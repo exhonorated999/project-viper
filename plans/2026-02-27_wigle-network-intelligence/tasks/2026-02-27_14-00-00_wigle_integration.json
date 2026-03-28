@@ -1,0 +1,32 @@
+[
+  {
+    "id": "1",
+    "content": "[Phase 1] Add WiGLE API credential fields to settings.html with encryption helpers",
+    "status": "completed"
+  },
+  {
+    "id": "2",
+    "content": "[Phase 2] Create wigleAPI.js client with search methods and credential management",
+    "status": "completed"
+  },
+  {
+    "id": "3",
+    "content": "[Phase 3] Add Network Intelligence tab to case-detail.html module config and UI",
+    "status": "completed"
+  },
+  {
+    "id": "4",
+    "content": "[Phase 4] Implement map visualization with Leaflet markers and clustering",
+    "status": "completed"
+  },
+  {
+    "id": "5",
+    "content": "[Phase 5] Add timeline component and details table rendering",
+    "status": "completed"
+  },
+  {
+    "id": "6",
+    "content": "[Phase 5] Implement query history save/load with localStorage persistence",
+    "status": "completed"
+  }
+]

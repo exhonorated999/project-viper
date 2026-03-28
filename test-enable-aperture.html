@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Enable Aperture</title>
+</head>
+<body>
+    <h1>Enable Aperture Test</h1>
+    <button onclick="enableAperture()">Enable Aperture</button>
+    <button onclick="checkAperture()">Check Status</button>
+    <button onclick="addApertureToCase()">Add Aperture to Current Case</button>
+    <div id="status"></div>
+    
+    <script>
+        function enableAperture() {
+            localStorage.setItem('apertureEnabled', 'true');
+            document.getElementById('status').innerHTML = '<p style="color: green;">Aperture enabled!</p>';
+        }
+        
+        function checkAperture() {
+            const enabled = localStorage.getItem('apertureEnabled');
+            document.getElementById('status').innerHTML = '<p>Aperture enabled: ' + enabled + '</p>';
+        }
+        
+        function addApertureToCase() {
+            let currentCase = JSON.parse(localStorage.getItem('currentCase'));
+            if (currentCase) {
+                if (!currentCase.modules.includes('aperture')) {
+                    currentCase.modules.push('aperture');
+                    if (currentCase.tabOrder && !currentCase.tabOrder.includes('aperture')) {
+                        currentCase.tabOrder.push('aperture');
+                    }
+                    localStorage.setItem('currentCase', JSON.stringify(currentCase));
+                    document.getElementById('status').innerHTML = '<p style="color: green;">Added Aperture to case: ' + currentCase.caseNumber + '</p>';
+                } else {
+                    document.getElementById('status').innerHTML = '<p style="color: orange;">Aperture already in case</p>';
+                }
+            } else {
+                document.getElementById('status').innerHTML = '<p style="color: red;">No current case found</p>';
+            }
+        }
+    </script>
+</body>
+</html>

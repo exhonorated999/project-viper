@@ -1,0 +1,32 @@
+[
+  {
+    "id": "1",
+    "content": "[Phase 1] Create Aperture module directory structure and copy Aperture source files for reference",
+    "status": "completed"
+  },
+  {
+    "id": "2",
+    "content": "[Phase 2] Implement .mbox file parsing logic and email data structures in vanilla JS",
+    "status": "completed"
+  },
+  {
+    "id": "3",
+    "content": "[Phase 3] Create Aperture UI components (email list, detail view, attachment viewer) in vanilla JS",
+    "status": "completed"
+  },
+  {
+    "id": "4",
+    "content": "[Phase 4] Integrate Aperture module into VIPER's moduleConfig and add settings toggle",
+    "status": "completed"
+  },
+  {
+    "id": "5",
+    "content": "[Phase 5] Test multi-source .mbox uploads and verify case-scoped data isolation",
+    "status": "completed"
+  },
+  {
+    "id": "6",
+    "content": "[Phase 5] Polish UI/UX with VIPER aesthetics and perform final testing",
+    "status": "completed"
+  }
+]

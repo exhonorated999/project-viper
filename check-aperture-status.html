@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Aperture Status Check</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #0a0e14; color: #00d9ff; }
+        .good { color: #00ff88; }
+        .bad { color: #ff5555; }
+        .warn { color: #ffa726; }
+        pre { background: #1a2332; padding: 10px; border-radius: 5px; }
+        button { 
+            background: #00d9ff; 
+            color: #0a0e14; 
+            border: none; 
+            padding: 10px 20px; 
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover { background: #00ff88; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Aperture Integration Status Check</h1>
+    
+    <button onclick="checkAll()">Run Full Check</button>
+    <button onclick="enableAperture()">Enable Aperture</button>
+    <button onclick="addToCase()">Add to Current Case</button>
+    <button onclick="location.reload()">Refresh</button>
+    
+    <div id="results"></div>
+    
+    <script>
+        function checkAll() {
+            let html = '<h2>Status Report:</h2>';
+            
+            // Check if Aperture is enabled
+            const enabled = localStorage.getItem('apertureEnabled');
+            html += '<div><strong>1. Aperture Enabled:</strong> ';
+            if (enabled === 'true') {
+                html += '<span class="good">✓ YES</span>';
+            } else {
+                html += '<span class="bad">✗ NO (currently: ' + enabled + ')</span>';
+            }
+            html += '</div>';
+            
+            // Check current case
+            const currentCase = localStorage.getItem('currentCase');
+            html += '<div><strong>2. Current Case:</strong> ';
+            if (currentCase) {
+                const caseData = JSON.parse(currentCase);
+                html += '<span class="good">✓ Found</span>';
+                html += '<pre>' + JSON.stringify(caseData, null, 2).substring(0, 500) + '...</pre>';
+                
+                // Check if aperture is in modules
+                html += '<strong>3. Aperture in Case Modules:</strong> ';
+                if (caseData.modules && caseData.modules.includes('aperture')) {
+                    html += '<span class="good">✓ YES</span>';
+                } else {
+                    html += '<span class="bad">✗ NO</span>';
+                    html += '<div class="warn">Current modules: ' + JSON.stringify(caseData.modules) + '</div>';
+                }
+                
+                // Check if aperture is in tab order
+                html += '<div><strong>4. Aperture in Tab Order:</strong> ';
+                if (caseData.tabOrder && caseData.tabOrder.includes('aperture')) {
+                    html += '<span class="good">✓ YES</span>';
+                } else {
+                    html += '<span class="warn">⚠ NO</span>';
+                }
+                html += '</div>';
+                
+            } else {
+                html += '<span class="bad">✗ No case open</span>';
+            }
+            
+            // Check all cases
+            const allCases = localStorage.getItem('viperCases');
+            html += '<div><strong>5. Total Cases in System:</strong> ';
+            if (allCases) {
+                const cases = JSON.parse(allCases);
+                html += '<span class="good">' + cases.length + ' cases</span>';
+                
+                const withAperture = cases.filter(c => c.modules && c.modules.includes('aperture'));
+                html += '<div>Cases with Aperture: ' + withAperture.length + '</div>';
+            } else {
+                html += '<span class="warn">0 cases</span>';
+            }
+            html += '</div>';
+            
+            // Check if modules are accessible
+            html += '<div><strong>6. Testing Module Load:</strong> ';
+            html += '<div class="warn">Check browser console for load errors</div>';
+            html += '<div>Try loading: <a href="/modules/aperture/aperture-module.js" target="_blank" style="color: #00d9ff;">aperture-module.js</a></div>';
+            html += '<div>Try loading: <a href="/modules/aperture/aperture-ui.js" target="_blank" style="color: #00d9ff;">aperture-ui.js</a></div>';
+            html += '<div>Try loading: <a href="/modules/aperture/aperture-styles.css" target="_blank" style="color: #00d9ff;">aperture-styles.css</a></div>';
+            html += '</div>';
+            
+            document.getElementById('results').innerHTML = html;
+        }
+        
+        function enableAperture() {
+            localStorage.setItem('apertureEnabled', 'true');
+            alert('Aperture enabled! Run check again.');
+            checkAll();
+        }
+        
+        function addToCase() {
+            let currentCase = JSON.parse(localStorage.getItem('currentCase'));
+            if (currentCase) {
+                if (!currentCase.modules) currentCase.modules = [];
+                if (!currentCase.modules.includes('aperture')) {
+                    currentCase.modules.push('aperture');
+                }
+                
+                if (!currentCase.tabOrder) currentCase.tabOrder = ['overview', ...currentCase.modules];
+                if (!currentCase.tabOrder.includes('aperture')) {
+                    currentCase.tabOrder.push('aperture');
+                }
+                
+                localStorage.setItem('currentCase', JSON.stringify(currentCase));
+                
+                // Also update in viperCases array
+                let cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+                const index = cases.findIndex(c => c.id === currentCase.id);
+                if (index !== -1) {
+                    cases[index] = currentCase;
+                    localStorage.setItem('viperCases', JSON.stringify(cases));
+                }
+                
+                alert('Added Aperture to case! Reload the case page to see the tab.');
+                checkAll();
+            } else {
+                alert('No current case found. Please open a case first.');
+            }
+        }
+        
+        // Auto-run on load
+        window.onload = checkAll;
+    </script>
+</body>
+</html>

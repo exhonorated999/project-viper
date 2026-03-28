@@ -1,0 +1,41 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+// Expose protected methods that allow the renderer process to use
+// the ipcRenderer without exposing the entire object
+contextBridge.exposeInMainWorld('electronAPI', {
+  // Evidence file storage
+  saveEvidenceFile: (data) => ipcRenderer.invoke('save-evidence-file', data),
+
+  // External app launch
+  launchAperture: (caseData) => ipcRenderer.invoke('launch-aperture', caseData),
+  openFile: (filePath) => ipcRenderer.invoke('open-file', filePath),
+
+  // Aperture: data loading
+  apertureLoadEmails: (caseId) => ipcRenderer.invoke('aperture-load-emails', caseId),
+  apertureLoadSources: (caseId) => ipcRenderer.invoke('aperture-load-sources', caseId),
+
+  // Aperture: importing
+  apertureImportMbox: (data) => ipcRenderer.invoke('aperture-import-mbox', data),
+  apertureImportEmailFile: (data) => ipcRenderer.invoke('aperture-import-email-file', data),
+
+  // Aperture: update/flag
+  apertureUpdateEmail: (data) => ipcRenderer.invoke('aperture-update-email', data),
+
+  // Aperture: evidence scanning
+  apertureScanEvidence: (data) => ipcRenderer.invoke('aperture-scan-evidence', data),
+
+  // Aperture: notes
+  apertureGetNotes: (data) => ipcRenderer.invoke('aperture-get-notes', data),
+  apertureAddNote: (data) => ipcRenderer.invoke('aperture-add-note', data),
+  apertureDeleteNote: (data) => ipcRenderer.invoke('aperture-delete-note', data),
+
+  // Aperture: IP lookup
+  apertureLookupIp: (data) => ipcRenderer.invoke('aperture-lookup-ip', data),
+
+  // Aperture: attachments
+  apertureOpenAttachment: (data) => ipcRenderer.invoke('aperture-open-attachment', data),
+  apertureGetAttachmentData: (data) => ipcRenderer.invoke('aperture-get-attachment-data', data),
+
+  // Aperture: report generation
+  apertureGenerateReport: (data) => ipcRenderer.invoke('aperture-generate-report', data),
+});

@@ -1,0 +1,32 @@
+[
+  {
+    "id": "1",
+    "content": "Add Aperture toggle to settings.html with localStorage save functionality",
+    "status": "completed"
+  },
+  {
+    "id": "2",
+    "content": "Add Aperture to moduleConfig in case-detail-with-analytics.html",
+    "status": "completed"
+  },
+  {
+    "id": "3",
+    "content": "Create Aperture tab content renderer with embedded interface",
+    "status": "completed"
+  },
+  {
+    "id": "4",
+    "content": "Update electron-main.js to launch and communicate with Aperture.exe",
+    "status": "completed"
+  },
+  {
+    "id": "5",
+    "content": "Implement case file data persistence for Aperture results",
+    "status": "completed"
+  },
+  {
+    "id": "6",
+    "content": "Test the full integration workflow",
+    "status": "completed"
+  }
+]

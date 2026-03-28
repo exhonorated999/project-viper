@@ -1,0 +1,107 @@
+╔════════════════════════════════════════════════════════════════════╗
+║                                                                    ║
+║          VIPER - Network Intelligence Edition                      ║
+║          Quick Start Guide                                         ║
+║                                                                    ║
+╚════════════════════════════════════════════════════════════════════╝
+
+┌────────────────────────────────────────────────────────────────────┐
+│  🚀 FASTEST WAY TO START                                           │
+└────────────────────────────────────────────────────────────────────┘
+
+   Double-click:  START_VIPER.bat
+
+   That's it! VIPER will open in your browser with all features working.
+
+
+┌────────────────────────────────────────────────────────────────────┐
+│  📂 WHAT'S INCLUDED                                                │
+└────────────────────────────────────────────────────────────────────┘
+
+   ✓ Full case management system
+   ✓ Network Intelligence module (NEW!)
+   ✓ WiGLE API integration
+   ✓ Interactive geolocation maps
+   ✓ Timeline visualization
+   ✓ PDF export capabilities
+   ✓ No browser restrictions
+
+
+┌────────────────────────────────────────────────────────────────────┐
+│  ⚙️  SETUP WIGLE API (One-time)                                    │
+└────────────────────────────────────────────────────────────────────┘
+
+   1. Launch VIPER (using START_VIPER.bat)
+   2. Click Settings (gear icon)
+   3. Enter WiGLE credentials:
+      • Get token from: https://wigle.net/account
+      • Enter API Name (your username)
+      • Enter API Token
+   4. Save
+
+   Done! You can now query WiFi/Bluetooth/Cell tower data.
+
+
+┌────────────────────────────────────────────────────────────────────┐
+│  🔍 USING NETWORK INTELLIGENCE                                     │
+└────────────────────────────────────────────────────────────────────┘
+
+   1. Create a new case
+   2. Enable "Network Intelligence" module
+   3. In the Network Intelligence tab, enter:
+      • SSID (WiFi network name)
+      • BSSID (MAC address)
+      • Cell Tower ID
+   4. Click Search
+   5. View results on interactive map
+   6. Data saves automatically with case
+
+
+┌────────────────────────────────────────────────────────────────────┐
+│  🛠️ OTHER LAUNCH OPTIONS                                           │
+└────────────────────────────────────────────────────────────────────┘
+
+   • launch-viper-dev.ps1     - PowerShell version with colors
+   • start-viper-server.bat   - Server only (manual browser open)
+
+
+┌────────────────────────────────────────────────────────────────────┐
+│  ❓ TROUBLESHOOTING                                                │
+└────────────────────────────────────────────────────────────────────┘
+
+   Problem: Server won't start
+   Solution: Check if port 8000 is in use, ensure Python installed
+
+   Problem: CDN resources blocked
+   Solution: Always use START_VIPER.bat, don't open HTML files directly
+
+   Problem: Features not working
+   Solution: Check browser console for errors, try Chrome/Edge
+
+
+┌────────────────────────────────────────────────────────────────────┐
+│  📖 MORE INFORMATION                                               │
+└────────────────────────────────────────────────────────────────────┘
+
+   • README_ANALYTICS.md       - Full documentation
+   • INTEGRATION_SUMMARY.md    - Technical details
+   • plans/                    - Development plans
+
+
+┌────────────────────────────────────────────────────────────────────┐
+│  📍 LOCATION                                                       │
+└────────────────────────────────────────────────────────────────────┘
+
+   C:\Users\JUSTI\VIPER\
+
+   All files are in this directory.
+   Just double-click START_VIPER.bat to begin!
+
+
+╔════════════════════════════════════════════════════════════════════╗
+║                                                                    ║
+║  Ready to use VIPER with Network Intelligence!                    ║
+║                                                                    ║
+║  Questions? Check README_ANALYTICS.md                             ║
+║                                                                    ║
+╚════════════════════════════════════════════════════════════════════╝

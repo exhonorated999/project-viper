@@ -1,0 +1,287 @@
+/**
+ * Aperture Styles
+ * VIPER-themed styling for Aperture email analysis module
+ */
+
+/* VIPER Color Variables */
+:root {
+    --viper-dark: #0a0e14;
+    --viper-card: #1a2332;
+    --viper-cyan: #00d9ff;
+    --viper-green: #00ff88;
+    --viper-purple: #9d4edd;
+    --viper-orange: #ffa726;
+}
+
+/* Aperture Container */
+.aperture-container {
+    background: transparent;
+    color: white;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* Buttons */
+.btn-viper-primary {
+    background: linear-gradient(135deg, var(--viper-cyan), var(--viper-green));
+    color: var(--viper-dark);
+    font-weight: 600;
+    transition: all 0.3s ease;
+    border: none;
+    cursor: pointer;
+}
+
+.btn-viper-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 217, 255, 0.3);
+}
+
+.btn-viper-secondary {
+    background: var(--viper-card);
+    color: var(--viper-cyan);
+    border: 1px solid var(--viper-cyan);
+    font-weight: 600;
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.btn-viper-secondary:hover {
+    background: var(--viper-cyan);
+    color: var(--viper-dark);
+}
+
+/* Email List Items */
+.email-item {
+    transition: all 0.2s ease;
+}
+
+.email-item:hover {
+    transform: translateX(4px);
+}
+
+/* Email Detail */
+.email-detail {
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Email Body Styling */
+.email-body {
+    line-height: 1.6;
+}
+
+.email-body img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    margin: 8px 0;
+}
+
+.email-body a {
+    color: var(--viper-cyan);
+    text-decoration: none;
+}
+
+.email-body a:hover {
+    color: var(--viper-green);
+    text-decoration: underline;
+}
+
+/* Prose Styling for Email Content */
+.prose-invert {
+    color: #e5e7eb;
+}
+
+.prose-invert h1,
+.prose-invert h2,
+.prose-invert h3 {
+    color: var(--viper-cyan);
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+}
+
+.prose-invert p {
+    margin: 0.75em 0;
+}
+
+.prose-invert ul,
+.prose-invert ol {
+    margin: 0.75em 0;
+    padding-left: 1.5em;
+}
+
+.prose-invert blockquote {
+    border-left: 4px solid var(--viper-cyan);
+    padding-left: 1em;
+    margin: 1em 0;
+    color: #9ca3af;
+}
+
+.prose-invert code {
+    background: var(--viper-dark);
+    padding: 0.2em 0.4em;
+    border-radius: 4px;
+    font-size: 0.9em;
+    color: var(--viper-green);
+}
+
+.prose-invert pre {
+    background: var(--viper-dark);
+    padding: 1em;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 1em 0;
+}
+
+.prose-invert pre code {
+    background: transparent;
+    padding: 0;
+}
+
+/* Scrollbar Styling */
+.aperture-container ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.aperture-container ::-webkit-scrollbar-track {
+    background: rgba(26, 35, 50, 0.5);
+    border-radius: 4px;
+}
+
+.aperture-container ::-webkit-scrollbar-thumb {
+    background: rgba(0, 217, 255, 0.3);
+    border-radius: 4px;
+}
+
+.aperture-container ::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 217, 255, 0.5);
+}
+
+/* Glass Card Effect */
+.glass-card {
+    background: rgba(26, 35, 50, 0.8);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(0, 217, 255, 0.1);
+}
+
+/* Loading Animation */
+.loading-spinner {
+    border: 3px solid rgba(0, 217, 255, 0.3);
+    border-top: 3px solid var(--viper-cyan);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Stats Cards Animation */
+.aperture-stats > div > div {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.aperture-stats > div > div:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 217, 255, 0.2);
+}
+
+/* Input Focus Effects */
+input:focus,
+select:focus,
+textarea:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.3);
+}
+
+/* Modal Animation */
+#aperture-import-dialog {
+    animation: modalFadeIn 0.2s ease;
+}
+
+@keyframes modalFadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+#aperture-import-dialog > div {
+    animation: modalSlideUp 0.3s ease;
+}
+
+@keyframes modalSlideUp {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* Attachment Grid */
+.attachment-grid-item {
+    transition: all 0.2s ease;
+}
+
+.attachment-grid-item:hover {
+    transform: scale(1.02);
+    box-shadow: 0 2px 8px rgba(157, 78, 221, 0.3);
+}
+
+/* Flag Button */
+button[onclick*="toggleFlag"] {
+    transition: transform 0.2s ease;
+}
+
+button[onclick*="toggleFlag"]:hover {
+    transform: scale(1.2);
+}
+
+/* Responsive Adjustments */
+@media (max-width: 1200px) {
+    .aperture-sidebar {
+        width: 320px !important;
+    }
+}
+
+@media (max-width: 900px) {
+    .aperture-main {
+        flex-direction: column;
+    }
+    
+    .aperture-sidebar {
+        width: 100% !important;
+        max-height: 300px;
+    }
+}
+
+/* Print Styles */
+@media print {
+    .aperture-header,
+    .aperture-sidebar,
+    button {
+        display: none !important;
+    }
+    
+    .aperture-detail {
+        max-width: 100%;
+    }
+}

@@ -1,0 +1,46 @@
+From test@example.com Mon Mar 20 10:00:00 2026
+From: John Doe <john.doe@example.com>
+To: Jane Smith <jane.smith@example.com>
+Subject: Test Email 1
+Date: Mon, 20 Mar 2026 10:00:00 -0400
+Message-ID: <test1@example.com>
+
+This is a test email message for Aperture testing.
+It contains some sample text to demonstrate the email parsing functionality.
+
+Best regards,
+John Doe
+
+From test@example.com Mon Mar 20 11:00:00 2026
+From: Jane Smith <jane.smith@example.com>
+To: John Doe <john.doe@example.com>
+Subject: Re: Test Email 1
+Date: Mon, 20 Mar 2026 11:00:00 -0400
+Message-ID: <test2@example.com>
+In-Reply-To: <test1@example.com>
+
+Hi John,
+
+Thanks for your email. This is a reply to test the email threading functionality.
+
+Best,
+Jane
+
+From test@example.com Mon Mar 20 12:00:00 2026
+From: Bob Johnson <bob.johnson@example.com>
+To: team@example.com
+Subject: Team Meeting Notes
+Date: Mon, 20 Mar 2026 12:00:00 -0400
+Message-ID: <test3@example.com>
+
+Hello Team,
+
+Here are the notes from today's meeting:
+1. Project updates
+2. Q1 goals review
+3. Resource allocation
+
+Please review and let me know if you have any questions.
+
+Thanks,
+Bob

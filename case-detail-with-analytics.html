@@ -6,40 +6,7 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://d3js.org https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; img-src 'self' data: https:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org; font-src 'self' data:;">
     <title>V.I.P.E.R. - Case Detail</title>
     <script src="modules/licensing.js"></script>
-    <script>
-        // AUTO-CLEANUP: Remove networkIntelligence from current case on load
-        (function() {
-            try {
-                // Clean from viperCases
-                let cases = JSON.parse(localStorage.getItem('viperCases')) || [];
-                let needsSave = false;
-                cases.forEach(c => {
-                    if (c.modules && c.modules.includes('networkIntelligence')) {
-                        c.modules = c.modules.filter(m => m !== 'networkIntelligence');
-                        if (c.tabOrder) c.tabOrder = c.tabOrder.filter(t => t !== 'networkIntelligence');
-                        needsSave = true;
-                    }
-                });
-                if (needsSave) {
-                    localStorage.setItem('viperCases', JSON.stringify(cases));
-                }
-                
-                // Clean from currentCase
-                let currentCase = JSON.parse(localStorage.getItem('currentCase'));
-                if (currentCase && currentCase.modules) {
-                    if (currentCase.modules.includes('networkIntelligence')) {
-                        currentCase.modules = currentCase.modules.filter(m => m !== 'networkIntelligence');
-                        if (currentCase.tabOrder) {
-                            currentCase.tabOrder = currentCase.tabOrder.filter(t => t !== 'networkIntelligence');
-                        }
-                        localStorage.setItem('currentCase', JSON.stringify(currentCase));
-                        // Reload to reflect changes
-                        window.location.reload();
-                    }
-                }
-            } catch(e) { console.error('Cleanup error:', e); }
-        })();
-    </script>
+
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

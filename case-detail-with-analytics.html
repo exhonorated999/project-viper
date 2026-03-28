@@ -13900,26 +13900,36 @@
             // Show loading state
             const resultsDiv = document.getElementById('wigleResults');
             resultsDiv.classList.remove('hidden');
-            resultsDiv.innerHTML = '<div class="glass-card p-6 rounded-xl text-center text-gray-400 py-8">Searching WiGLE database...</div>';
+            resultsDiv.innerHTML = '<div class="glass-card p-6 rounded-xl text-center text-gray-400 py-8"><div class="animate-pulse">Searching WiGLE database...</div></div>';
 
             try {
                 let results;
                 const options = getAdvancedFilterOptions();
 
+                console.log(`[WiGLE] Searching ${queryType}: "${query}"`, options);
+
                 // Call appropriate API method
                 if (queryType === 'bssid') {
                     const response = await wigleClient.searchWiFiByBSSID(query);
+                    console.log('[WiGLE] BSSID response:', response);
                     results = wigleClient.parseWiFiResults(response);
                 } else if (queryType === 'ssid') {
                     const response = await wigleClient.searchWiFiBySSID(query, options);
+                    console.log('[WiGLE] SSID response:', response);
                     results = wigleClient.parseWiFiResults(response);
                 } else if (queryType === 'cell') {
                     const response = await wigleClient.searchCell(query, options);
+                    console.log('[WiGLE] Cell response:', response);
                     results = wigleClient.parseCellResults(response);
                 }
 
-                if (results.length === 0) {
-                    resultsDiv.innerHTML = '<div class="glass-card p-6 rounded-xl text-center text-yellow-400 py-8">No results found</div>';
+                console.log(`[WiGLE] Parsed ${results ? results.length : 0} results`);
+
+                if (!results || results.length === 0) {
+                    resultsDiv.innerHTML = `<div class="glass-card p-6 rounded-xl text-center py-8">
+                        <div class="text-yellow-400 text-lg mb-2">No results found</div>
+                        <div class="text-gray-500 text-sm">Try a different search term. For best results, search WiFi by SSID (e.g. "xfinitywifi") or BSSID (MAC address).</div>
+                    </div>`;
                     return;
                 }
 
@@ -13935,18 +13945,22 @@
                 });
                 saveNetworkIntelligenceData(networkData);
 
-                // Re-render tab to show results
-                renderTabContent('networkIntelligence');
-                
-                // After tab renders, display the results
-                setTimeout(() => {
-                    renderWiGLEResults(results);
-                    renderQueryHistory();
-                }, 100);
+                // Display results directly (don't re-render whole tab)
+                renderWiGLEResults(results);
+                const historyEl = document.getElementById('queryHistoryList');
+                if (historyEl) renderQueryHistory();
 
             } catch (error) {
-                resultsDiv.innerHTML = `<div class="glass-card p-6 rounded-xl text-center text-red-400 py-8">Error: ${error.message}</div>`;
-                console.error('WiGLE search error:', error);
+                console.error('[WiGLE] Search error:', error);
+                const errDiv = document.getElementById('wigleResults');
+                if (errDiv) {
+                    errDiv.classList.remove('hidden');
+                    errDiv.innerHTML = `<div class="glass-card p-6 rounded-xl text-center py-8">
+                        <div class="text-red-400 text-lg mb-2">Search Failed</div>
+                        <div class="text-gray-400 text-sm">${error.message}</div>
+                        ${error.message.includes('credentials') ? '<div class="mt-3"><a href="#" onclick="loadPage(\'settings\')" class="text-viper-cyan hover:underline">→ Go to Settings to configure WiGLE API credentials</a></div>' : ''}
+                    </div>`;
+                }
             }
         }
 
@@ -13963,8 +13977,40 @@
         }
 
         function renderWiGLEResults(results) {
-            // Show results section
-            document.getElementById('wigleResults').classList.remove('hidden');
+            const resultsDiv = document.getElementById('wigleResults');
+            resultsDiv.classList.remove('hidden');
+
+            // Rebuild results structure (may have been replaced by loading text)
+            resultsDiv.innerHTML = `
+                <!-- Map Panel -->
+                <div class="glass-card p-6 rounded-xl">
+                    <h3 class="text-xl font-bold text-white mb-4">Observation Map</h3>
+                    <div id="wigleMap" style="height: 500px; border-radius: 8px;" class="bg-viper-dark"></div>
+                    <div class="mt-4 flex items-center justify-between text-sm">
+                        <div class="text-gray-400"><span id="observationCount">0</span> observations found</div>
+                        <div class="flex space-x-4">
+                            <div class="flex items-center space-x-2"><div class="w-3 h-3 rounded-full bg-red-500"></div><span class="text-gray-400">Recent (30d)</span></div>
+                            <div class="flex items-center space-x-2"><div class="w-3 h-3 rounded-full bg-yellow-500"></div><span class="text-gray-400">Medium (30d-1y)</span></div>
+                            <div class="flex items-center space-x-2"><div class="w-3 h-3 rounded-full bg-blue-500"></div><span class="text-gray-400">Old (1y+)</span></div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Details Table -->
+                <div class="glass-card p-6 rounded-xl">
+                    <h3 class="text-xl font-bold text-white mb-4">Observation Details</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm">
+                            <thead class="border-b border-viper-cyan/30">
+                                <tr class="text-gray-400">
+                                    <th class="pb-3">Name/ID</th><th class="pb-3">BSSID/MAC</th><th class="pb-3">Location</th>
+                                    <th class="pb-3">First Seen</th><th class="pb-3">Last Seen</th><th class="pb-3">Observations</th>
+                                </tr>
+                            </thead>
+                            <tbody id="wigleDetailsBody" class="text-gray-300"></tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
 
             // Update observation count
             document.getElementById('observationCount').textContent = results.length;
@@ -13992,13 +14038,15 @@
                     fillOpacity: 0.8
                 });
 
+                const displayName = obs.ssid || obs.name || obs.cellId || 'Hidden Network';
+                const displayId = obs.bssid || obs.mac || obs.cellId || 'N/A';
                 marker.bindPopup(`
-                    <div style="min-width: 200px;">
-                        <strong style="color: #00d9ff;">${obs.ssid || obs.name || obs.cellId || 'Unknown'}</strong><br>
-                        <span style="color: #999;">BSSID/MAC:</span> ${obs.bssid || obs.mac || obs.cellId}<br>
-                        <span style="color: #999;">First Seen:</span> ${obs.firstSeen}<br>
-                        <span style="color: #999;">Last Seen:</span> ${obs.lastSeen}<br>
-                        <span style="color: #999;">Observations:</span> ${obs.observations}<br>
+                    <div style="min-width: 220px; font-family: sans-serif;">
+                        <strong style="color: #00d9ff;">${displayName}</strong><br>
+                        ${displayId !== 'N/A' ? `<span style="color: #999;">ID:</span> <code>${displayId}</code><br>` : ''}
+                        <span style="color: #999;">📍</span> ${obs.lat.toFixed(4)}, ${obs.lon.toFixed(4)}<br>
+                        <span style="color: #999;">First Seen:</span> ${obs.firstSeen ? new Date(obs.firstSeen).toLocaleDateString() : 'N/A'}<br>
+                        <span style="color: #999;">Last Seen:</span> ${obs.lastSeen ? new Date(obs.lastSeen).toLocaleDateString() : 'N/A'}<br>
                         ${obs.encryption ? `<span style="color: #999;">Encryption:</span> ${obs.encryption}<br>` : ''}
                         ${obs.channel ? `<span style="color: #999;">Channel:</span> ${obs.channel}` : ''}
                     </div>
@@ -14009,9 +14057,6 @@
 
             wigleMap.addLayer(wigleMarkerLayer);
             wigleMap.fitBounds(wigleMarkerLayer.getBounds());
-
-            // Render timeline
-            renderTimeline(results);
 
             // Render details table
             renderDetailsTable(results);
@@ -14053,15 +14098,15 @@
 
         function renderDetailsTable(results) {
             const tbody = document.getElementById('wigleDetailsBody');
+            if (!tbody) return;
             tbody.innerHTML = results.map(obs => `
                 <tr class="border-b border-viper-cyan/10 hover:bg-viper-cyan/5">
                     <td class="py-3">${obs.ssid || obs.name || obs.cellId || '<em>Hidden</em>'}</td>
-                    <td class="py-3 font-mono text-xs">${obs.bssid || obs.mac || obs.cellId}</td>
-                    <td class="py-3">${obs.lat.toFixed(4)}, ${obs.lon.toFixed(4)}</td>
-                    <td class="py-3">${obs.firstSeen}</td>
-                    <td class="py-3">${obs.lastSeen}</td>
-                    <td class="py-3">${obs.observations}</td>
-                    <td class="py-3">${obs.encryption || obs.network || 'N/A'}</td>
+                    <td class="py-3 font-mono text-xs">${obs.bssid || obs.mac || obs.cellId || 'N/A'}</td>
+                    <td class="py-3">${obs.lat != null ? obs.lat.toFixed(4) + ', ' + obs.lon.toFixed(4) : 'N/A'}</td>
+                    <td class="py-3">${obs.firstSeen || 'N/A'}</td>
+                    <td class="py-3">${obs.lastSeen || 'N/A'}</td>
+                    <td class="py-3">${obs.observations || 0}</td>
                 </tr>
             `).join('');
         }

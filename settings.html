@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' data:; connect-src 'self' http://localhost:* https://intellect-unified-dashboard-production.up.railway.app; font-src 'self' data:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' data:; connect-src 'self' http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://api.wigle.net; font-src 'self' data:;">
     <title>V.I.P.E.R. - Settings</title>
     <script src="modules/licensing.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -721,9 +721,13 @@
 
         async function loadSettings() {
             try {
-                const settings = await invoke('get_settings');
-                document.getElementById('caseFilesPath').value = settings.case_files_path;
-                document.getElementById('appDataPath').value = settings.app_data_path;
+                const settings = await invoke('get_settings') || {};
+                if (settings.case_files_path) {
+                    document.getElementById('caseFilesPath').value = settings.case_files_path;
+                }
+                if (settings.app_data_path) {
+                    document.getElementById('appDataPath').value = settings.app_data_path;
+                }
                 
                 // Load last backup date
                 if (settings.last_backup_date) {
@@ -894,7 +898,7 @@
                 const wigleApiToken = document.getElementById('wigleApiToken').value.trim();
                 
                 if (!wigleApiName || !wigleApiToken) {
-                    alert('Please enter both API Name and Token');
+                    showNotification('Please enter both API Name and Token', 'error');
                     return;
                 }
                 
@@ -903,10 +907,10 @@
                 settings.wigleApiToken = encryptString(wigleApiToken);
                 localStorage.setItem('viperSettings', JSON.stringify(settings));
                 
-                alert('WiGLE credentials saved successfully!');
+                showNotification('WiGLE credentials saved successfully!', 'success');
             } catch (error) {
                 console.error('Error saving WiGLE credentials:', error);
-                alert('Failed to save credentials: ' + error.message);
+                showNotification('Failed to save credentials: ' + error.message, 'error');
             }
         }
 

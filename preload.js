@@ -6,6 +6,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Storage paths
   getStoragePaths: () => ipcRenderer.invoke('get-storage-paths'),
 
+  // Backup & Restore
+  selectBackupDirectory: () => ipcRenderer.invoke('select-backup-directory'),
+  createBackup: (data) => ipcRenderer.invoke('create-backup', data),
+  selectBackupFile: () => ipcRenderer.invoke('select-backup-file'),
+  restoreBackup: (data) => ipcRenderer.invoke('restore-backup', data),
+
   // Evidence file storage
   saveEvidenceFile: (data) => ipcRenderer.invoke('save-evidence-file', data),
 

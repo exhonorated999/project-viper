@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -134,6 +134,38 @@ ipcMain.handle('get-storage-paths', async () => {
     casesDir: path.join(__dirname, 'cases'),
     userData: app.getPath('userData')
   };
+});
+
+// --- Backup & Restore ---
+ipcMain.handle('select-backup-directory', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Backup Destination',
+    properties: ['openDirectory']
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle('create-backup', async (event, { backupPath, data }) => {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const filePath = path.join(backupPath, `VIPER_Backup_${timestamp}.json`);
+  fs.writeFileSync(filePath, data, 'utf-8');
+  return filePath;
+});
+
+ipcMain.handle('select-backup-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Backup File to Restore',
+    properties: ['openFile'],
+    filters: [{ name: 'VIPER Backup', extensions: ['json'] }]
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle('restore-backup', async (event, { backupPath }) => {
+  const data = fs.readFileSync(backupPath, 'utf-8');
+  return data;
 });
 
 // --- Evidence file storage (replaces Tauri save_evidence_file) ---

@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   securityNewRecoveryKey: () => ipcRenderer.invoke('security-new-recovery-key'),
   securityDisable: () => ipcRenderer.invoke('security-disable'),
   securityNavigateApp: () => ipcRenderer.invoke('security-navigate-app'),
+  securitySaveVault: (data) => ipcRenderer.invoke('security-save-vault', data),
+  securityLock: () => ipcRenderer.invoke('security-lock'),
 
   // Evidence file storage
   saveEvidenceFile: (data) => ipcRenderer.invoke('save-evidence-file', data),

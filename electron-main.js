@@ -284,6 +284,25 @@ ipcMain.handle('security-navigate-app', async () => {
   return { success: true };
 });
 
+ipcMain.handle('security-save-vault', async (event, data) => {
+  // Encrypt localStorage snapshot to vault (called by renderer before lock)
+  try {
+    security.encryptVault(data);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('security-lock', async () => {
+  // Lock master key and navigate back to login page
+  if (security) security.lock();
+  if (mainWindow) {
+    mainWindow.loadURL('http://localhost:8000/security-login.html');
+  }
+  return { success: true };
+});
+
 // --- Evidence file storage (replaces Tauri save_evidence_file) ---
 ipcMain.handle('save-evidence-file', async (event, data) => {
   try {

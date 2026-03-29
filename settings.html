@@ -707,19 +707,18 @@
             try {
                 const settings = await invoke('get_settings') || {};
 
-                // Resolve storage paths
-                let caseFilesDir = settings.case_files_path || '';
+                // Resolve storage paths from Electron main process
+                let caseFilesDir = '';
                 let appDataDir = '';
 
-                // Try Electron's app.getPath('userData') via preload
-                if (window.electronAPI && window.electronAPI.getUserDataPath) {
-                    appDataDir = await window.electronAPI.getUserDataPath();
-                } else if (window.process && window.process.env && window.process.env.APPDATA) {
-                    appDataDir = window.process.env.APPDATA + '\\VIPER';
-                }
-
-                if (!caseFilesDir && appDataDir) {
-                    caseFilesDir = appDataDir + '\\Cases';
+                if (window.electronAPI && window.electronAPI.getStoragePaths) {
+                    try {
+                        const paths = await window.electronAPI.getStoragePaths();
+                        caseFilesDir = paths.casesDir || '';
+                        appDataDir = paths.userData || paths.appDir || '';
+                    } catch (e) {
+                        console.warn('Could not get storage paths:', e);
+                    }
                 }
 
                 document.getElementById('caseFilesPath').textContent = caseFilesDir || 'Browser localStorage (no file system access)';

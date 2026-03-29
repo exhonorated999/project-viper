@@ -3,6 +3,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
+  // Storage paths
+  getStoragePaths: () => ipcRenderer.invoke('get-storage-paths'),
+
   // Evidence file storage
   saveEvidenceFile: (data) => ipcRenderer.invoke('save-evidence-file', data),
 

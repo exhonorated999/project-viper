@@ -127,6 +127,15 @@ app.on('will-quit', () => {
   }
 });
 
+// --- Storage paths for Settings page ---
+ipcMain.handle('get-storage-paths', async () => {
+  return {
+    appDir: __dirname,
+    casesDir: path.join(__dirname, 'cases'),
+    userData: app.getPath('userData')
+  };
+});
+
 // --- Evidence file storage (replaces Tauri save_evidence_file) ---
 ipcMain.handle('save-evidence-file', async (event, data) => {
   try {

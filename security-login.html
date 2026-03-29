@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V.I.P.E.R. — Unlock</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'viper-dark': '#0a0a0f',
+                        'viper-card': '#12121a',
+                        'viper-green': '#00e676',
+                        'viper-purple': '#7c4dff',
+                        'viper-border': '#1e1e2e'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .glow-green { box-shadow: 0 0 30px rgba(0, 230, 118, 0.15); }
+        .glow-red { box-shadow: 0 0 20px rgba(239, 68, 68, 0.2); }
+        .shield-icon { filter: drop-shadow(0 0 12px rgba(0, 230, 118, 0.3)); }
+        input:focus { outline: none; }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
+            20%, 40%, 60%, 80% { transform: translateX(4px); }
+        }
+        .shake { animation: shake 0.5s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .fade-in { animation: fadeIn 0.3s ease-out; }
+    </style>
+</head>
+<body class="h-full bg-viper-dark flex items-center justify-center">
+
+    <!-- Main Container -->
+    <div class="w-full max-w-md px-6">
+
+        <!-- Logo + Title -->
+        <div class="text-center mb-8">
+            <div class="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-viper-card border border-viper-border mb-4 shield-icon">
+                <svg class="w-10 h-10 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                </svg>
+            </div>
+            <h1 class="text-2xl font-bold text-white tracking-wide">V.I.P.E.R.</h1>
+            <p class="text-gray-500 text-sm mt-1">Field Security Mode</p>
+        </div>
+
+        <!-- ═══ PASSWORD UNLOCK PANEL ═══ -->
+        <div id="panelUnlock" class="bg-viper-card border border-viper-border rounded-2xl p-6 glow-green">
+            <h2 class="text-white font-semibold mb-1">Unlock Application</h2>
+            <p class="text-gray-500 text-xs mb-5">Enter your security password to access case data.</p>
+
+            <div class="relative mb-4">
+                <input id="inputPassword" type="password" placeholder="Password"
+                    class="w-full bg-viper-dark border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:border-viper-green transition-colors"
+                    onkeydown="if(event.key==='Enter') doUnlock()">
+                <button onclick="toggleVis('inputPassword', this)" class="absolute right-3 top-3 text-gray-500 hover:text-gray-300">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                </button>
+            </div>
+
+            <div id="unlockError" class="hidden text-red-400 text-xs mb-3 flex items-center gap-1">
+                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M12 3l9.66 16.5H2.34L12 3z"/></svg>
+                <span id="unlockErrorText">Incorrect password</span>
+            </div>
+
+            <button id="btnUnlock" onclick="doUnlock()"
+                class="w-full bg-viper-green/10 border border-viper-green/30 text-viper-green font-semibold rounded-lg py-3 hover:bg-viper-green/20 transition-colors flex items-center justify-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"/></svg>
+                Unlock
+            </button>
+
+            <button onclick="showPanel('panelRecovery')" class="w-full text-center text-gray-500 hover:text-viper-purple text-xs mt-4 transition-colors">
+                Forgot password?
+            </button>
+        </div>
+
+        <!-- ═══ RECOVERY KEY PANEL ═══ -->
+        <div id="panelRecovery" class="hidden bg-viper-card border border-viper-border rounded-2xl p-6 fade-in">
+            <h2 class="text-white font-semibold mb-1">Account Recovery</h2>
+            <p class="text-gray-500 text-xs mb-5">Enter the 24-character recovery key you saved during setup.</p>
+
+            <div class="mb-4">
+                <input id="inputRecoveryKey" type="text" placeholder="VIPER-XXXX-XXXX-XXXX-XXXX-XXXX"
+                    class="w-full bg-viper-dark border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:border-viper-purple transition-colors font-mono text-sm tracking-wider uppercase"
+                    onkeydown="if(event.key==='Enter') doRecover()">
+            </div>
+
+            <div id="recoverError" class="hidden text-red-400 text-xs mb-3 flex items-center gap-1">
+                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M12 3l9.66 16.5H2.34L12 3z"/></svg>
+                <span id="recoverErrorText">Invalid recovery key</span>
+            </div>
+
+            <button id="btnRecover" onclick="doRecover()"
+                class="w-full bg-viper-purple/10 border border-viper-purple/30 text-viper-purple font-semibold rounded-lg py-3 hover:bg-viper-purple/20 transition-colors flex items-center justify-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                Recover Account
+            </button>
+
+            <button onclick="showPanel('panelUnlock')" class="w-full text-center text-gray-500 hover:text-gray-300 text-xs mt-4 transition-colors">
+                ← Back to password
+            </button>
+        </div>
+
+        <!-- ═══ SET NEW PASSWORD PANEL (after recovery) ═══ -->
+        <div id="panelNewPassword" class="hidden bg-viper-card border border-viper-border rounded-2xl p-6 fade-in">
+            <div class="flex items-center gap-2 mb-1">
+                <svg class="w-5 h-5 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <h2 class="text-white font-semibold">Recovery Successful</h2>
+            </div>
+            <p class="text-gray-500 text-xs mb-5">Set a new password to continue.</p>
+
+            <div class="space-y-3 mb-4">
+                <div class="relative">
+                    <input id="inputNewPassword" type="password" placeholder="New password"
+                        class="w-full bg-viper-dark border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:border-viper-green transition-colors">
+                    <button onclick="toggleVis('inputNewPassword', this)" class="absolute right-3 top-3 text-gray-500 hover:text-gray-300">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                    </button>
+                </div>
+                <input id="inputConfirmPassword" type="password" placeholder="Confirm new password"
+                    class="w-full bg-viper-dark border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:border-viper-green transition-colors"
+                    onkeydown="if(event.key==='Enter') doSetNewPassword()">
+            </div>
+
+            <div id="newPwError" class="hidden text-red-400 text-xs mb-3"></div>
+
+            <button id="btnSetPassword" onclick="doSetNewPassword()"
+                class="w-full bg-viper-green/10 border border-viper-green/30 text-viper-green font-semibold rounded-lg py-3 hover:bg-viper-green/20 transition-colors">
+                Set Password & Continue
+            </button>
+        </div>
+
+        <!-- Version footer -->
+        <p class="text-center text-gray-700 text-xs mt-6">AES-256-GCM · PBKDF2-SHA256 · 100k iterations</p>
+    </div>
+
+<script>
+    // ═══ Panel switching ═══
+    function showPanel(id) {
+        document.querySelectorAll('[id^="panel"]').forEach(p => p.classList.add('hidden'));
+        const panel = document.getElementById(id);
+        panel.classList.remove('hidden');
+        panel.classList.add('fade-in');
+        // Clear errors
+        document.querySelectorAll('[id$="Error"]').forEach(e => e.classList.add('hidden'));
+        // Focus first input
+        const inp = panel.querySelector('input');
+        if (inp) setTimeout(() => inp.focus(), 100);
+    }
+
+    // ═══ Toggle password visibility ═══
+    function toggleVis(inputId, btn) {
+        const inp = document.getElementById(inputId);
+        inp.type = inp.type === 'password' ? 'text' : 'password';
+    }
+
+    // ═══ Unlock with password ═══
+    let unlockAttempts = 0;
+    async function doUnlock() {
+        const password = document.getElementById('inputPassword').value;
+        if (!password) return;
+
+        const btn = document.getElementById('btnUnlock');
+        btn.disabled = true;
+        btn.innerHTML = '<svg class="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-opacity="0.25" stroke-width="4"/><path stroke-linecap="round" stroke-width="4" d="M4 12a8 8 0 018-8"/></svg> Unlocking...';
+
+        try {
+            const result = await window.electronAPI.securityUnlock({ password });
+            if (result.success) {
+                // Restore localStorage from vault
+                if (result.vaultData) {
+                    for (const [key, value] of Object.entries(result.vaultData)) {
+                        localStorage.setItem(key, value);
+                    }
+                }
+                btn.innerHTML = '<svg class="w-5 h-5 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4"/></svg> Success';
+                setTimeout(() => {
+                    window.electronAPI.securityNavigateApp();
+                }, 400);
+            } else {
+                unlockAttempts++;
+                const errDiv = document.getElementById('unlockError');
+                const errText = document.getElementById('unlockErrorText');
+                errDiv.classList.remove('hidden');
+                errText.textContent = `Incorrect password (attempt ${unlockAttempts})`;
+                document.getElementById('inputPassword').value = '';
+                document.querySelector('#panelUnlock').classList.add('shake');
+                setTimeout(() => document.querySelector('#panelUnlock').classList.remove('shake'), 500);
+                btn.disabled = false;
+                btn.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"/></svg> Unlock';
+                document.getElementById('inputPassword').focus();
+            }
+        } catch (e) {
+            console.error(e);
+            btn.disabled = false;
+            btn.innerHTML = 'Unlock';
+        }
+    }
+
+    // ═══ Recovery key flow ═══
+    async function doRecover() {
+        const key = document.getElementById('inputRecoveryKey').value.trim().toUpperCase();
+        if (!key) return;
+
+        const btn = document.getElementById('btnRecover');
+        btn.disabled = true;
+        btn.textContent = 'Verifying...';
+
+        try {
+            const result = await window.electronAPI.securityRecover({ recoveryKey: key });
+            if (result.success) {
+                // Restore vault data
+                if (result.vaultData) {
+                    for (const [k, v] of Object.entries(result.vaultData)) {
+                        localStorage.setItem(k, v);
+                    }
+                }
+                showPanel('panelNewPassword');
+            } else {
+                const errDiv = document.getElementById('recoverError');
+                const errText = document.getElementById('recoverErrorText');
+                errDiv.classList.remove('hidden');
+                errText.textContent = 'Invalid recovery key. Check for typos and try again.';
+                document.querySelector('#panelRecovery').classList.add('shake');
+                setTimeout(() => document.querySelector('#panelRecovery').classList.remove('shake'), 500);
+            }
+        } catch (e) {
+            console.error(e);
+        }
+        btn.disabled = false;
+        btn.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> Recover Account';
+    }
+
+    // ═══ Set new password after recovery ═══
+    async function doSetNewPassword() {
+        const pw = document.getElementById('inputNewPassword').value;
+        const confirm = document.getElementById('inputConfirmPassword').value;
+        const errDiv = document.getElementById('newPwError');
+
+        if (!pw || pw.length < 6) {
+            errDiv.classList.remove('hidden');
+            errDiv.textContent = 'Password must be at least 6 characters.';
+            return;
+        }
+        if (pw !== confirm) {
+            errDiv.classList.remove('hidden');
+            errDiv.textContent = 'Passwords do not match.';
+            return;
+        }
+
+        const btn = document.getElementById('btnSetPassword');
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+
+        try {
+            const result = await window.electronAPI.securityChangePassword({ newPassword: pw });
+            if (result.success) {
+                btn.textContent = '✓ Password updated';
+                setTimeout(() => {
+                    window.electronAPI.securityNavigateApp();
+                }, 500);
+            } else {
+                errDiv.classList.remove('hidden');
+                errDiv.textContent = result.error || 'Failed to update password.';
+                btn.disabled = false;
+                btn.textContent = 'Set Password & Continue';
+            }
+        } catch (e) {
+            console.error(e);
+            btn.disabled = false;
+            btn.textContent = 'Set Password & Continue';
+        }
+    }
+
+    // ═══ Init ═══
+    window.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('inputPassword').focus();
+    });
+</script>
+</body>
+</html>

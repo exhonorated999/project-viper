@@ -4,10 +4,13 @@ const http = require('http');
 const fs = require('fs');
 const url = require('url');
 const { spawn } = require('child_process');
+const SecurityManager = require('./modules/security');
 
 let mainWindow;
 let server;
 let apertureProcess = null;
+let security = null;
+let isQuitting = false;
 
 // MIME types mapping
 const mimeTypes = {
@@ -79,17 +82,28 @@ function createWindow() {
     backgroundColor: '#1a1a1a'
   });
 
-  // Load the app
-  mainWindow.loadURL('http://localhost:8000/case-detail-with-analytics.html');
+  // Gate on security — show login page or main app
+  if (security && security.isEnabled()) {
+    mainWindow.loadURL('http://localhost:8000/security-login.html');
+  } else {
+    mainWindow.loadURL('http://localhost:8000/case-detail-with-analytics.html');
+  }
 
   // Open DevTools in development mode
   if (process.argv.includes('--dev')) {
     mainWindow.webContents.openDevTools();
   }
 
+  // Vault save on close when security is active
+  mainWindow.on('close', (e) => {
+    if (!isQuitting && security && security.isEnabled() && security.isUnlocked()) {
+      e.preventDefault();
+      saveVaultAndQuit();
+    }
+  });
+
   mainWindow.on('closed', function () {
     mainWindow = null;
-    // Close Aperture if running
     if (apertureProcess) {
       apertureProcess.kill();
       apertureProcess = null;
@@ -97,12 +111,43 @@ function createWindow() {
   });
 }
 
+// Encrypt localStorage snapshot to vault, clear sensitive data, then quit
+async function saveVaultAndQuit() {
+  try {
+    const data = await mainWindow.webContents.executeJavaScript(`
+      JSON.stringify(Object.fromEntries(
+        Object.keys(localStorage)
+          .filter(k => k.startsWith('viper') || k.startsWith('Viper'))
+          .map(k => [k, localStorage.getItem(k)])
+      ))
+    `);
+    security.encryptVault(data);
+    // Clear sensitive localStorage so it's not readable at rest
+    await mainWindow.webContents.executeJavaScript(`
+      Object.keys(localStorage)
+        .filter(k => k.startsWith('viper') || k.startsWith('Viper'))
+        .forEach(k => localStorage.removeItem(k))
+    `);
+    security.lock();
+  } catch (e) {
+    console.error('Vault save error:', e.message);
+  }
+  isQuitting = true;
+  mainWindow.destroy();
+}
+
 app.whenReady().then(async () => {
   try {
+    // Initialize security manager (uses userData for config + vault)
+    const secDir = app.getPath('userData');
+    if (!fs.existsSync(secDir)) fs.mkdirSync(secDir, { recursive: true });
+    security = new SecurityManager(secDir);
+    console.log('Security:', security.isEnabled() ? 'ENABLED (locked)' : 'disabled');
+
     await startServer();
     createWindow();
   } catch (err) {
-    console.error('Failed to start server:', err);
+    console.error('Failed to start:', err);
     app.quit();
   }
 
@@ -166,6 +211,77 @@ ipcMain.handle('select-backup-file', async () => {
 ipcMain.handle('restore-backup', async (event, { backupPath }) => {
   const data = fs.readFileSync(backupPath, 'utf-8');
   return data;
+});
+
+// --- Field Security IPC ---
+ipcMain.handle('security-check', async () => {
+  return {
+    enabled: security ? security.isEnabled() : false,
+    unlocked: security ? security.isUnlocked() : false
+  };
+});
+
+ipcMain.handle('security-setup', async (event, { password }) => {
+  const recoveryKey = security.setup(password);
+  return { success: true, recoveryKey };
+});
+
+ipcMain.handle('security-unlock', async (event, { password }) => {
+  const success = security.unlock(password);
+  if (!success) return { success: false, vaultData: null };
+  // Decrypt vault and return localStorage snapshot
+  let vaultData = null;
+  try {
+    const raw = security.decryptVault();
+    if (raw) vaultData = JSON.parse(raw);
+  } catch (e) { console.error('Vault decrypt:', e.message); }
+  return { success: true, vaultData };
+});
+
+ipcMain.handle('security-recover', async (event, { recoveryKey }) => {
+  const success = security.recover(recoveryKey);
+  if (!success) return { success: false, vaultData: null };
+  let vaultData = null;
+  try {
+    const raw = security.decryptVault();
+    if (raw) vaultData = JSON.parse(raw);
+  } catch (e) { console.error('Vault decrypt:', e.message); }
+  return { success: true, vaultData };
+});
+
+ipcMain.handle('security-change-password', async (event, { newPassword }) => {
+  try {
+    security.changePassword(newPassword);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('security-new-recovery-key', async () => {
+  try {
+    const recoveryKey = security.generateNewRecoveryKey();
+    return { success: true, recoveryKey };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('security-disable', async () => {
+  try {
+    security.disable();
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('security-navigate-app', async () => {
+  // Called after successful unlock/setup to navigate to main app
+  if (mainWindow) {
+    mainWindow.loadURL('http://localhost:8000/case-detail-with-analytics.html');
+  }
+  return { success: true };
 });
 
 // --- Evidence file storage (replaces Tauri save_evidence_file) ---

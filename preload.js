@@ -12,6 +12,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectBackupFile: () => ipcRenderer.invoke('select-backup-file'),
   restoreBackup: (data) => ipcRenderer.invoke('restore-backup', data),
 
+  // Field Security
+  securityCheck: () => ipcRenderer.invoke('security-check'),
+  securitySetup: (data) => ipcRenderer.invoke('security-setup', data),
+  securityUnlock: (data) => ipcRenderer.invoke('security-unlock', data),
+  securityRecover: (data) => ipcRenderer.invoke('security-recover', data),
+  securityChangePassword: (data) => ipcRenderer.invoke('security-change-password', data),
+  securityNewRecoveryKey: () => ipcRenderer.invoke('security-new-recovery-key'),
+  securityDisable: () => ipcRenderer.invoke('security-disable'),
+  securityNavigateApp: () => ipcRenderer.invoke('security-navigate-app'),
+
   // Evidence file storage
   saveEvidenceFile: (data) => ipcRenderer.invoke('save-evidence-file', data),
 

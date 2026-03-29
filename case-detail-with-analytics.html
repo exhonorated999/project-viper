@@ -16834,7 +16834,7 @@
                     alert('Import errors:\n' + errors.join('\n'));
                 }
                 if (imported > 0) {
-                    showNotification(`Imported ${imported} TRACE package${imported !== 1 ? 's' : ''}`, 'success');
+                    showToast(`Imported ${imported} TRACE package${imported !== 1 ? 's' : ''}`, 'success');
                     markUnsavedChanges();
                 }
                 renderTabContent('traceImport');
@@ -16890,7 +16890,7 @@
                         ${suspects.map((s, i) => `
                         <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
                             <div class="flex items-center gap-3 mb-3">
-                                ${s.photo_path ? `<img src="${s.photo_path}" class="w-12 h-12 rounded-full object-cover border-2 border-gray-600">` : `<div class="w-12 h-12 rounded-full bg-gray-700 flex items-center justify-center text-gray-400 text-lg font-bold">${(s.name || '?')[0].toUpperCase()}</div>`}
+                                <div class="w-12 h-12 rounded-full bg-gray-700 flex items-center justify-center text-gray-400 text-lg font-bold">${(s.name || '?')[0].toUpperCase()}</div>
                                 <div>
                                     <p class="font-bold text-white">${s.name || 'Unknown'}</p>
                                     ${s.dob ? `<p class="text-xs text-gray-400">DOB: ${s.dob}</p>` : ''}
@@ -17131,22 +17131,35 @@
         function viewTraceEvidence(importIdx, evidenceIdx) {
             const imports = getTraceImports();
             const ev = imports[importIdx]?.evidence?.[evidenceIdx];
-            if (!ev || !ev.data) return;
+            if (!ev || !ev.data) { alert('No image data embedded in this evidence file.'); return; }
 
             const mimeType = ev.file_type || 'image/jpeg';
-            const dataUrl = 'data:' + mimeType + ';base64,' + ev.data;
+            const imgSrc = 'data:' + mimeType + ';base64,' + ev.data;
 
-            // Lightbox overlay
             const overlay = document.createElement('div');
             overlay.className = 'fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-8';
             overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
-            overlay.innerHTML = `
-                <div class="relative max-w-5xl max-h-full">
-                    <button onclick="this.closest('.fixed').remove()" class="absolute -top-10 right-0 text-white hover:text-red-400 text-2xl">&times;</button>
-                    <img src="${dataUrl}" class="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl">
-                    <p class="text-center text-gray-400 text-sm mt-3">${ev.file_name || 'Evidence'} ${ev.description ? '— ' + ev.description : ''}</p>
-                </div>
-            `;
+
+            const inner = document.createElement('div');
+            inner.className = 'relative max-w-5xl max-h-full';
+
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'absolute -top-10 right-0 text-white hover:text-red-400 text-2xl';
+            closeBtn.textContent = '\u00D7';
+            closeBtn.onclick = () => overlay.remove();
+
+            const img = document.createElement('img');
+            img.src = imgSrc;
+            img.className = 'max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl';
+
+            const caption = document.createElement('p');
+            caption.className = 'text-center text-gray-400 text-sm mt-3';
+            caption.textContent = (ev.file_name || 'Evidence') + (ev.description ? ' — ' + ev.description : '');
+
+            inner.appendChild(closeBtn);
+            inner.appendChild(img);
+            inner.appendChild(caption);
+            overlay.appendChild(inner);
             document.body.appendChild(overlay);
         }
 

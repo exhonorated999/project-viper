@@ -1,24 +1,28 @@
 appId: com.intellect.viper
 productName: V.I.P.E.R.
-copyright: Copyright © 2025 Intellect LE, LLC
+copyright: Copyright © 2026 Intellect LE, LLC
 directories:
   output: dist
 files:
   - "**/*"
   - "!dist/**"
   - "!plans/**"
+  - "!tasks/**"
+  - "!test/**"
+  - "!cases/**"
+  - "!viper-source/**"
   - "!*.md"
   - "!*.txt"
   - "!*.bat"
   - "!*.ps1"
   - "!*.mbox"
-  - "!viper-source/**"
   - "!VIPER_*.exe"
   - "!viper-app.exe"
   - "!uninstall.exe"
   - "!aperture-integration-tasks.json"
   - "!test-*.html"
   - "!check-*.html"
+  - "!.gitignore"
 win:
   target:
     - target: nsis
@@ -27,7 +31,7 @@ win:
   icon: build/icon.ico
   signAndEditExecutable: false
   verifyUpdateCodeSignature: false
-  legalTrademarks: Copyright © 2025 Intellect LE, LLC
+  legalTrademarks: Copyright © 2026 Intellect LE, LLC
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true

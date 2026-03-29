@@ -1,0 +1,140 @@
+{
+  "trace_version": "1.2.0",
+  "export_date": "2026-03-28T14:30:00.000Z",
+  "case": {
+    "case_ref": "CR-2026-0042",
+    "case_type": "retail",
+    "title": "Organized Retail Theft – Target #1847",
+    "status": "active",
+    "priority": "high",
+    "incident_date": "2026-03-15",
+    "location": "8701 Research Blvd",
+    "city": "Austin",
+    "state": "TX",
+    "police_agency": "Austin Police Department",
+    "police_report_num": "APD-2026-44210",
+    "case_contact": {
+      "name": "Sarah Mitchell",
+      "title": "Asset Protection Manager",
+      "phone": "512-555-0142",
+      "email": "s.mitchell@target.com"
+    },
+    "summary": "Organized retail crime ring targeting electronics department. Three suspects identified entering store on multiple occasions, concealing high-value items in foil-lined bags. Total estimated loss exceeds $12,000 across five incidents over two weeks.",
+    "narrative": "<h3>Incident Summary</h3><p>On March 15, 2026, at approximately 14:22 hours, three subjects entered Target store #1847 located at 8701 Research Blvd, Austin, TX. Subjects were observed by AP associate Sarah Mitchell via CCTV.</p><p>Subject 1 (later identified as Marcus Johnson) proceeded to the electronics department and began selecting Apple AirPods Pro and Samsung Galaxy Buds, placing approximately 8 units into a shopping cart. Subject 2 (unidentified female, approx 25-30 years) acted as a lookout near the department entrance. Subject 3 (later identified as Devon Williams) was observed in the parking lot in a silver 2019 Honda Accord (TX plate KJR-4821).</p><p>At 14:35, Subject 1 transferred merchandise to a foil-lined reusable shopping bag (booster bag), defeating EAS tags. Subject exited through the garden center emergency exit. All three subjects departed in the Honda Accord heading southbound on Research Blvd.</p><h3>Loss Details</h3><ul><li>6x Apple AirPods Pro - $1,494.00</li><li>2x Samsung Galaxy Buds2 Pro - $459.98</li></ul><p>Total single-incident loss: $1,953.98</p>",
+    "loss_amount": 12450.00,
+    "recovered": 1953.98,
+    "created_at": "2026-03-15T16:00:00.000Z"
+  },
+  "suspects": [
+    {
+      "name": "Marcus Johnson",
+      "dob": "1994-08-12",
+      "dl_number": "TX-32841976",
+      "phone": "512-555-8834",
+      "race": "Black",
+      "sex": "Male",
+      "height": "5'11\"",
+      "weight": "185",
+      "hair": "Black",
+      "eyes": "Brown",
+      "build": "Medium",
+      "clothing": "Black hoodie, blue jeans, white Nike Air Max",
+      "other_desc": "Tattoo on left forearm, small scar above right eyebrow",
+      "notes": "Known ORC suspect. Previously identified in incidents at Walmart and Best Buy in the Austin area.",
+      "arrested": 0,
+      "arrest_date": null
+    },
+    {
+      "name": "Devon Williams",
+      "dob": "1996-02-23",
+      "dl_number": "TX-44920183",
+      "phone": "512-555-7721",
+      "race": "Black",
+      "sex": "Male",
+      "height": "6'1\"",
+      "weight": "200",
+      "hair": "Black",
+      "eyes": "Brown",
+      "build": "Athletic",
+      "clothing": "Gray tracksuit, black sneakers",
+      "other_desc": "Drives silver 2019 Honda Accord TX KJR-4821",
+      "notes": "Getaway driver. Registered owner of suspect vehicle.",
+      "arrested": 1,
+      "arrest_date": "2026-03-22"
+    }
+  ],
+  "vehicles": [
+    {
+      "plate": "KJR-4821",
+      "plate_state": "TX",
+      "make": "Honda",
+      "model": "Accord",
+      "year": "2019",
+      "color": "Silver",
+      "vin": "1HGCV1F34KA048392",
+      "description": "Four-door sedan, aftermarket window tint, small dent on rear passenger door",
+      "notes": "Registered to Devon Williams. Seen in surveillance at multiple Target locations."
+    }
+  ],
+  "cargo": null,
+  "notes": [
+    {
+      "note": "AP associate Sarah Mitchell provided CCTV footage from cameras 14, 17, and 22 covering the electronics department, garden center exit, and parking lot.",
+      "created_at": "2026-03-15T17:30:00.000Z"
+    },
+    {
+      "note": "Cross-referenced Subject 1 description with APD bulletin — matches suspect in ORC ring under investigation by APD Organized Crime Unit.",
+      "created_at": "2026-03-16T09:15:00.000Z"
+    },
+    {
+      "note": "Vehicle plate KJR-4821 confirmed at three other Target locations in Austin metro area over the past 30 days via LPR data.",
+      "created_at": "2026-03-18T11:00:00.000Z"
+    },
+    {
+      "note": "Devon Williams arrested during traffic stop on 03/22. Stolen merchandise recovered from vehicle trunk ($1,953.98 in electronics). Booked into Travis County Jail.",
+      "created_at": "2026-03-22T20:45:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "file_name": "CCTV_Cam14_20260315_1422.jpg",
+      "file_type": "image/jpeg",
+      "file_size": 245760,
+      "description": "CCTV still - Subject 1 selecting merchandise in electronics dept",
+      "created_at": "2026-03-15T17:00:00.000Z",
+      "data": null
+    },
+    {
+      "file_name": "CCTV_Cam22_20260315_1435.jpg",
+      "file_type": "image/jpeg",
+      "file_size": 198400,
+      "description": "CCTV still - Subject 1 exiting garden center with booster bag",
+      "created_at": "2026-03-15T17:00:00.000Z",
+      "data": null
+    },
+    {
+      "file_name": "ParkingLot_Cam17_Plate.jpg",
+      "file_type": "image/jpeg",
+      "file_size": 156800,
+      "description": "Parking lot camera - Honda Accord plate capture KJR-4821",
+      "created_at": "2026-03-15T17:00:00.000Z",
+      "data": null
+    },
+    {
+      "file_name": "APD_Arrest_Report_Williams.pdf",
+      "file_type": "application/pdf",
+      "file_size": 524288,
+      "description": "APD arrest report for Devon Williams - Traffic stop and merchandise recovery",
+      "created_at": "2026-03-23T10:00:00.000Z",
+      "data": null
+    },
+    {
+      "file_name": "Recovered_Merchandise_Photos.zip",
+      "file_type": "application/zip",
+      "file_size": 3145728,
+      "description": "Photos of recovered merchandise from Williams vehicle",
+      "created_at": "2026-03-23T10:30:00.000Z",
+      "data": null
+    }
+  ]
+}

@@ -1137,14 +1137,6 @@
                     // Check if it's in modules
                     if (!currentCase.modules.includes(tabId)) return false;
                     
-                    // Check if module requires settings to be enabled
-                    if (moduleConfig[tabId]?.requiresSettings) {
-                        // For Aperture, check if it's enabled in settings
-                        if (tabId === 'aperture') {
-                            return localStorage.getItem('apertureEnabled') === 'true';
-                        }
-                    }
-                    
                     return true;
                 })
                 .map(tabId => {
@@ -1240,11 +1232,7 @@
                 opsplan: { label: 'OPS Plan', icon: '📋' }
             };
 
-            // Add Aperture if enabled in settings
-            const apertureEnabled = localStorage.getItem('apertureEnabled') === 'true';
-            if (apertureEnabled) {
-                allModules.aperture = { label: 'Aperture', icon: '🔍' };
-            }
+            allModules.aperture = { label: 'Aperture', icon: '🔍' };
 
             const availableModules = Object.keys(allModules).filter(
                 module => !currentCase.modules.includes(module)

@@ -435,68 +435,6 @@
                     </div>
                 </div>
 
-                <!-- WiGLE Network Intelligence Section -->
-                <div class="glass-card rounded-xl p-6">
-                    <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
-                        <svg class="w-6 h-6 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                        </svg>
-                        WiGLE Network Intelligence
-                    </h3>
-                    <p class="text-gray-400 mb-6 text-sm">
-                        Configure API credentials for WiGLE geolocation database. Get your API credentials from 
-                        <a href="https://wigle.net/account" target="_blank" class="text-viper-cyan hover:underline">wigle.net/account</a>
-                    </p>
-
-                    <div class="space-y-4">
-                        <!-- API Name -->
-                        <div>
-                            <label class="block text-sm font-medium text-gray-300 mb-2">API Name</label>
-                            <input 
-                                type="text" 
-                                id="wigleApiName" 
-                                class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg focus:outline-none focus:border-viper-cyan text-white"
-                                placeholder="Enter WiGLE API Name"
-                            >
-                        </div>
-
-                        <!-- API Token -->
-                        <div>
-                            <label class="block text-sm font-medium text-gray-300 mb-2">API Token</label>
-                            <input 
-                                type="password" 
-                                id="wigleApiToken" 
-                                class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg focus:outline-none focus:border-viper-cyan text-white"
-                                placeholder="Enter WiGLE API Token"
-                            >
-                        </div>
-
-                        <!-- Action Buttons -->
-                        <div class="flex items-center gap-4">
-                            <button 
-                                onclick="saveWiGLECredentials()" 
-                                class="px-6 py-2 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green transition flex items-center gap-2">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-                                </svg>
-                                Save Credentials
-                            </button>
-                            <button 
-                                onclick="testWiGLEConnection()" 
-                                class="px-6 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition flex items-center gap-2">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                                </svg>
-                                Test Connection
-                            </button>
-                            <div id="wigleConnectionStatus" class="text-sm"></div>
-                        </div>
-                    </div>
-
-                    <!-- Connection Status Display -->
-                    <div id="wigleConnectionResult" class="hidden mt-4 p-4 rounded-lg"></div>
-                </div>
-
                 <!-- Investigative Tools Reference -->
                 <div class="glass-card rounded-xl p-6">
                     <h3 class="text-xl font-bold mb-2 flex items-center gap-2">
@@ -546,9 +484,40 @@
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                                     </svg>
                                 </div>
-                                <div>
+                                <div class="flex-1">
                                     <h4 class="text-white font-semibold text-sm">Network Intelligence — WiGLE</h4>
-                                    <p class="text-xs text-gray-400 mt-1 leading-relaxed">Query the WiGLE wireless geolocation database to map WiFi access points, Bluetooth devices, and cell towers. Useful for placing a device at a location by searching BSSID (unique MAC address), or tracking movement patterns via SSID history. Requires a free WiGLE API account — configure credentials above.</p>
+                                    <p class="text-xs text-gray-400 mt-1 leading-relaxed">Query the WiGLE wireless geolocation database to map WiFi access points, Bluetooth devices, and cell towers. Useful for placing a device at a location by searching BSSID (unique MAC address), or tracking movement patterns via SSID history. Requires a free WiGLE API account.</p>
+
+                                    <!-- Collapsible credentials -->
+                                    <details class="mt-3">
+                                        <summary class="cursor-pointer text-xs text-viper-green hover:text-viper-green/80 select-none flex items-center gap-1.5 font-medium">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+                                            <span id="wigleCredSummary">Configure API Credentials</span>
+                                        </summary>
+                                        <div class="mt-3 space-y-3 border-t border-gray-700/50 pt-3">
+                                            <p class="text-xs text-gray-500">Get your API credentials from <a href="https://wigle.net/account" target="_blank" class="text-viper-cyan hover:underline">wigle.net/account</a></p>
+                                            <div>
+                                                <label class="block text-xs font-medium text-gray-400 mb-1">API Name</label>
+                                                <input type="text" id="wigleApiName" class="w-full px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg focus:outline-none focus:border-viper-green text-white text-sm" placeholder="Enter WiGLE API Name">
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs font-medium text-gray-400 mb-1">API Token</label>
+                                                <input type="password" id="wigleApiToken" class="w-full px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg focus:outline-none focus:border-viper-green text-white text-sm" placeholder="Enter WiGLE API Token">
+                                            </div>
+                                            <div class="flex items-center gap-3">
+                                                <button onclick="saveWiGLECredentials()" class="px-4 py-1.5 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green transition text-xs font-medium flex items-center gap-1.5">
+                                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                                    Save
+                                                </button>
+                                                <button onclick="testWiGLEConnection()" class="px-4 py-1.5 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition text-xs font-medium flex items-center gap-1.5">
+                                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                                    Test Connection
+                                                </button>
+                                                <span id="wigleConnectionStatus" class="text-xs"></span>
+                                            </div>
+                                            <div id="wigleConnectionResult" class="hidden rounded-lg"></div>
+                                        </div>
+                                    </details>
                                 </div>
                             </div>
                         </div>
@@ -737,6 +706,13 @@
                 }
                 if (viperSettings.wigleApiToken) {
                     document.getElementById('wigleApiToken').value = decryptString(viperSettings.wigleApiToken);
+                }
+                // Update credential summary hint
+                const credSummary = document.getElementById('wigleCredSummary');
+                if (credSummary) {
+                    credSummary.textContent = (viperSettings.wigleApiName && viperSettings.wigleApiToken)
+                        ? 'API Credentials Configured ✓'
+                        : 'Configure API Credentials';
                 }
             } catch (error) {
                 console.error('Error loading settings:', error);

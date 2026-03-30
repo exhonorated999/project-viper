@@ -101,15 +101,19 @@ async function activateLicense(licenseKey) {
       "Content-Type": "application/json",
       "X-API-Key": apiKey,
     },
-    body: JSON.stringify({ license_key: licenseKey }),
+    body: JSON.stringify({ license_key: licenseKey, product_slug: PRODUCT_SLUG }),
   });
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "Activation failed");
+    const detail = Array.isArray(err.detail) ? err.detail.map(e => e.msg).join(", ") : err.detail;
+    throw new Error(detail || "Activation failed");
   }
 
   const json = await res.json();
+  if (!json.valid) {
+    throw new Error(json.message || "Activation failed");
+  }
   _set("license_key", licenseKey);
   _set("license_type", json.license_type || "standard");
   if (json.expires_at) _set("expires_at", json.expires_at);

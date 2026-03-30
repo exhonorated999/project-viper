@@ -7,8 +7,51 @@ const fs = require('fs');
 const path = require('path');
 
 class ApertureData {
-    constructor(basePath = './cases') {
+    constructor(basePath = './cases', securityManager = null) {
         this.basePath = basePath;
+        this.security = securityManager;
+    }
+
+    /**
+     * Set or update the security manager reference
+     */
+    setSecurityManager(sm) {
+        this.security = sm;
+    }
+
+    /**
+     * Write data to file — encrypts if security is enabled and unlocked
+     */
+    _secureWrite(filePath, data) {
+        if (this.security && this.security.isEnabled() && this.security.isUnlocked()) {
+            const buf = Buffer.isBuffer(data) ? data : Buffer.from(data, 'utf-8');
+            fs.writeFileSync(filePath, this.security.encryptBuffer(buf));
+        } else {
+            if (Buffer.isBuffer(data)) {
+                fs.writeFileSync(filePath, data);
+            } else {
+                fs.writeFileSync(filePath, data, 'utf-8');
+            }
+        }
+    }
+
+    /**
+     * Read data from file — decrypts if the file is encrypted
+     */
+    _secureRead(filePath) {
+        const raw = fs.readFileSync(filePath);
+        if (this.security && this.security.isUnlocked() && this.security.isEncryptedBuffer(raw)) {
+            return this.security.decryptBuffer(raw);
+        }
+        return raw;
+    }
+
+    /**
+     * Read text file — returns string (decrypted if needed)
+     */
+    _secureReadText(filePath) {
+        const buf = this._secureRead(filePath);
+        return Buffer.isBuffer(buf) ? buf.toString('utf-8') : buf;
     }
 
     /**
@@ -45,7 +88,7 @@ class ApertureData {
         
         if (fs.existsSync(sourcesPath)) {
             try {
-                const data = fs.readFileSync(sourcesPath, 'utf-8');
+                const data = this._secureReadText(sourcesPath);
                 return JSON.parse(data);
             } catch (error) {
                 console.error('Failed to load sources:', error);
@@ -62,7 +105,7 @@ class ApertureData {
     saveSources(caseId, sources) {
         this.ensureApertureDirectory(caseId);
         const sourcesPath = path.join(this.getCaseAperturePath(caseId), 'sources.json');
-        fs.writeFileSync(sourcesPath, JSON.stringify(sources, null, 2), 'utf-8');
+        this._secureWrite(sourcesPath, JSON.stringify(sources, null, 2));
     }
 
     /**
@@ -94,7 +137,7 @@ class ApertureData {
         
         if (fs.existsSync(emailsPath)) {
             try {
-                const data = fs.readFileSync(emailsPath, 'utf-8');
+                const data = this._secureReadText(emailsPath);
                 return JSON.parse(data);
             } catch (error) {
                 console.error('Failed to load emails:', error);
@@ -111,7 +154,7 @@ class ApertureData {
     saveEmails(caseId, emails) {
         this.ensureApertureDirectory(caseId);
         const emailsPath = path.join(this.getCaseAperturePath(caseId), 'emails.json');
-        fs.writeFileSync(emailsPath, JSON.stringify(emails, null, 2), 'utf-8');
+        this._secureWrite(emailsPath, JSON.stringify(emails, null, 2));
     }
 
     /**
@@ -177,7 +220,7 @@ class ApertureData {
         // Decode base64 content and save
         if (attachment.content) {
             const buffer = Buffer.from(attachment.content, 'base64');
-            fs.writeFileSync(attachmentPath, buffer);
+            this._secureWrite(attachmentPath, buffer);
             return attachmentPath;
         }
         
@@ -204,7 +247,7 @@ class ApertureData {
         
         if (fs.existsSync(metadataPath)) {
             try {
-                const data = fs.readFileSync(metadataPath, 'utf-8');
+                const data = this._secureReadText(metadataPath);
                 return JSON.parse(data);
             } catch (error) {
                 console.error('Failed to load metadata:', error);
@@ -221,7 +264,7 @@ class ApertureData {
     saveMetadata(caseId, metadata) {
         this.ensureApertureDirectory(caseId);
         const metadataPath = path.join(this.getCaseAperturePath(caseId), 'metadata.json');
-        fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), 'utf-8');
+        this._secureWrite(metadataPath, JSON.stringify(metadata, null, 2));
     }
 
     /**

@@ -128,6 +128,8 @@
             'cases_closed': { value: 0, subtitle: 'Cases resolved', color: 'viper-green' },
             'narcotics_seized': { value: 0, subtitle: 'kg seized', color: 'viper-purple' },
             'money_seized': { value: 0, subtitle: 'USD seized', color: 'viper-green' },
+            'cargo_recovered': { value: 0, subtitle: 'Merchandise recovered', color: 'viper-green' },
+            'cargo_loss': { value: 0, subtitle: 'Outstanding loss', color: 'viper-orange' },
             'missing_persons': { value: 0, subtitle: 'Active cases', color: 'viper-orange' },
             'open_cases': { value: 0, subtitle: 'Active investigations', color: 'viper-orange' },
             'warrants_written': { value: 0, subtitle: 'This month', color: 'viper-orange' },
@@ -143,6 +145,8 @@
             'cases_closed': 'Cases Closed',
             'narcotics_seized': 'Narcotics Seized',
             'money_seized': 'Money Seized',
+            'cargo_recovered': 'Cargo Recovered',
+            'cargo_loss': 'Cargo Loss',
             'missing_persons': 'Missing Persons',
             'open_cases': 'Open Cases',
             'warrants_written': 'Warrants Written',
@@ -2439,6 +2443,23 @@
             return totalActive;
         }
         
+        function getTotalCargoStats() {
+            const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            let totalValue = 0;
+            let recoveredValue = 0;
+
+            cases.forEach(caseItem => {
+                const cargo = JSON.parse(localStorage.getItem(`cargo_${caseItem.id}`)) || [];
+                cargo.forEach(item => {
+                    const val = (parseFloat(item.estimatedValue) || 0) * (parseInt(item.quantity) || 1);
+                    totalValue += val;
+                    if (item.recovered) recoveredValue += val;
+                });
+            });
+
+            return { totalValue, recoveredValue, lossValue: totalValue - recoveredValue };
+        }
+
         function getNewCasesThisMonth() {
             const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
             const now = new Date();
@@ -2665,6 +2686,11 @@
             
             // Update active missing persons
             dashboardMetrics['missing_persons'].value = getTotalActiveMissingPersons();
+
+            // Update cargo recovered / loss
+            const cargoStats = getTotalCargoStats();
+            dashboardMetrics['cargo_recovered'].value = '$' + cargoStats.recoveredValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+            dashboardMetrics['cargo_loss'].value = '$' + cargoStats.lossValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
             
             // Update case data on dashboard
             updateDashboardCaseData();

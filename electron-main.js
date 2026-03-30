@@ -168,6 +168,16 @@ async function saveVaultAndQuit() {
   mainWindow.destroy();
 }
 
+// Helper: set cases folder hidden/visible (Windows: attrib +H / -H)
+function _setCasesHidden(hidden) {
+  try {
+    if (process.platform === 'win32' && fs.existsSync(casesDir)) {
+      const flag = hidden ? '+H' : '-H';
+      spawn('attrib', [flag, casesDir]);
+    }
+  } catch (e) { console.error('attrib error:', e.message); }
+}
+
 app.whenReady().then(async () => {
   try {
     // Initialize security manager (uses userData for config + vault)
@@ -175,6 +185,14 @@ app.whenReady().then(async () => {
     if (!fs.existsSync(secDir)) fs.mkdirSync(secDir, { recursive: true });
     security = new SecurityManager(secDir);
     console.log('Security:', security.isEnabled() ? 'ENABLED (locked)' : 'disabled');
+
+    // Wire security into aperture data for case file encryption
+    if (typeof apertureData !== 'undefined') {
+      apertureData.setSecurityManager(security);
+    }
+
+    // Keep cases folder hidden on disk when security is enabled
+    if (security.isEnabled()) _setCasesHidden(true);
 
     await startServer();
     createWindow();
@@ -269,7 +287,12 @@ ipcMain.handle('select-backup-directory', async () => {
 ipcMain.handle('create-backup', async (event, { backupPath, data }) => {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const filePath = path.join(backupPath, `VIPER_Backup_${timestamp}.json`);
-  fs.writeFileSync(filePath, data, 'utf-8');
+  // Encrypt backup if security is active
+  if (security && security.isEnabled() && security.isUnlocked()) {
+    fs.writeFileSync(filePath, security.encryptBuffer(Buffer.from(data, 'utf-8')));
+  } else {
+    fs.writeFileSync(filePath, data, 'utf-8');
+  }
   return filePath;
 });
 
@@ -284,8 +307,12 @@ ipcMain.handle('select-backup-file', async () => {
 });
 
 ipcMain.handle('restore-backup', async (event, { backupPath }) => {
-  const data = fs.readFileSync(backupPath, 'utf-8');
-  return data;
+  const raw = fs.readFileSync(backupPath);
+  // Decrypt backup if it's encrypted
+  if (security && security.isUnlocked() && security.isEncryptedBuffer(raw)) {
+    return security.decryptBuffer(raw).toString('utf-8');
+  }
+  return raw.toString('utf-8');
 });
 
 // --- Field Security IPC ---
@@ -298,6 +325,8 @@ ipcMain.handle('security-check', async () => {
 
 ipcMain.handle('security-setup', async (event, { password }) => {
   const recoveryKey = security.setup(password);
+  // Hide the cases folder on disk
+  _setCasesHidden(true);
   return { success: true, recoveryKey };
 });
 
@@ -387,7 +416,13 @@ ipcMain.handle('save-evidence-file', async (event, data) => {
 
     const filePath = path.join(evidenceDir, fileName);
     const buffer = Buffer.from(fileData);
-    fs.writeFileSync(filePath, buffer);
+
+    // Encrypt evidence if security is enabled and unlocked
+    if (security && security.isEnabled() && security.isUnlocked()) {
+      fs.writeFileSync(filePath, security.encryptBuffer(buffer));
+    } else {
+      fs.writeFileSync(filePath, buffer);
+    }
 
     console.log(`Evidence saved: ${filePath} (${buffer.length} bytes)`);
     return filePath;
@@ -430,6 +465,19 @@ ipcMain.handle('launch-aperture', async (event, caseData) => {
 
 ipcMain.handle('open-file', async (event, filePath) => {
   try {
+    // If file is encrypted, decrypt to temp and open the temp copy
+    if (security && security.isUnlocked() && fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath);
+      if (security.isEncryptedBuffer(raw)) {
+        const decrypted = security.decryptBuffer(raw);
+        const tempDir = path.join(app.getPath('temp'), 'viper-view');
+        fs.mkdirSync(tempDir, { recursive: true });
+        const tempPath = path.join(tempDir, path.basename(filePath));
+        fs.writeFileSync(tempPath, decrypted);
+        await shell.openPath(tempPath);
+        return { success: true };
+      }
+    }
     await shell.openPath(filePath);
     return { success: true };
   } catch (error) {
@@ -641,6 +689,18 @@ ipcMain.handle('aperture-open-attachment', async (event, data) => {
     const { caseId, emailId, attachment } = data;
     const savedPath = apertureData.saveAttachment(caseId, emailId, attachment, 0);
     if (savedPath) {
+      // If encrypted on disk, decrypt to temp for viewing
+      if (security && security.isUnlocked()) {
+        const raw = fs.readFileSync(savedPath);
+        if (security.isEncryptedBuffer(raw)) {
+          const tempDir = path.join(app.getPath('temp'), 'viper-view');
+          fs.mkdirSync(tempDir, { recursive: true });
+          const tempPath = path.join(tempDir, path.basename(savedPath));
+          fs.writeFileSync(tempPath, security.decryptBuffer(raw));
+          await shell.openPath(tempPath);
+          return { success: true, path: tempPath };
+        }
+      }
       await shell.openPath(savedPath);
       return { success: true, path: savedPath };
     }
@@ -680,8 +740,19 @@ ipcMain.handle('aperture-generate-report', async (event, data) => {
     const fileName = `Aperture_Report_${timestamp}.html`;
     const outPath = path.join(outDir, fileName);
 
-    fs.writeFileSync(outPath, html, 'utf-8');
-    await shell.openPath(outPath);
+    // Encrypt report if security is enabled and unlocked
+    if (security && security.isEnabled() && security.isUnlocked()) {
+      fs.writeFileSync(outPath, security.encryptBuffer(Buffer.from(html, 'utf-8')));
+      // Decrypt to temp for viewing
+      const tempDir = path.join(app.getPath('temp'), 'viper-view');
+      fs.mkdirSync(tempDir, { recursive: true });
+      const tempPath = path.join(tempDir, path.basename(outPath));
+      fs.writeFileSync(tempPath, html, 'utf-8');
+      await shell.openPath(tempPath);
+    } else {
+      fs.writeFileSync(outPath, html, 'utf-8');
+      await shell.openPath(outPath);
+    }
 
     return { success: true, path: outPath };
   } catch (error) {

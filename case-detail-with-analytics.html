@@ -2311,6 +2311,46 @@
                         </div>
                     </div>
                     
+                    <!-- Financial Summary (cargo + victim business) -->
+                    ${(() => {
+                        const cCargo = JSON.parse(localStorage.getItem('cargo_' + currentCase.id) || '[]');
+                        const cVB = JSON.parse(localStorage.getItem('victimBusinesses_' + currentCase.id) || '[]');
+                        const cargoTotal = cCargo.reduce((s, c) => s + (parseFloat(c.estimatedValue) || 0) * (parseInt(c.quantity) || 1), 0);
+                        const cargoRecov = cCargo.filter(c => c.recovered).reduce((s, c) => s + (parseFloat(c.estimatedValue) || 0) * (parseInt(c.quantity) || 1), 0);
+                        const vbLoss = cVB.reduce((s, v) => s + (parseFloat(v.lossAmount) || 0), 0);
+                        const vbRecov = cVB.reduce((s, v) => s + (parseFloat(v.recoveredAmount) || 0), 0);
+                        const totalLoss = cargoTotal + vbLoss;
+                        const totalRecov = cargoRecov + vbRecov;
+                        if (totalLoss === 0 && cCargo.length === 0 && cVB.length === 0) return '';
+                        return `
+                        <div class="glass-card rounded-xl p-6">
+                            <h3 class="text-xl font-bold mb-4 flex items-center">
+                                <svg class="w-5 h-5 mr-2 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                                Financial Summary
+                            </h3>
+                            <div class="grid grid-cols-3 gap-4">
+                                <div class="bg-viper-dark/50 rounded-lg p-4 text-center">
+                                    <div class="text-xs text-gray-400 mb-1">Total Loss</div>
+                                    <div class="text-2xl font-bold text-white">$${totalLoss.toLocaleString()}</div>
+                                </div>
+                                <div class="bg-viper-dark/50 rounded-lg p-4 text-center">
+                                    <div class="text-xs text-gray-400 mb-1">Recovered</div>
+                                    <div class="text-2xl font-bold text-viper-green">$${totalRecov.toLocaleString()}</div>
+                                </div>
+                                <div class="bg-viper-dark/50 rounded-lg p-4 text-center">
+                                    <div class="text-xs text-gray-400 mb-1">Outstanding</div>
+                                    <div class="text-2xl font-bold text-red-400">$${(totalLoss - totalRecov).toLocaleString()}</div>
+                                </div>
+                            </div>
+                            <div class="mt-3 text-xs text-gray-500">
+                                ${cCargo.length > 0 ? '<span class="mr-4">📦 ' + cCargo.length + ' cargo item' + (cCargo.length !== 1 ? 's' : '') + '</span>' : ''}
+                                ${cVB.length > 0 ? '<span>🏢 ' + cVB.length + ' victim business' + (cVB.length !== 1 ? 'es' : '') + '</span>' : ''}
+                            </div>
+                        </div>`;
+                    })()}
+
                     <!-- Case Tasks -->
                     <div class="glass-card rounded-xl p-6">
                         <div class="flex items-center justify-between mb-4">
@@ -6486,7 +6526,7 @@
         function saveVictimBusinesses() {
             localStorage.setItem(`victimBusinesses_${currentCase.id}`, JSON.stringify(victimBusinesses));
             caseVictimBusinesses = victimBusinesses;
-            markUnsavedChanges();
+            hasUnsavedChanges = true;
         }
 
         function renderVictimBusinessTab() {
@@ -6654,71 +6694,110 @@
         function saveCargo() {
             localStorage.setItem(`cargo_${currentCase.id}`, JSON.stringify(cargoItems));
             caseCargo = cargoItems;
-            markUnsavedChanges();
+            hasUnsavedChanges = true;
         }
 
         function renderCargoTab() {
             loadCargo();
             if (currentCargoView !== null) return renderCargoDetail(currentCargoView);
 
-            const totalValue = cargoItems.reduce((sum, c) => sum + (parseFloat(c.estimatedValue) || 0), 0);
-            const totalRecovered = cargoItems.filter(c => c.recovered).length;
+            const totalValue = cargoItems.reduce((sum, c) => sum + (parseFloat(c.estimatedValue) || 0) * (parseInt(c.quantity) || 1), 0);
+            const recoveredItems = cargoItems.filter(c => c.recovered);
+            const recoveredValue = recoveredItems.reduce((sum, c) => sum + (parseFloat(c.estimatedValue) || 0) * (parseInt(c.quantity) || 1), 0);
+            const stolenValue = totalValue - recoveredValue;
 
             return `
-                <div>
-                    <div class="flex justify-between items-center mb-6">
+                <div class="space-y-6">
+                    <div class="flex items-center justify-between">
                         <div>
-                            <h2 class="text-2xl font-bold text-white">Cargo / Merchandise</h2>
-                            ${cargoItems.length > 0 ? `<p class="text-sm text-gray-400 mt-1">${cargoItems.length} items · $${totalValue.toLocaleString()} total value · ${totalRecovered} recovered</p>` : ''}
+                            <h2 class="text-2xl font-bold text-white flex items-center gap-2">
+                                <svg class="w-6 h-6 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+                                </svg>
+                                Cargo / Merchandise
+                                ${cargoItems.length > 0 ? `<span class="text-sm font-normal text-gray-400 ml-2">${cargoItems.length} item${cargoItems.length !== 1 ? 's' : ''}</span>` : ''}
+                            </h2>
                         </div>
-                        <button onclick="addNewCargoItem()" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition flex items-center gap-2">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                        <button onclick="addNewCargoItem()" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan text-sm font-medium transition-colors inline-flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                             Add Item
                         </button>
                     </div>
+
+                    ${cargoItems.length > 0 ? `
+                    <!-- Summary Stats -->
+                    <div class="grid grid-cols-3 gap-4">
+                        <div class="glass-card rounded-lg p-4">
+                            <div class="text-xs text-gray-400 mb-1">Total Value</div>
+                            <div class="text-2xl font-bold text-white">$${totalValue.toLocaleString()}</div>
+                        </div>
+                        <div class="glass-card rounded-lg p-4">
+                            <div class="text-xs text-gray-400 mb-1">Recovered Value</div>
+                            <div class="text-2xl font-bold text-viper-green">$${recoveredValue.toLocaleString()}</div>
+                            <div class="text-xs text-gray-500 mt-1">${recoveredItems.length} of ${cargoItems.length} items</div>
+                        </div>
+                        <div class="glass-card rounded-lg p-4">
+                            <div class="text-xs text-gray-400 mb-1">Outstanding Loss</div>
+                            <div class="text-2xl font-bold text-red-400">$${stolenValue.toLocaleString()}</div>
+                        </div>
+                    </div>
+                    ` : ''}
+
                     ${cargoItems.length === 0 ? `
                         <div class="glass-card rounded-xl p-12 text-center">
-                            <svg class="w-20 h-20 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
-                            </svg>
-                            <h3 class="text-2xl font-bold text-gray-300 mb-2">No Cargo / Merchandise</h3>
-                            <p class="text-gray-400 mb-6">Track stolen, recovered, or seized merchandise and cargo items</p>
-                            <button onclick="addNewCargoItem()" class="px-6 py-3 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition">Add First Item</button>
+                            <div class="w-20 h-20 rounded-full bg-viper-cyan/10 flex items-center justify-center mx-auto mb-6">
+                                <svg class="w-10 h-10 text-viper-cyan/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+                                </svg>
+                            </div>
+                            <h3 class="text-xl font-bold text-white mb-2">No Cargo / Merchandise</h3>
+                            <p class="text-gray-400 mb-6 max-w-md mx-auto">Track stolen, recovered, or seized merchandise and cargo items associated with this case.</p>
+                            <button onclick="addNewCargoItem()" class="px-6 py-3 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan font-medium transition-colors">Add First Item</button>
                         </div>
                     ` : `
-                        <div class="overflow-x-auto">
-                            <table class="w-full text-left">
-                                <thead>
-                                    <tr class="border-b border-gray-700 text-sm text-gray-400">
-                                        <th class="py-3 px-4">Item</th>
-                                        <th class="py-3 px-4">Brand</th>
-                                        <th class="py-3 px-4">Serial #</th>
-                                        <th class="py-3 px-4">Qty</th>
-                                        <th class="py-3 px-4">Value</th>
-                                        <th class="py-3 px-4">Status</th>
-                                        <th class="py-3 px-4"></th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${cargoItems.map((item, i) => `
-                                        <tr class="border-b border-gray-800 hover:bg-viper-card/30 cursor-pointer transition" onclick="viewCargoDetail(${i})">
-                                            <td class="py-3 px-4 text-white font-medium">${item.itemName || '—'}</td>
-                                            <td class="py-3 px-4 text-gray-300">${item.brand || '—'}</td>
-                                            <td class="py-3 px-4 text-gray-400 font-mono text-sm">${item.serialNumber || '—'}</td>
-                                            <td class="py-3 px-4 text-gray-300">${item.quantity || 1}</td>
-                                            <td class="py-3 px-4 text-gray-300">${item.estimatedValue ? '$' + Number(item.estimatedValue).toLocaleString() : '—'}</td>
-                                            <td class="py-3 px-4">
-                                                ${item.recovered ? '<span class="px-2 py-1 bg-viper-green/20 text-viper-green text-xs rounded-full border border-viper-green/30">Recovered</span>' :
-                                                '<span class="px-2 py-1 bg-red-500/20 text-red-400 text-xs rounded-full border border-red-500/30">Stolen</span>'}
-                                            </td>
-                                            <td class="py-3 px-4">
-                                                <button onclick="event.stopPropagation();deleteCargoItem(${i})" class="text-red-400 hover:text-red-300 text-sm">✕</button>
-                                            </td>
-                                        </tr>
-                                    `).join('')}
-                                </tbody>
-                            </table>
-                        </div>
+                    <!-- Cargo Item Cards -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        ${cargoItems.map((item, i) => {
+                            const val = parseFloat(item.estimatedValue) || 0;
+                            const qty = parseInt(item.quantity) || 1;
+                            const lineTotal = val * qty;
+                            const statusClass = item.recovered
+                                ? 'text-green-400 bg-green-400/10 border-green-400/30'
+                                : 'text-red-400 bg-red-400/10 border-red-400/30';
+                            const statusLabel = item.recovered ? 'RECOVERED' : 'STOLEN';
+                            const condLabels = { 'new': 'New/Sealed', 'used': 'Used', 'damaged': 'Damaged', 'unknown': 'Unknown' };
+                            return `
+                            <div class="glass-card rounded-xl p-5 hover:border-viper-cyan/30 transition-colors cursor-pointer group" onclick="viewCargoDetail(${i})">
+                                <div class="flex items-start justify-between mb-3">
+                                    <div>
+                                        <div class="flex items-center gap-2 mb-1">
+                                            <span class="text-xs px-2 py-0.5 rounded border ${statusClass}">${statusLabel}</span>
+                                            ${item.category ? `<span class="text-xs font-mono px-2 py-0.5 rounded bg-viper-purple/20 text-viper-purple border border-viper-purple/30">${item.category.toUpperCase()}</span>` : ''}
+                                        </div>
+                                        <h3 class="text-lg font-bold text-white">${item.itemName || 'Unnamed Item'}</h3>
+                                        <p class="text-sm text-gray-400">${[item.brand, item.model].filter(Boolean).join(' — ') || 'No brand/model'}</p>
+                                    </div>
+                                    <button onclick="event.stopPropagation(); deleteCargoItem(${i})" class="p-1.5 text-gray-600 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100" title="Delete item">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2 text-xs mb-3">
+                                    <div class="text-gray-500">Serial: <span class="text-gray-300 font-mono">${item.serialNumber || 'N/A'}</span></div>
+                                    <div class="text-gray-500">Value: <span class="text-gray-300">${val ? '$' + lineTotal.toLocaleString() : 'N/A'}${qty > 1 ? ' (' + qty + ' × $' + val.toLocaleString() + ')' : ''}</span></div>
+                                    <div class="text-gray-500">Condition: <span class="text-gray-300">${condLabels[item.condition] || 'N/A'}</span></div>
+                                    ${item.recovered && item.recoveryDate ? `<div class="text-gray-500">Recovered: <span class="text-gray-300">${new Date(item.recoveryDate).toLocaleDateString()}</span></div>` : `<div class="text-gray-500">Color: <span class="text-gray-300">${item.color || 'N/A'}</span></div>`}
+                                </div>
+                                <div class="flex items-center gap-3 text-xs text-gray-500 border-t border-gray-700/50 pt-3">
+                                    ${item.bolNumber ? `<span class="flex items-center gap-1">📄 BOL: ${item.bolNumber}</span>` : ''}
+                                    ${item.carrierName ? `<span class="flex items-center gap-1">🚛 ${item.carrierName}</span>` : ''}
+                                    ${item.recoveryLocation ? `<span class="flex items-center gap-1">📍 ${item.recoveryLocation}</span>` : ''}
+                                    <span class="ml-auto text-viper-cyan opacity-0 group-hover:opacity-100 transition-opacity">View →</span>
+                                </div>
+                            </div>`;
+                        }).join('')}
+                    </div>
                     `}
                 </div>`;
         }
@@ -17224,7 +17303,7 @@
                 }
                 if (imported > 0) {
                     showToast(`Imported ${imported} TRACE package${imported !== 1 ? 's' : ''}`, 'success');
-                    markUnsavedChanges();
+                    hasUnsavedChanges = true;
                 }
                 renderTabContent('traceImport');
             };

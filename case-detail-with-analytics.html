@@ -812,6 +812,8 @@
         let caseMissingPersons = [];
         let caseCanvasEntries = [];
         let caseProsecution = [];
+        let caseVictimBusinesses = [];
+        let caseCargo = [];
         
         // Date formatting utility - converts YYYY-MM-DD to MM-DD-YYYY
         function formatDate(dateString) {
@@ -1109,8 +1111,10 @@
             const moduleConfig = {
                 suspects: { label: 'Suspects', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
                 victims: { label: 'Victims', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
+                victimBusiness: { label: 'Victim Business', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4' },
                 witnesses: { label: 'Witnesses', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z' },
                 vehicles: { label: 'Recovered Vehicles', icon: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4' },
+                cargo: { label: 'Cargo / Merchandise', icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4' },
                 firearms: { label: 'Firearms', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' },
                 evidence: { label: 'Evidence', icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10' },
                 warrants: { label: 'Warrants', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
@@ -1222,8 +1226,10 @@
             const allModules = {
                 suspects: { label: 'Suspects', icon: '👤' },
                 victims: { label: 'Victims', icon: '👥' },
+                victimBusiness: { label: 'Victim Business', icon: '🏢' },
                 witnesses: { label: 'Witnesses', icon: '👁️' },
                 vehicles: { label: 'Recovered Vehicles', icon: '🚗' },
+                cargo: { label: 'Cargo / Merchandise', icon: '📦' },
                 firearms: { label: 'Firearms', icon: '🔫' },
                 evidence: { label: 'Evidence', icon: '📦' },
                 warrants: { label: 'Warrants', icon: '📄' },
@@ -1310,8 +1316,10 @@
                 overview: { label: 'Case Overview', icon: '📋', type: 'data' },
                 suspects: { label: 'Suspects', icon: '👤', type: 'data' },
                 victims: { label: 'Victims', icon: '👥', type: 'data' },
+                victimBusiness: { label: 'Victim Business', icon: '🏢', type: 'data' },
                 witnesses: { label: 'Witnesses', icon: '👁️', type: 'data' },
                 vehicles: { label: 'Recovered Vehicles', icon: '🚗', type: 'data' },
+                cargo: { label: 'Cargo / Merchandise', icon: '📦', type: 'data' },
                 firearms: { label: 'Firearms', icon: '🔫', type: 'data' },
                 evidence: { label: 'Evidence Files', icon: '📦', type: 'files' },
                 warrants: { label: 'Search Warrants', icon: '📄', type: 'files' },
@@ -1429,6 +1437,8 @@
                 case 'missingpersons': return caseMissingPersons ? caseMissingPersons.length : 0;
                 case 'areacanvas': return caseCanvasEntries ? caseCanvasEntries.length : 0;
                 case 'prosecution': return caseProsecution ? caseProsecution.length : 0;
+                case 'victimBusiness': return caseVictimBusinesses ? caseVictimBusinesses.length : 0;
+                case 'cargo': return caseCargo ? caseCargo.length : 0;
                 default: return 0;
             }
         }
@@ -2226,6 +2236,10 @@
                 contentDiv.innerHTML = renderWitnessesTab();
             } else if (tabId === 'vehicles') {
                 contentDiv.innerHTML = renderRecoveredVehiclesTab();
+            } else if (tabId === 'victimBusiness') {
+                contentDiv.innerHTML = renderVictimBusinessTab();
+            } else if (tabId === 'cargo') {
+                contentDiv.innerHTML = renderCargoTab();
             } else if (tabId === 'missingpersons') {
                 contentDiv.innerHTML = renderMissingPersonsTab();
             } else if (tabId === 'areacanvas') {
@@ -6456,6 +6470,385 @@
             pdfWindow.document.close();
         }
         
+        // =====================================================
+        // =====================================================
+        // VICTIM BUSINESS TAB FUNCTIONALITY
+        // =====================================================
+
+        let victimBusinesses = [];
+        let currentVBView = null;
+
+        function loadVictimBusinesses() {
+            const stored = localStorage.getItem(`victimBusinesses_${currentCase.id}`);
+            victimBusinesses = stored ? JSON.parse(stored) : [];
+            caseVictimBusinesses = victimBusinesses;
+        }
+        function saveVictimBusinesses() {
+            localStorage.setItem(`victimBusinesses_${currentCase.id}`, JSON.stringify(victimBusinesses));
+            caseVictimBusinesses = victimBusinesses;
+            markUnsavedChanges();
+        }
+
+        function renderVictimBusinessTab() {
+            loadVictimBusinesses();
+            if (currentVBView !== null) return renderVBDetail(currentVBView);
+
+            return `
+                <div>
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-2xl font-bold text-white">Victim Businesses</h2>
+                        <button onclick="addNewVictimBusiness()" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                            Add Business
+                        </button>
+                    </div>
+                    ${victimBusinesses.length === 0 ? `
+                        <div class="glass-card rounded-xl p-12 text-center">
+                            <svg class="w-20 h-20 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                            </svg>
+                            <h3 class="text-2xl font-bold text-gray-300 mb-2">No Victim Businesses</h3>
+                            <p class="text-gray-400 mb-6">Add businesses that were victims of theft or fraud in this case</p>
+                            <button onclick="addNewVictimBusiness()" class="px-6 py-3 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition">Add First Business</button>
+                        </div>
+                    ` : `
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            ${victimBusinesses.map((biz, i) => `
+                                <div class="glass-card rounded-xl p-5 hover:border-viper-cyan/50 transition cursor-pointer" onclick="viewVBDetail(${i})">
+                                    <div class="flex items-start gap-4">
+                                        <div class="w-12 h-12 rounded-lg bg-viper-cyan/20 flex items-center justify-center flex-shrink-0">
+                                            <svg class="w-6 h-6 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+                                        </div>
+                                        <div class="flex-1 min-w-0">
+                                            <h3 class="text-lg font-bold text-white truncate">${biz.businessName || 'Unknown Business'}</h3>
+                                            <p class="text-sm text-gray-400">${biz.businessType || 'Business'}</p>
+                                            <p class="text-sm text-gray-500 mt-1">${[biz.city, biz.state].filter(Boolean).join(', ') || 'No location'}</p>
+                                            ${biz.lossAmount ? `<p class="text-sm text-red-400 mt-1">Loss: $${Number(biz.lossAmount).toLocaleString()}</p>` : ''}
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `}
+                </div>`;
+        }
+
+        function viewVBDetail(index) { currentVBView = index; renderTabContent('victimBusiness'); }
+        function backToVBList() { currentVBView = null; renderTabContent('victimBusiness'); }
+
+        function renderVBDetail(index) {
+            const biz = victimBusinesses[index];
+            const e = isEditingInline;
+            const f = (label, key, type='text') => `
+                <div class="form-group">
+                    <label class="block text-sm text-gray-400 mb-1">${label}</label>
+                    ${e ? `<input type="${type}" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white focus:border-viper-cyan focus:outline-none" id="vb_${key}" value="${(biz[key]||'').toString().replace(/"/g,'&quot;')}">` :
+                    `<p class="text-white">${biz[key] || '—'}</p>`}
+                </div>`;
+            const ta = (label, key) => `
+                <div class="form-group col-span-2">
+                    <label class="block text-sm text-gray-400 mb-1">${label}</label>
+                    ${e ? `<textarea class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white focus:border-viper-cyan focus:outline-none h-24" id="vb_${key}">${biz[key]||''}</textarea>` :
+                    `<p class="text-white whitespace-pre-wrap">${biz[key] || '—'}</p>`}
+                </div>`;
+
+            return `
+                <div>
+                    <div class="flex justify-between items-center mb-6">
+                        <button onclick="backToVBList()" class="flex items-center gap-2 text-viper-cyan hover:text-white transition">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                            Back to Businesses
+                        </button>
+                        <div class="flex gap-3">
+                            ${e ? `
+                                <button onclick="isEditingInline=false;renderTabContent('victimBusiness')" class="px-4 py-2 bg-gray-600/20 border border-gray-600 rounded-lg text-gray-300 transition">Cancel</button>
+                                <button onclick="saveVBEdit(${index})" class="px-4 py-2 bg-viper-green/20 border border-viper-green rounded-lg text-viper-green transition">Save</button>
+                            ` : `
+                                <button onclick="isEditingInline=true;renderTabContent('victimBusiness')" class="px-4 py-2 bg-viper-cyan/20 border border-viper-cyan rounded-lg text-viper-cyan transition">Edit</button>
+                                <button onclick="deleteVictimBusiness(${index})" class="px-4 py-2 bg-red-500/20 border border-red-500 rounded-lg text-red-500 transition">Delete</button>
+                            `}
+                        </div>
+                    </div>
+                    <div class="glass-card rounded-xl p-6">
+                        <h3 class="text-xl font-bold text-white mb-4">Business Information</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            ${f('Business Name', 'businessName')}
+                            ${f('Business Type', 'businessType')}
+                            ${f('Store/Location #', 'storeNumber')}
+                            ${f('Address', 'address')}
+                            ${f('City', 'city')}
+                            ${f('State', 'state')}
+                            ${f('Zip Code', 'zip')}
+                            ${f('Phone', 'phone')}
+                        </div>
+                    </div>
+                    <div class="glass-card rounded-xl p-6 mt-4">
+                        <h3 class="text-xl font-bold text-white mb-4">Contact Person</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            ${f('Contact Name', 'contactName')}
+                            ${f('Title / Position', 'contactTitle')}
+                            ${f('Contact Phone', 'contactPhone')}
+                            ${f('Contact Email', 'contactEmail')}
+                        </div>
+                    </div>
+                    <div class="glass-card rounded-xl p-6 mt-4">
+                        <h3 class="text-xl font-bold text-white mb-4">Loss & Insurance</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            ${f('Total Loss Amount ($)', 'lossAmount', 'number')}
+                            ${f('Recovered Amount ($)', 'recoveredAmount', 'number')}
+                            ${f('Insurance Company', 'insuranceCompany')}
+                            ${f('Insurance Claim #', 'insuranceClaim')}
+                            ${ta('Notes', 'notes')}
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        function addNewVictimBusiness() {
+            victimBusinesses.push({
+                businessName: '', businessType: '', storeNumber: '',
+                address: '', city: '', state: '', zip: '', phone: '',
+                contactName: '', contactTitle: '', contactPhone: '', contactEmail: '',
+                lossAmount: '', recoveredAmount: '', insuranceCompany: '', insuranceClaim: '',
+                notes: '', createdAt: new Date().toISOString()
+            });
+            saveVictimBusinesses();
+            currentVBView = victimBusinesses.length - 1;
+            isEditingInline = true;
+            renderTabContent('victimBusiness');
+        }
+
+        function saveVBEdit(index) {
+            const fields = ['businessName','businessType','storeNumber','address','city','state','zip','phone',
+                'contactName','contactTitle','contactPhone','contactEmail',
+                'lossAmount','recoveredAmount','insuranceCompany','insuranceClaim','notes'];
+            fields.forEach(k => {
+                const el = document.getElementById('vb_' + k);
+                if (el) victimBusinesses[index][k] = el.value;
+            });
+            saveVictimBusinesses();
+            isEditingInline = false;
+            renderTabContent('victimBusiness');
+        }
+
+        function deleteVictimBusiness(index) {
+            if (!confirm('Delete this business record?')) return;
+            victimBusinesses.splice(index, 1);
+            saveVictimBusinesses();
+            currentVBView = null;
+            renderTabContent('victimBusiness');
+        }
+
+        // =====================================================
+        // CARGO / MERCHANDISE TAB FUNCTIONALITY
+        // =====================================================
+
+        let cargoItems = [];
+        let currentCargoView = null;
+
+        function loadCargo() {
+            const stored = localStorage.getItem(`cargo_${currentCase.id}`);
+            cargoItems = stored ? JSON.parse(stored) : [];
+            caseCargo = cargoItems;
+        }
+        function saveCargo() {
+            localStorage.setItem(`cargo_${currentCase.id}`, JSON.stringify(cargoItems));
+            caseCargo = cargoItems;
+            markUnsavedChanges();
+        }
+
+        function renderCargoTab() {
+            loadCargo();
+            if (currentCargoView !== null) return renderCargoDetail(currentCargoView);
+
+            const totalValue = cargoItems.reduce((sum, c) => sum + (parseFloat(c.estimatedValue) || 0), 0);
+            const totalRecovered = cargoItems.filter(c => c.recovered).length;
+
+            return `
+                <div>
+                    <div class="flex justify-between items-center mb-6">
+                        <div>
+                            <h2 class="text-2xl font-bold text-white">Cargo / Merchandise</h2>
+                            ${cargoItems.length > 0 ? `<p class="text-sm text-gray-400 mt-1">${cargoItems.length} items · $${totalValue.toLocaleString()} total value · ${totalRecovered} recovered</p>` : ''}
+                        </div>
+                        <button onclick="addNewCargoItem()" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                            Add Item
+                        </button>
+                    </div>
+                    ${cargoItems.length === 0 ? `
+                        <div class="glass-card rounded-xl p-12 text-center">
+                            <svg class="w-20 h-20 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+                            </svg>
+                            <h3 class="text-2xl font-bold text-gray-300 mb-2">No Cargo / Merchandise</h3>
+                            <p class="text-gray-400 mb-6">Track stolen, recovered, or seized merchandise and cargo items</p>
+                            <button onclick="addNewCargoItem()" class="px-6 py-3 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition">Add First Item</button>
+                        </div>
+                    ` : `
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left">
+                                <thead>
+                                    <tr class="border-b border-gray-700 text-sm text-gray-400">
+                                        <th class="py-3 px-4">Item</th>
+                                        <th class="py-3 px-4">Brand</th>
+                                        <th class="py-3 px-4">Serial #</th>
+                                        <th class="py-3 px-4">Qty</th>
+                                        <th class="py-3 px-4">Value</th>
+                                        <th class="py-3 px-4">Status</th>
+                                        <th class="py-3 px-4"></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${cargoItems.map((item, i) => `
+                                        <tr class="border-b border-gray-800 hover:bg-viper-card/30 cursor-pointer transition" onclick="viewCargoDetail(${i})">
+                                            <td class="py-3 px-4 text-white font-medium">${item.itemName || '—'}</td>
+                                            <td class="py-3 px-4 text-gray-300">${item.brand || '—'}</td>
+                                            <td class="py-3 px-4 text-gray-400 font-mono text-sm">${item.serialNumber || '—'}</td>
+                                            <td class="py-3 px-4 text-gray-300">${item.quantity || 1}</td>
+                                            <td class="py-3 px-4 text-gray-300">${item.estimatedValue ? '$' + Number(item.estimatedValue).toLocaleString() : '—'}</td>
+                                            <td class="py-3 px-4">
+                                                ${item.recovered ? '<span class="px-2 py-1 bg-viper-green/20 text-viper-green text-xs rounded-full border border-viper-green/30">Recovered</span>' :
+                                                '<span class="px-2 py-1 bg-red-500/20 text-red-400 text-xs rounded-full border border-red-500/30">Stolen</span>'}
+                                            </td>
+                                            <td class="py-3 px-4">
+                                                <button onclick="event.stopPropagation();deleteCargoItem(${i})" class="text-red-400 hover:text-red-300 text-sm">✕</button>
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    `}
+                </div>`;
+        }
+
+        function viewCargoDetail(index) { currentCargoView = index; renderTabContent('cargo'); }
+        function backToCargoList() { currentCargoView = null; renderTabContent('cargo'); }
+
+        function renderCargoDetail(index) {
+            const item = cargoItems[index];
+            const e = isEditingInline;
+            const f = (label, key, type='text') => `
+                <div class="form-group">
+                    <label class="block text-sm text-gray-400 mb-1">${label}</label>
+                    ${e ? `<input type="${type}" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white focus:border-viper-cyan focus:outline-none" id="cargo_${key}" value="${(item[key]||'').toString().replace(/"/g,'&quot;')}">` :
+                    `<p class="text-white">${item[key] || '—'}</p>`}
+                </div>`;
+            const sel = (label, key, options) => `
+                <div class="form-group">
+                    <label class="block text-sm text-gray-400 mb-1">${label}</label>
+                    ${e ? `<select class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white focus:border-viper-cyan focus:outline-none" id="cargo_${key}">
+                        ${options.map(o => `<option value="${o.value}" ${item[key] === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
+                    </select>` : `<p class="text-white">${item[key] || '—'}</p>`}
+                </div>`;
+            const chk = (label, key) => `
+                <div class="form-group">
+                    <label class="block text-sm text-gray-400 mb-1">${label}</label>
+                    ${e ? `<input type="checkbox" id="cargo_${key}" ${item[key] ? 'checked' : ''} class="w-5 h-5 rounded border-gray-600 text-viper-green focus:ring-viper-green">` :
+                    `<p class="text-white">${item[key] ? '✅ Yes' : '❌ No'}</p>`}
+                </div>`;
+            const ta = (label, key) => `
+                <div class="form-group col-span-2">
+                    <label class="block text-sm text-gray-400 mb-1">${label}</label>
+                    ${e ? `<textarea class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white focus:border-viper-cyan focus:outline-none h-24" id="cargo_${key}">${item[key]||''}</textarea>` :
+                    `<p class="text-white whitespace-pre-wrap">${item[key] || '—'}</p>`}
+                </div>`;
+
+            return `
+                <div>
+                    <div class="flex justify-between items-center mb-6">
+                        <button onclick="backToCargoList()" class="flex items-center gap-2 text-viper-cyan hover:text-white transition">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                            Back to Cargo
+                        </button>
+                        <div class="flex gap-3">
+                            ${e ? `
+                                <button onclick="isEditingInline=false;renderTabContent('cargo')" class="px-4 py-2 bg-gray-600/20 border border-gray-600 rounded-lg text-gray-300 transition">Cancel</button>
+                                <button onclick="saveCargoEdit(${index})" class="px-4 py-2 bg-viper-green/20 border border-viper-green rounded-lg text-viper-green transition">Save</button>
+                            ` : `
+                                <button onclick="isEditingInline=true;renderTabContent('cargo')" class="px-4 py-2 bg-viper-cyan/20 border border-viper-cyan rounded-lg text-viper-cyan transition">Edit</button>
+                                <button onclick="deleteCargoItem(${index})" class="px-4 py-2 bg-red-500/20 border border-red-500 rounded-lg text-red-500 transition">Delete</button>
+                            `}
+                        </div>
+                    </div>
+                    <div class="glass-card rounded-xl p-6">
+                        <h3 class="text-xl font-bold text-white mb-4">Item Details</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            ${f('Item Name', 'itemName')}
+                            ${f('Brand / Manufacturer', 'brand')}
+                            ${f('Model', 'model')}
+                            ${f('Serial Number', 'serialNumber')}
+                            ${f('Color', 'color')}
+                            ${sel('Condition', 'condition', [
+                                {value:'', label:'—'}, {value:'new', label:'New/Sealed'}, {value:'used', label:'Used'},
+                                {value:'damaged', label:'Damaged'}, {value:'unknown', label:'Unknown'}
+                            ])}
+                            ${f('Category', 'category')}
+                            ${f('Quantity', 'quantity', 'number')}
+                            ${f('Estimated Value ($)', 'estimatedValue', 'number')}
+                            ${chk('Recovered', 'recovered')}
+                            ${f('Recovery Date', 'recoveryDate', 'date')}
+                            ${f('Recovery Location', 'recoveryLocation')}
+                        </div>
+                    </div>
+                    <div class="glass-card rounded-xl p-6 mt-4">
+                        <h3 class="text-xl font-bold text-white mb-4">Shipping / Cargo Details</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            ${f('BOL Number', 'bolNumber')}
+                            ${f('Trailer Number', 'trailerNumber')}
+                            ${f('Trailer Plate', 'trailerPlate')}
+                            ${f('MC Number', 'mcNumber')}
+                            ${f('Carrier Name', 'carrierName')}
+                            ${f('Commodity', 'commodity')}
+                            ${f('Pickup Location', 'pickupLocation')}
+                            ${f('Delivery Location', 'deliveryLocation')}
+                            ${ta('Notes', 'notes')}
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        function addNewCargoItem() {
+            cargoItems.push({
+                itemName: '', brand: '', model: '', serialNumber: '', color: '',
+                condition: '', category: '', quantity: 1, estimatedValue: '',
+                recovered: false, recoveryDate: '', recoveryLocation: '',
+                bolNumber: '', trailerNumber: '', trailerPlate: '', mcNumber: '',
+                carrierName: '', commodity: '', pickupLocation: '', deliveryLocation: '',
+                notes: '', createdAt: new Date().toISOString()
+            });
+            saveCargo();
+            currentCargoView = cargoItems.length - 1;
+            isEditingInline = true;
+            renderTabContent('cargo');
+        }
+
+        function saveCargoEdit(index) {
+            const fields = ['itemName','brand','model','serialNumber','color','condition','category',
+                'quantity','estimatedValue','recoveryDate','recoveryLocation',
+                'bolNumber','trailerNumber','trailerPlate','mcNumber','carrierName','commodity',
+                'pickupLocation','deliveryLocation','notes'];
+            fields.forEach(k => {
+                const el = document.getElementById('cargo_' + k);
+                if (el) cargoItems[index][k] = el.value;
+            });
+            // Handle checkbox separately
+            const recEl = document.getElementById('cargo_recovered');
+            if (recEl) cargoItems[index].recovered = recEl.checked;
+            saveCargo();
+            isEditingInline = false;
+            renderTabContent('cargo');
+        }
+
+        function deleteCargoItem(index) {
+            if (!confirm('Delete this cargo/merchandise item?')) return;
+            cargoItems.splice(index, 1);
+            saveCargo();
+            currentCargoView = null;
+            renderTabContent('cargo');
+        }
+
         // =====================================================
         // WITNESSES TAB FUNCTIONALITY
         // =====================================================
@@ -14177,8 +14570,10 @@
             const caseManagement = [
                 { id: 'suspects', label: 'Suspects', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
                 { id: 'victims', label: 'Victims', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
+                { id: 'victimBusiness', label: 'Victim Business', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4' },
                 { id: 'witnesses', label: 'Witnesses', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z' },
                 { id: 'vehicles', label: 'Recovered Vehicles', icon: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4' },
+                { id: 'cargo', label: 'Cargo / Merchandise', icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4' },
                 { id: 'firearms', label: 'Firearms', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' },
                 { id: 'evidence', label: 'Evidence', icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10' },
                 { id: 'warrants', label: 'Warrants', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },

@@ -6,6 +6,8 @@ directories:
 files:
   - "**/*"
   - "!dist/**"
+asarUnpack:
+  - "build/**"
   - "!plans/**"
   - "!tasks/**"
   - "!test/**"

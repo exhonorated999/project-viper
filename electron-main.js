@@ -16,6 +16,11 @@ let mediaBrowserView = null;
 let mediaViewVisible = false;
 let lastMediaBounds = null;
 
+// Icon path: use unpacked asar path in production, normal path in dev
+const iconPath = app.isPackaged
+  ? path.join(__dirname, '..', 'app.asar.unpacked', 'build', 'icon.ico')
+  : path.join(__dirname, 'build', 'icon.ico');
+
 // MIME types mapping
 const mimeTypes = {
   '.html': 'text/html',
@@ -82,7 +87,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js')
     },
     title: 'VIPER - Network Intelligence',
-    icon: path.join(__dirname, 'build', 'icon.ico'),
+    icon: iconPath,
     show: true,
     backgroundColor: '#1a1a1a'
   });
@@ -679,7 +684,7 @@ ipcMain.handle('pop-out-media-player', async (_event, mediaUrl) => {
       frame: true,
       title: 'VIPER Media Player',
       autoHideMenuBar: true,
-      icon: path.join(__dirname, 'build', 'icon.ico'),
+      icon: iconPath,
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,

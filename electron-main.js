@@ -21,6 +21,28 @@ const iconPath = app.isPackaged
   ? path.join(__dirname, '..', 'app.asar.unpacked', 'build', 'icon.ico')
   : path.join(__dirname, 'build', 'icon.ico');
 
+// ── Portable mode detection ──────────────────────────────────────────
+// If the app is NOT installed under C:\Program Files, treat it as a portable
+// USB install. All user data (localStorage, security vault, cases) is stored
+// on the USB itself so each stick is self-contained and independent.
+const exeDir = app.isPackaged ? path.dirname(app.getPath('exe')) : __dirname;
+const isPortable = app.isPackaged && !exeDir.toLowerCase().startsWith('c:\\program files');
+
+let casesDir;   // writable directory for case data
+if (isPortable) {
+  const portableData = path.join(exeDir, 'userdata');
+  if (!fs.existsSync(portableData)) fs.mkdirSync(portableData, { recursive: true });
+  app.setPath('userData', portableData);   // redirects localStorage, cookies, etc.
+  casesDir = path.join(exeDir, 'cases');
+  console.log('PORTABLE MODE — data stored on USB:', portableData);
+} else {
+  // Desktop install: cases next to the app in dev, or under userData in production
+  casesDir = app.isPackaged
+    ? path.join(app.getPath('userData'), 'cases')
+    : path.join(__dirname, 'cases');
+}
+if (!fs.existsSync(casesDir)) fs.mkdirSync(casesDir, { recursive: true });
+
 // MIME types mapping
 const mimeTypes = {
   '.html': 'text/html',
@@ -228,8 +250,9 @@ app.on('will-quit', () => {
 ipcMain.handle('get-storage-paths', async () => {
   return {
     appDir: __dirname,
-    casesDir: path.join(__dirname, 'cases'),
-    userData: app.getPath('userData')
+    casesDir: casesDir,
+    userData: app.getPath('userData'),
+    isPortable: isPortable
   };
 });
 
@@ -359,10 +382,10 @@ ipcMain.handle('security-lock', async () => {
 ipcMain.handle('save-evidence-file', async (event, data) => {
   try {
     const { caseNumber, evidenceTag, fileName, fileData } = data;
-    const casesDir = path.join(__dirname, 'cases', caseNumber, 'Evidence', evidenceTag);
-    fs.mkdirSync(casesDir, { recursive: true });
+    const evidenceDir = path.join(casesDir, caseNumber, 'Evidence', evidenceTag);
+    fs.mkdirSync(evidenceDir, { recursive: true });
 
-    const filePath = path.join(casesDir, fileName);
+    const filePath = path.join(evidenceDir, fileName);
     const buffer = Buffer.from(fileData);
     fs.writeFileSync(filePath, buffer);
 
@@ -418,7 +441,7 @@ ipcMain.handle('open-file', async (event, filePath) => {
 // Aperture Native Integration IPC Handlers
 const ApertureParser = require('./modules/aperture/aperture-parser.js');
 const ApertureData = require('./modules/aperture/aperture-data.js');
-const apertureData = new ApertureData(path.join(__dirname, 'cases'));
+const apertureData = new ApertureData(casesDir);
 
 ipcMain.handle('aperture-load-emails', async (event, caseId) => {
   try {
@@ -650,7 +673,7 @@ ipcMain.handle('aperture-generate-report', async (event, data) => {
     const html = apertureData.generateReport(caseId, { caseName, flaggedOnly });
 
     // Always resolve relative to app dir
-    const outDir = path.join(__dirname, 'cases', caseId, 'aperture');
+    const outDir = path.join(casesDir, caseId, 'aperture');
     fs.mkdirSync(outDir, { recursive: true });
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);

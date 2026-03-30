@@ -662,6 +662,37 @@
                     </div>
                 </div>
 
+                <!-- Media Player Toggle -->
+                <div class="glass-card rounded-xl p-6">
+                    <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
+                        <svg class="w-6 h-6 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"/>
+                        </svg>
+                        Media Player
+                    </h3>
+                    <p class="text-gray-400 text-sm mb-4">
+                        Embedded streaming player for Spotify, SiriusXM, YouTube and more. Appears in the sidebar on all pages.
+                    </p>
+                    <div class="flex items-center justify-between bg-viper-dark rounded-lg p-4 border border-viper-cyan/20">
+                        <div class="flex items-center gap-3">
+                            <div class="w-12 h-12 rounded-lg bg-viper-cyan/10 flex items-center justify-center">
+                                <span class="text-2xl">🎵</span>
+                            </div>
+                            <div>
+                                <p class="font-medium" id="mediaToggleLabel">Disabled</p>
+                                <p class="text-gray-400 text-xs">Toggle to show/hide the media player overlay. Boss key: Ctrl+Alt+M</p>
+                            </div>
+                        </div>
+                        <button
+                            id="mediaToggleBtn"
+                            onclick="toggleMediaPlayer()"
+                            class="relative w-14 h-7 rounded-full transition-colors bg-gray-600"
+                        >
+                            <div id="mediaToggleKnob" class="absolute w-5 h-5 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Backup & Restore Section -->
                 <div class="glass-card rounded-xl p-6">
                     <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
@@ -1374,5 +1405,25 @@
         });
     </script>
     <script src="/modules/security-ui.js"></script>
+    <script>
+    // Media Player toggle
+    function toggleMediaPlayer() {
+        const enabled = localStorage.getItem('mediaPlayerEnabled') !== 'true';
+        localStorage.setItem('mediaPlayerEnabled', String(enabled));
+        updateMediaToggleUI(enabled);
+    }
+    function updateMediaToggleUI(enabled) {
+        const label = document.getElementById('mediaToggleLabel');
+        const btn = document.getElementById('mediaToggleBtn');
+        const knob = document.getElementById('mediaToggleKnob');
+        if (label) label.textContent = enabled ? 'Enabled' : 'Disabled';
+        if (btn) btn.className = 'relative w-14 h-7 rounded-full transition-colors ' + (enabled ? 'bg-viper-cyan' : 'bg-gray-600');
+        if (knob) {
+            knob.className = 'absolute w-5 h-5 bg-white rounded-full top-1 transition-transform ' + (enabled ? 'translate-x-8' : 'translate-x-1');
+        }
+    }
+    // Set initial state
+    updateMediaToggleUI(localStorage.getItem('mediaPlayerEnabled') === 'true');
+    </script>
 </body>
 </html>

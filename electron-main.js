@@ -35,9 +35,9 @@ function startServer() {
     server = http.createServer((req, res) => {
       console.log(`Request: ${req.url}`);
       
-      let filePath = '.' + req.url;
-      if (filePath === './') {
-        filePath = './case-detail-with-analytics.html';
+      let filePath = path.join(__dirname, req.url);
+      if (req.url === '/') {
+        filePath = path.join(__dirname, 'case-detail-with-analytics.html');
       }
 
       const extname = String(path.extname(filePath)).toLowerCase();

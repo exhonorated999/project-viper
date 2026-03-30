@@ -2451,7 +2451,8 @@
             cases.forEach(caseItem => {
                 const cargo = JSON.parse(localStorage.getItem(`cargo_${caseItem.id}`)) || [];
                 cargo.forEach(item => {
-                    const val = (parseFloat(item.estimatedValue) || 0) * (parseInt(item.quantity) || 1);
+                    const raw = parseFloat(item.estimatedValue) || 0;
+                    const val = item.valueType === 'total' ? raw : raw * (parseInt(item.quantity) || 1);
                     totalValue += val;
                     if (item.recovered) recoveredValue += val;
                 });

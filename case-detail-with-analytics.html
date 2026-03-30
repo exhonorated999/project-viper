@@ -2315,8 +2315,8 @@
                     ${(() => {
                         const cCargo = JSON.parse(localStorage.getItem('cargo_' + currentCase.id) || '[]');
                         const cVB = JSON.parse(localStorage.getItem('victimBusinesses_' + currentCase.id) || '[]');
-                        const cargoTotal = cCargo.reduce((s, c) => s + (parseFloat(c.estimatedValue) || 0) * (parseInt(c.quantity) || 1), 0);
-                        const cargoRecov = cCargo.filter(c => c.recovered).reduce((s, c) => s + (parseFloat(c.estimatedValue) || 0) * (parseInt(c.quantity) || 1), 0);
+                        const cargoTotal = cCargo.reduce((s, c) => s + cargoLineTotal(c), 0);
+                        const cargoRecov = cCargo.filter(c => c.recovered).reduce((s, c) => s + cargoLineTotal(c), 0);
                         const vbLoss = cVB.reduce((s, v) => s + (parseFloat(v.lossAmount) || 0), 0);
                         const vbRecov = cVB.reduce((s, v) => s + (parseFloat(v.recoveredAmount) || 0), 0);
                         const totalLoss = cargoTotal + vbLoss;
@@ -6526,7 +6526,6 @@
         function saveVictimBusinesses() {
             localStorage.setItem(`victimBusinesses_${currentCase.id}`, JSON.stringify(victimBusinesses));
             caseVictimBusinesses = victimBusinesses;
-            hasUnsavedChanges = true;
         }
 
         function renderVictimBusinessTab() {
@@ -6694,16 +6693,22 @@
         function saveCargo() {
             localStorage.setItem(`cargo_${currentCase.id}`, JSON.stringify(cargoItems));
             caseCargo = cargoItems;
-            hasUnsavedChanges = true;
+        }
+
+        // Compute line total for a cargo item respecting valueType
+        function cargoLineTotal(item) {
+            const val = parseFloat(item.estimatedValue) || 0;
+            if (item.valueType === 'total') return val;
+            return val * (parseInt(item.quantity) || 1);
         }
 
         function renderCargoTab() {
             loadCargo();
             if (currentCargoView !== null) return renderCargoDetail(currentCargoView);
 
-            const totalValue = cargoItems.reduce((sum, c) => sum + (parseFloat(c.estimatedValue) || 0) * (parseInt(c.quantity) || 1), 0);
+            const totalValue = cargoItems.reduce((sum, c) => sum + cargoLineTotal(c), 0);
             const recoveredItems = cargoItems.filter(c => c.recovered);
-            const recoveredValue = recoveredItems.reduce((sum, c) => sum + (parseFloat(c.estimatedValue) || 0) * (parseInt(c.quantity) || 1), 0);
+            const recoveredValue = recoveredItems.reduce((sum, c) => sum + cargoLineTotal(c), 0);
             const stolenValue = totalValue - recoveredValue;
 
             return `
@@ -6760,7 +6765,8 @@
                         ${cargoItems.map((item, i) => {
                             const val = parseFloat(item.estimatedValue) || 0;
                             const qty = parseInt(item.quantity) || 1;
-                            const lineTotal = val * qty;
+                            const isTotal = item.valueType === 'total';
+                            const lineTotal = cargoLineTotal(item);
                             const statusClass = item.recovered
                                 ? 'text-green-400 bg-green-400/10 border-green-400/30'
                                 : 'text-red-400 bg-red-400/10 border-red-400/30';
@@ -6785,7 +6791,7 @@
                                 </div>
                                 <div class="grid grid-cols-2 gap-2 text-xs mb-3">
                                     <div class="text-gray-500">Serial: <span class="text-gray-300 font-mono">${item.serialNumber || 'N/A'}</span></div>
-                                    <div class="text-gray-500">Value: <span class="text-gray-300">${val ? '$' + lineTotal.toLocaleString() : 'N/A'}${qty > 1 ? ' (' + qty + ' × $' + val.toLocaleString() + ')' : ''}</span></div>
+                                    <div class="text-gray-500">Value: <span class="text-gray-300">${val ? '$' + lineTotal.toLocaleString() : 'N/A'}${qty > 1 && !isTotal ? ' (' + qty + ' × $' + val.toLocaleString() + ')' : ''}${isTotal && qty > 1 ? ' (total for ' + qty + ' items)' : ''}</span></div>
                                     <div class="text-gray-500">Condition: <span class="text-gray-300">${condLabels[item.condition] || 'N/A'}</span></div>
                                     ${item.recovered && item.recoveryDate ? `<div class="text-gray-500">Recovered: <span class="text-gray-300">${new Date(item.recoveryDate).toLocaleDateString()}</span></div>` : `<div class="text-gray-500">Color: <span class="text-gray-300">${item.color || 'N/A'}</span></div>`}
                                 </div>
@@ -6865,7 +6871,22 @@
                             ])}
                             ${f('Category', 'category')}
                             ${f('Quantity', 'quantity', 'number')}
-                            ${f('Estimated Value ($)', 'estimatedValue', 'number')}
+                            <div class="form-group">
+                                <label class="block text-sm text-gray-400 mb-1">Estimated Value ($)</label>
+                                ${e ? `
+                                    <input type="number" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white focus:border-viper-cyan focus:outline-none" id="cargo_estimatedValue" value="${(item.estimatedValue||'').toString().replace(/"/g,'&quot;')}">
+                                    <div class="flex gap-2 mt-2">
+                                        <label class="flex items-center gap-1.5 text-xs cursor-pointer px-3 py-1.5 rounded-lg border transition ${item.valueType !== 'total' ? 'bg-viper-cyan/20 border-viper-cyan text-viper-cyan' : 'border-gray-600 text-gray-400 hover:border-gray-500'}">
+                                            <input type="radio" name="valueType" value="per_item" ${item.valueType !== 'total' ? 'checked' : ''} class="hidden"> Per Item
+                                        </label>
+                                        <label class="flex items-center gap-1.5 text-xs cursor-pointer px-3 py-1.5 rounded-lg border transition ${item.valueType === 'total' ? 'bg-viper-cyan/20 border-viper-cyan text-viper-cyan' : 'border-gray-600 text-gray-400 hover:border-gray-500'}">
+                                            <input type="radio" name="valueType" value="total" ${item.valueType === 'total' ? 'checked' : ''} class="hidden"> Total Load Value
+                                        </label>
+                                    </div>
+                                ` : `
+                                    <p class="text-white">$${cargoLineTotal(item).toLocaleString()}${item.valueType === 'total' ? ' <span class="text-xs text-gray-400">(total for ' + (item.quantity || 1) + ' items)</span>' : (parseInt(item.quantity) || 1) > 1 ? ' <span class="text-xs text-gray-400">(' + (item.quantity || 1) + ' × $' + Number(item.estimatedValue || 0).toLocaleString() + ' each)</span>' : ''}</p>
+                                `}
+                            </div>
                             ${chk('Recovered', 'recovered')}
                             ${f('Recovery Date', 'recoveryDate', 'date')}
                             ${f('Recovery Location', 'recoveryLocation')}
@@ -6892,7 +6913,7 @@
             cargoItems.push({
                 itemName: '', brand: '', model: '', serialNumber: '', color: '',
                 condition: '', category: '', quantity: 1, estimatedValue: '',
-                recovered: false, recoveryDate: '', recoveryLocation: '',
+                valueType: 'per_item', recovered: false, recoveryDate: '', recoveryLocation: '',
                 bolNumber: '', trailerNumber: '', trailerPlate: '', mcNumber: '',
                 carrierName: '', commodity: '', pickupLocation: '', deliveryLocation: '',
                 notes: '', createdAt: new Date().toISOString()
@@ -6915,6 +6936,9 @@
             // Handle checkbox separately
             const recEl = document.getElementById('cargo_recovered');
             if (recEl) cargoItems[index].recovered = recEl.checked;
+            // Handle valueType radio
+            const vtEl = document.querySelector('input[name="valueType"]:checked');
+            if (vtEl) cargoItems[index].valueType = vtEl.value;
             saveCargo();
             isEditingInline = false;
             renderTabContent('cargo');

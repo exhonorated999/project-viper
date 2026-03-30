@@ -3582,26 +3582,31 @@
     }
     </script>
     <script src="/modules/security-ui.js"></script>
-    <script src="/modules/media-player.js"></script>
     <script>
-    (function initMediaPlayer() {
+    // Media Player — BrowserView coordination
+    (function initMediaBrowserView() {
         const container = document.getElementById('mediaPlayerContainer');
         if (!container) return;
-        function applyState() {
+        function reportBounds() {
             const enabled = localStorage.getItem('mediaPlayerEnabled') === 'true';
-            container.style.display = enabled ? 'flex' : 'none';
-            if (enabled && !container.dataset.rendered) {
-                container.dataset.rendered = 'true';
-                window.ViperMediaPlayer.render(container);
+            container.style.display = enabled ? 'block' : 'none';
+            if (enabled) {
+                const r = container.getBoundingClientRect();
+                window.electronAPI.mediaSetBounds({ x: r.x, y: r.y, width: r.width, height: r.height });
+                window.electronAPI.mediaSetVisible(true);
+            } else {
+                window.electronAPI.mediaSetVisible(false);
             }
         }
-        applyState();
-        window.addEventListener('storage', (e) => { if (e.key === 'mediaPlayerEnabled') applyState(); });
+        reportBounds();
+        window.addEventListener('resize', reportBounds);
+        window.electronAPI.onRequestMediaBounds(() => reportBounds());
         window.electronAPI.onToggleMediaPlayer(() => {
             const next = localStorage.getItem('mediaPlayerEnabled') !== 'true';
             localStorage.setItem('mediaPlayerEnabled', String(next));
-            applyState();
+            reportBounds();
         });
+        window.addEventListener('storage', (e) => { if (e.key === 'mediaPlayerEnabled') reportBounds(); });
     })();
     </script>
 </body>

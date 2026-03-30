@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' data:; connect-src 'self' http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://api.wigle.net; font-src 'self' data:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' data:; connect-src 'self' http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://api.wigle.net; font-src 'self' data:; frame-src https: http:;">
     <title>V.I.P.E.R. - Settings</title>
     <script src="modules/licensing.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -222,7 +222,7 @@
             </div>
             
             <!-- Navigation -->
-            <nav class="flex-1 p-4 space-y-2">
+            <nav class="p-4 space-y-2 flex-shrink-0">
                 <div class="sidebar-item px-4 py-3 rounded-lg cursor-pointer flex items-center space-x-3" onclick="window.location.href='index.html'">
                     <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
@@ -245,9 +245,12 @@
                     <span class="font-medium">Settings</span>
                 </div>
             </nav>
+
+            <!-- Media Player (fills remaining sidebar space) -->
+            <div id="mediaPlayerContainer" class="flex-1 min-h-0" style="display:none;"></div>
             
             <!-- User Profile -->
-            <div class="p-4 border-t border-viper-cyan/20">
+            <div class="p-4 border-t border-viper-cyan/20 flex-shrink-0">
                 <div class="flex items-center space-x-3 mb-4">
                     <div class="w-10 h-10 rounded-full bg-gradient-to-br from-viper-green to-viper-cyan flex items-center justify-center font-bold text-sm" id="userInitials">
                         JM
@@ -1406,12 +1409,28 @@
     </script>
     <script src="/modules/security-ui.js"></script>
     <script>
-    // Media Player toggle
+    // Media Player — BrowserView coordination + settings toggle
+    function reportBounds() {
+        const container = document.getElementById('mediaPlayerContainer');
+        if (!container) return;
+        const enabled = localStorage.getItem('mediaPlayerEnabled') === 'true';
+        container.style.display = enabled ? 'block' : 'none';
+        if (enabled) {
+            const r = container.getBoundingClientRect();
+            window.electronAPI.mediaSetBounds({ x: r.x, y: r.y, width: r.width, height: r.height });
+            window.electronAPI.mediaSetVisible(true);
+        } else {
+            window.electronAPI.mediaSetVisible(false);
+        }
+    }
+
     function toggleMediaPlayer() {
         const enabled = localStorage.getItem('mediaPlayerEnabled') !== 'true';
         localStorage.setItem('mediaPlayerEnabled', String(enabled));
         updateMediaToggleUI(enabled);
+        reportBounds();
     }
+
     function updateMediaToggleUI(enabled) {
         const label = document.getElementById('mediaToggleLabel');
         const btn = document.getElementById('mediaToggleBtn');
@@ -1422,8 +1441,20 @@
             knob.className = 'absolute w-5 h-5 bg-white rounded-full top-1 transition-transform ' + (enabled ? 'translate-x-8' : 'translate-x-1');
         }
     }
+
     // Set initial state
     updateMediaToggleUI(localStorage.getItem('mediaPlayerEnabled') === 'true');
+    reportBounds();
+
+    window.addEventListener('resize', reportBounds);
+    window.electronAPI.onRequestMediaBounds(() => reportBounds());
+    window.electronAPI.onToggleMediaPlayer(() => {
+        const next = localStorage.getItem('mediaPlayerEnabled') !== 'true';
+        localStorage.setItem('mediaPlayerEnabled', String(next));
+        updateMediaToggleUI(next);
+        reportBounds();
+    });
+    window.addEventListener('storage', (e) => { if (e.key === 'mediaPlayerEnabled') reportBounds(); });
     </script>
 </body>
 </html>

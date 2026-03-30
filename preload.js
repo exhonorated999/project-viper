@@ -59,4 +59,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Aperture: report generation
   apertureGenerateReport: (data) => ipcRenderer.invoke('aperture-generate-report', data),
+
+  // Media Player
+  popOutMediaPlayer: (url) => ipcRenderer.invoke('pop-out-media-player', url),
+  onToggleMediaPlayer: (callback) => ipcRenderer.on('toggle-media-player', callback),
+  removeToggleMediaPlayerListener: (callback) => ipcRenderer.removeListener('toggle-media-player', callback),
+  onMediaPopoutClosed: (callback) => ipcRenderer.on('media-popout-closed', callback),
+  removeMediaPopoutClosedListener: (callback) => ipcRenderer.removeListener('media-popout-closed', callback),
 });

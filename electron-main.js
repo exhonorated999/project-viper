@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, globalShortcut, session } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -11,6 +11,7 @@ let server;
 let apertureProcess = null;
 let security = null;
 let isQuitting = false;
+let mediaPlayerWindow = null;
 
 // MIME types mapping
 const mimeTypes = {
@@ -74,6 +75,7 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: true,
+      webviewTag: true,
       preload: path.join(__dirname, 'preload.js')
     },
     title: 'VIPER - Network Intelligence',
@@ -146,6 +148,22 @@ app.whenReady().then(async () => {
 
     await startServer();
     createWindow();
+
+    // Media player permissions (audio/video/DRM for streaming services)
+    const allowedPerms = ['media', 'mediaKeySystem', 'fullscreen'];
+    const setupPermissions = (ses) => {
+      ses.setPermissionRequestHandler((_wc, perm, cb) => cb(allowedPerms.includes(perm)));
+      ses.setPermissionCheckHandler((_wc, perm) => allowedPerms.includes(perm));
+    };
+    setupPermissions(session.defaultSession);
+    setupPermissions(session.fromPartition('persist:media'));
+
+    // Boss key: Ctrl+Alt+M toggles media player visibility in renderer
+    globalShortcut.register('CommandOrControl+Alt+M', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('toggle-media-player');
+      }
+    });
   } catch (err) {
     console.error('Failed to start:', err);
     app.quit();
@@ -611,6 +629,47 @@ ipcMain.handle('aperture-generate-report', async (event, data) => {
     return { success: true, path: outPath };
   } catch (error) {
     console.error('Report generation error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// --- Media Player: Pop-out window ---
+ipcMain.handle('pop-out-media-player', async (_event, mediaUrl) => {
+  try {
+    if (mediaPlayerWindow && !mediaPlayerWindow.isDestroyed()) {
+      mediaPlayerWindow.loadURL(mediaUrl);
+      mediaPlayerWindow.focus();
+      return { success: true };
+    }
+
+    mediaPlayerWindow = new BrowserWindow({
+      width: 1024,
+      height: 700,
+      minWidth: 480,
+      minHeight: 400,
+      frame: true,
+      title: 'VIPER Media Player',
+      autoHideMenuBar: true,
+      icon: path.join(__dirname, 'build', 'icon.ico'),
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        plugins: true,
+        partition: 'persist:media',
+      },
+    });
+
+    mediaPlayerWindow.loadURL(mediaUrl);
+    mediaPlayerWindow.on('closed', () => {
+      mediaPlayerWindow = null;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('media-popout-closed');
+      }
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error('Pop-out media error:', error);
     return { success: false, error: error.message };
   }
 });

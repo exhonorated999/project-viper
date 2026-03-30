@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://d3js.org https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; img-src 'self' data: https:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org; font-src 'self' data:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://d3js.org https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; img-src 'self' data: https:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org; font-src 'self' data:; frame-src https: http:;">
     <title>V.I.P.E.R. - Case Detail</title>
     <script src="modules/licensing.js"></script>
 
@@ -658,7 +658,7 @@
             </div>
             
             <!-- Navigation -->
-            <nav class="flex-1 p-4 space-y-2">
+            <nav class="p-4 space-y-2 flex-shrink-0">
                 <div class="sidebar-item px-4 py-3 rounded-lg cursor-pointer flex items-center space-x-3" onclick="window.location.href='index.html'">
                     <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
@@ -681,6 +681,9 @@
                     <span class="font-medium text-gray-400">Settings</span>
                 </div>
             </nav>
+
+            <!-- Media Player (fills remaining sidebar space) -->
+            <div id="mediaPlayerContainer" class="flex-1 min-h-0" style="display:none;"></div>
             
             <!-- User Profile -->
             <div class="p-4 border-t border-viper-cyan/20">
@@ -17418,5 +17421,36 @@
         window.saveApertureResult = saveApertureResult;
     </script>
     <script src="/modules/security-ui.js"></script>
+    <script src="/modules/media-player.js"></script>
+    <script>
+    // Media Player integration
+    (function initMediaPlayer() {
+        const container = document.getElementById('mediaPlayerContainer');
+        if (!container) return;
+
+        function applyState() {
+            const enabled = localStorage.getItem('mediaPlayerEnabled') === 'true';
+            container.style.display = enabled ? 'flex' : 'none';
+            if (enabled && !container.dataset.rendered) {
+                container.dataset.rendered = 'true';
+                window.ViperMediaPlayer.render(container);
+            }
+        }
+
+        applyState();
+
+        // Listen for toggle from settings page
+        window.addEventListener('storage', (e) => {
+            if (e.key === 'mediaPlayerEnabled') applyState();
+        });
+
+        // Listen for boss-key (Ctrl+Alt+M) from main process
+        window.electronAPI.onToggleMediaPlayer(() => {
+            const next = localStorage.getItem('mediaPlayerEnabled') !== 'true';
+            localStorage.setItem('mediaPlayerEnabled', String(next));
+            applyState();
+        });
+    })();
+    </script>
 </body>
 </html>

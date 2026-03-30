@@ -35,6 +35,7 @@ win:
   legalTrademarks: Copyright © 2026 Intellect LE, LLC
 nsis:
   oneClick: false
+  include: build/installer.nsh
   allowToChangeInstallationDirectory: true
   allowElevation: true
   createDesktopShortcut: always

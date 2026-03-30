@@ -17421,34 +17421,43 @@
         window.saveApertureResult = saveApertureResult;
     </script>
     <script src="/modules/security-ui.js"></script>
-    <script src="/modules/media-player.js"></script>
     <script>
-    // Media Player integration
-    (function initMediaPlayer() {
+    // Media Player — BrowserView coordination (player lives in main process, persists across pages)
+    (function initMediaBrowserView() {
         const container = document.getElementById('mediaPlayerContainer');
         if (!container) return;
 
-        function applyState() {
+        function reportBounds() {
             const enabled = localStorage.getItem('mediaPlayerEnabled') === 'true';
-            container.style.display = enabled ? 'flex' : 'none';
-            if (enabled && !container.dataset.rendered) {
-                container.dataset.rendered = 'true';
-                window.ViperMediaPlayer.render(container);
+            container.style.display = enabled ? 'block' : 'none';
+            if (enabled) {
+                const r = container.getBoundingClientRect();
+                window.electronAPI.mediaSetBounds({ x: r.x, y: r.y, width: r.width, height: r.height });
+                window.electronAPI.mediaSetVisible(true);
+            } else {
+                window.electronAPI.mediaSetVisible(false);
             }
         }
 
-        applyState();
+        // Report on load
+        reportBounds();
 
-        // Listen for toggle from settings page
-        window.addEventListener('storage', (e) => {
-            if (e.key === 'mediaPlayerEnabled') applyState();
-        });
+        // Re-report on window resize (BrowserView needs updated coords)
+        window.addEventListener('resize', reportBounds);
 
-        // Listen for boss-key (Ctrl+Alt+M) from main process
+        // Main process asks for bounds after page navigation
+        window.electronAPI.onRequestMediaBounds(() => reportBounds());
+
+        // Boss-key toggle from main process
         window.electronAPI.onToggleMediaPlayer(() => {
             const next = localStorage.getItem('mediaPlayerEnabled') !== 'true';
             localStorage.setItem('mediaPlayerEnabled', String(next));
-            applyState();
+            reportBounds();
+        });
+
+        // Settings page may change toggle via localStorage
+        window.addEventListener('storage', (e) => {
+            if (e.key === 'mediaPlayerEnabled') reportBounds();
         });
     })();
     </script>

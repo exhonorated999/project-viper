@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, globalShortcut, session } = require('electron');
+const { app, BrowserWindow, BrowserView, ipcMain, shell, dialog, globalShortcut, session } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -12,6 +12,9 @@ let apertureProcess = null;
 let security = null;
 let isQuitting = false;
 let mediaPlayerWindow = null;
+let mediaBrowserView = null;
+let mediaViewVisible = false;
+let lastMediaBounds = null;
 
 // MIME types mapping
 const mimeTypes = {
@@ -158,7 +161,33 @@ app.whenReady().then(async () => {
     setupPermissions(session.defaultSession);
     setupPermissions(session.fromPartition('persist:media'));
 
-    // Boss key: Ctrl+Alt+M toggles media player visibility in renderer
+    // Create persistent BrowserView for media player (survives page navigations)
+    mediaBrowserView = new BrowserView({
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        webviewTag: true,
+        preload: path.join(__dirname, 'preload-media.js'),
+      },
+    });
+    mainWindow.addBrowserView(mediaBrowserView);
+    mediaBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 }); // hidden
+    mediaBrowserView.setAutoResize({ width: false, height: false });
+    mediaBrowserView.webContents.loadURL('http://localhost:8000/media-player.html');
+
+    // Re-position media BrowserView on window resize
+    mainWindow.on('resize', () => {
+      if (mediaViewVisible && lastMediaBounds) {
+        mediaBrowserView.setBounds(lastMediaBounds);
+      }
+    });
+
+    // When the renderer page finishes loading, ask it to report media bounds
+    mainWindow.webContents.on('did-finish-load', () => {
+      mainWindow.webContents.send('request-media-bounds');
+    });
+
+    // Boss key: Ctrl+Alt+M toggles media player
     globalShortcut.register('CommandOrControl+Alt+M', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('toggle-media-player');
@@ -671,5 +700,33 @@ ipcMain.handle('pop-out-media-player', async (_event, mediaUrl) => {
   } catch (error) {
     console.error('Pop-out media error:', error);
     return { success: false, error: error.message };
+  }
+});
+
+// --- Media Player: BrowserView positioning ---
+// Renderer reports the bounding rect of its mediaPlayerContainer placeholder
+ipcMain.on('media-set-bounds', (_event, bounds) => {
+  if (!mediaBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  // bounds = { x, y, width, height } from getBoundingClientRect()
+  const b = {
+    x: Math.round(bounds.x),
+    y: Math.round(bounds.y),
+    width: Math.round(bounds.width),
+    height: Math.round(bounds.height),
+  };
+  lastMediaBounds = b;
+  if (mediaViewVisible) {
+    mediaBrowserView.setBounds(b);
+  }
+});
+
+// Renderer tells main process to show/hide the media BrowserView
+ipcMain.on('media-set-visible', (_event, visible) => {
+  if (!mediaBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  mediaViewVisible = visible;
+  if (visible && lastMediaBounds) {
+    mediaBrowserView.setBounds(lastMediaBounds);
+  } else if (!visible) {
+    mediaBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
   }
 });

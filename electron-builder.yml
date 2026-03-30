@@ -6,8 +6,6 @@ directories:
 files:
   - "**/*"
   - "!dist/**"
-asarUnpack:
-  - "build/**"
   - "!plans/**"
   - "!tasks/**"
   - "!test/**"
@@ -25,13 +23,14 @@ asarUnpack:
   - "!test-*.html"
   - "!check-*.html"
   - "!.gitignore"
+asarUnpack:
+  - "build/**"
 win:
   target:
     - target: nsis
       arch:
         - x64
   icon: build/icon.ico
-  signAndEditExecutable: false
   verifyUpdateCodeSignature: false
   legalTrademarks: Copyright © 2026 Intellect LE, LLC
 nsis:

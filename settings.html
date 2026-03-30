@@ -253,10 +253,10 @@
             <div class="p-4 border-t border-viper-cyan/20 flex-shrink-0">
                 <div class="flex items-center space-x-3 mb-4">
                     <div class="w-10 h-10 rounded-full bg-gradient-to-br from-viper-green to-viper-cyan flex items-center justify-center font-bold text-sm" id="userInitials">
-                        JM
+                        —
                     </div>
                     <div>
-                        <p class="font-medium text-sm" id="userDisplayName">Justin Moyer</p>
+                        <p class="font-medium text-sm" id="userDisplayName">Officer</p>
                         <p class="text-xs text-gray-400">Officer</p>
                     </div>
                 </div>
@@ -815,9 +815,9 @@
             const regEmail = localStorage.getItem('viper_contact_email') || '';
             const regDate = localStorage.getItem('viper_registered_at') || '';
 
-            const name = userInfo.officerName || regName || '—';
+            const name = regName || userInfo.officerName || '—';
             const badge = userInfo.badgeNumber || '—';
-            const agency = userInfo.agencyName || '—';
+            const agency = localStorage.getItem('viper_agency') || userInfo.agencyName || '—';
             const email = regEmail || '—';
 
             document.getElementById('profileName').textContent = name;
@@ -1267,9 +1267,12 @@
             const nameElement = document.getElementById('userDisplayName');
             const initialsElement = document.getElementById('userInitials');
             
-            if (userInfo.officerName) {
-                nameElement.textContent = userInfo.officerName;
-                const names = userInfo.officerName.split(' ');
+            // Use registration name as primary, viperUserInfo as fallback
+            const displayName = localStorage.getItem('viper_customer_name') || userInfo.officerName;
+            
+            if (displayName) {
+                nameElement.textContent = displayName;
+                const names = displayName.split(' ');
                 const initials = names.map(n => n.charAt(0).toUpperCase()).join('');
                 initialsElement.textContent = initials.substring(0, 2);
             }

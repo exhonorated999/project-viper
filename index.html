@@ -467,10 +467,10 @@
             <div class="p-4 border-t border-viper-cyan/20 flex-shrink-0">
                 <div class="flex items-center space-x-3 mb-4">
                     <div class="w-10 h-10 rounded-full bg-gradient-to-br from-viper-green to-viper-cyan flex items-center justify-center font-bold text-sm" id="userInitials">
-                        JM
+                        —
                     </div>
                     <div>
-                        <p class="font-medium text-sm" id="userDisplayName">Justin Moyer</p>
+                        <p class="font-medium text-sm" id="userDisplayName">Officer</p>
                         <p class="text-xs text-gray-400">Officer</p>
                     </div>
                 </div>
@@ -1595,7 +1595,7 @@
                     modules: selectedModules,
                     tabOrder: ['overview', ...selectedModules], // Initialize tab order
                     createdAt: new Date().toISOString(),
-                    createdBy: 'Justin Moyer',
+                    createdBy: localStorage.getItem('viper_customer_name') || 'Officer',
                     lastModified: new Date().toISOString()
                 };
                 
@@ -1714,9 +1714,9 @@
             doc.text(`Period: ${periodText}`, 15, yPos + 5);
             // Get user info
             const userInfo = JSON.parse(localStorage.getItem('viperUserInfo')) || {};
-            const officerName = userInfo.officerName || 'Officer';
+            const officerName = localStorage.getItem('viper_customer_name') || userInfo.officerName || 'Officer';
             const badgeNumber = userInfo.badgeNumber || '';
-            const agencyName = userInfo.agencyName || '';
+            const agencyName = localStorage.getItem('viper_agency') || userInfo.agencyName || '';
             
             doc.text(`Officer: ${officerName}${badgeNumber ? ' (Badge #' + badgeNumber + ')' : ''}`, 15, yPos + 10);
             if (agencyName) {
@@ -2693,12 +2693,15 @@
             const initialsElement = document.getElementById('userInitials');
             const welcomeElement = document.getElementById('dashboardWelcome');
             
-            if (userInfo.officerName) {
-                const firstName = userInfo.officerName.split(' ')[0];
-                nameElement.textContent = userInfo.officerName;
+            // Use registration name (viper_customer_name) as primary, viperUserInfo as fallback
+            const displayName = localStorage.getItem('viper_customer_name') || userInfo.officerName;
+            
+            if (displayName) {
+                const firstName = displayName.split(' ')[0];
+                nameElement.textContent = displayName;
                 welcomeElement.textContent = `Welcome back, ${firstName}`;
                 
-                const names = userInfo.officerName.split(' ');
+                const names = displayName.split(' ');
                 const initials = names.map(n => n.charAt(0).toUpperCase()).join('');
                 initialsElement.textContent = initials.substring(0, 2);
             }

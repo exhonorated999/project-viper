@@ -86,6 +86,7 @@ async function registerDemo(data) {
   _set("api_key", json.api_key);
   _set("customer_name", data.name);
   _set("contact_email", data.email);
+  if (data.agency) _set("agency", data.agency);
   return json;
 }
 

@@ -1,0 +1,172 @@
+{
+  "trace_version": "1.2.0",
+  "export_date": "2026-03-29T16:45:00.000Z",
+  "case": {
+    "case_ref": "RT-2026-0067",
+    "case_type": "retail",
+    "title": "Repeat ORC — Home Depot Power Tools, San Bernardino",
+    "status": "active",
+    "priority": "high",
+    "incident_date": "2026-03-24",
+    "location": "Home Depot #6652, 1155 S Tippecanoe Ave",
+    "city": "San Bernardino",
+    "state": "CA",
+    "police_agency": "San Bernardino Police Department",
+    "police_report_num": "SBPD-2026-28451",
+    "case_contact": {
+      "name": "Patricia Owens",
+      "title": "Asset Protection Specialist",
+      "phone": "(909) 555-0315",
+      "email": "powens@homedepot.com"
+    },
+    "summary": "Three-person ORC crew targeting DeWalt and Milwaukee power tools. Push-out theft through lumber yard exit. Subjects have been identified at four Home Depot locations in San Bernardino County over the past three weeks. Cumulative loss estimated at $22,600. Recovered stolen merchandise being resold at Colton swap meet.",
+    "narrative": "On 03/24/2026 at approximately 1115 hours, AP associate Patricia Owens observed three male subjects enter Store #6652. The subjects split up: Subject 1 proceeded to the power tools aisle and began loading a flatbed cart with DeWalt combo kits (DCD999B, DCF903B) and Milwaukee M18 FUEL sets. Subject 2 grabbed a second cart and loaded Milwaukee packout tool boxes and a DeWalt table saw (DWE7491RS). Subject 3 positioned himself near the lumber yard exit.\n\nAt approximately 1128 hours, all three subjects converged at the lumber yard exit. Subject 3 held the gate open while Subjects 1 and 2 pushed the loaded carts through. They loaded merchandise into a dark blue Dodge Ram pickup truck backed up to the gate.\n\nOwens activated the store's external cameras and obtained a clear plate: California 8XYZ123. DMV lookup returned the vehicle as registered to \"Carlos Mendez\" at a Colton address.\n\nOwens contacted SBPD and provided footage. Reviewing prior incidents, this crew matches descriptions from HD stores in Rialto (03/10), Redlands (03/15), and Colton (03/19). Total combined loss from all four incidents: $22,600.\n\nOn 03/26, an informant reported that stolen power tools matching DeWalt/Milwaukee inventory were being sold at the Colton Indoor Swap Meet, vendor booth E-14. SBPD is coordinating a buy operation.",
+    "loss_amount": 6840.00,
+    "recovered": 1200.00,
+    "created_at": "2026-03-24T18:30:00.000Z"
+  },
+  "suspects": [
+    {
+      "name": "Carlos Antonio Mendez",
+      "dob": "1988-11-03",
+      "dl_number": "M2294815",
+      "phone": "(909) 555-0472",
+      "race": "Hispanic",
+      "sex": "Male",
+      "height": "5'10\"",
+      "weight": "185",
+      "hair": "Black, buzzcut",
+      "eyes": "Brown",
+      "build": "Stocky",
+      "clothing": "Gray t-shirt, cargo shorts, black Nike Air Max. Tattoo sleeve on right arm.",
+      "other_desc": "Vehicle registered owner. Tattoo sleeve is distinctive — tribal/geometric pattern from wrist to shoulder on right arm.",
+      "notes": "Identified via plate lookup. Address: 1842 N Rancho Ave, Colton, CA 92324. Prior arrest for grand theft (2021), shoplifting (2019). Currently on probation in SB County."
+    },
+    {
+      "name": "Unknown Male 2",
+      "dob": null,
+      "dl_number": null,
+      "phone": null,
+      "race": "Hispanic",
+      "sex": "Male",
+      "height": "5'6\"",
+      "weight": "160",
+      "hair": "Brown, medium length",
+      "eyes": "Brown",
+      "build": "Slim",
+      "clothing": "Red flannel shirt over white t-shirt, dark jeans, Timberland boots.",
+      "other_desc": "Younger than Subject 1, estimated 20-25 years old. Small goatee.",
+      "notes": "Handles the second cart. Moves quickly and appears to know exact product locations — possible former employee or repeated reconnaissance."
+    },
+    {
+      "name": "Unknown Male 3",
+      "dob": null,
+      "dl_number": null,
+      "phone": null,
+      "race": "Hispanic",
+      "sex": "Male",
+      "height": "5'11\"",
+      "weight": "210",
+      "hair": "Black, fade cut",
+      "eyes": "Brown",
+      "build": "Heavy",
+      "clothing": "Black tank top, basketball shorts, slides. Gold chain necklace.",
+      "other_desc": "Gate man. Stands at lumber exit and waits. Has been at all four incidents in the same role.",
+      "notes": "Always wears the same gold chain — visible in CCTV from all four locations. May be the crew leader based on observed coordination behavior."
+    }
+  ],
+  "vehicles": [
+    {
+      "plate": "8XYZ123",
+      "plate_state": "CA",
+      "make": "Dodge",
+      "model": "Ram 1500",
+      "year": "2021",
+      "color": "Dark Blue",
+      "vin": "1C6SRFFT8MN654321",
+      "description": "Crew cab, short bed, aftermarket tonneau cover. Tonneau cover used to conceal loaded merchandise. Chrome running boards.",
+      "notes": "Registered to Carlos Mendez, 1842 N Rancho Ave, Colton, CA 92324. Vehicle observed at all four incidents."
+    }
+  ],
+  "cargo": null,
+  "notes": [
+    {
+      "note": "Cross-referenced with Rialto HD (03/10): $4,200 loss, same MO. Rialto PD report #RPD-2026-5521. Their footage shows same Dodge Ram.",
+      "created_at": "2026-03-25T09:00:00.000Z"
+    },
+    {
+      "note": "Redlands HD (03/15): $5,100 loss. AP associate recognized Subject 3's gold chain from TRACE network alert. Redlands PD report #RDPD-2026-1887.",
+      "created_at": "2026-03-25T14:00:00.000Z"
+    },
+    {
+      "note": "Informant tip: stolen tools being sold at Colton Indoor Swap Meet, booth E-14. Vendor operating Thursday-Sunday. Product appears to match stolen inventory (DeWalt yellow packaging, some still with security tags).",
+      "created_at": "2026-03-26T16:30:00.000Z"
+    },
+    {
+      "note": "SBPD detective assigned: Det. Frank Herrera, ORC Task Force, (909) 555-0199. Coordinating with Rialto and Redlands PD for joint operation. Buy-bust planned for 03/30 at swap meet.",
+      "created_at": "2026-03-27T10:00:00.000Z"
+    },
+    {
+      "note": "Recovered $1,200 in DeWalt combo kits from Colton swap meet (undercover purchase). Serial numbers confirmed match to Store #6652 inventory. Evidence booked at SBPD.",
+      "created_at": "2026-03-28T15:00:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "file_name": "hd6652_cctv_subj1_cart_0324.jpg",
+      "file_type": "image/jpeg",
+      "file_size": 267000,
+      "description": "CCTV — Subject 1 (Mendez) loading DeWalt combo kits onto flatbed cart, 03/24/2026 11:18",
+      "created_at": "2026-03-24T19:00:00.000Z",
+      "data": null
+    },
+    {
+      "file_name": "hd6652_cctv_lumber_exit_0324.jpg",
+      "file_type": "image/jpeg",
+      "file_size": 298000,
+      "description": "CCTV — All three subjects pushing carts through lumber yard exit, Subject 3 holding gate, 03/24 11:28",
+      "created_at": "2026-03-24T19:05:00.000Z",
+      "data": null
+    },
+    {
+      "file_name": "hd6652_ext_cam_plate_0324.jpg",
+      "file_type": "image/jpeg",
+      "file_size": 189000,
+      "description": "External camera — Dodge Ram plate 8XYZ123 backed up to lumber gate, clear plate capture",
+      "created_at": "2026-03-24T19:10:00.000Z",
+      "data": null
+    },
+    {
+      "file_name": "dmv_mendez_carlos_dl.pdf",
+      "file_type": "application/pdf",
+      "file_size": 95000,
+      "description": "DMV record — Carlos Antonio Mendez, DL #M2294815, vehicle registration confirmation",
+      "created_at": "2026-03-25T08:00:00.000Z",
+      "data": null
+    },
+    {
+      "file_name": "swap_meet_booth_e14_photo.jpg",
+      "file_type": "image/jpeg",
+      "file_size": 342000,
+      "description": "Undercover photo of Colton Swap Meet booth E-14 — stolen DeWalt tools displayed for sale, some with security tags visible",
+      "created_at": "2026-03-28T13:00:00.000Z",
+      "data": null
+    },
+    {
+      "file_name": "sbpd_report_2026_28451.pdf",
+      "file_type": "application/pdf",
+      "file_size": 178000,
+      "description": "SBPD Incident Report #SBPD-2026-28451, responding officer report",
+      "created_at": "2026-03-25T10:00:00.000Z",
+      "data": null
+    },
+    {
+      "file_name": "serial_number_match_report.xlsx",
+      "file_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "file_size": 28000,
+      "description": "Serial number comparison — recovered swap meet items vs Store #6652 inventory loss records. 8 of 12 items confirmed match.",
+      "created_at": "2026-03-28T16:00:00.000Z",
+      "data": null
+    }
+  ]
+}

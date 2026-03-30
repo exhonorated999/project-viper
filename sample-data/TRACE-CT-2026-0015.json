@@ -1,0 +1,154 @@
+{
+  "trace_version": "1.2.0",
+  "export_date": "2026-03-27T10:15:00.000Z",
+  "case": {
+    "case_ref": "CT-2026-0015",
+    "case_type": "cargo",
+    "title": "Cargo Theft — Electronics Shipment, I-10 Corridor",
+    "status": "active",
+    "priority": "critical",
+    "incident_date": "2026-03-22",
+    "location": "TA Travel Center, 2950 Lenwood Rd",
+    "city": "Barstow",
+    "state": "CA",
+    "police_agency": "California Highway Patrol — Barstow",
+    "police_report_num": "CHP-BAR-2026-02194",
+    "case_contact": {
+      "name": "James Whitfield",
+      "title": "Fleet Security Director",
+      "phone": "(213) 555-0261",
+      "email": "jwhitfield@meridian-logistics.com"
+    },
+    "summary": "Full trailer theft from TA Travel Center truck stop. Sealed trailer containing consumer electronics (tablets, laptops, wireless headphones) valued at approximately $380,000. Driver discovered theft after an 8-hour rest break. Trailer lock cut with bolt cutters—no signs of forced entry to tractor. GPS tracker on trailer was disabled. Suspected organized cargo theft group operating along I-10/I-15 corridor.",
+    "narrative": "On 03/22/2026 at approximately 0545 hours, driver Miguel Reyes (CDL #CA-R8821004) reported his sealed trailer missing from slot 47 at the TA Travel Center in Barstow. Reyes had parked at approximately 2130 hours on 03/21 for a mandatory rest break. The tractor remained in the lot; only the trailer was taken.\n\nTA facility manager confirmed that exterior cameras in the east lot were non-functional due to a recent lightning strike. The west lot cameras captured a white Freightliner Cascadia tractor (no markings) pulling into the east lot area at approximately 0215 hours on 03/22, and exiting 18 minutes later towing a trailer matching the stolen unit.\n\nThe trailer (unit MER-4471, 2024 Wabash DuraPlate) was equipped with a CalAmp GPS unit, which transmitted its last position at 0217 hours from the truck stop. The device was likely jammed or removed.\n\nCHP responded and took the report. Meridian Logistics security team activated their cargo theft protocol. BOL showed the shipment originated at the Samsung distribution center in Ontario, CA, destined for a Best Buy DC in Phoenix, AZ.\n\nTrace network scan returned a match: a similar MO cargo theft occurred on 03/09 at a Pilot truck stop in Colton, CA (case ref CT-2026-0011), where a trailer carrying $220K in Amazon-bound goods was stolen during a driver rest period. Same corridor, same time window (0100-0400).",
+    "loss_amount": 380000.00,
+    "recovered": 0.00,
+    "created_at": "2026-03-22T13:00:00.000Z"
+  },
+  "suspects": [
+    {
+      "name": "Unknown Male 1",
+      "dob": null,
+      "dl_number": null,
+      "phone": null,
+      "race": "White",
+      "sex": "Male",
+      "height": "6'0\"",
+      "weight": "200",
+      "hair": "Dark, short, baseball cap",
+      "eyes": "Unknown",
+      "build": "Heavy",
+      "clothing": "Dark work jacket, jeans, work boots. Wearing reflective vest (appears to be posing as truck driver).",
+      "other_desc": "Visible from west lot camera footage. Walked confidently—appears experienced with trailer hookup procedures.",
+      "notes": "Subject connected to stolen trailer in under 4 minutes (king pin hookup, air lines, light connection). Likely has CDL or extensive trucking experience."
+    }
+  ],
+  "vehicles": [
+    {
+      "plate": null,
+      "plate_state": null,
+      "make": "Freightliner",
+      "model": "Cascadia",
+      "year": "2020-2023",
+      "color": "White",
+      "vin": null,
+      "description": "Day cab configuration, no sleeper. No company markings or DOT numbers visible. Aftermarket LED light bar on roof. Clean condition.",
+      "notes": "Vehicle likely stolen or using swapped plates. No DOT/MC markings is a major red flag — legitimate carriers are required to display them."
+    },
+    {
+      "plate": "MER-4471",
+      "plate_state": "CA",
+      "make": "Wabash",
+      "model": "DuraPlate",
+      "year": "2024",
+      "color": "White",
+      "vin": "1JJV532D3RL123456",
+      "description": "53' dry van trailer. Meridian Logistics branding on sides. Unit number MER-4471 on front and rear.",
+      "notes": "STOLEN — this is the victim trailer. Last GPS ping: 03/22 0217hrs at TA Barstow. CalAmp tracker model LMU-3640."
+    }
+  ],
+  "cargo": {
+    "trailer_number": "MER-4471",
+    "trailer_plate": "CA T-884291",
+    "bol_number": "BOL-MER-20260321-7842",
+    "mc_number": "MC-442918",
+    "cdl_number": "CA-R8821004",
+    "carrier_name": "Meridian Logistics Inc.",
+    "commodity": "Consumer electronics — Samsung tablets (Galaxy Tab S10), HP laptops (Pavilion 16), Sony WH-1000XM6 headphones",
+    "pickup_location": "Samsung Distribution Center, 2100 S Milliken Ave, Ontario, CA 91761",
+    "delivery_location": "Best Buy Distribution Center, 3750 W Buckeye Rd, Phoenix, AZ 85009",
+    "notes": "Shipment manifested at 847 units across 42 pallets. Insured value $380,000. Carrier has $1M cargo insurance through Zurich. Claim filed 03/22."
+  },
+  "notes": [
+    {
+      "note": "CHP detective assigned: Sgt. David Park, Commercial Auto Theft Unit, (760) 555-0133. Case flagged for CargoNet alert system.",
+      "created_at": "2026-03-22T16:00:00.000Z"
+    },
+    {
+      "note": "TRACE network match: CT-2026-0011 (Colton Pilot, 03/09, $220K Amazon shipment). Same MO — driver rest period theft, GPS disabled, unmarked white day cab tractor. Colton PD contact: Det. Nguyen, (909) 555-0288.",
+      "created_at": "2026-03-23T09:00:00.000Z"
+    },
+    {
+      "note": "TA Barstow provided fuel purchase records for 0100-0400 window on 03/22. One cash diesel purchase at pump 14 (east side) at 0158hrs — 38 gallons. No loyalty card used. Reviewing pump camera.",
+      "created_at": "2026-03-24T11:30:00.000Z"
+    },
+    {
+      "note": "ALPR hit: White Freightliner Cascadia day cab scanned on I-15 SB at Primm, NV at 0347hrs on 03/22 — 90 min after theft. Plate registered to a 2018 Kenworth (plate swap confirmed). NHP notified.",
+      "created_at": "2026-03-25T14:00:00.000Z"
+    },
+    {
+      "note": "Intel from NICB: similar cargo theft ring operating AZ/NV/CA triangle. Suspects believed to use rented warehouse space to break down loads for resale. FBI Phoenix field office has open investigation — SA Michelle Reeves, (602) 555-0194.",
+      "created_at": "2026-03-26T10:00:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "file_name": "ta_west_cam_tractor_0215.jpg",
+      "file_type": "image/jpeg",
+      "file_size": 287000,
+      "description": "TA west lot camera — White Freightliner Cascadia entering east lot area, 03/22/2026 02:15",
+      "created_at": "2026-03-22T14:00:00.000Z",
+      "data": null
+    },
+    {
+      "file_name": "ta_west_cam_exit_0233.jpg",
+      "file_type": "image/jpeg",
+      "file_size": 315000,
+      "description": "TA west lot camera — Tractor exiting with stolen trailer MER-4471, 03/22/2026 02:33",
+      "created_at": "2026-03-22T14:05:00.000Z",
+      "data": null
+    },
+    {
+      "file_name": "bol_mer_20260321_7842.pdf",
+      "file_type": "application/pdf",
+      "file_size": 124000,
+      "description": "Bill of Lading — Samsung to Best Buy via Meridian Logistics, shipment manifest with item counts",
+      "created_at": "2026-03-22T15:00:00.000Z",
+      "data": null
+    },
+    {
+      "file_name": "calamp_gps_log_mer4471.csv",
+      "file_type": "text/csv",
+      "file_size": 42000,
+      "description": "CalAmp GPS tracker log for trailer MER-4471, last 72 hours. Final ping at 02:17 TA Barstow",
+      "created_at": "2026-03-22T16:30:00.000Z",
+      "data": null
+    },
+    {
+      "file_name": "alpr_hit_primm_0347.png",
+      "file_type": "image/png",
+      "file_size": 178000,
+      "description": "ALPR capture — I-15 SB Primm, NV. Plate registered to different vehicle (plate swap). 03/22 03:47",
+      "created_at": "2026-03-25T14:30:00.000Z",
+      "data": null
+    },
+    {
+      "file_name": "chp_report_bar_2026_02194.pdf",
+      "file_type": "application/pdf",
+      "file_size": 203000,
+      "description": "CHP Barstow Incident Report #CHP-BAR-2026-02194",
+      "created_at": "2026-03-23T09:00:00.000Z",
+      "data": null
+    }
+  ]
+}

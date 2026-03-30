@@ -1,0 +1,136 @@
+{
+  "trace_version": "1.2.0",
+  "export_date": "2026-03-28T14:32:00.000Z",
+  "case": {
+    "case_ref": "RT-2026-0042",
+    "case_type": "retail",
+    "title": "Organized Retail Theft — Target, Fontana",
+    "status": "active",
+    "priority": "high",
+    "incident_date": "2026-03-15",
+    "location": "Target Store #1287, 16960 Sierra Lakes Pkwy",
+    "city": "Fontana",
+    "state": "CA",
+    "police_agency": "Fontana Police Department",
+    "police_report_num": "FPD-2026-11847",
+    "case_contact": {
+      "name": "Derek Simmons",
+      "title": "Loss Prevention Manager",
+      "phone": "(909) 555-0142",
+      "email": "dsimmons@target.com"
+    },
+    "summary": "Coordinated theft ring targeting high-value electronics and fragrances across multiple visits. Suspects use booster bags and have been identified at three separate Target locations in the Inland Empire over a two-week period. Estimated combined loss exceeds $14,000.",
+    "narrative": "On 03/15/2026 at approximately 1420 hours, Target LP associate Derek Simmons observed two female subjects enter Store #1287. Subject 1 (later identified as Maria Delgado) proceeded directly to the electronics department and began concealing Apple AirPods and Samsung earbuds inside a foil-lined shopping bag. Subject 2 (unidentified, Hispanic female, approximately 30 years old) acted as a lookout near the department entrance.\n\nSimmons reviewed prior CCTV footage and confirmed the same subjects had visited on 03/08 and 03/11, executing similar theft patterns. On both prior occasions, the subjects exited through the garden center emergency exit.\n\nFontana PD was contacted and responded. Officer Martinez (Badge #4412) arrived at 1445 hours and took the report. Subjects had already fled in a silver Honda Civic, partial plate 8ABC. LP team recovered a dropped receipt from a nearby Walmart that may link to the suspects.\n\nNetwork scan through TRACE identified two potential matches at Target stores in Ontario and Rancho Cucamonga with similar suspect descriptions and MO.",
+    "loss_amount": 4820.00,
+    "recovered": 0.00,
+    "created_at": "2026-03-15T22:15:00.000Z"
+  },
+  "suspects": [
+    {
+      "name": "Maria Elena Delgado",
+      "dob": "1994-07-22",
+      "dl_number": "D4481927",
+      "phone": "(909) 555-0398",
+      "race": "Hispanic",
+      "sex": "Female",
+      "height": "5'4\"",
+      "weight": "135",
+      "hair": "Black, shoulder length",
+      "eyes": "Brown",
+      "build": "Medium",
+      "clothing": "Black hoodie, blue jeans, white Nike shoes. Carrying large black tote bag (booster bag).",
+      "other_desc": "Tattoo of rose on left wrist. Small scar above right eyebrow.",
+      "notes": "Previously identified in ORC ring operating out of San Bernardino County. Known to fence stolen goods through social media marketplace accounts."
+    },
+    {
+      "name": "Unknown Female",
+      "dob": null,
+      "dl_number": null,
+      "phone": null,
+      "race": "Hispanic",
+      "sex": "Female",
+      "height": "5'7\"",
+      "weight": "150",
+      "hair": "Brown, long, ponytail",
+      "eyes": "Brown",
+      "build": "Medium",
+      "clothing": "Red jacket, black leggings, gray sneakers. Carrying small crossbody purse.",
+      "other_desc": "Observed using a cell phone to communicate with Subject 1 during all three incidents. Possible coordinator.",
+      "notes": "Acts as lookout. Positions herself near exits and uses phone—possibly texting Subject 1 about employee movements."
+    }
+  ],
+  "vehicles": [
+    {
+      "plate": "8ABC???",
+      "plate_state": "CA",
+      "make": "Honda",
+      "model": "Civic",
+      "year": "2019",
+      "color": "Silver",
+      "vin": null,
+      "description": "4-door sedan, tinted rear windows, aftermarket rims. Damage to rear bumper (right side).",
+      "notes": "Partial plate obtained from parking lot camera. Vehicle also observed at Ontario Target on 03/11."
+    }
+  ],
+  "cargo": null,
+  "notes": [
+    {
+      "note": "Contacted Ontario PD — they have a similar ORC case (ONT-2026-3388) with matching suspect description. Waiting on their CCTV footage.",
+      "created_at": "2026-03-16T09:30:00.000Z"
+    },
+    {
+      "note": "TRACE network match confirmed: Rancho Cucamonga Target reported $3,200 loss on 03/12 with same MO (booster bags, electronics/fragrances, garden center exit). Their LP has plate image—running through ALPR.",
+      "created_at": "2026-03-17T11:15:00.000Z"
+    },
+    {
+      "note": "Walmart receipt recovered at scene traced to a purchase made with a prepaid Visa card. Working with Walmart LP to pull transaction footage from their Fontana store on 03/14.",
+      "created_at": "2026-03-18T14:00:00.000Z"
+    },
+    {
+      "note": "Fontana PD detective assigned: Det. Rachel Torres, (909) 555-0177, rtorres@fontanapd.gov. Case elevated to multi-jurisdictional investigation.",
+      "created_at": "2026-03-20T08:45:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "file_name": "target_cctv_subj1_0315.jpg",
+      "file_type": "image/jpeg",
+      "file_size": 245000,
+      "description": "CCTV still — Subject 1 (Delgado) in electronics dept concealing merchandise, 03/15/2026 14:22",
+      "created_at": "2026-03-15T22:30:00.000Z",
+      "data": null
+    },
+    {
+      "file_name": "target_cctv_subj2_0315.jpg",
+      "file_type": "image/jpeg",
+      "file_size": 198000,
+      "description": "CCTV still — Subject 2 (unknown) acting as lookout near electronics entrance, 03/15/2026 14:24",
+      "created_at": "2026-03-15T22:32:00.000Z",
+      "data": null
+    },
+    {
+      "file_name": "parking_lot_vehicle_0315.jpg",
+      "file_type": "image/jpeg",
+      "file_size": 312000,
+      "description": "Parking lot camera — Silver Honda Civic, partial plate 8ABC, garden center lot, 03/15/2026 14:38",
+      "created_at": "2026-03-15T22:35:00.000Z",
+      "data": null
+    },
+    {
+      "file_name": "walmart_receipt_recovered.pdf",
+      "file_type": "application/pdf",
+      "file_size": 89000,
+      "description": "Walmart receipt found at scene — prepaid Visa transaction, Fontana store, 03/14/2026",
+      "created_at": "2026-03-16T10:00:00.000Z",
+      "data": null
+    },
+    {
+      "file_name": "fpd_incident_report_2026-11847.pdf",
+      "file_type": "application/pdf",
+      "file_size": 156000,
+      "description": "Fontana PD Incident Report #FPD-2026-11847, Officer Martinez Badge #4412",
+      "created_at": "2026-03-16T15:00:00.000Z",
+      "data": null
+    }
+  ]
+}

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://d3js.org https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org; font-src 'self' data:; frame-src 'self' blob: https: http:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://d3js.org https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org; font-src 'self' data:; frame-src 'self' blob: https: http:;">
     <title>V.I.P.E.R. - Case Detail</title>
     <script src="modules/licensing.js"></script>
 
@@ -2311,8 +2311,16 @@
                 contentDiv.innerHTML = renderCargoTab();
             } else if (tabId === 'missingpersons') {
                 contentDiv.innerHTML = renderMissingPersonsTab();
+                // Init map if viewing a person detail
+                if (currentMissingPersonView !== null) {
+                    setTimeout(() => initMissingPersonMap(currentMissingPersonView), 200);
+                }
             } else if (tabId === 'areacanvas') {
                 contentDiv.innerHTML = renderAreaCanvasTab();
+                // Init canvas map after HTML is in DOM
+                setTimeout(() => {
+                    if (document.getElementById('canvasMap')) initCanvasMap();
+                }, 200);
             } else if (tabId === 'prosecution') {
                 contentDiv.innerHTML = renderProsecutionTab();
             } else if (tabId === 'narcotics') {

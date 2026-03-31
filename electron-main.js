@@ -325,6 +325,37 @@ ipcMain.handle('restore-backup', async (event, { backupPath }) => {
   return raw.toString('utf-8');
 });
 
+// --- Case Export / Import ---
+ipcMain.handle('save-case-export', async (event, { fileName, data }) => {
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export Case Package',
+    defaultPath: fileName,
+    filters: [{ name: 'VIPER Case Package', extensions: ['vcase'] }]
+  });
+  if (result.canceled || !result.filePath) return null;
+  const buf = Buffer.from(data, 'utf-8');
+  if (security && security.isEnabled() && security.isUnlocked()) {
+    fs.writeFileSync(result.filePath, security.encryptBuffer(buf));
+  } else {
+    fs.writeFileSync(result.filePath, buf, 'utf-8');
+  }
+  return result.filePath;
+});
+
+ipcMain.handle('open-case-import', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import Case Package',
+    properties: ['openFile'],
+    filters: [{ name: 'VIPER Case Package', extensions: ['vcase'] }]
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  const raw = fs.readFileSync(result.filePaths[0]);
+  if (security && security.isUnlocked() && security.isEncryptedBuffer(raw)) {
+    return security.decryptBuffer(raw).toString('utf-8');
+  }
+  return raw.toString('utf-8');
+});
+
 // --- Field Security IPC ---
 ipcMain.handle('security-check', async () => {
   return {

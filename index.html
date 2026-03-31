@@ -511,6 +511,10 @@
                                 <span class="notification-badge absolute top-0 right-0 w-5 h-5 bg-red-500 rounded-full border-2 border-viper-dark hidden text-xs flex items-center justify-center font-bold">0</span>
                             </button>
                         </div>
+                        <button onclick="importCasePackage()" class="px-4 md:px-6 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg font-medium text-viper-cyan transition-all whitespace-nowrap text-sm md:text-base flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                            Import Case
+                        </button>
                         <button onclick="openCreateCaseModal()" class="px-4 md:px-6 py-2 bg-gradient-to-r from-viper-green to-viper-cyan rounded-lg font-medium text-viper-dark hover:shadow-lg hover:shadow-viper-green/50 transition-all whitespace-nowrap text-sm md:text-base">
                             + New Case
                         </button>
@@ -1563,6 +1567,81 @@
         // Chart.js no longer needed - using progress bars instead
         
         // Case Creation
+        /* ========== Notifications ========== */
+        function showNotification(message, type = 'info') {
+            const colors = { success: '#10b981', error: '#ef4444', info: '#00d9ff' };
+            const toast = document.createElement('div');
+            toast.style.cssText = `position:fixed;top:20px;right:20px;z-index:9999;padding:14px 20px;border-radius:10px;color:#fff;font-size:14px;max-width:400px;box-shadow:0 8px 32px rgba(0,0,0,0.4);backdrop-filter:blur(12px);border:1px solid ${colors[type] || colors.info}40;background:rgba(30,35,45,0.95);animation:slideIn .3s ease`;
+            toast.innerHTML = `<span style="color:${colors[type] || colors.info};font-weight:600;">${type === 'success' ? '✓' : type === 'error' ? '✗' : 'ℹ'}</span> ${message}`;
+            document.body.appendChild(toast);
+            setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity .3s'; setTimeout(() => toast.remove(), 300); }, 4000);
+        }
+
+        /* ========== Import Case Package (.vcase) ========== */
+        async function importCasePackage() {
+            try {
+                const raw = await window.electronAPI.openCaseImport();
+                if (!raw) return;  // user cancelled
+
+                let pkg;
+                try { pkg = JSON.parse(raw); } catch (e) {
+                    showNotification('Invalid case package file.', 'error'); return;
+                }
+                if (!pkg._viperExport || !pkg.caseMetadata) {
+                    showNotification('This file is not a valid VIPER case package.', 'error'); return;
+                }
+
+                const meta = pkg.caseMetadata;
+
+                // Check for duplicate case number
+                const existing = cases.find(c => c.caseNumber === meta.caseNumber);
+                if (existing) {
+                    if (!confirm(`Case ${meta.caseNumber} already exists locally. Importing will REPLACE its data. Continue?`)) return;
+                    // Remove old case entry — we'll re-add
+                    const idx = cases.indexOf(existing);
+                    if (idx !== -1) cases.splice(idx, 1);
+                }
+
+                // Assign new ID to avoid collisions (keep caseNumber intact)
+                const newId = Date.now();
+                const importedCase = { ...meta, id: newId, lastModified: new Date().toISOString() };
+                cases.push(importedCase);
+                localStorage.setItem('viperCases', JSON.stringify(cases));
+
+                // Restore per-ID module data (Pattern 2)
+                if (pkg.moduleData) {
+                    Object.entries(pkg.moduleData).forEach(([key, val]) => {
+                        localStorage.setItem(`${key}_${newId}`, JSON.stringify(val));
+                    });
+                }
+
+                // Restore shared-object data (Pattern 1)
+                if (pkg.sharedData) {
+                    Object.entries(pkg.sharedData).forEach(([storeKey, val]) => {
+                        const all = JSON.parse(localStorage.getItem(storeKey) || '{}');
+                        all[meta.caseNumber] = val;
+                        localStorage.setItem(storeKey, JSON.stringify(all));
+                    });
+                }
+
+                // Restore tasks
+                if (pkg.tasks && pkg.tasks.length) {
+                    const allTasks = JSON.parse(localStorage.getItem('viperTasks') || '[]');
+                    // Remove old tasks for this caseNumber, then add imported ones
+                    const filtered = allTasks.filter(t => t.caseId !== meta.caseNumber);
+                    filtered.push(...pkg.tasks);
+                    localStorage.setItem('viperTasks', JSON.stringify(filtered));
+                }
+
+                updateDashboardCaseData();
+                showNotification(`Case ${meta.caseNumber} imported successfully${pkg._exportedBy ? ` (from ${pkg._exportedBy})` : ''}.`, 'success');
+
+            } catch (err) {
+                console.error('Case import failed:', err);
+                showNotification('Failed to import case: ' + err.message, 'error');
+            }
+        }
+
         function openCreateCaseModal() {
             if (window.ViperLicensing && !window.ViperLicensing.canCreateCases()) {
                 showNotification('Your demo has expired. Go to Settings to activate a license.', 'error');

@@ -736,6 +736,12 @@
                             </svg>
                             Export for DA
                         </button>
+                        <button onclick="exportCasePackage()" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                            </svg>
+                            Export Case
+                        </button>
                         <button onclick="openManageTabsModal()" class="px-4 py-2 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded-lg text-viper-purple transition flex items-center gap-2">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
@@ -1409,6 +1415,69 @@
             `;
             
             document.body.insertAdjacentHTML('beforeend', modalHTML);
+        }
+
+        /* ========== Export / Import Case Package (.vcase) ========== */
+        async function exportCasePackage() {
+            if (!currentCase) return;
+            const caseId = currentCase.id;
+            const caseNum = currentCase.caseNumber;
+
+            // Collect per-ID module data (Pattern 2)
+            const moduleKeys = [
+                'suspects', 'victims', 'victimBusinesses', 'cargo',
+                'witnesses', 'recoveredVehicles', 'missingpersons',
+                'areacanvas', 'prosecution', 'narcotics', 'firearms',
+                'money', 'opsplan'
+            ];
+            const moduleData = {};
+            moduleKeys.forEach(k => {
+                const raw = localStorage.getItem(`${k}_${caseId}`);
+                if (raw) moduleData[k] = JSON.parse(raw);
+            });
+
+            // Collect shared-object data keyed by caseNumber (Pattern 1)
+            const sharedKeys = [
+                'viperCaseNotes', 'viperCaseReports', 'viperCaseEvidence',
+                'viperCaseWarrants', 'viperCaseSuspects', 'viperCaseVictims',
+                'viperCaseWitnesses', 'viperCaseVehicles', 'viperCaseFirearms',
+                'viperCaseNarcotics', 'viperCaseMoney', 'viperCaseMissingPersons',
+                'viperCaseCanvas', 'viperCaseProsecution', 'viperTraceImports'
+            ];
+            const sharedData = {};
+            sharedKeys.forEach(k => {
+                const all = JSON.parse(localStorage.getItem(k) || '{}');
+                if (all[caseNum] !== undefined) sharedData[k] = all[caseNum];
+            });
+
+            // Collect tasks for this case
+            const allTasks = JSON.parse(localStorage.getItem('viperTasks') || '[]');
+            const caseTasks = allTasks.filter(t => t.caseId === caseNum);
+
+            const pkg = {
+                _viperExport: true,
+                _version: '1.0',
+                _exportedAt: new Date().toISOString(),
+                _exportedBy: localStorage.getItem('viper_customer_name') || 'Unknown',
+                caseMetadata: { ...currentCase },
+                moduleData,
+                sharedData,
+                tasks: caseTasks
+            };
+
+            const fileName = `VIPER_Case_${caseNum.replace(/[^a-zA-Z0-9-]/g, '_')}_${new Date().toISOString().slice(0,10)}.vcase`;
+            try {
+                const savedPath = await window.electronAPI.saveCaseExport({
+                    fileName,
+                    data: JSON.stringify(pkg, null, 2)
+                });
+                if (savedPath) {
+                    showToast(`Case exported to ${savedPath.split('\\').pop()}`, 'success');
+                }
+            } catch (err) {
+                console.error('Case export failed:', err);
+                showToast('Failed to export case: ' + err.message, 'error');
+            }
         }
 
         function closeExportCaseModal() {

@@ -1389,7 +1389,9 @@
                 const info = await window.ViperLicensing.checkForUpdate();
                 if (info.updateAvailable) {
                     res.innerHTML = `🎉 Version <strong>${info.latestVersion}</strong> available! ` +
-                        (info.downloadUrl ? `<a href="${info.downloadUrl}" style="color:#00d9ff;text-decoration:underline;">Download</a>` : '');
+                        (info.downloadUrl ? `<a href="${info.downloadUrl}" style="color:#00d9ff;text-decoration:underline;">Download</a>` : '') +
+                        `<div style="margin-top:8px;padding:10px 12px;background:rgba(251,191,36,0.12);border:1px solid rgba(251,191,36,0.35);border-radius:8px;color:#fbbf24;font-size:12px;line-height:1.5;">` +
+                        `⚠️ <strong>Back up your data before updating.</strong> Go to <em>Backup &amp; Restore</em> above to create a full backup, or export individual cases from each case detail page.</div>`;
                     res.style.color = '#86efac';
                 } else {
                     res.textContent = '✅ You are running the latest version.';

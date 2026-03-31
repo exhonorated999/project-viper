@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://d3js.org https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; img-src 'self' data: https:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org; font-src 'self' data:; frame-src https: http:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://d3js.org https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org; font-src 'self' data:; frame-src 'self' blob: https: http:;">
     <title>V.I.P.E.R. - Case Detail</title>
     <script src="modules/licensing.js"></script>
 
@@ -3720,19 +3720,33 @@
                 return;
             }
             
+            // Derive MIME type from extension (file.type may be empty)
+            const mimeFromExt = (name) => {
+                const ext = (name || '').split('.').pop().toLowerCase();
+                const map = {
+                    jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',gif:'image/gif',
+                    bmp:'image/bmp',webp:'image/webp',svg:'image/svg+xml',tiff:'image/tiff',tif:'image/tiff',
+                    heic:'image/heic',heif:'image/heif',
+                    mp4:'video/mp4',webm:'video/webm',ogg:'video/ogg',mov:'video/quicktime',
+                    avi:'video/x-msvideo',mkv:'video/x-matroska',flv:'video/x-flv',m4v:'video/x-m4v',wmv:'video/x-ms-wmv',
+                    mp3:'audio/mpeg',wav:'audio/wav',m4a:'audio/mp4',aac:'audio/aac',flac:'audio/flac',wma:'audio/x-ms-wma',
+                    pdf:'application/pdf'
+                };
+                return map[ext] || '';
+            };
+
             // Convert file paths to blob URLs for inline preview
             for (const file of evidence.files) {
                 if (file.path && !file.path.startsWith('http') && !file.path.startsWith('data:') && !file.path.startsWith('blob:')) {
-                    const needsBlobUrl = file.type && (
-                        file.type.startsWith('audio/') || 
-                        file.type.startsWith('video/') || 
-                        file.type.startsWith('image/') ||
-                        file.type === 'application/pdf'
+                    const mime = file.type || mimeFromExt(file.name);
+                    const isViewable = mime && (
+                        mime.startsWith('audio/') || mime.startsWith('video/') ||
+                        mime.startsWith('image/') || mime === 'application/pdf'
                     );
-                    if (needsBlobUrl && window.electronAPI && window.electronAPI.readEvidenceFile) {
+                    if (isViewable && window.electronAPI && window.electronAPI.readEvidenceFile) {
                         try {
                             const fileData = await window.electronAPI.readEvidenceFile(file.path);
-                            const blob = new Blob([new Uint8Array(fileData)], { type: file.type });
+                            const blob = new Blob([new Uint8Array(fileData)], { type: mime });
                             file.displayUrl = URL.createObjectURL(blob);
                         } catch (error) {
                             console.error('Error creating blob URL for', file.name, error);

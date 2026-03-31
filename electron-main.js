@@ -23,10 +23,11 @@ const iconPath = app.isPackaged
 
 // ── Portable mode detection ──────────────────────────────────────────
 // If the app is NOT installed under C:\Program Files, treat it as a portable
-// USB install. All user data (localStorage, security vault, cases) is stored
-// on the USB itself so each stick is self-contained and independent.
+// USB / portable install. All user data (localStorage, security vault, cases)
+// is stored on the USB itself so each stick is self-contained and independent.
+// Detection: a `.portable` marker file next to the exe signals portable mode.
 const exeDir = app.isPackaged ? path.dirname(app.getPath('exe')) : __dirname;
-const isPortable = app.isPackaged && !exeDir.toLowerCase().startsWith('c:\\program files');
+const isPortable = app.isPackaged && fs.existsSync(path.join(exeDir, '.portable'));
 
 let casesDir;   // writable directory for case data
 if (isPortable) {

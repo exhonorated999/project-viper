@@ -3720,44 +3720,25 @@
                 return;
             }
             
-            // Convert file paths to Tauri-compatible URLs
+            // Convert file paths to blob URLs for inline preview
             for (const file of evidence.files) {
                 if (file.path && !file.path.startsWith('http') && !file.path.startsWith('data:') && !file.path.startsWith('blob:')) {
-                    try {
-                        // For all viewable files, read them and create blob URLs
-                        if (window.__TAURI__ && window.__TAURI__.core) {
-                            const needsBlobUrl = file.type && (
-                                file.type.startsWith('audio/') || 
-                                file.type.startsWith('video/') || 
-                                file.type.startsWith('image/') ||
-                                file.type === 'application/pdf'
-                            );
-                            
-                            if (needsBlobUrl) {
-                                // Read file data and create blob URL
-                                try {
-                                    const fileData = await window.__TAURI__.core.invoke('read_evidence_file', {
-                                        filePath: file.path
-                                    });
-                                    const blob = new Blob([new Uint8Array(fileData)], { type: file.type });
-                                    const blobUrl = URL.createObjectURL(blob);
-                                    file.displayUrl = blobUrl;
-                                    console.log('Created blob URL for:', file.name);
-                                } catch (error) {
-                                    console.error('Error creating blob URL:', error);
-                                    file.displayUrl = file.path;
-                                }
-                            } else {
-                                // For other files, just use the path
-                                file.displayUrl = file.path;
-                            }
-                        } else {
-                            // Fallback for development/web mode
-                            console.warn('Tauri API not available, using file path directly');
+                    const needsBlobUrl = file.type && (
+                        file.type.startsWith('audio/') || 
+                        file.type.startsWith('video/') || 
+                        file.type.startsWith('image/') ||
+                        file.type === 'application/pdf'
+                    );
+                    if (needsBlobUrl && window.electronAPI && window.electronAPI.readEvidenceFile) {
+                        try {
+                            const fileData = await window.electronAPI.readEvidenceFile(file.path);
+                            const blob = new Blob([new Uint8Array(fileData)], { type: file.type });
+                            file.displayUrl = URL.createObjectURL(blob);
+                        } catch (error) {
+                            console.error('Error creating blob URL for', file.name, error);
                             file.displayUrl = file.path;
                         }
-                    } catch (error) {
-                        console.error('Error converting file path:', error);
+                    } else {
                         file.displayUrl = file.path;
                     }
                 }

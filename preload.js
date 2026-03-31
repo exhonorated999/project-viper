@@ -12,6 +12,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectBackupFile: () => ipcRenderer.invoke('select-backup-file'),
   restoreBackup: (data) => ipcRenderer.invoke('restore-backup', data),
 
+  // RMS PDF Import
+  selectRmsFiles: () => ipcRenderer.invoke('select-rms-files'),
+  extractPdfText: (filePath) => ipcRenderer.invoke('extract-pdf-text', filePath),
+
   // Case Export / Import
   saveCaseExport: (data) => ipcRenderer.invoke('save-case-export', data),
   openCaseImport: () => ipcRenderer.invoke('open-case-import'),

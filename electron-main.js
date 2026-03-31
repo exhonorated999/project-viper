@@ -325,6 +325,34 @@ ipcMain.handle('restore-backup', async (event, { backupPath }) => {
   return raw.toString('utf-8');
 });
 
+// --- RMS PDF Import ---
+ipcMain.handle('select-rms-files', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import RMS Reports',
+    properties: ['openFile', 'multiSelections'],
+    filters: [{ name: 'PDF Reports', extensions: ['pdf'] }]
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths;
+});
+
+ipcMain.handle('extract-pdf-text', async (event, filePath) => {
+  try {
+    const pdfParse = require('pdf-parse');
+    const dataBuffer = fs.readFileSync(filePath);
+    const data = await pdfParse(dataBuffer);
+    return {
+      text: data.text,
+      numPages: data.numpages,
+      info: data.info || {},
+      fileName: path.basename(filePath)
+    };
+  } catch (error) {
+    console.error('PDF parse error:', error);
+    throw error;
+  }
+});
+
 // --- Case Export / Import ---
 ipcMain.handle('save-case-export', async (event, { fileName, data }) => {
   const result = await dialog.showSaveDialog(mainWindow, {

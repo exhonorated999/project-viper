@@ -12,6 +12,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectBackupFile: () => ipcRenderer.invoke('select-backup-file'),
   restoreBackup: (data) => ipcRenderer.invoke('restore-backup', data),
 
+  // Case Export / Import
+  saveCaseExport: (data) => ipcRenderer.invoke('save-case-export', data),
+  openCaseImport: () => ipcRenderer.invoke('open-case-import'),
+
   // Field Security
   securityCheck: () => ipcRenderer.invoke('security-check'),
   securitySetup: (data) => ipcRenderer.invoke('security-setup', data),

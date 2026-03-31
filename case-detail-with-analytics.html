@@ -1135,7 +1135,8 @@
                 networkIntelligence: { label: 'Network Intel', icon: 'M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
                 aperture: { label: 'Aperture', icon: 'M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z' },
                 analytics: { label: 'CDR', icon: 'M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z' },
-                traceImport: { label: 'Trace Import', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12' }
+                traceImport: { label: 'Trace Import', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12' },
+                rmsImport: { label: 'RMS Import', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' }
             };
             
             // Initialize tabOrder if it doesn't exist
@@ -1337,7 +1338,9 @@
                 money: { label: 'Money Seized', icon: '💰', type: 'data' },
                 missingpersons: { label: 'Missing Persons', icon: '🔍', type: 'data' },
                 areacanvas: { label: 'Area Canvas', icon: '🗺️', type: 'data' },
-                opsplan: { label: 'OPS Plan', icon: '📋', type: 'data' }
+                opsplan: { label: 'OPS Plan', icon: '📋', type: 'data' },
+                traceImport: { label: 'Trace Import', icon: '📥', type: 'data' },
+                rmsImport: { label: 'RMS Import', icon: '📄', type: 'data' }
             };
 
             // Get active tabs (overview + enabled modules)
@@ -1428,7 +1431,7 @@
                 'suspects', 'victims', 'victimBusinesses', 'cargo',
                 'witnesses', 'recoveredVehicles', 'missingpersons',
                 'areacanvas', 'prosecution', 'narcotics', 'firearms',
-                'money', 'opsplan'
+                'money', 'opsplan', 'rmsImports'
             ];
             const moduleData = {};
             moduleKeys.forEach(k => {
@@ -1508,6 +1511,15 @@
                 case 'prosecution': return caseProsecution ? caseProsecution.length : 0;
                 case 'victimBusiness': return caseVictimBusinesses ? caseVictimBusinesses.length : 0;
                 case 'cargo': return caseCargo ? caseCargo.length : 0;
+                case 'traceImport': {
+                    const ti = JSON.parse(localStorage.getItem('viperTraceImports') || '{}');
+                    const arr = ti[currentCase.caseNumber];
+                    return Array.isArray(arr) ? arr.length : 0;
+                }
+                case 'rmsImport': {
+                    const ri = JSON.parse(localStorage.getItem(`rmsImports_${currentCase.id}`) || '[]');
+                    return ri.length;
+                }
                 default: return 0;
             }
         }
@@ -2341,6 +2353,9 @@
                 initializeAperture();
             } else if (tabId === 'traceImport') {
                 contentDiv.innerHTML = renderTraceImportTab();
+            } else if (tabId === 'rmsImport') {
+                loadRmsData();
+                contentDiv.innerHTML = renderRmsImportTab();
             } else {
                 contentDiv.innerHTML = renderPlaceholderTab(tabId);
             }
@@ -14767,6 +14782,7 @@
                 { id: 'aperture', label: 'Aperture (Email Forensics)', icon: 'M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z', desc: 'Parse & analyze email evidence from .mbox/.eml files' },
                 { id: 'networkIntelligence', label: 'Network Intelligence (WiGLE)', icon: 'M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z', desc: 'Wireless network geolocation via WiGLE API' },
                 { id: 'traceImport', label: 'Trace Import', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12', desc: 'Import case packages from TRACE software' },
+                { id: 'rmsImport', label: 'RMS Import', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', desc: 'Import PDF reports from agency Record Management Systems' },
             ];
 
             const allModules = [...caseManagement, ...investigativeTools];
@@ -17215,6 +17231,658 @@
         // ═══════════════════════════════════════════════════════════════════════
         // TRACE IMPORT MODULE
         // ═══════════════════════════════════════════════════════════════════════
+
+        /* ================================================================
+           RMS IMPORT MODULE — Parse PDF reports from agency RMS systems
+           ================================================================ */
+        let rmsImports = [];
+        let currentRmsView = null;
+
+        function getRmsImports() {
+            return JSON.parse(localStorage.getItem(`rmsImports_${currentCase.id}`) || '[]');
+        }
+        function saveRmsImports(data) {
+            localStorage.setItem(`rmsImports_${currentCase.id}`, JSON.stringify(data));
+        }
+        function loadRmsData() {
+            rmsImports = getRmsImports();
+        }
+
+        /* ---------- RMS PDF Text Parser ---------- */
+        function parseRmsReport(text, fileName) {
+            // Step 1: Strip page-break headers / footers that appear throughout INFORM RMS PDF text
+            // Patterns vary: "Generated By: INFORM RMS..." or "Generated By: OFFICER_NAME"
+            // Followed by: date, page "N/N", "*DRAFT COPY*", "Confidential Incident Report/Summary",
+            //              "NNNNNN Supplement No: ...", "Reported Date/Time: ...", agency, address, city, phone
+            const rawLines = text.split('\n').map(l => l.trim());
+            const cleaned = [];
+            let i = 0;
+            let reportNumber = '', supplementNo = '', reportDate = '', agencyName = '', reportTitle = '';
+            while (i < rawLines.length) {
+                const l = rawLines[i];
+                // Skip standalone DRAFT markers
+                if (/^\*DRAFT COPY( ONLY)?\*$/.test(l)) { i++; continue; }
+                if (/^Generated By:\s/i.test(l)) {
+                    // Skip the page-break block (variable length)
+                    i++;
+                    // Skip date line
+                    if (i < rawLines.length && /^\d{1,2}\/\d{1,2}\/\d{4}/.test(rawLines[i])) i++;
+                    // Skip page number "N/N"
+                    if (i < rawLines.length && /^\d+\/\d+$/.test(rawLines[i])) i++;
+                    // Skip DRAFT markers
+                    while (i < rawLines.length && /^\*DRAFT COPY/.test(rawLines[i])) i++;
+                    // Skip "Confidential Incident Report" or "Confidential Incident Summary"
+                    if (i < rawLines.length && /^Confidential Incident/i.test(rawLines[i])) {
+                        if (!reportTitle) reportTitle = rawLines[i];
+                        i++;
+                    }
+                    // Skip report number line (may have "Supplement No:" or just the number)
+                    if (i < rawLines.length && /^\d{6,12}/.test(rawLines[i])) {
+                        const parts = rawLines[i].match(/^(\d+)\s+Supplement\s*No:\s*(.*)$/i);
+                        if (parts) {
+                            if (!reportNumber) { reportNumber = parts[1]; supplementNo = parts[2].trim(); }
+                        } else {
+                            const numOnly = rawLines[i].match(/^(\d{6,12})/);
+                            if (numOnly && !reportNumber) reportNumber = numOnly[1];
+                        }
+                        i++;
+                    }
+                    // Skip "Reported Date/Time:" line
+                    if (i < rawLines.length && /^Reported Date/i.test(rawLines[i])) {
+                        const m = rawLines[i].match(/Reported Date(?:\/Time)?:\s*(.+)/i);
+                        if (m && !reportDate) reportDate = m[1].trim();
+                        i++;
+                    }
+                    // Skip agency name
+                    if (i < rawLines.length && /Police Department|Sheriff|Agency/i.test(rawLines[i])) {
+                        if (!agencyName) agencyName = rawLines[i];
+                        i++;
+                    }
+                    // Skip remaining address/phone/blank lines
+                    while (i < rawLines.length && (
+                        /^\d+\s+\w+\s+(Ave|St|Blvd|Dr|Rd|Ln|Way)\b/i.test(rawLines[i])
+                        || /^[A-Z][a-z]+,\s*[A-Z]{2}\s+\d{5}/.test(rawLines[i])
+                        || /^\(\d{3}\)\s*\d{3}-\d{4}$/.test(rawLines[i])
+                        || rawLines[i] === '')) {
+                        i++;
+                    }
+                    continue;
+                }
+                cleaned.push(l);
+                i++;
+            }
+
+            const lines = cleaned;
+            const report = {
+                id: 'rms_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+                fileName,
+                importedAt: new Date().toISOString(),
+                reportNumber: reportNumber,
+                reportDate: reportDate,
+                reportType: reportTitle || '',
+                supplementNo: supplementNo,
+                agencyName: agencyName,
+                location: '',
+                beat: '',
+                fromDateTime: '',
+                toDateTime: '',
+                offenses: [],
+                personsInvolved: [],
+                vehicles: [],
+                property: [],
+                narratives: [],
+                digital: [],
+                confidentialPersons: [],
+                rawText: text
+            };
+
+            // Try to extract report type/number from filename if not found in footer
+            if (!report.reportType) {
+                const fnMatch = fileName.match(/(Initial Incident|Summary Incident|Supplement|Officer Incident)/i);
+                if (fnMatch) report.reportType = fnMatch[1];
+            }
+            if (!report.reportNumber) {
+                const fnNum = fileName.match(/(\d{9,12})/);
+                if (fnNum) report.reportNumber = fnNum[1];
+            }
+
+            // Identify section boundaries in cleaned text
+            const sectionNames = ['Event', 'Event Information', 'Offense(s)', 'Offenses',
+                'Involved', 'Persons Involved', 'Vehicle(s)', 'Vehicles',
+                'Property', 'Narrative(s)', 'Narratives', 'NARRATIVE',
+                'Digital', 'Suspect(s) Extended', 'Suspects Extended', 'OFFICER'];
+            const sections = [];
+            for (let i = 0; i < lines.length; i++) {
+                if (sectionNames.includes(lines[i])) {
+                    sections.push({ name: lines[i], startLine: i });
+                }
+            }
+
+            function getSectionLines(names) {
+                if (typeof names === 'string') names = [names];
+                const sec = sections.find(s => names.includes(s.name));
+                if (!sec) return [];
+                const nextSec = sections.find(s => s.startLine > sec.startLine);
+                return lines.slice(sec.startLine + 1, nextSec ? nextSec.startLine : lines.length);
+            }
+
+            // ---- Event ----
+            const eventLines = getSectionLines(['Event', 'Event Information']);
+            for (let i = 0; i < eventLines.length; i++) {
+                const el = eventLines[i];
+                if (el === 'Location' && eventLines[i + 1]) { report.location = eventLines[i + 1]; i++; }
+                else if (el === 'Beat' && eventLines[i + 1]) { report.beat = eventLines[i + 1]; i++; }
+                else if (/^From Date/i.test(el)) {
+                    if (eventLines[i + 1] && /^\d{2}\/\d{2}\/\d{4}/.test(eventLines[i + 1])) { report.fromDateTime = eventLines[i + 1]; i++; }
+                }
+                else if (/^To Date/i.test(el)) {
+                    if (eventLines[i + 1] && /^\d{2}\/\d{2}\/\d{4}/.test(eventLines[i + 1])) { report.toDateTime = eventLines[i + 1]; i++; }
+                }
+            }
+
+            // ---- Offenses ----
+            // INFORM formats: offenses concatenated on one or two lines
+            const offLines = getSectionLines(['Offense(s)', 'Offenses']);
+            let offBuf = '';
+            const offChunks = [];
+            for (let oi = 0; oi < offLines.length; oi++) {
+                const ol = offLines[oi];
+                if (!ol) continue;
+                if (/^\d/.test(ol) && offBuf) { offChunks.push(offBuf); offBuf = ''; }
+                offBuf += (offBuf ? ' ' : '') + ol;
+                if (/(?:FELONY|MISDEMEANOR|INFRACTION)$/i.test(ol)) { offChunks.push(offBuf); offBuf = ''; }
+            }
+            if (offBuf) offChunks.push(offBuf);
+
+            const penalCodes = ['PC', 'HS', 'VC', 'BP', 'FC', 'WI', 'CC'];
+            for (const chunk of offChunks) {
+                const sevMatch = chunk.match(/(FELONY|MISDEMEANOR|INFRACTION)$/i);
+                if (!sevMatch) continue;
+                const severity = sevMatch[1].toUpperCase();
+                let rest = chunk.slice(0, sevMatch.index).trimEnd();
+                const numMatch = rest.match(/^(\d)/);
+                if (!numMatch) continue;
+                rest = rest.slice(1);
+                let status = '';
+                const stMatch = rest.match(/^(COMPLETED|ATTEMPTED|CONSPIRACY)\s*/i);
+                if (stMatch) { status = stMatch[1].toUpperCase(); rest = rest.slice(stMatch[0].length); }
+                let bestIdx = -1, bestCode = '';
+                for (const code of penalCodes) {
+                    for (const pfx of [' ', ')']) {
+                        const idx = rest.indexOf(pfx + code);
+                        if (idx >= 0 && (idx + pfx.length) > bestIdx) { bestIdx = idx + pfx.length; bestCode = code; }
+                    }
+                }
+                if (bestIdx < 0) continue;
+                const statute = rest.slice(0, bestIdx + bestCode.length).trim();
+                const desc = rest.slice(bestIdx + bestCode.length).replace(/^[\s-]+/, '').trim();
+                report.offenses.push({ number: parseInt(numMatch[1]), status, statute, description: desc, severity });
+            }
+
+            // ---- Involved ----
+            const invLines = getSectionLines(['Involved', 'Persons Involved']);
+            let currentPerson = null;
+            const roles = ['SUSPECT', 'VICTIM', 'PERSON', 'WITNESS', 'REPORTING', 'ARRESTED', 'MISSING', 'REPORTEE', 'ORG'];
+            for (let j = 0; j < invLines.length; j++) {
+                const il = invLines[j];
+                if (/^Involvement/.test(il)) continue; // header row
+                if (il === 'Invl No' || /^#?NameDOB/.test(il)) continue;
+                const isRole = roles.some(r => il === r || il.startsWith(r + ' '));
+                if (isRole) {
+                    if (currentPerson) report.personsInvolved.push(currentPerson);
+                    currentPerson = { involvement: il, name: '', dob: '', sex: '', race: '', detail: '' };
+                } else if (il === 'INVOLVED' && currentPerson && currentPerson.involvement === 'PERSON') {
+                    // "PERSON" + "INVOLVED" on separate lines → combine
+                    currentPerson.involvement = 'PERSON INVOLVED';
+                } else if (currentPerson) {
+                    if (/^\d+$/.test(il)) continue; // invl number
+                    if (/SEE CONFIDENTIAL PAGE/i.test(il)) { currentPerson.name = '(Confidential)'; }
+                    else if (/^UNKNOWN,/.test(il)) { currentPerson.name = il; }
+                    else if (/^[A-Z][A-Z]+,\s+[A-Z]/.test(il) && !currentPerson.name) currentPerson.name = il;
+                    else if (il === 'Name' && invLines[j + 1]) { currentPerson.name = invLines[j + 1]; j++; }
+                    else if (il === 'DOB' && invLines[j + 1] && /\d/.test(invLines[j + 1])) { currentPerson.dob = invLines[j + 1]; j++; }
+                    else if (il === 'Sex' && invLines[j + 1]) { currentPerson.sex = invLines[j + 1]; j++; }
+                    else if (il === 'Race' && invLines[j + 1]) { currentPerson.race = invLines[j + 1]; j++; }
+                    else if (/^[MF]$/.test(il) && !currentPerson.sex) currentPerson.sex = il;
+                    else if (/^\d{2}\/\d{2}\/\d{4}$/.test(il) && !currentPerson.dob) currentPerson.dob = il;
+                }
+            }
+            if (currentPerson) report.personsInvolved.push(currentPerson);
+
+            // ---- Vehicles ----
+            const vehLines = getSectionLines(['Vehicle(s)', 'Vehicles']);
+            let currentVeh = null;
+            for (let j = 0; j < vehLines.length; j++) {
+                const vl = vehLines[j];
+                if (/^(RECOVERED|STOLEN|IMPOUNDED|SUSPECT|VICTIM|TOWED)\s*$/i.test(vl)) {
+                    if (currentVeh) report.vehicles.push(currentVeh);
+                    currentVeh = { status: vl.trim(), colors: '', year: '', make: '', model: '', license: '', state: '', vin: '', type: '' };
+                } else if (currentVeh) {
+                    if (vl === 'Color(s)') { /* next non-empty line is colors */ }
+                    else if (/^(WHITE|BLACK|BLUE|RED|GREEN|SILVER|GRAY|GREY|BROWN|TAN|MAROON|GOLD|YELLOW|ORANGE)/i.test(vl) && !currentVeh.colors) currentVeh.colors = vl;
+                    else if (vl === 'Year' || (/^\d{4}$/.test(vl) && parseInt(vl) > 1900 && parseInt(vl) < 2030)) currentVeh.year = /^\d{4}$/.test(vl) ? vl : '';
+                    else if (/^\d{4}$/.test(vl) && !currentVeh.year) currentVeh.year = vl;
+                    else if (vl === 'Make' && vehLines[j + 1]) { currentVeh.make = vehLines[j + 1]; j++; }
+                    else if (vl === 'ModelType / Style' && vehLines[j + 1]) { currentVeh.type = vehLines[j + 1]; j++; }
+                    else if (/^License No$/.test(vl) && vehLines[j + 1]) { currentVeh.license = vehLines[j + 1]; j++; }
+                    else if (vl === 'State' && vehLines[j + 1]) { currentVeh.state = vehLines[j + 1]; j++; }
+                    else if (vl === 'VIN' && vehLines[j + 1]) { currentVeh.vin = vehLines[j + 1]; j++; }
+                }
+            }
+            if (currentVeh) report.vehicles.push(currentVeh);
+
+            // ---- Property ----
+            const propLines = getSectionLines(['Property']);
+            let currentProp = null;
+            for (let j = 0; j < propLines.length; j++) {
+                const pl = propLines[j];
+                if (pl === 'Hold Reason' && propLines[j + 1]) {
+                    if (currentProp) report.property.push(currentProp);
+                    currentProp = { holdReason: propLines[j + 1], articleType: '', make: '', description: '', quantity: '', value: '', recoveredValue: '' };
+                    j++;
+                } else if (currentProp) {
+                    if (pl === 'Article Type' && propLines[j + 1]) { currentProp.articleType = propLines[j + 1]; j++; }
+                    else if (pl === 'Description' && propLines[j + 1]) { currentProp.description = propLines[j + 1]; j++; }
+                    else if (pl === 'MakeModel' && propLines[j + 1]) { currentProp.make = propLines[j + 1]; j++; }
+                    else if (pl === 'Quantity' && propLines[j + 1]) { currentProp.quantity = propLines[j + 1]; j++; }
+                    else if (pl === 'Value' && propLines[j + 1]) { currentProp.value = propLines[j + 1]; j++; }
+                    else if (/^Recovered Value/.test(pl) && propLines[j + 1]) { currentProp.recoveredValue = propLines[j + 1]; j++; }
+                }
+            }
+            if (currentProp) report.property.push(currentProp);
+
+            // ---- Narratives (most important) ----
+            const narLines = getSectionLines(['Narrative(s)', 'Narratives', 'NARRATIVE']);
+            let currentNarrative = null;
+            // Officer line: "LASTNAME, FIRSTNAME BADGE#" or "LASTNAME, FIRSTNAME BADGE# NARRATIVE"
+            const officerPattern = /^([A-Z][A-Z]+,\s+[A-Z][A-Z]+(?:\s+[A-Z]\.?)?)\s+(\d{2,5})(?:\s+NARRATIVE)?$/;
+            for (let j = 0; j < narLines.length; j++) {
+                const nl = narLines[j];
+                const om = nl.match(officerPattern);
+                if (om) {
+                    if (currentNarrative && currentNarrative.text.trim()) report.narratives.push(currentNarrative);
+                    currentNarrative = { officer: om[1].trim(), badge: om[2], text: '' };
+                } else if (currentNarrative) {
+                    // Skip "OFFICER" section markers and confidential section
+                    if (nl === 'OFFICER' || nl === '*** Confidential Section ***' || nl === 'DO NOT DISTRIBUTE') break;
+                    currentNarrative.text += (currentNarrative.text ? '\n' : '') + nl;
+                }
+            }
+            if (currentNarrative && currentNarrative.text.trim()) report.narratives.push(currentNarrative);
+
+            // ---- Digital ----
+            const digLines = getSectionLines(['Digital']);
+            for (let j = 0; j < digLines.length; j++) {
+                const dl = digLines[j];
+                // "OFFICER, NAME BADGE#DESCRIPTION" or "OFFICER, NAME BADGE#" then description on next line
+                const digMatch = dl.match(/^([A-Z][A-Z]+,\s+[A-Z][A-Z]+(?:\s+[A-Z]\.?)?)\s+(\d{2,5})(.*)$/);
+                if (digMatch) {
+                    report.digital.push({
+                        officer: digMatch[1].trim(),
+                        badge: digMatch[2],
+                        description: digMatch[3].trim() || (digLines[j + 1] || '')
+                    });
+                }
+            }
+
+            // ---- Suspects Extended ----
+            const suspExtLines = getSectionLines(['Suspect(s) Extended', 'Suspects Extended']);
+            if (suspExtLines.length > 0) {
+                let se = null;
+                for (let j = 0; j < suspExtLines.length; j++) {
+                    const sl = suspExtLines[j];
+                    if (sl === 'Involvement' && suspExtLines[j + 1]) {
+                        if (se) report.personsInvolved.push(se);
+                        se = { involvement: suspExtLines[j + 1], name: '', dob: '', age: '', sex: '', race: '', detail: 'Extended' };
+                        j++;
+                    } else if (se) {
+                        if (sl === 'Name' && suspExtLines[j + 1]) { se.name = suspExtLines[j + 1]; j++; }
+                        else if (sl === 'DOB' && suspExtLines[j + 1]) { se.dob = suspExtLines[j + 1]; j++; }
+                        else if (sl === 'Age' && suspExtLines[j + 1]) { se.age = suspExtLines[j + 1]; j++; }
+                        else if (sl === 'Sex' && suspExtLines[j + 1]) { se.sex = suspExtLines[j + 1]; j++; }
+                        else if (sl === 'Race' && suspExtLines[j + 1]) { se.race = suspExtLines[j + 1]; j++; }
+                    }
+                }
+                if (se) report.personsInvolved.push(se);
+            }
+
+            // ---- Confidential persons (after "*** Confidential Section ***") ----
+            const confIdx = lines.findIndex(l => l === '*** Confidential Section ***');
+            if (confIdx >= 0) {
+                let cp = null;
+                for (let j = confIdx + 1; j < lines.length; j++) {
+                    const cl = lines[j];
+                    if (cl === 'DO NOT DISTRIBUTE') continue;
+                    const isRole = roles.some(r => cl.startsWith(r));
+                    if (isRole) {
+                        if (cp) report.confidentialPersons.push(cp);
+                        cp = { involvement: cl, name: '', address: '', phone: '', dob: '', age: '', sex: '', race: '' };
+                    } else if (cp) {
+                        if (cl === 'Name' && lines[j + 1]) { cp.name = lines[j + 1]; j++; }
+                        else if (cl === 'Address' && lines[j + 1]) { cp.address = lines[j + 1]; j++; }
+                        else if (/^Home Address$/.test(cl) && lines[j + 1]) { cp.address = lines[j + 1]; j++; }
+                        else if (cl === 'DOB' && lines[j + 1]) { cp.dob = lines[j + 1]; j++; }
+                        else if (cl === 'Age' && lines[j + 1]) { cp.age = lines[j + 1]; j++; }
+                        else if (cl === 'Sex' && lines[j + 1]) { cp.sex = lines[j + 1]; j++; }
+                        else if (cl === 'Race' && lines[j + 1]) { cp.race = lines[j + 1]; j++; }
+                        else if (/^Cell Phone$/.test(cl) && lines[j + 1]) { cp.phone = lines[j + 1]; j++; }
+                    }
+                }
+                if (cp) report.confidentialPersons.push(cp);
+            }
+
+            return report;
+        }
+
+        /* ---------- RMS Import Handler ---------- */
+        async function handleRmsImport() {
+            try {
+                const filePaths = await window.electronAPI.selectRmsFiles();
+                if (!filePaths || filePaths.length === 0) return;
+
+                showLoadingIndicator('Parsing RMS reports...');
+                let imported = 0;
+
+                for (const filePath of filePaths) {
+                    try {
+                        const result = await window.electronAPI.extractPdfText(filePath);
+                        const report = parseRmsReport(result.text, result.fileName);
+                        report.pageCount = result.numPages;
+
+                        // Check for duplicate
+                        const existingIdx = rmsImports.findIndex(r =>
+                            r.reportNumber === report.reportNumber && r.fileName === report.fileName);
+                        if (existingIdx !== -1) {
+                            rmsImports[existingIdx] = report; // replace
+                        } else {
+                            rmsImports.push(report);
+                        }
+                        imported++;
+                    } catch (err) {
+                        console.error('Failed to parse:', filePath, err);
+                    }
+                }
+
+                saveRmsImports(rmsImports);
+                hideLoadingIndicator();
+
+                if (imported > 0) {
+                    showToast(`Imported ${imported} RMS report${imported !== 1 ? 's' : ''}`, 'success');
+                    renderTabContent('rmsImport');
+                } else {
+                    showToast('No reports could be parsed', 'error');
+                }
+            } catch (err) {
+                hideLoadingIndicator();
+                console.error('RMS import error:', err);
+                showToast('Import failed: ' + err.message, 'error');
+            }
+        }
+
+        function deleteRmsImport(index) {
+            if (!confirm('Remove this imported RMS report?')) return;
+            rmsImports.splice(index, 1);
+            saveRmsImports(rmsImports);
+            currentRmsView = null;
+            renderTabContent('rmsImport');
+        }
+
+        function viewRmsReport(index) {
+            currentRmsView = index;
+            renderTabContent('rmsImport');
+        }
+
+        function backToRmsList() {
+            currentRmsView = null;
+            renderTabContent('rmsImport');
+        }
+
+        /* ---------- RMS Tab Renderer ---------- */
+        function renderRmsImportTab() {
+            loadRmsData();
+
+            if (currentRmsView !== null && rmsImports[currentRmsView]) {
+                return renderRmsReportDetail(currentRmsView);
+            }
+
+            if (rmsImports.length === 0) {
+                return `
+                <div class="space-y-6">
+                    <div class="flex items-center justify-between">
+                        <h2 class="text-2xl font-bold text-white flex items-center gap-2">
+                            <svg class="w-6 h-6 text-viper-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                            RMS Import
+                        </h2>
+                    </div>
+                    <div class="glass-card rounded-xl p-12 text-center">
+                        <div class="w-20 h-20 rounded-full bg-viper-orange/10 flex items-center justify-center mx-auto mb-6">
+                            <svg class="w-10 h-10 text-viper-orange/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                        </div>
+                        <h3 class="text-xl font-bold text-white mb-2">No RMS Reports Imported</h3>
+                        <p class="text-gray-400 mb-6 max-w-md mx-auto">Import PDF reports from your agency's Record Management System (RMS) to consolidate case data, officer narratives, evidence, and suspect information.</p>
+                        <button onclick="handleRmsImport()" class="px-6 py-3 bg-viper-orange/20 hover:bg-viper-orange/30 border border-viper-orange rounded-lg text-viper-orange font-medium transition-colors inline-flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                            </svg>
+                            Import RMS Report (.pdf)
+                        </button>
+                    </div>
+                </div>`;
+            }
+
+            return `
+            <div class="space-y-6">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-2">
+                        <svg class="w-6 h-6 text-viper-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        RMS Import
+                        <span class="text-sm font-normal text-gray-400 ml-2">${rmsImports.length} report${rmsImports.length !== 1 ? 's' : ''}</span>
+                    </h2>
+                    <button onclick="handleRmsImport()" class="px-4 py-2 bg-viper-orange/20 hover:bg-viper-orange/30 border border-viper-orange rounded-lg text-viper-orange text-sm font-medium transition-colors inline-flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                        Import Another
+                    </button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    ${rmsImports.map((rpt, idx) => {
+                        const offCount = rpt.offenses.length;
+                        const narCount = rpt.narratives.length;
+                        const personCount = rpt.personsInvolved.length;
+                        const vehCount = rpt.vehicles.length;
+                        const topOffense = rpt.offenses[0];
+                        const officers = rpt.narratives.map(n => n.officer.split(/\s+\d+$/)[0]).join(', ');
+                        return `
+                        <div class="glass-card rounded-xl p-5 hover:border-viper-orange/30 transition-colors cursor-pointer group" onclick="viewRmsReport(${idx})">
+                            <div class="flex items-start justify-between mb-3">
+                                <div>
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <span class="text-xs font-mono px-2 py-0.5 rounded bg-viper-orange/20 text-viper-orange border border-viper-orange/30">${rpt.reportType || 'Report'}</span>
+                                        ${rpt.supplementNo ? `<span class="text-xs px-2 py-0.5 rounded bg-gray-600/30 text-gray-300 border border-gray-600">${rpt.supplementNo}</span>` : ''}
+                                    </div>
+                                    <h3 class="text-lg font-bold text-white">#${rpt.reportNumber || 'Unknown'}</h3>
+                                    <p class="text-sm text-gray-400">${rpt.agencyName || rpt.fileName}</p>
+                                </div>
+                                <button onclick="event.stopPropagation(); deleteRmsImport(${idx})" class="p-1.5 text-gray-600 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100" title="Remove">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                                    </svg>
+                                </button>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2 text-xs mb-3">
+                                <div class="bg-viper-dark/50 rounded px-2 py-1.5"><span class="text-gray-500">Date:</span> <span class="text-gray-300">${rpt.reportDate || rpt.fromDateTime || '—'}</span></div>
+                                <div class="bg-viper-dark/50 rounded px-2 py-1.5"><span class="text-gray-500">Beat:</span> <span class="text-gray-300">${rpt.beat || '—'}</span></div>
+                                <div class="bg-viper-dark/50 rounded px-2 py-1.5"><span class="text-gray-500">Offenses:</span> <span class="text-viper-orange">${offCount}</span></div>
+                                <div class="bg-viper-dark/50 rounded px-2 py-1.5"><span class="text-gray-500">Persons:</span> <span class="text-gray-300">${personCount}</span></div>
+                            </div>
+                            ${topOffense ? `<p class="text-xs text-gray-400 truncate mb-2">📋 ${topOffense.statute} — ${topOffense.description || ''}</p>` : ''}
+                            ${officers ? `<p class="text-xs text-gray-500 truncate">👮 ${officers}</p>` : ''}
+                            <p class="text-xs text-gray-600 mt-2">Imported ${new Date(rpt.importedAt).toLocaleString()} · ${rpt.pageCount || '?'} pages</p>
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>`;
+        }
+
+        /* ---------- RMS Report Detail View ---------- */
+        function renderRmsReportDetail(index) {
+            const rpt = rmsImports[index];
+            if (!rpt) return '<p class="text-red-400">Report not found</p>';
+
+            const sectionCard = (title, icon, content) => `
+                <div class="glass-card rounded-xl p-5 mb-4">
+                    <h3 class="text-lg font-bold text-white flex items-center gap-2 mb-4">
+                        <span>${icon}</span> ${title}
+                    </h3>
+                    ${content}
+                </div>`;
+
+            // Event Info
+            const eventHtml = sectionCard('Event Information', '📍', `
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div><span class="text-gray-500 block text-xs">Location</span><span class="text-white">${rpt.location || '—'}</span></div>
+                    <div><span class="text-gray-500 block text-xs">Beat</span><span class="text-white">${rpt.beat || '—'}</span></div>
+                    <div><span class="text-gray-500 block text-xs">From</span><span class="text-white">${rpt.fromDateTime || '—'}</span></div>
+                    <div><span class="text-gray-500 block text-xs">To</span><span class="text-white">${rpt.toDateTime || '—'}</span></div>
+                </div>
+            `);
+
+            // Offenses
+            const offensesHtml = rpt.offenses.length ? sectionCard('Offenses', '⚖️', `
+                <div class="space-y-2">
+                    ${rpt.offenses.map(o => `
+                        <div class="flex items-center justify-between p-3 bg-viper-dark/50 rounded-lg">
+                            <div>
+                                <span class="text-viper-orange font-mono text-sm font-bold">${o.statute || ''}</span>
+                                <span class="text-gray-300 text-sm ml-2">${o.description || ''}</span>
+                            </div>
+                            <span class="text-xs px-2 py-0.5 rounded ${o.severity === 'FELONY' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'}">${o.severity || ''}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            `) : '';
+
+            // Persons Involved
+            const personsHtml = rpt.personsInvolved.length ? sectionCard('Persons Involved', '👥', `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    ${rpt.personsInvolved.map(p => {
+                        const invColor = p.involvement.startsWith('SUSPECT') ? 'red' : p.involvement.startsWith('VICTIM') ? 'orange' : p.involvement.startsWith('WITNESS') ? 'blue' : 'gray';
+                        return `
+                        <div class="p-3 bg-viper-dark/50 rounded-lg">
+                            <span class="text-xs px-2 py-0.5 rounded bg-${invColor}-500/20 text-${invColor}-400 border border-${invColor}-500/30">${p.involvement}</span>
+                            <p class="text-white font-medium mt-2">${p.name || 'Unknown'}</p>
+                            <div class="text-xs text-gray-400 mt-1">
+                                ${p.dob ? `DOB: ${p.dob}` : ''} ${p.sex ? `| ${p.sex}` : ''} ${p.race ? `| ${p.race}` : ''}
+                            </div>
+                        </div>`;
+                    }).join('')}
+                </div>
+            `) : '';
+
+            // Vehicles
+            const vehiclesHtml = rpt.vehicles.length ? sectionCard('Vehicles', '🚗', `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    ${rpt.vehicles.map(v => `
+                        <div class="p-3 bg-viper-dark/50 rounded-lg">
+                            <span class="text-xs px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">${v.status || ''}</span>
+                            <p class="text-white font-medium mt-2">${[v.year, v.colors, v.make].filter(Boolean).join(' ') || 'Unknown'}</p>
+                            <div class="text-xs text-gray-400 mt-1 space-y-0.5">
+                                ${v.license ? `<div>Plate: <span class="text-gray-300 font-mono">${v.license}</span> ${v.state || ''}</div>` : ''}
+                                ${v.vin ? `<div>VIN: <span class="text-gray-300 font-mono">${v.vin}</span></div>` : ''}
+                                ${v.type ? `<div>Type: ${v.type}</div>` : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `) : '';
+
+            // Property
+            const propertyHtml = rpt.property.length ? sectionCard('Property / Evidence', '📦', `
+                <div class="space-y-2">
+                    ${rpt.property.map(p => `
+                        <div class="p-3 bg-viper-dark/50 rounded-lg flex items-start justify-between">
+                            <div>
+                                <span class="text-xs px-2 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-500/30">${p.holdReason || ''}</span>
+                                <p class="text-white text-sm mt-1">${p.articleType || ''}</p>
+                                <p class="text-gray-400 text-xs mt-0.5">${p.description || ''}</p>
+                            </div>
+                            ${p.value ? `<span class="text-gray-300 text-sm font-mono">${p.value}</span>` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            `) : '';
+
+            // Narratives — the star section
+            const narrativesHtml = rpt.narratives.length ? sectionCard('Officer Narratives', '📝', `
+                <div class="space-y-4">
+                    ${rpt.narratives.map((n, ni) => {
+                        const badge = n.badge || '';
+                        const name = n.officer || 'Unknown Officer';
+                        return `
+                        <div class="border border-gray-700 rounded-lg overflow-hidden">
+                            <div class="bg-viper-card/50 px-4 py-3 flex items-center justify-between cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-8 h-8 rounded-full bg-viper-orange/20 flex items-center justify-center text-viper-orange text-xs font-bold">${name.charAt(0)}</div>
+                                    <div>
+                                        <span class="text-white font-medium">${name}</span>
+                                        ${badge ? `<span class="text-gray-500 text-xs ml-2">#${badge}</span>` : ''}
+                                    </div>
+                                </div>
+                                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                </svg>
+                            </div>
+                            <div class="px-4 py-4 ${ni > 0 ? 'hidden' : ''}">
+                                <div class="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap max-h-[600px] overflow-y-auto pr-2">${n.text}</div>
+                            </div>
+                        </div>`;
+                    }).join('')}
+                </div>
+            `) : '';
+
+            // Digital
+            const digitalHtml = rpt.digital.length ? sectionCard('Digital Evidence', '💾', `
+                <div class="space-y-2">
+                    ${rpt.digital.map(d => `
+                        <div class="p-3 bg-viper-dark/50 rounded-lg">
+                            <span class="text-white text-sm font-medium">${d.officer}</span>
+                            <p class="text-gray-400 text-xs mt-1">${d.description}</p>
+                        </div>
+                    `).join('')}
+                </div>
+            `) : '';
+
+            return `
+            <div class="space-y-4">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-4">
+                        <button onclick="backToRmsList()" class="p-2 rounded-lg bg-viper-dark border border-gray-700 hover:border-viper-orange/50 text-gray-400 hover:text-white transition-colors">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                            </svg>
+                        </button>
+                        <div>
+                            <h2 class="text-2xl font-bold text-white">#${rpt.reportNumber || 'Unknown'} <span class="text-sm font-normal text-gray-400">${rpt.reportType || ''}</span></h2>
+                            <p class="text-sm text-gray-500">${rpt.agencyName || ''} · ${rpt.reportDate || rpt.fromDateTime || ''} · ${rpt.supplementNo ? 'Supplement: ' + rpt.supplementNo : ''}</p>
+                        </div>
+                    </div>
+                </div>
+                ${eventHtml}
+                ${offensesHtml}
+                ${personsHtml}
+                ${vehiclesHtml}
+                ${propertyHtml}
+                ${narrativesHtml}
+                ${digitalHtml}
+            </div>`;
+        }
 
         function getTraceImports() {
             const all = JSON.parse(localStorage.getItem('viperTraceImports')) || {};

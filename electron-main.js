@@ -115,8 +115,13 @@ function createWindow() {
     },
     title: 'VIPER - Network Intelligence',
     icon: iconPath,
-    show: true,
+    show: false,
     backgroundColor: '#1a1a1a'
+  });
+
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+    mainWindow.focus();
   });
 
   // Gate on security — show login page or main app

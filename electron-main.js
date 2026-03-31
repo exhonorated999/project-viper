@@ -473,6 +473,22 @@ ipcMain.handle('save-evidence-file', async (event, data) => {
   }
 });
 
+// --- Read evidence file (for inline preview) ---
+ipcMain.handle('read-evidence-file', async (event, filePath) => {
+  try {
+    const raw = fs.readFileSync(filePath);
+    // Decrypt if security is active and file is encrypted
+    if (security && security.isUnlocked() && security.isEncryptedBuffer(raw)) {
+      const decrypted = security.decryptBuffer(raw);
+      return Array.from(new Uint8Array(decrypted));
+    }
+    return Array.from(new Uint8Array(raw));
+  } catch (error) {
+    console.error('Failed to read evidence file:', error);
+    throw error;
+  }
+});
+
 // IPC Handlers for Aperture Integration
 ipcMain.handle('launch-aperture', async (event, caseData) => {
   const aperturePath = 'C:\\Users\\JUSTI\\Downloads\\Aperture.exe';

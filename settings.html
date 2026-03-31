@@ -1323,6 +1323,9 @@
         function initLicenseUI() {
             const lic = window.ViperLicensing;
             if (!lic) return;
+            // Show actual version from licensing module
+            const verLabel = document.getElementById('currentVersionLabel');
+            if (verLabel && lic.APP_VERSION) verLabel.textContent = lic.APP_VERSION;
             const status = lic.getLicenseStatus();
             const badge = document.getElementById('licStatusBadge');
             const countdown = document.getElementById('licDemoCountdown');

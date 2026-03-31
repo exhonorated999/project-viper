@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Evidence file storage
   saveEvidenceFile: (data) => ipcRenderer.invoke('save-evidence-file', data),
+  readEvidenceFile: (filePath) => ipcRenderer.invoke('read-evidence-file', filePath),
 
   // External app launch
   launchAperture: (caseData) => ipcRenderer.invoke('launch-aperture', caseData),

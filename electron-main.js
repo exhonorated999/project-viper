@@ -352,8 +352,9 @@ ipcMain.handle('report-get', async (event, caseNumber) => {
 
 ipcMain.handle('report-save', async (event, caseNumber, content, lastSaved) => {
   if (!mainWindow || mainWindow.isDestroyed()) return false;
-  const payload = JSON.stringify({ content, lastSaved });
-  const js = `(() => { const r = JSON.parse(localStorage.getItem('viperCaseReports') || '{}'); r[${JSON.stringify(caseNumber)}] = ${JSON.stringify(JSON.parse(payload))}; localStorage.setItem('viperCaseReports', JSON.stringify(r)); return true; })()`;
+  // Encode the entire payload as a safe JSON string to avoid injection issues with HTML content
+  const safePayload = JSON.stringify(JSON.stringify({ caseNumber, content, lastSaved }));
+  const js = `(() => { const d = JSON.parse(${safePayload}); const r = JSON.parse(localStorage.getItem('viperCaseReports') || '{}'); r[d.caseNumber] = { content: d.content, lastSaved: d.lastSaved }; localStorage.setItem('viperCaseReports', JSON.stringify(r)); return true; })()`;
   return await mainWindow.webContents.executeJavaScript(js);
 });
 

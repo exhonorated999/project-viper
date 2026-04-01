@@ -339,7 +339,7 @@ ipcMain.handle('open-report-window', async (event, caseNumber) => {
       nodeIntegration: false
     }
   });
-  reportWin.loadURL(`http://localhost:8000/case-detail-with-analytics.html?case=${encodeURIComponent(caseNumber)}&tab=reports&popout=1`);
+  reportWin.loadURL(`http://localhost:8000/report-popout.html?case=${encodeURIComponent(caseNumber)}`);
   return true;
 });
 

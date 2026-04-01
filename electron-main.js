@@ -352,9 +352,21 @@ ipcMain.handle('report-get', async (event, caseNumber) => {
 
 ipcMain.handle('report-save', async (event, caseNumber, content, lastSaved) => {
   if (!mainWindow || mainWindow.isDestroyed()) return false;
-  // Encode the entire payload as a safe JSON string to avoid injection issues with HTML content
   const safePayload = JSON.stringify(JSON.stringify({ caseNumber, content, lastSaved }));
-  const js = `(() => { const d = JSON.parse(${safePayload}); const r = JSON.parse(localStorage.getItem('viperCaseReports') || '{}'); r[d.caseNumber] = { content: d.content, lastSaved: d.lastSaved }; localStorage.setItem('viperCaseReports', JSON.stringify(r)); return true; })()`;
+  const js = `(() => {
+    const d = JSON.parse(${safePayload});
+    const r = JSON.parse(localStorage.getItem('viperCaseReports') || '{}');
+    r[d.caseNumber] = { content: d.content, lastSaved: d.lastSaved };
+    localStorage.setItem('viperCaseReports', JSON.stringify(r));
+    // Also update the live editor DOM and JS variables so auto-save doesn't overwrite
+    const ed = document.getElementById('reportEditor');
+    if (ed) ed.innerHTML = d.content;
+    if (typeof caseReport !== 'undefined') caseReport = d.content;
+    if (typeof reportLastSaved !== 'undefined') reportLastSaved = d.lastSaved;
+    const ts = document.getElementById('reportLastSavedText');
+    if (ts) ts.textContent = 'Last saved: ' + new Date(d.lastSaved).toLocaleString();
+    return true;
+  })()`;
   return await mainWindow.webContents.executeJavaScript(js);
 });
 

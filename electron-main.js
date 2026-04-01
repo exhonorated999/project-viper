@@ -325,6 +325,22 @@ ipcMain.handle('restore-backup', async (event, { backupPath }) => {
   return raw.toString('utf-8');
 });
 
+// --- Report Pop-out Window ---
+ipcMain.handle('open-report-window', async (event, caseNumber) => {
+  const reportWin = new BrowserWindow({
+    width: 900,
+    height: 700,
+    title: `Report — Case ${caseNumber}`,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  reportWin.loadURL(`http://localhost:8000/case-detail-with-analytics.html?case=${encodeURIComponent(caseNumber)}&tab=reports&popout=1`);
+  return true;
+});
+
 // --- RMS PDF Import ---
 ipcMain.handle('select-rms-files', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {

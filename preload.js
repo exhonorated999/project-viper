@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // RMS PDF Import
   openReportWindow: (caseNumber) => ipcRenderer.invoke('open-report-window', caseNumber),
+  reportGet: (caseNumber) => ipcRenderer.invoke('report-get', caseNumber),
+  reportSave: (caseNumber, content, lastSaved) => ipcRenderer.invoke('report-save', caseNumber, content, lastSaved),
   selectRmsFiles: () => ipcRenderer.invoke('select-rms-files'),
   extractPdfText: (filePath) => ipcRenderer.invoke('extract-pdf-text', filePath),
 

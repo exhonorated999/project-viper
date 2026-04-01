@@ -169,25 +169,29 @@
         const saveStatus = document.getElementById('saveStatus');
         const lastSavedEl = document.getElementById('lastSaved');
         const syncLabel = document.getElementById('syncLabel');
+        const api = window.electronAPI;
 
         function fmt(cmd) { document.execCommand(cmd, false, null); editor.focus(); }
 
-        // Load report from localStorage
-        function loadReport() {
-            const allReports = JSON.parse(localStorage.getItem('viperCaseReports') || '{}');
-            const data = allReports[caseNumber] || { content: '', lastSaved: null };
-            editor.innerHTML = data.content || '';
-            if (data.lastSaved) {
-                lastSavedEl.textContent = 'Last saved: ' + new Date(data.lastSaved).toLocaleString();
+        // Load report from main window's localStorage via IPC
+        async function loadReport() {
+            if (!api || !api.reportGet) return;
+            const data = await api.reportGet(caseNumber);
+            if (data) {
+                editor.innerHTML = data.content || '';
+                lastKnownSave = data.lastSaved || '';
+                if (data.lastSaved) {
+                    lastSavedEl.textContent = 'Last saved: ' + new Date(data.lastSaved).toLocaleString();
+                }
             }
         }
 
-        // Save report to localStorage
-        function saveReport() {
-            const allReports = JSON.parse(localStorage.getItem('viperCaseReports') || '{}');
+        // Save report to main window's localStorage via IPC
+        async function saveReport() {
+            if (!api || !api.reportSave) return;
             const now = new Date().toISOString();
-            allReports[caseNumber] = { content: editor.innerHTML, lastSaved: now };
-            localStorage.setItem('viperCaseReports', JSON.stringify(allReports));
+            await api.reportSave(caseNumber, editor.innerHTML, now);
+            lastKnownSave = now;
             lastSavedEl.textContent = 'Last saved: ' + new Date(now).toLocaleString();
             saveStatus.textContent = 'Synced';
             saveStatus.style.color = '#4ade80';
@@ -213,12 +217,12 @@
             }
         });
 
-        // Sync from main window changes (poll localStorage)
+        // Poll main window for changes (sync when popout not focused)
         let lastKnownSave = '';
-        setInterval(() => {
-            const allReports = JSON.parse(localStorage.getItem('viperCaseReports') || '{}');
-            const data = allReports[caseNumber];
-            if (data && data.lastSaved !== lastKnownSave && !document.hasFocus()) {
+        setInterval(async () => {
+            if (document.hasFocus() || !api || !api.reportGet) return;
+            const data = await api.reportGet(caseNumber);
+            if (data && data.lastSaved && data.lastSaved !== lastKnownSave) {
                 lastKnownSave = data.lastSaved;
                 editor.innerHTML = data.content || '';
                 lastSavedEl.textContent = 'Synced from main: ' + new Date(data.lastSaved).toLocaleString();
@@ -226,7 +230,6 @@
         }, 2000);
 
         loadReport();
-        lastKnownSave = (JSON.parse(localStorage.getItem('viperCaseReports') || '{}')[caseNumber] || {}).lastSaved || '';
         editor.focus();
     </script>
 </body>

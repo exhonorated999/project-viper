@@ -343,6 +343,20 @@ ipcMain.handle('open-report-window', async (event, caseNumber) => {
   return true;
 });
 
+// Report popout sync — relay through main window's localStorage
+ipcMain.handle('report-get', async (event, caseNumber) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+  const js = `(() => { const r = JSON.parse(localStorage.getItem('viperCaseReports') || '{}'); return r[${JSON.stringify(caseNumber)}] || null; })()`;
+  return await mainWindow.webContents.executeJavaScript(js);
+});
+
+ipcMain.handle('report-save', async (event, caseNumber, content, lastSaved) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const payload = JSON.stringify({ content, lastSaved });
+  const js = `(() => { const r = JSON.parse(localStorage.getItem('viperCaseReports') || '{}'); r[${JSON.stringify(caseNumber)}] = ${JSON.stringify(JSON.parse(payload))}; localStorage.setItem('viperCaseReports', JSON.stringify(r)); return true; })()`;
+  return await mainWindow.webContents.executeJavaScript(js);
+});
+
 // --- RMS PDF Import ---
 ipcMain.handle('select-rms-files', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {

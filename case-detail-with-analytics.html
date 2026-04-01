@@ -3026,21 +3026,20 @@
         }
 
         async function openReportPopout() {
-            console.log('openReportPopout called');
-            console.log('Current case:', currentCase);
-            
             // Save current report first
             saveReport(true);
-            
+
             try {
-                if (window.__TAURI__ && window.__TAURI__.core) {
-                    console.log('Using Tauri command to open window');
-                    await window.__TAURI__.core.invoke('open_report_window', {
-                        caseNumber: currentCase.caseNumber
-                    });
-                    console.log('Report window opened successfully');
+                if (window.electronAPI && window.electronAPI.openReportWindow) {
+                    await window.electronAPI.openReportWindow(currentCase.caseNumber);
                 } else {
-                    console.error('Tauri core API not available');
+                    // Fallback: open in a new browser window via the local server
+                    const popout = window.open(
+                        `http://localhost:8000/case-detail-with-analytics.html?case=${encodeURIComponent(currentCase.caseNumber)}&tab=reports&popout=1`,
+                        `report_${currentCase.caseNumber}`,
+                        'width=900,height=700,menubar=no,toolbar=no,location=no,status=no'
+                    );
+                    if (popout) popout.focus();
                 }
             } catch (error) {
                 console.error('Error opening report popout:', error);

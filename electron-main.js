@@ -65,10 +65,12 @@ const mimeTypes = {
 function startServer() {
   return new Promise((resolve, reject) => {
     server = http.createServer((req, res) => {
-      console.log(`Request: ${req.url}`);
+      const parsedUrl = new URL(req.url, 'http://localhost');
+      const pathname = decodeURIComponent(parsedUrl.pathname);
+      console.log(`Request: ${pathname}`);
       
-      let filePath = path.join(__dirname, req.url);
-      if (req.url === '/') {
+      let filePath = path.join(__dirname, pathname);
+      if (pathname === '/') {
         filePath = path.join(__dirname, 'case-detail-with-analytics.html');
       }
 

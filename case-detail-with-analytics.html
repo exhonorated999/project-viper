@@ -897,9 +897,16 @@
         
         // Load case data
         function loadCase() {
-            const caseId = parseInt(localStorage.getItem('currentCaseId'));
+            const params = new URLSearchParams(window.location.search);
             const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
-            currentCase = cases.find(c => c.id === caseId);
+
+            // Support loading by case number from URL (for pop-out windows)
+            if (params.get('case')) {
+                currentCase = cases.find(c => c.caseNumber === params.get('case'));
+            } else {
+                const caseId = parseInt(localStorage.getItem('currentCaseId'));
+                currentCase = cases.find(c => c.id === caseId);
+            }
             
             if (!currentCase) {
                 alert('Case not found');
@@ -963,7 +970,10 @@
             
             renderCaseHeader();
             renderTabs();
-            renderTabContent('overview');
+
+            // Support opening a specific tab from URL (for pop-out windows)
+            const startTab = params.get('tab');
+            renderTabContent(startTab && (startTab === 'overview' || currentCase.modules.includes(startTab)) ? startTab : 'overview');
         }
 
         function saveCaseTasks() {

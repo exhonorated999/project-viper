@@ -3045,7 +3045,7 @@
                 } else {
                     // Fallback: open in a new browser window via the local server
                     const popout = window.open(
-                        `http://localhost:8000/case-detail-with-analytics.html?case=${encodeURIComponent(currentCase.caseNumber)}&tab=reports&popout=1`,
+                        `http://localhost:8000/report-popout.html?case=${encodeURIComponent(currentCase.caseNumber)}`,
                         `report_${currentCase.caseNumber}`,
                         'width=900,height=700,menubar=no,toolbar=no,location=no,status=no'
                     );

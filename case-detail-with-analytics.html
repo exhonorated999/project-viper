@@ -3,9 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://d3js.org https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org; font-src 'self' data:; frame-src 'self' blob: https: http:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://d3js.org https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.genlogs.io; font-src 'self' data:; frame-src 'self' blob: https: http:;">
     <title>V.I.P.E.R. - Case Detail</title>
     <script src="modules/licensing.js"></script>
+    <script src="modules/genlogs-api.js"></script>
 
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -635,6 +636,45 @@
         body.light-mode .bg-viper-cyan\/20:hover {
             background: rgba(0, 150, 200, 0.3) !important;
         }
+
+        /* ── GenLogs Styles ─────────────────────────────────────── */
+        .gl-action-btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 600;
+            background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.35);
+            color: #34d399; cursor: pointer; transition: all 0.2s;
+        }
+        .gl-action-btn:hover { background: rgba(16,185,129,0.25); border-color: rgba(16,185,129,0.6); }
+        .gl-alert-btn { background: rgba(251,191,36,0.12); border-color: rgba(251,191,36,0.35); color: #fbbf24; }
+        .gl-alert-btn:hover { background: rgba(251,191,36,0.25); border-color: rgba(251,191,36,0.6); }
+
+        /* Slide-out Intel Panel */
+        .gl-panel-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 9998; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+        .gl-panel-overlay.active { opacity: 1; pointer-events: auto; }
+        .gl-panel { position: fixed; top: 0; right: -460px; width: 450px; height: 100vh; background: #0f1117; border-left: 1px solid rgba(16,185,129,0.25); z-index: 9999; transition: right 0.35s cubic-bezier(0.4,0,0.2,1); overflow-y: auto; box-shadow: -8px 0 32px rgba(0,0,0,0.5); }
+        .gl-panel.active { right: 0; }
+        .gl-panel-header { position: sticky; top: 0; background: linear-gradient(180deg, #0f1117 0%, #0f1117 90%, transparent); padding: 20px 24px 12px; z-index: 10; }
+        .gl-card { background: rgba(26,35,50,0.5); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 16px; margin: 0 16px 12px; animation: glCardIn 0.4s ease-out both; }
+        .gl-card:nth-child(2) { animation-delay: 0.06s; }
+        .gl-card:nth-child(3) { animation-delay: 0.12s; }
+        .gl-card:nth-child(4) { animation-delay: 0.18s; }
+        .gl-card:nth-child(5) { animation-delay: 0.24s; }
+        @keyframes glCardIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+        .gl-card-title { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #64748b; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+        .gl-card-title::before { content: ''; width: 3px; height: 14px; border-radius: 2px; background: #10b981; }
+        .gl-badge-pass { background: rgba(74,222,128,0.15); color: #4ade80; border: 1px solid rgba(74,222,128,0.3); padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+        .gl-badge-review { background: rgba(251,191,36,0.15); color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+        .gl-badge-fail { background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+        .gl-badge-unknown { background: rgba(100,116,139,0.15); color: #94a3b8; border: 1px solid rgba(100,116,139,0.3); padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+        .gl-skeleton { background: linear-gradient(90deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 100%); background-size: 200% 100%; animation: glShimmer 1.5s infinite; border-radius: 6px; height: 16px; margin: 6px 0; }
+        @keyframes glShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .gl-contact-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 8px; background: rgba(255,255,255,0.02); margin-bottom: 4px; }
+        .gl-contact-row:hover { background: rgba(255,255,255,0.05); }
+        .gl-copy-btn { background: rgba(0,224,255,0.1); border: 1px solid rgba(0,224,255,0.2); color: #00e0ff; padding: 2px 8px; border-radius: 4px; font-size: 10px; cursor: pointer; transition: all 0.15s; }
+        .gl-copy-btn:hover { background: rgba(0,224,255,0.25); }
+        .gl-sighting-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .gl-rule-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 13px; }
+        .gl-rule-icon { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; flex-shrink: 0; }
     </style>
 
     <!-- Aperture Module Scripts -->
@@ -7001,6 +7041,24 @@
                             ${f('Delivery Location', 'deliveryLocation')}
                             ${ta('Notes', 'notes')}
                         </div>
+                        ${GenLogs.isEnabled() ? `
+                        <div class="mt-5 pt-4 border-t border-emerald-500/20">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="text-emerald-400 text-xs font-bold tracking-wider uppercase">GenLogs Intelligence</span>
+                                <div class="flex-1 h-px bg-emerald-500/20"></div>
+                            </div>
+                            <div class="flex flex-wrap gap-2">
+                                ${item.mcNumber ? `<button onclick="event.stopPropagation(); openGenlogsVetPanel(${index}, 'mc')" class="gl-action-btn">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                                    Vet Carrier
+                                </button>` : ''}
+                                ${item.trailerPlate || item.trailerNumber ? `<button onclick="event.stopPropagation(); openGenlogsAlertModal(${index})" class="gl-action-btn gl-alert-btn">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+                                    Create Alert
+                                </button>` : ''}
+                                ${!item.mcNumber && !item.trailerPlate && !item.trailerNumber ? `<span class="text-gray-500 text-xs italic">Enter MC#, trailer plate, or trailer# to unlock GenLogs actions</span>` : ''}
+                            </div>
+                        </div>` : ''}
                     </div>
                 </div>`;
         }
@@ -18710,6 +18768,419 @@
             if (e.key === 'mediaPlayerEnabled') reportBounds();
         });
     })();
+    </script>
+
+    <!-- GenLogs Slide-Out Intel Panel -->
+    <div class="gl-panel-overlay" id="glPanelOverlay" onclick="closeGenlogsPanel()"></div>
+    <div class="gl-panel" id="glPanel">
+        <div class="gl-panel-header">
+            <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                    <span class="text-emerald-400 text-lg">🚛</span>
+                    <span class="text-emerald-400 font-bold text-sm tracking-wider uppercase">GenLogs Intel</span>
+                </div>
+                <button onclick="closeGenlogsPanel()" class="p-1.5 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div id="glPanelSubject" class="text-xs text-gray-500"></div>
+        </div>
+        <div id="glPanelContent" class="pb-8"></div>
+    </div>
+
+    <!-- GenLogs Alert Creation Modal -->
+    <div id="glAlertModal" class="fixed inset-0 z-[10000] hidden items-center justify-center" style="background:rgba(0,0,0,0.6);">
+        <div class="bg-[#161921] border border-emerald-500/20 rounded-2xl p-6 w-[440px] max-w-[95vw] shadow-2xl">
+            <div class="flex items-center justify-between mb-5">
+                <h3 class="text-lg font-bold text-emerald-400 flex items-center gap-2">🚨 Create GenLogs Alert</h3>
+                <button onclick="closeGenlogsAlertModal()" class="text-gray-400 hover:text-white"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+            </div>
+            <div id="glAlertModalBody" class="space-y-4"></div>
+        </div>
+    </div>
+
+    <script>
+    // ═══════════════════════════════════════════════════════════════════
+    //  GenLogs Integration — Intel Panel, Vetting, Alerts
+    // ═══════════════════════════════════════════════════════════════════
+
+    function openGenlogsPanel() {
+        document.getElementById('glPanelOverlay').classList.add('active');
+        document.getElementById('glPanel').classList.add('active');
+    }
+    function closeGenlogsPanel() {
+        document.getElementById('glPanelOverlay').classList.remove('active');
+        document.getElementById('glPanel').classList.remove('active');
+    }
+
+    // ── Vet Carrier from Cargo Item ──────────────────────────────────
+    async function openGenlogsVetPanel(cargoIndex) {
+        const item = cargoItems[cargoIndex];
+        if (!item) return;
+
+        // We need a USDOT number. MC# alone won't work for all endpoints.
+        // Prompt user for USDOT if not available (MC is on the item, but GenLogs needs USDOT)
+        let usdot = item.usdotNumber || '';
+        if (!usdot) {
+            usdot = prompt('Enter USDOT number for this carrier' + (item.carrierName ? ` (${item.carrierName})` : '') + ':');
+            if (!usdot) return;
+            // Save it back to the cargo item
+            item.usdotNumber = usdot.trim();
+            saveCargo();
+        }
+
+        openGenlogsPanel();
+        document.getElementById('glPanelSubject').innerHTML = `<span class="text-gray-300 font-medium">${item.carrierName || 'Carrier'}</span> &middot; USDOT ${usdot}` + (item.mcNumber ? ` &middot; MC ${item.mcNumber}` : '');
+
+        // Show loading skeletons
+        document.getElementById('glPanelContent').innerHTML = `
+            <div class="gl-card"><div class="gl-card-title">Carrier Profile</div>${'<div class="gl-skeleton" style="width:PERC%"></div>'.replace('PERC','85').repeat(1)}${'<div class="gl-skeleton" style="width:PERC%"></div>'.replace('PERC','60').repeat(1)}${'<div class="gl-skeleton" style="width:PERC%"></div>'.replace('PERC','70').repeat(1)}<div class="gl-skeleton" style="width:45%"></div></div>
+            <div class="gl-card"><div class="gl-card-title">Risk Assessment</div><div class="gl-skeleton" style="width:50%"></div><div class="gl-skeleton" style="width:80%"></div></div>
+            <div class="gl-card"><div class="gl-card-title">Sighting History</div><div class="gl-skeleton" style="width:90%"></div><div class="gl-skeleton" style="width:65%"></div></div>
+            <div class="gl-card"><div class="gl-card-title">Contacts</div><div class="gl-skeleton" style="width:75%"></div><div class="gl-skeleton" style="width:55%"></div></div>`;
+
+        try {
+            const intel = await GenLogs.fullCarrierIntel(usdot);
+            renderGenlogsIntelPanel(usdot, intel);
+        } catch (err) {
+            document.getElementById('glPanelContent').innerHTML = `<div class="gl-card" style="border-color:rgba(239,68,68,0.3)"><p class="text-red-400 text-sm">${err.message}</p><p class="text-gray-500 text-xs mt-2">Check your GenLogs credentials in Settings.</p></div>`;
+        }
+    }
+
+    function renderGenlogsIntelPanel(usdot, intel) {
+        const content = document.getElementById('glPanelContent');
+        let html = '';
+
+        // ── Profile Card ─────────────────────────────────────────────
+        const pd = intel.profile[usdot]?.fmcsa_detail || intel.profile?.error;
+        if (pd && !intel.profile.error) {
+            const statusColor = pd.carrier_status === 'Active' ? '#4ade80' : pd.carrier_status === 'Not Authorized' ? '#ef4444' : '#fbbf24';
+            html += `<div class="gl-card">
+                <div class="gl-card-title">Carrier Profile</div>
+                <div class="flex items-start justify-between mb-3">
+                    <div>
+                        <h3 class="text-white font-bold text-base">${pd.legal_name || 'N/A'}</h3>
+                        ${pd.dba_name && pd.dba_name !== 'N/A' ? `<p class="text-gray-400 text-xs">DBA: ${pd.dba_name}</p>` : ''}
+                    </div>
+                    <span style="color:${statusColor}; background:${statusColor}15; border: 1px solid ${statusColor}40; padding:3px 10px; border-radius:20px; font-size:11px; font-weight:700;">${pd.carrier_status || 'Unknown'}</span>
+                </div>
+                <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    <div class="text-gray-500">USDOT <span class="text-gray-300 font-mono">${pd.usdot_number || usdot}</span></div>
+                    <div class="text-gray-500">MC# <span class="text-gray-300 font-mono">${pd.mc_mx_ff_number || 'N/A'}</span></div>
+                    <div class="text-gray-500">Entity <span class="text-gray-300">${pd.entity_type || 'N/A'}</span></div>
+                    <div class="text-gray-500">Operation <span class="text-gray-300">${pd.carrier_operation || 'N/A'}</span></div>
+                    <div class="text-gray-500">Power Units <span class="text-gray-300 font-bold">${pd.power_units || 'N/A'}</span></div>
+                    <div class="text-gray-500">Drivers <span class="text-gray-300 font-bold">${pd.drivers || 'N/A'}</span></div>
+                    <div class="text-gray-500">Phone <span class="text-gray-300">${pd.telephone || 'N/A'}</span></div>
+                    <div class="text-gray-500">Email <span class="text-gray-300 break-all">${pd.email || 'N/A'}</span></div>
+                </div>
+                ${pd.physical_address ? `<div class="mt-2 text-xs text-gray-500">📍 ${pd.physical_address}</div>` : ''}
+                ${pd.cargo_carried ? `<div class="mt-2 flex flex-wrap gap-1">${pd.cargo_carried.split(',').map(c => `<span class="text-[10px] px-2 py-0.5 rounded-full bg-viper-purple/15 text-viper-purple border border-viper-purple/25">${c.trim()}</span>`).join('')}</div>` : ''}
+            </div>`;
+
+            // Equipment pairings
+            const eq = intel.profile[usdot]?.equipment_pairings;
+            if (eq) {
+                const glEq = eq.genlogs || [];
+                const fmcsaEq = eq.fmcsa || [];
+                if (glEq.length || fmcsaEq.length) {
+                    html += `<div class="gl-card"><div class="gl-card-title">Equipment Pairings</div>`;
+                    const renderBars = (items, label) => {
+                        if (!items.length) return '';
+                        return `<div class="mb-2"><span class="text-[10px] text-gray-500 uppercase tracking-wider">${label}</span>` +
+                            items.map(e => `<div class="flex items-center gap-2 mt-1"><span class="text-xs text-gray-300 w-20 truncate">${e.name}</span><div class="flex-1 h-2 bg-gray-800 rounded-full overflow-hidden"><div class="h-full rounded-full bg-emerald-500/60" style="width:${e.value_percent}%"></div></div><span class="text-xs text-gray-400 w-12 text-right">${e.value_percent}%</span></div>`).join('') + '</div>';
+                    };
+                    html += renderBars(glEq, 'GenLogs') + renderBars(fmcsaEq, 'FMCSA') + '</div>';
+                }
+            }
+        } else {
+            html += `<div class="gl-card"><div class="gl-card-title">Carrier Profile</div><p class="text-gray-500 text-sm">${intel.profile.error || 'No profile data available'}</p></div>`;
+        }
+
+        // ── Risk Assessment Card ─────────────────────────────────────
+        const vd = intel.vetting;
+        if (vd && !vd.error) {
+            const rs = vd.rule_status || {};
+            const passN = rs.pass?.total || 0;
+            const reviewN = rs.review?.total || 0;
+            const failN = rs.fail?.total || 0;
+            const total = passN + reviewN + failN;
+            const overallClass = failN > 0 ? 'gl-badge-fail' : reviewN > 0 ? 'gl-badge-review' : passN > 0 ? 'gl-badge-pass' : 'gl-badge-unknown';
+            const overallLabel = failN > 0 ? '🔴 FAIL' : reviewN > 0 ? '⚠️ REVIEW' : passN > 0 ? '✅ PASS' : '? UNKNOWN';
+
+            html += `<div class="gl-card">
+                <div class="gl-card-title">Risk Assessment</div>
+                <div class="flex items-center gap-3 mb-3">
+                    <span class="${overallClass}">${overallLabel}</span>
+                    <div class="flex gap-3 text-xs">
+                        <span class="text-green-400">${passN} pass</span>
+                        <span class="text-yellow-400">${reviewN} review</span>
+                        <span class="text-red-400">${failN} fail</span>
+                    </div>
+                </div>
+                ${total > 0 ? `<div class="h-2 rounded-full overflow-hidden flex bg-gray-800 mb-3">
+                    ${passN ? `<div class="h-full bg-green-500" style="width:${(passN/total*100).toFixed(1)}%"></div>` : ''}
+                    ${reviewN ? `<div class="h-full bg-yellow-500" style="width:${(reviewN/total*100).toFixed(1)}%"></div>` : ''}
+                    ${failN ? `<div class="h-full bg-red-500" style="width:${(failN/total*100).toFixed(1)}%"></div>` : ''}
+                </div>` : ''}
+                ${(vd.rules || []).map(r => {
+                    const icon = r.status === 'pass' ? '✅' : r.status === 'fail' ? '🔴' : r.status === 'review' ? '⚠️' : '❓';
+                    const color = r.status === 'pass' ? '#4ade80' : r.status === 'fail' ? '#ef4444' : '#fbbf24';
+                    return `<div class="gl-rule-row"><span class="gl-rule-icon" style="background:${color}20; color:${color}">${icon}</span><span class="text-gray-300 flex-1">${r.rule_result_description || r.category || 'Rule'}</span><span class="text-xs" style="color:${color}">${r.status}</span></div>`;
+                }).join('')}
+            </div>`;
+        } else {
+            html += `<div class="gl-card"><div class="gl-card-title">Risk Assessment</div><p class="text-gray-500 text-sm">${vd?.error || 'Vetting data unavailable'}</p></div>`;
+        }
+
+        // ── Sighting History Card ────────────────────────────────────
+        const sightings = intel.profile[usdot]?.sightings || [];
+        html += `<div class="gl-card"><div class="gl-card-title">Sighting History</div>`;
+        if (sightings.length) {
+            // Mini map placeholder (Leaflet)
+            html += `<div id="glSightingMap" style="height:180px; border-radius:8px; margin-bottom:12px; background:#1a1d2e; border:1px solid rgba(255,255,255,0.06);"></div>`;
+            html += `<div class="space-y-1 max-h-[200px] overflow-y-auto">`;
+            sightings.slice(0, 20).forEach(s => {
+                const daysAgo = Math.ceil((Date.now() - new Date(s.sighting_date).getTime()) / 86400000);
+                const recency = daysAgo <= 7 ? '#4ade80' : daysAgo <= 30 ? '#fbbf24' : daysAgo <= 90 ? '#f97316' : '#64748b';
+                html += `<div class="flex items-center gap-2 text-xs py-1">
+                    <div class="gl-sighting-dot" style="background:${recency}"></div>
+                    <span class="text-gray-300 w-20">${s.sighting_date}</span>
+                    <span class="text-gray-400">${s.state_seen || '?'} ${s.location_zip || ''}</span>
+                    <span class="text-gray-500 ml-auto">${s.sightings || 1}× &middot; ${s.source || ''}</span>
+                </div>`;
+            });
+            html += `</div>`;
+            if (sightings.length > 20) html += `<p class="text-gray-500 text-xs mt-1">+${sightings.length - 20} more sightings</p>`;
+        } else {
+            html += `<p class="text-gray-500 text-sm">No sightings found for this carrier</p>`;
+        }
+        html += `</div>`;
+
+        // ── Contacts Card ────────────────────────────────────────────
+        const cd = intel.contacts?.data?.[usdot] || intel.contacts?.data;
+        if (cd && !intel.contacts.error) {
+            html += `<div class="gl-card"><div class="gl-card-title">Contacts</div>`;
+            const renderContact = (c, badge) => {
+                const name = c.name || '';
+                const phone = c.phone || '';
+                const email = c.email || '';
+                if (!name && !phone && !email) return '';
+                return `<div class="gl-contact-row">
+                    <div class="flex-1 min-w-0">
+                        ${name ? `<div class="text-white text-sm font-medium truncate">${name}</div>` : ''}
+                        <div class="flex gap-3 text-xs text-gray-400 mt-0.5">
+                            ${phone ? `<span>📞 ${phone}</span>` : ''}
+                            ${email ? `<span class="truncate">✉️ ${email}</span>` : ''}
+                        </div>
+                    </div>
+                    <div class="flex gap-1 flex-shrink-0">
+                        ${phone ? `<button class="gl-copy-btn" onclick="navigator.clipboard.writeText('${phone.replace(/'/g,'')}')">📋</button>` : ''}
+                        ${badge}
+                    </div>
+                </div>`;
+            };
+            if (cd.dispatch_contact?.length) {
+                html += `<div class="text-[10px] text-emerald-400 uppercase tracking-wider mb-1 font-bold">✓ Verified Dispatch</div>`;
+                cd.dispatch_contact.forEach(c => { html += renderContact(c, '<span class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">Verified</span>'); });
+            }
+            if (cd.fmcsa_contact) {
+                html += `<div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1 mt-2">FMCSA</div>`;
+                const fc = Array.isArray(cd.fmcsa_contact) ? cd.fmcsa_contact : [cd.fmcsa_contact];
+                fc.forEach(c => { html += renderContact(c, '<span class="text-[9px] px-1.5 py-0.5 rounded bg-gray-700 text-gray-400">FMCSA</span>'); });
+            }
+            if (cd.onboarded_contacts?.length) {
+                html += `<div class="text-[10px] text-viper-cyan uppercase tracking-wider mb-1 mt-2">Onboarded</div>`;
+                cd.onboarded_contacts.forEach(c => { html += renderContact(c, '<span class="text-[9px] px-1.5 py-0.5 rounded bg-viper-cyan/15 text-viper-cyan border border-viper-cyan/25">Onboarded</span>'); });
+            }
+            html += `</div>`;
+        } else {
+            html += `<div class="gl-card"><div class="gl-card-title">Contacts</div><p class="text-gray-500 text-sm">${intel.contacts?.error || 'No contacts available'}</p></div>`;
+        }
+
+        // Quick actions footer
+        html += `<div class="gl-card" style="background:rgba(16,185,129,0.05); border-color:rgba(16,185,129,0.15);">
+            <div class="flex gap-2">
+                <button onclick="openGenlogsAlertFromPanel('${usdot}')" class="gl-alert-btn flex-1 justify-center" style="padding:8px;">🚨 Create Alert for this Carrier</button>
+            </div>
+        </div>`;
+
+        content.innerHTML = html;
+
+        // Init sighting map if we have data
+        if (sightings.length && typeof L !== 'undefined') {
+            setTimeout(() => initGlSightingMap(sightings), 100);
+        }
+    }
+
+    function initGlSightingMap(sightings) {
+        const mapEl = document.getElementById('glSightingMap');
+        if (!mapEl || !window.L) return;
+        const map = L.map(mapEl, { zoomControl: false, attributionControl: false }).setView([39.8, -98.5], 4);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 18 }).addTo(map);
+        const bounds = [];
+        sightings.forEach(s => {
+            // Sightings have state_seen and location_zip but no lat/lon — we approximate from state
+            // For precise mapping we'd need geocoding; for now we use zip prefix
+            // This is a visual approximation
+            if (s.state_seen) {
+                const coords = stateCenter(s.state_seen);
+                if (coords) {
+                    const daysAgo = Math.ceil((Date.now() - new Date(s.sighting_date).getTime()) / 86400000);
+                    const color = daysAgo <= 7 ? '#4ade80' : daysAgo <= 30 ? '#fbbf24' : daysAgo <= 90 ? '#f97316' : '#64748b';
+                    // Small random offset so multiple same-state dots don't stack
+                    const lat = coords[0] + (Math.random() - 0.5) * 1.5;
+                    const lon = coords[1] + (Math.random() - 0.5) * 1.5;
+                    L.circleMarker([lat, lon], { radius: 5 + Math.min(s.sightings || 1, 10), color: color, fillColor: color, fillOpacity: 0.6, weight: 1 })
+                        .bindPopup(`<b>${s.state_seen}</b> ${s.location_zip || ''}<br>${s.sighting_date}<br>${s.sightings || 1} detection(s)`)
+                        .addTo(map);
+                    bounds.push([lat, lon]);
+                }
+            }
+        });
+        if (bounds.length) map.fitBounds(bounds, { padding: [20, 20] });
+    }
+
+    function stateCenter(abbr) {
+        const centers = {AL:[32.8,-86.8],AK:[64.2,-152.5],AZ:[34.0,-111.1],AR:[35.2,-91.8],CA:[36.8,-119.4],CO:[39.1,-105.4],CT:[41.6,-72.7],DE:[38.9,-75.5],FL:[27.6,-81.5],GA:[32.2,-83.6],HI:[19.9,-155.6],ID:[44.1,-114.7],IL:[40.6,-89.3],IN:[40.3,-86.1],IA:[41.9,-93.1],KS:[39.0,-98.5],KY:[37.7,-84.3],LA:[30.9,-92.3],ME:[45.3,-69.4],MD:[39.0,-76.6],MA:[42.4,-71.4],MI:[44.3,-84.5],MN:[46.7,-94.7],MS:[32.7,-89.7],MO:[37.9,-91.8],MT:[46.8,-110.4],NE:[41.1,-98.3],NV:[38.8,-116.4],NH:[43.2,-71.6],NJ:[40.1,-74.4],NM:[34.5,-105.9],NY:[43.0,-75.0],NC:[35.8,-80.8],ND:[47.5,-99.8],OH:[40.4,-82.9],OK:[35.0,-97.1],OR:[43.8,-120.6],PA:[41.2,-77.2],RI:[41.6,-71.5],SC:[33.8,-80.9],SD:[43.9,-99.4],TN:[35.5,-86.6],TX:[31.1,-97.6],UT:[39.3,-111.7],VT:[44.0,-72.7],VA:[37.4,-78.2],WA:[47.8,-120.7],WV:[38.6,-80.5],WI:[43.8,-88.8],WY:[43.1,-107.6],DC:[38.9,-77.0]};
+        return centers[(abbr||'').toUpperCase()] || null;
+    }
+
+    // ── Alert Creation ───────────────────────────────────────────────
+    function openGenlogsAlertModal(cargoIndex) {
+        const item = cargoItems[cargoIndex];
+        if (!item) return;
+        const caseName = currentCase ? currentCase.caseNumber : 'Unknown';
+        const modal = document.getElementById('glAlertModal');
+        modal.style.display = 'flex';
+        modal.querySelector('#glAlertModalBody').innerHTML = `
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-xs text-gray-400 mb-1">Alert Name</label>
+                    <input id="glAlertName" type="text" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-emerald-400 focus:outline-none text-sm"
+                        value="Case ${caseName} - ${item.trailerPlate || item.trailerNumber || item.carrierName || 'Alert'}">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">License Plate</label>
+                        <input id="glAlertPlate" type="text" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-emerald-400 focus:outline-none text-sm"
+                            value="${item.trailerPlate || ''}">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">Trailer Number</label>
+                        <input id="glAlertTrailer" type="text" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-emerald-400 focus:outline-none text-sm"
+                            value="${item.trailerNumber || ''}">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">VIN (last 6)</label>
+                        <input id="glAlertVin" type="text" maxlength="6" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-emerald-400 focus:outline-none text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">USDOT Number</label>
+                        <input id="glAlertDot" type="text" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-emerald-400 focus:outline-none text-sm"
+                            value="${item.usdotNumber || ''}">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-400 mb-1">Notification Email</label>
+                    <input id="glAlertEmail" type="email" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-emerald-400 focus:outline-none text-sm"
+                        value="${localStorage.getItem('genlogsEmail') || ''}">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-400 mb-1">Alert Type</label>
+                    <div class="flex gap-2">
+                        <label class="flex-1 cursor-pointer">
+                            <input type="radio" name="glAlertType" value="hot" checked class="hidden peer">
+                            <div class="peer-checked:bg-red-500/20 peer-checked:border-red-500/50 peer-checked:text-red-400 text-center py-2 rounded-lg border border-gray-600 text-gray-400 text-sm font-medium transition-all">
+                                🔴 Hot (15 min)
+                            </div>
+                        </label>
+                        <label class="flex-1 cursor-pointer">
+                            <input type="radio" name="glAlertType" value="normal" class="hidden peer">
+                            <div class="peer-checked:bg-blue-500/20 peer-checked:border-blue-500/50 peer-checked:text-blue-400 text-center py-2 rounded-lg border border-gray-600 text-gray-400 text-sm font-medium transition-all">
+                                📋 Daily
+                            </div>
+                        </label>
+                    </div>
+                </div>
+                <button onclick="submitGenlogsAlert()" id="glAlertSubmitBtn"
+                    class="w-full py-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-lg font-medium text-emerald-400 transition-all text-sm mt-2">
+                    Create Alert
+                </button>
+                <div id="glAlertResult" class="hidden text-sm rounded-lg p-3"></div>
+            </div>`;
+    }
+
+    function openGenlogsAlertFromPanel(usdot) {
+        closeGenlogsPanel();
+        const modal = document.getElementById('glAlertModal');
+        modal.style.display = 'flex';
+        const caseName = currentCase ? currentCase.caseNumber : 'Unknown';
+        modal.querySelector('#glAlertModalBody').innerHTML = `
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-xs text-gray-400 mb-1">Alert Name</label>
+                    <input id="glAlertName" type="text" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-emerald-400 focus:outline-none text-sm" value="Case ${caseName} - USDOT ${usdot}">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="block text-xs text-gray-400 mb-1">USDOT Number</label><input id="glAlertDot" type="text" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-emerald-400 focus:outline-none text-sm" value="${usdot}"></div>
+                    <div><label class="block text-xs text-gray-400 mb-1">License Plate</label><input id="glAlertPlate" type="text" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-emerald-400 focus:outline-none text-sm"></div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="block text-xs text-gray-400 mb-1">Trailer Number</label><input id="glAlertTrailer" type="text" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-emerald-400 focus:outline-none text-sm"></div>
+                    <div><label class="block text-xs text-gray-400 mb-1">VIN (last 6)</label><input id="glAlertVin" type="text" maxlength="6" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-emerald-400 focus:outline-none text-sm"></div>
+                </div>
+                <div><label class="block text-xs text-gray-400 mb-1">Notification Email</label><input id="glAlertEmail" type="email" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-emerald-400 focus:outline-none text-sm" value="${localStorage.getItem('genlogsEmail') || ''}"></div>
+                <div>
+                    <label class="block text-xs text-gray-400 mb-1">Alert Type</label>
+                    <div class="flex gap-2">
+                        <label class="flex-1 cursor-pointer"><input type="radio" name="glAlertType" value="hot" checked class="hidden peer"><div class="peer-checked:bg-red-500/20 peer-checked:border-red-500/50 peer-checked:text-red-400 text-center py-2 rounded-lg border border-gray-600 text-gray-400 text-sm font-medium transition-all">🔴 Hot (15 min)</div></label>
+                        <label class="flex-1 cursor-pointer"><input type="radio" name="glAlertType" value="normal" class="hidden peer"><div class="peer-checked:bg-blue-500/20 peer-checked:border-blue-500/50 peer-checked:text-blue-400 text-center py-2 rounded-lg border border-gray-600 text-gray-400 text-sm font-medium transition-all">📋 Daily</div></label>
+                    </div>
+                </div>
+                <button onclick="submitGenlogsAlert()" id="glAlertSubmitBtn" class="w-full py-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-lg font-medium text-emerald-400 transition-all text-sm mt-2">Create Alert</button>
+                <div id="glAlertResult" class="hidden text-sm rounded-lg p-3"></div>
+            </div>`;
+    }
+
+    function closeGenlogsAlertModal() {
+        document.getElementById('glAlertModal').style.display = 'none';
+    }
+
+    async function submitGenlogsAlert() {
+        const btn = document.getElementById('glAlertSubmitBtn');
+        btn.textContent = 'Creating...';
+        btn.disabled = true;
+        try {
+            const data = {
+                alert_name: document.getElementById('glAlertName').value.trim(),
+                email: document.getElementById('glAlertEmail').value.trim(),
+                alert_type: document.querySelector('input[name="glAlertType"]:checked')?.value || 'hot',
+                disabled: false,
+                license_plate: document.getElementById('glAlertPlate')?.value.trim() || '',
+                trailer_number: document.getElementById('glAlertTrailer')?.value.trim() || '',
+                vin: document.getElementById('glAlertVin')?.value.trim() || '',
+                usdot_number: document.getElementById('glAlertDot')?.value.trim() || ''
+            };
+            if (!data.alert_name || !data.email) throw new Error('Alert name and email are required');
+            const result = await GenLogs.createAlert(data);
+            const el = document.getElementById('glAlertResult');
+            el.className = 'text-sm rounded-lg p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400';
+            el.innerHTML = `✅ Alert created! ID: <span class="font-mono">${result.id || 'N/A'}</span><br><span class="text-xs text-gray-400">${data.alert_type === 'hot' ? 'Checking every 15 minutes' : 'Daily scan'} — notifications to ${data.email}</span>`;
+            el.style.display = 'block';
+            btn.textContent = '✅ Created!';
+            setTimeout(() => closeGenlogsAlertModal(), 3000);
+        } catch (err) {
+            const el = document.getElementById('glAlertResult');
+            el.className = 'text-sm rounded-lg p-3 bg-red-500/10 border border-red-500/30 text-red-400';
+            el.textContent = '❌ ' + err.message;
+            el.style.display = 'block';
+            btn.textContent = 'Create Alert';
+            btn.disabled = false;
+        }
+    }
     </script>
 </body>
 </html>

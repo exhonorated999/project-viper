@@ -39,13 +39,39 @@
             font-size: 12px;
             color: #64748b;
         }
-        .header .status {
-            font-size: 11px;
+        .save-btn {
+            -webkit-app-region: no-drag;
+            background: rgba(0, 224, 255, 0.15);
+            border: 1px solid rgba(0, 224, 255, 0.4);
+            color: #00e0ff;
+            padding: 6px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        .save-btn:hover {
+            background: rgba(0, 224, 255, 0.25);
+            border-color: rgba(0, 224, 255, 0.6);
+        }
+        .save-btn.saved {
+            background: rgba(74, 222, 128, 0.15);
+            border-color: rgba(74, 222, 128, 0.4);
             color: #4ade80;
-            background: rgba(74, 222, 128, 0.1);
-            border: 1px solid rgba(74, 222, 128, 0.25);
-            padding: 2px 8px;
-            border-radius: 4px;
+        }
+        .save-btn.unsaved {
+            background: rgba(251, 191, 36, 0.15);
+            border-color: rgba(251, 191, 36, 0.4);
+            color: #fbbf24;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
         }
         .toolbar {
             background: #161921;
@@ -80,69 +106,70 @@
             width: 1px;
             height: 20px;
             background: rgba(255,255,255,0.08);
-            margin: 0 4px;
+            margin: 0 6px;
         }
         .toolbar select {
             background: #1e2130;
-            color: #94a3b8;
             border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 4px;
+            color: #94a3b8;
             padding: 3px 6px;
+            border-radius: 4px;
             font-size: 12px;
             cursor: pointer;
         }
         .editor-wrap {
             flex: 1;
+            padding: 16px;
             overflow: hidden;
-            padding: 0;
+            display: flex;
+            flex-direction: column;
         }
         #editor {
-            width: 100%;
-            height: 100%;
-            padding: 20px 24px;
-            font-family: Arial, sans-serif;
+            flex: 1;
+            background: #1a1d2e;
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 6px;
+            padding: 16px;
+            color: #e2e8f0;
+            font-family: 'Segoe UI', Arial, sans-serif;
             font-size: 14px;
             line-height: 1.7;
-            color: #e2e8f0;
-            background: #0f1117;
-            border: none;
-            outline: none;
             overflow-y: auto;
-            resize: none;
+            outline: none;
         }
-        #editor:empty::before {
-            content: 'Start typing your report here...';
-            color: #4a5568;
+        #editor:focus {
+            border-color: rgba(0, 224, 255, 0.3);
         }
         .footer {
             background: #161921;
             border-top: 1px solid rgba(255,255,255,0.06);
             padding: 6px 16px;
             display: flex;
-            align-items: center;
             justify-content: space-between;
+            align-items: center;
             font-size: 11px;
-            color: #64748b;
+            color: #475569;
             flex-shrink: 0;
         }
-        .footer .save-status.saved { color: #4ade80; }
-        .footer .save-status.saving { color: #fbbf24; }
     </style>
 </head>
 <body>
     <div class="header">
         <div class="header-left">
             <h1>📝 Report Editor</h1>
-            <span class="case-num" id="caseLabel">Case</span>
+            <span class="case-num" id="caseLabel"></span>
         </div>
-        <span class="status" id="saveStatus">Synced</span>
+        <button class="save-btn" id="saveBtn" onclick="saveToMain()">
+            💾 Save to Main
+        </button>
     </div>
+
     <div class="toolbar">
         <button onclick="fmt('bold')" title="Bold"><b>B</b></button>
         <button onclick="fmt('italic')" title="Italic"><i>I</i></button>
         <button onclick="fmt('underline')" title="Underline"><u>U</u></button>
         <div class="sep"></div>
-        <select onchange="document.execCommand('fontSize', false, this.value); this.blur();" title="Font Size">
+        <select onchange="document.execCommand('fontSize', false, this.value); editor.focus();">
             <option value="3">14</option>
             <option value="1">10</option>
             <option value="2">12</option>
@@ -151,12 +178,14 @@
             <option value="6">24</option>
         </select>
     </div>
+
     <div class="editor-wrap">
-        <div id="editor" contenteditable="true"></div>
+        <div id="editor" contenteditable="true" spellcheck="true"></div>
     </div>
+
     <div class="footer">
-        <span id="lastSaved">Loading...</span>
-        <span class="save-status saved" id="syncLabel">● Auto-sync enabled</span>
+        <span id="lastSaved">Not yet saved</span>
+        <span>Ctrl+S to save</span>
     </div>
 
     <script>
@@ -166,68 +195,63 @@
         document.title = `Report — ${caseNumber}`;
 
         const editor = document.getElementById('editor');
-        const saveStatus = document.getElementById('saveStatus');
+        const saveBtn = document.getElementById('saveBtn');
         const lastSavedEl = document.getElementById('lastSaved');
-        const syncLabel = document.getElementById('syncLabel');
         const api = window.electronAPI;
+        let hasUnsaved = false;
 
         function fmt(cmd) { document.execCommand(cmd, false, null); editor.focus(); }
 
-        // Load report from main window's localStorage via IPC
+        // Load report from main window on open
         async function loadReport() {
             if (!api || !api.reportGet) return;
             const data = await api.reportGet(caseNumber);
             if (data) {
                 editor.innerHTML = data.content || '';
-                lastKnownSave = data.lastSaved || '';
                 if (data.lastSaved) {
-                    lastSavedEl.textContent = 'Last saved: ' + new Date(data.lastSaved).toLocaleString();
+                    lastSavedEl.textContent = 'Loaded from main: ' + new Date(data.lastSaved).toLocaleString();
                 }
             }
         }
 
-        // Save report to main window's localStorage via IPC
-        async function saveReport() {
-            if (!api || !api.reportSave) return;
+        // Save to main window via IPC
+        async function saveToMain() {
+            if (!api || !api.reportSave) {
+                alert('Cannot save — IPC not available');
+                return;
+            }
             const now = new Date().toISOString();
-            await api.reportSave(caseNumber, editor.innerHTML, now);
-            lastKnownSave = now;
-            lastSavedEl.textContent = 'Last saved: ' + new Date(now).toLocaleString();
-            saveStatus.textContent = 'Synced';
-            saveStatus.style.color = '#4ade80';
-            syncLabel.className = 'save-status saved';
+            const result = await api.reportSave(caseNumber, editor.innerHTML, now);
+            if (result) {
+                lastSavedEl.textContent = 'Saved to main: ' + new Date(now).toLocaleString();
+                lastSavedEl.style.color = '#4ade80';
+                saveBtn.textContent = '✅ Saved!';
+                saveBtn.className = 'save-btn saved';
+                hasUnsaved = false;
+                setTimeout(() => {
+                    saveBtn.innerHTML = '💾 Save to Main';
+                    saveBtn.className = 'save-btn';
+                    lastSavedEl.style.color = '';
+                }, 2000);
+            }
         }
 
-        // Auto-save on typing (debounced)
-        let saveTimer = null;
+        // Track unsaved changes
         editor.addEventListener('input', () => {
-            saveStatus.textContent = 'Unsaved';
-            saveStatus.style.color = '#fbbf24';
-            syncLabel.className = 'save-status saving';
-            clearTimeout(saveTimer);
-            saveTimer = setTimeout(saveReport, 800);
+            if (!hasUnsaved) {
+                hasUnsaved = true;
+                saveBtn.innerHTML = '💾 Save to Main *';
+                saveBtn.className = 'save-btn unsaved';
+            }
         });
 
-        // Ctrl+S manual save
+        // Ctrl+S
         document.addEventListener('keydown', (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 's') {
                 e.preventDefault();
-                clearTimeout(saveTimer);
-                saveReport();
+                saveToMain();
             }
         });
-
-        // Poll main window for changes (sync when popout not focused)
-        let lastKnownSave = '';
-        setInterval(async () => {
-            if (document.hasFocus() || !api || !api.reportGet) return;
-            const data = await api.reportGet(caseNumber);
-            if (data && data.lastSaved && data.lastSaved !== lastKnownSave) {
-                lastKnownSave = data.lastSaved;
-                editor.innerHTML = data.content || '';
-                lastSavedEl.textContent = 'Synced from main: ' + new Date(data.lastSaved).toLocaleString();
-            }
-        }, 2000);
 
         loadReport();
         editor.focus();

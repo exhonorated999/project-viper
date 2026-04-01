@@ -717,6 +717,95 @@
                     </div>
                 </div>
                 
+                <!-- GenLogs Intelligence Panel (conditionally rendered) -->
+                <div id="glDashboardPanel" class="hidden">
+                    <div class="glass-card rounded-xl p-6 border border-emerald-500/30" style="background: linear-gradient(135deg, rgba(16,185,129,0.05) 0%, rgba(26,35,50,0.7) 100%);">
+                        <div class="flex items-center justify-between mb-5">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                                    <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 class="text-lg font-bold text-emerald-300">GenLogs Intelligence</h3>
+                                    <p class="text-xs text-gray-400" id="glConnectionStatus">Checking connection…</p>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button onclick="glDashRefresh()" class="p-2 rounded-lg hover:bg-emerald-500/10 text-gray-400 hover:text-emerald-400 transition" title="Refresh">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                                </button>
+                                <button onclick="openGlQuickLookup()" class="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-medium border border-emerald-500/30 transition">
+                                    🔍 Quick Carrier Lookup
+                                </button>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-3 gap-4">
+                            <!-- Active Alerts -->
+                            <div class="rounded-lg p-4" style="background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.15);">
+                                <div class="flex items-center justify-between mb-3">
+                                    <h4 class="text-sm font-semibold text-emerald-300">Active Alerts</h4>
+                                    <span id="glAlertCount" class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold">0</span>
+                                </div>
+                                <div id="glAlertsList" class="space-y-2 max-h-32 overflow-y-auto text-xs">
+                                    <p class="text-gray-500 italic">No active alerts</p>
+                                </div>
+                            </div>
+                            <!-- Recent Activity -->
+                            <div class="rounded-lg p-4" style="background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.15);">
+                                <div class="flex items-center justify-between mb-3">
+                                    <h4 class="text-sm font-semibold text-emerald-300">Recent Activity</h4>
+                                </div>
+                                <div id="glActivityFeed" class="space-y-2 max-h-32 overflow-y-auto text-xs">
+                                    <p class="text-gray-500 italic">No recent activity</p>
+                                </div>
+                            </div>
+                            <!-- Quick Stats -->
+                            <div class="rounded-lg p-4" style="background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.15);">
+                                <div class="flex items-center justify-between mb-3">
+                                    <h4 class="text-sm font-semibold text-emerald-300">Intelligence Stats</h4>
+                                </div>
+                                <div class="space-y-3">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-gray-400">Carriers Vetted</span>
+                                        <span id="glStatVetted" class="text-emerald-300 font-bold">0</span>
+                                    </div>
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-gray-400">Alerts Created</span>
+                                        <span id="glStatAlerts" class="text-emerald-300 font-bold">0</span>
+                                    </div>
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-gray-400">Lookups Today</span>
+                                        <span id="glStatLookups" class="text-emerald-300 font-bold">0</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- GenLogs Quick Carrier Lookup Modal -->
+                <div id="glQuickLookupModal" class="fixed inset-0 z-[9999] hidden items-center justify-center" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);">
+                    <div class="rounded-xl p-6 w-full max-w-md border border-emerald-500/30" style="background: rgba(15,23,42,0.97); backdrop-filter: blur(20px);">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-lg font-bold text-emerald-300">Quick Carrier Lookup</h3>
+                            <button onclick="closeGlQuickLookup()" class="text-gray-400 hover:text-white">&times;</button>
+                        </div>
+                        <div class="space-y-3">
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">USDOT Number</label>
+                                <input id="glQuickDot" type="text" placeholder="e.g. 1234567" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-emerald-500/30 text-white text-sm focus:border-emerald-400 outline-none">
+                            </div>
+                            <button onclick="glQuickCarrierLookup()" id="glQuickLookupBtn" class="w-full py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-medium text-sm transition flex items-center justify-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                                Lookup Carrier
+                            </button>
+                            <div id="glQuickResult" class="hidden mt-3 rounded-lg p-4 text-sm" style="background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2);"></div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Active Investigations and Tasks -->
                 <div class="grid grid-cols-3 gap-6 relative" style="z-index: 1;">
                     <!-- Active Investigations -->
@@ -2739,6 +2828,179 @@
             localStorage.setItem('viperCaseFirearms', JSON.stringify(allFirearms));
         }
         
+        // ============================================
+        // GENLOGS DASHBOARD FUNCTIONS
+        // ============================================
+        function initGenlogsDashboard() {
+            if (typeof GenLogs === 'undefined' || !GenLogs.isEnabled()) {
+                document.getElementById('glDashboardPanel').classList.add('hidden');
+                return;
+            }
+            document.getElementById('glDashboardPanel').classList.remove('hidden');
+            glUpdateConnectionStatus();
+            glRenderAlerts();
+            glRenderActivityFeed();
+            glRenderStats();
+        }
+
+        async function glUpdateConnectionStatus() {
+            const el = document.getElementById('glConnectionStatus');
+            try {
+                const status = GenLogs.connectionStatus();
+                if (status.authenticated) {
+                    el.innerHTML = '<span class="text-emerald-400">● Connected</span>';
+                } else {
+                    el.innerHTML = '<span class="text-yellow-400">● Not authenticated — configure in Settings</span>';
+                }
+            } catch(e) {
+                el.innerHTML = '<span class="text-red-400">● Error</span>';
+            }
+        }
+
+        function glRenderAlerts() {
+            const alerts = JSON.parse(localStorage.getItem('genlogsAlerts') || '[]');
+            const listEl = document.getElementById('glAlertsList');
+            const countEl = document.getElementById('glAlertCount');
+            countEl.textContent = alerts.length;
+            if (alerts.length === 0) {
+                listEl.innerHTML = '<p class="text-gray-500 italic">No active alerts</p>';
+                return;
+            }
+            listEl.innerHTML = alerts.slice(0, 5).map(a => {
+                const typeIcon = a.hot ? '🔴' : '🔵';
+                const label = a.usdot ? `DOT ${a.usdot}` : (a.plate || a.trailer || 'Alert');
+                const time = a.createdAt ? new Date(a.createdAt).toLocaleDateString() : '';
+                return `<div class="flex items-center justify-between p-1.5 rounded bg-emerald-500/5 border border-emerald-500/10">
+                    <div class="flex items-center gap-1.5">
+                        <span>${typeIcon}</span>
+                        <span class="text-gray-300 font-medium">${label}</span>
+                    </div>
+                    <span class="text-gray-500">${time}</span>
+                </div>`;
+            }).join('');
+        }
+
+        function glRenderActivityFeed() {
+            const log = JSON.parse(localStorage.getItem('genlogsActivityLog') || '[]');
+            const el = document.getElementById('glActivityFeed');
+            if (log.length === 0) {
+                el.innerHTML = '<p class="text-gray-500 italic">No recent activity</p>';
+                return;
+            }
+            el.innerHTML = log.slice(0, 6).map(entry => {
+                const icons = { carrier_lookup: '🚛', vet: '✅', alert: '🔔', facility: '🏭', contacts: '📞', auth: '🔑' };
+                const icon = icons[entry.type] || '📋';
+                const time = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                return `<div class="flex items-center justify-between p-1.5 rounded bg-emerald-500/5 border border-emerald-500/10">
+                    <div class="flex items-center gap-1.5 truncate">
+                        <span>${icon}</span>
+                        <span class="text-gray-300 truncate">${entry.description || entry.type}</span>
+                    </div>
+                    <span class="text-gray-500 whitespace-nowrap ml-2">${time}</span>
+                </div>`;
+            }).join('');
+        }
+
+        function glRenderStats() {
+            const log = JSON.parse(localStorage.getItem('genlogsActivityLog') || '[]');
+            const alerts = JSON.parse(localStorage.getItem('genlogsAlerts') || '[]');
+            const today = new Date().toDateString();
+            const vettedCount = log.filter(e => e.type === 'vet' || e.type === 'carrier_lookup').length;
+            const lookupsToday = log.filter(e => e.timestamp && new Date(e.timestamp).toDateString() === today).length;
+            document.getElementById('glStatVetted').textContent = vettedCount;
+            document.getElementById('glStatAlerts').textContent = alerts.length;
+            document.getElementById('glStatLookups').textContent = lookupsToday;
+        }
+
+        async function glDashRefresh() {
+            const btn = event.currentTarget;
+            btn.classList.add('animate-spin');
+            // If authenticated, try to run any stored alerts
+            try {
+                if (GenLogs.connectionStatus().authenticated) {
+                    await GenLogs.runAlerts();
+                }
+            } catch(e) { /* silent */ }
+            glRenderAlerts();
+            glRenderActivityFeed();
+            glRenderStats();
+            glUpdateConnectionStatus();
+            setTimeout(() => btn.classList.remove('animate-spin'), 500);
+        }
+
+        function openGlQuickLookup() {
+            const modal = document.getElementById('glQuickLookupModal');
+            modal.classList.remove('hidden');
+            modal.style.display = 'flex';
+            document.getElementById('glQuickDot').value = '';
+            document.getElementById('glQuickResult').classList.add('hidden');
+            setTimeout(() => document.getElementById('glQuickDot').focus(), 100);
+        }
+
+        function closeGlQuickLookup() {
+            const modal = document.getElementById('glQuickLookupModal');
+            modal.classList.add('hidden');
+            modal.style.display = 'none';
+        }
+
+        async function glQuickCarrierLookup() {
+            const dot = document.getElementById('glQuickDot').value.trim();
+            if (!dot) return;
+            const btn = document.getElementById('glQuickLookupBtn');
+            const resultEl = document.getElementById('glQuickResult');
+            btn.disabled = true;
+            btn.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Looking up…';
+            try {
+                await GenLogs.ensureToken();
+                const intel = await GenLogs.fullCarrierIntel(dot);
+                const p = intel.profile || {};
+                const v = intel.vetting || {};
+                const riskColor = v.overallScore >= 80 ? 'text-emerald-400' : v.overallScore >= 50 ? 'text-yellow-400' : 'text-red-400';
+                const riskLabel = v.overallScore >= 80 ? 'LOW RISK' : v.overallScore >= 50 ? 'REVIEW' : 'HIGH RISK';
+                resultEl.classList.remove('hidden');
+                resultEl.innerHTML = `
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between">
+                            <span class="text-white font-bold">${p.legalName || p.dbaName || 'Unknown'}</span>
+                            <span class="${riskColor} font-bold text-xs px-2 py-0.5 rounded-full" style="background: rgba(0,0,0,0.3);">${v.overallScore != null ? v.overallScore + '% — ' + riskLabel : 'N/A'}</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-300">
+                            <div>DOT: <span class="text-white">${p.usdot || dot}</span></div>
+                            <div>MC#: <span class="text-white">${p.mcNumber || 'N/A'}</span></div>
+                            <div>Status: <span class="text-white">${p.operatingStatus || 'N/A'}</span></div>
+                            <div>Auth: <span class="text-white">${p.operatingAuthority || 'N/A'}</span></div>
+                            <div>Equipment: <span class="text-white">${(p.equipmentPairings || []).length} pairings</span></div>
+                            <div>Sightings: <span class="text-white">${(p.sightings || []).length}</span></div>
+                        </div>
+                        ${(intel.contacts || []).length > 0 ? `<div class="pt-2 border-t border-emerald-500/20 text-xs"><span class="text-emerald-400">${intel.contacts.length} contacts available</span></div>` : ''}
+                    </div>`;
+            } catch(e) {
+                resultEl.classList.remove('hidden');
+                resultEl.innerHTML = `<p class="text-red-400">${e.message || 'Lookup failed'}</p>`;
+            }
+            btn.disabled = false;
+            btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg> Lookup Carrier';
+            glRenderActivityFeed();
+            glRenderStats();
+        }
+
+        // Update notification badge to include GenLogs alerts
+        function updateNotificationBadge() {
+            const overdueCount = checkOverdueWarrants();
+            const glAlerts = (typeof GenLogs !== 'undefined' && GenLogs.isEnabled()) 
+                ? JSON.parse(localStorage.getItem('genlogsAlerts') || '[]').length : 0;
+            const total = overdueCount + glAlerts;
+            const badge = document.querySelector('.notification-badge');
+            if (badge) {
+                if (total > 0) {
+                    badge.textContent = total;
+                    badge.classList.remove('hidden');
+                } else {
+                    badge.classList.add('hidden');
+                }
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             // Migrate existing data to central storage (one-time sync)
             migrateExistingDataToCentralStorage();
@@ -2783,10 +3045,10 @@
             renderTasks();
             
             // Show overdue warrant notification if any exist
-            const overdueCount = checkOverdueWarrants();
-            if (overdueCount > 0) {
-                showOverdueWarrantNotification(overdueCount);
-            }
+            updateNotificationBadge();
+
+            // Initialize GenLogs dashboard panel
+            initGenlogsDashboard();
 
             // Load user info and theme
             updateUserDisplay();
@@ -2874,23 +3136,44 @@
                     }
                 });
             });
+
+            // GenLogs alerts
+            const glEnabled = typeof GenLogs !== 'undefined' && GenLogs.isEnabled();
+            const glAlerts = glEnabled ? JSON.parse(localStorage.getItem('genlogsAlerts') || '[]') : [];
             
-            if (overdueWarrants.length === 0) {
-                alert('No overdue warrants');
+            if (overdueWarrants.length === 0 && glAlerts.length === 0) {
+                alert('No notifications');
                 return;
             }
             
-            const message = overdueWarrants.map(item => {
-                const daysOverdue = Math.ceil((new Date() - new Date(item.warrant.dueDate)) / (1000 * 60 * 60 * 24));
-                return `⚠️ Case ${item.caseNumber}: ${item.warrant.type.toUpperCase()} ${item.warrant.issuedTo ? 'to ' + item.warrant.issuedTo : ''}\n   ${daysOverdue} days overdue`;
-            }).join('\n\n');
+            let message = '';
+            if (overdueWarrants.length > 0) {
+                message += `OVERDUE WARRANTS (${overdueWarrants.length}):\n\n`;
+                message += overdueWarrants.map(item => {
+                    const daysOverdue = Math.ceil((new Date() - new Date(item.warrant.dueDate)) / (1000 * 60 * 60 * 24));
+                    return `⚠️ Case ${item.caseNumber}: ${item.warrant.type.toUpperCase()} ${item.warrant.issuedTo ? 'to ' + item.warrant.issuedTo : ''}\n   ${daysOverdue} days overdue`;
+                }).join('\n\n');
+            }
+            if (glAlerts.length > 0) {
+                if (message) message += '\n\n─────────────────\n\n';
+                message += `GENLOGS ALERTS (${glAlerts.length}):\n\n`;
+                message += glAlerts.slice(0, 5).map(a => {
+                    const typeLabel = a.hot ? '🔴 HOT' : '🔵 DAILY';
+                    const target = a.usdot ? `DOT ${a.usdot}` : (a.plate || a.trailer || 'Unknown');
+                    return `${typeLabel}: ${target}`;
+                }).join('\n');
+                if (glAlerts.length > 5) message += `\n... and ${glAlerts.length - 5} more`;
+            }
             
-            if (confirm(`OVERDUE WARRANTS (${overdueWarrants.length}):\n\n${message}\n\nGo to warrants to review?`)) {
-                // Open first overdue warrant's case
-                if (overdueWarrants[0].caseId) {
-                    localStorage.setItem('currentCaseId', overdueWarrants[0].caseId);
-                    window.location.href = 'case-detail-with-analytics.html';
+            if (overdueWarrants.length > 0) {
+                if (confirm(message + '\n\nGo to warrants to review?')) {
+                    if (overdueWarrants[0].caseId) {
+                        localStorage.setItem('currentCaseId', overdueWarrants[0].caseId);
+                        window.location.href = 'case-detail-with-analytics.html';
+                    }
                 }
+            } else {
+                alert(message);
             }
         }
 

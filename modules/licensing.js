@@ -6,7 +6,7 @@ const PRODUCT_SLUG = "project-viper";
 const STORAGE_PREFIX = "viper_";
 const API_BASE = "https://intellect-unified-dashboard-production.up.railway.app";
 const DEMO_DAYS = 60;
-const APP_VERSION = "1.8.0";
+const APP_VERSION = "1.9.0";
 
 /* ---------- helpers ---------- */
 function _get(key) { return localStorage.getItem(STORAGE_PREFIX + key); }

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' data:; connect-src 'self' http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://api.wigle.net https://api.genlogs.io; font-src 'self' data:; frame-src https: http:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' data:; connect-src 'self' http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://api.wigle.net https://api.genlogs.io https://trace-broker-production.up.railway.app; font-src 'self' data:; frame-src https: http:;">
     <title>V.I.P.E.R. - Settings</title>
     <script src="modules/licensing.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -787,6 +787,115 @@
                     </div>
                 </div>
 
+                <!-- TRACE Network Search -->
+                <div class="glass-card rounded-xl p-6">
+                    <h3 class="text-xl font-bold mb-2 flex items-center gap-2">
+                        <svg class="w-6 h-6 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                        TRACE Network Search
+                    </h3>
+                    <p class="text-gray-400 text-sm mb-4">
+                        Search the TRACE retail theft & cargo intelligence network for matches against your investigation data.
+                        <span class="text-orange-400/80">Requires a full VIPER license (not demo).</span>
+                    </p>
+
+                    <!-- Toggle -->
+                    <div class="flex items-center justify-between p-4 rounded-lg bg-viper-dark/50 border border-gray-700/50 mb-4">
+                        <div class="flex items-center gap-3">
+                            <div class="w-3 h-3 rounded-full" id="traceStatusDotToggle" style="background: #ef4444;"></div>
+                            <div>
+                                <p class="font-medium" id="traceToggleLabel">Disabled</p>
+                                <p class="text-xs text-gray-500" id="traceToggleSub">Toggle to enable TRACE network search</p>
+                            </div>
+                        </div>
+                        <button
+                            id="traceToggleBtn"
+                            onclick="toggleTrace()"
+                            class="relative w-12 h-7 rounded-full bg-gray-600 transition-colors"
+                        >
+                            <div id="traceToggleKnob" class="absolute w-5 h-5 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
+                        </button>
+                    </div>
+
+                    <!-- Registration Panel (shown when enabled but not registered) -->
+                    <div id="traceRegPanel" style="display:none;" class="space-y-4">
+                        <!-- Status bar -->
+                        <div id="traceStatusBar" class="flex items-center gap-2 px-4 py-2 rounded-lg bg-viper-dark border border-gray-700">
+                            <div id="traceStatusDot" class="w-2.5 h-2.5 rounded-full bg-red-500"></div>
+                            <span id="traceStatusText" class="text-sm text-gray-400">Not connected</span>
+                        </div>
+
+                        <!-- Registration form (only shown if not registered) -->
+                        <div id="traceRegForm" class="space-y-3">
+                            <p class="text-sm text-gray-300">Connect your VIPER license to the TRACE network for search access.</p>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Name</label>
+                                    <input id="traceRegName" type="text" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-orange-400 outline-none" placeholder="Officer name">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Email</label>
+                                    <input id="traceRegEmail" type="email" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-orange-400 outline-none" placeholder="email@agency.gov">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Agency</label>
+                                    <input id="traceRegAgency" type="text" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-orange-400 outline-none" placeholder="Agency name">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">City</label>
+                                    <input id="traceRegCity" type="text" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-orange-400 outline-none" placeholder="City">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">State</label>
+                                    <input id="traceRegState" type="text" maxlength="2" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-orange-400 outline-none uppercase" placeholder="CA">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">ZIP Code</label>
+                                    <input id="traceRegZip" type="text" maxlength="10" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-orange-400 outline-none" placeholder="90210">
+                                </div>
+                            </div>
+                            <button id="traceRegBtn" onclick="registerWithTrace()" class="w-full py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white font-medium text-sm transition flex items-center justify-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                                Connect to TRACE Network
+                            </button>
+                            <div id="traceRegResult" class="hidden text-sm px-4 py-2 rounded-lg"></div>
+                        </div>
+
+                        <!-- Connected info (shown when registered) -->
+                        <div id="traceConnectedInfo" style="display:none;" class="space-y-3">
+                            <div class="p-4 rounded-lg bg-orange-500/10 border border-orange-500/20">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-sm font-medium text-orange-300">Connected to TRACE Network</p>
+                                        <p class="text-xs text-gray-400 mt-1" id="traceConnectedAs">—</p>
+                                    </div>
+                                    <div class="text-right">
+                                        <p class="text-xs text-gray-500" id="traceSearchCount">0 searches logged</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flex gap-2">
+                                <button onclick="viewTraceAuditLog()" class="flex-1 py-2 rounded-lg bg-viper-dark border border-orange-500/30 text-orange-300 text-sm hover:bg-orange-500/10 transition flex items-center justify-center gap-2">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                                    View Audit Log
+                                </button>
+                                <button onclick="testTraceConnection()" class="flex-1 py-2 rounded-lg bg-viper-dark border border-gray-600 text-gray-300 text-sm hover:bg-gray-700 transition flex items-center justify-center gap-2">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                    Test Connection
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Danger zone -->
+                        <div class="pt-4 border-t border-gray-700/50">
+                            <button onclick="disconnectTrace()" class="text-red-400/60 hover:text-red-400 text-xs transition-colors">
+                                Disconnect from TRACE Network
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Backup & Restore Section -->
                 <div class="glass-card rounded-xl p-6">
                     <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
@@ -1558,6 +1667,7 @@
 
     <!-- GenLogs API Service -->
     <script src="modules/genlogs-api.js"></script>
+    <script src="modules/trace-search-api.js"></script>
     <script>
     // ── GenLogs Settings ─────────────────────────────────────────────────
     function initGenlogsUI() {
@@ -1669,6 +1779,217 @@
     }
 
     initGenlogsUI();
+
+    // ============================================
+    // TRACE NETWORK SEARCH
+    // ============================================
+    function initTraceUI() {
+        updateTraceToggleUI();
+        if (TraceSearch.isEnabled()) {
+            document.getElementById('traceRegPanel').style.display = '';
+            if (TraceSearch.isRegistered()) {
+                showTraceConnected();
+            } else {
+                autoFillTraceReg();
+            }
+        }
+    }
+
+    function toggleTrace() {
+        // Check license before enabling
+        if (!TraceSearch.isEnabled()) {
+            const licStatus = typeof getLicenseStatus === 'function' ? getLicenseStatus() : null;
+            if (licStatus && (licStatus.licenseType === 'demo' || licStatus.status === 'demo' || licStatus.status === 'demo_expired')) {
+                alert('TRACE Network Search requires a full VIPER license (not demo).');
+                return;
+            }
+        }
+        const enabled = !TraceSearch.isEnabled();
+        localStorage.setItem('traceSearch_enabled', enabled ? 'true' : 'false');
+        updateTraceToggleUI();
+        document.getElementById('traceRegPanel').style.display = enabled ? '' : 'none';
+        if (enabled && !TraceSearch.isRegistered()) autoFillTraceReg();
+        if (enabled && TraceSearch.isRegistered()) showTraceConnected();
+    }
+
+    function updateTraceToggleUI() {
+        const enabled = TraceSearch.isEnabled();
+        const btn = document.getElementById('traceToggleBtn');
+        const knob = document.getElementById('traceToggleKnob');
+        const label = document.getElementById('traceToggleLabel');
+        const sub = document.getElementById('traceToggleSub');
+        const dot = document.getElementById('traceStatusDotToggle');
+        if (enabled) {
+            btn.style.background = '#f97316';
+            knob.style.transform = 'translateX(1.4rem)';
+            label.textContent = 'Enabled';
+            sub.textContent = TraceSearch.isRegistered() ? 'Connected to TRACE Network' : 'Registration required';
+            dot.style.background = TraceSearch.isRegistered() ? '#22c55e' : '#f97316';
+        } else {
+            btn.style.background = '#4b5563';
+            knob.style.transform = 'translateX(0.25rem)';
+            label.textContent = 'Disabled';
+            sub.textContent = 'Toggle to enable TRACE network search';
+            dot.style.background = '#ef4444';
+        }
+    }
+
+    function autoFillTraceReg() {
+        // Pre-fill from VIPER registration data
+        const name = localStorage.getItem('viper_customer_name') || '';
+        const email = localStorage.getItem('viper_contact_email') || '';
+        const agency = localStorage.getItem('viper_agency') || '';
+        document.getElementById('traceRegName').value = name;
+        document.getElementById('traceRegEmail').value = email;
+        document.getElementById('traceRegAgency').value = agency;
+        document.getElementById('traceRegForm').style.display = '';
+        document.getElementById('traceConnectedInfo').style.display = 'none';
+    }
+
+    async function registerWithTrace() {
+        const btn = document.getElementById('traceRegBtn');
+        const resultEl = document.getElementById('traceRegResult');
+        const name = document.getElementById('traceRegName').value.trim();
+        const email = document.getElementById('traceRegEmail').value.trim();
+        const agency = document.getElementById('traceRegAgency').value.trim();
+        const city = document.getElementById('traceRegCity').value.trim();
+        const state = document.getElementById('traceRegState').value.trim();
+        const zip = document.getElementById('traceRegZip').value.trim();
+
+        if (!name || !email || !agency) {
+            showTraceRegResult('Name, email, and agency are required.', false);
+            return;
+        }
+
+        const viperLicenseKey = localStorage.getItem('viper_license_key') || '';
+        const viperApiKey = localStorage.getItem('viper_api_key') || '';
+        if (!viperLicenseKey || !viperApiKey) {
+            showTraceRegResult('No VIPER license found. Activate a full license first.', false);
+            return;
+        }
+
+        btn.disabled = true;
+        btn.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Connecting…';
+
+        try {
+            const result = await TraceSearch.register(name, email, agency, city, state, zip, viperLicenseKey, viperApiKey);
+            showTraceRegResult(result.message || 'Connected successfully!', true);
+            showTraceConnected();
+            updateTraceToggleUI();
+        } catch (e) {
+            showTraceRegResult(e.message || 'Registration failed', false);
+        }
+
+        btn.disabled = false;
+        btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Connect to TRACE Network';
+    }
+
+    function showTraceRegResult(msg, success) {
+        const el = document.getElementById('traceRegResult');
+        el.classList.remove('hidden');
+        el.style.background = success ? 'rgba(249,115,22,0.15)' : 'rgba(239,68,68,0.15)';
+        el.style.border = '1px solid ' + (success ? 'rgba(249,115,22,0.3)' : 'rgba(239,68,68,0.3)');
+        el.style.color = success ? '#fb923c' : '#f87171';
+        el.textContent = msg;
+        setTimeout(() => el.classList.add('hidden'), 5000);
+    }
+
+    function showTraceConnected() {
+        document.getElementById('traceRegForm').style.display = 'none';
+        document.getElementById('traceConnectedInfo').style.display = '';
+        const status = TraceSearch.connectionStatus();
+        document.getElementById('traceConnectedAs').textContent = `${status.userName} — ${status.agency}`;
+        const auditLog = TraceSearch.getAuditLog();
+        document.getElementById('traceSearchCount').textContent = `${auditLog.length} searches logged`;
+        document.getElementById('traceStatusDot').style.background = '#22c55e';
+        document.getElementById('traceStatusText').textContent = 'Connected';
+        document.getElementById('traceStatusText').style.color = '#22c55e';
+    }
+
+    async function testTraceConnection() {
+        try {
+            const result = await TraceSearch.checkStatus();
+            if (result.status === 'active') {
+                alert('✅ TRACE connection is active.');
+            } else {
+                alert('⚠️ TRACE connection issue: ' + (result.message || result.status));
+            }
+        } catch (e) {
+            alert('❌ Connection failed: ' + e.message);
+        }
+    }
+
+    function viewTraceAuditLog() {
+        const log = TraceSearch.getAuditLog();
+        if (log.length === 0) {
+            alert('No search activity logged yet.');
+            return;
+        }
+        // Open audit modal
+        const overlay = document.createElement('div');
+        overlay.id = 'traceAuditOverlay';
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;';
+        overlay.innerHTML = `
+            <div style="background:rgba(15,23,42,0.97);border:1px solid rgba(249,115,22,0.3);border-radius:12px;padding:24px;width:90%;max-width:700px;max-height:80vh;overflow:auto;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                    <h3 style="font-size:18px;font-weight:bold;color:#fb923c;">TRACE Search Audit Log</h3>
+                    <div style="display:flex;gap:8px;">
+                        <button onclick="exportTraceAuditLog()" style="padding:4px 12px;border-radius:6px;background:rgba(249,115,22,0.2);border:1px solid rgba(249,115,22,0.3);color:#fb923c;font-size:12px;cursor:pointer;">Export CSV</button>
+                        <button onclick="document.getElementById('traceAuditOverlay').remove()" style="color:#9ca3af;font-size:20px;cursor:pointer;background:none;border:none;">&times;</button>
+                    </div>
+                </div>
+                <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                    <thead>
+                        <tr style="border-bottom:1px solid rgba(249,115,22,0.2);">
+                            <th style="text-align:left;padding:8px 6px;color:#9ca3af;">Date/Time</th>
+                            <th style="text-align:left;padding:8px 6px;color:#9ca3af;">Type</th>
+                            <th style="text-align:left;padding:8px 6px;color:#9ca3af;">Tokens</th>
+                            <th style="text-align:left;padding:8px 6px;color:#9ca3af;">Matches</th>
+                            <th style="text-align:left;padding:8px 6px;color:#9ca3af;">Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${log.map(e => `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                            <td style="padding:6px;color:#d1d5db;">${new Date(e.timestamp).toLocaleString()}</td>
+                            <td style="padding:6px;"><span style="padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;background:${e.searchType==='manual'?'rgba(59,130,246,0.2);color:#60a5fa':e.searchType==='cargo_scan'?'rgba(249,115,22,0.2);color:#fb923c':'rgba(34,197,94,0.2);color:#4ade80'};">${e.searchType || 'manual'}</span></td>
+                            <td style="padding:6px;color:#d1d5db;">${e.tokenCount || 0}</td>
+                            <td style="padding:6px;color:${e.matchCount > 0 ? '#f87171' : '#d1d5db'};font-weight:${e.matchCount > 0 ? '700' : '400'};">${e.matchCount || 0}</td>
+                            <td style="padding:6px;color:#9ca3af;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(e.reason||'').replace(/"/g,'&quot;')}">${e.reason || '—'}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+    }
+
+    function exportTraceAuditLog() {
+        const log = TraceSearch.getAuditLog();
+        const header = 'Timestamp,User,Agency,Type,Tokens,Matches,Reason\n';
+        const rows = log.map(e =>
+            `"${e.timestamp}","${e.userName||''}","${e.agency||''}","${e.searchType||''}",${e.tokenCount||0},${e.matchCount||0},"${(e.reason||'').replace(/"/g,'""')}"`
+        ).join('\n');
+        const csv = header + rows;
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `trace_audit_log_${new Date().toISOString().slice(0,10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    function disconnectTrace() {
+        if (!confirm('Disconnect from TRACE Network? You will need to re-register to use this feature again.')) return;
+        TraceSearch.disconnect();
+        updateTraceToggleUI();
+        document.getElementById('traceRegPanel').style.display = 'none';
+        localStorage.setItem('traceSearch_enabled', 'false');
+        updateTraceToggleUI();
+    }
+
+    initTraceUI();
     </script>
 </body>
 </html>

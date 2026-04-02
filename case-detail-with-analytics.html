@@ -1631,189 +1631,427 @@
         async function generateCaseReportPDF(dataTabs, includeFilesList) {
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
-            
-            let yPos = 20;
-            const pageHeight = doc.internal.pageSize.height;
-            const pageWidth = doc.internal.pageSize.width;
-            const margin = 20;
-            const contentWidth = pageWidth - (2 * margin);
+            const PH = doc.internal.pageSize.height;
+            const PW = doc.internal.pageSize.width;
+            const M = 20;           // margin
+            const CW = PW - 2 * M;  // content width
+            const ACCENT = [0, 90, 160];   // navy blue
+            const BLACK = [30, 30, 30];
+            const GRAY = [100, 100, 100];
+            const LGRAY = [180, 180, 180];
+            let y = M;
 
-            // Helper function to add new page
-            function checkAndAddPage(requiredSpace = 20) {
-                if (yPos + requiredSpace > pageHeight - margin) {
-                    doc.addPage();
-                    yPos = margin;
-                    return true;
-                }
-                return false;
+            // ── helpers ──
+            function newPage() { doc.addPage(); y = M + 15; addHeader(); }
+            function need(h) { if (y + h > PH - 25) newPage(); }
+            function addHeader() {
+                doc.setFontSize(7); doc.setTextColor(...LGRAY);
+                doc.text(`Case ${currentCase.caseNumber} — DA Report`, M, 10);
+                doc.text(`Page ${doc.getNumberOfPages()}`, PW - M, 10, { align: 'right' });
+                doc.setDrawColor(...LGRAY); doc.setLineWidth(0.2);
+                doc.line(M, 12, PW - M, 12);
             }
+            function sectionTitle(label) {
+                need(18);
+                doc.setFontSize(15); doc.setFont(undefined, 'bold'); doc.setTextColor(...ACCENT);
+                doc.text(label, M, y); y += 2;
+                doc.setDrawColor(...ACCENT); doc.setLineWidth(0.6);
+                doc.line(M, y, PW - M, y); y += 8;
+            }
+            function fieldBold(label, value) {
+                if (!value) return;
+                need(7);
+                doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...BLACK);
+                doc.text(`${label}: `, M + 2, y);
+                const lw = doc.getTextWidth(`${label}: `);
+                doc.setFont(undefined, 'normal'); doc.setTextColor(...GRAY);
+                const lines = doc.splitTextToSize(String(value), CW - lw - 4);
+                doc.text(lines, M + 2 + lw, y);
+                y += lines.length * 5 + 1;
+            }
+            function bodyText(text) {
+                if (!text) return;
+                doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(...BLACK);
+                const lines = doc.splitTextToSize(String(text), CW - 4);
+                for (const line of lines) { need(6); doc.text(line, M + 2, y); y += 5; }
+                y += 2;
+            }
+            function itemHeading(label) {
+                need(10);
+                doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...BLACK);
+                doc.text(label, M + 2, y); y += 6;
+            }
+            function gap(h = 4) { y += h; }
+            function emptyMsg(msg) { doc.setFontSize(10); doc.setFont(undefined, 'italic'); doc.setTextColor(...LGRAY); doc.text(msg, M + 2, y); y += 6; }
 
             // ========== TITLE PAGE ==========
-            doc.setFillColor(10, 14, 20);
-            doc.rect(0, 0, pageWidth, pageHeight, 'F');
-            
+            doc.setFillColor(255, 255, 255);
+            doc.rect(0, 0, PW, PH, 'F');
+            // Blue bar top
+            doc.setFillColor(...ACCENT);
+            doc.rect(0, 0, PW, 6, 'F');
             // Title
-            doc.setTextColor(0, 217, 255);
-            doc.setFontSize(32);
-            doc.setFont(undefined, 'bold');
-            doc.text('CASE REPORT', pageWidth / 2, 80, { align: 'center' });
-            
+            doc.setFontSize(36); doc.setFont(undefined, 'bold'); doc.setTextColor(...ACCENT);
+            doc.text('CASE REPORT', PW / 2, 70, { align: 'center' });
             // Case Number
-            doc.setFontSize(24);
-            doc.setTextColor(255, 167, 38);
-            doc.text(currentCase.caseNumber, pageWidth / 2, 110, { align: 'center' });
-            
-            // Prepared for
-            doc.setFontSize(14);
-            doc.setTextColor(200, 200, 200);
-            doc.text('Prepared for District Attorney', pageWidth / 2, 140, { align: 'center' });
-            
+            doc.setFontSize(26); doc.setTextColor(...BLACK);
+            doc.text(currentCase.caseNumber, PW / 2, 90, { align: 'center' });
+            // Subtitle
+            doc.setFontSize(14); doc.setFont(undefined, 'normal'); doc.setTextColor(...GRAY);
+            doc.text('Prepared for the District Attorney', PW / 2, 110, { align: 'center' });
             // Date
-            doc.setFontSize(12);
-            doc.setTextColor(150, 150, 150);
-            const exportDate = new Date().toLocaleDateString('en-US', { 
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric' 
-            });
-            doc.text(exportDate, pageWidth / 2, 160, { align: 'center' });
-            
-            // Agency info
-            doc.setFontSize(10);
-            doc.text('V.I.P.E.R. Case Management System', pageWidth / 2, pageHeight - 30, { align: 'center' });
+            const exportDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+            doc.text(exportDate, PW / 2, 122, { align: 'center' });
+            // Case info box
+            doc.setDrawColor(...ACCENT); doc.setLineWidth(0.4);
+            doc.roundedRect(M + 20, 140, CW - 40, 40, 3, 3, 'S');
+            doc.setFontSize(10); doc.setTextColor(...BLACK);
+            doc.text(`Case Type: ${currentCase.type || 'N/A'}`, PW / 2, 152, { align: 'center' });
+            doc.text(`Status: ${currentCase.status || 'N/A'}`, PW / 2, 160, { align: 'center' });
+            doc.text(`Created: ${formatDate(currentCase.createdDate)}`, PW / 2, 168, { align: 'center' });
+            // Investigator
+            const investigator = currentCase.investigator || localStorage.getItem('viper_customer_name') || '';
+            if (investigator) { doc.text(`Investigator: ${investigator}`, PW / 2, 176, { align: 'center' }); }
+            // Footer
+            doc.setFontSize(8); doc.setTextColor(...LGRAY);
+            doc.text('Generated by V.I.P.E.R. Case Management System', PW / 2, PH - 15, { align: 'center' });
+            // Blue bar bottom
+            doc.setFillColor(...ACCENT);
+            doc.rect(0, PH - 6, PW, 6, 'F');
 
-            // ========== TABLE OF CONTENTS ==========
+            // ========== TOC PLACEHOLDER (page 2) — we'll fill in later ==========
             doc.addPage();
-            yPos = margin;
-            
-            doc.setFontSize(20);
-            doc.setTextColor(0, 217, 255);
-            doc.setFont(undefined, 'bold');
-            doc.text('TABLE OF CONTENTS', margin, yPos);
-            yPos += 15;
-            
-            doc.setDrawColor(0, 217, 255);
-            doc.setLineWidth(0.5);
-            doc.line(margin, yPos, pageWidth - margin, yPos);
-            yPos += 10;
-            
-            let pageNumber = 3; // Start after title and TOC
+            const tocPageIdx = doc.getNumberOfPages(); // remember this page
+
+            // ========== CONTENT RENDERER ==========
+            async function _renderTabPDF(tabId) {
+                const caseId = currentCase.id;
+                const caseNum = currentCase.caseNumber;
+                switch(tabId) {
+                case 'overview':
+                    fieldBold('Case Number', currentCase.caseNumber);
+                    fieldBold('Status', currentCase.status);
+                    fieldBold('Type', currentCase.type);
+                    fieldBold('Category', currentCase.category);
+                    fieldBold('Created', formatDate(currentCase.createdDate));
+                    fieldBold('Investigator', currentCase.investigator);
+                    if (currentCase.description) { gap(); itemHeading('Description'); bodyText(currentCase.description); }
+                    break;
+                case 'suspects': {
+                    const items = caseSuspects || JSON.parse(localStorage.getItem(`suspects_${caseId}`) || '[]');
+                    if (!items.length) { emptyMsg('No suspects recorded.'); break; }
+                    items.forEach((s, i) => {
+                        itemHeading(`Suspect ${i+1}: ${s.name || s.firstName && s.lastName ? s.firstName+' '+s.lastName : 'Unknown'}`);
+                        fieldBold('DOB', s.dob ? formatDate(s.dob) : null);
+                        fieldBold('DL#', s.dlNumber); fieldBold('SSN (last 4)', s.ssn);
+                        fieldBold('Race', s.race); fieldBold('Sex', s.sex);
+                        fieldBold('Height', s.height); fieldBold('Weight', s.weight);
+                        fieldBold('Hair', s.hair); fieldBold('Eyes', s.eyes);
+                        fieldBold('Address', s.address); fieldBold('Phone', s.phone);
+                        if (s.description) { bodyText(s.description); }
+                        gap(3);
+                    });
+                    break;
+                }
+                case 'victims': {
+                    const items = caseVictims || JSON.parse(localStorage.getItem(`victims_${caseId}`) || '[]');
+                    if (!items.length) { emptyMsg('No victims recorded.'); break; }
+                    items.forEach((v, i) => {
+                        itemHeading(`Victim ${i+1}: ${v.name || 'Unknown'}`);
+                        fieldBold('DOB', v.dob ? formatDate(v.dob) : null);
+                        fieldBold('Address', v.address); fieldBold('Phone', v.phone);
+                        fieldBold('Email', v.email);
+                        if (v.statement) { bodyText(v.statement); }
+                        gap(3);
+                    });
+                    break;
+                }
+                case 'victimBusiness': {
+                    const items = JSON.parse(localStorage.getItem(`victimBusinesses_${caseId}`) || '[]');
+                    if (!items.length) { emptyMsg('No victim businesses recorded.'); break; }
+                    items.forEach((b, i) => {
+                        itemHeading(`Business ${i+1}: ${b.businessName || 'Unknown'}`);
+                        fieldBold('Type', b.businessType); fieldBold('Store #', b.storeNumber);
+                        fieldBold('Address', b.address); fieldBold('City', b.city);
+                        fieldBold('Contact', b.contactName); fieldBold('Phone', b.contactPhone);
+                        fieldBold('Loss Amount', b.lossAmount ? '$' + parseFloat(b.lossAmount).toLocaleString() : null);
+                        fieldBold('Recovered Amount', b.recoveredAmount ? '$' + parseFloat(b.recoveredAmount).toLocaleString() : null);
+                        gap(3);
+                    });
+                    break;
+                }
+                case 'witnesses': {
+                    const items = caseWitnesses || JSON.parse(localStorage.getItem(`witnesses_${caseId}`) || '[]');
+                    if (!items.length) { emptyMsg('No witnesses recorded.'); break; }
+                    items.forEach((w, i) => {
+                        itemHeading(`Witness ${i+1}: ${w.name || 'Unknown'}`);
+                        fieldBold('Phone', w.phone); fieldBold('Email', w.email);
+                        fieldBold('Address', w.address);
+                        if (w.statement) { bodyText(w.statement); }
+                        gap(3);
+                    });
+                    break;
+                }
+                case 'vehicles': {
+                    const items = caseVehicles || JSON.parse(localStorage.getItem(`recoveredVehicles_${caseId}`) || '[]');
+                    if (!items.length) { emptyMsg('No vehicles recorded.'); break; }
+                    items.forEach((v, i) => {
+                        itemHeading(`Vehicle ${i+1}: ${[v.year, v.make, v.model].filter(Boolean).join(' ') || 'Unknown'}`);
+                        fieldBold('Color', v.color); fieldBold('Plate', v.plateNumber || v.plate);
+                        fieldBold('State', v.plateState || v.state); fieldBold('VIN', v.vin);
+                        fieldBold('Location Recovered', v.locationRecovered || v.location);
+                        gap(3);
+                    });
+                    break;
+                }
+                case 'cargo': {
+                    const items = JSON.parse(localStorage.getItem(`cargo_${caseId}`) || '[]');
+                    if (!items.length) { emptyMsg('No cargo/merchandise recorded.'); break; }
+                    let totalValue = 0;
+                    items.forEach((c, i) => {
+                        itemHeading(`Item ${i+1}: ${c.description || c.itemDescription || 'Unknown'}`);
+                        fieldBold('Quantity', c.quantity);
+                        const val = parseFloat(c.value || c.estimatedValue || 0);
+                        const lineVal = c.valueType === 'total' ? val : val * (parseFloat(c.quantity) || 1);
+                        totalValue += lineVal;
+                        fieldBold('Value', '$' + lineVal.toLocaleString());
+                        fieldBold('Recovered', c.recovered ? 'Yes' : 'No');
+                        fieldBold('MC#', c.mcNumber); fieldBold('BOL', c.bolNumber);
+                        fieldBold('Trailer #', c.trailerNumber); fieldBold('Trailer Plate', c.trailerPlate);
+                        gap(3);
+                    });
+                    gap(2); itemHeading(`Total Cargo Value: $${totalValue.toLocaleString()}`);
+                    break;
+                }
+                case 'firearms': {
+                    const items = caseFirearms || JSON.parse(localStorage.getItem(`firearms_${caseId}`) || '[]');
+                    if (!items.length) { emptyMsg('No firearms recorded.'); break; }
+                    items.forEach((f, i) => {
+                        itemHeading(`Firearm ${i+1}: ${[f.make, f.model].filter(Boolean).join(' ') || 'Unknown'}`);
+                        fieldBold('Type', f.type); fieldBold('Caliber', f.caliber);
+                        fieldBold('Serial #', f.serialNumber); fieldBold('Status', f.status);
+                        gap(3);
+                    });
+                    break;
+                }
+                case 'narcotics': {
+                    const items = caseNarcotics || JSON.parse(localStorage.getItem(`narcotics_${caseId}`) || '[]');
+                    if (!items.length) { emptyMsg('No narcotics recorded.'); break; }
+                    items.forEach((n, i) => {
+                        itemHeading(`Narcotic ${i+1}`);
+                        fieldBold('Type', n.drugType || n.type); fieldBold('Weight', n.weight);
+                        fieldBold('Location', n.location); fieldBold('Field Tested', n.fieldTested);
+                        gap(3);
+                    });
+                    break;
+                }
+                case 'money': {
+                    const items = caseMoney || JSON.parse(localStorage.getItem(`money_${caseId}`) || '[]');
+                    if (!items.length) { emptyMsg('No money seizures recorded.'); break; }
+                    let total = 0;
+                    items.forEach((m, i) => {
+                        const amt = parseFloat(m.amount) || 0; total += amt;
+                        itemHeading(`Seizure ${i+1}`);
+                        fieldBold('Amount', '$' + amt.toFixed(2));
+                        fieldBold('Denomination', m.denomination); fieldBold('Location', m.location);
+                        gap(3);
+                    });
+                    gap(2); itemHeading(`Total Seized: $${total.toFixed(2)}`);
+                    break;
+                }
+                case 'missingpersons': {
+                    const items = caseMissingPersons || JSON.parse(localStorage.getItem(`missingpersons_${caseId}`) || '[]');
+                    if (!items.length) { emptyMsg('No missing persons recorded.'); break; }
+                    items.forEach((p, i) => {
+                        itemHeading(`Missing Person ${i+1}: ${p.name || 'Unknown'}`);
+                        fieldBold('Age', p.age); fieldBold('Last Seen', p.lastSeen);
+                        if (p.description) bodyText(p.description);
+                        gap(3);
+                    });
+                    break;
+                }
+                case 'prosecution': {
+                    const items = caseProsecution || JSON.parse(localStorage.getItem(`prosecution_${caseId}`) || '[]');
+                    if (!items.length) { emptyMsg('No prosecution information recorded.'); break; }
+                    items.forEach((p, i) => {
+                        itemHeading(`Charge ${i+1}`);
+                        fieldBold('Charge', p.charge); fieldBold('Defendant', p.defendant);
+                        fieldBold('Status', p.status); fieldBold('Court Date', p.courtDate);
+                        gap(3);
+                    });
+                    break;
+                }
+                case 'areacanvas': {
+                    const items = caseCanvasEntries || JSON.parse(localStorage.getItem(`areacanvas_${caseId}`) || '[]');
+                    if (!items.length) { emptyMsg('No area canvas entries recorded.'); break; }
+                    items.forEach((e, i) => {
+                        itemHeading(`Canvas Entry ${i+1}`);
+                        fieldBold('Location', e.location); fieldBold('Contact', e.contact);
+                        if (e.notes) bodyText(e.notes);
+                        gap(3);
+                    });
+                    break;
+                }
+                case 'notes': {
+                    const items = caseNotes || [];
+                    if (!items.length) { emptyMsg('No case notes.'); break; }
+                    items.forEach((n, i) => {
+                        itemHeading(`${n.title || 'Note ' + (i+1)}`);
+                        fieldBold('Created', n.createdAt ? new Date(n.createdAt).toLocaleString() : '');
+                        bodyText(n.content);
+                        gap(4);
+                    });
+                    break;
+                }
+                case 'reports': {
+                    const rd = JSON.parse(localStorage.getItem('viperCaseReports') || '{}');
+                    const rpt = rd[caseNum];
+                    if (rpt && rpt.content) {
+                        const div = document.createElement('div'); div.innerHTML = rpt.content;
+                        bodyText(div.textContent || div.innerText);
+                    } else emptyMsg('No report content.');
+                    break;
+                }
+                case 'opsplan': {
+                    const od = JSON.parse(localStorage.getItem(`opsplan_${caseId}`) || 'null')
+                            || (JSON.parse(localStorage.getItem('viperCaseOPSPlans') || '{}'))[caseNum];
+                    if (!od) { emptyMsg('No operational plan recorded.'); break; }
+                    fieldBold('Objective', od.objective);
+                    if (od.plan) { gap(); bodyText(od.plan); }
+                    break;
+                }
+                case 'traceImport': {
+                    const imports = (JSON.parse(localStorage.getItem('viperTraceImports') || '{}'))[caseNum] || [];
+                    if (!imports.length) { emptyMsg('No TRACE imports.'); break; }
+                    imports.forEach((imp, i) => {
+                        const c = imp.case || {};
+                        itemHeading(`Import ${i+1}: ${c.case_number || 'Unknown'}`);
+                        fieldBold('Type', c.case_type); fieldBold('Status', c.status);
+                        fieldBold('Incident Date', c.incident_date); fieldBold('Location', c.location);
+                        fieldBold('Loss', c.total_loss ? '$' + parseFloat(c.total_loss).toLocaleString() : null);
+                        const susps = imp.suspects || [];
+                        if (susps.length) fieldBold('Suspects', susps.map(s => s.name || `${s.first_name||''} ${s.last_name||''}`).join(', '));
+                        const vehs = imp.vehicles || [];
+                        if (vehs.length) fieldBold('Vehicles', vehs.map(v => [v.color,v.make,v.model,v.plate].filter(Boolean).join(' ')).join('; '));
+                        gap(3);
+                    });
+                    break;
+                }
+                case 'rmsImport': {
+                    const imports = JSON.parse(localStorage.getItem(`rmsImports_${caseId}`) || '[]');
+                    if (!imports.length) { emptyMsg('No RMS imports.'); break; }
+                    imports.forEach((imp, i) => {
+                        itemHeading(`RMS Report ${i+1}: ${imp.reportNumber || imp.fileName || 'Unknown'}`);
+                        fieldBold('Agency', imp.agency); fieldBold('Date', imp.eventDate);
+                        if (imp.offenses && imp.offenses.length) fieldBold('Offenses', imp.offenses.map(o => o.description || o.charge).join('; '));
+                        if (imp.narratives && imp.narratives.length) {
+                            gap(); imp.narratives.forEach(n => {
+                                fieldBold('Narrative by', n.officer || 'Unknown');
+                                bodyText(n.text);
+                            });
+                        }
+                        gap(3);
+                    });
+                    break;
+                }
+                default:
+                    emptyMsg(`Content for ${getTabLabel(tabId)} not available.`);
+                }
+            }
+
+            // ========== CONTENT — track page numbers ==========
             const tocEntries = [];
-            
-            dataTabs.forEach(tab => {
-                const tabLabel = getTabLabel(tab.id);
-                tocEntries.push({ label: tabLabel, page: pageNumber });
-                pageNumber++;
-            });
-            
-            if (includeFilesList) {
-                tocEntries.push({ label: 'Evidence & Warrant Files', page: pageNumber });
-            }
-            
-            doc.setFontSize(12);
-            doc.setFont(undefined, 'normal');
-            doc.setTextColor(255, 255, 255);
-            
-            tocEntries.forEach((entry, index) => {
-                checkAndAddPage(10);
-                doc.text(`${index + 1}. ${entry.label}`, margin + 5, yPos);
-                doc.text(`${entry.page}`, pageWidth - margin - 10, yPos, { align: 'right' });
-                yPos += 8;
-            });
 
-            // ========== DATA TABS CONTENT ==========
             for (const tab of dataTabs) {
-                doc.addPage();
-                yPos = margin;
-                
-                // Tab title
-                doc.setFontSize(18);
-                doc.setTextColor(0, 217, 255);
-                doc.setFont(undefined, 'bold');
-                doc.text(getTabLabel(tab.id), margin, yPos);
-                yPos += 10;
-                
-                doc.setDrawColor(0, 217, 255);
-                doc.line(margin, yPos, pageWidth - margin, yPos);
-                yPos += 10;
-                
-                // Tab content
-                await addTabContentToPDF(doc, tab.id, margin, contentWidth);
+                newPage();
+                const pageNum = doc.getNumberOfPages();
+                const label = getTabLabel(tab.id);
+                tocEntries.push({ label, page: pageNum });
+                sectionTitle(label);
+                await _renderTabPDF(tab.id);
             }
 
-            // ========== FILE LISTS ==========
             if (includeFilesList) {
-                doc.addPage();
-                yPos = margin;
-                
-                doc.setFontSize(18);
-                doc.setTextColor(0, 217, 255);
-                doc.setFont(undefined, 'bold');
-                doc.text('Evidence & Warrant Files', margin, yPos);
-                yPos += 10;
-                
-                doc.setDrawColor(0, 217, 255);
-                doc.line(margin, yPos, pageWidth - margin, yPos);
-                yPos += 15;
-                
-                // Evidence files
+                newPage();
+                tocEntries.push({ label: 'Evidence & Warrant Files', page: doc.getNumberOfPages() });
+                sectionTitle('Evidence & Warrant Files');
                 if (caseEvidence && caseEvidence.length > 0) {
-                    doc.setFontSize(14);
-                    doc.setTextColor(0, 255, 136);
-                    doc.text('Evidence Files', margin, yPos);
-                    yPos += 8;
-                    
-                    doc.setFontSize(10);
-                    doc.setTextColor(200, 200, 200);
-                    doc.setFont(undefined, 'normal');
-                    
-                    caseEvidence.forEach((evidence, index) => {
-                        checkAndAddPage(15);
-                        doc.text(`${index + 1}. ${evidence.description}`, margin + 5, yPos);
-                        yPos += 5;
-                        doc.setTextColor(150, 150, 150);
-                        doc.text(`   Type: ${evidence.type} | Collected: ${formatDate(evidence.collectionDate)}`, margin + 5, yPos);
-                        yPos += 5;
-                        doc.text(`   Location: ${evidence.location}`, margin + 5, yPos);
-                        yPos += 8;
-                        doc.setTextColor(200, 200, 200);
+                    itemHeading('Evidence Files');
+                    caseEvidence.forEach((ev, i) => {
+                        need(18);
+                        fieldBold(`${i + 1}. ${ev.description || 'Evidence item'}`, '');
+                        fieldBold('   Type', ev.type); fieldBold('   Collected', formatDate(ev.collectionDate));
+                        fieldBold('   Location', ev.location); gap();
                     });
-                }
-                
-                // Warrant files
+                } else emptyMsg('No evidence files recorded.');
+                gap(4);
                 if (caseWarrants && caseWarrants.length > 0) {
-                    yPos += 5;
-                    checkAndAddPage(20);
-                    
-                    doc.setFontSize(14);
-                    doc.setTextColor(0, 255, 136);
-                    doc.setFont(undefined, 'bold');
-                    doc.text('Search Warrants', margin, yPos);
-                    yPos += 8;
-                    
-                    doc.setFontSize(10);
-                    doc.setTextColor(200, 200, 200);
-                    doc.setFont(undefined, 'normal');
-                    
-                    caseWarrants.forEach((warrant, index) => {
-                        checkAndAddPage(15);
-                        doc.text(`${index + 1}. ${warrant.warrantType}`, margin + 5, yPos);
-                        yPos += 5;
-                        doc.setTextColor(150, 150, 150);
-                        doc.text(`   Location: ${warrant.location}`, margin + 5, yPos);
-                        yPos += 5;
-                        doc.text(`   Executed: ${warrant.executionDate ? formatDate(warrant.executionDate) : 'Not executed'}`, margin + 5, yPos);
-                        yPos += 8;
-                        doc.setTextColor(200, 200, 200);
+                    itemHeading('Search Warrants');
+                    caseWarrants.forEach((w, i) => {
+                        need(18);
+                        fieldBold(`${i + 1}. ${w.warrantType || 'Warrant'}`, '');
+                        fieldBold('   Location', w.location);
+                        fieldBold('   Executed', w.executionDate ? formatDate(w.executionDate) : 'Not executed');
+                        gap();
                     });
-                }
+                } else emptyMsg('No warrants recorded.');
             }
 
-            // Save PDF
-            const fileName = `${currentCase.caseNumber}_DA_Report_${new Date().toISOString().split('T')[0]}.pdf`;
-            doc.save(fileName);
-            
-            alert('Export complete! PDF downloaded successfully.');
+            // ========== BACKFILL TOC ==========
+            doc.setPage(tocPageIdx);
+            let ty = 25;
+            doc.setFillColor(255, 255, 255); doc.rect(0, 0, PW, PH, 'F');
+            // header
+            doc.setFontSize(7); doc.setTextColor(...LGRAY);
+            doc.text(`Case ${currentCase.caseNumber} — DA Report`, M, 10);
+            doc.text(`Page 2`, PW - M, 10, { align: 'right' });
+            doc.setDrawColor(...LGRAY); doc.setLineWidth(0.2); doc.line(M, 12, PW - M, 12);
+
+            doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(...ACCENT);
+            doc.text('TABLE OF CONTENTS', M, ty); ty += 3;
+            doc.setDrawColor(...ACCENT); doc.setLineWidth(0.6);
+            doc.line(M, ty, PW - M, ty); ty += 12;
+
+            doc.setFontSize(11); doc.setFont(undefined, 'normal');
+            tocEntries.forEach((entry, i) => {
+                doc.setTextColor(...BLACK);
+                doc.text(`${i + 1}.  ${entry.label}`, M + 4, ty);
+                // Dotted leader
+                const labelW = doc.getTextWidth(`${i + 1}.  ${entry.label}  `);
+                const pageW = doc.getTextWidth(String(entry.page));
+                const dotsStart = M + 4 + labelW;
+                const dotsEnd = PW - M - pageW - 4;
+                doc.setTextColor(...LGRAY); doc.setFontSize(8);
+                let dx = dotsStart;
+                while (dx < dotsEnd) { doc.text('.', dx, ty); dx += 2.5; }
+                doc.setFontSize(11); doc.setTextColor(...BLACK);
+                doc.text(String(entry.page), PW - M, ty, { align: 'right' });
+                ty += 8;
+            });
+
+            // ========== SAVE VIA IPC (ZIP with evidence) ==========
+            const pdfBytes = doc.output('arraybuffer');
+            const fileName = `${currentCase.caseNumber}_DA_Export_${new Date().toISOString().split('T')[0]}.zip`;
+
+            if (window.electronAPI && window.electronAPI.saveDAExport) {
+                try {
+                    const savedPath = await window.electronAPI.saveDAExport({
+                        fileName,
+                        pdfBytes: Array.from(new Uint8Array(pdfBytes)),
+                        caseNumber: currentCase.caseNumber,
+                    });
+                    if (savedPath) {
+                        alert(`DA Export saved to:\n${savedPath}\n\nIncludes PDF report and all evidence files.`);
+                    }
+                } catch (e) {
+                    console.error('DA export IPC failed, falling back to PDF download:', e);
+                    doc.save(`${currentCase.caseNumber}_DA_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+                    alert('Export complete! PDF downloaded (evidence files not bundled — requires desktop app).');
+                }
+            } else {
+                doc.save(`${currentCase.caseNumber}_DA_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+                alert('Export complete! PDF downloaded.');
+            }
         }
 
         function getTabLabel(tabId) {
@@ -1821,8 +2059,10 @@
                 overview: 'Case Overview',
                 suspects: 'Suspects',
                 victims: 'Victims',
+                victimBusiness: 'Victim Business',
                 witnesses: 'Witnesses',
                 vehicles: 'Recovered Vehicles',
+                cargo: 'Cargo / Merchandise',
                 firearms: 'Firearms',
                 evidence: 'Evidence',
                 warrants: 'Search Warrants',
@@ -1833,25 +2073,18 @@
                 money: 'Money Seized',
                 missingpersons: 'Missing Persons',
                 areacanvas: 'Area Canvas',
-                opsplan: 'OPS Plan'
+                opsplan: 'OPS Plan',
+                traceImport: 'TRACE Import',
+                rmsImport: 'RMS Import'
             };
             return labels[tabId] || tabId;
         }
 
-        async function addTabContentToPDF(doc, tabId, margin, contentWidth) {
-            let yPos = doc.lastAutoTable ? doc.lastAutoTable.finalY + 10 : 50;
-            const pageHeight = doc.internal.pageSize.height;
-            
-            doc.setFontSize(10);
-            doc.setTextColor(200, 200, 200);
-            doc.setFont(undefined, 'normal');
-
-            function checkPage() {
-                if (yPos > pageHeight - 30) {
-                    doc.addPage();
-                    yPos = margin;
-                }
-            }
+        async function _addTabContentToPDF_OLD(doc, tabId) {
+            // DEPRECATED — left for reference, real renderer is inside generateCaseReportPDF
+            const margin = 20, contentWidth = 170;
+            let yPos = 50; const pageHeight = doc.internal.pageSize.height;
+            function checkPage() { if (yPos > pageHeight - 30) { doc.addPage(); yPos = margin; } }
 
             switch(tabId) {
                 case 'overview':
@@ -2281,16 +2514,17 @@
         }
 
         async function bundleFilesOnly(fileTabs) {
-            // For now, just show alert about bundling
-            let fileCount = 0;
-            if (fileTabs.some(t => t.id === 'evidence')) {
-                fileCount += caseEvidence.length;
+            if (!window.electronAPI || !window.electronAPI.saveDAExport) {
+                alert('File bundling requires the VIPER desktop app.'); return;
             }
-            if (fileTabs.some(t => t.id === 'warrants')) {
-                fileCount += caseWarrants.length;
-            }
-            
-            alert(`File bundling feature: Would bundle ${fileCount} files from the selected tabs.\n\nNote: File bundling requires additional implementation for accessing file system.`);
+            try {
+                const savedPath = await window.electronAPI.saveDAExport({
+                    fileName: `${currentCase.caseNumber}_Evidence_${new Date().toISOString().split('T')[0]}.zip`,
+                    pdfBytes: [],
+                    caseNumber: currentCase.caseNumber,
+                });
+                if (savedPath) alert(`Evidence files saved to:\n${savedPath}`);
+            } catch (e) { alert('Error bundling files: ' + e.message); }
         }
 
         function addSelectedTabs() {

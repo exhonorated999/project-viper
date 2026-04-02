@@ -18028,7 +18028,11 @@
                         ${(typeof TraceSearch !== 'undefined' && TraceSearch.isEnabled() && TraceSearch.isRegistered()) ? `
                         <button onclick="scanTraceImports()" class="px-4 py-2 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500 rounded-lg text-orange-400 text-sm font-medium transition-colors inline-flex items-center gap-2">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                            Scan Network
+                            Scan This Case
+                        </button>
+                        <button onclick="scanAllCasesTrace()" class="px-4 py-2 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/50 rounded-lg text-orange-300 text-sm font-medium transition-colors inline-flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                            Scan All Cases
                         </button>` : ''}
                         <button onclick="handleTraceFileImport()" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan text-sm font-medium transition-colors inline-flex items-center gap-2">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -19134,6 +19138,66 @@
 
         try {
             const result = await TraceSearch.search(allTokens, caseNum || 'VIPER', reason, 'cargo_scan');
+            renderTraceResults(result, resultsEl);
+        } catch (e) {
+            resultsEl.innerHTML = `<div class="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">${e.message}</div>`;
+        }
+    }
+
+    async function scanAllCasesTrace() {
+        if (!TraceSearch.isEnabled() || !TraceSearch.isRegistered()) {
+            alert('Enable and register TRACE Network Search in Settings first.');
+            return;
+        }
+
+        openTraceSearchPanel();
+        document.getElementById('tracePanelSubject').textContent = 'Scanning all cases…';
+        const resultsEl = document.getElementById('traceSearchResults');
+        resultsEl.innerHTML = '<div class="text-center py-8"><div class="gl-skeleton" style="height:60px;margin-bottom:8px;border-radius:8px;"></div><div class="gl-skeleton" style="height:60px;border-radius:8px;"></div></div>';
+
+        const traceImports = JSON.parse(localStorage.getItem('viperTraceImports') || '{}');
+        let allTokens = [];
+        let importCount = 0;
+        let caseCount = 0;
+
+        for (const [caseNum, imports] of Object.entries(traceImports)) {
+            if (!Array.isArray(imports) || imports.length === 0) continue;
+            caseCount++;
+            for (const importData of imports) {
+                const t = await TraceSearch.extractTraceImportTokens(importData);
+                allTokens = allTokens.concat(t);
+                importCount++;
+            }
+        }
+
+        // Also scan cargo, suspects, vehicles from all cases
+        const cases = JSON.parse(localStorage.getItem('viperCases') || '[]');
+        for (const c of cases) {
+            const cargo = JSON.parse(localStorage.getItem(`cargo_${c.id}`) || '[]');
+            if (cargo.length) allTokens = allTokens.concat(await TraceSearch.extractCargoTokens(cargo));
+            const suspects = JSON.parse(localStorage.getItem(`suspects_${c.id}`) || '[]');
+            if (suspects.length) allTokens = allTokens.concat(await TraceSearch.extractSuspectTokens(suspects));
+            const vehicles = JSON.parse(localStorage.getItem(`recoveredVehicles_${c.id}`) || '[]');
+            if (vehicles.length) allTokens = allTokens.concat(await TraceSearch.extractVehicleTokens(vehicles));
+        }
+
+        if (allTokens.length === 0) {
+            resultsEl.innerHTML = '<div class="p-3 text-yellow-400 text-sm">No searchable tokens found across any cases.</div>';
+            return;
+        }
+
+        const seen = new Set();
+        allTokens = allTokens.filter(t => {
+            const key = t.token_hash + t.token_type;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+
+        document.getElementById('tracePanelSubject').textContent = `All Cases Scan — ${allTokens.length} tokens from ${caseCount} cases`;
+
+        try {
+            const result = await TraceSearch.search(allTokens, 'All Cases', `Global scan — ${caseCount} cases, ${importCount} TRACE imports`, 'trace_scan');
             renderTraceResults(result, resultsEl);
         } catch (e) {
             resultsEl.innerHTML = `<div class="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">${e.message}</div>`;

@@ -35,6 +35,13 @@
         }
     </script>
     <style>
+        /* Font size accessibility — set via Settings > Display */
+        :root { --viper-font-size: 15px; }
+        #tabContent { font-size: var(--viper-font-size); }
+        #tabContent .text-xs  { font-size: calc(var(--viper-font-size) * 0.8); }
+        #tabContent .text-sm  { font-size: calc(var(--viper-font-size) * 0.93); }
+        #tabContent .text-base { font-size: var(--viper-font-size); }
+
         /* Global responsive fixes */
         * {
             box-sizing: border-box;
@@ -823,6 +830,13 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="wigleAPI.js"></script>
     <script>
+        // Apply font size preference from Settings
+        (function() {
+            const sizes = { small: '13px', medium: '15px', large: '17px', 'x-large': '20px' };
+            const pref = localStorage.getItem('viperFontSize') || 'medium';
+            document.documentElement.style.setProperty('--viper-font-size', sizes[pref] || '15px');
+        })();
+
         let currentCase = null;
         let currentTab = 'overview';
         let caseTasks = [];
@@ -3147,6 +3161,12 @@
                             </p>
                         </div>
                         <div class="flex items-center space-x-3">
+                            <button onclick="copyReportToClipboard()" id="copyReportBtn" class="px-4 py-2 rounded-lg bg-viper-orange/20 text-viper-orange border border-viper-orange/30 hover:bg-viper-orange/30 transition-colors text-sm font-medium flex items-center space-x-2" title="Copy entire narrative to clipboard">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/>
+                                </svg>
+                                <span>Copy</span>
+                            </button>
                             <button onclick="openReportPopout()" class="px-4 py-2 rounded-lg bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/30 hover:bg-viper-cyan/30 transition-colors text-sm font-medium flex items-center space-x-2">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
@@ -3336,6 +3356,36 @@
             }
         }
         
+        function copyReportToClipboard() {
+            const editor = document.getElementById('reportEditor');
+            if (!editor) return;
+            const text = editor.innerText || editor.textContent || '';
+            if (!text.trim()) {
+                const btn = document.getElementById('copyReportBtn');
+                const span = btn.querySelector('span');
+                span.textContent = 'Empty';
+                setTimeout(() => { span.textContent = 'Copy'; }, 1500);
+                return;
+            }
+            const sel = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(editor);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            document.execCommand('copy');
+            sel.removeAllRanges();
+            const btn = document.getElementById('copyReportBtn');
+            const span = btn.querySelector('span');
+            span.textContent = '✓ Copied';
+            btn.classList.remove('text-viper-orange', 'border-viper-orange/30', 'bg-viper-orange/20');
+            btn.classList.add('text-viper-green', 'border-viper-green/30', 'bg-viper-green/20');
+            setTimeout(() => {
+                span.textContent = 'Copy';
+                btn.classList.remove('text-viper-green', 'border-viper-green/30', 'bg-viper-green/20');
+                btn.classList.add('text-viper-orange', 'border-viper-orange/30', 'bg-viper-orange/20');
+            }, 2000);
+        }
+
         function saveReport(silent = false) {
             const editor = document.getElementById('reportEditor');
             if (!editor) return;

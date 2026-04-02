@@ -308,8 +308,8 @@
                         <!-- Demo countdown -->
                         <div id="licDemoCountdown" style="display:none;" class="text-sm text-gray-400"></div>
 
-                        <!-- Activate license -->
-                        <div class="mt-4 p-4 bg-viper-dark rounded-lg space-y-3">
+                        <!-- Activate license (hidden when already licensed) -->
+                        <div id="licActivatePanel" class="mt-4 p-4 bg-viper-dark rounded-lg space-y-3">
                             <label class="block text-sm font-medium text-gray-300">Activate License Key</label>
                             <div class="flex gap-2">
                                 <input type="text" id="licKeyInput" placeholder="INT-PROJVIPE-XXXX-XXXX-XXXX"
@@ -322,8 +322,8 @@
                             <div id="licActivateMsg" class="text-sm" style="display:none;"></div>
                         </div>
 
-                        <!-- Trial info -->
-                        <div class="mt-4 p-4 bg-viper-dark rounded-lg">
+                        <!-- Trial info (hidden when licensed) -->
+                        <div id="licTrialInfo" class="mt-4 p-4 bg-viper-dark rounded-lg">
                             <p class="text-sm text-gray-400 leading-relaxed">
                                 Your 60-day evaluation includes full access to all V.I.P.E.R. features. Once the evaluation period ends, 
                                 all existing cases and data remain fully accessible — you simply won't be able to create new cases until 
@@ -331,8 +331,8 @@
                             </p>
                         </div>
 
-                        <!-- Licensing info -->
-                        <div class="mt-3 p-4 bg-viper-dark rounded-lg">
+                        <!-- Licensing info (hidden when licensed) -->
+                        <div id="licPricingInfo" class="mt-3 p-4 bg-viper-dark rounded-lg">
                             <h4 class="text-sm font-semibold text-viper-cyan mb-3">Licensing</h4>
                             <div class="flex items-center justify-center gap-4">
                                 <div class="p-4 bg-viper-card rounded-lg border border-viper-cyan/30 text-center flex-1 max-w-xs">
@@ -401,6 +401,31 @@
                             <div>
                                 <span class="text-xs text-gray-500 block">Registered</span>
                                 <span class="text-gray-300 text-sm" id="profileRegDate">—</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Display & Accessibility -->
+                <div class="glass-card rounded-xl p-6">
+                    <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
+                        <svg class="w-6 h-6 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                        </svg>
+                        Display & Accessibility
+                    </h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Interface Font Size</label>
+                            <p class="text-xs text-gray-500 mb-3">Adjusts text size across all modules, tabs, and data views. Does not affect the main dashboard.</p>
+                            <div class="flex items-center gap-4">
+                                <div class="flex gap-2">
+                                    <button onclick="setViperFontSize('small')" id="fontSizeSmall" class="px-4 py-2 rounded-lg border text-sm font-medium transition-colors border-gray-600 text-gray-400 hover:border-viper-purple hover:text-viper-purple">Small</button>
+                                    <button onclick="setViperFontSize('medium')" id="fontSizeMedium" class="px-4 py-2 rounded-lg border text-sm font-medium transition-colors border-gray-600 text-gray-400 hover:border-viper-purple hover:text-viper-purple">Medium</button>
+                                    <button onclick="setViperFontSize('large')" id="fontSizeLarge" class="px-4 py-2 rounded-lg border text-sm font-medium transition-colors border-gray-600 text-gray-400 hover:border-viper-purple hover:text-viper-purple">Large</button>
+                                    <button onclick="setViperFontSize('x-large')" id="fontSizeXlarge" class="px-4 py-2 rounded-lg border text-sm font-medium transition-colors border-gray-600 text-gray-400 hover:border-viper-purple hover:text-viper-purple">X-Large</button>
+                                </div>
+                                <span class="text-xs text-gray-500" id="fontSizePreview">Current: Medium</span>
                             </div>
                         </div>
                     </div>
@@ -536,6 +561,146 @@
                                 <div>
                                     <h4 class="text-white font-semibold text-sm">Trace Import — TRACE Case Packages</h4>
                                     <p class="text-xs text-gray-400 mt-1 leading-relaxed">Import case packages exported from TRACE (Targeted Retail & Cargo Intelligence Engine) to cross-reference suspects, vehicles, evidence, and case narratives from retail/cargo theft investigations. Imported data is read-only and preserved as reference material alongside your VIPER case.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- GenLogs Cargo Intelligence -->
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-start gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+                                    <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/>
+                                    </svg>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <h4 class="text-white font-semibold text-sm">GenLogs — Cargo Intelligence</h4>
+                                        <button id="genlogsToggleBtn" onclick="toggleGenlogs()" class="relative w-11 h-6 rounded-full transition-colors bg-gray-600 flex-shrink-0">
+                                            <div id="genlogsToggleKnob" class="absolute w-4 h-4 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-gray-400 mt-1 leading-relaxed">Integrate with GenLogs for carrier vetting, vehicle tracking alerts, and freight intelligence. Query DOT/MC numbers, monitor carrier safety scores, and receive real-time alerts on cargo movements relevant to your investigation.</p>
+                                    <span id="genlogsToggleLabel" class="text-xs text-gray-500 mt-1 block"></span>
+
+                                    <!-- Collapsible credentials -->
+                                    <details class="mt-3" id="genlogsDetails">
+                                        <summary class="cursor-pointer text-xs text-emerald-400 hover:text-emerald-300 select-none flex items-center gap-1.5 font-medium">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+                                            Configure Credentials
+                                        </summary>
+                                        <div class="mt-3 space-y-3 border-t border-gray-700/50 pt-3">
+                                            <div id="genlogsStatusBar" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-viper-dark border border-gray-700">
+                                                <div id="genlogsStatusDot" class="w-2 h-2 rounded-full bg-red-500"></div>
+                                                <span id="genlogsStatusText" class="text-xs text-gray-400">Not Connected</span>
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs font-medium text-gray-400 mb-1">API Key</label>
+                                                <input type="password" id="genlogsApiKeyInput" class="w-full px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg focus:outline-none focus:border-emerald-400 text-white text-sm" placeholder="Enter your GenLogs API key">
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs font-medium text-gray-400 mb-1">Email</label>
+                                                <input type="email" id="genlogsEmailInput" class="w-full px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg focus:outline-none focus:border-emerald-400 text-white text-sm" placeholder="your@email.com">
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs font-medium text-gray-400 mb-1">Password</label>
+                                                <input type="password" id="genlogsPasswordInput" class="w-full px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg focus:outline-none focus:border-emerald-400 text-white text-sm" placeholder="Enter your GenLogs password">
+                                            </div>
+                                            <div class="flex items-center gap-3">
+                                                <button onclick="testGenlogsConnection()" id="genlogsTestBtn" class="px-4 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500 rounded-lg text-emerald-400 transition text-xs font-medium">Test Connection</button>
+                                                <button onclick="saveGenlogsCredentials()" class="px-4 py-1.5 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition text-xs font-medium">Save</button>
+                                                <span id="genlogsConnectionStatus" class="text-xs"></span>
+                                            </div>
+                                            <div id="genlogsTestResult" class="hidden rounded-lg p-3 text-sm"></div>
+                                            <button onclick="clearGenlogsCredentials()" class="text-red-400/60 hover:text-red-400 text-xs transition-colors">Clear Credentials</button>
+                                        </div>
+                                    </details>
+                                    <div id="genlogsCredentialsPanel" style="display:none;"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- TRACE Network Search -->
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-start gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center flex-shrink-0">
+                                    <svg class="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                                    </svg>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <h4 class="text-white font-semibold text-sm">TRACE Network Search</h4>
+                                        <button id="traceToggleBtn" onclick="toggleTrace()" class="relative w-11 h-6 rounded-full bg-gray-600 transition-colors flex-shrink-0">
+                                            <div id="traceToggleKnob" class="absolute w-4 h-4 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-gray-400 mt-1 leading-relaxed">Search the TRACE retail theft &amp; cargo intelligence network for cross-agency matches against license plates, suspect names, MC numbers, and BOL/CDL numbers. Requires a full VIPER license.</p>
+                                    <div class="flex items-center gap-2 mt-1">
+                                        <span id="traceToggleLabel" class="text-xs text-gray-500"></span>
+                                        <div class="w-2 h-2 rounded-full" id="traceStatusDotToggle" style="background: #ef4444;"></div>
+                                    </div>
+                                    <span id="traceToggleSub" class="hidden"></span>
+
+                                    <!-- Collapsible registration -->
+                                    <details class="mt-3" id="traceDetails">
+                                        <summary class="cursor-pointer text-xs text-orange-400 hover:text-orange-300 select-none flex items-center gap-1.5 font-medium">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+                                            Configure Connection
+                                        </summary>
+                                        <div id="traceRegPanel" class="mt-3 space-y-3 border-t border-gray-700/50 pt-3">
+                                            <div id="traceStatusBar" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-viper-dark border border-gray-700">
+                                                <div id="traceStatusDot" class="w-2 h-2 rounded-full bg-red-500"></div>
+                                                <span id="traceStatusText" class="text-xs text-gray-400">Not connected</span>
+                                            </div>
+                                            <div id="traceRegForm" class="space-y-3">
+                                                <p class="text-xs text-gray-300">Connect your VIPER license to the TRACE network.</p>
+                                                <div class="grid grid-cols-2 gap-2">
+                                                    <div>
+                                                        <label class="block text-xs text-gray-400 mb-1">Name</label>
+                                                        <input id="traceRegName" type="text" class="w-full px-3 py-1.5 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-orange-400 outline-none" placeholder="Officer name">
+                                                    </div>
+                                                    <div>
+                                                        <label class="block text-xs text-gray-400 mb-1">Email</label>
+                                                        <input id="traceRegEmail" type="email" class="w-full px-3 py-1.5 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-orange-400 outline-none" placeholder="email@agency.gov">
+                                                    </div>
+                                                    <div>
+                                                        <label class="block text-xs text-gray-400 mb-1">Agency</label>
+                                                        <input id="traceRegAgency" type="text" class="w-full px-3 py-1.5 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-orange-400 outline-none" placeholder="Agency name">
+                                                    </div>
+                                                    <div>
+                                                        <label class="block text-xs text-gray-400 mb-1">City</label>
+                                                        <input id="traceRegCity" type="text" class="w-full px-3 py-1.5 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-orange-400 outline-none" placeholder="City">
+                                                    </div>
+                                                    <div>
+                                                        <label class="block text-xs text-gray-400 mb-1">State</label>
+                                                        <input id="traceRegState" type="text" maxlength="2" class="w-full px-3 py-1.5 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-orange-400 outline-none uppercase" placeholder="CA">
+                                                    </div>
+                                                    <div>
+                                                        <label class="block text-xs text-gray-400 mb-1">ZIP Code</label>
+                                                        <input id="traceRegZip" type="text" maxlength="10" class="w-full px-3 py-1.5 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-orange-400 outline-none" placeholder="90210">
+                                                    </div>
+                                                </div>
+                                                <button id="traceRegBtn" onclick="registerWithTrace()" class="w-full py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white font-medium text-xs transition flex items-center justify-center gap-2">
+                                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                                                    Connect to TRACE Network
+                                                </button>
+                                                <div id="traceRegResult" class="hidden text-sm px-4 py-2 rounded-lg"></div>
+                                            </div>
+                                            <div id="traceConnectedInfo" style="display:none;" class="space-y-3">
+                                                <div class="p-3 rounded-lg bg-orange-500/10 border border-orange-500/20">
+                                                    <p class="text-xs font-medium text-orange-300">Connected to TRACE Network</p>
+                                                    <p class="text-xs text-gray-400 mt-1" id="traceConnectedAs">—</p>
+                                                    <p class="text-xs text-gray-500 mt-0.5" id="traceSearchCount">0 searches logged</p>
+                                                </div>
+                                                <div class="flex gap-2">
+                                                    <button onclick="viewTraceAuditLog()" class="flex-1 py-1.5 rounded-lg bg-viper-dark border border-orange-500/30 text-orange-300 text-xs hover:bg-orange-500/10 transition">Audit Log</button>
+                                                    <button onclick="testTraceConnection()" class="flex-1 py-1.5 rounded-lg bg-viper-dark border border-gray-600 text-gray-300 text-xs hover:bg-gray-700 transition">Test</button>
+                                                </div>
+                                            </div>
+                                            <button onclick="disconnectTrace()" class="text-red-400/60 hover:text-red-400 text-xs transition-colors">Disconnect</button>
+                                        </div>
+                                    </details>
                                 </div>
                             </div>
                         </div>
@@ -696,205 +861,7 @@
                     </div>
                 </div>
 
-                <!-- GenLogs Cargo Intelligence -->
-                <div class="glass-card rounded-xl p-6">
-                    <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
-                        <svg class="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/>
-                        </svg>
-                        GenLogs Cargo Intelligence
-                    </h3>
-                    <p class="text-gray-400 text-sm mb-4">
-                        Integrate with GenLogs for carrier vetting, vehicle tracking alerts, and freight intelligence. Requires a GenLogs API account.
-                    </p>
-
-                    <!-- Enable Toggle -->
-                    <div class="flex items-center justify-between bg-viper-dark rounded-lg p-4 border border-emerald-500/20 mb-4">
-                        <div class="flex items-center gap-3">
-                            <div class="w-12 h-12 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-                                <span class="text-2xl">🚛</span>
-                            </div>
-                            <div>
-                                <p class="font-medium" id="genlogsToggleLabel">Disabled</p>
-                                <p class="text-gray-400 text-xs">Enables carrier vetting, alerts, and facility lookup in case modules</p>
-                            </div>
-                        </div>
-                        <button
-                            id="genlogsToggleBtn"
-                            onclick="toggleGenlogs()"
-                            class="relative w-14 h-7 rounded-full transition-colors bg-gray-600"
-                        >
-                            <div id="genlogsToggleKnob" class="absolute w-5 h-5 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
-                        </button>
-                    </div>
-
-                    <!-- Credentials (hidden when disabled) -->
-                    <div id="genlogsCredentialsPanel" style="display:none;" class="space-y-4">
-                        <!-- Connection Status -->
-                        <div id="genlogsStatusBar" class="flex items-center gap-2 px-4 py-2 rounded-lg bg-viper-dark border border-gray-700">
-                            <div id="genlogsStatusDot" class="w-2.5 h-2.5 rounded-full bg-red-500"></div>
-                            <span id="genlogsStatusText" class="text-sm text-gray-400">Not Connected</span>
-                        </div>
-
-                        <!-- API Key -->
-                        <div>
-                            <label class="block text-sm font-medium text-gray-300 mb-1">API Key</label>
-                            <input type="password" id="genlogsApiKeyInput"
-                                class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg focus:outline-none focus:border-emerald-400 text-white"
-                                placeholder="Enter your GenLogs API key">
-                        </div>
-
-                        <!-- Email -->
-                        <div>
-                            <label class="block text-sm font-medium text-gray-300 mb-1">Email</label>
-                            <input type="email" id="genlogsEmailInput"
-                                class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg focus:outline-none focus:border-emerald-400 text-white"
-                                placeholder="your@email.com">
-                        </div>
-
-                        <!-- Password -->
-                        <div>
-                            <label class="block text-sm font-medium text-gray-300 mb-1">Password</label>
-                            <input type="password" id="genlogsPasswordInput"
-                                class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg focus:outline-none focus:border-emerald-400 text-white"
-                                placeholder="Enter your GenLogs password">
-                        </div>
-
-                        <!-- Buttons -->
-                        <div class="flex gap-3 pt-2">
-                            <button onclick="testGenlogsConnection()"
-                                id="genlogsTestBtn"
-                                class="flex-1 px-4 py-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-lg font-medium text-emerald-400 transition-all text-sm flex items-center justify-center gap-2">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                                Test Connection
-                            </button>
-                            <button onclick="saveGenlogsCredentials()"
-                                class="flex-1 px-4 py-2.5 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan/40 rounded-lg font-medium text-viper-cyan transition-all text-sm flex items-center justify-center gap-2">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                                Save Credentials
-                            </button>
-                        </div>
-
-                        <!-- Test Result -->
-                        <div id="genlogsTestResult" class="hidden rounded-lg p-3 text-sm"></div>
-
-                        <!-- Danger Zone -->
-                        <div class="pt-4 border-t border-gray-700/50">
-                            <button onclick="clearGenlogsCredentials()" class="text-red-400/60 hover:text-red-400 text-xs transition-colors">
-                                Clear Credentials & Disconnect
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- TRACE Network Search -->
-                <div class="glass-card rounded-xl p-6">
-                    <h3 class="text-xl font-bold mb-2 flex items-center gap-2">
-                        <svg class="w-6 h-6 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-                        </svg>
-                        TRACE Network Search
-                    </h3>
-                    <p class="text-gray-400 text-sm mb-4">
-                        Search the TRACE retail theft & cargo intelligence network for matches against your investigation data.
-                        <span class="text-orange-400/80">Requires a full VIPER license (not demo).</span>
-                    </p>
-
-                    <!-- Toggle -->
-                    <div class="flex items-center justify-between p-4 rounded-lg bg-viper-dark/50 border border-gray-700/50 mb-4">
-                        <div class="flex items-center gap-3">
-                            <div class="w-3 h-3 rounded-full" id="traceStatusDotToggle" style="background: #ef4444;"></div>
-                            <div>
-                                <p class="font-medium" id="traceToggleLabel">Disabled</p>
-                                <p class="text-xs text-gray-500" id="traceToggleSub">Toggle to enable TRACE network search</p>
-                            </div>
-                        </div>
-                        <button
-                            id="traceToggleBtn"
-                            onclick="toggleTrace()"
-                            class="relative w-12 h-7 rounded-full bg-gray-600 transition-colors"
-                        >
-                            <div id="traceToggleKnob" class="absolute w-5 h-5 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
-                        </button>
-                    </div>
-
-                    <!-- Registration Panel (shown when enabled but not registered) -->
-                    <div id="traceRegPanel" style="display:none;" class="space-y-4">
-                        <!-- Status bar -->
-                        <div id="traceStatusBar" class="flex items-center gap-2 px-4 py-2 rounded-lg bg-viper-dark border border-gray-700">
-                            <div id="traceStatusDot" class="w-2.5 h-2.5 rounded-full bg-red-500"></div>
-                            <span id="traceStatusText" class="text-sm text-gray-400">Not connected</span>
-                        </div>
-
-                        <!-- Registration form (only shown if not registered) -->
-                        <div id="traceRegForm" class="space-y-3">
-                            <p class="text-sm text-gray-300">Connect your VIPER license to the TRACE network for search access.</p>
-                            <div class="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label class="block text-xs text-gray-400 mb-1">Name</label>
-                                    <input id="traceRegName" type="text" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-orange-400 outline-none" placeholder="Officer name">
-                                </div>
-                                <div>
-                                    <label class="block text-xs text-gray-400 mb-1">Email</label>
-                                    <input id="traceRegEmail" type="email" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-orange-400 outline-none" placeholder="email@agency.gov">
-                                </div>
-                                <div>
-                                    <label class="block text-xs text-gray-400 mb-1">Agency</label>
-                                    <input id="traceRegAgency" type="text" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-orange-400 outline-none" placeholder="Agency name">
-                                </div>
-                                <div>
-                                    <label class="block text-xs text-gray-400 mb-1">City</label>
-                                    <input id="traceRegCity" type="text" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-orange-400 outline-none" placeholder="City">
-                                </div>
-                                <div>
-                                    <label class="block text-xs text-gray-400 mb-1">State</label>
-                                    <input id="traceRegState" type="text" maxlength="2" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-orange-400 outline-none uppercase" placeholder="CA">
-                                </div>
-                                <div>
-                                    <label class="block text-xs text-gray-400 mb-1">ZIP Code</label>
-                                    <input id="traceRegZip" type="text" maxlength="10" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-orange-400 outline-none" placeholder="90210">
-                                </div>
-                            </div>
-                            <button id="traceRegBtn" onclick="registerWithTrace()" class="w-full py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white font-medium text-sm transition flex items-center justify-center gap-2">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                                Connect to TRACE Network
-                            </button>
-                            <div id="traceRegResult" class="hidden text-sm px-4 py-2 rounded-lg"></div>
-                        </div>
-
-                        <!-- Connected info (shown when registered) -->
-                        <div id="traceConnectedInfo" style="display:none;" class="space-y-3">
-                            <div class="p-4 rounded-lg bg-orange-500/10 border border-orange-500/20">
-                                <div class="flex items-center justify-between">
-                                    <div>
-                                        <p class="text-sm font-medium text-orange-300">Connected to TRACE Network</p>
-                                        <p class="text-xs text-gray-400 mt-1" id="traceConnectedAs">—</p>
-                                    </div>
-                                    <div class="text-right">
-                                        <p class="text-xs text-gray-500" id="traceSearchCount">0 searches logged</p>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="flex gap-2">
-                                <button onclick="viewTraceAuditLog()" class="flex-1 py-2 rounded-lg bg-viper-dark border border-orange-500/30 text-orange-300 text-sm hover:bg-orange-500/10 transition flex items-center justify-center gap-2">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-                                    View Audit Log
-                                </button>
-                                <button onclick="testTraceConnection()" class="flex-1 py-2 rounded-lg bg-viper-dark border border-gray-600 text-gray-300 text-sm hover:bg-gray-700 transition flex items-center justify-center gap-2">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                                    Test Connection
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- Danger zone -->
-                        <div class="pt-4 border-t border-gray-700/50">
-                            <button onclick="disconnectTrace()" class="text-red-400/60 hover:text-red-400 text-xs transition-colors">
-                                Disconnect from TRACE Network
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <!-- GenLogs and TRACE are now in the Investigative Tools section below -->
 
                 <!-- Backup & Restore Section -->
                 <div class="glass-card rounded-xl p-6">
@@ -1553,6 +1520,13 @@
                 case 'licensed':
                     badge.textContent = status.licenseType;
                     badge.className = 'px-3 py-1 rounded-full text-xs font-bold uppercase bg-green-900/60 text-green-300 border border-green-500/40';
+                    // Hide activation and pricing — license is already active
+                    const ap = document.getElementById('licActivatePanel');
+                    const ti = document.getElementById('licTrialInfo');
+                    const pi = document.getElementById('licPricingInfo');
+                    if (ap) ap.style.display = 'none';
+                    if (ti) ti.style.display = 'none';
+                    if (pi) pi.style.display = 'none';
                     break;
                 case 'expired':
                     badge.textContent = 'License Expired';
@@ -1610,9 +1584,32 @@
         }
 
         // Init license UI on load
+        /* ---------- Font Size ---------- */
+        const FONT_SIZES = { small: '13px', medium: '15px', large: '17px', 'x-large': '20px' };
+        function setViperFontSize(size) {
+            localStorage.setItem('viperFontSize', size);
+            applyViperFontSize(size);
+        }
+        function applyViperFontSize(size) {
+            document.querySelectorAll('#fontSizeSmall,#fontSizeMedium,#fontSizeLarge,#fontSizeXlarge').forEach(b => {
+                b.classList.remove('border-viper-purple', 'text-viper-purple', 'bg-viper-purple/10');
+                b.classList.add('border-gray-600', 'text-gray-400');
+            });
+            const active = document.getElementById('fontSize' + size.charAt(0).toUpperCase() + size.slice(1).replace('-l', 'L').replace('arge', 'arge'));
+            const btnId = { small: 'fontSizeSmall', medium: 'fontSizeMedium', large: 'fontSizeLarge', 'x-large': 'fontSizeXlarge' }[size];
+            const btn = document.getElementById(btnId);
+            if (btn) {
+                btn.classList.remove('border-gray-600', 'text-gray-400');
+                btn.classList.add('border-viper-purple', 'text-viper-purple', 'bg-viper-purple/10');
+            }
+            const preview = document.getElementById('fontSizePreview');
+            if (preview) preview.textContent = 'Current: ' + size.charAt(0).toUpperCase() + size.slice(1);
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             initLicenseUI();
             doCheckUpdate();
+            applyViperFontSize(localStorage.getItem('viperFontSize') || 'medium');
         });
     </script>
     <script src="/modules/security-ui.js"></script>

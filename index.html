@@ -1469,8 +1469,8 @@
     
     <!-- Quick Stats Configuration Modal -->
     <div id="quickStatsModal" class="modal">
-        <div class="modal-content glass-card rounded-2xl p-8 max-w-2xl w-full mx-4 border-2 border-viper-cyan/30">
-            <div class="flex items-center justify-between mb-6">
+        <div class="modal-content glass-card rounded-2xl p-8 max-w-2xl w-full mx-4 border-2 border-viper-cyan/30 max-h-[90vh] flex flex-col">
+            <div class="flex items-center justify-between mb-6 flex-shrink-0">
                 <h3 class="text-2xl font-bold text-viper-cyan">Configure Quick Stats</h3>
                 <button onclick="closeQuickStatsModal()" class="text-gray-400 hover:text-white">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1479,14 +1479,14 @@
                 </button>
             </div>
             
-            <p class="text-gray-400 mb-6">Select 4 metrics to display in Quick Stats panel</p>
+            <p class="text-gray-400 mb-6 flex-shrink-0">Select 4 metrics to display in Quick Stats panel</p>
             
-            <div class="grid grid-cols-2 gap-4 mb-6">
+            <div class="grid grid-cols-2 gap-4 mb-6 overflow-y-auto flex-1 min-h-0">
                 <!-- Metric checkboxes will be generated here -->
                 <div id="quickStatsOptions"></div>
             </div>
             
-            <div class="flex justify-end space-x-4">
+            <div class="flex justify-end space-x-4 flex-shrink-0">
                 <button onclick="closeQuickStatsModal()" class="px-6 py-2 rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-700 transition-colors">
                     Cancel
                 </button>
@@ -2140,7 +2140,7 @@
                 
                 // Get real case data
                 const allCases = JSON.parse(localStorage.getItem('viperCases')) || [];
-                const activeCases = allCases.filter(c => c.status === 'Open' || c.status === 'Active');
+                const activeCases = allCases.filter(c => !['closed', 'closed-arrest', 'transferred', 'Closed', 'Closed with Arrest', 'Transferred'].includes(c.status));
                 
                 const investigationsData = activeCases.map(caseItem => {
                     // Get synopsis/description (truncate if too long)
@@ -2729,7 +2729,8 @@
             const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
             
             // Update metrics
-            const activeCases = cases.filter(c => c.status === 'active');
+            const inactiveStatuses = ['closed', 'closed-arrest', 'transferred'];
+            const activeCases = cases.filter(c => !inactiveStatuses.includes(c.status));
             const closedCases = cases.filter(c => c.status === 'closed');
             const closedWithArrestCases = cases.filter(c => c.status === 'closed-arrest');
             
@@ -3523,7 +3524,7 @@
                                 <div class="flex items-center justify-between">
                                     <div>
                                         <p class="text-sm text-gray-400">Active Cases</p>
-                                        <p class="text-2xl font-bold text-white mt-1">${cases.filter(c => c.status === 'active').length}</p>
+                                        <p class="text-2xl font-bold text-white mt-1">${cases.filter(c => !['closed','closed-arrest','transferred'].includes(c.status)).length}</p>
                                     </div>
                                     <div class="w-12 h-12 bg-viper-green/20 rounded-lg flex items-center justify-center">
                                         <svg class="w-6 h-6 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">

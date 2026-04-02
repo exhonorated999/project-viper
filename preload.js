@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Case Export / Import
   saveCaseExport: (data) => ipcRenderer.invoke('save-case-export', data),
   openCaseImport: () => ipcRenderer.invoke('open-case-import'),
+  saveDAExport: (data) => ipcRenderer.invoke('save-da-export', data),
 
   // Field Security
   securityCheck: () => ipcRenderer.invoke('security-check'),

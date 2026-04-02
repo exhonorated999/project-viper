@@ -415,6 +415,83 @@ ipcMain.handle('save-case-export', async (event, { fileName, data }) => {
   return result.filePath;
 });
 
+// --- Export DA Package (ZIP with PDF + evidence files) ---
+ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber }) => {
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save DA Export Package',
+    defaultPath: fileName,
+    filters: [{ name: 'ZIP Archive', extensions: ['zip'] }]
+  });
+  if (result.canceled || !result.filePath) return null;
+
+  // Collect evidence files for this case
+  const evidenceBase = path.join(casesDir, caseNumber, 'Evidence');
+  const evidenceFiles = [];
+  if (fs.existsSync(evidenceBase)) {
+    const walkDir = (dir, rel) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) walkDir(full, relPath);
+        else {
+          let buf = fs.readFileSync(full);
+          if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
+            buf = security.decryptBuffer(buf);
+          }
+          evidenceFiles.push({ name: relPath, data: buf });
+        }
+      }
+    };
+    walkDir(evidenceBase, '');
+  }
+
+  // Build ZIP using Node.js built-in zlib (no external lib needed)
+  // Use archiver-like manual ZIP construction or write a simple one
+  // For simplicity, use the 'archiver' package or manual approach
+  // Since we don't want external deps, write files to a temp dir then use native zip
+  // Actually, let's use a simple approach: save PDF + copy evidence to a temp folder, then zip
+
+  const archiver = (() => {
+    try { return require('archiver'); } catch { return null; }
+  })();
+
+  if (archiver) {
+    // Use archiver if available
+    const output = fs.createWriteStream(result.filePath);
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    return new Promise((resolve, reject) => {
+      output.on('close', () => resolve(result.filePath));
+      archive.on('error', err => reject(err));
+      archive.pipe(output);
+      archive.append(Buffer.from(pdfBytes), { name: `${caseNumber}_DA_Report.pdf` });
+      for (const f of evidenceFiles) {
+        archive.append(f.data, { name: `Evidence/${f.name}` });
+      }
+      archive.finalize();
+    });
+  } else {
+    // Fallback: save PDF directly and copy evidence alongside
+    const dir = path.dirname(result.filePath);
+    const base = path.basename(result.filePath, '.zip');
+    const exportDir = path.join(dir, base);
+    fs.mkdirSync(exportDir, { recursive: true });
+
+    // Save PDF
+    fs.writeFileSync(path.join(exportDir, `${caseNumber}_DA_Report.pdf`), Buffer.from(pdfBytes));
+
+    // Copy evidence
+    if (evidenceFiles.length > 0) {
+      const evDir = path.join(exportDir, 'Evidence');
+      for (const f of evidenceFiles) {
+        const dest = path.join(evDir, f.name);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.writeFileSync(dest, f.data);
+      }
+    }
+    return exportDir;
+  }
+});
+
 ipcMain.handle('open-case-import', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Import Case Package',

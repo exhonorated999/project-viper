@@ -1664,17 +1664,24 @@
                 doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...BLACK);
                 doc.text(`${label}: `, M + 2, y);
                 const lw = doc.getTextWidth(`${label}: `);
-                doc.setFont(undefined, 'normal'); doc.setTextColor(...GRAY);
+                doc.setFont(undefined, 'normal'); doc.setTextColor(60, 60, 60);
                 const lines = doc.splitTextToSize(String(value), CW - lw - 4);
                 doc.text(lines, M + 2 + lw, y);
                 y += lines.length * 5 + 1;
+                doc.setTextColor(...BLACK); // reset
             }
             function bodyText(text) {
                 if (!text) return;
                 doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(...BLACK);
-                const lines = doc.splitTextToSize(String(text), CW - 4);
-                for (const line of lines) { need(6); doc.text(line, M + 2, y); y += 5; }
-                y += 2;
+                // Preserve paragraph breaks
+                const paragraphs = String(text).split(/\n\s*\n|\r?\n/);
+                for (const para of paragraphs) {
+                    const trimmed = para.trim();
+                    if (!trimmed) { y += 3; continue; }
+                    const lines = doc.splitTextToSize(trimmed, CW - 4);
+                    for (const line of lines) { need(6); doc.text(line, M + 2, y); y += 5; }
+                    y += 2;
+                }
             }
             function itemHeading(label) {
                 need(10);

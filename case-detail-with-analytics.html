@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://d3js.org https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.genlogs.io; font-src 'self' data:; frame-src 'self' blob: https: http:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://d3js.org https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.genlogs.io https://trace-broker-production.up.railway.app; font-src 'self' data:; frame-src 'self' blob: https: http:;">
     <title>V.I.P.E.R. - Case Detail</title>
     <script src="modules/licensing.js"></script>
     <script src="modules/genlogs-api.js"></script>
+    <script src="modules/trace-search-api.js"></script>
 
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -781,6 +782,12 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
                             </svg>
                             Export Case
+                        </button>
+                        <button id="traceSearchHeaderBtn" onclick="openTraceSearchPanel()" class="px-4 py-2 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500 rounded-lg text-orange-400 transition flex items-center gap-2" style="display:none;">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                            </svg>
+                            TRACE Search
                         </button>
                         <button onclick="openManageTabsModal()" class="px-4 py-2 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded-lg text-viper-purple transition flex items-center gap-2">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -7058,6 +7065,17 @@
                                 </button>` : ''}
                                 ${!item.mcNumber && !item.trailerPlate && !item.trailerNumber ? `<span class="text-gray-500 text-xs italic">Enter MC#, trailer plate, or trailer# to unlock GenLogs actions</span>` : ''}
                             </div>
+                        </div>` : ''}
+                        ${(typeof TraceSearch !== 'undefined' && TraceSearch.isEnabled() && TraceSearch.isRegistered()) ? `
+                        <div class="mt-5 pt-4 border-t border-orange-500/20">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="text-orange-400 text-xs font-bold tracking-wider uppercase">TRACE Network</span>
+                                <div class="flex-1 h-px bg-orange-500/20"></div>
+                            </div>
+                            <button onclick="event.stopPropagation(); scanCargoNetwork()" class="px-3 py-1.5 rounded-lg bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/30 text-orange-400 text-xs font-medium transition-colors inline-flex items-center gap-1.5">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                                Scan All Case Data
+                            </button>
                         </div>` : ''}
                     </div>
                 </div>`;
@@ -18006,12 +18024,19 @@
                         Trace Import
                         <span class="text-sm font-normal text-gray-400 ml-2">${imports.length} package${imports.length !== 1 ? 's' : ''}</span>
                     </h2>
-                    <button onclick="handleTraceFileImport()" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan text-sm font-medium transition-colors inline-flex items-center gap-2">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-                        </svg>
-                        Import Another
-                    </button>
+                    <div class="flex items-center gap-2">
+                        ${(typeof TraceSearch !== 'undefined' && TraceSearch.isEnabled() && TraceSearch.isRegistered()) ? `
+                        <button onclick="scanTraceImports()" class="px-4 py-2 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500 rounded-lg text-orange-400 text-sm font-medium transition-colors inline-flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                            Scan Network
+                        </button>` : ''}
+                        <button onclick="handleTraceFileImport()" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan text-sm font-medium transition-colors inline-flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                            </svg>
+                            Import Another
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Import Cards -->
@@ -18798,6 +18823,324 @@
             <div id="glAlertModalBody" class="space-y-4"></div>
         </div>
     </div>
+
+    <!-- TRACE Network Search — Slide-out Panel -->
+    <div class="gl-panel-overlay" id="tracePanelOverlay" onclick="closeTracePanel()" style="z-index:9996;"></div>
+    <div class="gl-panel" id="tracePanel" style="z-index:9997; border-left-color: rgba(249,115,22,0.25);">
+        <div class="gl-panel-header">
+            <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                    <span class="text-orange-400 text-lg">🔍</span>
+                    <span class="text-orange-400 font-bold text-sm tracking-wider uppercase">TRACE Network</span>
+                </div>
+                <button onclick="closeTracePanel()" class="p-1.5 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div id="tracePanelSubject" class="text-xs text-gray-500"></div>
+        </div>
+        <div id="tracePanelContent" class="px-5 pb-8">
+            <!-- Search Form -->
+            <div id="traceSearchForm" class="space-y-3">
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-[10px] text-gray-500 uppercase tracking-wider mb-1">License Plate</label>
+                        <input id="tsPlate" type="text" class="w-full px-3 py-2 rounded-lg bg-[#1a1d27] border border-gray-700 text-white text-sm focus:border-orange-400 outline-none uppercase" placeholder="ABC1234">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-gray-500 uppercase tracking-wider mb-1">Plate State</label>
+                        <input id="tsPlateState" type="text" maxlength="2" class="w-full px-3 py-2 rounded-lg bg-[#1a1d27] border border-gray-700 text-white text-sm focus:border-orange-400 outline-none uppercase" placeholder="CA">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-[10px] text-gray-500 uppercase tracking-wider mb-1">VIN</label>
+                    <input id="tsVin" type="text" class="w-full px-3 py-2 rounded-lg bg-[#1a1d27] border border-gray-700 text-white text-sm focus:border-orange-400 outline-none uppercase" placeholder="Vehicle Identification Number">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-[10px] text-gray-500 uppercase tracking-wider mb-1">First Name</label>
+                        <input id="tsFirstName" type="text" class="w-full px-3 py-2 rounded-lg bg-[#1a1d27] border border-gray-700 text-white text-sm focus:border-orange-400 outline-none" placeholder="First">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-gray-500 uppercase tracking-wider mb-1">Last Name</label>
+                        <input id="tsLastName" type="text" class="w-full px-3 py-2 rounded-lg bg-[#1a1d27] border border-gray-700 text-white text-sm focus:border-orange-400 outline-none" placeholder="Last">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-[10px] text-gray-500 uppercase tracking-wider mb-1">BOL Number</label>
+                        <input id="tsBol" type="text" class="w-full px-3 py-2 rounded-lg bg-[#1a1d27] border border-gray-700 text-white text-sm focus:border-orange-400 outline-none" placeholder="Bill of Lading">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-gray-500 uppercase tracking-wider mb-1">MC Number</label>
+                        <input id="tsMc" type="text" class="w-full px-3 py-2 rounded-lg bg-[#1a1d27] border border-gray-700 text-white text-sm focus:border-orange-400 outline-none" placeholder="Motor Carrier #">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-[10px] text-gray-500 uppercase tracking-wider mb-1">CDL Number</label>
+                        <input id="tsCdl" type="text" class="w-full px-3 py-2 rounded-lg bg-[#1a1d27] border border-gray-700 text-white text-sm focus:border-orange-400 outline-none" placeholder="Driver License">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-gray-500 uppercase tracking-wider mb-1">Trailer #</label>
+                        <input id="tsTrailerNum" type="text" class="w-full px-3 py-2 rounded-lg bg-[#1a1d27] border border-gray-700 text-white text-sm focus:border-orange-400 outline-none" placeholder="Trailer Number">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-[10px] text-gray-500 uppercase tracking-wider mb-1">Trailer Plate</label>
+                    <input id="tsTrailerPlate" type="text" class="w-full px-3 py-2 rounded-lg bg-[#1a1d27] border border-gray-700 text-white text-sm focus:border-orange-400 outline-none uppercase" placeholder="Trailer License Plate">
+                </div>
+                <div>
+                    <label class="block text-[10px] text-gray-500 uppercase tracking-wider mb-1">Reason for Search <span class="text-orange-400">*</span></label>
+                    <input id="tsReason" type="text" class="w-full px-3 py-2 rounded-lg bg-[#1a1d27] border border-orange-500/30 text-white text-sm focus:border-orange-400 outline-none" placeholder="Cargo theft investigation — Case #..." value="">
+                </div>
+                <button id="tsSearchBtn" onclick="executeTraceSearch()" class="w-full py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm transition flex items-center justify-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                    Search TRACE Network
+                </button>
+            </div>
+            <!-- Results -->
+            <div id="traceSearchResults" class="mt-4"></div>
+        </div>
+    </div>
+
+    <script>
+    // ═══════════════════════════════════════════════════════════════════
+    //  TRACE Network Search — Panel, Search, Scan Buttons
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Show TRACE button if enabled + registered
+    (function initTraceSearchBtn() {
+        if (typeof TraceSearch !== 'undefined' && TraceSearch.isEnabled() && TraceSearch.isRegistered()) {
+            const btn = document.getElementById('traceSearchHeaderBtn');
+            if (btn) btn.style.display = '';
+        }
+    })();
+
+    function openTraceSearchPanel() {
+        document.getElementById('tracePanelOverlay').classList.add('active');
+        document.getElementById('tracePanel').classList.add('active');
+        // Pre-fill reason with case number
+        const caseNum = currentCase ? (currentCase.caseNumber || '') : '';
+        const reasonEl = document.getElementById('tsReason');
+        if (reasonEl && !reasonEl.value) reasonEl.value = `Cargo theft investigation — Case #${caseNum}`;
+        document.getElementById('tracePanelSubject').textContent = caseNum ? `Case ${caseNum}` : '';
+    }
+    function closeTracePanel() {
+        document.getElementById('tracePanelOverlay').classList.remove('active');
+        document.getElementById('tracePanel').classList.remove('active');
+    }
+
+    async function executeTraceSearch() {
+        const reason = document.getElementById('tsReason').value.trim();
+        if (!reason) { alert('A reason for search is required (audit compliance).'); return; }
+
+        const fields = {
+            plate: document.getElementById('tsPlate').value.trim(),
+            plateState: document.getElementById('tsPlateState').value.trim(),
+            vin: document.getElementById('tsVin').value.trim(),
+            firstName: document.getElementById('tsFirstName').value.trim(),
+            lastName: document.getElementById('tsLastName').value.trim(),
+            bol: document.getElementById('tsBol').value.trim(),
+            mc: document.getElementById('tsMc').value.trim(),
+            cdl: document.getElementById('tsCdl').value.trim(),
+            trailerNumber: document.getElementById('tsTrailerNum').value.trim(),
+            trailerPlate: document.getElementById('tsTrailerPlate').value.trim(),
+        };
+
+        // Check at least one field
+        const hasValue = Object.values(fields).some(v => v.length > 0);
+        if (!hasValue) { alert('Enter at least one search token.'); return; }
+
+        const btn = document.getElementById('tsSearchBtn');
+        const resultsEl = document.getElementById('traceSearchResults');
+        btn.disabled = true;
+        btn.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Searching…';
+        resultsEl.innerHTML = '<div class="text-center py-8"><div class="gl-skeleton" style="height:60px;margin-bottom:8px;border-radius:8px;"></div><div class="gl-skeleton" style="height:60px;margin-bottom:8px;border-radius:8px;"></div></div>';
+
+        try {
+            const tokens = await TraceSearch.extractManualTokens(fields);
+            const caseRef = currentCase ? (currentCase.caseNumber || 'VIPER') : 'VIPER';
+            const result = await TraceSearch.search(tokens, caseRef, reason, 'manual');
+            renderTraceResults(result, resultsEl);
+        } catch (e) {
+            resultsEl.innerHTML = `<div class="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">${e.message}</div>`;
+        }
+
+        btn.disabled = false;
+        btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg> Search TRACE Network';
+    }
+
+    function renderTraceResults(result, container) {
+        if (!result.matches || result.matches.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-8">
+                    <div class="text-3xl mb-2">✅</div>
+                    <p class="text-gray-400 text-sm">No matches found in the TRACE network.</p>
+                    <p class="text-gray-600 text-xs mt-1">${result.match_count || 0} results</p>
+                </div>`;
+            return;
+        }
+
+        const confidenceConfig = {
+            red:    { label: 'EXACT MATCH',    bg: 'rgba(239,68,68,0.15)',  border: 'rgba(239,68,68,0.4)',  color: '#f87171', icon: '🔴' },
+            green:  { label: 'PARTIAL MATCH',  bg: 'rgba(34,197,94,0.15)',  border: 'rgba(34,197,94,0.4)',  color: '#4ade80', icon: '🟢' },
+            orange: { label: 'SOFT MATCH',     bg: 'rgba(249,115,22,0.15)', border: 'rgba(249,115,22,0.4)', color: '#fb923c', icon: '🟠' },
+        };
+
+        const cards = result.matches.map((m, i) => {
+            const conf = confidenceConfig[m.confidence] || confidenceConfig.orange;
+            const delay = i * 0.08;
+            return `
+            <div class="gl-card" style="animation-delay:${delay}s; background:${conf.bg}; border:1px solid ${conf.border}; border-radius:12px; padding:16px; margin-bottom:10px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span>${conf.icon}</span>
+                        <span style="font-weight:700;color:${conf.color};font-size:11px;text-transform:uppercase;letter-spacing:0.05em;">${conf.label}</span>
+                    </div>
+                    <span style="font-size:10px;color:#9ca3af;">${m.distance_miles != null ? m.distance_miles + ' mi' : ''}${m.distant_flag ? ' ⚠️ DISTANT' : ''}</span>
+                </div>
+                <div style="font-size:14px;font-weight:600;color:white;margin-bottom:6px;">${m.store_name || 'Unknown'}</div>
+                <div style="font-size:12px;color:#d1d5db;margin-bottom:8px;">
+                    ${m.city || ''}${m.city && m.state ? ', ' : ''}${m.state || ''}
+                    ${m.case_ref ? `<span style="margin-left:8px;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,0.1);font-size:10px;">Case: ${m.case_ref}</span>` : ''}
+                    <span style="margin-left:8px;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,0.08);font-size:10px;">${m.case_type || ''}</span>
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;">
+                    ${(m.matched_on || []).map(t => `<span style="padding:2px 8px;border-radius:4px;background:rgba(255,255,255,0.08);font-size:10px;color:#e5e7eb;">${t}</span>`).join('')}
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.08);">
+                    <div>
+                        <div style="font-size:10px;color:#6b7280;">Contact</div>
+                        <div style="font-size:12px;color:white;">${m.contact_name || '—'}</div>
+                    </div>
+                    <div>
+                        <div style="font-size:10px;color:#6b7280;">Phone</div>
+                        <div style="font-size:12px;color:${conf.color};">${m.contact_phone || '—'}</div>
+                    </div>
+                    <div style="grid-column:span 2;">
+                        <div style="font-size:10px;color:#6b7280;">Email</div>
+                        <div style="font-size:12px;color:#d1d5db;">${m.contact_email || '—'}</div>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+
+        container.innerHTML = `
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                <span style="font-size:13px;font-weight:600;color:#fb923c;">${result.match_count} Match${result.match_count !== 1 ? 'es' : ''} Found</span>
+                <span style="font-size:10px;color:#6b7280;">TRACE Network</span>
+            </div>
+            ${cards}`;
+    }
+
+    // ── Scan functions for TRACE imports and Cargo module ─────────
+    async function scanTraceImports() {
+        if (!TraceSearch.isEnabled() || !TraceSearch.isRegistered()) {
+            alert('Enable and register TRACE Network Search in Settings first.');
+            return;
+        }
+
+        const caseId = currentCase ? currentCase.id : null;
+        if (!caseId) return;
+
+        // Collect tokens from TRACE imports (Pattern 1 storage)
+        const traceImports = JSON.parse(localStorage.getItem('viperTraceImports') || '{}');
+        const caseNum = currentCase.caseNumber || '';
+        const caseTraceData = traceImports[caseNum] || [];
+
+        // Also check Pattern 2 rmsImports
+        const rmsImports = JSON.parse(localStorage.getItem(`rmsImports_${caseId}`) || '[]');
+
+        let allTokens = [];
+        const reason = `TRACE import scan — Case #${caseNum}`;
+
+        // Process TRACE imports
+        for (const importData of caseTraceData) {
+            const t = await TraceSearch.extractTraceImportTokens(importData);
+            allTokens = allTokens.concat(t);
+        }
+
+        if (allTokens.length === 0) {
+            alert('No searchable tokens found in TRACE imports for this case.');
+            return;
+        }
+
+        // Dedup
+        const seen = new Set();
+        allTokens = allTokens.filter(t => {
+            const key = t.token_hash + t.token_type;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+
+        // Open panel and show results
+        openTraceSearchPanel();
+        document.getElementById('tracePanelSubject').textContent = `TRACE Import Scan — ${allTokens.length} tokens from ${caseTraceData.length} import(s)`;
+        const resultsEl = document.getElementById('traceSearchResults');
+        resultsEl.innerHTML = '<div class="text-center py-8"><div class="gl-skeleton" style="height:60px;margin-bottom:8px;border-radius:8px;"></div><div class="gl-skeleton" style="height:60px;border-radius:8px;"></div></div>';
+
+        try {
+            const result = await TraceSearch.search(allTokens, caseNum || 'VIPER', reason, 'trace_scan');
+            renderTraceResults(result, resultsEl);
+        } catch (e) {
+            resultsEl.innerHTML = `<div class="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">${e.message}</div>`;
+        }
+    }
+
+    async function scanCargoNetwork() {
+        if (!TraceSearch.isEnabled() || !TraceSearch.isRegistered()) {
+            alert('Enable and register TRACE Network Search in Settings first.');
+            return;
+        }
+
+        const caseId = currentCase ? currentCase.id : null;
+        const caseNum = currentCase ? (currentCase.caseNumber || '') : '';
+        if (!caseId) return;
+
+        // Get cargo items from the current case
+        const cargoData = JSON.parse(localStorage.getItem(`cargo_${caseId}`) || '[]');
+        // Also get suspects and recovered vehicles
+        const suspects = JSON.parse(localStorage.getItem(`suspects_${caseId}`) || '[]');
+        const vehicles = JSON.parse(localStorage.getItem(`recoveredVehicles_${caseId}`) || '[]');
+
+        let allTokens = [];
+        const cargoTokens = await TraceSearch.extractCargoTokens(cargoData);
+        const suspectTokens = await TraceSearch.extractSuspectTokens(suspects);
+        const vehicleTokens = await TraceSearch.extractVehicleTokens(vehicles);
+        allTokens = allTokens.concat(cargoTokens, suspectTokens, vehicleTokens);
+
+        // Dedup
+        const seen = new Set();
+        allTokens = allTokens.filter(t => {
+            const key = t.token_hash + t.token_type;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+
+        if (allTokens.length === 0) {
+            alert('No searchable tokens found in cargo/suspects/vehicles for this case.');
+            return;
+        }
+
+        const reason = `Cargo module scan — Case #${caseNum}`;
+
+        openTraceSearchPanel();
+        document.getElementById('tracePanelSubject').textContent = `Cargo Scan — ${allTokens.length} tokens (${cargoData.length} cargo, ${suspects.length} suspects, ${vehicles.length} vehicles)`;
+        const resultsEl = document.getElementById('traceSearchResults');
+        resultsEl.innerHTML = '<div class="text-center py-8"><div class="gl-skeleton" style="height:60px;margin-bottom:8px;border-radius:8px;"></div><div class="gl-skeleton" style="height:60px;border-radius:8px;"></div></div>';
+
+        try {
+            const result = await TraceSearch.search(allTokens, caseNum || 'VIPER', reason, 'cargo_scan');
+            renderTraceResults(result, resultsEl);
+        } catch (e) {
+            resultsEl.innerHTML = `<div class="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">${e.message}</div>`;
+        }
+    }
+
+    </script>
 
     <script>
     // ═══════════════════════════════════════════════════════════════════

@@ -82,9 +82,9 @@ a:hover { color: #fff; text-shadow: 0 0 12px var(--viper-glow); }
     width: 100%; height: 100%;
     z-index: 0;
     background:
-        radial-gradient(ellipse 80% 50% at 50% 0%, rgba(57,255,20,0.06) 0%, transparent 60%),
-        radial-gradient(ellipse 60% 40% at 20% 80%, rgba(57,255,20,0.03) 0%, transparent 50%),
-        linear-gradient(180deg, rgba(5,10,5,0.3) 0%, rgba(5,10,5,0.95) 100%);
+        radial-gradient(ellipse 80% 50% at 50% 0%, rgba(57,255,20,0.03) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 20% 80%, rgba(57,255,20,0.015) 0%, transparent 50%),
+        linear-gradient(180deg, rgba(5,10,5,0.2) 0%, rgba(5,10,5,0.92) 100%);
     pointer-events: none;
 }
 
@@ -120,7 +120,7 @@ h1, h2, h3, h4 {
 .mono { font-family: var(--font-mono); }
 .text-green { color: var(--viper-green); }
 .text-dim { color: var(--text-secondary); }
-.glow-text { text-shadow: 0 0 20px var(--viper-glow), 0 0 40px rgba(57,255,20,0.15); }
+.glow-text { text-shadow: 0 0 15px rgba(57,255,20,0.25), 0 0 30px rgba(57,255,20,0.08); }
 
 /* ══════════════════════════════════════════════════════════════════
    LAYOUT
@@ -182,21 +182,21 @@ nav .container {
     font-family: var(--font-display);
     font-weight: 600;
     font-size: 14px;
-    color: var(--bg-deep);
-    background: var(--viper-green);
-    border: none;
+    color: var(--viper-green);
+    background: rgba(57,255,20,0.08);
+    border: 1px solid var(--border-green-hover);
     border-radius: 6px;
     letter-spacing: 1px;
     text-transform: uppercase;
     cursor: pointer;
     transition: all 0.3s;
     text-decoration: none;
-    box-shadow: 0 0 20px var(--viper-glow), inset 0 1px 0 rgba(255,255,255,0.2);
 }
 .nav-cta:hover {
-    background: #4dff30;
-    color: var(--bg-deep);
-    box-shadow: 0 0 35px var(--viper-glow-strong), inset 0 1px 0 rgba(255,255,255,0.3);
+    background: rgba(57,255,20,0.15);
+    color: #fff;
+    border-color: var(--viper-green);
+    box-shadow: 0 0 15px rgba(57,255,20,0.15);
     transform: translateY(-1px);
 }
 .mobile-toggle {
@@ -255,8 +255,8 @@ nav .container {
     animation: fadeInUp 0.8s ease 0.1s both;
 }
 .hero h1 .accent {
-    color: var(--viper-green);
-    text-shadow: 0 0 30px var(--viper-glow), 0 0 60px rgba(57,255,20,0.15);
+    color: var(--viper-green-dim);
+    text-shadow: 0 0 20px rgba(57,255,20,0.2);
 }
 .hero-sub {
     font-size: 18px;
@@ -280,7 +280,7 @@ nav .container {
     font-weight: 700;
     font-size: 16px;
     color: var(--bg-deep);
-    background: var(--viper-green);
+    background: var(--viper-green-dim);
     border: none;
     border-radius: 8px;
     letter-spacing: 1px;
@@ -288,12 +288,12 @@ nav .container {
     cursor: pointer;
     transition: all 0.3s;
     text-decoration: none;
-    box-shadow: 0 0 25px var(--viper-glow), 0 4px 15px rgba(0,0,0,0.3);
+    box-shadow: 0 0 12px rgba(57,255,20,0.2), 0 4px 15px rgba(0,0,0,0.3);
 }
 .btn-primary:hover {
-    background: #4dff30;
+    background: var(--viper-green);
     color: var(--bg-deep);
-    box-shadow: 0 0 45px var(--viper-glow-strong), 0 6px 20px rgba(0,0,0,0.4);
+    box-shadow: 0 0 25px rgba(57,255,20,0.3), 0 6px 20px rgba(0,0,0,0.4);
     transform: translateY(-2px);
 }
 .btn-secondary {
@@ -337,7 +337,7 @@ nav .container {
     max-width: 520px;
     width: 100%;
     border-radius: 16px;
-    box-shadow: 0 0 60px rgba(57,255,20,0.12), 0 20px 60px rgba(0,0,0,0.5);
+    box-shadow: 0 0 30px rgba(57,255,20,0.06), 0 20px 60px rgba(0,0,0,0.5);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -364,7 +364,7 @@ nav .container {
 .trust-icon {
     font-size: 28px;
     margin-bottom: 4px;
-    filter: drop-shadow(0 0 8px var(--viper-glow));
+    filter: drop-shadow(0 0 3px rgba(57,255,20,0.12));
 }
 .trust-value {
     font-family: var(--font-display);
@@ -409,14 +409,14 @@ nav .container {
     border-color: var(--border-green-hover);
     background: var(--bg-card-hover);
     transform: translateY(-4px);
-    box-shadow: 0 12px 40px rgba(0,0,0,0.3), 0 0 30px rgba(57,255,20,0.06);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.3);
 }
 .manifesto-card:hover::before { opacity: 1; }
 .card-icon {
     font-size: 36px;
     margin-bottom: 20px;
     display: block;
-    filter: drop-shadow(0 0 10px var(--viper-glow));
+    filter: drop-shadow(0 0 4px rgba(57,255,20,0.15));
 }
 .manifesto-card h3 {
     font-size: 22px;
@@ -459,11 +459,10 @@ nav .container {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(57,255,20,0.08);
+    background: rgba(57,255,20,0.06);
     border: 1px solid var(--border-green);
     border-radius: 10px;
     font-size: 24px;
-    filter: drop-shadow(0 0 6px var(--viper-glow));
 }
 .feature-card h4 {
     font-size: 18px;
@@ -577,7 +576,7 @@ nav .container {
     font-size: 48px;
     margin-bottom: 20px;
     display: block;
-    filter: drop-shadow(0 0 12px var(--viper-glow));
+    filter: drop-shadow(0 0 4px rgba(57,255,20,0.12));
 }
 .audience-card h4 {
     font-family: var(--font-display);
@@ -682,7 +681,7 @@ nav .container {
     position: absolute;
     top: 0; left: 50%; transform: translateX(-50%);
     width: 600px; height: 600px;
-    background: radial-gradient(circle, rgba(57,255,20,0.06) 0%, transparent 70%);
+    background: radial-gradient(circle, rgba(57,255,20,0.03) 0%, transparent 70%);
     pointer-events: none;
 }
 .cta-section h2 {
@@ -787,9 +786,8 @@ footer {
 .section-divider {
     width: 100%;
     height: 1px;
-    background: linear-gradient(90deg, transparent 0%, var(--border-green-hover) 25%, var(--viper-green) 50%, var(--border-green-hover) 75%, transparent 100%);
-    box-shadow: 0 0 10px var(--viper-glow);
-    opacity: 0.5;
+    background: linear-gradient(90deg, transparent 0%, var(--border-green-hover) 25%, rgba(57,255,20,0.35) 50%, var(--border-green-hover) 75%, transparent 100%);
+    opacity: 0.4;
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -1100,7 +1098,7 @@ footer {
                 </div>
                 <div class="price-card featured reveal reveal-delay-1">
                     <div class="price-label">Lifetime License</div>
-                    <div class="price-amount">$1,500</div>
+                    <div class="price-amount">$600</div>
                     <div class="price-period">one-time · per seat</div>
                     <ul class="price-features">
                         <li>Everything in the demo — forever</li>
@@ -1216,7 +1214,7 @@ footer {
         for (const edge of edges) {
             const a = nodes[edge.a];
             const b = nodes[edge.b];
-            const alpha = 0.04 + (1 - edge.dist / 250) * 0.08;
+            const alpha = 0.02 + (1 - edge.dist / 250) * 0.04;
             ctx.strokeStyle = `rgba(57,255,20,${alpha})`;
             ctx.lineWidth = 0.5;
             ctx.beginPath();
@@ -1235,15 +1233,15 @@ footer {
         // Draw nodes
         const time = Date.now() * 0.001;
         for (const node of nodes) {
-            const pulseAlpha = 0.3 + 0.4 * Math.sin(time * node.speed * 60 + node.pulse);
+            const pulseAlpha = 0.15 + 0.2 * Math.sin(time * node.speed * 60 + node.pulse);
             ctx.fillStyle = `rgba(57,255,20,${pulseAlpha})`;
             ctx.beginPath();
             ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
             ctx.fill();
             // Glow
-            ctx.fillStyle = `rgba(57,255,20,${pulseAlpha * 0.3})`;
+            ctx.fillStyle = `rgba(57,255,20,${pulseAlpha * 0.2})`;
             ctx.beginPath();
-            ctx.arc(node.x, node.y, node.r * 3, 0, Math.PI * 2);
+            ctx.arc(node.x, node.y, node.r * 2.5, 0, Math.PI * 2);
             ctx.fill();
         }
 
@@ -1279,14 +1277,14 @@ footer {
                 }
             }
             // Bright dot
-            ctx.fillStyle = 'rgba(57,255,20,0.9)';
+            ctx.fillStyle = 'rgba(57,255,20,0.5)';
             ctx.beginPath();
-            ctx.arc(px, py, 2, 0, Math.PI * 2);
+            ctx.arc(px, py, 1.5, 0, Math.PI * 2);
             ctx.fill();
             // Trail glow
-            ctx.fillStyle = 'rgba(57,255,20,0.2)';
+            ctx.fillStyle = 'rgba(57,255,20,0.1)';
             ctx.beginPath();
-            ctx.arc(px, py, 6, 0, Math.PI * 2);
+            ctx.arc(px, py, 4, 0, Math.PI * 2);
             ctx.fill();
         }
 

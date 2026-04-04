@@ -1,0 +1,1352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Project V.I.P.E.R. — Visual Intelligence Platform for Evidence &amp; Reporting</title>
+    <meta name="description" content="Project VIPER is a secure, local-first investigative case management platform built for law enforcement. No cloud. No subscriptions. Own your data.">
+    <link rel="icon" href="assets/favicon.ico" type="image/x-icon">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Exo+2:wght@300;400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+    <style>
+/* ══════════════════════════════════════════════════════════════════
+   CSS VARIABLES
+   ══════════════════════════════════════════════════════════════════ */
+:root {
+    --viper-green: #39ff14;
+    --viper-green-dim: #2bcc10;
+    --viper-green-dark: #1a8a0a;
+    --viper-glow: rgba(57,255,20,0.35);
+    --viper-glow-strong: rgba(57,255,20,0.6);
+    --bg-deep: #050a05;
+    --bg-card: rgba(10,25,10,0.7);
+    --bg-card-hover: rgba(15,40,15,0.85);
+    --border-green: rgba(57,255,20,0.15);
+    --border-green-hover: rgba(57,255,20,0.4);
+    --text-primary: #e0ffe0;
+    --text-secondary: #8ab88a;
+    --text-dim: #5a7a5a;
+    --font-display: 'Rajdhani', sans-serif;
+    --font-body: 'Exo 2', sans-serif;
+    --font-mono: 'Share Tech Mono', monospace;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   RESET & BASE
+   ══════════════════════════════════════════════════════════════════ */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; scrollbar-width: thin; scrollbar-color: var(--viper-green-dark) var(--bg-deep); }
+body {
+    font-family: var(--font-body);
+    background: var(--bg-deep);
+    color: var(--text-primary);
+    line-height: 1.7;
+    overflow-x: hidden;
+}
+img { max-width: 100%; display: block; }
+a { color: var(--viper-green); text-decoration: none; transition: all 0.3s; }
+a:hover { color: #fff; text-shadow: 0 0 12px var(--viper-glow); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-deep); }
+::-webkit-scrollbar-thumb { background: var(--viper-green-dark); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--viper-green-dim); }
+
+/* ══════════════════════════════════════════════════════════════════
+   ANIMATED BACKGROUND
+   ══════════════════════════════════════════════════════════════════ */
+#bg-canvas {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 0;
+    pointer-events: none;
+}
+.bg-image-layer {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 0;
+    background: url('assets/background.png') center/cover no-repeat;
+    opacity: 0.18;
+    pointer-events: none;
+}
+.bg-gradient-overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 0;
+    background:
+        radial-gradient(ellipse 80% 50% at 50% 0%, rgba(57,255,20,0.06) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 20% 80%, rgba(57,255,20,0.03) 0%, transparent 50%),
+        linear-gradient(180deg, rgba(5,10,5,0.3) 0%, rgba(5,10,5,0.95) 100%);
+    pointer-events: none;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   TYPOGRAPHY
+   ══════════════════════════════════════════════════════════════════ */
+h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    color: var(--text-primary);
+    font-weight: 700;
+    line-height: 1.15;
+}
+.section-tag {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--viper-green);
+    text-transform: uppercase;
+    letter-spacing: 4px;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.section-tag::before {
+    content: '';
+    width: 35px;
+    height: 2px;
+    background: var(--viper-green);
+    display: inline-block;
+    box-shadow: 0 0 8px var(--viper-glow);
+}
+.mono { font-family: var(--font-mono); }
+.text-green { color: var(--viper-green); }
+.text-dim { color: var(--text-secondary); }
+.glow-text { text-shadow: 0 0 20px var(--viper-glow), 0 0 40px rgba(57,255,20,0.15); }
+
+/* ══════════════════════════════════════════════════════════════════
+   LAYOUT
+   ══════════════════════════════════════════════════════════════════ */
+.container { max-width: 1140px; margin: 0 auto; padding: 0 28px; }
+.content-wrapper { position: relative; z-index: 1; }
+section { padding: 100px 0; }
+
+/* ══════════════════════════════════════════════════════════════════
+   NAVIGATION
+   ══════════════════════════════════════════════════════════════════ */
+nav {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 100;
+    padding: 18px 0;
+    transition: all 0.4s ease;
+    backdrop-filter: blur(0px);
+}
+nav.scrolled {
+    padding: 10px 0;
+    background: rgba(5,10,5,0.92);
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border-green);
+    box-shadow: 0 4px 30px rgba(0,0,0,0.5);
+}
+nav .container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.nav-logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 22px;
+    color: var(--viper-green);
+    letter-spacing: 2px;
+}
+.nav-logo img { height: 36px; width: 36px; border-radius: 8px; }
+.nav-links { display: flex; gap: 32px; align-items: center; }
+.nav-links a {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: 14px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    transition: color 0.3s;
+}
+.nav-links a:hover { color: var(--viper-green); text-shadow: 0 0 10px var(--viper-glow); }
+.nav-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 24px;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--bg-deep);
+    background: var(--viper-green);
+    border: none;
+    border-radius: 6px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.3s;
+    text-decoration: none;
+    box-shadow: 0 0 20px var(--viper-glow), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+.nav-cta:hover {
+    background: #4dff30;
+    color: var(--bg-deep);
+    box-shadow: 0 0 35px var(--viper-glow-strong), inset 0 1px 0 rgba(255,255,255,0.3);
+    transform: translateY(-1px);
+}
+.mobile-toggle {
+    display: none;
+    background: none;
+    border: 1px solid var(--border-green);
+    border-radius: 6px;
+    padding: 8px;
+    cursor: pointer;
+    color: var(--viper-green);
+}
+.mobile-toggle svg { width: 24px; height: 24px; }
+
+/* ══════════════════════════════════════════════════════════════════
+   HERO
+   ══════════════════════════════════════════════════════════════════ */
+.hero {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    padding-top: 80px;
+    position: relative;
+    overflow: hidden;
+}
+.hero .container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 60px;
+    align-items: center;
+}
+.hero-text { max-width: 560px; }
+.hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    border: 1px solid var(--border-green);
+    border-radius: 50px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--viper-green);
+    background: rgba(57,255,20,0.05);
+    margin-bottom: 28px;
+    animation: fadeInUp 0.8s ease both;
+}
+.hero-badge .pulse-dot {
+    width: 8px; height: 8px;
+    background: var(--viper-green);
+    border-radius: 50%;
+    animation: pulse 2s ease-in-out infinite;
+    box-shadow: 0 0 8px var(--viper-glow);
+}
+.hero h1 {
+    font-size: clamp(42px, 5vw, 68px);
+    margin-bottom: 24px;
+    animation: fadeInUp 0.8s ease 0.1s both;
+}
+.hero h1 .accent {
+    color: var(--viper-green);
+    text-shadow: 0 0 30px var(--viper-glow), 0 0 60px rgba(57,255,20,0.15);
+}
+.hero-sub {
+    font-size: 18px;
+    color: var(--text-secondary);
+    line-height: 1.8;
+    margin-bottom: 40px;
+    animation: fadeInUp 0.8s ease 0.2s both;
+}
+.hero-actions {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    animation: fadeInUp 0.8s ease 0.3s both;
+}
+.btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 36px;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--bg-deep);
+    background: var(--viper-green);
+    border: none;
+    border-radius: 8px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.3s;
+    text-decoration: none;
+    box-shadow: 0 0 25px var(--viper-glow), 0 4px 15px rgba(0,0,0,0.3);
+}
+.btn-primary:hover {
+    background: #4dff30;
+    color: var(--bg-deep);
+    box-shadow: 0 0 45px var(--viper-glow-strong), 0 6px 20px rgba(0,0,0,0.4);
+    transform: translateY(-2px);
+}
+.btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 36px;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 16px;
+    color: var(--viper-green);
+    background: transparent;
+    border: 1px solid var(--border-green-hover);
+    border-radius: 8px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.3s;
+    text-decoration: none;
+}
+.btn-secondary:hover {
+    border-color: var(--viper-green);
+    background: rgba(57,255,20,0.06);
+    box-shadow: 0 0 20px rgba(57,255,20,0.15);
+    color: #fff;
+}
+.hero-meta {
+    margin-top: 24px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    animation: fadeInUp 0.8s ease 0.4s both;
+}
+.hero-image {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    animation: fadeInRight 1s ease 0.3s both;
+}
+.hero-image img {
+    max-width: 520px;
+    width: 100%;
+    border-radius: 16px;
+    box-shadow: 0 0 60px rgba(57,255,20,0.12), 0 20px 60px rgba(0,0,0,0.5);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   TRUST BAR
+   ══════════════════════════════════════════════════════════════════ */
+.trust-bar {
+    padding: 50px 0;
+    border-top: 1px solid var(--border-green);
+    border-bottom: 1px solid var(--border-green);
+    background: rgba(5,15,5,0.5);
+}
+.trust-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 40px;
+    text-align: center;
+}
+.trust-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+.trust-icon {
+    font-size: 28px;
+    margin-bottom: 4px;
+    filter: drop-shadow(0 0 8px var(--viper-glow));
+}
+.trust-value {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--viper-green);
+    letter-spacing: 1px;
+}
+.trust-label {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   MANIFESTO SECTION
+   ══════════════════════════════════════════════════════════════════ */
+.manifesto-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 28px;
+    margin-top: 50px;
+}
+.manifesto-card {
+    position: relative;
+    padding: 40px 32px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-green);
+    border-radius: 12px;
+    transition: all 0.4s ease;
+    overflow: hidden;
+}
+.manifesto-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--viper-green), transparent);
+    opacity: 0;
+    transition: opacity 0.4s;
+}
+.manifesto-card:hover {
+    border-color: var(--border-green-hover);
+    background: var(--bg-card-hover);
+    transform: translateY(-4px);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.3), 0 0 30px rgba(57,255,20,0.06);
+}
+.manifesto-card:hover::before { opacity: 1; }
+.card-icon {
+    font-size: 36px;
+    margin-bottom: 20px;
+    display: block;
+    filter: drop-shadow(0 0 10px var(--viper-glow));
+}
+.manifesto-card h3 {
+    font-size: 22px;
+    margin-bottom: 14px;
+    color: var(--viper-green);
+}
+.manifesto-card p {
+    color: var(--text-secondary);
+    font-size: 15px;
+    line-height: 1.7;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   FEATURES SECTION
+   ══════════════════════════════════════════════════════════════════ */
+.features-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 28px;
+    margin-top: 50px;
+}
+.feature-card {
+    display: flex;
+    gap: 20px;
+    padding: 32px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-green);
+    border-radius: 12px;
+    transition: all 0.4s ease;
+}
+.feature-card:hover {
+    border-color: var(--border-green-hover);
+    background: var(--bg-card-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+}
+.feature-icon {
+    flex-shrink: 0;
+    width: 50px; height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(57,255,20,0.08);
+    border: 1px solid var(--border-green);
+    border-radius: 10px;
+    font-size: 24px;
+    filter: drop-shadow(0 0 6px var(--viper-glow));
+}
+.feature-card h4 {
+    font-size: 18px;
+    margin-bottom: 8px;
+    color: var(--text-primary);
+}
+.feature-card p {
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.7;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   COURTROOM SECTION (split layout)
+   ══════════════════════════════════════════════════════════════════ */
+.split-section .container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 80px;
+    align-items: center;
+}
+.split-visual {
+    position: relative;
+    padding: 40px;
+}
+.evidence-flow {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+.flow-step {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 18px 22px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-green);
+    border-radius: 10px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text-secondary);
+    transition: all 0.3s;
+}
+.flow-step:hover {
+    border-color: var(--viper-green);
+    background: var(--bg-card-hover);
+    box-shadow: 0 0 20px rgba(57,255,20,0.08);
+}
+.flow-num {
+    flex-shrink: 0;
+    width: 32px; height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(57,255,20,0.1);
+    border: 1px solid var(--border-green-hover);
+    border-radius: 8px;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--viper-green);
+}
+.split-text h2 {
+    font-size: clamp(32px, 3.5vw, 48px);
+    margin-bottom: 24px;
+}
+.split-text p {
+    color: var(--text-secondary);
+    font-size: 16px;
+    line-height: 1.8;
+    margin-bottom: 16px;
+}
+.split-text .highlight-box {
+    margin-top: 28px;
+    padding: 24px;
+    background: rgba(57,255,20,0.04);
+    border: 1px solid var(--border-green);
+    border-left: 3px solid var(--viper-green);
+    border-radius: 0 10px 10px 0;
+}
+.highlight-box p {
+    color: var(--text-primary);
+    font-size: 15px;
+    font-style: italic;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   WHO IS VIPER FOR
+   ══════════════════════════════════════════════════════════════════ */
+.audience-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 28px;
+    margin-top: 50px;
+}
+.audience-card {
+    text-align: center;
+    padding: 48px 32px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-green);
+    border-radius: 12px;
+    transition: all 0.4s ease;
+}
+.audience-card:hover {
+    border-color: var(--border-green-hover);
+    background: var(--bg-card-hover);
+    transform: translateY(-4px);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.3), 0 0 20px rgba(57,255,20,0.06);
+}
+.audience-icon {
+    font-size: 48px;
+    margin-bottom: 20px;
+    display: block;
+    filter: drop-shadow(0 0 12px var(--viper-glow));
+}
+.audience-card h4 {
+    font-family: var(--font-display);
+    font-size: 22px;
+    color: var(--viper-green);
+    margin-bottom: 12px;
+}
+.audience-card p {
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.7;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PRICING
+   ══════════════════════════════════════════════════════════════════ */
+.pricing-section { text-align: center; }
+.pricing-cards {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 32px;
+    max-width: 900px;
+    margin: 50px auto 0;
+}
+.price-card {
+    padding: 48px 36px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-green);
+    border-radius: 16px;
+    text-align: left;
+    transition: all 0.4s ease;
+    position: relative;
+    overflow: hidden;
+}
+.price-card.featured {
+    border-color: var(--viper-green);
+    box-shadow: 0 0 40px rgba(57,255,20,0.1);
+}
+.price-card.featured::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--viper-green-dark), var(--viper-green), var(--viper-green-dark));
+    box-shadow: 0 0 15px var(--viper-glow);
+}
+.price-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.3), 0 0 30px rgba(57,255,20,0.08);
+}
+.price-label {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--viper-green);
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    margin-bottom: 16px;
+}
+.price-amount {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 48px;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+.price-period {
+    font-size: 14px;
+    color: var(--text-dim);
+    margin-bottom: 28px;
+}
+.price-features {
+    list-style: none;
+    margin-bottom: 32px;
+}
+.price-features li {
+    padding: 8px 0;
+    font-size: 14px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.price-features li::before {
+    content: '✦';
+    color: var(--viper-green);
+    font-size: 10px;
+}
+.price-card .btn-primary { width: 100%; justify-content: center; }
+.price-card .btn-secondary { width: 100%; justify-content: center; }
+
+/* ══════════════════════════════════════════════════════════════════
+   CTA / DOWNLOAD SECTION
+   ══════════════════════════════════════════════════════════════════ */
+.cta-section {
+    text-align: center;
+    padding: 120px 0;
+    position: relative;
+}
+.cta-section::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 50%; transform: translateX(-50%);
+    width: 600px; height: 600px;
+    background: radial-gradient(circle, rgba(57,255,20,0.06) 0%, transparent 70%);
+    pointer-events: none;
+}
+.cta-section h2 {
+    font-size: clamp(36px, 4vw, 56px);
+    margin-bottom: 20px;
+}
+.cta-section p {
+    color: var(--text-secondary);
+    font-size: 18px;
+    max-width: 600px;
+    margin: 0 auto 40px;
+}
+.cta-actions {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+.download-meta {
+    margin-top: 20px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-dim);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   FOOTER
+   ══════════════════════════════════════════════════════════════════ */
+footer {
+    padding: 50px 0 30px;
+    border-top: 1px solid var(--border-green);
+    background: rgba(5,10,5,0.8);
+}
+.footer-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 20px;
+}
+.footer-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.footer-brand img { height: 28px; width: 28px; border-radius: 6px; }
+.footer-brand span {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--viper-green);
+    letter-spacing: 2px;
+}
+.footer-legal {
+    font-size: 13px;
+    color: var(--text-dim);
+}
+.footer-legal a { color: var(--text-secondary); }
+
+/* ══════════════════════════════════════════════════════════════════
+   SCROLL ANIMATIONS
+   ══════════════════════════════════════════════════════════════════ */
+.reveal {
+    opacity: 0;
+    transform: translateY(30px);
+    transition: opacity 0.7s ease, transform 0.7s ease;
+}
+.reveal.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+.reveal-delay-1 { transition-delay: 0.1s; }
+.reveal-delay-2 { transition-delay: 0.2s; }
+.reveal-delay-3 { transition-delay: 0.3s; }
+.reveal-delay-4 { transition-delay: 0.4s; }
+.reveal-delay-5 { transition-delay: 0.5s; }
+.reveal-delay-6 { transition-delay: 0.6s; }
+
+/* ══════════════════════════════════════════════════════════════════
+   ANIMATIONS
+   ══════════════════════════════════════════════════════════════════ */
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(25px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeInRight {
+    from { opacity: 0; transform: translateX(40px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+@keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.5); }
+}
+@keyframes scanline {
+    0% { top: -5%; }
+    100% { top: 105%; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   SECTION DIVIDER
+   ══════════════════════════════════════════════════════════════════ */
+.section-divider {
+    width: 100%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent 0%, var(--border-green-hover) 25%, var(--viper-green) 50%, var(--border-green-hover) 75%, transparent 100%);
+    box-shadow: 0 0 10px var(--viper-glow);
+    opacity: 0.5;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ══════════════════════════════════════════════════════════════════ */
+@media (max-width: 1024px) {
+    .hero .container { grid-template-columns: 1fr; text-align: center; }
+    .hero-text { max-width: 100%; }
+    .hero-actions { justify-content: center; }
+    .hero-image { margin-top: 40px; }
+    .hero-image img { max-width: 400px; }
+    .manifesto-grid { grid-template-columns: 1fr; }
+    .features-grid { grid-template-columns: 1fr; }
+    .split-section .container { grid-template-columns: 1fr; gap: 40px; }
+    .split-visual { order: 2; }
+    .audience-grid { grid-template-columns: 1fr; }
+    .pricing-cards { grid-template-columns: 1fr; max-width: 480px; }
+}
+@media (max-width: 768px) {
+    .nav-links { display: none; }
+    .mobile-toggle { display: block; }
+    .nav-links.open {
+        display: flex;
+        flex-direction: column;
+        position: absolute;
+        top: 100%; left: 0; right: 0;
+        background: rgba(5,10,5,0.97);
+        padding: 20px 28px;
+        border-bottom: 1px solid var(--border-green);
+        gap: 16px;
+    }
+    .trust-grid { grid-template-columns: repeat(2, 1fr); gap: 24px; }
+    section { padding: 70px 0; }
+    .hero { min-height: auto; padding: 120px 0 60px; }
+}
+    </style>
+</head>
+<body>
+
+<!-- ═══════════════ BACKGROUND LAYERS ═══════════════ -->
+<div class="bg-image-layer"></div>
+<div class="bg-gradient-overlay"></div>
+<canvas id="bg-canvas"></canvas>
+
+<!-- ═══════════════ CONTENT WRAPPER ═══════════════ -->
+<div class="content-wrapper">
+
+    <!-- ═══════════════ NAVIGATION ═══════════════ -->
+    <nav id="mainNav">
+        <div class="container">
+            <a href="#" class="nav-logo">
+                <img src="assets/favicon.ico" alt="V.I.P.E.R.">
+                <span>V.I.P.E.R.</span>
+            </a>
+            <div class="nav-links" id="navLinks">
+                <a href="#manifesto">Manifesto</a>
+                <a href="#features">Features</a>
+                <a href="#courtroom">Workflow</a>
+                <a href="#audience">Who It's For</a>
+                <a href="#pricing">Pricing</a>
+                <a href="#download" class="nav-cta">⬇ Download Demo</a>
+            </div>
+            <button class="mobile-toggle" onclick="document.getElementById('navLinks').classList.toggle('open')">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+            </button>
+        </div>
+    </nav>
+
+    <!-- ═══════════════ HERO ═══════════════ -->
+    <section class="hero" id="hero">
+        <div class="container">
+            <div class="hero-text">
+                <div class="hero-badge">
+                    <span class="pulse-dot"></span>
+                    <span>Now Available for Windows</span>
+                </div>
+                <h1>The Investigator's<br><span class="accent glow-text">Digital Command Center</span></h1>
+                <p class="hero-sub">
+                    A secure, local-first investigative case management platform. No cloud dependency.
+                    No endless subscriptions. Your data stays on your machine — encrypted, portable, and under your control.
+                </p>
+                <div class="hero-actions">
+                    <a href="#download" class="btn-primary">⬇ Download Free Demo</a>
+                    <a href="#features" class="btn-secondary">Explore Features</a>
+                </div>
+                <p class="hero-meta">Version 1.9.0 · Windows 10/11 · 60-Day Free Trial</p>
+            </div>
+            <div class="hero-image">
+                <img src="assets/hero-banner.png" alt="V.I.P.E.R. — Visual Intelligence Platform for Evidence and Reporting">
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══════════════ TRUST BAR ═══════════════ -->
+    <section class="trust-bar">
+        <div class="container">
+            <div class="trust-grid">
+                <div class="trust-item reveal">
+                    <span class="trust-icon">🔒</span>
+                    <span class="trust-value">AES-256</span>
+                    <span class="trust-label">Case File Encryption</span>
+                </div>
+                <div class="trust-item reveal reveal-delay-1">
+                    <span class="trust-icon">💻</span>
+                    <span class="trust-value">100% Local</span>
+                    <span class="trust-label">Zero Cloud Dependency</span>
+                </div>
+                <div class="trust-item reveal reveal-delay-2">
+                    <span class="trust-icon">🔌</span>
+                    <span class="trust-value">USB Portable</span>
+                    <span class="trust-label">Take It Anywhere</span>
+                </div>
+                <div class="trust-item reveal reveal-delay-3">
+                    <span class="trust-icon">⏱️</span>
+                    <span class="trust-value">60 Days</span>
+                    <span class="trust-label">Risk-Free Trial</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══════════════ THE VIPER MANIFESTO ═══════════════ -->
+    <section id="manifesto">
+        <div class="container">
+            <div class="section-tag reveal">The Viper Manifesto</div>
+            <h2 class="reveal" style="font-size:clamp(32px,3.5vw,48px); max-width:700px;">
+                Your tools should work for <span class="text-green">you</span> — not the other way around.
+            </h2>
+            <div class="manifesto-grid">
+                <div class="manifesto-card reveal reveal-delay-1">
+                    <span class="card-icon">🛡️</span>
+                    <h3>Own Your Tools</h3>
+                    <p>No SaaS, no subscriptions, no "pay-to-play" renewals. One affordable lifetime license. Your software. Your rules. Period.</p>
+                </div>
+                <div class="manifesto-card reveal reveal-delay-2">
+                    <span class="card-icon">🌐</span>
+                    <h3>Off-the-Grid Security</h3>
+                    <p>Zero cloud dependency. Run VIPER natively from your desktop or take it mobile on a USB drive. Investigate anywhere — even without internet.</p>
+                </div>
+                <div class="manifesto-card reveal reveal-delay-3">
+                    <span class="card-icon">🔐</span>
+                    <h3>Total Privacy</h3>
+                    <p>No AI training on your data. No external storage. Everything is protected by AES-256 encryption — both the software and your case files.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="section-divider"></div>
+
+    <!-- ═══════════════ FEATURES ═══════════════ -->
+    <section id="features">
+        <div class="container">
+            <div class="section-tag reveal">Built for the Modern Investigator</div>
+            <h2 class="reveal" style="font-size:clamp(32px,3.5vw,48px); max-width:760px;">
+                Not just a database — a <span class="text-green">Swiss Army knife</span> for complex cases.
+            </h2>
+            <p class="reveal text-dim" style="font-size:16px; max-width:680px; margin-top:16px;">
+                Our modular system allows you to scale your workspace as the investigation develops. Add modules, track evidence, and manage your caseload from a single interface.
+            </p>
+            <div class="features-grid">
+                <div class="feature-card reveal reveal-delay-1">
+                    <div class="feature-icon">📊</div>
+                    <div>
+                        <h4>Unified Dashboard</h4>
+                        <p>A customizable "Single Pane of Glass" to track arrests, recoveries (vehicles/cargo), missing persons, narcotics, and currency seizures — all from one view.</p>
+                    </div>
+                </div>
+                <div class="feature-card reveal reveal-delay-2">
+                    <div class="feature-icon">📡</div>
+                    <div>
+                        <h4>Native Investigative Modules</h4>
+                        <p>Built-in email parsers, cell tower record analysis (CDR), WiGLE network intelligence, and cargo theft integration via the TRACE network.</p>
+                    </div>
+                </div>
+                <div class="feature-card reveal reveal-delay-3">
+                    <div class="feature-icon">⚖️</div>
+                    <div>
+                        <h4>Smart Warrant Tracking</h4>
+                        <p>A dedicated dashboard that alerts you when a company is late on a return, so you never miss a follow-up or a filing deadline.</p>
+                    </div>
+                </div>
+                <div class="feature-card reveal reveal-delay-4">
+                    <div class="feature-icon">📋</div>
+                    <div>
+                        <h4>RMS Import &amp; Parsing</h4>
+                        <p>Import PDF reports directly from your agency's Record Management System. VIPER parses officers, offenses, suspects, vehicles, and narratives automatically.</p>
+                    </div>
+                </div>
+                <div class="feature-card reveal reveal-delay-5">
+                    <div class="feature-icon">💾</div>
+                    <div>
+                        <h4>Collaborative &amp; Portable</h4>
+                        <p>One-button backup and restore. Share case files within your unit or across agencies — without needing an internet connection. Runs from USB drives.</p>
+                    </div>
+                </div>
+                <div class="feature-card reveal reveal-delay-6">
+                    <div class="feature-icon">🔍</div>
+                    <div>
+                        <h4>TRACE Network Search</h4>
+                        <p>Query the TRACE anonymous intelligence network directly from VIPER. Surface cross-company connections on suspects, vehicles, and cargo across state lines.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="section-divider"></div>
+
+    <!-- ═══════════════ CRIME SCENE TO COURTROOM ═══════════════ -->
+    <section id="courtroom" class="split-section">
+        <div class="container">
+            <div class="split-text">
+                <div class="section-tag reveal">From Crime Scene to Courtroom</div>
+                <h2 class="reveal">Managing a case shouldn't be <span class="text-green">harder</span> than solving it.</h2>
+                <p class="reveal">
+                    VIPER handles your reports, suspects, victims, and digital evidence in one encrypted ecosystem. Modular tabs keep every piece of the puzzle organized without cluttering your workspace.
+                </p>
+                <p class="reveal">
+                    When it's time for discovery, the <strong style="color:var(--viper-green);">One-Button DA Package</strong> exports all evidence and reports into a unified, court-ready folder for seamless evidence preservation.
+                </p>
+                <div class="highlight-box reveal">
+                    <p>"Investigate without limits. Own your data. Secure the conviction."</p>
+                </div>
+            </div>
+            <div class="split-visual reveal">
+                <div class="evidence-flow">
+                    <div class="flow-step">
+                        <span class="flow-num">01</span>
+                        <span>Document suspects, victims, witnesses &amp; evidence</span>
+                    </div>
+                    <div class="flow-step">
+                        <span class="flow-num">02</span>
+                        <span>Attach photos, videos, digital files to the case</span>
+                    </div>
+                    <div class="flow-step">
+                        <span class="flow-num">03</span>
+                        <span>Write reports with built-in auto-save editor</span>
+                    </div>
+                    <div class="flow-step">
+                        <span class="flow-num">04</span>
+                        <span>Track warrants, prosecution status &amp; deadlines</span>
+                    </div>
+                    <div class="flow-step">
+                        <span class="flow-num">05</span>
+                        <span>Export DA Package — one click, court-ready folder</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="section-divider"></div>
+
+    <!-- ═══════════════ WHO IS VIPER FOR ═══════════════ -->
+    <section id="audience">
+        <div class="container">
+            <div class="section-tag reveal">Who Is Viper For</div>
+            <h2 class="reveal" style="font-size:clamp(32px,3.5vw,48px); max-width:760px;">
+                Every investigator deserves <span class="text-green">elite tools</span> — regardless of zip code.
+            </h2>
+            <div class="audience-grid">
+                <div class="audience-card reveal reveal-delay-1">
+                    <span class="audience-icon">🏛️</span>
+                    <h4>Federal Agents</h4>
+                    <p>Joint Task Force operations, multi-jurisdictional investigations, and complex organized crime cases that span state lines.</p>
+                </div>
+                <div class="audience-card reveal reveal-delay-2">
+                    <span class="audience-icon">🔵</span>
+                    <h4>Specialized Units</h4>
+                    <p>ORC task forces, cargo theft units, narcotics divisions, and major crimes teams in metropolitan agencies.</p>
+                </div>
+                <div class="audience-card reveal reveal-delay-3">
+                    <span class="audience-icon">⭐</span>
+                    <h4>Rural Detectives</h4>
+                    <p>The lone detective in a small-town department. No IT budget? No problem. VIPER runs anywhere — even from a thumb drive.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="section-divider"></div>
+
+    <!-- ═══════════════ PRICING ═══════════════ -->
+    <section id="pricing" class="pricing-section">
+        <div class="container">
+            <div class="section-tag reveal" style="justify-content:center;">Pricing</div>
+            <h2 class="reveal" style="font-size:clamp(32px,3.5vw,48px);">
+                Simple. <span class="text-green">Affordable.</span> Permanent.
+            </h2>
+            <p class="reveal text-dim" style="font-size:16px; max-width:600px; margin:16px auto 0;">
+                No tiers, no upsells, no monthly drain. All features included — forever.
+            </p>
+            <div class="pricing-cards">
+                <div class="price-card reveal">
+                    <div class="price-label">Free Demo</div>
+                    <div class="price-amount">$0</div>
+                    <div class="price-period">60 days · full access</div>
+                    <ul class="price-features">
+                        <li>Every module &amp; feature unlocked</li>
+                        <li>Unlimited cases, suspects, evidence</li>
+                        <li>TRACE network search included</li>
+                        <li>No credit card required</li>
+                        <li>No data lost if you upgrade</li>
+                        <li>Setup takes less than 5 minutes</li>
+                    </ul>
+                    <a href="#download" class="btn-secondary">Start Free Demo</a>
+                </div>
+                <div class="price-card featured reveal reveal-delay-1">
+                    <div class="price-label">Lifetime License</div>
+                    <div class="price-amount">$1,500</div>
+                    <div class="price-period">one-time · per seat</div>
+                    <ul class="price-features">
+                        <li>Everything in the demo — forever</li>
+                        <li>Lifetime software updates</li>
+                        <li>DA export &amp; prosecution tools</li>
+                        <li>RMS import &amp; CDR analysis</li>
+                        <li>Priority direct support</li>
+                        <li>Never locked out of your data</li>
+                    </ul>
+                    <a href="mailto:sales@intellectle.com?subject=VIPER%20License%20Inquiry" class="btn-primary">Contact Sales</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="section-divider"></div>
+
+    <!-- ═══════════════ DOWNLOAD CTA ═══════════════ -->
+    <section id="download" class="cta-section">
+        <div class="container">
+            <h2 class="reveal"><span class="text-green glow-text">Download</span> V.I.P.E.R.</h2>
+            <p class="reveal">60-day free trial. No credit card. No obligation. Full access to every feature.</p>
+            <div class="cta-actions reveal">
+                <a href="#" class="btn-primary" id="downloadBtn" onclick="handleDownload(event)">
+                    ⬇ Download V.I.P.E.R. v1.9.0
+                </a>
+            </div>
+            <p class="download-meta reveal">Version 1.9.0 · Windows 10/11 · ~85 MB</p>
+        </div>
+    </section>
+
+    <!-- ═══════════════ FOOTER ═══════════════ -->
+    <footer>
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <img src="assets/favicon.ico" alt="V.I.P.E.R.">
+                    <span>V.I.P.E.R.</span>
+                </div>
+                <div class="footer-legal">
+                    &copy; 2026 <a href="https://intellectle.com">Intellect LE, LLC</a>. All rights reserved.
+                </div>
+            </div>
+        </div>
+    </footer>
+
+</div><!-- /content-wrapper -->
+
+<!-- ═══════════════ JAVASCRIPT ═══════════════ -->
+<script>
+/* ──────────────────────────────────────────────
+   ANIMATED CIRCUIT BOARD BACKGROUND (canvas)
+   ────────────────────────────────────────────── */
+(function() {
+    const canvas = document.getElementById('bg-canvas');
+    const ctx = canvas.getContext('2d');
+    let W, H, nodes = [], edges = [], particles = [];
+    const NODE_COUNT = 60;
+    const PARTICLE_COUNT = 18;
+
+    function resize() {
+        W = canvas.width = window.innerWidth;
+        H = canvas.height = window.innerHeight * 3;
+    }
+
+    function initNodes() {
+        nodes = [];
+        edges = [];
+        for (let i = 0; i < NODE_COUNT; i++) {
+            nodes.push({
+                x: Math.random() * W,
+                y: Math.random() * H,
+                r: 1.5 + Math.random() * 2,
+                pulse: Math.random() * Math.PI * 2,
+                speed: 0.005 + Math.random() * 0.015
+            });
+        }
+        // Build edges (connect nearby nodes)
+        for (let i = 0; i < nodes.length; i++) {
+            for (let j = i + 1; j < nodes.length; j++) {
+                const dx = nodes[i].x - nodes[j].x;
+                const dy = nodes[i].y - nodes[j].y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 250) {
+                    edges.push({ a: i, b: j, dist });
+                }
+            }
+        }
+        // Init traveling particles
+        particles = [];
+        const usableEdges = edges.filter(e => e.dist > 80);
+        for (let i = 0; i < PARTICLE_COUNT && i < usableEdges.length; i++) {
+            const edge = usableEdges[Math.floor(Math.random() * usableEdges.length)];
+            particles.push({
+                edge,
+                t: Math.random(),
+                speed: 0.001 + Math.random() * 0.003,
+                dir: Math.random() > 0.5 ? 1 : -1
+            });
+        }
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, W, H);
+
+        // Scroll offset — parallax the circuit slightly
+        const scrollY = window.scrollY * 0.15;
+
+        ctx.save();
+        ctx.translate(0, -scrollY);
+
+        // Draw edges
+        for (const edge of edges) {
+            const a = nodes[edge.a];
+            const b = nodes[edge.b];
+            const alpha = 0.04 + (1 - edge.dist / 250) * 0.08;
+            ctx.strokeStyle = `rgba(57,255,20,${alpha})`;
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            // Circuit-board style: horizontal then vertical
+            ctx.moveTo(a.x, a.y);
+            if (Math.abs(a.x - b.x) > Math.abs(a.y - b.y)) {
+                ctx.lineTo(b.x, a.y);
+                ctx.lineTo(b.x, b.y);
+            } else {
+                ctx.lineTo(a.x, b.y);
+                ctx.lineTo(b.x, b.y);
+            }
+            ctx.stroke();
+        }
+
+        // Draw nodes
+        const time = Date.now() * 0.001;
+        for (const node of nodes) {
+            const pulseAlpha = 0.3 + 0.4 * Math.sin(time * node.speed * 60 + node.pulse);
+            ctx.fillStyle = `rgba(57,255,20,${pulseAlpha})`;
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
+            ctx.fill();
+            // Glow
+            ctx.fillStyle = `rgba(57,255,20,${pulseAlpha * 0.3})`;
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, node.r * 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Draw traveling particles
+        for (const p of particles) {
+            p.t += p.speed * p.dir;
+            if (p.t > 1 || p.t < 0) { p.dir *= -1; p.t = Math.max(0, Math.min(1, p.t)); }
+            const a = nodes[p.edge.a];
+            const b = nodes[p.edge.b];
+            let px, py;
+            // Circuit-board path interpolation
+            if (Math.abs(a.x - b.x) > Math.abs(a.y - b.y)) {
+                const midT = Math.abs(b.x - a.x) / (Math.abs(b.x - a.x) + Math.abs(b.y - a.y));
+                if (p.t < midT) {
+                    const localT = p.t / midT;
+                    px = a.x + (b.x - a.x) * localT;
+                    py = a.y;
+                } else {
+                    const localT = (p.t - midT) / (1 - midT);
+                    px = b.x;
+                    py = a.y + (b.y - a.y) * localT;
+                }
+            } else {
+                const midT = Math.abs(b.y - a.y) / (Math.abs(b.x - a.x) + Math.abs(b.y - a.y));
+                if (p.t < midT) {
+                    const localT = p.t / midT;
+                    px = a.x;
+                    py = a.y + (b.y - a.y) * localT;
+                } else {
+                    const localT = (p.t - midT) / (1 - midT);
+                    px = a.x + (b.x - a.x) * localT;
+                    py = b.y;
+                }
+            }
+            // Bright dot
+            ctx.fillStyle = 'rgba(57,255,20,0.9)';
+            ctx.beginPath();
+            ctx.arc(px, py, 2, 0, Math.PI * 2);
+            ctx.fill();
+            // Trail glow
+            ctx.fillStyle = 'rgba(57,255,20,0.2)';
+            ctx.beginPath();
+            ctx.arc(px, py, 6, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        ctx.restore();
+        requestAnimationFrame(draw);
+    }
+
+    resize();
+    initNodes();
+    draw();
+    window.addEventListener('resize', () => { resize(); initNodes(); });
+})();
+
+/* ──────────────────────────────────────────────
+   NAV SCROLL BEHAVIOR
+   ────────────────────────────────────────────── */
+const nav = document.getElementById('mainNav');
+window.addEventListener('scroll', () => {
+    nav.classList.toggle('scrolled', window.scrollY > 60);
+});
+
+/* ──────────────────────────────────────────────
+   SCROLL REVEAL
+   ────────────────────────────────────────────── */
+const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+        if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+        }
+    });
+}, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+/* ──────────────────────────────────────────────
+   SMOOTH SCROLL (nav links)
+   ────────────────────────────────────────────── */
+document.querySelectorAll('a[href^="#"]').forEach(link => {
+    link.addEventListener('click', (e) => {
+        const target = document.querySelector(link.getAttribute('href'));
+        if (target) {
+            e.preventDefault();
+            // Close mobile menu if open
+            document.getElementById('navLinks').classList.remove('open');
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    });
+});
+
+/* ──────────────────────────────────────────────
+   DOWNLOAD HANDLER
+   ────────────────────────────────────────────── */
+function handleDownload(e) {
+    // TODO: Wire up to actual download URL from intellect dashboard
+    // e.g., https://your-dashboard.railway.app/api/updates/project-viper/latest
+    // For now, this is a placeholder that can be updated with the real URL
+    const downloadUrl = 'https://intellectle-dashboard-production.up.railway.app/updates/project-viper/V.I.P.E.R-1.9.0-Setup.exe';
+    window.location.href = downloadUrl;
+}
+</script>
+
+</body>
+</html>

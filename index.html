@@ -1338,13 +1338,29 @@ document.querySelectorAll('a[href^="#"]').forEach(link => {
    DOWNLOAD HANDLER
    ────────────────────────────────────────────── */
 function handleDownload(e) {
-    // TODO: Wire up to actual download URL from intellect dashboard
-    // e.g., https://your-dashboard.railway.app/api/updates/project-viper/latest
-    // For now, this is a placeholder that can be updated with the real URL
-    const downloadUrl = 'https://intellectle-dashboard-production.up.railway.app/updates/project-viper/V.I.P.E.R-1.9.0-Setup.exe';
+    const downloadUrl = 'https://intellect-unified-dashboard-production.up.railway.app/updates/project-viper/V.I.P.E.R-1.9.0-Setup.exe';
+    // Track download click
+    _iq('download_click');
     window.location.href = downloadUrl;
 }
 </script>
 
+<!-- Intellect Analytics -->
+<script>
+(function(){
+    const SITE='project-viper';
+    const API='https://intellect-unified-dashboard-production.up.railway.app/api/analytics';
+    function _send(endpoint,body){
+        try{fetch(API+'/'+endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),keepalive:true})}catch(e){}
+    }
+    _send('pageview',{site:SITE,path:location.pathname,referrer:document.referrer||null});
+    window._iq=function(evt,meta){_send('event',{site:SITE,event_name:evt,metadata:meta||null})};
+    document.querySelectorAll('a[href*="download"],a[href*="Download"],.btn-primary').forEach(function(el){
+        if(el.textContent.toLowerCase().includes('download')){
+            el.addEventListener('click',function(){_iq('download_click')});
+        }
+    });
+})();
+</script>
 </body>
 </html>

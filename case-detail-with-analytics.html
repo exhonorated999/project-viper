@@ -885,9 +885,15 @@
         function formatDate(dateString) {
             if (!dateString) return '';
             
-            // Handle ISO format dates
-            const date = new Date(dateString);
-            if (isNaN(date.getTime())) return dateString; // Return original if invalid
+            // If already in YYYY-MM-DD format (from date inputs), parse directly to avoid timezone shift
+            const ymdMatch = dateString.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+            if (ymdMatch) {
+                return `${ymdMatch[2]}-${ymdMatch[3]}-${ymdMatch[1]}`;
+            }
+            
+            // Fallback for other date formats — use local time parsing
+            const date = new Date(dateString + 'T00:00:00');
+            if (isNaN(date.getTime())) return dateString;
             
             const month = String(date.getMonth() + 1).padStart(2, '0');
             const day = String(date.getDate()).padStart(2, '0');
@@ -4455,8 +4461,10 @@
         
         function renderWarrantItems() {
             return caseWarrants.map(warrant => {
-                const isOverdue = warrant.dueDate && !warrant.returnReceived && new Date(warrant.dueDate) < new Date();
-                const daysUntilDue = warrant.dueDate ? Math.ceil((new Date(warrant.dueDate) - new Date()) / (1000 * 60 * 60 * 24)) : null;
+                const dueDateLocal = warrant.dueDate ? new Date(warrant.dueDate + 'T00:00:00') : null;
+                const todayLocal = new Date(); todayLocal.setHours(0,0,0,0);
+                const isOverdue = dueDateLocal && !warrant.returnReceived && dueDateLocal < todayLocal;
+                const daysUntilDue = dueDateLocal ? Math.ceil((dueDateLocal - todayLocal) / (1000 * 60 * 60 * 24)) : null;
                 
                 return `
                     <div class="glass-card rounded-xl p-6 mb-4 ${isOverdue ? 'border-2 border-red-500/50' : 'border-viper-orange/20'}">

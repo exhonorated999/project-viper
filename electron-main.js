@@ -127,6 +127,12 @@ function createWindow() {
     mainWindow.webContents.focus();
   });
 
+  // Ensure web content always receives focus when the window is activated
+  // Prevents the "first click ignored" issue with Electron modals/popups
+  mainWindow.on('focus', () => {
+    mainWindow.webContents.focus();
+  });
+
   // Gate on security — show login page or main app
   if (security && security.isEnabled()) {
     mainWindow.loadURL('http://localhost:8000/security-login.html');
@@ -232,6 +238,11 @@ app.whenReady().then(async () => {
     mediaBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 }); // hidden
     mediaBrowserView.setAutoResize({ width: false, height: false });
     mediaBrowserView.webContents.loadURL('http://localhost:8000/media-player.html');
+
+    // Prevent media BrowserView from stealing focus when it loads
+    mediaBrowserView.webContents.on('did-finish-load', () => {
+      if (!mediaViewVisible) mainWindow.webContents.focus();
+    });
 
     // Re-position media BrowserView on window resize
     mainWindow.on('resize', () => {
@@ -532,36 +543,44 @@ ipcMain.handle('open-offense-import', async () => {
 // --- ARIN WHOIS Lookup ---
 ipcMain.handle('arin-lookup', async (_event, ipAddress) => {
   const https = require('https');
-  return new Promise((resolve) => {
-    const req = https.request({
-      hostname: 'whois.arin.net', port: 443,
-      path: `/rest/ip/${ipAddress}`, method: 'GET',
-      headers: { 'Accept': 'application/json' }
-    }, (res) => {
-      let data = '';
-      res.on('data', (chunk) => data += chunk);
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          const net = json.net;
-          if (net) {
-            const orgRef = net.orgRef;
-            const blocks = net.netBlocks?.netBlock;
-            let netRange = '';
-            if (blocks) {
-              const b = Array.isArray(blocks) ? blocks[0] : blocks;
-              netRange = `${b.startAddress?.$} - ${b.endAddress?.$}`;
-            }
-            resolve({ success: true, provider: orgRef?.['@name'] || 'Unknown', organization: orgRef?.['@name'] || 'Unknown', network: net.name?.$, netRange });
-          } else {
-            resolve({ success: false, error: 'No network information found' });
-          }
-        } catch (e) { resolve({ success: false, error: 'Failed to parse ARIN response' }); }
+  
+  function fetchJson(url, redirects = 3) {
+    return new Promise((resolve, reject) => {
+      const req = https.get(url, { headers: { 'Accept': 'application/json' } }, (res) => {
+        // Follow redirects
+        if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location && redirects > 0) {
+          return fetchJson(res.headers.location, redirects - 1).then(resolve).catch(reject);
+        }
+        let data = '';
+        res.on('data', (chunk) => data += chunk);
+        res.on('end', () => {
+          try { resolve(JSON.parse(data)); }
+          catch (e) { reject(new Error('Failed to parse response')); }
+        });
       });
+      req.on('error', (e) => reject(e));
+      req.setTimeout(10000, () => { req.destroy(); reject(new Error('Request timed out')); });
     });
-    req.on('error', (e) => resolve({ success: false, error: e.message }));
-    req.end();
-  });
+  }
+  
+  try {
+    const json = await fetchJson(`https://whois.arin.net/rest/ip/${encodeURIComponent(ipAddress)}`);
+    const net = json.net;
+    if (net) {
+      const orgRef = net.orgRef || net.customerRef;
+      const blocks = net.netBlocks?.netBlock;
+      let netRange = '';
+      if (blocks) {
+        const b = Array.isArray(blocks) ? blocks[0] : blocks;
+        netRange = `${b.startAddress?.$} - ${b.endAddress?.$}`;
+      }
+      return { success: true, provider: orgRef?.['@name'] || net.name?.$ || 'Unknown', organization: orgRef?.['@name'] || 'Unknown', network: net.name?.$, netRange };
+    } else {
+      return { success: false, error: 'No network information found' };
+    }
+  } catch (e) {
+    return { success: false, error: e.message || 'ARIN lookup failed' };
+  }
 });
 
 // --- Email Verification ---
@@ -625,31 +644,73 @@ ipcMain.handle('verify-email', async (_event, email) => {
     records.sort((a, b) => a.priority - b.priority);
     result.checks.dns = { valid: true, message: 'MX records found', mxRecords: records.map(r => r.exchange) };
 
-    // SMTP check
+    // SMTP + RCPT TO verification (checks if actual mailbox exists)
     const mxHost = records[0]?.exchange;
     if (mxHost) {
-      const smtpValid = await new Promise((resolve) => {
+      const smtpResult = await new Promise((resolve) => {
         const socket = netMod.createConnection({ host: mxHost, port: 25, timeout: 8000 });
-        let responded = false;
+        let step = 'connect'; // connect → ehlo → mailfrom → rcptto
+        let buffer = '';
+        const timeout = setTimeout(() => { socket.destroy(); resolve({ connected: false, reason: 'timeout' }); }, 12000);
+
         socket.on('data', (data) => {
-          const str = data.toString();
-          if (!responded && str.startsWith('220')) {
-            responded = true;
-            socket.write(`EHLO viper.local\r\n`);
-            socket.on('data', () => { socket.destroy(); resolve(true); });
+          buffer += data.toString();
+          const lines = buffer.split('\r\n');
+          buffer = lines.pop(); // keep incomplete line
+          for (const line of lines) {
+            const code = parseInt(line.substring(0, 3));
+            if (isNaN(code)) continue;
+            // Multi-line responses have '-' after code; wait for final line (space after code)
+            if (line[3] === '-') continue;
+
+            if (step === 'connect' && code === 220) {
+              step = 'ehlo';
+              socket.write('EHLO viper.local\r\n');
+            } else if (step === 'ehlo' && code === 250) {
+              step = 'mailfrom';
+              socket.write('MAIL FROM:<verify@viper.local>\r\n');
+            } else if (step === 'mailfrom' && code === 250) {
+              step = 'rcptto';
+              socket.write(`RCPT TO:<${email}>\r\n`);
+            } else if (step === 'rcptto') {
+              socket.write('QUIT\r\n');
+              clearTimeout(timeout);
+              socket.destroy();
+              if (code === 250) {
+                resolve({ connected: true, accepted: true, reason: 'Mailbox exists' });
+              } else if (code === 550 || code === 551 || code === 553 || code === 554) {
+                resolve({ connected: true, accepted: false, reason: 'Mailbox does not exist' });
+              } else if (code === 452 || code === 421) {
+                resolve({ connected: true, accepted: null, reason: 'Server busy, cannot verify' });
+              } else {
+                resolve({ connected: true, accepted: null, reason: `Server responded ${code}` });
+              }
+            } else if (code >= 500) {
+              // Server rejected our command
+              socket.write('QUIT\r\n');
+              clearTimeout(timeout);
+              socket.destroy();
+              resolve({ connected: true, accepted: null, reason: `Server rejected at ${step} (${code})` });
+            }
           }
         });
-        socket.on('error', () => resolve(false));
-        socket.on('timeout', () => { socket.destroy(); resolve(false); });
-        setTimeout(() => { socket.destroy(); resolve(false); }, 10000);
+        socket.on('error', () => { clearTimeout(timeout); resolve({ connected: false, reason: 'Connection failed' }); });
+        socket.on('timeout', () => { clearTimeout(timeout); socket.destroy(); resolve({ connected: false, reason: 'Connection timed out' }); });
       });
-      result.checks.smtp = { valid: smtpValid, message: smtpValid ? 'Mail server responds' : 'Mail server unreachable' };
-      if (smtpValid) {
+
+      result.checks.smtp = { valid: smtpResult.connected, accepted: smtpResult.accepted, message: smtpResult.reason };
+      if (smtpResult.accepted === true) {
         result.valid = true; result.status = 'valid'; result.classification = 'deliverable';
-        result.message = 'Email address verified — mail server responds';
-      } else {
+        result.message = 'Email verified — mailbox exists on server';
+      } else if (smtpResult.accepted === false) {
+        result.valid = false; result.status = 'invalid'; result.classification = 'undeliverable';
+        result.message = 'Mailbox does not exist on server';
+      } else if (smtpResult.connected) {
         result.valid = true; result.status = 'catch-all'; result.classification = 'risky';
-        result.message = 'DNS valid but server blocks direct verification';
+        result.message = 'Domain valid but server blocks mailbox verification';
+      } else {
+        result.valid = false; result.status = 'unknown'; result.classification = 'risky';
+        result.message = 'Could not connect to mail server';
       }
     }
   } catch (e) {

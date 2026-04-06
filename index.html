@@ -3294,6 +3294,11 @@
             // Load user info and theme
             updateUserDisplay();
             loadTheme();
+
+            // Handle hash navigation (e.g. from case-detail sidebar link)
+            if (window.location.hash === '#offense-reference') {
+                setTimeout(() => showOffenseReference(), 100);
+            }
         });
 
         // User Information Display

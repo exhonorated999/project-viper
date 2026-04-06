@@ -602,6 +602,19 @@ ipcMain.handle('verify-email', async (_event, email) => {
     'outlok.com':'outlook.com','outloo.com':'outlook.com'
   };
 
+  // Major providers that block RCPT TO verification (anti-spam)
+  // These have valid MX but reject or mislead on mailbox checks
+  const UNVERIFIABLE_PROVIDERS = [
+    'icloud.com','me.com','mac.com',           // Apple
+    'yahoo.com','ymail.com','aol.com',          // Yahoo/Verizon
+    'protonmail.com','proton.me','pm.me',       // ProtonMail
+    'tutanota.com','tuta.io',                   // Tutanota
+    'zoho.com','zohomail.com',                  // Zoho
+    'fastmail.com',                             // FastMail
+    'gmx.com','gmx.net',                        // GMX
+    'mail.com',                                 // Mail.com
+  ];
+
   const result = {
     email, valid: false, status: 'unknown', classification: 'risky',
     checks: { syntax: {}, disposable: {}, typo: {}, dns: {}, smtp: {} },
@@ -637,6 +650,23 @@ ipcMain.handle('verify-email', async (_event, email) => {
     return result;
   }
   result.checks.typo = { hasTypo: false, message: 'No typos detected' };
+
+  // Known providers that block verification — trust DNS only
+  if (UNVERIFIABLE_PROVIDERS.includes(domain)) {
+    try {
+      const records = await resolveMx(domain);
+      result.checks.dns = { valid: true, message: 'MX records found' };
+      result.checks.smtp = { valid: true, accepted: null, message: 'Provider blocks mailbox verification' };
+      result.valid = true; result.status = 'unverifiable'; result.classification = 'risky';
+      result.message = `Domain valid (${domain}) — provider blocks mailbox-level verification`;
+      return result;
+    } catch (e) {
+      result.checks.dns = { valid: false, message: 'No MX records found' };
+      result.status = 'invalid'; result.classification = 'undeliverable';
+      result.message = 'Domain has no mail server';
+      return result;
+    }
+  }
 
   // DNS/MX check
   try {

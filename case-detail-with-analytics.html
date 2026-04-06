@@ -4747,20 +4747,43 @@
         }
         
         function uploadWarrantProduction(warrantId) {
-            // Create temporary file input
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.multiple = true;
-            input.setAttribute('webkitdirectory', '');
-            input.setAttribute('directory', '');
-            
-            input.onchange = (e) => {
-                const files = Array.from(e.target.files);
+            // Show picker modal: folder or individual files
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4';
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+            modal.innerHTML = `
+                <div class="glass-card rounded-xl p-6 max-w-sm w-full" onclick="event.stopPropagation()">
+                    <h3 class="text-lg font-bold text-white mb-2">Upload Production</h3>
+                    <p class="text-sm text-gray-400 mb-5">Select how you'd like to upload the production files.</p>
+                    <div class="space-y-3">
+                        <button id="prodUploadFolder" class="w-full flex items-center gap-3 px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg hover:border-viper-orange transition text-left">
+                            <svg class="w-5 h-5 text-viper-orange flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                            </svg>
+                            <div>
+                                <div class="text-white text-sm font-medium">Select Folder</div>
+                                <div class="text-xs text-gray-500">Upload an entire production folder</div>
+                            </div>
+                        </button>
+                        <button id="prodUploadFiles" class="w-full flex items-center gap-3 px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg hover:border-viper-cyan transition text-left">
+                            <svg class="w-5 h-5 text-viper-cyan flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                            <div>
+                                <div class="text-white text-sm font-medium">Select Files</div>
+                                <div class="text-xs text-gray-500">Pick individual files (PDFs, documents, etc.)</div>
+                            </div>
+                        </button>
+                    </div>
+                    <button onclick="this.closest('.fixed').remove()" class="mt-4 w-full px-4 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white transition text-sm">Cancel</button>
+                </div>
+            `;
+            document.body.appendChild(modal);
+
+            const handleFiles = (files) => {
                 if (files.length === 0) return;
-                
                 const warrant = caseWarrants.find(w => w.id === warrantId);
                 if (!warrant) return;
-                
                 warrant.hasProduction = true;
                 warrant.productionFileCount = files.length;
                 warrant.productionFiles = files.map(file => ({
@@ -4770,12 +4793,30 @@
                     type: file.type,
                     url: URL.createObjectURL(file)
                 }));
-                
                 saveWarrantsToStorage();
                 renderTabContent('warrants');
+                showToast(`Uploaded ${files.length} production file(s)`, 'success');
             };
-            
-            input.click();
+
+            document.getElementById('prodUploadFolder').onclick = () => {
+                modal.remove();
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.multiple = true;
+                input.setAttribute('webkitdirectory', '');
+                input.setAttribute('directory', '');
+                input.onchange = (e) => handleFiles(Array.from(e.target.files));
+                input.click();
+            };
+
+            document.getElementById('prodUploadFiles').onclick = () => {
+                modal.remove();
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.multiple = true;
+                input.onchange = (e) => handleFiles(Array.from(e.target.files));
+                input.click();
+            };
         }
         
         function uploadCourtReturn(warrantId) {

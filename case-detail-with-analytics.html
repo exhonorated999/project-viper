@@ -1404,13 +1404,13 @@
             saveCase();
 
             // If currently viewing the removed module, switch to overview
-            if (activeTab === moduleId) {
-                activeTab = 'overview';
+            if (currentTab === moduleId) {
+                currentTab = 'overview';
             }
 
             closeManageTabsModal();
             renderTabs();
-            renderTabContent(activeTab);
+            renderTabContent(currentTab);
             showToast(`Removed "${label}" module`, 'info');
         }
 
@@ -4987,15 +4987,10 @@
                                     ${renderEditableField('City, State, ZIP', 'addressCityStateZip', suspect.addressCityStateZip, index)}
                                 </div>
                                 <div class="col-span-1">
-                                    ${suspect.residencePhoto ? `
-                                        <div class="aspect-video rounded-lg overflow-hidden bg-viper-dark">
-                                            <img id="suspect-residence-${index}" src="${suspect.residencePhoto}" alt="Residence" class="w-full h-full object-cover">
-                                        </div>
-                                    ` : `
-                                        <div class="aspect-video rounded-lg bg-viper-dark flex items-center justify-center border border-dashed border-gray-600">
-                                            <p class="text-gray-500 text-sm">No residence photo</p>
-                                        </div>
-                                    `}
+                                    <div class="aspect-video rounded-lg overflow-hidden bg-viper-dark ${!suspect.residencePhoto ? 'flex items-center justify-center border border-dashed border-gray-600' : ''}">
+                                        <img id="suspect-residence-${index}" src="${suspect.residencePhoto || ''}" alt="Residence" class="w-full h-full object-cover ${!suspect.residencePhoto ? 'hidden' : ''}">
+                                        ${!suspect.residencePhoto ? `<p id="suspect-residence-placeholder-${index}" class="text-gray-500 text-sm">No residence photo</p>` : ''}
+                                    </div>
                                     ${isEditingInline ? `
                                         <div class="mt-2">
                                             <input type="file" accept="image/*" onchange="handleInlineImageUpload(event, 'suspect-residence-${index}')" class="text-xs text-gray-400">
@@ -5234,6 +5229,13 @@
                     if (imgElement) {
                         imgElement.src = e.target.result;
                         imgElement.dataset.newPhoto = e.target.result;
+                        imgElement.classList.remove('hidden');
+                        // Hide placeholder text if present
+                        const placeholder = imgElement.parentElement?.querySelector('p[id$="-placeholder-"]') 
+                            || imgElement.parentElement?.querySelector('p');
+                        if (placeholder) placeholder.classList.add('hidden');
+                        // Remove dashed border styling from container
+                        imgElement.parentElement?.classList.remove('border-dashed', 'border-gray-600', 'flex', 'items-center', 'justify-center');
                     }
                 };
                 reader.readAsDataURL(file);
@@ -5992,6 +5994,30 @@
                                 </div>
                             </div>
                             
+                            ${suspect.identifiers && suspect.identifiers.length > 0 ? `
+                                <div class="section">
+                                    <h3>Identifiers</h3>
+                                    <table style="width:100%; border-collapse:collapse; margin-bottom:10px;">
+                                        <thead>
+                                            <tr style="background:#f0f0f0;">
+                                                <th style="padding:6px 10px; text-align:left; border:1px solid #ddd; font-size:12px;">Type</th>
+                                                <th style="padding:6px 10px; text-align:left; border:1px solid #ddd; font-size:12px;">Value</th>
+                                                <th style="padding:6px 10px; text-align:left; border:1px solid #ddd; font-size:12px;">Provider / Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            ${suspect.identifiers.map(id => `
+                                                <tr>
+                                                    <td style="padding:6px 10px; border:1px solid #ddd; text-transform:uppercase; font-size:11px; font-weight:bold;">${id.type}</td>
+                                                    <td style="padding:6px 10px; border:1px solid #ddd;">${id.value}</td>
+                                                    <td style="padding:6px 10px; border:1px solid #ddd;">${id.provider ? 'ISP: ' + id.provider : ''}${id.emailResult ? (id.emailResult.status || '') : ''}</td>
+                                                </tr>
+                                            `).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            ` : ''}
+                            
                             ${suspect.firearms && suspect.firearms.length > 0 ? `
                                 <div class="section">
                                     <h3>Registered Firearms</h3>
@@ -6223,15 +6249,10 @@
                                     ${renderEditableFieldVictim('City, State, ZIP', 'addressCityStateZip', victim.addressCityStateZip, index)}
                                 </div>
                                 <div class="col-span-1">
-                                    ${victim.residencePhoto ? `
-                                        <div class="aspect-video rounded-lg overflow-hidden bg-viper-dark border-2 border-viper-purple/30">
-                                            <img id="victim-residence-${index}" src="${victim.residencePhoto}" alt="Residence" class="w-full h-full object-cover">
-                                        </div>
-                                    ` : `
-                                        <div class="aspect-video rounded-lg bg-viper-dark flex items-center justify-center border-2 border-dashed border-gray-600">
-                                            <p class="text-gray-400 text-sm">No residence photo</p>
-                                        </div>
-                                    `}
+                                    <div class="aspect-video rounded-lg overflow-hidden bg-viper-dark ${!victim.residencePhoto ? 'flex items-center justify-center border-2 border-dashed border-gray-600' : 'border-2 border-viper-purple/30'}">
+                                        <img id="victim-residence-${index}" src="${victim.residencePhoto || ''}" alt="Residence" class="w-full h-full object-cover ${!victim.residencePhoto ? 'hidden' : ''}">
+                                        ${!victim.residencePhoto ? `<p class="text-gray-400 text-sm">No residence photo</p>` : ''}
+                                    </div>
                                     ${isEditingInline ? `
                                         <div class="mt-2">
                                             <input type="file" accept="image/*" onchange="handleInlineImageUpload(event, 'victim-residence-${index}')" class="text-xs text-gray-400">
@@ -7812,15 +7833,10 @@
                                     ${renderEditableFieldWitness('City, State, ZIP', 'addressCityStateZip', witness.addressCityStateZip, index)}
                                 </div>
                                 <div class="col-span-1">
-                                    ${witness.residencePhoto ? `
-                                        <div class="aspect-video rounded-lg overflow-hidden bg-viper-dark border-2 border-viper-green/30">
-                                            <img id="witness-residence-${index}" src="${witness.residencePhoto}" alt="Residence" class="w-full h-full object-cover">
-                                        </div>
-                                    ` : `
-                                        <div class="aspect-video rounded-lg bg-viper-dark flex items-center justify-center border-2 border-dashed border-gray-600">
-                                            <p class="text-gray-400 text-sm">No residence photo</p>
-                                        </div>
-                                    `}
+                                    <div class="aspect-video rounded-lg overflow-hidden bg-viper-dark ${!witness.residencePhoto ? 'flex items-center justify-center border-2 border-dashed border-gray-600' : 'border-2 border-viper-green/30'}">
+                                        <img id="witness-residence-${index}" src="${witness.residencePhoto || ''}" alt="Residence" class="w-full h-full object-cover ${!witness.residencePhoto ? 'hidden' : ''}">
+                                        ${!witness.residencePhoto ? `<p class="text-gray-400 text-sm">No residence photo</p>` : ''}
+                                    </div>
                                     ${isEditingInline ? `
                                         <div class="mt-2">
                                             <input type="file" accept="image/*" onchange="handleInlineImageUpload(event, 'witness-residence-${index}')" class="text-xs text-gray-400">
@@ -15597,10 +15613,12 @@
                 for (const m of mutations) {
                     for (const node of m.addedNodes) {
                         if (node.nodeType === 1 && node.classList?.contains('fixed')) {
-                            requestAnimationFrame(() => {
+                            // Use setTimeout to ensure Electron focus resolution completes
+                            setTimeout(() => {
+                                window.focus();
                                 const input = node.querySelector('input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]), textarea, select');
                                 if (input) input.focus();
-                            });
+                            }, 50);
                         }
                     }
                 }

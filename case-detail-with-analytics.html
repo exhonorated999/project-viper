@@ -5588,25 +5588,7 @@
                             <option value="ip">IP Address</option>
                         </select>
                         <div id="identPlatformRow" style="display:none;">
-                            <select name="platform" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
-                                <option value="">Select Platform...</option>
-                                <option value="Snapchat">Snapchat</option>
-                                <option value="Instagram">Instagram</option>
-                                <option value="Facebook">Facebook</option>
-                                <option value="TikTok">TikTok</option>
-                                <option value="Twitter/X">Twitter/X</option>
-                                <option value="Reddit">Reddit</option>
-                                <option value="Discord">Discord</option>
-                                <option value="Telegram">Telegram</option>
-                                <option value="WhatsApp">WhatsApp</option>
-                                <option value="YouTube">YouTube</option>
-                                <option value="LinkedIn">LinkedIn</option>
-                                <option value="Kik">Kik</option>
-                                <option value="Signal">Signal</option>
-                                <option value="Twitch">Twitch</option>
-                                <option value="Pinterest">Pinterest</option>
-                                <option value="Other">Other</option>
-                            </select>
+                            <input type="text" name="platform" placeholder="Platform (e.g. Snapchat, Instagram, Discord)" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                         </div>
                         <input type="text" name="value" placeholder="Value" required class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                         <div class="flex justify-end gap-3">
@@ -15778,12 +15760,20 @@
                 for (const m of mutations) {
                     for (const node of m.addedNodes) {
                         if (node.nodeType === 1 && node.classList?.contains('fixed')) {
-                            // Use setTimeout to ensure Electron focus resolution completes
-                            setTimeout(() => {
+                            // Electron BrowserView can steal focus — retry until input receives focus
+                            const focusModal = (attempt) => {
+                                if (attempt > 5) return;
                                 window.focus();
                                 const input = node.querySelector('input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]), textarea, select');
-                                if (input) input.focus();
-                            }, 50);
+                                if (input) {
+                                    input.focus();
+                                    // Verify it actually got focus, retry if not
+                                    if (document.activeElement !== input) {
+                                        setTimeout(() => focusModal(attempt + 1), 80);
+                                    }
+                                }
+                            };
+                            setTimeout(() => focusModal(0), 50);
                         }
                     }
                 }

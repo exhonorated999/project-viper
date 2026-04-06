@@ -124,6 +124,7 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
     mainWindow.focus();
+    mainWindow.webContents.focus();
   });
 
   // Gate on security — show login page or main app

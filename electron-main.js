@@ -508,7 +508,11 @@ ipcMain.handle('open-case-import', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Import Case Package',
     properties: ['openFile'],
-    filters: [{ name: 'VIPER Case Package', extensions: ['vcase'] }]
+    filters: [
+      { name: 'VIPER Files', extensions: ['vcase', 'json'] },
+      { name: 'VIPER Case Package', extensions: ['vcase'] },
+      { name: 'VIPER Backup', extensions: ['json'] }
+    ]
   });
   if (result.canceled || !result.filePaths.length) return null;
   const raw = fs.readFileSync(result.filePaths[0]);

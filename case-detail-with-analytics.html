@@ -1088,7 +1088,7 @@
                 showSaveNotification();
             } catch (error) {
                 console.error('Failed to save case:', error);
-                showNotification('Failed to save case: ' + error.message, 'error');
+                showToast('Failed to save case: ' + error.message, 'error');
             }
         }
 
@@ -1336,8 +1336,9 @@
                                 <h4 class="text-sm font-semibold text-viper-cyan mb-3">Current Tabs (${currentCase.modules.length})</h4>
                                 <div class="flex flex-wrap gap-2 mb-4">
                                     ${currentCase.modules.map(module => `
-                                        <span class="px-3 py-1 bg-viper-green/20 text-viper-green text-sm rounded-lg border border-viper-green">
-                                            ${allModules[module].icon} ${allModules[module].label}
+                                        <span class="px-3 py-1 bg-viper-green/20 text-viper-green text-sm rounded-lg border border-viper-green inline-flex items-center gap-1">
+                                            ${allModules[module]?.icon || '📋'} ${allModules[module]?.label || module}
+                                            <button onclick="removeModuleFromCase('${module}')" class="ml-1 text-red-400 hover:text-red-300 font-bold" title="Remove module">×</button>
                                         </span>
                                     `).join('')}
                                 </div>
@@ -1379,6 +1380,38 @@
         function closeManageTabsModal() {
             const modal = document.getElementById('manageTabsModal');
             if (modal) modal.remove();
+        }
+
+        function removeModuleFromCase(moduleId) {
+            const moduleConfig = {
+                suspects:'Suspects', victims:'Victims', victimBusiness:'Victim Business',
+                witnesses:'Witnesses', vehicles:'Recovered Vehicles', cargo:'Cargo / Merchandise',
+                firearms:'Firearms', evidence:'Evidence', warrants:'Warrants', reports:'Reports',
+                notes:'Case Notes', prosecution:'Prosecution', narcotics:'Narcotics Seized',
+                money:'Money Seized', missingpersons:'Missing Persons', areacanvas:'Area Canvas',
+                opsplan:'OPS Plan', analytics:'CDR', aperture:'Aperture',
+                networkIntelligence:'Network Intel', traceImport:'Trace Import', rmsImport:'RMS Import'
+            };
+            const label = moduleConfig[moduleId] || moduleId;
+            if (!confirm(`Remove "${label}" from this case?\n\nNote: Any data in this module will remain in storage and can be recovered by re-adding the module.`)) return;
+
+            // Remove from modules array
+            currentCase.modules = currentCase.modules.filter(m => m !== moduleId);
+            // Remove from tabOrder
+            if (currentCase.tabOrder) {
+                currentCase.tabOrder = currentCase.tabOrder.filter(t => t !== moduleId);
+            }
+            saveCase();
+
+            // If currently viewing the removed module, switch to overview
+            if (activeTab === moduleId) {
+                activeTab = 'overview';
+            }
+
+            closeManageTabsModal();
+            renderTabs();
+            renderTabContent(activeTab);
+            showToast(`Removed "${label}" module`, 'info');
         }
 
         function openExportCaseModal() {
@@ -4983,6 +5016,56 @@
                             </div>
                         </div>
                         
+                        <!-- Identifiers -->
+                        <div class="glass-card rounded-xl p-6">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-xl font-bold text-viper-green">Identifiers</h3>
+                                <button onclick="addSuspectIdentifierInline(${index})" class="px-3 py-1 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green text-sm transition">
+                                    + Add Identifier
+                                </button>
+                            </div>
+                            ${suspect.identifiers && suspect.identifiers.length > 0 ? `
+                                <div class="space-y-3">
+                                    ${suspect.identifiers.map((ident, iIdx) => {
+                                        const typeColors = { email: 'viper-cyan', phone: 'viper-orange', username: 'viper-purple', ip: 'yellow-400' };
+                                        const typeIcons = { email: '📧', phone: '📱', username: '👤', ip: '🌐' };
+                                        const color = typeColors[ident.type] || 'gray-400';
+                                        return `
+                                        <div class="bg-gradient-to-r from-${color}/10 to-transparent border border-${color}/20 rounded-lg p-4 flex items-center justify-between">
+                                            <div class="flex items-center gap-3 flex-1">
+                                                <span class="text-lg">${typeIcons[ident.type] || '🔗'}</span>
+                                                <span class="px-2 py-0.5 rounded text-xs font-semibold bg-${color}/20 text-${color} border border-${color}/40 uppercase">${ident.type}</span>
+                                                <span class="text-white font-medium">${ident.value}</span>
+                                                ${ident.provider ? `<span class="px-2 py-0.5 rounded text-xs bg-green-500/20 text-green-400 border border-green-500/40">ISP: ${ident.provider}</span>` : ''}
+                                                ${ident.emailResult ? `<span class="px-2 py-0.5 rounded text-xs bg-${ident.emailResult.valid ? 'green' : 'red'}-500/20 text-${ident.emailResult.valid ? 'green' : 'red'}-400 border border-${ident.emailResult.valid ? 'green' : 'red'}-500/40">${ident.emailResult.status}</span>` : ''}
+                                            </div>
+                                            <div class="flex items-center gap-2">
+                                                ${ident.type === 'ip' ? `
+                                                    <button onclick="arinLookupSuspectIdent(${index}, ${iIdx})" class="px-3 py-1.5 bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500 rounded-lg text-yellow-400 text-xs font-semibold transition" title="ARIN WHOIS Lookup">
+                                                        🌐 ARIN
+                                                    </button>
+                                                ` : ''}
+                                                ${ident.type === 'ip' ? `
+                                                    <button onclick="pingSuspectIdent(${index}, ${iIdx})" class="px-3 py-1.5 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan text-xs font-semibold transition" title="Ping IP">
+                                                        📡 Ping
+                                                    </button>
+                                                ` : ''}
+                                                ${ident.type === 'email' ? `
+                                                    <button onclick="verifyEmailSuspectIdent(${index}, ${iIdx})" class="px-3 py-1.5 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan text-xs font-semibold transition" title="Verify Email">
+                                                        ✉️ Verify
+                                                    </button>
+                                                ` : ''}
+                                                <button onclick="removeSuspectIdentifier(${index}, ${iIdx})" class="text-red-500 hover:text-red-400 p-1" title="Remove">
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            ` : '<p class="text-gray-500">No identifiers added</p>'}
+                        </div>
+                        
                         <!-- Registered Firearms -->
                         <div class="glass-card rounded-xl p-6">
                             <div class="flex justify-between items-center mb-4">
@@ -5269,6 +5352,31 @@
                             </div>
                         </div>
                         
+                        <!-- Identifiers -->
+                        <div>
+                            <h3 class="text-lg font-bold text-viper-cyan mb-3">Identifiers</h3>
+                            <div id="suspectIdentifiersList" class="space-y-2 mb-3">
+                                ${(suspect.identifiers || []).map((id, i) => `
+                                    <div class="flex items-center gap-2" data-ident-row="${i}">
+                                        <select class="ident-type bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-cyan focus:outline-none w-40">
+                                            <option value="email" ${id.type === 'email' ? 'selected' : ''}>Email</option>
+                                            <option value="phone" ${id.type === 'phone' ? 'selected' : ''}>Phone</option>
+                                            <option value="username" ${id.type === 'username' ? 'selected' : ''}>Username</option>
+                                            <option value="ip" ${id.type === 'ip' ? 'selected' : ''}>IP Address</option>
+                                        </select>
+                                        <input type="text" class="ident-value flex-1 bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white text-sm focus:border-viper-cyan focus:outline-none" value="${id.value || ''}" placeholder="Value">
+                                        <button type="button" onclick="this.closest('[data-ident-row]').remove()" class="text-red-400 hover:text-red-300 p-1">
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                        </button>
+                                    </div>
+                                `).join('')}
+                            </div>
+                            <button type="button" onclick="addSuspectIdentifierRow()" class="px-4 py-2 bg-viper-cyan/10 hover:bg-viper-cyan/20 border border-viper-cyan/40 rounded-lg text-viper-cyan text-sm transition flex items-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                                Add Identifier
+                            </button>
+                        </div>
+                        
                         <div class="flex justify-end gap-3 pt-4 border-t border-gray-700">
                             <button type="button" onclick="this.closest('.fixed').remove()" class="px-6 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white hover:border-white transition">
                                 Cancel
@@ -5303,7 +5411,8 @@
                     employerAddress: formData.get('employerAddress'),
                     employerPhone: formData.get('employerPhone'),
                     firearms: isEdit ? suspect.firearms : [],
-                    vehicles: isEdit ? suspect.vehicles : []
+                    vehicles: isEdit ? suspect.vehicles : [],
+                    identifiers: collectSuspectIdentifiers()
                 };
                 
                 if (isEdit) {
@@ -5318,6 +5427,130 @@
             };
         }
         
+        function addSuspectIdentifierRow() {
+            const list = document.getElementById('suspectIdentifiersList');
+            if (!list) return;
+            const idx = list.children.length;
+            const row = document.createElement('div');
+            row.className = 'flex items-center gap-2';
+            row.setAttribute('data-ident-row', idx);
+            row.innerHTML = `
+                <select class="ident-type bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-cyan focus:outline-none w-40">
+                    <option value="email">Email</option>
+                    <option value="phone">Phone</option>
+                    <option value="username">Username</option>
+                    <option value="ip">IP Address</option>
+                </select>
+                <input type="text" class="ident-value flex-1 bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Value">
+                <button type="button" onclick="this.closest('[data-ident-row]').remove()" class="text-red-400 hover:text-red-300 p-1">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                </button>
+            `;
+            list.appendChild(row);
+            row.querySelector('.ident-value').focus();
+        }
+
+        function collectSuspectIdentifiers() {
+            const rows = document.querySelectorAll('#suspectIdentifiersList [data-ident-row]');
+            const identifiers = [];
+            rows.forEach(row => {
+                const type = row.querySelector('.ident-type')?.value;
+                const value = row.querySelector('.ident-value')?.value?.trim();
+                if (type && value) identifiers.push({ type, value, provider: '' });
+            });
+            return identifiers;
+        }
+
+        async function arinLookupSuspectIdent(suspectIdx, identIdx) {
+            const ident = suspects[suspectIdx]?.identifiers?.[identIdx];
+            if (!ident) return;
+            showToast(`Looking up ${ident.value}...`, 'info');
+            try {
+                const result = await window.electronAPI.arinLookup(ident.value);
+                if (result.success && result.provider) {
+                    ident.provider = result.provider;
+                    saveSuspects();
+                    renderTabContent('suspects');
+                    showToast(`ISP: ${result.provider}${result.network ? ' | Network: ' + result.network : ''}${result.netRange ? ' | Range: ' + result.netRange : ''}`, 'success');
+                } else {
+                    showToast(result.error || 'ARIN lookup failed', 'error');
+                }
+            } catch (e) {
+                showToast('ARIN lookup error: ' + e.message, 'error');
+            }
+        }
+
+        async function verifyEmailSuspectIdent(suspectIdx, identIdx) {
+            const ident = suspects[suspectIdx]?.identifiers?.[identIdx];
+            if (!ident) return;
+            showToast(`Verifying ${ident.value}...`, 'info');
+            try {
+                const result = await window.electronAPI.verifyEmail(ident.value);
+                ident.emailResult = { valid: result.valid, status: result.status, classification: result.classification, message: result.message };
+                saveSuspects();
+                renderTabContent('suspects');
+                const icon = result.valid ? '✓' : '✗';
+                showToast(`${icon} ${result.message}`, result.valid ? 'success' : 'error');
+            } catch (e) {
+                showToast('Email verification error: ' + e.message, 'error');
+            }
+        }
+
+        function pingSuspectIdent(suspectIdx, identIdx) {
+            const ident = suspects[suspectIdx]?.identifiers?.[identIdx];
+            if (!ident) return;
+            // Use fetch to ping via HTTP (simple reachability check)
+            showToast(`Pinging ${ident.value}...`, 'info');
+            fetch(`http://${ident.value}`, { mode: 'no-cors', signal: AbortSignal.timeout(5000) })
+                .then(() => showToast(`${ident.value} responded`, 'success'))
+                .catch(() => showToast(`${ident.value} — no response or unreachable`, 'error'));
+        }
+
+        function addSuspectIdentifierInline(suspectIdx) {
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4';
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+            modal.innerHTML = `
+                <div class="glass-card rounded-xl p-6 max-w-md w-full" onclick="event.stopPropagation()">
+                    <h3 class="text-xl font-bold text-white mb-4">Add Identifier</h3>
+                    <form id="addIdentForm" class="space-y-4">
+                        <select name="type" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
+                            <option value="email">Email</option>
+                            <option value="phone">Phone</option>
+                            <option value="username">Username</option>
+                            <option value="ip">IP Address</option>
+                        </select>
+                        <input type="text" name="value" placeholder="Value" required class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
+                        <div class="flex justify-end gap-3">
+                            <button type="button" onclick="this.closest('.fixed').remove()" class="px-4 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white transition">Cancel</button>
+                            <button type="submit" class="px-4 py-2 bg-viper-cyan hover:bg-viper-cyan/80 rounded-lg text-black font-semibold transition">Add</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            document.getElementById('addIdentForm').onsubmit = (e) => {
+                e.preventDefault();
+                const fd = new FormData(e.target);
+                const type = fd.get('type');
+                const value = fd.get('value')?.trim();
+                if (!value) return;
+                if (!suspects[suspectIdx].identifiers) suspects[suspectIdx].identifiers = [];
+                suspects[suspectIdx].identifiers.push({ type, value, provider: '' });
+                saveSuspects();
+                modal.remove();
+                renderTabContent('suspects');
+                showToast(`Added ${type}: ${value}`, 'success');
+            };
+        }
+
+        function removeSuspectIdentifier(suspectIdx, identIdx) {
+            if (!confirm('Remove this identifier?')) return;
+            suspects[suspectIdx].identifiers.splice(identIdx, 1);
+            saveSuspects();
+            renderTabContent('suspects');
+        }
+
         function handleImageUpload(event, fieldName) {
             const file = event.target.files[0];
             if (file) {
@@ -15358,6 +15591,20 @@
             loadTheme();
             updateUserDisplay();
             loadCase();
+            
+            // Auto-focus first input in any dynamically-added modal
+            new MutationObserver((mutations) => {
+                for (const m of mutations) {
+                    for (const node of m.addedNodes) {
+                        if (node.nodeType === 1 && node.classList?.contains('fixed')) {
+                            requestAnimationFrame(() => {
+                                const input = node.querySelector('input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]), textarea, select');
+                                if (input) input.focus();
+                            });
+                        }
+                    }
+                }
+            }).observe(document.body, { childList: true });
         });
 
         // ========================================
@@ -18905,9 +19152,9 @@
                     caseNumber: currentCase.caseNumber,
                     caseTitle: currentCase.title
                 });
-                showNotification('Launching Aperture...', 'info');
+                showToast('Launching Aperture...', 'info');
             } else {
-                showNotification('Aperture integration requires the desktop app', 'error');
+                showToast('Aperture integration requires the desktop app', 'error');
             }
         }
 
@@ -18971,7 +19218,7 @@
 
             saveCase();
             loadApertureResults();
-            showNotification('Aperture result saved to case', 'success');
+            showToast('Aperture result saved to case', 'success');
         }
 
         function openApertureResult(filePath) {
@@ -19071,12 +19318,12 @@
             const fileName = filePathInput.value;
 
             if (!title) {
-                showNotification('Please enter a title', 'error');
+                showToast('Please enter a title', 'error');
                 return;
             }
 
             if (!fileName) {
-                showNotification('Please select a file', 'error');
+                showToast('Please select a file', 'error');
                 return;
             }
 
@@ -19100,7 +19347,7 @@
             currentCase.apertureData.results.splice(index, 1);
             saveCase();
             loadApertureResults();
-            showNotification('Aperture result removed', 'info');
+            showToast('Aperture result removed', 'info');
         }
 
         // Expose Aperture save function globally for Electron IPC

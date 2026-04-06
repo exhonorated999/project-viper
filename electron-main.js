@@ -507,6 +507,160 @@ ipcMain.handle('open-case-import', async () => {
   return raw.toString('utf-8');
 });
 
+// --- Offense Reference Export/Import ---
+ipcMain.handle('save-offense-export', async (event, { fileName, data }) => {
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export Offense Reference List',
+    defaultPath: fileName,
+    filters: [{ name: 'VIPER Offense List', extensions: ['voffenses'] }]
+  });
+  if (result.canceled || !result.filePath) return null;
+  fs.writeFileSync(result.filePath, data, 'utf-8');
+  return result.filePath;
+});
+
+ipcMain.handle('open-offense-import', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import Offense Reference List',
+    properties: ['openFile'],
+    filters: [{ name: 'VIPER Offense List', extensions: ['voffenses'] }]
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  return fs.readFileSync(result.filePaths[0], 'utf-8');
+});
+
+// --- ARIN WHOIS Lookup ---
+ipcMain.handle('arin-lookup', async (_event, ipAddress) => {
+  const https = require('https');
+  return new Promise((resolve) => {
+    const req = https.request({
+      hostname: 'whois.arin.net', port: 443,
+      path: `/rest/ip/${ipAddress}`, method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          const net = json.net;
+          if (net) {
+            const orgRef = net.orgRef;
+            const blocks = net.netBlocks?.netBlock;
+            let netRange = '';
+            if (blocks) {
+              const b = Array.isArray(blocks) ? blocks[0] : blocks;
+              netRange = `${b.startAddress?.$} - ${b.endAddress?.$}`;
+            }
+            resolve({ success: true, provider: orgRef?.['@name'] || 'Unknown', organization: orgRef?.['@name'] || 'Unknown', network: net.name?.$, netRange });
+          } else {
+            resolve({ success: false, error: 'No network information found' });
+          }
+        } catch (e) { resolve({ success: false, error: 'Failed to parse ARIN response' }); }
+      });
+    });
+    req.on('error', (e) => resolve({ success: false, error: e.message }));
+    req.end();
+  });
+});
+
+// --- Email Verification ---
+ipcMain.handle('verify-email', async (_event, email) => {
+  const dns = require('dns');
+  const netMod = require('net');
+  const { promisify } = require('util');
+  const resolveMx = promisify(dns.resolveMx);
+
+  const DISPOSABLE_DOMAINS = [
+    '10minutemail.com','guerrillamail.com','mailinator.com','tempmail.com',
+    'throwaway.email','trashmail.com','yopmail.com','getnada.com',
+    'maildrop.cc','temp-mail.org','fakeinbox.com','sharklasers.com'
+  ];
+  const COMMON_TYPOS = {
+    'gmial.com':'gmail.com','gmai.com':'gmail.com','gmil.com':'gmail.com',
+    'yahooo.com':'yahoo.com','yaho.com':'yahoo.com',
+    'hotmial.com':'hotmail.com','hotmil.com':'hotmail.com',
+    'outlok.com':'outlook.com','outloo.com':'outlook.com'
+  };
+
+  const result = {
+    email, valid: false, status: 'unknown', classification: 'risky',
+    checks: { syntax: {}, disposable: {}, typo: {}, dns: {}, smtp: {} },
+    message: '', timestamp: new Date().toISOString()
+  };
+
+  // Syntax check
+  const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+  if (!emailRegex.test(email)) {
+    result.checks.syntax = { valid: false, message: 'Invalid email format' };
+    result.status = 'invalid'; result.classification = 'undeliverable';
+    result.message = 'Invalid email format';
+    return result;
+  }
+  result.checks.syntax = { valid: true, message: 'Valid format' };
+
+  const domain = email.split('@')[1].toLowerCase();
+
+  // Disposable check
+  const isDisposable = DISPOSABLE_DOMAINS.includes(domain);
+  result.checks.disposable = { isDisposable, message: isDisposable ? 'Disposable email service' : 'Not disposable' };
+  if (isDisposable) {
+    result.status = 'disposable'; result.classification = 'risky';
+    result.message = 'Disposable/temporary email service detected';
+    return result;
+  }
+
+  // Typo check
+  if (COMMON_TYPOS[domain]) {
+    result.checks.typo = { hasTypo: true, suggestion: COMMON_TYPOS[domain], message: `Did you mean ${COMMON_TYPOS[domain]}?` };
+    result.status = 'risky'; result.classification = 'risky';
+    result.message = `Possible typo. Did you mean ${email.split('@')[0]}@${COMMON_TYPOS[domain]}?`;
+    return result;
+  }
+  result.checks.typo = { hasTypo: false, message: 'No typos detected' };
+
+  // DNS/MX check
+  try {
+    const records = await resolveMx(domain);
+    records.sort((a, b) => a.priority - b.priority);
+    result.checks.dns = { valid: true, message: 'MX records found', mxRecords: records.map(r => r.exchange) };
+
+    // SMTP check
+    const mxHost = records[0]?.exchange;
+    if (mxHost) {
+      const smtpValid = await new Promise((resolve) => {
+        const socket = netMod.createConnection({ host: mxHost, port: 25, timeout: 8000 });
+        let responded = false;
+        socket.on('data', (data) => {
+          const str = data.toString();
+          if (!responded && str.startsWith('220')) {
+            responded = true;
+            socket.write(`EHLO viper.local\r\n`);
+            socket.on('data', () => { socket.destroy(); resolve(true); });
+          }
+        });
+        socket.on('error', () => resolve(false));
+        socket.on('timeout', () => { socket.destroy(); resolve(false); });
+        setTimeout(() => { socket.destroy(); resolve(false); }, 10000);
+      });
+      result.checks.smtp = { valid: smtpValid, message: smtpValid ? 'Mail server responds' : 'Mail server unreachable' };
+      if (smtpValid) {
+        result.valid = true; result.status = 'valid'; result.classification = 'deliverable';
+        result.message = 'Email address verified — mail server responds';
+      } else {
+        result.valid = true; result.status = 'catch-all'; result.classification = 'risky';
+        result.message = 'DNS valid but server blocks direct verification';
+      }
+    }
+  } catch (e) {
+    result.checks.dns = { valid: false, message: 'No MX records found' };
+    result.status = 'invalid'; result.classification = 'undeliverable';
+    result.message = 'Domain has no mail server (MX records)';
+  }
+
+  return result;
+});
+
 // --- Field Security IPC ---
 ipcMain.handle('security-check', async () => {
   return {

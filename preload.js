@@ -24,6 +24,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openCaseImport: () => ipcRenderer.invoke('open-case-import'),
   saveDAExport: (data) => ipcRenderer.invoke('save-da-export', data),
 
+  // Offense Reference Export / Import
+  saveOffenseExport: (data) => ipcRenderer.invoke('save-offense-export', data),
+  openOffenseImport: () => ipcRenderer.invoke('open-offense-import'),
+
+  // Identifier Lookups
+  arinLookup: (ipAddress) => ipcRenderer.invoke('arin-lookup', ipAddress),
+  verifyEmail: (email) => ipcRenderer.invoke('verify-email', email),
+
   // Field Security
   securityCheck: () => ipcRenderer.invoke('security-check'),
   securitySetup: (data) => ipcRenderer.invoke('security-setup', data),

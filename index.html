@@ -1718,7 +1718,8 @@
         document.addEventListener('click', function(event) {
             if (!event.target.closest('.settings-btn') && !event.target.closest('[id^="dropdown-"]')) {
                 for (let i = 1; i <= 4; i++) {
-                    document.getElementById(`dropdown-${i}`).classList.add('hidden');
+                    const dd = document.getElementById(`dropdown-${i}`);
+                    if (dd) dd.classList.add('hidden');
                 }
             }
         });
@@ -3298,6 +3299,8 @@
             // Handle hash navigation (e.g. from case-detail sidebar link)
             if (window.location.hash === '#offense-reference') {
                 setTimeout(() => showOffenseReference(), 100);
+                // Clear hash so navigating back to dashboard doesn't re-trigger
+                history.replaceState(null, '', window.location.pathname + window.location.search);
             }
         });
 

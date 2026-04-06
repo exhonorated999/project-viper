@@ -2138,7 +2138,7 @@
                             if (!warrant.returnReceived) {
                                 // Calculate days since issued
                                 const issuedDate = new Date(warrant.issuedDate || warrant.dateIssued);
-                                const dueDate = new Date(warrant.dueDate);
+                                const dueDate = new Date(warrant.dueDate + 'T00:00:00');
                                 const today = new Date();
                                 const daysSinceIssued = Math.floor((today - issuedDate) / (1000 * 60 * 60 * 24));
                                 
@@ -2639,7 +2639,7 @@
             
             Object.values(allWarrants).forEach(caseWarrants => {
                 caseWarrants.forEach(warrant => {
-                    if (warrant.dueDate && !warrant.returnReceived && new Date(warrant.dueDate) < new Date()) {
+                    if (warrant.dueDate && !warrant.returnReceived && new Date(warrant.dueDate + 'T00:00:00') < new Date()) {
                         overdueCount++;
                     }
                 });
@@ -2945,13 +2945,13 @@
             
             Object.entries(allWarrants).forEach(([caseNumber, warrants]) => {
                 warrants.forEach(warrant => {
-                    if (warrant.dueDate && !warrant.returnReceived && new Date(warrant.dueDate) < new Date()) {
+                    if (warrant.dueDate && !warrant.returnReceived && new Date(warrant.dueDate + 'T00:00:00') < new Date()) {
                         const caseInfo = allCases.find(c => c.caseNumber === caseNumber);
                         overdueWarrants.push({
                             caseNumber: caseNumber,
                             warrant: warrant,
                             caseId: caseInfo ? caseInfo.id : null,
-                            daysOverdue: Math.ceil((new Date() - new Date(warrant.dueDate)) / (1000 * 60 * 60 * 24))
+                            daysOverdue: Math.ceil((new Date() - new Date(warrant.dueDate + 'T00:00:00')) / (1000 * 60 * 60 * 24))
                         });
                     }
                 });
@@ -3505,7 +3505,7 @@
             
             Object.entries(allWarrants).forEach(([caseNumber, warrants]) => {
                 warrants.forEach(warrant => {
-                    if (warrant.dueDate && !warrant.returnReceived && new Date(warrant.dueDate) < new Date()) {
+                    if (warrant.dueDate && !warrant.returnReceived && new Date(warrant.dueDate + 'T00:00:00') < new Date()) {
                         const caseInfo = allCases.find(c => c.caseNumber === caseNumber);
                         overdueWarrants.push({
                             caseNumber: caseNumber,

@@ -1256,6 +1256,15 @@
                         </svg>
                         <span>${tab.label}</span>
                     </button>
+                    ${tab.id !== 'overview' ? `
+                    <button onclick="event.stopPropagation(); confirmRemoveModule('${tab.id}', '${tab.label.replace(/'/g, "\\'")}')" 
+                            class="p-0.5 text-gray-600 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 -ml-1 mr-1"
+                            title="Remove ${tab.label} module">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                    ` : ''}
                     <button onclick="moveTabRight('${tab.id}')" 
                             class="p-1 text-gray-600 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
                             title="Move tab right"
@@ -1389,6 +1398,12 @@
             if (modal) modal.remove();
         }
 
+        function confirmRemoveModule(moduleId, label) {
+            if (confirm(`Are you sure? You will lose all data associated with this module.`)) {
+                removeModuleFromCase(moduleId);
+            }
+        }
+
         function removeModuleFromCase(moduleId) {
             const moduleConfig = {
                 suspects:'Suspects', victims:'Victims', victimBusiness:'Victim Business',
@@ -1420,8 +1435,6 @@
             renderTabs();
             renderTabContent(currentTab);
             showToast(`Removed "${label}" module`, 'info');
-            // Reopen the manage modal so user can continue removing
-            setTimeout(() => showAddModuleModal(), 100);
         }
 
         function openExportCaseModal() {
@@ -5081,6 +5094,7 @@
                                             <div class="flex items-center gap-3 flex-1">
                                                 <span class="text-lg">${typeIcons[ident.type] || '🔗'}</span>
                                                 <span class="px-2 py-0.5 rounded text-xs font-semibold bg-${color}/20 text-${color} border border-${color}/40 uppercase">${ident.type}</span>
+                                                ${ident.platform ? `<span class="px-2 py-0.5 rounded text-xs font-semibold bg-viper-purple/20 text-viper-purple border border-viper-purple/40">${ident.platform}</span>` : ''}
                                                 <span class="text-white font-medium">${ident.value}</span>
                                                 ${ident.provider ? `<span class="px-2 py-0.5 rounded text-xs bg-green-500/20 text-green-400 border border-green-500/40">ISP: ${ident.provider}</span>` : ''}
                                                 ${ident.emailResult ? `<span class="px-2 py-0.5 rounded text-xs bg-${ident.emailResult.valid ? 'green' : 'red'}-500/20 text-${ident.emailResult.valid ? 'green' : 'red'}-400 border border-${ident.emailResult.valid ? 'green' : 'red'}-500/40">${ident.emailResult.status}</span>` : ''}
@@ -5567,12 +5581,33 @@
                 <div class="glass-card rounded-xl p-6 max-w-md w-full" onclick="event.stopPropagation()">
                     <h3 class="text-xl font-bold text-white mb-4">Add Identifier</h3>
                     <form id="addIdentForm" class="space-y-4">
-                        <select name="type" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
+                        <select name="type" id="identTypeSelect" onchange="document.getElementById('identPlatformRow').style.display = this.value === 'username' ? 'block' : 'none'" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                             <option value="email">Email</option>
                             <option value="phone">Phone</option>
                             <option value="username">Username</option>
                             <option value="ip">IP Address</option>
                         </select>
+                        <div id="identPlatformRow" style="display:none;">
+                            <select name="platform" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
+                                <option value="">Select Platform...</option>
+                                <option value="Snapchat">Snapchat</option>
+                                <option value="Instagram">Instagram</option>
+                                <option value="Facebook">Facebook</option>
+                                <option value="TikTok">TikTok</option>
+                                <option value="Twitter/X">Twitter/X</option>
+                                <option value="Reddit">Reddit</option>
+                                <option value="Discord">Discord</option>
+                                <option value="Telegram">Telegram</option>
+                                <option value="WhatsApp">WhatsApp</option>
+                                <option value="YouTube">YouTube</option>
+                                <option value="LinkedIn">LinkedIn</option>
+                                <option value="Kik">Kik</option>
+                                <option value="Signal">Signal</option>
+                                <option value="Twitch">Twitch</option>
+                                <option value="Pinterest">Pinterest</option>
+                                <option value="Other">Other</option>
+                            </select>
+                        </div>
                         <input type="text" name="value" placeholder="Value" required class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                         <div class="flex justify-end gap-3">
                             <button type="button" onclick="this.closest('.fixed').remove()" class="px-4 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white transition">Cancel</button>
@@ -5589,7 +5624,12 @@
                 const value = fd.get('value')?.trim();
                 if (!value) return;
                 if (!suspects[suspectIdx].identifiers) suspects[suspectIdx].identifiers = [];
-                suspects[suspectIdx].identifiers.push({ type, value, provider: '' });
+                const ident = { type, value, provider: '' };
+                if (type === 'username') {
+                    const platform = fd.get('platform');
+                    if (platform) ident.platform = platform;
+                }
+                suspects[suspectIdx].identifiers.push(ident);
                 saveSuspects();
                 modal.remove();
                 renderTabContent('suspects');
@@ -6052,6 +6092,7 @@
                                         <thead>
                                             <tr style="background:#f0f0f0;">
                                                 <th style="padding:6px 10px; text-align:left; border:1px solid #ddd; font-size:12px;">Type</th>
+                                                <th style="padding:6px 10px; text-align:left; border:1px solid #ddd; font-size:12px;">Platform</th>
                                                 <th style="padding:6px 10px; text-align:left; border:1px solid #ddd; font-size:12px;">Value</th>
                                                 <th style="padding:6px 10px; text-align:left; border:1px solid #ddd; font-size:12px;">Provider / Status</th>
                                             </tr>
@@ -6060,6 +6101,7 @@
                                             ${suspect.identifiers.map(id => `
                                                 <tr>
                                                     <td style="padding:6px 10px; border:1px solid #ddd; text-transform:uppercase; font-size:11px; font-weight:bold;">${id.type}</td>
+                                                    <td style="padding:6px 10px; border:1px solid #ddd;">${id.platform || '—'}</td>
                                                     <td style="padding:6px 10px; border:1px solid #ddd;">${id.value}</td>
                                                     <td style="padding:6px 10px; border:1px solid #ddd;">${id.provider ? 'ISP: ' + id.provider : ''}${id.emailResult ? (id.emailResult.status || '') : ''}</td>
                                                 </tr>

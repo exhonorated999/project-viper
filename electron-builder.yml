@@ -49,4 +49,8 @@ nsis:
   artifactName: ${productName}-${version}-Setup.${ext}
 portable:
   artifactName: ${productName}-${version}-Portable.${ext}
-publish: null
+publish:
+  provider: github
+  owner: exhonorated999
+  repo: project-viper
+  releaseType: release

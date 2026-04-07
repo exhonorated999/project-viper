@@ -356,15 +356,45 @@
                         </svg>
                         Software Updates
                     </h3>
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-sm text-gray-400">Current Version: <span class="text-white font-mono" id="currentVersionLabel">1.1.0</span></p>
-                            <p id="updateResult" class="text-sm mt-2" style="display:none;"></p>
+                    <div>
+                        <div class="flex items-center justify-between">
+                            <p class="text-sm text-gray-400">Current Version: <span class="text-white font-mono" id="currentVersionLabel">—</span></p>
+                            <button onclick="doCheckUpdate()" id="checkUpdateBtn"
+                                class="px-6 py-2 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green transition font-medium">
+                                Check for Updates
+                            </button>
                         </div>
-                        <button onclick="doCheckUpdate()" id="checkUpdateBtn"
-                            class="px-6 py-2 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green transition font-medium">
-                            Check for Updates
-                        </button>
+
+                        <!-- Update status area (hidden by default) -->
+                        <div id="updateStatusArea" style="display:none;" class="mt-4">
+                            <p id="updateStatusText" class="text-sm text-gray-300"></p>
+
+                            <!-- Progress bar (shown during download) -->
+                            <div id="updateProgressWrap" style="display:none;" class="mt-3">
+                                <div class="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
+                                    <div id="updateProgressBar" class="h-3 rounded-full bg-viper-cyan transition-all duration-300" style="width:0%"></div>
+                                </div>
+                                <p id="updateProgressLabel" class="text-xs text-gray-400 mt-1">0%</p>
+                            </div>
+
+                            <!-- Action buttons -->
+                            <div class="flex gap-3 mt-3">
+                                <button id="updateDownloadBtn" onclick="doDownloadUpdate()" style="display:none;"
+                                    class="px-5 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition font-medium text-sm">
+                                    Download Update
+                                </button>
+                                <button id="updateInstallBtn" onclick="doInstallUpdate()" style="display:none;"
+                                    class="px-5 py-2 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green transition font-medium text-sm">
+                                    Install &amp; Restart
+                                </button>
+                            </div>
+
+                            <!-- Backup warning (shown when update is available or downloaded) -->
+                            <div id="updateBackupWarning" style="display:none;background:rgba(251,191,36,0.12);border:1px solid rgba(251,191,36,0.35);color:#fbbf24;" class="mt-3 p-3 rounded-lg text-xs leading-relaxed">
+                                ⚠️ <strong>Your cases and data will be preserved during the update.</strong>
+                                As an extra precaution, create a backup using <em>Backup &amp; Restore</em> above before updating.
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -1555,12 +1585,17 @@
         // Aperture toggle removed — modules are now added per-case via Add Module button
 
         /* ---------- Licensing UI ---------- */
-        function initLicenseUI() {
+        async function initLicenseUI() {
             const lic = window.ViperLicensing;
             if (!lic) return;
-            // Show actual version from licensing module
+            // Show actual version from Electron (package.json)
             const verLabel = document.getElementById('currentVersionLabel');
-            if (verLabel && lic.APP_VERSION) verLabel.textContent = lic.APP_VERSION;
+            if (verLabel) {
+                try {
+                    const v = await window.electronAPI.getAppVersion();
+                    verLabel.textContent = v;
+                } catch { if (lic.APP_VERSION) verLabel.textContent = lic.APP_VERSION; }
+            }
             const status = lic.getLicenseStatus();
             const badge = document.getElementById('licStatusBadge');
             const countdown = document.getElementById('licDemoCountdown');
@@ -1625,30 +1660,139 @@
             btn.disabled = false; btn.textContent = 'Activate';
         }
 
+        /* ---------- Auto-Update (electron-updater) ---------- */
         async function doCheckUpdate() {
             const btn = document.getElementById('checkUpdateBtn');
-            const res = document.getElementById('updateResult');
             btn.disabled = true; btn.textContent = 'Checking...';
-            res.style.display = 'none';
+            hideUpdateUI();
             try {
-                const info = await window.ViperLicensing.checkForUpdate();
-                if (info.updateAvailable) {
-                    res.innerHTML = `🎉 Version <strong>${info.latestVersion}</strong> available! ` +
-                        (info.downloadUrl ? `<a href="${info.downloadUrl}" style="color:#00d9ff;text-decoration:underline;">Download</a>` : '') +
-                        `<div style="margin-top:8px;padding:10px 12px;background:rgba(251,191,36,0.12);border:1px solid rgba(251,191,36,0.35);border-radius:8px;color:#fbbf24;font-size:12px;line-height:1.5;">` +
-                        `⚠️ <strong>Back up your data before updating.</strong> Go to <em>Backup &amp; Restore</em> above to create a full backup, or export individual cases from each case detail page.</div>`;
-                    res.style.color = '#86efac';
+                if (window.electronAPI && window.electronAPI.updateCheck) {
+                    await window.electronAPI.updateCheck();
+                    // Status arrives via onUpdateStatus listener below
                 } else {
-                    res.textContent = '✅ You are running the latest version.';
-                    res.style.color = '#9ca3af';
+                    // Fallback for dev mode / no electron
+                    const info = await window.ViperLicensing.checkForUpdate();
+                    const area = document.getElementById('updateStatusArea');
+                    const text = document.getElementById('updateStatusText');
+                    area.style.display = 'block';
+                    if (info.updateAvailable) {
+                        text.innerHTML = `🎉 Version <strong>${info.latestVersion}</strong> available! ` +
+                            (info.downloadUrl ? `<a href="${info.downloadUrl}" style="color:#00d9ff;text-decoration:underline;">Download from website</a>` : '');
+                        text.style.color = '#86efac';
+                    } else {
+                        text.textContent = '✅ You are running the latest version.';
+                        text.style.color = '#9ca3af';
+                    }
+                    btn.disabled = false; btn.textContent = 'Check for Updates';
                 }
-                res.style.display = 'block';
             } catch (e) {
-                res.textContent = 'Could not check for updates.';
-                res.style.color = '#fca5a5';
-                res.style.display = 'block';
+                showUpdateError('Could not check for updates.');
+                btn.disabled = false; btn.textContent = 'Check for Updates';
             }
-            btn.disabled = false; btn.textContent = 'Check for Updates';
+        }
+
+        async function doDownloadUpdate() {
+            const btn = document.getElementById('updateDownloadBtn');
+            btn.disabled = true; btn.textContent = 'Starting...';
+            try {
+                await window.electronAPI.updateDownload();
+            } catch (e) {
+                showUpdateError('Download failed: ' + (e.message || e));
+                btn.disabled = false; btn.textContent = 'Download Update';
+            }
+        }
+
+        function doInstallUpdate() {
+            // NSIS installer.nsh handles userdata/ and cases/ backup+restore
+            window.electronAPI.updateInstall();
+        }
+
+        function hideUpdateUI() {
+            document.getElementById('updateStatusArea').style.display = 'none';
+            document.getElementById('updateProgressWrap').style.display = 'none';
+            document.getElementById('updateDownloadBtn').style.display = 'none';
+            document.getElementById('updateInstallBtn').style.display = 'none';
+            document.getElementById('updateBackupWarning').style.display = 'none';
+        }
+
+        function showUpdateError(msg) {
+            const area = document.getElementById('updateStatusArea');
+            const text = document.getElementById('updateStatusText');
+            area.style.display = 'block';
+            text.textContent = msg;
+            text.style.color = '#fca5a5';
+        }
+
+        function formatBytes(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / 1048576).toFixed(1) + ' MB';
+        }
+
+        // Listen for update status events from main process
+        if (window.electronAPI && window.electronAPI.onUpdateStatus) {
+            window.electronAPI.onUpdateStatus((data) => {
+                const area = document.getElementById('updateStatusArea');
+                const text = document.getElementById('updateStatusText');
+                const progressWrap = document.getElementById('updateProgressWrap');
+                const progressBar = document.getElementById('updateProgressBar');
+                const progressLabel = document.getElementById('updateProgressLabel');
+                const downloadBtn = document.getElementById('updateDownloadBtn');
+                const installBtn = document.getElementById('updateInstallBtn');
+                const backupWarn = document.getElementById('updateBackupWarning');
+                const checkBtn = document.getElementById('checkUpdateBtn');
+
+                area.style.display = 'block';
+
+                switch (data.status) {
+                    case 'checking':
+                        text.textContent = 'Checking for updates...';
+                        text.style.color = '#9ca3af';
+                        break;
+
+                    case 'available':
+                        text.innerHTML = `🎉 Version <strong>${data.version}</strong> is available!`;
+                        text.style.color = '#86efac';
+                        downloadBtn.style.display = 'inline-block';
+                        downloadBtn.disabled = false;
+                        downloadBtn.textContent = 'Download Update';
+                        backupWarn.style.display = 'block';
+                        checkBtn.disabled = false; checkBtn.textContent = 'Check for Updates';
+                        break;
+
+                    case 'up-to-date':
+                        text.textContent = '✅ You are running the latest version.';
+                        text.style.color = '#9ca3af';
+                        checkBtn.disabled = false; checkBtn.textContent = 'Check for Updates';
+                        break;
+
+                    case 'downloading':
+                        text.textContent = 'Downloading update...';
+                        text.style.color = '#00d9ff';
+                        progressWrap.style.display = 'block';
+                        progressBar.style.width = data.percent + '%';
+                        progressLabel.textContent = `${data.percent}% — ${formatBytes(data.transferred)} / ${formatBytes(data.total)}`;
+                        downloadBtn.style.display = 'none';
+                        break;
+
+                    case 'downloaded':
+                        text.innerHTML = `✅ Version <strong>${data.version}</strong> downloaded and ready to install.`;
+                        text.style.color = '#86efac';
+                        progressWrap.style.display = 'none';
+                        installBtn.style.display = 'inline-block';
+                        backupWarn.style.display = 'block';
+                        checkBtn.disabled = false; checkBtn.textContent = 'Check for Updates';
+                        break;
+
+                    case 'error':
+                        text.textContent = data.message || 'Update check failed.';
+                        text.style.color = '#fca5a5';
+                        checkBtn.disabled = false; checkBtn.textContent = 'Check for Updates';
+                        downloadBtn.style.display = 'none';
+                        progressWrap.style.display = 'none';
+                        break;
+                }
+            });
         }
 
         // Init license UI on load

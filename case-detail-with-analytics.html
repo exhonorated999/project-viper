@@ -7809,19 +7809,13 @@
             const searchString = inputEl.value.trim();
             if (!searchString) { alert('Enter a search term.'); return; }
 
-            const webKey = localStorage.getItem('fmcsaApiKey');
-            if (!webKey) {
-                alert('No FMCSA API key configured. Go to Settings → Investigative Tools → FMCSA to add your free key.');
-                return;
-            }
-
             openFmcsaDrawer();
             setFmcsaDrawerLoading(searchString);
 
             try {
-                const result = await window.electronAPI.fmcsaLookup({ type: searchType, query: searchString, webKey });
+                const result = await window.electronAPI.fmcsaLookup({ type: searchType, query: searchString });
                 if (result.success) {
-                    renderFmcsaResults(result.carriers, searchString);
+                    renderFmcsaResults(result.carriers, searchString, result.isList);
                 } else {
                     renderFmcsaError(result.error);
                 }
@@ -7882,47 +7876,52 @@
                 </div>`;
         }
 
-        function renderFmcsaResults(carriers, term) {
+        function renderFmcsaResults(carriers, term, isList) {
             const c = document.getElementById('fmcsaDrawerContent');
             if (!c) return;
             if (!carriers.length) { renderFmcsaError('No carriers found.'); return; }
 
-            c.innerHTML = `
-                <p class="text-xs text-gray-500 mb-4">${carriers.length} result${carriers.length !== 1 ? 's' : ''} for "${term}"</p>
-                <div class="space-y-4">
-                    ${carriers.map(cr => {
-                        const opBadge = cr.outOfService === 'Y'
-                            ? '<span class="px-2 py-0.5 rounded text-xs font-bold bg-red-500/20 text-red-400 border border-red-500/40">OUT OF SERVICE</span>'
-                            : cr.allowToOperate === 'Y'
-                                ? '<span class="px-2 py-0.5 rounded text-xs font-bold bg-green-500/20 text-green-400 border border-green-500/40">AUTHORIZED</span>'
-                                : '<span class="px-2 py-0.5 rounded text-xs font-bold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40">NOT AUTHORIZED</span>';
-                        const addr = [cr.phyStreet, cr.phyCity, cr.phyState, cr.phyZip].filter(Boolean).join(', ');
-                        return `
-                        <div class="rounded-xl p-4 border border-blue-500/20" style="background:rgba(59,130,246,0.04);">
-                            <div class="flex items-start justify-between mb-2">
-                                <div>
-                                    <h4 class="text-white font-bold text-sm">${cr.legalName || 'Unknown'}</h4>
-                                    ${cr.dbaName ? `<p class="text-xs text-gray-400">DBA: ${cr.dbaName}</p>` : ''}
-                                </div>
-                                ${opBadge}
-                            </div>
-                            <div class="grid grid-cols-2 gap-x-4 gap-y-2 mt-3 text-xs">
-                                <div><span class="text-gray-500">USDOT#</span><p class="text-white font-mono">${cr.dotNumber || '—'}</p></div>
-                                <div><span class="text-gray-500">MC/MX#</span><p class="text-white font-mono">${cr.mcNumber || '—'}</p></div>
-                                <div><span class="text-gray-500">Power Units</span><p class="text-white">${cr.totalPowerUnits || '—'}</p></div>
-                                <div><span class="text-gray-500">Drivers</span><p class="text-white">${cr.totalDrivers || '—'}</p></div>
-                                ${cr.safetyRating ? `<div><span class="text-gray-500">Safety Rating</span><p class="text-white">${cr.safetyRating}${cr.safetyRatingDate ? ` <span class="text-gray-600">(${cr.safetyRatingDate})</span>` : ''}</p></div>` : ''}
-                                ${cr.carrierOperation ? `<div><span class="text-gray-500">Operation</span><p class="text-white">${cr.carrierOperation}</p></div>` : ''}
-                                ${cr.telephone ? `<div><span class="text-gray-500">Phone</span><p class="text-white">${cr.telephone}</p></div>` : ''}
-                                ${cr.complaintCount > 0 ? `<div><span class="text-gray-500">Complaints</span><p class="text-red-400 font-bold">${cr.complaintCount}</p></div>` : ''}
-                            </div>
-                            ${addr ? `<div class="mt-3 pt-3 border-t border-gray-700/40"><p class="text-xs text-gray-400">${addr}</p></div>` : ''}
-                            <div class="mt-3 pt-2 border-t border-gray-700/40 flex gap-2">
-                                <button onclick="if(window.electronAPI&&window.electronAPI.openExternalUrl)window.electronAPI.openExternalUrl('https://safer.fmcsa.dot.gov/CompanySnapshot.aspx?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=USDOT&query_string=${cr.dotNumber}')" class="text-xs text-blue-400 hover:text-blue-300 underline transition">View on SAFER ↗</button>
-                            </div>
-                        </div>`;
-                    }).join('')}
-                </div>`;
+            if (isList) {
+                c.innerHTML = `
+                    <p class="text-xs text-gray-500 mb-4">${carriers.length} matches for "${term}" — click to view details</p>
+                    <div class="space-y-2">${carriers.map(cr => `
+                        <button onclick="fmcsaLookupByDot('${cr.dotNumber}')" class="w-full text-left rounded-lg p-3 border border-blue-500/20 hover:border-blue-500/40 transition" style="background:rgba(59,130,246,0.04);">
+                            <p class="text-white font-semibold text-sm">${cr.legalName || 'Unknown'}</p>
+                            <p class="text-xs text-gray-400 font-mono">USDOT# ${cr.dotNumber}</p>
+                        </button>`).join('')}
+                    </div>`;
+                return;
+            }
+
+            c.innerHTML = carriers.map(cr => {
+                const statusBadge = cr.outOfServiceDate && cr.outOfServiceDate !== 'None'
+                    ? `<span class="px-2 py-0.5 rounded text-xs font-bold bg-red-500/20 text-red-400 border border-red-500/40">OUT OF SERVICE</span>`
+                    : cr.status === 'ACTIVE'
+                        ? `<span class="px-2 py-0.5 rounded text-xs font-bold bg-green-500/20 text-green-400 border border-green-500/40">${cr.status}</span>`
+                        : `<span class="px-2 py-0.5 rounded text-xs font-bold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40">${cr.status || 'UNKNOWN'}</span>`;
+                let inspHtml = '';
+                if (cr.inspections) {
+                    const ins = cr.inspections.inspections, pct = cr.inspections.oosPercent;
+                    inspHtml = `<div class="mt-3 pt-3 border-t border-gray-700/40"><h5 class="text-xs font-bold text-blue-300 mb-2">Inspections (24 Months)</h5><div class="grid grid-cols-3 gap-2 text-xs"><div><span class="text-gray-500">Vehicle</span><p class="text-white">${ins?.[1]||'—'} <span class="text-gray-500">(${pct?.[1]||'—'} OOS)</span></p></div><div><span class="text-gray-500">Driver</span><p class="text-white">${ins?.[2]||'—'} <span class="text-gray-500">(${pct?.[2]||'—'} OOS)</span></p></div><div><span class="text-gray-500">Hazmat</span><p class="text-white">${ins?.[3]||'—'}</p></div></div></div>`;
+                }
+                let crashHtml = '';
+                if (cr.crashes && cr.crashes.data) {
+                    const d = cr.crashes.data;
+                    crashHtml = `<div class="mt-3 pt-3 border-t border-gray-700/40"><h5 class="text-xs font-bold text-blue-300 mb-2">Crashes (24 Months)</h5><div class="grid grid-cols-4 gap-2 text-xs"><div><span class="text-gray-500">Fatal</span><p class="text-white ${d[1]!=='0'?'text-red-400 font-bold':''}">${d[1]||'0'}</p></div><div><span class="text-gray-500">Injury</span><p class="text-white">${d[2]||'0'}</p></div><div><span class="text-gray-500">Tow</span><p class="text-white">${d[3]||'0'}</p></div><div><span class="text-gray-500">Total</span><p class="text-white font-bold">${d[4]||'0'}</p></div></div></div>`;
+                }
+                const cargoHtml = cr.cargoCarried && cr.cargoCarried.length
+                    ? `<div class="mt-3 pt-3 border-t border-gray-700/40"><h5 class="text-xs font-bold text-blue-300 mb-1">Cargo Carried</h5><div class="flex flex-wrap gap-1">${cr.cargoCarried.map(c=>`<span class="px-2 py-0.5 rounded text-xs bg-blue-500/10 text-blue-300 border border-blue-500/20">${c}</span>`).join('')}</div></div>` : '';
+                return `<div class="space-y-0"><div class="flex items-start justify-between mb-3"><div><h4 class="text-white font-bold text-base">${cr.legalName||'Unknown'}</h4>${cr.dbaName?`<p class="text-xs text-gray-400 mt-0.5">DBA: ${cr.dbaName}</p>`:''}</div>${statusBadge}</div>${cr.opAuthority?`<p class="text-xs mb-3"><span class="text-gray-500">Authority:</span> <span class="text-white">${cr.opAuthority}</span></p>`:''}<div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs"><div><span class="text-gray-500">USDOT#</span><p class="text-white font-mono font-bold">${cr.dotNumber||'—'}</p></div><div><span class="text-gray-500">MC/MX#</span><p class="text-white font-mono">${cr.mcNumber||'—'}</p></div><div><span class="text-gray-500">Power Units</span><p class="text-white">${cr.powerUnits||'—'}</p></div><div><span class="text-gray-500">Drivers</span><p class="text-white">${cr.drivers||'—'}</p></div><div><span class="text-gray-500">Phone</span><p class="text-white">${cr.phone||'—'}</p></div><div><span class="text-gray-500">Entity Type</span><p class="text-white">${cr.entityType||'—'}</p></div><div><span class="text-gray-500">Safety Rating</span><p class="text-white">${cr.safetyRating||'None'}</p></div><div><span class="text-gray-500">MCS-150 Date</span><p class="text-white">${cr.mcsDate||'—'}</p></div></div>${cr.address?`<div class="mt-3 pt-3 border-t border-gray-700/40"><p class="text-xs text-gray-500">Address</p><p class="text-xs text-white mt-0.5">${cr.address}</p></div>`:''}${inspHtml}${crashHtml}${cargoHtml}<div class="mt-3 pt-2 border-t border-gray-700/40"><button onclick="if(window.electronAPI&&window.electronAPI.openExternalUrl)window.electronAPI.openExternalUrl('https://safer.fmcsa.dot.gov/query.asp?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=USDOT&query_string=${cr.dotNumber}')" class="text-xs text-blue-400 hover:text-blue-300 underline transition">View full snapshot on SAFER ↗</button></div></div>`;
+            }).join('');
+        }
+
+        async function fmcsaLookupByDot(dot) {
+            setFmcsaDrawerLoading(dot);
+            try {
+                const result = await window.electronAPI.fmcsaLookup({ type: 'USDOT', query: dot });
+                if (result.success) renderFmcsaResults(result.carriers, dot);
+                else renderFmcsaError(result.error);
+            } catch (e) { renderFmcsaError(e.message); }
         }
 
         function addNewCargoItem() {

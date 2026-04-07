@@ -697,7 +697,7 @@ ipcMain.handle('arin-lookup', async (_event, ipAddress) => {
 // --- FMCSA Carrier Lookup (SAFER web scrape — no API key needed) ---
 ipcMain.handle('fmcsa-lookup', async (_event, params) => {
   const https = require('https');
-  const cheerio = require('cheerio');
+  const { parse: parseHTML } = require('node-html-parser');
   const { type, query } = params;
   if (!query) return { success: false, error: 'Search term is required.' };
 
@@ -718,12 +718,10 @@ ipcMain.handle('fmcsa-lookup', async (_event, params) => {
   }
 
   // Helper: extract "Label: | Value" pairs from table rows
-  function parseKV($, tableEl) {
+  function parseKV(tableEl) {
     const kv = {};
-    $(tableEl).find('tr').each((_, tr) => {
-      const cells = [];
-      $(tr).find('th, td').each((_, td) => cells.push($(td).text().trim().replace(/\s+/g, ' ')));
-      // Look for "Key:" / value pairs
+    for (const tr of tableEl.querySelectorAll('tr')) {
+      const cells = tr.querySelectorAll('th, td').map(td => td.text.trim().replace(/\s+/g, ' '));
       for (let i = 0; i < cells.length - 1; i++) {
         if (cells[i].endsWith(':')) {
           const key = cells[i].replace(/:$/, '').trim();
@@ -731,59 +729,54 @@ ipcMain.handle('fmcsa-lookup', async (_event, params) => {
           if (key && val) kv[key] = val;
         }
       }
-    });
+    }
     return kv;
   }
 
   // Helper: parse labeled table (header row + data rows)
-  function parseLabeledTable($, tableEl) {
+  function parseLabeledTable(tableEl) {
     const rows = [];
-    $(tableEl).find('tr').each((_, tr) => {
-      const cells = [];
-      $(tr).find('th, td').each((_, td) => cells.push($(td).text().trim().replace(/\s+/g, ' ')));
+    for (const tr of tableEl.querySelectorAll('tr')) {
+      const cells = tr.querySelectorAll('th, td').map(td => td.text.trim().replace(/\s+/g, ' '));
       if (cells.some(c => c)) rows.push(cells);
-    });
+    }
     return rows;
   }
 
-  // Helper: extract checked items (X | label) from cargo/operation tables
-  function parseChecked($, tables) {
+  // Helper: extract checked items (X | label) from tables
+  function parseChecked(tables) {
     const items = [];
-    tables.each((_, tbl) => {
-      $(tbl).find('tr').each((_, tr) => {
-        const cells = [];
-        $(tr).find('td').each((_, td) => cells.push($(td).text().trim()));
+    for (const tbl of tables) {
+      for (const tr of tbl.querySelectorAll('tr')) {
+        const cells = tr.querySelectorAll('td').map(td => td.text.trim());
         if (cells.length >= 2 && cells[0] === 'X') items.push(cells[1]);
-      });
-    });
+      }
+    }
     return items;
   }
 
   try {
     const url = `https://safer.fmcsa.dot.gov/query.asp?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=${encodeURIComponent(type)}&query_string=${encodeURIComponent(query)}`;
     const html = await fetchHtml(url);
-    const $ = cheerio.load(html);
+    const root = parseHTML(html);
 
     // Check for "no records" or error
-    const bodyText = $('body').text();
+    const bodyText = root.text;
     if (bodyText.includes('No records matching') || bodyText.includes('No Record Found')) {
       return { success: false, error: 'No carrier found matching your search.' };
     }
 
     // For NAME search, SAFER may return a list page with links
-    // Check if this is a list page by looking for multiple carrier links
     const carrierLinks = [];
-    $('a').each((_, a) => {
-      const href = $(a).attr('href') || '';
+    for (const a of root.querySelectorAll('a')) {
+      const href = a.getAttribute('href') || '';
       if (href.includes('query_type=queryCarrierSnapshot') && href.includes('query_param=USDOT')) {
         const match = href.match(/query_string=(\d+)/);
-        if (match) carrierLinks.push({ dot: match[1], name: $(a).text().trim() });
+        if (match) carrierLinks.push({ dot: match[1], name: a.text.trim() });
       }
-    });
+    }
 
-    // If NAME search returned list page, fetch first result (or return list)
     if (type === 'NAME' && carrierLinks.length > 1) {
-      // Return list of matches for user to see
       const carriers = carrierLinks.slice(0, 20).map(cl => ({
         dotNumber: cl.dot, legalName: cl.name, _listResult: true
       }));
@@ -791,37 +784,43 @@ ipcMain.handle('fmcsa-lookup', async (_event, params) => {
     }
 
     // Parse single carrier snapshot
-    const centers = [];
-    $('center').each((i, c) => centers.push(c));
+    const centers = root.querySelectorAll('center');
 
     // Center 0: Company info
-    const infoTables = $(centers[0]).find('table');
+    const infoTables = centers[0] ? centers[0].querySelectorAll('table') : [];
     const info = {};
-    infoTables.each((_, tbl) => Object.assign(info, parseKV($, tbl)));
+    for (const tbl of infoTables) Object.assign(info, parseKV(tbl));
 
-    // Cargo carried
-    const cargoItems = parseChecked($, $(centers[0]).find('table').slice(10, 14));
-
-    // Operation classification
-    const opItems = parseChecked($, $(centers[0]).find('table').slice(5, 9));
+    // Cargo carried & operation classification from center 0 tables
+    const cargoItems = parseChecked(infoTables.slice(10, 14));
+    const opItems = parseChecked(infoTables.slice(5, 9));
 
     // Center 2: Inspections (24 months)
     let inspections = null;
     if (centers[2]) {
-      const rows = parseLabeledTable($, $(centers[2]).find('table').first());
-      if (rows.length >= 4) inspections = { headers: rows[0], inspections: rows[1], oos: rows[2], oosPercent: rows[3], natAvg: rows.length > 4 ? rows[4] : null };
+      const tbl = centers[2].querySelector('table');
+      if (tbl) {
+        const rows = parseLabeledTable(tbl);
+        if (rows.length >= 4) inspections = { headers: rows[0], inspections: rows[1], oos: rows[2], oosPercent: rows[3], natAvg: rows.length > 4 ? rows[4] : null };
+      }
     }
 
     // Center 3: Crashes (24 months)
     let crashes = null;
     if (centers[3]) {
-      const rows = parseLabeledTable($, $(centers[3]).find('table').first());
-      if (rows.length >= 2) crashes = { headers: rows[0], data: rows[1] };
+      const tbl = centers[3].querySelector('table');
+      if (tbl) {
+        const rows = parseLabeledTable(tbl);
+        if (rows.length >= 2) crashes = { headers: rows[0], data: rows[1] };
+      }
     }
 
     // Center 8: Safety rating
     let rating = {};
-    if (centers[8]) rating = parseKV($, $(centers[8]).find('table').first());
+    if (centers[8]) {
+      const tbl = centers[8].querySelector('table');
+      if (tbl) rating = parseKV(tbl);
+    }
 
     const carrier = {
       dotNumber: info['USDOT Number'] || '',

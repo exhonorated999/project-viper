@@ -36,6 +36,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   arinLookup: (ipAddress) => ipcRenderer.invoke('arin-lookup', ipAddress),
   verifyEmail: (email) => ipcRenderer.invoke('verify-email', email),
 
+  // FMCSA Carrier Lookup
+  fmcsaLookup: (params) => ipcRenderer.invoke('fmcsa-lookup', params),
+
   // Field Security
   securityCheck: () => ipcRenderer.invoke('security-check'),
   securitySetup: (data) => ipcRenderer.invoke('security-setup', data),

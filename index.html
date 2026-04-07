@@ -911,9 +911,7 @@
                                 Search
                             </button>
                         </div>
-                        <div id="fmcsaDashResult" class="mt-4 hidden">
-                            <p class="text-xs text-gray-400">Results open in a new FMCSA SAFER window.</p>
-                        </div>
+
                     </div>
                 </div>
 
@@ -3257,25 +3255,129 @@
             }
         }
 
-        function fmcsaSearch(context) {
+        async function fmcsaSearch(context) {
             const prefix = context === 'cargo' ? 'fmcsaCargo' : 'fmcsaDash';
             const typeEl = document.getElementById(prefix + 'SearchType');
             const inputEl = document.getElementById(prefix + 'SearchInput');
             if (!typeEl || !inputEl) return;
             const searchType = typeEl.value;
             const searchString = inputEl.value.trim();
-            if (!searchString) {
-                alert('Enter a search term.');
+            if (!searchString) { alert('Enter a search term.'); return; }
+
+            const webKey = localStorage.getItem('fmcsaApiKey');
+            if (!webKey) {
+                alert('No FMCSA API key configured. Go to Settings → Investigative Tools → FMCSA to add your free key.');
                 return;
             }
-            // Build FMCSA SAFER URL
-            const url = `https://safer.fmcsa.dot.gov/query.asp?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=${encodeURIComponent(searchType)}&query_string=${encodeURIComponent(searchString)}`;
-            // Open in system browser via IPC, fallback to window.open
-            if (window.electronAPI && window.electronAPI.openExternalUrl) {
-                window.electronAPI.openExternalUrl(url);
-            } else {
-                window.open(url, '_blank');
+
+            openFmcsaDrawer();
+            setFmcsaDrawerLoading(searchString);
+
+            try {
+                const result = await window.electronAPI.fmcsaLookup({ type: searchType, query: searchString, webKey });
+                if (result.success) {
+                    renderFmcsaResults(result.carriers, searchString);
+                } else {
+                    renderFmcsaError(result.error);
+                }
+            } catch (e) {
+                renderFmcsaError(e.message || 'Lookup failed.');
             }
+        }
+
+        /* ── FMCSA Drawer ─────────────────────────────── */
+        function openFmcsaDrawer() {
+            let drawer = document.getElementById('fmcsaDrawer');
+            if (!drawer) {
+                drawer = document.createElement('div');
+                drawer.id = 'fmcsaDrawer';
+                drawer.className = 'fixed top-0 right-0 h-full z-[9999] transition-transform duration-300 translate-x-full';
+                drawer.style.width = '480px';
+                drawer.innerHTML = `
+                    <div class="h-full flex flex-col border-l border-blue-500/30" style="background:rgba(10,15,28,0.97);backdrop-filter:blur(20px);">
+                        <div class="flex items-center justify-between px-5 py-4 border-b border-blue-500/20">
+                            <div class="flex items-center gap-2">
+                                <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+                                <h3 class="text-lg font-bold text-white">FMCSA Carrier Lookup</h3>
+                            </div>
+                            <button onclick="closeFmcsaDrawer()" class="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                            </button>
+                        </div>
+                        <div id="fmcsaDrawerContent" class="flex-1 overflow-y-auto p-5"></div>
+                    </div>`;
+                document.body.appendChild(drawer);
+            }
+            requestAnimationFrame(() => drawer.classList.remove('translate-x-full'));
+        }
+
+        function closeFmcsaDrawer() {
+            const drawer = document.getElementById('fmcsaDrawer');
+            if (drawer) {
+                drawer.classList.add('translate-x-full');
+                setTimeout(() => drawer.remove(), 300);
+            }
+        }
+
+        function setFmcsaDrawerLoading(term) {
+            const c = document.getElementById('fmcsaDrawerContent');
+            if (c) c.innerHTML = `
+                <div class="flex flex-col items-center justify-center h-48 text-gray-400">
+                    <svg class="w-8 h-8 animate-spin text-blue-400 mb-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                    <p class="text-sm">Searching FMCSA for "<span class="text-white font-semibold">${term}</span>"…</p>
+                </div>`;
+        }
+
+        function renderFmcsaError(msg) {
+            const c = document.getElementById('fmcsaDrawerContent');
+            if (c) c.innerHTML = `
+                <div class="flex flex-col items-center justify-center h-48 text-center">
+                    <svg class="w-10 h-10 text-red-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+                    <p class="text-red-400 text-sm font-medium">${msg}</p>
+                </div>`;
+        }
+
+        function renderFmcsaResults(carriers, term) {
+            const c = document.getElementById('fmcsaDrawerContent');
+            if (!c) return;
+            if (!carriers.length) { renderFmcsaError('No carriers found.'); return; }
+
+            c.innerHTML = `
+                <p class="text-xs text-gray-500 mb-4">${carriers.length} result${carriers.length !== 1 ? 's' : ''} for "${term}"</p>
+                <div class="space-y-4">
+                    ${carriers.map(cr => {
+                        const opBadge = cr.outOfService === 'Y'
+                            ? '<span class="px-2 py-0.5 rounded text-xs font-bold bg-red-500/20 text-red-400 border border-red-500/40">OUT OF SERVICE</span>'
+                            : cr.allowToOperate === 'Y'
+                                ? '<span class="px-2 py-0.5 rounded text-xs font-bold bg-green-500/20 text-green-400 border border-green-500/40">AUTHORIZED</span>'
+                                : '<span class="px-2 py-0.5 rounded text-xs font-bold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40">NOT AUTHORIZED</span>';
+                        const addr = [cr.phyStreet, cr.phyCity, cr.phyState, cr.phyZip].filter(Boolean).join(', ');
+                        return `
+                        <div class="rounded-xl p-4 border border-blue-500/20" style="background:rgba(59,130,246,0.04);">
+                            <div class="flex items-start justify-between mb-2">
+                                <div>
+                                    <h4 class="text-white font-bold text-sm">${cr.legalName || 'Unknown'}</h4>
+                                    ${cr.dbaName ? `<p class="text-xs text-gray-400">DBA: ${cr.dbaName}</p>` : ''}
+                                </div>
+                                ${opBadge}
+                            </div>
+                            <div class="grid grid-cols-2 gap-x-4 gap-y-2 mt-3 text-xs">
+                                <div><span class="text-gray-500">USDOT#</span><p class="text-white font-mono">${cr.dotNumber || '—'}</p></div>
+                                <div><span class="text-gray-500">MC/MX#</span><p class="text-white font-mono">${cr.mcNumber || '—'}</p></div>
+                                <div><span class="text-gray-500">Power Units</span><p class="text-white">${cr.totalPowerUnits || '—'}</p></div>
+                                <div><span class="text-gray-500">Drivers</span><p class="text-white">${cr.totalDrivers || '—'}</p></div>
+                                ${cr.safetyRating ? `<div><span class="text-gray-500">Safety Rating</span><p class="text-white">${cr.safetyRating}${cr.safetyRatingDate ? ` <span class="text-gray-600">(${cr.safetyRatingDate})</span>` : ''}</p></div>` : ''}
+                                ${cr.carrierOperation ? `<div><span class="text-gray-500">Operation</span><p class="text-white">${cr.carrierOperation}</p></div>` : ''}
+                                ${cr.telephone ? `<div><span class="text-gray-500">Phone</span><p class="text-white">${cr.telephone}</p></div>` : ''}
+                                ${cr.complaintCount > 0 ? `<div><span class="text-gray-500">Complaints</span><p class="text-red-400 font-bold">${cr.complaintCount}</p></div>` : ''}
+                            </div>
+                            ${addr ? `<div class="mt-3 pt-3 border-t border-gray-700/40"><p class="text-xs text-gray-400">${addr}</p></div>` : ''}
+                            <div class="mt-3 pt-2 border-t border-gray-700/40 flex gap-2">
+                                <button onclick="if(window.electronAPI&&window.electronAPI.openExternalUrl)window.electronAPI.openExternalUrl('https://safer.fmcsa.dot.gov/CompanySnapshot.aspx?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=USDOT&query_string=${cr.dotNumber}')" class="text-xs text-blue-400 hover:text-blue-300 underline transition">View on SAFER ↗</button>
+                            </div>
+                        </div>`;
+                    }).join('')}
+                </div>`;
         }
 
         // ═══════════════════════════════════════════════════════════════════

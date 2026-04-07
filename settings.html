@@ -1033,6 +1033,14 @@
             await loadStorageInfo();
             loadUserProfile();
             loadSecurityState();
+
+            // Electron/Chromium focus fix: native <select> dropdowns steal focus
+            document.addEventListener('change', (e) => {
+                if (e.target.tagName === 'SELECT') window.focus();
+            }, true);
+            document.addEventListener('mousedown', (e) => {
+                if (e.target.matches('input, textarea, button, select, [contenteditable]')) window.focus();
+            }, true);
         });
 
         // User Profile (read-only, populated from registration + viperUserInfo)

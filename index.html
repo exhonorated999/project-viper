@@ -3429,9 +3429,16 @@
             // Handle hash navigation (e.g. from case-detail sidebar link)
             if (window.location.hash === '#offense-reference') {
                 setTimeout(() => showOffenseReference(), 100);
-                // Clear hash so navigating back to dashboard doesn't re-trigger
                 history.replaceState(null, '', window.location.pathname + window.location.search);
             }
+
+            // Electron/Chromium focus fix: native <select> dropdowns steal focus
+            document.addEventListener('change', (e) => {
+                if (e.target.tagName === 'SELECT') window.focus();
+            }, true);
+            document.addEventListener('mousedown', (e) => {
+                if (e.target.matches('input, textarea, button, select, [contenteditable]')) window.focus();
+            }, true);
         });
 
         // User Information Display

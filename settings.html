@@ -581,6 +581,27 @@
                                     </div>
                                     <p class="text-xs text-gray-400 mt-1 leading-relaxed">Search the FMCSA SAFER (Safety and Fitness Electronic Records) database to look up motor carriers by USDOT number, MC/MX number, or company name. Returns carrier snapshots including safety ratings, operating status, insurance, vehicle/driver counts, and crash history. Useful for cargo theft investigations to identify and verify trucking companies, brokers, and freight forwarders involved in a case.</p>
                                     <span id="fmcsaToggleLabel" class="text-xs text-gray-500 mt-1 block"></span>
+
+                                    <!-- Collapsible API key -->
+                                    <details class="mt-3" id="fmcsaDetails">
+                                        <summary class="cursor-pointer text-xs text-blue-400 hover:text-blue-300 select-none flex items-center gap-1.5 font-medium">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+                                            Configure API Key
+                                        </summary>
+                                        <div class="mt-3 space-y-3 border-t border-gray-700/50 pt-3">
+                                            <p class="text-xs text-gray-500 leading-relaxed">Get a free API key from <a href="#" onclick="if(window.electronAPI&&window.electronAPI.openExternalUrl){window.electronAPI.openExternalUrl('https://mobile.fmcsa.dot.gov/QCDevsite/docs/apiAccess')}else{window.open('https://mobile.fmcsa.dot.gov/QCDevsite/docs/apiAccess','_blank')};return false;" class="text-blue-400 underline hover:text-blue-300">FMCSA Developer Portal</a>. Registration is free and instant.</p>
+                                            <div>
+                                                <label class="block text-xs font-medium text-gray-400 mb-1">Web API Key</label>
+                                                <input type="password" id="fmcsaApiKeyInput" class="w-full px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg focus:outline-none focus:border-blue-400 text-white text-sm" placeholder="Enter your FMCSA webKey">
+                                            </div>
+                                            <div class="flex items-center gap-3">
+                                                <button onclick="testFmcsaConnection()" id="fmcsaTestBtn" class="px-4 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500 rounded-lg text-blue-400 transition text-xs font-medium">Test Connection</button>
+                                                <button onclick="saveFmcsaKey()" class="px-4 py-1.5 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition text-xs font-medium">Save</button>
+                                                <span id="fmcsaKeyStatus" class="text-xs"></span>
+                                            </div>
+                                            <button onclick="localStorage.removeItem('fmcsaApiKey');document.getElementById('fmcsaApiKeyInput').value='';document.getElementById('fmcsaKeyStatus').textContent='Cleared';document.getElementById('fmcsaKeyStatus').style.color='#9ca3af';" class="text-red-400/60 hover:text-red-400 text-xs transition-colors">Clear API Key</button>
+                                        </div>
+                                    </details>
                                 </div>
                             </div>
                         </div>
@@ -1923,6 +1944,43 @@
         if (knob) knob.className = 'absolute w-4 h-4 bg-white rounded-full top-1 transition-transform ' + (enabled ? 'translate-x-6' : 'translate-x-1');
     }
 
+    function saveFmcsaKey() {
+        const key = document.getElementById('fmcsaApiKeyInput').value.trim();
+        const status = document.getElementById('fmcsaKeyStatus');
+        if (!key) { status.textContent = 'Enter an API key.'; status.style.color = '#fca5a5'; return; }
+        localStorage.setItem('fmcsaApiKey', key);
+        status.textContent = 'Saved'; status.style.color = '#86efac';
+    }
+
+    async function testFmcsaConnection() {
+        const btn = document.getElementById('fmcsaTestBtn');
+        const status = document.getElementById('fmcsaKeyStatus');
+        const key = document.getElementById('fmcsaApiKeyInput').value.trim() || localStorage.getItem('fmcsaApiKey');
+        if (!key) { status.textContent = 'Enter an API key first.'; status.style.color = '#fca5a5'; return; }
+        btn.disabled = true; btn.textContent = 'Testing...';
+        status.textContent = '';
+        try {
+            // Test with a known carrier (Greyhound, DOT 1)
+            const result = await window.electronAPI.fmcsaLookup({ type: 'USDOT', query: '1', webKey: key });
+            if (result.success) {
+                status.textContent = '✅ Connected — API key is valid'; status.style.color = '#86efac';
+            } else {
+                status.textContent = result.error || 'Connection failed'; status.style.color = '#fca5a5';
+            }
+        } catch (e) {
+            status.textContent = e.message || 'Test failed'; status.style.color = '#fca5a5';
+        }
+        btn.disabled = false; btn.textContent = 'Test Connection';
+    }
+
+    function initFmcsaSettings() {
+        const enabled = localStorage.getItem('fmcsaEnabled') === 'true';
+        updateFmcsaToggleUI(enabled);
+        const key = localStorage.getItem('fmcsaApiKey') || '';
+        const input = document.getElementById('fmcsaApiKeyInput');
+        if (input && key) input.value = key;
+    }
+
     function toggleGenlogs() {
         const enabled = localStorage.getItem('genlogsEnabled') !== 'true';
         localStorage.setItem('genlogsEnabled', String(enabled));
@@ -2025,7 +2083,7 @@
     }
 
     initGenlogsUI();
-    updateFmcsaToggleUI(localStorage.getItem('fmcsaEnabled') === 'true');
+    initFmcsaSettings();
 
     // ============================================
     // TRACE NETWORK SEARCH

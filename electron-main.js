@@ -5,7 +5,14 @@ const fs = require('fs');
 const url = require('url');
 const { spawn } = require('child_process');
 const SecurityManager = require('./modules/security');
-const { autoUpdater } = require('electron-updater');
+
+// electron-updater: lazy-load to avoid crashing in dev mode
+let autoUpdater = null;
+try {
+  autoUpdater = require('electron-updater').autoUpdater;
+} catch (e) {
+  console.warn('electron-updater not available (dev mode):', e.message);
+}
 
 let mainWindow;
 let server;
@@ -314,64 +321,67 @@ ipcMain.handle('get-app-version', () => app.getVersion());
 // ── Auto-Update (electron-updater) ─────────────────────────────────
 // Uses GitHub Releases. NSIS installer.nsh backup/restore logic ensures
 // userdata/ and cases/ are NEVER overwritten during an update.
-autoUpdater.autoDownload = false;          // user must click "Download"
-autoUpdater.autoInstallOnAppQuit = false;  // user must click "Install & Restart"
-autoUpdater.allowDowngrade = false;
-
 function sendUpdateStatus(channel, data) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, data);
   }
 }
 
-autoUpdater.on('checking-for-update', () => {
-  sendUpdateStatus('update-status', { status: 'checking' });
-});
+if (autoUpdater) {
+  autoUpdater.autoDownload = false;          // user must click "Download"
+  autoUpdater.autoInstallOnAppQuit = false;  // user must click "Install & Restart"
+  autoUpdater.allowDowngrade = false;
 
-autoUpdater.on('update-available', (info) => {
-  sendUpdateStatus('update-status', {
-    status: 'available',
-    version: info.version,
-    releaseDate: info.releaseDate,
-    releaseNotes: info.releaseNotes || ''
+  autoUpdater.on('checking-for-update', () => {
+    sendUpdateStatus('update-status', { status: 'checking' });
   });
-});
 
-autoUpdater.on('update-not-available', (info) => {
-  sendUpdateStatus('update-status', {
-    status: 'up-to-date',
-    version: info.version
+  autoUpdater.on('update-available', (info) => {
+    sendUpdateStatus('update-status', {
+      status: 'available',
+      version: info.version,
+      releaseDate: info.releaseDate,
+      releaseNotes: info.releaseNotes || ''
+    });
   });
-});
 
-autoUpdater.on('download-progress', (progress) => {
-  sendUpdateStatus('update-status', {
-    status: 'downloading',
-    percent: Math.round(progress.percent),
-    transferred: progress.transferred,
-    total: progress.total,
-    bytesPerSecond: progress.bytesPerSecond
+  autoUpdater.on('update-not-available', (info) => {
+    sendUpdateStatus('update-status', {
+      status: 'up-to-date',
+      version: info.version
+    });
   });
-});
 
-autoUpdater.on('update-downloaded', (info) => {
-  sendUpdateStatus('update-status', {
-    status: 'downloaded',
-    version: info.version
+  autoUpdater.on('download-progress', (progress) => {
+    sendUpdateStatus('update-status', {
+      status: 'downloading',
+      percent: Math.round(progress.percent),
+      transferred: progress.transferred,
+      total: progress.total,
+      bytesPerSecond: progress.bytesPerSecond
+    });
   });
-});
 
-autoUpdater.on('error', (err) => {
-  sendUpdateStatus('update-status', {
-    status: 'error',
-    message: err.message || 'Update check failed.'
+  autoUpdater.on('update-downloaded', (info) => {
+    sendUpdateStatus('update-status', {
+      status: 'downloaded',
+      version: info.version
+    });
   });
-});
+
+  autoUpdater.on('error', (err) => {
+    sendUpdateStatus('update-status', {
+      status: 'error',
+      message: err.message || 'Update check failed.'
+    });
+  });
+}
 
 // Renderer requests: check → download → install+restart
 ipcMain.handle('update-check', async () => {
+  if (!autoUpdater) return { success: false, error: 'Auto-updater not available in dev mode.' };
   try {
-    const result = await autoUpdater.checkForUpdates();
+    await autoUpdater.checkForUpdates();
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
@@ -379,6 +389,7 @@ ipcMain.handle('update-check', async () => {
 });
 
 ipcMain.handle('update-download', async () => {
+  if (!autoUpdater) return { success: false, error: 'Auto-updater not available.' };
   try {
     await autoUpdater.downloadUpdate();
     return { success: true };
@@ -388,6 +399,7 @@ ipcMain.handle('update-download', async () => {
 });
 
 ipcMain.handle('update-install', () => {
+  if (!autoUpdater) return;
   // quitAndInstall runs the NSIS installer which uses installer.nsh
   // to backup userdata/ and cases/ before replacing files, then restores them.
   autoUpdater.quitAndInstall(false, true); // isSilent=false, isForceRunAfter=true
@@ -679,6 +691,89 @@ ipcMain.handle('arin-lookup', async (_event, ipAddress) => {
     }
   } catch (e) {
     return { success: false, error: e.message || 'ARIN lookup failed' };
+  }
+});
+
+// --- FMCSA Carrier Lookup (QCMobile API) ---
+ipcMain.handle('fmcsa-lookup', async (_event, params) => {
+  const https = require('https');
+  const { type, query, webKey } = params;
+  if (!webKey) return { success: false, error: 'No FMCSA API key configured. Add one in Settings → Investigative Tools.' };
+  if (!query) return { success: false, error: 'Search term is required.' };
+
+  function fetchJson(urlStr, redirects = 3) {
+    return new Promise((resolve, reject) => {
+      const req = https.get(urlStr, { headers: { 'Accept': 'application/json' } }, (res) => {
+        if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location && redirects > 0) {
+          return fetchJson(res.headers.location, redirects - 1).then(resolve).catch(reject);
+        }
+        if (res.statusCode === 401) return reject(new Error('Invalid API key. Check your FMCSA webKey in Settings.'));
+        if (res.statusCode === 404) return reject(new Error('No carrier found.'));
+        if (res.statusCode !== 200) return reject(new Error(`FMCSA API returned status ${res.statusCode}`));
+        let data = '';
+        res.on('data', (chunk) => data += chunk);
+        res.on('end', () => {
+          try { resolve(JSON.parse(data)); }
+          catch (e) { reject(new Error('Failed to parse FMCSA response')); }
+        });
+      });
+      req.on('error', (e) => reject(e));
+      req.setTimeout(15000, () => { req.destroy(); reject(new Error('FMCSA request timed out')); });
+    });
+  }
+
+  try {
+    const base = 'https://mobile.fmcsa.dot.gov/qc/services';
+    let url;
+    if (type === 'USDOT') {
+      url = `${base}/carriers/${encodeURIComponent(query)}?webKey=${encodeURIComponent(webKey)}`;
+    } else if (type === 'MC_MX') {
+      url = `${base}/carriers/docket-number/${encodeURIComponent(query)}?webKey=${encodeURIComponent(webKey)}`;
+    } else {
+      // NAME search
+      url = `${base}/carriers/name/${encodeURIComponent(query)}?webKey=${encodeURIComponent(webKey)}&size=20`;
+    }
+
+    const json = await fetchJson(url);
+    // QCMobile wraps results differently for name vs DOT lookups
+    let carriers = [];
+    if (json.content) {
+      // Name/docket search returns { content: [ { carrier: {...} }, ... ] }
+      carriers = (Array.isArray(json.content) ? json.content : [json.content])
+        .map(c => c.carrier || c).filter(Boolean);
+    } else if (json.carrier) {
+      // Single DOT lookup returns { carrier: {...} }
+      carriers = [json.carrier];
+    }
+
+    if (!carriers.length) return { success: false, error: 'No carriers found.' };
+
+    const results = carriers.map(c => ({
+      dotNumber: c.dotNumber || '',
+      legalName: c.legalName || '',
+      dbaName: c.dbaName || '',
+      allowToOperate: c.allowToOperate || '',
+      outOfService: c.outOfService || 'N',
+      outOfServiceDate: c.outOfServiceDate || '',
+      telephone: c.telephone || '',
+      phyStreet: c.phyStreet || '',
+      phyCity: c.phyCity || '',
+      phyState: c.phyState || '',
+      phyZip: c.phyZip || '',
+      phyCountry: c.phyCountry || '',
+      totalPowerUnits: c.totalPowerUnits || 0,
+      totalDrivers: c.totalDrivers || 0,
+      mcNumber: c.mcNumber || '',
+      safetyRating: c.safetyRating || '',
+      safetyRatingDate: c.safetyRatingDate || '',
+      complaintCount: c.complaintCount || 0,
+      carrierOperation: c.carrierOperation || '',
+      cargoCarried: c.cargoCarried || '',
+    }));
+
+    return { success: true, carriers: results };
+  } catch (e) {
+    return { success: false, error: e.message || 'FMCSA lookup failed.' };
   }
 });
 

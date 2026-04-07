@@ -875,6 +875,48 @@
                     </div>
                 </div>
 
+                <!-- FMCSA Carrier Lookup Panel (conditional on toggle) -->
+                <div id="fmcsaDashboardPanel" class="hidden">
+                    <div class="glass-card rounded-xl p-6 border border-blue-500/30" style="background: linear-gradient(135deg, rgba(59,130,246,0.05) 0%, rgba(26,35,50,0.7) 100%);">
+                        <div class="flex items-center justify-between mb-4">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                                    <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 class="text-lg font-bold text-blue-300">FMCSA Carrier Lookup</h3>
+                                    <p class="text-xs text-gray-400">Search the SAFER database for motor carrier information</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flex items-end gap-3">
+                            <div class="flex-1">
+                                <label class="block text-xs text-gray-400 mb-1">Search By</label>
+                                <select id="fmcsaDashSearchType" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-blue-500/30 text-white text-sm focus:border-blue-400 outline-none">
+                                    <option value="NAME">Company Name</option>
+                                    <option value="USDOT">USDOT Number</option>
+                                    <option value="MC_MX">MC/MX Number</option>
+                                </select>
+                            </div>
+                            <div class="flex-[2]">
+                                <label class="block text-xs text-gray-400 mb-1">Search Term</label>
+                                <input id="fmcsaDashSearchInput" type="text" placeholder="Enter carrier name, DOT#, or MC/MX#"
+                                    class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-blue-500/30 text-white text-sm focus:border-blue-400 outline-none"
+                                    onkeydown="if(event.key==='Enter') fmcsaSearch('dash')">
+                            </div>
+                            <button onclick="fmcsaSearch('dash')" class="px-5 py-2 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 text-sm font-medium border border-blue-500/30 transition flex items-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                                Search
+                            </button>
+                        </div>
+                        <div id="fmcsaDashResult" class="mt-4 hidden">
+                            <p class="text-xs text-gray-400">Results open in a new FMCSA SAFER window.</p>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Active Investigations and Tasks -->
                 <div class="grid grid-cols-3 gap-6 relative" style="z-index: 1;">
                     <!-- Active Investigations -->
@@ -3203,6 +3245,40 @@
         }
 
         // ═══════════════════════════════════════════════════════════════════
+        //  FMCSA Carrier Lookup — Dashboard & Cargo
+        // ═══════════════════════════════════════════════════════════════════
+        function initFmcsaDashboard() {
+            const panel = document.getElementById('fmcsaDashboardPanel');
+            if (!panel) return;
+            if (localStorage.getItem('fmcsaEnabled') === 'true') {
+                panel.classList.remove('hidden');
+            } else {
+                panel.classList.add('hidden');
+            }
+        }
+
+        function fmcsaSearch(context) {
+            const prefix = context === 'cargo' ? 'fmcsaCargo' : 'fmcsaDash';
+            const typeEl = document.getElementById(prefix + 'SearchType');
+            const inputEl = document.getElementById(prefix + 'SearchInput');
+            if (!typeEl || !inputEl) return;
+            const searchType = typeEl.value;
+            const searchString = inputEl.value.trim();
+            if (!searchString) {
+                alert('Enter a search term.');
+                return;
+            }
+            // Build FMCSA SAFER URL
+            const url = `https://safer.fmcsa.dot.gov/query.asp?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=${encodeURIComponent(searchType)}&query_string=${encodeURIComponent(searchString)}`;
+            // Open in system browser via IPC, fallback to window.open
+            if (window.electronAPI && window.electronAPI.openExternalUrl) {
+                window.electronAPI.openExternalUrl(url);
+            } else {
+                window.open(url, '_blank');
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
         //  TRACE Network Search — Dashboard Panel
         // ═══════════════════════════════════════════════════════════════════
         function initTraceDashboard() {
@@ -3418,6 +3494,9 @@
 
             // Initialize GenLogs dashboard panel
             initGenlogsDashboard();
+
+            // Initialize FMCSA carrier lookup panel
+            initFmcsaDashboard();
 
             // Initialize TRACE Network dashboard panel
             initTraceDashboard();

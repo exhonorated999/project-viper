@@ -299,6 +299,15 @@ ipcMain.handle('get-storage-paths', async () => {
   };
 });
 
+// --- Open external URL in system browser ---
+ipcMain.handle('open-external-url', async (_e, url) => {
+  if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
+    await shell.openExternal(url);
+    return true;
+  }
+  return false;
+});
+
 // --- App version (reads from package.json via Electron) ---
 ipcMain.handle('get-app-version', () => app.getVersion());
 

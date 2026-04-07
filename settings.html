@@ -564,6 +564,27 @@
                             </div>
                         </div>
 
+                        <!-- FMCSA Carrier Lookup -->
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-start gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                                    <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+                                    </svg>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <h4 class="text-white font-semibold text-sm">FMCSA — Carrier Lookup</h4>
+                                        <button id="fmcsaToggleBtn" onclick="toggleFmcsa()" class="relative w-11 h-6 rounded-full transition-colors bg-gray-600 flex-shrink-0">
+                                            <div id="fmcsaToggleKnob" class="absolute w-4 h-4 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-gray-400 mt-1 leading-relaxed">Search the FMCSA SAFER (Safety and Fitness Electronic Records) database to look up motor carriers by USDOT number, MC/MX number, or company name. Returns carrier snapshots including safety ratings, operating status, insurance, vehicle/driver counts, and crash history. Useful for cargo theft investigations to identify and verify trucking companies, brokers, and freight forwarders involved in a case.</p>
+                                    <span id="fmcsaToggleLabel" class="text-xs text-gray-500 mt-1 block"></span>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- GenLogs Cargo Intelligence -->
                         <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
                             <div class="flex items-start gap-3">
@@ -1886,6 +1907,22 @@
         updateGenlogsStatus();
     }
 
+    /* ---------- FMCSA Toggle ---------- */
+    function toggleFmcsa() {
+        const enabled = localStorage.getItem('fmcsaEnabled') !== 'true';
+        localStorage.setItem('fmcsaEnabled', String(enabled));
+        updateFmcsaToggleUI(enabled);
+    }
+
+    function updateFmcsaToggleUI(enabled) {
+        const label = document.getElementById('fmcsaToggleLabel');
+        const btn = document.getElementById('fmcsaToggleBtn');
+        const knob = document.getElementById('fmcsaToggleKnob');
+        if (label) label.textContent = enabled ? 'Enabled — search available on Dashboard and Cargo module' : 'Disabled';
+        if (btn) btn.className = 'relative w-11 h-6 rounded-full transition-colors ' + (enabled ? 'bg-blue-500' : 'bg-gray-600');
+        if (knob) knob.className = 'absolute w-4 h-4 bg-white rounded-full top-1 transition-transform ' + (enabled ? 'translate-x-6' : 'translate-x-1');
+    }
+
     function toggleGenlogs() {
         const enabled = localStorage.getItem('genlogsEnabled') !== 'true';
         localStorage.setItem('genlogsEnabled', String(enabled));
@@ -1988,6 +2025,7 @@
     }
 
     initGenlogsUI();
+    updateFmcsaToggleUI(localStorage.getItem('fmcsaEnabled') === 'true');
 
     // ============================================
     // TRACE NETWORK SEARCH

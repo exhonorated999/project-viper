@@ -3829,32 +3829,139 @@
         async function importOffenseList() {
             const raw = await window.electronAPI.openOffenseImport();
             if (!raw) return;
+            let parsed;
             try {
-                const parsed = JSON.parse(raw);
+                parsed = JSON.parse(raw);
                 if (!parsed.offenses || !Array.isArray(parsed.offenses)) {
                     alert('Invalid offense reference file.');
                     return;
                 }
-                const incoming = parsed.offenses;
-                loadOffenses();
-                const existingCodes = new Set(offenses.map(o => o.code.toLowerCase()));
-                let added = 0, skipped = 0;
-                for (const o of incoming) {
-                    if (existingCodes.has(o.code.toLowerCase())) {
+            } catch (e) {
+                alert('Failed to parse offense file: ' + e.message);
+                return;
+            }
+            // Show import options modal
+            showOffenseImportOptions(parsed.offenses);
+        }
+
+        function showOffenseImportOptions(incoming) {
+            const modal = document.createElement('div');
+            modal.id = 'offenseImportModal';
+            modal.className = 'fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4';
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+            modal.innerHTML = `
+                <div class="glass-card rounded-xl p-6 max-w-md w-full">
+                    <h3 class="text-xl font-bold text-white mb-2">Import Offense Reference</h3>
+                    <p class="text-sm text-gray-400 mb-5">${incoming.length} offense(s) found in file</p>
+                    <div class="space-y-3">
+                        <button onclick="executeOffenseImport('all')" class="w-full px-4 py-3 bg-viper-cyan/10 hover:bg-viper-cyan/20 border border-viper-cyan/40 rounded-lg text-left transition group">
+                            <div class="flex items-center gap-3">
+                                <svg class="w-5 h-5 text-viper-cyan flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                                </svg>
+                                <div>
+                                    <p class="text-white font-semibold text-sm">Import All</p>
+                                    <p class="text-gray-400 text-xs mt-0.5">Import everything including duplicates (overwrites existing)</p>
+                                </div>
+                            </div>
+                        </button>
+                        <button onclick="executeOffenseImport('skip_dupes')" class="w-full px-4 py-3 bg-viper-green/10 hover:bg-viper-green/20 border border-viper-green/40 rounded-lg text-left transition group">
+                            <div class="flex items-center gap-3">
+                                <svg class="w-5 h-5 text-viper-green flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                                <div>
+                                    <p class="text-white font-semibold text-sm">Skip Duplicates</p>
+                                    <p class="text-gray-400 text-xs mt-0.5">Import only new offenses, keep existing entries unchanged</p>
+                                </div>
+                            </div>
+                        </button>
+                        <button onclick="executeOffenseImport('charges_only')" class="w-full px-4 py-3 bg-viper-purple/10 hover:bg-viper-purple/20 border border-viper-purple/40 rounded-lg text-left transition group">
+                            <div class="flex items-center gap-3">
+                                <svg class="w-5 h-5 text-viper-purple flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                                </svg>
+                                <div>
+                                    <p class="text-white font-semibold text-sm">Charges &amp; Sentencing Only</p>
+                                    <p class="text-gray-400 text-xs mt-0.5">Import code, description, type, and sentencing — skip notes</p>
+                                </div>
+                            </div>
+                        </button>
+                    </div>
+                    <button onclick="document.getElementById('offenseImportModal').remove()" class="mt-4 w-full px-4 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white hover:border-gray-400 transition text-sm">
+                        Cancel
+                    </button>
+                </div>
+            `;
+            // Stash incoming data on the modal element
+            modal._importData = incoming;
+            document.body.appendChild(modal);
+        }
+
+        function executeOffenseImport(mode) {
+            const modal = document.getElementById('offenseImportModal');
+            const incoming = modal._importData;
+            modal.remove();
+
+            loadOffenses();
+            const existingMap = new Map(offenses.map((o, i) => [o.code.toLowerCase(), i]));
+            let added = 0, skipped = 0, updated = 0;
+
+            for (const o of incoming) {
+                const key = o.code.toLowerCase();
+                const existingIdx = existingMap.get(key);
+
+                if (mode === 'all') {
+                    if (existingIdx !== undefined) {
+                        // Overwrite existing
+                        offenses[existingIdx] = { ...offenses[existingIdx], ...o, id: offenses[existingIdx].id };
+                        updated++;
+                    } else {
+                        offenses.push({ ...o, id: o.id || Date.now() + added });
+                        existingMap.set(key, offenses.length - 1);
+                        added++;
+                    }
+                } else if (mode === 'skip_dupes') {
+                    if (existingIdx !== undefined) {
                         skipped++;
                     } else {
-                        offenses.push(o);
-                        existingCodes.add(o.code.toLowerCase());
+                        offenses.push({ ...o, id: o.id || Date.now() + added });
+                        existingMap.set(key, offenses.length - 1);
+                        added++;
+                    }
+                } else if (mode === 'charges_only') {
+                    // Strip notes, import only code/description/type/sentencing
+                    const stripped = {
+                        code: o.code,
+                        description: o.description || '',
+                        type: o.type || '',
+                        sentencing: o.sentencing || '',
+                        createdAt: o.createdAt || new Date().toISOString()
+                    };
+                    if (existingIdx !== undefined) {
+                        // Update charge info but preserve existing notes
+                        offenses[existingIdx].code = stripped.code;
+                        offenses[existingIdx].description = stripped.description;
+                        offenses[existingIdx].type = stripped.type;
+                        offenses[existingIdx].sentencing = stripped.sentencing;
+                        updated++;
+                    } else {
+                        offenses.push({ ...stripped, notes: '', id: Date.now() + added });
+                        existingMap.set(key, offenses.length - 1);
                         added++;
                     }
                 }
-                saveOffenses();
-                renderOffenseReferenceView();
-                const msg = `Imported ${added} offense(s).` + (skipped > 0 ? ` ${skipped} duplicate(s) skipped.` : '');
-                showNotification(msg, 'success');
-            } catch (e) {
-                alert('Failed to parse offense file: ' + e.message);
             }
+
+            saveOffenses();
+            renderOffenseReferenceView();
+
+            const parts = [];
+            if (added > 0) parts.push(`${added} added`);
+            if (updated > 0) parts.push(`${updated} updated`);
+            if (skipped > 0) parts.push(`${skipped} skipped`);
+            const label = mode === 'charges_only' ? 'Charges & sentencing imported' : 'Import complete';
+            showNotification(`${label}: ${parts.join(', ')}.`, 'success');
         }
 
         function showOffenseReference() {

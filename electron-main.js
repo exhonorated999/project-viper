@@ -23,6 +23,12 @@ let mediaPlayerWindow = null;
 let mediaBrowserView = null;
 let mediaViewVisible = false;
 let lastMediaBounds = null;
+let flockBrowserView = null;
+let flockViewVisible = false;
+let lastFlockBounds = null;
+let tloBrowserView = null;
+let tloViewVisible = false;
+let lastTloBounds = null;
 
 // Icon path: use unpacked asar path in production, normal path in dev
 const iconPath = app.isPackaged
@@ -256,6 +262,127 @@ app.whenReady().then(async () => {
     mainWindow.on('resize', () => {
       if (mediaViewVisible && lastMediaBounds) {
         mediaBrowserView.setBounds(lastMediaBounds);
+      }
+    });
+
+    // Create persistent BrowserView for Flock Safety LPR (survives page navigations)
+    flockBrowserView = new BrowserView({
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        partition: 'persist:flock', // separate session to persist login cookies
+      },
+    });
+    mainWindow.addBrowserView(flockBrowserView);
+    flockBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 }); // hidden
+    flockBrowserView.setAutoResize({ width: false, height: false });
+    flockBrowserView.webContents.loadURL('https://search-2.flocksafety.com/');
+
+    // Prevent Flock BrowserView from stealing focus + auto-fill credentials on login page
+    flockBrowserView.webContents.on('did-finish-load', () => {
+      if (!flockViewVisible) mainWindow.webContents.focus();
+      // Inject dark theme override CSS to blend with VIPER
+      flockBrowserView.webContents.insertCSS(`
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0d1117; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+      `).catch(() => {});
+
+      // Auto-fill credentials on Auth0 login page
+      const url = flockBrowserView.webContents.getURL();
+      if (url.includes('auth0.com') || url.includes('/login') || url.includes('/authorize')) {
+        // Request stored credentials from renderer
+        mainWindow.webContents.executeJavaScript(
+          `JSON.stringify({ email: localStorage.getItem('flockEmail') || '', password: localStorage.getItem('flockPassword') || '' })`
+        ).then(json => {
+          const creds = JSON.parse(json);
+          if (creds.email || creds.password) {
+            flockBrowserView.webContents.executeJavaScript(`
+              (function() {
+                function fill() {
+                  const emailInput = document.querySelector('input[name="email"], input[name="username"], input[type="email"]');
+                  const passInput = document.querySelector('input[name="password"], input[type="password"]');
+                  function setVal(el, val) {
+                    if (!el || !val) return;
+                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                    nativeSetter.call(el, val);
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                  }
+                  setVal(emailInput, ${JSON.stringify(creds.email)});
+                  setVal(passInput, ${JSON.stringify(creds.password)});
+                }
+                // Auth0 may render fields after page load
+                setTimeout(fill, 500);
+                setTimeout(fill, 1500);
+              })();
+            `).catch(() => {});
+          }
+        }).catch(() => {});
+      }
+    });
+
+    // Re-position Flock BrowserView on window resize
+    mainWindow.on('resize', () => {
+      if (flockViewVisible && lastFlockBounds) {
+        flockBrowserView.setBounds(lastFlockBounds);
+      }
+      if (tloViewVisible && lastTloBounds) {
+        tloBrowserView.setBounds(lastTloBounds);
+      }
+    });
+
+    // Create persistent BrowserView for TLO (TransUnion) — people search / skip tracing
+    tloBrowserView = new BrowserView({
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        partition: 'persist:tlo', // separate session to persist login cookies
+      },
+    });
+    mainWindow.addBrowserView(tloBrowserView);
+    tloBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    tloBrowserView.setAutoResize({ width: false, height: false });
+    tloBrowserView.webContents.loadURL('https://tloxp.tlo.com/');
+
+    // Prevent TLO BrowserView from stealing focus + auto-fill credentials on login page
+    tloBrowserView.webContents.on('did-finish-load', () => {
+      if (!tloViewVisible) mainWindow.webContents.focus();
+      tloBrowserView.webContents.insertCSS(`
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0d1117; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+      `).catch(() => {});
+
+      // Auto-fill credentials on TLO login page
+      const url = tloBrowserView.webContents.getURL();
+      if (url.includes('tlo.com') && (url.includes('login') || url.includes('Login') || url === 'https://tloxp.tlo.com/' || url.includes('Account'))) {
+        mainWindow.webContents.executeJavaScript(
+          `JSON.stringify({ username: localStorage.getItem('tloUsername') || '', password: localStorage.getItem('tloPassword') || '' })`
+        ).then(json => {
+          const creds = JSON.parse(json);
+          if (creds.username || creds.password) {
+            tloBrowserView.webContents.executeJavaScript(`
+              (function() {
+                function fill() {
+                  const userInput = document.querySelector('input[name="Username"], input[name="username"], input[name="email"], input[type="email"], input[id*="user"], input[id*="User"]');
+                  const passInput = document.querySelector('input[name="Password"], input[name="password"], input[type="password"]');
+                  function setVal(el, val) {
+                    if (!el || !val) return;
+                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                    nativeSetter.call(el, val);
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                  }
+                  setVal(userInput, ${JSON.stringify(creds.username)});
+                  setVal(passInput, ${JSON.stringify(creds.password)});
+                }
+                setTimeout(fill, 500);
+                setTimeout(fill, 1500);
+              })();
+            `).catch(() => {});
+          }
+        }).catch(() => {});
       }
     });
 
@@ -1537,4 +1664,155 @@ ipcMain.on('media-set-visible', (_event, visible) => {
   } else if (!visible) {
     mediaBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
   }
+});
+
+// --- Flock Safety LPR: BrowserView positioning ---
+ipcMain.on('flock-set-bounds', (_event, bounds) => {
+  if (!flockBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  const b = {
+    x: Math.round(bounds.x),
+    y: Math.round(bounds.y),
+    width: Math.round(bounds.width),
+    height: Math.round(bounds.height),
+  };
+  lastFlockBounds = b;
+  if (flockViewVisible) {
+    flockBrowserView.setBounds(b);
+  }
+});
+
+ipcMain.on('flock-set-visible', (_event, visible) => {
+  if (!flockBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  flockViewVisible = visible;
+  if (visible && lastFlockBounds) {
+    flockBrowserView.setBounds(lastFlockBounds);
+  } else if (!visible) {
+    flockBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+  }
+});
+
+// Navigate Flock to search page and optionally fill a plate number
+ipcMain.handle('flock-search-plate', async (_event, { plate, state }) => {
+  if (!flockBrowserView) return { success: false, error: 'Flock not initialized' };
+  try {
+    const currentUrl = flockBrowserView.webContents.getURL();
+    // If not on search page, navigate there first
+    if (!currentUrl.includes('search-2.flocksafety.com')) {
+      flockBrowserView.webContents.loadURL('https://search-2.flocksafety.com/');
+      // Wait for page to load
+      await new Promise(resolve => {
+        flockBrowserView.webContents.once('did-finish-load', resolve);
+        setTimeout(resolve, 8000); // timeout fallback
+      });
+    }
+    // Fill plate number into the search field after a short delay for SPA rendering
+    if (plate) {
+      await new Promise(r => setTimeout(r, 1500));
+      await flockBrowserView.webContents.executeJavaScript(`
+        (function() {
+          // Flock uses React — find the plate input and set its value
+          const plateInput = document.querySelector('input[placeholder*="license plate" i], input[name*="plate" i], input[aria-label*="plate" i]');
+          if (plateInput) {
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            nativeInputValueSetter.call(plateInput, '${plate.replace(/'/g, "\\'")}');
+            plateInput.dispatchEvent(new Event('input', { bubbles: true }));
+            plateInput.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          ${state ? `
+          // Try to set the state dropdown if provided
+          const stateSelect = document.querySelector('select[name*="state" i], [aria-label*="state" i]');
+          if (stateSelect) {
+            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+            nativeSetter.call(stateSelect, '${state.replace(/'/g, "\\'")}');
+            stateSelect.dispatchEvent(new Event('change', { bubbles: true }));
+          }` : ''}
+        })();
+      `);
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Reset Flock session (logout)
+ipcMain.handle('flock-reset', async () => {
+  if (!flockBrowserView) return;
+  const ses = flockBrowserView.webContents.session;
+  await ses.clearStorageData();
+  flockBrowserView.webContents.loadURL('https://search-2.flocksafety.com/');
+});
+
+/* ── TLO (TransUnion) IPC handlers ─────────────────────────── */
+ipcMain.on('tlo-set-bounds', (_event, bounds) => {
+  if (!tloBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  const b = {
+    x: Math.round(bounds.x),
+    y: Math.round(bounds.y),
+    width: Math.round(bounds.width),
+    height: Math.round(bounds.height),
+  };
+  lastTloBounds = b;
+  if (tloViewVisible) {
+    tloBrowserView.setBounds(b);
+  }
+});
+
+ipcMain.on('tlo-set-visible', (_event, visible) => {
+  if (!tloBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  tloViewVisible = visible;
+  if (visible && lastTloBounds) {
+    tloBrowserView.setBounds(lastTloBounds);
+  } else if (!visible) {
+    tloBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+  }
+});
+
+// Navigate TLO to search and optionally fill a person's name
+ipcMain.handle('tlo-search-person', async (_event, { firstName, lastName, state, dob }) => {
+  if (!tloBrowserView) return { success: false, error: 'TLO not initialized' };
+  try {
+    const currentUrl = tloBrowserView.webContents.getURL();
+    // If on login page or not on TLO, navigate to main page
+    if (!currentUrl.includes('tloxp.tlo.com') || currentUrl.includes('Login') || currentUrl.includes('login')) {
+      tloBrowserView.webContents.loadURL('https://tloxp.tlo.com/');
+      await new Promise(resolve => {
+        tloBrowserView.webContents.once('did-finish-load', resolve);
+        setTimeout(resolve, 8000);
+      });
+    }
+    // Fill person search fields
+    if (firstName || lastName) {
+      await new Promise(r => setTimeout(r, 1500));
+      await tloBrowserView.webContents.executeJavaScript(`
+        (function() {
+          function setVal(el, val) {
+            if (!el || !val) return;
+            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            nativeSetter.call(el, val);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          // TLO person search fields
+          const fnInput = document.querySelector('input[name*="irstName" i], input[id*="irstName" i], input[placeholder*="First" i]');
+          const lnInput = document.querySelector('input[name*="astName" i], input[id*="astName" i], input[placeholder*="Last" i]');
+          const stInput = document.querySelector('select[name*="tate" i], select[id*="tate" i]');
+          setVal(fnInput, ${JSON.stringify(firstName || '')});
+          setVal(lnInput, ${JSON.stringify(lastName || '')});
+          ${state ? `if (stInput) { stInput.value = ${JSON.stringify(state)}; stInput.dispatchEvent(new Event('change', { bubbles: true })); }` : ''}
+        })();
+      `);
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Reset TLO session (logout)
+ipcMain.handle('tlo-reset', async () => {
+  if (!tloBrowserView) return;
+  const ses = tloBrowserView.webContents.session;
+  await ses.clearStorageData();
+  tloBrowserView.webContents.loadURL('https://tloxp.tlo.com/');
 });

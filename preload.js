@@ -99,4 +99,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   mediaSetVisible: (visible) => ipcRenderer.send('media-set-visible', visible),
   onToggleMediaPlayer: (callback) => ipcRenderer.on('toggle-media-player', callback),
   onRequestMediaBounds: (callback) => ipcRenderer.on('request-media-bounds', callback),
+
+  // Flock Safety LPR (persistent BrowserView)
+  flockSetBounds: (bounds) => ipcRenderer.send('flock-set-bounds', bounds),
+  flockSetVisible: (visible) => ipcRenderer.send('flock-set-visible', visible),
+  flockSearchPlate: (params) => ipcRenderer.invoke('flock-search-plate', params),
+  flockReset: () => ipcRenderer.invoke('flock-reset'),
+
+  // TLO / TransUnion (persistent BrowserView)
+  tloSetBounds: (bounds) => ipcRenderer.send('tlo-set-bounds', bounds),
+  tloSetVisible: (visible) => ipcRenderer.send('tlo-set-visible', visible),
+  tloSearchPerson: (params) => ipcRenderer.invoke('tlo-search-person', params),
+  tloReset: () => ipcRenderer.invoke('tlo-reset'),
 });

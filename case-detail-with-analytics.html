@@ -15828,6 +15828,24 @@
                     }
                 }
             }).observe(document.body, { childList: true });
+
+            // Electron/Chromium focus fix: native <select> dropdowns steal focus
+            // from the renderer. After a select closes, clicks on other inputs are
+            // swallowed until the user clicks outside the app and back.
+            // Fix: force window.focus() after every select interaction so the
+            // renderer immediately reclaims focus from the native widget.
+            document.addEventListener('change', (e) => {
+                if (e.target.tagName === 'SELECT') {
+                    window.focus();
+                }
+            }, true);
+            document.addEventListener('mousedown', (e) => {
+                // If clicking any input/textarea/button and document doesn't have
+                // focus (common after native select), reclaim it immediately
+                if (e.target.matches('input, textarea, button, select, [contenteditable]')) {
+                    window.focus();
+                }
+            }, true);
         });
 
         // ========================================

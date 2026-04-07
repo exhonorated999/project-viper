@@ -694,84 +694,162 @@ ipcMain.handle('arin-lookup', async (_event, ipAddress) => {
   }
 });
 
-// --- FMCSA Carrier Lookup (QCMobile API) ---
+// --- FMCSA Carrier Lookup (SAFER web scrape — no API key needed) ---
 ipcMain.handle('fmcsa-lookup', async (_event, params) => {
   const https = require('https');
-  const { type, query, webKey } = params;
-  if (!webKey) return { success: false, error: 'No FMCSA API key configured. Add one in Settings → Investigative Tools.' };
+  const cheerio = require('cheerio');
+  const { type, query } = params;
   if (!query) return { success: false, error: 'Search term is required.' };
 
-  function fetchJson(urlStr, redirects = 3) {
+  function fetchHtml(urlStr, redirects = 5) {
     return new Promise((resolve, reject) => {
-      const req = https.get(urlStr, { headers: { 'Accept': 'application/json' } }, (res) => {
+      const req = https.get(urlStr, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
         if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location && redirects > 0) {
-          return fetchJson(res.headers.location, redirects - 1).then(resolve).catch(reject);
+          return fetchHtml(res.headers.location, redirects - 1).then(resolve).catch(reject);
         }
-        if (res.statusCode === 401) return reject(new Error('Invalid API key. Check your FMCSA webKey in Settings.'));
-        if (res.statusCode === 404) return reject(new Error('No carrier found.'));
-        if (res.statusCode !== 200) return reject(new Error(`FMCSA API returned status ${res.statusCode}`));
+        if (res.statusCode !== 200) return reject(new Error(`FMCSA returned status ${res.statusCode}`));
         let data = '';
-        res.on('data', (chunk) => data += chunk);
-        res.on('end', () => {
-          try { resolve(JSON.parse(data)); }
-          catch (e) { reject(new Error('Failed to parse FMCSA response')); }
-        });
+        res.on('data', c => data += c);
+        res.on('end', () => resolve(data));
       });
-      req.on('error', (e) => reject(e));
+      req.on('error', reject);
       req.setTimeout(15000, () => { req.destroy(); reject(new Error('FMCSA request timed out')); });
     });
   }
 
+  // Helper: extract "Label: | Value" pairs from table rows
+  function parseKV($, tableEl) {
+    const kv = {};
+    $(tableEl).find('tr').each((_, tr) => {
+      const cells = [];
+      $(tr).find('th, td').each((_, td) => cells.push($(td).text().trim().replace(/\s+/g, ' ')));
+      // Look for "Key:" / value pairs
+      for (let i = 0; i < cells.length - 1; i++) {
+        if (cells[i].endsWith(':')) {
+          const key = cells[i].replace(/:$/, '').trim();
+          const val = cells[i + 1].trim();
+          if (key && val) kv[key] = val;
+        }
+      }
+    });
+    return kv;
+  }
+
+  // Helper: parse labeled table (header row + data rows)
+  function parseLabeledTable($, tableEl) {
+    const rows = [];
+    $(tableEl).find('tr').each((_, tr) => {
+      const cells = [];
+      $(tr).find('th, td').each((_, td) => cells.push($(td).text().trim().replace(/\s+/g, ' ')));
+      if (cells.some(c => c)) rows.push(cells);
+    });
+    return rows;
+  }
+
+  // Helper: extract checked items (X | label) from cargo/operation tables
+  function parseChecked($, tables) {
+    const items = [];
+    tables.each((_, tbl) => {
+      $(tbl).find('tr').each((_, tr) => {
+        const cells = [];
+        $(tr).find('td').each((_, td) => cells.push($(td).text().trim()));
+        if (cells.length >= 2 && cells[0] === 'X') items.push(cells[1]);
+      });
+    });
+    return items;
+  }
+
   try {
-    const base = 'https://mobile.fmcsa.dot.gov/qc/services';
-    let url;
-    if (type === 'USDOT') {
-      url = `${base}/carriers/${encodeURIComponent(query)}?webKey=${encodeURIComponent(webKey)}`;
-    } else if (type === 'MC_MX') {
-      url = `${base}/carriers/docket-number/${encodeURIComponent(query)}?webKey=${encodeURIComponent(webKey)}`;
-    } else {
-      // NAME search
-      url = `${base}/carriers/name/${encodeURIComponent(query)}?webKey=${encodeURIComponent(webKey)}&size=20`;
+    const url = `https://safer.fmcsa.dot.gov/query.asp?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=${encodeURIComponent(type)}&query_string=${encodeURIComponent(query)}`;
+    const html = await fetchHtml(url);
+    const $ = cheerio.load(html);
+
+    // Check for "no records" or error
+    const bodyText = $('body').text();
+    if (bodyText.includes('No records matching') || bodyText.includes('No Record Found')) {
+      return { success: false, error: 'No carrier found matching your search.' };
     }
 
-    const json = await fetchJson(url);
-    // QCMobile wraps results differently for name vs DOT lookups
-    let carriers = [];
-    if (json.content) {
-      // Name/docket search returns { content: [ { carrier: {...} }, ... ] }
-      carriers = (Array.isArray(json.content) ? json.content : [json.content])
-        .map(c => c.carrier || c).filter(Boolean);
-    } else if (json.carrier) {
-      // Single DOT lookup returns { carrier: {...} }
-      carriers = [json.carrier];
+    // For NAME search, SAFER may return a list page with links
+    // Check if this is a list page by looking for multiple carrier links
+    const carrierLinks = [];
+    $('a').each((_, a) => {
+      const href = $(a).attr('href') || '';
+      if (href.includes('query_type=queryCarrierSnapshot') && href.includes('query_param=USDOT')) {
+        const match = href.match(/query_string=(\d+)/);
+        if (match) carrierLinks.push({ dot: match[1], name: $(a).text().trim() });
+      }
+    });
+
+    // If NAME search returned list page, fetch first result (or return list)
+    if (type === 'NAME' && carrierLinks.length > 1) {
+      // Return list of matches for user to see
+      const carriers = carrierLinks.slice(0, 20).map(cl => ({
+        dotNumber: cl.dot, legalName: cl.name, _listResult: true
+      }));
+      return { success: true, carriers, isList: true };
     }
 
-    if (!carriers.length) return { success: false, error: 'No carriers found.' };
+    // Parse single carrier snapshot
+    const centers = [];
+    $('center').each((i, c) => centers.push(c));
 
-    const results = carriers.map(c => ({
-      dotNumber: c.dotNumber || '',
-      legalName: c.legalName || '',
-      dbaName: c.dbaName || '',
-      allowToOperate: c.allowToOperate || '',
-      outOfService: c.outOfService || 'N',
-      outOfServiceDate: c.outOfServiceDate || '',
-      telephone: c.telephone || '',
-      phyStreet: c.phyStreet || '',
-      phyCity: c.phyCity || '',
-      phyState: c.phyState || '',
-      phyZip: c.phyZip || '',
-      phyCountry: c.phyCountry || '',
-      totalPowerUnits: c.totalPowerUnits || 0,
-      totalDrivers: c.totalDrivers || 0,
-      mcNumber: c.mcNumber || '',
-      safetyRating: c.safetyRating || '',
-      safetyRatingDate: c.safetyRatingDate || '',
-      complaintCount: c.complaintCount || 0,
-      carrierOperation: c.carrierOperation || '',
-      cargoCarried: c.cargoCarried || '',
-    }));
+    // Center 0: Company info
+    const infoTables = $(centers[0]).find('table');
+    const info = {};
+    infoTables.each((_, tbl) => Object.assign(info, parseKV($, tbl)));
 
-    return { success: true, carriers: results };
+    // Cargo carried
+    const cargoItems = parseChecked($, $(centers[0]).find('table').slice(10, 14));
+
+    // Operation classification
+    const opItems = parseChecked($, $(centers[0]).find('table').slice(5, 9));
+
+    // Center 2: Inspections (24 months)
+    let inspections = null;
+    if (centers[2]) {
+      const rows = parseLabeledTable($, $(centers[2]).find('table').first());
+      if (rows.length >= 4) inspections = { headers: rows[0], inspections: rows[1], oos: rows[2], oosPercent: rows[3], natAvg: rows.length > 4 ? rows[4] : null };
+    }
+
+    // Center 3: Crashes (24 months)
+    let crashes = null;
+    if (centers[3]) {
+      const rows = parseLabeledTable($, $(centers[3]).find('table').first());
+      if (rows.length >= 2) crashes = { headers: rows[0], data: rows[1] };
+    }
+
+    // Center 8: Safety rating
+    let rating = {};
+    if (centers[8]) rating = parseKV($, $(centers[8]).find('table').first());
+
+    const carrier = {
+      dotNumber: info['USDOT Number'] || '',
+      legalName: info['Legal Name'] || '',
+      dbaName: info['DBA Name'] || '',
+      status: info['USDOT Status'] || '',
+      outOfServiceDate: info['Out of Service Date'] || 'None',
+      phone: info['Phone'] || '',
+      address: info['Physical Address'] || '',
+      mailingAddress: info['Mailing Address'] || '',
+      mcNumber: (info['MC/MX/FF Number(s)'] || '').replace(/\s+/g, ' '),
+      powerUnits: info['Power Units'] || '',
+      drivers: info['Drivers'] || '',
+      mcsDate: info['MCS-150 Form Date'] || '',
+      mileage: info['MCS-150 Mileage (Year)'] || '',
+      entityType: info['Entity Type'] || '',
+      opAuthority: info['Operating Authority Status'] || '',
+      operationClass: opItems,
+      cargoCarried: cargoItems,
+      safetyRating: rating['Rating'] || 'None',
+      safetyRatingDate: rating['Rating Date'] || '',
+      reviewDate: rating['Review Date'] || '',
+      reviewType: rating['Type'] || '',
+      inspections,
+      crashes,
+    };
+
+    return { success: true, carriers: [carrier] };
   } catch (e) {
     return { success: false, error: e.message || 'FMCSA lookup failed.' };
   }

@@ -6,7 +6,16 @@ const PRODUCT_SLUG = "project-viper";
 const STORAGE_PREFIX = "viper_";
 const API_BASE = "https://intellect-unified-dashboard-production.up.railway.app";
 const DEMO_DAYS = 60;
-const APP_VERSION = "1.9.0";
+let APP_VERSION = "0.0.0"; // populated at runtime from Electron app.getVersion()
+
+// Fetch version from Electron main process (package.json)
+(async () => {
+  try {
+    if (window.electronAPI && window.electronAPI.getAppVersion) {
+      APP_VERSION = await window.electronAPI.getAppVersion();
+    }
+  } catch { /* fallback stays 0.0.0 */ }
+})();
 
 /* ---------- helpers ---------- */
 function _get(key) { return localStorage.getItem(STORAGE_PREFIX + key); }

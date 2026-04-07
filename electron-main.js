@@ -5,6 +5,7 @@ const fs = require('fs');
 const url = require('url');
 const { spawn } = require('child_process');
 const SecurityManager = require('./modules/security');
+const { autoUpdater } = require('electron-updater');
 
 let mainWindow;
 let server;
@@ -296,6 +297,91 @@ ipcMain.handle('get-storage-paths', async () => {
     userData: app.getPath('userData'),
     isPortable: isPortable
   };
+});
+
+// --- App version (reads from package.json via Electron) ---
+ipcMain.handle('get-app-version', () => app.getVersion());
+
+// ── Auto-Update (electron-updater) ─────────────────────────────────
+// Uses GitHub Releases. NSIS installer.nsh backup/restore logic ensures
+// userdata/ and cases/ are NEVER overwritten during an update.
+autoUpdater.autoDownload = false;          // user must click "Download"
+autoUpdater.autoInstallOnAppQuit = false;  // user must click "Install & Restart"
+autoUpdater.allowDowngrade = false;
+
+function sendUpdateStatus(channel, data) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, data);
+  }
+}
+
+autoUpdater.on('checking-for-update', () => {
+  sendUpdateStatus('update-status', { status: 'checking' });
+});
+
+autoUpdater.on('update-available', (info) => {
+  sendUpdateStatus('update-status', {
+    status: 'available',
+    version: info.version,
+    releaseDate: info.releaseDate,
+    releaseNotes: info.releaseNotes || ''
+  });
+});
+
+autoUpdater.on('update-not-available', (info) => {
+  sendUpdateStatus('update-status', {
+    status: 'up-to-date',
+    version: info.version
+  });
+});
+
+autoUpdater.on('download-progress', (progress) => {
+  sendUpdateStatus('update-status', {
+    status: 'downloading',
+    percent: Math.round(progress.percent),
+    transferred: progress.transferred,
+    total: progress.total,
+    bytesPerSecond: progress.bytesPerSecond
+  });
+});
+
+autoUpdater.on('update-downloaded', (info) => {
+  sendUpdateStatus('update-status', {
+    status: 'downloaded',
+    version: info.version
+  });
+});
+
+autoUpdater.on('error', (err) => {
+  sendUpdateStatus('update-status', {
+    status: 'error',
+    message: err.message || 'Update check failed.'
+  });
+});
+
+// Renderer requests: check → download → install+restart
+ipcMain.handle('update-check', async () => {
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('update-download', async () => {
+  try {
+    await autoUpdater.downloadUpdate();
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('update-install', () => {
+  // quitAndInstall runs the NSIS installer which uses installer.nsh
+  // to backup userdata/ and cases/ before replacing files, then restores them.
+  autoUpdater.quitAndInstall(false, true); // isSilent=false, isForceRunAfter=true
 });
 
 // --- Backup & Restore ---

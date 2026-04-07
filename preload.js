@@ -3,6 +3,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
+  // App info
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+
   // Storage paths
   getStoragePaths: () => ipcRenderer.invoke('get-storage-paths'),
 
@@ -80,6 +83,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Aperture: report generation
   apertureGenerateReport: (data) => ipcRenderer.invoke('aperture-generate-report', data),
+
+  // Auto-Update
+  updateCheck: () => ipcRenderer.invoke('update-check'),
+  updateDownload: () => ipcRenderer.invoke('update-download'),
+  updateInstall: () => ipcRenderer.invoke('update-install'),
+  onUpdateStatus: (callback) => ipcRenderer.on('update-status', (_e, data) => callback(data)),
 
   // Media Player (persistent BrowserView)
   mediaSetBounds: (bounds) => ipcRenderer.send('media-set-bounds', bounds),

@@ -717,56 +717,17 @@ ipcMain.handle('fmcsa-lookup', async (_event, params) => {
     });
   }
 
-  // Helper: extract "Label: | Value" pairs from table rows
-  function parseKV(tableEl) {
-    const kv = {};
-    for (const tr of tableEl.querySelectorAll('tr')) {
-      const cells = tr.querySelectorAll('th, td').map(td => td.text.trim().replace(/\s+/g, ' '));
-      for (let i = 0; i < cells.length - 1; i++) {
-        if (cells[i].endsWith(':')) {
-          const key = cells[i].replace(/:$/, '').trim();
-          const val = cells[i + 1].trim();
-          if (key && val) kv[key] = val;
-        }
-      }
-    }
-    return kv;
-  }
-
-  // Helper: parse labeled table (header row + data rows)
-  function parseLabeledTable(tableEl) {
-    const rows = [];
-    for (const tr of tableEl.querySelectorAll('tr')) {
-      const cells = tr.querySelectorAll('th, td').map(td => td.text.trim().replace(/\s+/g, ' '));
-      if (cells.some(c => c)) rows.push(cells);
-    }
-    return rows;
-  }
-
-  // Helper: extract checked items (X | label) from tables
-  function parseChecked(tables) {
-    const items = [];
-    for (const tbl of tables) {
-      for (const tr of tbl.querySelectorAll('tr')) {
-        const cells = tr.querySelectorAll('td').map(td => td.text.trim());
-        if (cells.length >= 2 && cells[0] === 'X') items.push(cells[1]);
-      }
-    }
-    return items;
-  }
-
   try {
     const url = `https://safer.fmcsa.dot.gov/query.asp?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=${encodeURIComponent(type)}&query_string=${encodeURIComponent(query)}`;
     const html = await fetchHtml(url);
     const root = parseHTML(html);
 
-    // Check for "no records" or error
     const bodyText = root.text;
-    if (bodyText.includes('No records matching') || bodyText.includes('No Record Found')) {
+    if (bodyText.includes('No records matching') || bodyText.includes('No Record Found') || bodyText.includes('Missing Parameter')) {
       return { success: false, error: 'No carrier found matching your search.' };
     }
 
-    // For NAME search, SAFER may return a list page with links
+    // NAME search may return a list page with links to individual carriers
     const carrierLinks = [];
     for (const a of root.querySelectorAll('a')) {
       const href = a.getAttribute('href') || '';
@@ -775,51 +736,75 @@ ipcMain.handle('fmcsa-lookup', async (_event, params) => {
         if (match) carrierLinks.push({ dot: match[1], name: a.text.trim() });
       }
     }
-
     if (type === 'NAME' && carrierLinks.length > 1) {
-      const carriers = carrierLinks.slice(0, 20).map(cl => ({
-        dotNumber: cl.dot, legalName: cl.name, _listResult: true
-      }));
-      return { success: true, carriers, isList: true };
+      return { success: true, carriers: carrierLinks.slice(0, 20).map(cl => ({ dotNumber: cl.dot, legalName: cl.name, _listResult: true })), isList: true };
     }
 
-    // Parse single carrier snapshot
-    const centers = root.querySelectorAll('center');
-
-    // Center 0: Company info
-    const infoTables = centers[0] ? centers[0].querySelectorAll('table') : [];
+    // ── Parse single carrier snapshot ──
+    // SAFER HTML is deeply malformed. Use regex on raw HTML for reliable KV extraction.
+    // Pattern: <TH...>Label:</TH> followed by <TD...>Value</TD>
     const info = {};
-    for (const tbl of infoTables) Object.assign(info, parseKV(tbl));
+    const kvPattern = /<TH[^>]*>(?:<A[^>]*>)?([^<]+?)(?:<\/A>)?<\/TH>\s*<TD[^>]*>([\s\S]*?)<\/TD>/gi;
+    let kvMatch;
+    while ((kvMatch = kvPattern.exec(html)) !== null) {
+      const key = kvMatch[1].trim().replace(/:$/, '').replace(/\s+/g, ' ');
+      // Strip HTML tags from value and decode &nbsp;
+      const val = kvMatch[2].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim().replace(/\s+/g, ' ');
+      if (key && val && val !== '--') info[key] = val;
+    }
 
-    // Cargo carried & operation classification from center 0 tables
-    const cargoItems = parseChecked(infoTables.slice(10, 14));
-    const opItems = parseChecked(infoTables.slice(5, 9));
+    // Cargo carried — extract checked items from HTML section via regex
+    // Pattern: <TD...>X</TD> then <TD...><FONT...>Label</FONT></TD> (FONT may or may not be present)
+    const cargoChecked = [], opsChecked = [];
+    function extractChecked(sectionHtml) {
+      const items = [];
+      const pat = /<TD[^>]*>\s*X\s*<\/TD>\s*<TD[^>]*>([\s\S]*?)<\/TD>/gi;
+      let m;
+      while ((m = pat.exec(sectionHtml)) !== null) {
+        const label = m[1].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
+        if (label) items.push(label);
+      }
+      return items;
+    }
+    const cargoStart = html.indexOf('Cargo Carried');
+    const cargoEnd = html.indexOf('Inspections/Crashes', cargoStart > 0 ? cargoStart : 0);
+    if (cargoStart > 0) {
+      cargoChecked.push(...extractChecked(html.substring(cargoStart, cargoEnd > cargoStart ? cargoEnd : cargoStart + 5000)));
+    }
+    const opsStart = html.indexOf('Operation Classification');
+    const opsEnd = html.indexOf('Carrier Operation', opsStart > 0 ? opsStart : 0);
+    if (opsStart > 0) {
+      opsChecked.push(...extractChecked(html.substring(opsStart, opsEnd > opsStart ? opsEnd : opsStart + 3000)));
+    }
 
-    // Center 2: Inspections (24 months)
+    // Inspections — parse from the well-structured inspections table via DOM
+    const allTables = root.querySelectorAll('table');
     let inspections = null;
-    if (centers[2]) {
-      const tbl = centers[2].querySelector('table');
-      if (tbl) {
-        const rows = parseLabeledTable(tbl);
-        if (rows.length >= 4) inspections = { headers: rows[0], inspections: rows[1], oos: rows[2], oosPercent: rows[3], natAvg: rows.length > 4 ? rows[4] : null };
+    for (const tbl of allTables) {
+      const rows = [];
+      for (const tr of tbl.querySelectorAll('tr')) {
+        const cells = tr.querySelectorAll('th, td').map(td => td.text.trim().replace(/\s+/g, ' '));
+        if (cells.some(c => c)) rows.push(cells);
+      }
+      // US inspections table: 5 cols (Type, Vehicle, Driver, Hazmat, IEP), 5 data rows
+      if (rows.length >= 4 && rows[0].length >= 4 && rows[0][0] === 'Inspection Type' && rows[0].includes('Vehicle')) {
+        inspections = { headers: rows[0], inspections: rows[1], oos: rows[2], oosPercent: rows[3], natAvg: rows.length > 4 ? rows[4] : null };
+        break;
       }
     }
 
-    // Center 3: Crashes (24 months)
+    // Crashes table
     let crashes = null;
-    if (centers[3]) {
-      const tbl = centers[3].querySelector('table');
-      if (tbl) {
-        const rows = parseLabeledTable(tbl);
-        if (rows.length >= 2) crashes = { headers: rows[0], data: rows[1] };
+    for (const tbl of allTables) {
+      const rows = [];
+      for (const tr of tbl.querySelectorAll('tr')) {
+        const cells = tr.querySelectorAll('th, td').map(td => td.text.trim().replace(/\s+/g, ' '));
+        if (cells.some(c => c)) rows.push(cells);
       }
-    }
-
-    // Center 8: Safety rating
-    let rating = {};
-    if (centers[8]) {
-      const tbl = centers[8].querySelector('table');
-      if (tbl) rating = parseKV(tbl);
+      if (rows.length >= 2 && rows[0].length >= 4 && rows[0][0] === 'Type' && rows[0].includes('Fatal')) {
+        crashes = { headers: rows[0], data: rows[1] };
+        break;
+      }
     }
 
     const carrier = {
@@ -837,9 +822,9 @@ ipcMain.handle('fmcsa-lookup', async (_event, params) => {
       mcsDate: info['MCS-150 Form Date'] || '',
       mileage: info['MCS-150 Mileage (Year)'] || '',
       entityType: info['Entity Type'] || '',
-      opAuthority: info['Operating Authority Status'] || '',
-      operationClass: opItems,
-      cargoCarried: cargoItems,
+      opAuthority: (info['Operating Authority Status'] || '').replace(/For Licensing.*$/i, '').trim(),
+      operationClass: opsChecked,
+      cargoCarried: cargoChecked,
       safetyRating: rating['Rating'] || 'None',
       safetyRatingDate: rating['Rating Date'] || '',
       reviewDate: rating['Review Date'] || '',

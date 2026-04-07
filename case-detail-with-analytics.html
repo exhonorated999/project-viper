@@ -5084,6 +5084,11 @@
                                 <button onclick="startInlineEditSuspect(${index})" class="px-4 py-2 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded-lg text-viper-purple transition">
                                     Edit
                                 </button>
+                                ${isTloEnabled() && suspect.name ? `
+                                <button onclick="event.stopPropagation(); openTloPanel('${(suspect.name.split(' ')[0]||'').replace(/'/g,"\\'")}', '${(suspect.name.split(' ').slice(1).join(' ')||'').replace(/'/g,"\\'")}', '')" class="px-4 py-2 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500 rounded-lg text-indigo-400 transition flex items-center gap-2">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                                    Search TLO
+                                </button>` : ''}
                                 <button onclick="deleteSuspect(${index})" class="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500 rounded-lg text-red-500 transition">
                                     Delete
                                 </button>
@@ -5269,7 +5274,10 @@
                                                     </div>
                                                     <div>
                                                         <p class="text-xs text-gray-500">Plate Number</p>
-                                                        <p class="text-white">${vehicle.plateNumber || 'N/A'}</p>
+                                                        <div class="flex items-center gap-2">
+                                                            <p class="text-white">${vehicle.plateNumber || 'N/A'}</p>
+                                                            ${renderFlockButton(vehicle.plateNumber, '', true)}
+                                                        </div>
                                                     </div>
                                                 </div>
                                                 <button onclick="removeVehicle(${index}, ${vIndex})" class="text-red-500 hover:text-red-400 ml-4">
@@ -6508,7 +6516,10 @@
                                                     </div>
                                                     <div>
                                                         <p class="text-xs text-gray-500">Plate Number</p>
-                                                        <p class="text-white">${vehicle.plateNumber || 'N/A'}</p>
+                                                        <div class="flex items-center gap-2">
+                                                            <p class="text-white">${vehicle.plateNumber || 'N/A'}</p>
+                                                            ${renderFlockButton(vehicle.plateNumber, '', true)}
+                                                        </div>
                                                     </div>
                                                 </div>
                                                 <button onclick="removeVictimVehicle(${index}, ${vIndex})" class="text-red-500 hover:text-red-400 ml-4">
@@ -7797,6 +7808,14 @@
                                 Scan All Case Data
                             </button>
                         </div>` : ''}
+                        ${isFlockEnabled() && item.trailerPlate ? `
+                        <div class="mt-5 pt-4 border-t border-teal-500/20">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="text-teal-400 text-xs font-bold tracking-wider uppercase">Flock Safety LPR</span>
+                                <div class="flex-1 h-px bg-teal-500/20"></div>
+                            </div>
+                            ${renderFlockButton(item.trailerPlate, '', false)}
+                        </div>` : ''}
                     </div>
                 </div>`;
         }
@@ -7922,6 +7941,298 @@
                 if (result.success) renderFmcsaResults(result.carriers, dot);
                 else renderFmcsaError(result.error);
             } catch (e) { renderFmcsaError(e.message); }
+        }
+
+        /* ── Flock Safety LPR Panel ──────────────────────────────── */
+        let flockPanelOpen = false;
+        let flockPanelPlate = '';
+        let flockPanelExpanded = false;
+
+        function isFlockEnabled() {
+            return localStorage.getItem('flockEnabled') === 'true';
+        }
+
+        function openFlockPanel(plate, state) {
+            if (!window.electronAPI || !window.electronAPI.flockSetBounds) return;
+            plate = (plate || '').trim().toUpperCase();
+            state = (state || '').trim().toUpperCase();
+            flockPanelPlate = plate;
+
+            // Create panel container if needed
+            let panel = document.getElementById('flockPanel');
+            if (!panel) {
+                panel = document.createElement('div');
+                panel.id = 'flockPanel';
+                panel.className = 'fixed top-0 right-0 h-full z-[9998] transition-transform duration-300 translate-x-full';
+                panel.style.width = '560px';
+                panel.innerHTML = `
+                    <div class="h-full flex flex-col" style="background:rgba(10,15,28,0.98);border-left:1px solid rgba(20,184,166,0.3);">
+                        <div class="flex items-center justify-between px-5 py-3 border-b border-teal-500/20" style="background:rgba(20,184,166,0.08);">
+                            <div class="flex items-center gap-3">
+                                <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:rgba(20,184,166,0.15);">
+                                    <svg class="w-5 h-5 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                                </div>
+                                <div>
+                                    <h3 class="text-sm font-bold text-white tracking-wide">Flock Safety LPR</h3>
+                                    <p id="flockPanelPlateLabel" class="text-xs text-teal-400 font-mono"></p>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <button onclick="toggleFlockExpand()" id="flockExpandBtn" title="Expand panel" class="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-teal-400 transition">
+                                    <svg id="flockExpandIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+                                </button>
+                                <button onclick="flockOpenExternal()" title="Open in browser" class="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-teal-400 transition">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                </button>
+                                <button onclick="closeFlockPanel()" class="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="flockBrowserArea" class="flex-1 relative">
+                            <!-- BrowserView overlays here -->
+                        </div>
+                    </div>`;
+                document.body.appendChild(panel);
+            }
+
+            // Update plate label
+            const label = document.getElementById('flockPanelPlateLabel');
+            if (label) label.textContent = plate ? `Plate: ${plate}${state ? ' (' + state + ')' : ''}` : 'Search';
+
+            // Slide in
+            requestAnimationFrame(() => {
+                panel.classList.remove('translate-x-full');
+                flockPanelOpen = true;
+                // Position BrowserView after animation
+                setTimeout(() => reportFlockBounds(), 320);
+            });
+
+            // Auto-fill plate if provided
+            if (plate) {
+                setTimeout(() => {
+                    window.electronAPI.flockSearchPlate({ plate, state });
+                }, 500);
+            }
+        }
+
+        function closeFlockPanel() {
+            const panel = document.getElementById('flockPanel');
+            if (panel) {
+                panel.classList.add('translate-x-full');
+                flockPanelOpen = false;
+                flockPanelExpanded = false;
+                panel.style.width = '560px';
+                panel.style.left = '';
+                if (window.electronAPI && window.electronAPI.flockSetVisible) {
+                    window.electronAPI.flockSetVisible(false);
+                }
+            }
+        }
+
+        function toggleFlockExpand() {
+            const panel = document.getElementById('flockPanel');
+            if (!panel) return;
+            flockPanelExpanded = !flockPanelExpanded;
+            const icon = document.getElementById('flockExpandIcon');
+            if (flockPanelExpanded) {
+                // Expand to fill from sidebar (w-64 = 256px) to right edge
+                panel.style.width = 'calc(100vw - 256px)';
+                panel.style.left = '256px';
+                panel.style.right = '0';
+                if (icon) icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 9L4 4m0 0v4m0-4h4m7 11l5 5m0 0v-4m0 4h-4M9 15l-5 5m0 0h4m-4 0v-4m11-7l5-5m0 0h-4m4 0v4"/>';
+            } else {
+                panel.style.width = '560px';
+                panel.style.left = '';
+                panel.style.right = '0';
+                if (icon) icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>';
+            }
+            setTimeout(() => reportFlockBounds(), 50);
+        }
+
+        function reportFlockBounds() {
+            if (!flockPanelOpen) return;
+            const area = document.getElementById('flockBrowserArea');
+            if (!area || !window.electronAPI || !window.electronAPI.flockSetBounds) return;
+            const rect = area.getBoundingClientRect();
+            window.electronAPI.flockSetBounds({
+                x: Math.round(rect.x),
+                y: Math.round(rect.y),
+                width: Math.round(rect.width),
+                height: Math.round(rect.height)
+            });
+            window.electronAPI.flockSetVisible(true);
+        }
+
+        function flockOpenExternal() {
+            if (window.electronAPI && window.electronAPI.openExternalUrl) {
+                window.electronAPI.openExternalUrl('https://search-2.flocksafety.com/');
+            }
+        }
+
+        // Re-report bounds on resize
+        window.addEventListener('resize', () => {
+            if (flockPanelOpen) reportFlockBounds();
+        });
+
+        // Hide Flock BrowserView when navigating away
+        window.addEventListener('beforeunload', () => {
+            if (window.electronAPI && window.electronAPI.flockSetVisible) {
+                window.electronAPI.flockSetVisible(false);
+            }
+        });
+
+        function renderFlockButton(plate, state, small) {
+            if (!isFlockEnabled()) return '';
+            if (!plate) return '';
+            const sz = small ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-xs';
+            return `<button onclick="event.stopPropagation(); openFlockPanel('${(plate||'').replace(/'/g,"\\'")}', '${(state||'').replace(/'/g,"\\'")}')" class="${sz} rounded-lg bg-teal-500/15 hover:bg-teal-500/25 border border-teal-500/30 text-teal-400 font-medium transition-colors inline-flex items-center gap-1.5" title="Search Flock Safety LPR">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                Run Plate
+            </button>`;
+        }
+
+        /* ── TLO (TransUnion) Panel ──────────────────────────────── */
+        let tloPanelOpen = false;
+        let tloPanelExpanded = false;
+
+        function isTloEnabled() {
+            return localStorage.getItem('tloEnabled') === 'true';
+        }
+
+        function openTloPanel(firstName, lastName, state, dob) {
+            if (!window.electronAPI || !window.electronAPI.tloSetBounds) return;
+            firstName = (firstName || '').trim();
+            lastName = (lastName || '').trim();
+
+            let panel = document.getElementById('tloPanel');
+            if (!panel) {
+                panel = document.createElement('div');
+                panel.id = 'tloPanel';
+                panel.className = 'fixed top-0 right-0 h-full z-[9997] transition-transform duration-300 translate-x-full';
+                panel.style.width = '560px';
+                panel.innerHTML = `
+                    <div class="h-full flex flex-col" style="background:rgba(10,15,28,0.98);border-left:1px solid rgba(99,102,241,0.3);">
+                        <div class="flex items-center justify-between px-5 py-3 border-b border-indigo-500/20" style="background:rgba(99,102,241,0.08);">
+                            <div class="flex items-center gap-3">
+                                <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:rgba(99,102,241,0.15);">
+                                    <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                                </div>
+                                <div>
+                                    <h3 class="text-sm font-bold text-white tracking-wide">TLO — TransUnion</h3>
+                                    <p id="tloPanelNameLabel" class="text-xs text-indigo-400 font-mono"></p>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <button onclick="toggleTloExpand()" id="tloExpandBtn" title="Expand panel" class="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-indigo-400 transition">
+                                    <svg id="tloExpandIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+                                </button>
+                                <button onclick="tloOpenExternal()" title="Open in browser" class="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-indigo-400 transition">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                </button>
+                                <button onclick="closeTloPanel()" class="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="tloBrowserArea" class="flex-1 relative">
+                            <!-- BrowserView overlays here -->
+                        </div>
+                    </div>`;
+                document.body.appendChild(panel);
+            }
+
+            const label = document.getElementById('tloPanelNameLabel');
+            if (label) label.textContent = (firstName || lastName) ? `${firstName} ${lastName}`.trim() : 'Search';
+
+            requestAnimationFrame(() => {
+                panel.classList.remove('translate-x-full');
+                tloPanelOpen = true;
+                setTimeout(() => reportTloBounds(), 320);
+            });
+
+            if (firstName || lastName) {
+                setTimeout(() => {
+                    window.electronAPI.tloSearchPerson({ firstName, lastName, state, dob });
+                }, 500);
+            }
+        }
+
+        function closeTloPanel() {
+            const panel = document.getElementById('tloPanel');
+            if (panel) {
+                panel.classList.add('translate-x-full');
+                tloPanelOpen = false;
+                tloPanelExpanded = false;
+                panel.style.width = '560px';
+                panel.style.left = '';
+                if (window.electronAPI && window.electronAPI.tloSetVisible) {
+                    window.electronAPI.tloSetVisible(false);
+                }
+            }
+        }
+
+        function reportTloBounds() {
+            if (!tloPanelOpen) return;
+            const area = document.getElementById('tloBrowserArea');
+            if (!area || !window.electronAPI || !window.electronAPI.tloSetBounds) return;
+            const rect = area.getBoundingClientRect();
+            window.electronAPI.tloSetBounds({
+                x: Math.round(rect.x),
+                y: Math.round(rect.y),
+                width: Math.round(rect.width),
+                height: Math.round(rect.height)
+            });
+            window.electronAPI.tloSetVisible(true);
+        }
+
+        function toggleTloExpand() {
+            const panel = document.getElementById('tloPanel');
+            if (!panel) return;
+            tloPanelExpanded = !tloPanelExpanded;
+            const icon = document.getElementById('tloExpandIcon');
+            if (tloPanelExpanded) {
+                panel.style.width = 'calc(100vw - 256px)';
+                panel.style.left = '256px';
+                panel.style.right = '0';
+                if (icon) icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 9L4 4m0 0v4m0-4h4m7 11l5 5m0 0v-4m0 4h-4M9 15l-5 5m0 0h4m-4 0v-4m11-7l5-5m0 0h-4m4 0v4"/>';
+            } else {
+                panel.style.width = '560px';
+                panel.style.left = '';
+                panel.style.right = '0';
+                if (icon) icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>';
+            }
+            setTimeout(() => reportTloBounds(), 50);
+        }
+
+        function tloOpenExternal() {
+            if (window.electronAPI && window.electronAPI.openExternalUrl) {
+                window.electronAPI.openExternalUrl('https://tloxp.tlo.com/');
+            }
+        }
+
+        // Re-report TLO bounds on resize
+        window.addEventListener('resize', () => {
+            if (tloPanelOpen) reportTloBounds();
+        });
+
+        // Hide TLO BrowserView when navigating away
+        window.addEventListener('beforeunload', () => {
+            if (window.electronAPI && window.electronAPI.tloSetVisible) {
+                window.electronAPI.tloSetVisible(false);
+            }
+        });
+
+        function renderTloButton(firstName, lastName, state) {
+            if (!isTloEnabled()) return '';
+            if (!firstName && !lastName) return '';
+            const fn = (firstName||'').replace(/'/g, "\\'");
+            const ln = (lastName||'').replace(/'/g, "\\'");
+            const st = (state||'').replace(/'/g, "\\'");
+            return `<button onclick="event.stopPropagation(); openTloPanel('${fn}', '${ln}', '${st}')" class="px-3 py-1.5 text-xs rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 text-indigo-400 font-medium transition-colors inline-flex items-center gap-1.5" title="Search TLO / TransUnion">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                Search TLO
+            </button>`;
         }
 
         function addNewCargoItem() {
@@ -8833,7 +9144,7 @@
                     </div>
                     <h3 class="text-xl font-bold text-white mb-2">${vehicle.makeModel || 'Unknown Vehicle'}</h3>
                     <div class="space-y-1 text-sm text-gray-400">
-                        ${vehicle.licensePlate ? `<p class="text-viper-orange">Plate: ${vehicle.licensePlate}</p>` : ''}
+                        ${vehicle.licensePlate ? `<div class="flex items-center gap-2"><p class="text-viper-orange">Plate: ${vehicle.licensePlate}</p>${renderFlockButton(vehicle.licensePlate, vehicle.plateState, true)}</div>` : ''}
                         ${vehicle.vin ? `<p>VIN: ${vehicle.vin}</p>` : ''}
                         ${vehicle.recoveryDate ? `<p>Recovered: ${formatDate(vehicle.recoveryDate)}</p>` : ''}
                     </div>
@@ -8901,6 +9212,14 @@
                                 ${renderField('Recovery Date', vehicle.recoveryDate)}
                                 ${renderField('Recovery Location', vehicle.recoveryLocation)}
                             </div>
+                            ${vehicle.licensePlate && isFlockEnabled() ? `
+                            <div class="mt-5 pt-4 border-t border-teal-500/20">
+                                <div class="flex items-center gap-2 mb-3">
+                                    <span class="text-teal-400 text-xs font-bold tracking-wider uppercase">Flock Safety LPR</span>
+                                    <div class="flex-1 h-px bg-teal-500/20"></div>
+                                </div>
+                                ${renderFlockButton(vehicle.licensePlate, vehicle.plateState, false)}
+                            </div>` : ''}
                         </div>
                         
                         <!-- Notes -->
@@ -11616,6 +11935,11 @@
                             <div class="col-span-2">
                                 <span class="text-gray-400">Characteristics:</span>
                                 <p class="text-white mt-1">${vehicle.characteristics}</p>
+                            </div>
+                        ` : ''}
+                        ${vehicle.licensePlate && isFlockEnabled() ? `
+                            <div class="col-span-2 pt-2 mt-2 border-t border-teal-500/20">
+                                ${renderFlockButton(vehicle.licensePlate, vehicle.plateState, false)}
                             </div>
                         ` : ''}
                     </div>

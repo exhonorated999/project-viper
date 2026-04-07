@@ -5,6 +5,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   // App info
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
 
   // Storage paths
   getStoragePaths: () => ipcRenderer.invoke('get-storage-paths'),

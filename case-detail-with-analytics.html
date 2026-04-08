@@ -12915,7 +12915,7 @@
             const importMode = importModeEl ? importModeEl.value : 'append';
             
             const reader = new FileReader();
-            reader.onload = function(e) {
+            reader.onload = async function(e) {
                 const text = e.target.result;
                 const lines = text.split('\n').filter(line => line.trim());
                 

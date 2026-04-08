@@ -2313,7 +2313,7 @@
         if (!TraceSearch.isEnabled()) {
             const licStatus = typeof getLicenseStatus === 'function' ? getLicenseStatus() : null;
             if (licStatus && (licStatus.licenseType === 'demo' || licStatus.status === 'demo' || licStatus.status === 'demo_expired')) {
-                viperToast('TRACE Network Search requires a full VIPER license (not demo, 'info').');
+                viperToast('TRACE Network Search requires a full VIPER license (not demo).', 'info');
                 return;
             }
         }
@@ -2425,7 +2425,7 @@
             if (result.status === 'active') {
                 viperToast('✅ TRACE connection is active.', 'info');
             } else {
-                viperToast('⚠️ TRACE connection issue: ' + (result.message || result.status, 'info'));
+                viperToast('⚠️ TRACE connection issue: ' + (result.message || result.status), 'info');
             }
         } catch (e) {
             viperToast('❌ Connection failed: ' + e.message, 'error');

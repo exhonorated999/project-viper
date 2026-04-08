@@ -808,113 +808,7 @@
                     </div>
                 </div>
 
-                <!-- TRACE Network Search Panel (dashboard) -->
-                <div id="traceDashPanel" class="glass-card rounded-xl p-6 mb-6" style="display:none; border-top: 2px solid rgba(249,115,22,0.4);">
-                    <div class="flex items-center justify-between mb-4">
-                        <div class="flex items-center gap-3">
-                            <div class="w-10 h-10 rounded-lg flex items-center justify-center" style="background: rgba(249,115,22,0.15);">
-                                <svg class="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                            </div>
-                            <div>
-                                <h3 class="text-lg font-bold text-white">TRACE Network Search</h3>
-                                <p class="text-xs text-gray-400">Search the retail theft &amp; cargo intelligence network</p>
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <span id="traceDashStatus" class="text-xs text-orange-400 flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-orange-400 inline-block"></span> Connected</span>
-                            <button onclick="traceDashScanAll()" class="px-3 py-1.5 rounded-lg bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/30 text-orange-400 text-xs font-medium transition-colors inline-flex items-center gap-1.5">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                                Scan All Cases
-                            </button>
-                        </div>
-                    </div>
 
-                    <div class="grid grid-cols-3 gap-4">
-                        <!-- Quick Search Form -->
-                        <div class="col-span-1 space-y-3">
-                            <div class="grid grid-cols-2 gap-2">
-                                <div>
-                                    <label class="block text-xs text-gray-400 mb-1">License Plate</label>
-                                    <input id="tdPlate" type="text" placeholder="ABC1234" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-orange-500/30 text-white text-sm focus:border-orange-400 outline-none uppercase">
-                                </div>
-                                <div>
-                                    <label class="block text-xs text-gray-400 mb-1">State</label>
-                                    <input id="tdPlateState" type="text" placeholder="CA" maxlength="2" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-orange-500/30 text-white text-sm focus:border-orange-400 outline-none uppercase">
-                                </div>
-                            </div>
-                            <div>
-                                <label class="block text-xs text-gray-400 mb-1">Name (First Last)</label>
-                                <input id="tdName" type="text" placeholder="John Smith" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-orange-500/30 text-white text-sm focus:border-orange-400 outline-none">
-                            </div>
-                            <div class="grid grid-cols-2 gap-2">
-                                <div>
-                                    <label class="block text-xs text-gray-400 mb-1">MC Number</label>
-                                    <input id="tdMC" type="text" placeholder="MC-123456" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-orange-500/30 text-white text-sm focus:border-orange-400 outline-none">
-                                </div>
-                                <div>
-                                    <label class="block text-xs text-gray-400 mb-1">BOL / CDL</label>
-                                    <input id="tdBolCdl" type="text" placeholder="BOL or CDL#" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-orange-500/30 text-white text-sm focus:border-orange-400 outline-none">
-                                </div>
-                            </div>
-                            <div>
-                                <label class="block text-xs text-gray-400 mb-1">Reason for Search <span class="text-red-400">*</span></label>
-                                <input id="tdReason" type="text" placeholder="Investigation reference" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-orange-500/30 text-white text-sm focus:border-orange-400 outline-none">
-                            </div>
-                            <button onclick="traceDashSearch()" id="tdSearchBtn" class="w-full py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white font-medium text-sm transition flex items-center justify-center gap-2">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                                Search Network
-                            </button>
-                        </div>
-
-                        <!-- Results Area -->
-                        <div class="col-span-2 min-h-[200px] rounded-lg p-4" style="background: rgba(249,115,22,0.05); border: 1px solid rgba(249,115,22,0.15);">
-                            <div id="tdResults" class="text-center text-gray-500 text-sm py-8">
-                                <svg class="w-12 h-12 mx-auto mb-3 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                                Enter search criteria or click <strong>Scan All Cases</strong> to query the TRACE network.
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- FMCSA Carrier Lookup Panel (conditional on toggle) -->
-                <div id="fmcsaDashboardPanel" class="hidden">
-                    <div class="glass-card rounded-xl p-6 border border-blue-500/30" style="background: linear-gradient(135deg, rgba(59,130,246,0.05) 0%, rgba(26,35,50,0.7) 100%);">
-                        <div class="flex items-center justify-between mb-4">
-                            <div class="flex items-center gap-3">
-                                <div class="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
-                                    <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
-                                    </svg>
-                                </div>
-                                <div>
-                                    <h3 class="text-lg font-bold text-blue-300">FMCSA Carrier Lookup</h3>
-                                    <p class="text-xs text-gray-400">Search the SAFER database for motor carrier information</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="flex items-end gap-3">
-                            <div class="flex-1">
-                                <label class="block text-xs text-gray-400 mb-1">Search By</label>
-                                <select id="fmcsaDashSearchType" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-blue-500/30 text-white text-sm focus:border-blue-400 outline-none">
-                                    <option value="NAME">Company Name</option>
-                                    <option value="USDOT">USDOT Number</option>
-                                    <option value="MC_MX">MC/MX Number</option>
-                                </select>
-                            </div>
-                            <div class="flex-[2]">
-                                <label class="block text-xs text-gray-400 mb-1">Search Term</label>
-                                <input id="fmcsaDashSearchInput" type="text" placeholder="Enter carrier name, DOT#, or MC/MX#"
-                                    class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-blue-500/30 text-white text-sm focus:border-blue-400 outline-none"
-                                    onkeydown="if(event.key==='Enter') fmcsaSearch('dash')">
-                            </div>
-                            <button onclick="fmcsaSearch('dash')" class="px-5 py-2 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 text-sm font-medium border border-blue-500/30 transition flex items-center gap-2">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                                Search
-                            </button>
-                        </div>
-
-                    </div>
-                </div>
 
                 <!-- Active Investigations and Tasks -->
                 <div class="grid grid-cols-3 gap-6 relative" style="z-index: 1;">
@@ -3243,18 +3137,10 @@
             }
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        //  FMCSA Carrier Lookup — Dashboard & Cargo
-        // ═══════════════════════════════════════════════════════════════════
-        function initFmcsaDashboard() {
-            const panel = document.getElementById('fmcsaDashboardPanel');
-            if (!panel) return;
-            if (localStorage.getItem('fmcsaEnabled') === 'true') {
-                panel.classList.remove('hidden');
-            } else {
-                panel.classList.add('hidden');
-            }
-        }
+        // FMCSA + TRACE dashboard panels removed — now in Resource Hub drawer
+
+        // Keep fmcsaSearch for cargo module context (case-detail still uses it)
+        function initFmcsaDashboard() { /* no-op — removed from dashboard */ }
 
         async function fmcsaSearch(context) {
             const prefix = context === 'cargo' ? 'fmcsaCargo' : 'fmcsaDash';
@@ -3439,173 +3325,9 @@
             } catch (e) { renderFmcsaError(e.message); }
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        //  TRACE Network Search — Dashboard Panel
-        // ═══════════════════════════════════════════════════════════════════
-        function initTraceDashboard() {
-            if (typeof TraceSearch === 'undefined' || !TraceSearch.isEnabled() || !TraceSearch.isRegistered()) return;
-            const panel = document.getElementById('traceDashPanel');
-            if (panel) panel.style.display = '';
-        }
+        function initTraceDashboard() { /* no-op — moved to Resource Hub drawer */ }
 
-        async function traceDashSearch() {
-            const reason = document.getElementById('tdReason').value.trim();
-            if (!reason) { viperToast('A reason for search is required (audit compliance).', 'info'); return; }
-
-            const plate = document.getElementById('tdPlate').value.trim();
-            const plateState = document.getElementById('tdPlateState').value.trim();
-            const name = document.getElementById('tdName').value.trim();
-            const mc = document.getElementById('tdMC').value.trim();
-            const bolCdl = document.getElementById('tdBolCdl').value.trim();
-
-            if (!plate && !name && !mc && !bolCdl) {
-                viperToast('Enter at least one search field.', 'error'); return;
-            }
-
-            const fields = { plate, plateState, firstName: '', lastName: '', mc, bol: '', cdl: '' };
-            // Parse name into first/last
-            if (name) {
-                const parts = name.trim().split(/\s+/);
-                fields.firstName = parts[0] || '';
-                fields.lastName = parts.slice(1).join(' ') || '';
-            }
-            // BOL/CDL field — guess based on content
-            if (bolCdl) {
-                if (/^\d{1,2}[A-Z]/i.test(bolCdl) || bolCdl.length <= 12) fields.cdl = bolCdl;
-                else fields.bol = bolCdl;
-            }
-
-            const btn = document.getElementById('tdSearchBtn');
-            btn.disabled = true;
-            btn.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Searching…';
-            const resultsEl = document.getElementById('tdResults');
-            resultsEl.innerHTML = '<div class="py-4 text-center text-gray-400 text-sm">Querying TRACE network…</div>';
-
-            try {
-                const tokens = await TraceSearch.extractManualTokens(fields);
-                if (tokens.length === 0) { resultsEl.innerHTML = '<div class="p-3 text-yellow-400 text-sm">No searchable tokens from input.</div>'; return; }
-                const result = await TraceSearch.search(tokens, 'Dashboard', reason, 'manual');
-                renderTraceDashResults(result, resultsEl);
-            } catch (e) {
-                resultsEl.innerHTML = `<div class="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">${e.message}</div>`;
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg> Search Network';
-            }
-        }
-
-        async function traceDashScanAll() {
-            if (typeof TraceSearch === 'undefined' || !TraceSearch.isEnabled() || !TraceSearch.isRegistered()) {
-                viperToast('Enable and register TRACE Network Search in Settings first.', 'info'); return;
-            }
-
-            const resultsEl = document.getElementById('tdResults');
-            resultsEl.innerHTML = '<div class="py-4 text-center text-gray-400 text-sm">Scanning all case TRACE imports…</div>';
-
-            // Gather TRACE imports from ALL cases (Pattern 1: viperTraceImports)
-            const traceImports = JSON.parse(localStorage.getItem('viperTraceImports') || '{}');
-            let allTokens = [];
-            let importCount = 0;
-            let caseCount = 0;
-
-            for (const [caseNum, imports] of Object.entries(traceImports)) {
-                if (!Array.isArray(imports) || imports.length === 0) continue;
-                caseCount++;
-                for (const importData of imports) {
-                    const t = await TraceSearch.extractTraceImportTokens(importData);
-                    allTokens = allTokens.concat(t);
-                    importCount++;
-                }
-            }
-
-            // Also gather cargo, suspects, vehicles from all cases
-            const cases = JSON.parse(localStorage.getItem('viperCases') || '[]');
-            for (const c of cases) {
-                const cargo = JSON.parse(localStorage.getItem(`cargo_${c.id}`) || '[]');
-                if (cargo.length) {
-                    const ct = await TraceSearch.extractCargoTokens(cargo);
-                    allTokens = allTokens.concat(ct);
-                }
-                const suspects = JSON.parse(localStorage.getItem(`suspects_${c.id}`) || '[]');
-                if (suspects.length) {
-                    const st = await TraceSearch.extractSuspectTokens(suspects);
-                    allTokens = allTokens.concat(st);
-                }
-                const vehicles = JSON.parse(localStorage.getItem(`recoveredVehicles_${c.id}`) || '[]');
-                if (vehicles.length) {
-                    const vt = await TraceSearch.extractVehicleTokens(vehicles);
-                    allTokens = allTokens.concat(vt);
-                }
-            }
-
-            if (allTokens.length === 0) {
-                resultsEl.innerHTML = '<div class="p-3 text-yellow-400 text-sm">No searchable tokens found across any cases.</div>';
-                return;
-            }
-
-            // Dedup
-            const seen = new Set();
-            allTokens = allTokens.filter(t => {
-                const key = t.token_hash + t.token_type;
-                if (seen.has(key)) return false;
-                seen.add(key);
-                return true;
-            });
-
-            resultsEl.innerHTML = `<div class="py-4 text-center text-gray-400 text-sm">Searching ${allTokens.length} tokens from ${caseCount} cases, ${importCount} imports…</div>`;
-
-            try {
-                const result = await TraceSearch.search(allTokens, 'All Cases', `Global scan — ${caseCount} cases, ${importCount} TRACE imports`, 'trace_scan');
-                renderTraceDashResults(result, resultsEl);
-            } catch (e) {
-                resultsEl.innerHTML = `<div class="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">${e.message}</div>`;
-            }
-        }
-
-        function renderTraceDashResults(result, container) {
-            if (!result || !result.matches || result.matches.length === 0) {
-                container.innerHTML = `<div class="text-center py-6">
-                    <svg class="w-10 h-10 mx-auto mb-2 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                    <p class="text-gray-400 text-sm">No matches found in the TRACE network.</p>
-                    <p class="text-gray-500 text-xs mt-1">${result ? result.tokens_searched + ' tokens searched' : ''}</p>
-                </div>`;
-                return;
-            }
-
-            const tierColors = { 1: { bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.4)', text: '#f87171', label: 'HIGH' },
-                                 2: { bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.4)', text: '#4ade80', label: 'PARTIAL' },
-                                 3: { bg: 'rgba(249,115,22,0.12)', border: 'rgba(249,115,22,0.4)', text: '#fb923c', label: 'SOFT' }};
-
-            let html = `<div class="flex items-center justify-between mb-3">
-                <span class="text-sm text-white font-medium">${result.matches.length} match${result.matches.length !== 1 ? 'es' : ''} found</span>
-                <span class="text-xs text-gray-500">${result.tokens_searched} tokens searched</span>
-            </div><div class="space-y-2 max-h-[400px] overflow-y-auto pr-1">`;
-
-            for (const m of result.matches) {
-                const tier = tierColors[m.confidence_tier] || tierColors[3];
-                const dist = m.distance_miles != null ? `${Math.round(m.distance_miles)} mi` : '';
-                const matchedOn = (m.matched_types || []).map(t => `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium" style="background:${tier.bg};color:${tier.text};">${t}</span>`).join(' ');
-
-                html += `<div class="rounded-lg p-3 transition-colors" style="background:${tier.bg};border:1px solid ${tier.border};">
-                    <div class="flex items-center justify-between mb-1">
-                        <div class="flex items-center gap-2">
-                            <span class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider" style="background:${tier.border};color:#fff;">${tier.label}</span>
-                            <span class="text-sm font-semibold text-white">${m.store_name || 'Unknown'}</span>
-                        </div>
-                        <div class="flex items-center gap-2 text-xs text-gray-400">
-                            ${dist ? `<span>📍 ${dist}</span>` : ''}
-                            <span>${m.overlap_count || 0} overlap${(m.overlap_count || 0) !== 1 ? 's' : ''}</span>
-                        </div>
-                    </div>
-                    <div class="flex items-center justify-between">
-                        <div class="text-xs text-gray-300">${m.contact_name || ''} ${m.contact_phone ? '• ' + m.contact_phone : ''}</div>
-                        <div class="flex items-center gap-1">${matchedOn}</div>
-                    </div>
-                </div>`;
-            }
-            html += '</div>';
-            container.innerHTML = html;
-        }
+        // traceDashSearch/traceDashScanAll/renderTraceDashResults — moved to Resource Hub drawer
 
         document.addEventListener('DOMContentLoaded', function() {
             // Migrate existing data to central storage (one-time sync)
@@ -4773,6 +4495,11 @@
     }
     </script>
     <script src="/modules/security-ui.js"></script>
+
+    <!-- Resource Hub (unified investigative resources drawer) -->
+    <script src="modules/resource-hub.js"></script>
+
+
     <script>
     // Media Player — BrowserView coordination
     (function initMediaBrowserView() {

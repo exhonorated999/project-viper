@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://d3js.org https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.genlogs.io https://trace-broker-production.up.railway.app; font-src 'self' data:; frame-src 'self' blob: https: http:;">
     <title>V.I.P.E.R. - Case Detail</title>
+    <script src="modules/viper-ui.js"></script>
     <script src="modules/licensing.js"></script>
     <script src="modules/genlogs-api.js"></script>
     <script src="modules/trace-search-api.js"></script>
@@ -975,7 +976,7 @@
             }
             
             if (!currentCase) {
-                alert('Case not found');
+                viperToast('Case not found', 'error');
                 window.location.href = 'index.html';
                 return;
             }
@@ -1132,9 +1133,9 @@
             }, 3000);
         }
 
-        function confirmLeavePage() {
+        async function confirmLeavePage() {
             if (hasUnsavedChanges) {
-                if (confirm('You have unsaved changes. Do you want to save before leaving?')) {
+                if (await viperConfirm('You have unsaved changes. Do you want to save before leaving?')) {
                     saveCase();
                     setTimeout(() => {
                         window.location.href = 'index.html';
@@ -1404,13 +1405,13 @@
             if (modal) modal.remove();
         }
 
-        function confirmRemoveModule(moduleId, label) {
-            if (confirm(`Are you sure? You will lose all data associated with this module.`)) {
+        async function confirmRemoveModule(moduleId, label) {
+            if (await viperConfirm(`Are you sure? You will lose all data associated with this module.`)) {
                 removeModuleFromCase(moduleId);
             }
         }
 
-        function removeModuleFromCase(moduleId) {
+        async function removeModuleFromCase(moduleId) {
             const moduleConfig = {
                 suspects:'Suspects', victims:'Victims', victimBusiness:'Victim Business',
                 witnesses:'Witnesses', vehicles:'Recovered Vehicles', cargo:'Cargo / Merchandise',
@@ -1421,7 +1422,7 @@
                 networkIntelligence:'Network Intel', traceImport:'Trace Import', rmsImport:'RMS Import'
             };
             const label = moduleConfig[moduleId] || moduleId;
-            if (!confirm(`Remove "${label}" from this case?\n\nNote: Any data in this module will remain in storage and can be recovered by re-adding the module.`)) return;
+            if (!await viperConfirm(`Remove "${label}" from this case?\n\nNote: Any data in this module will remain in storage and can be recovered by re-adding the module.`, {danger:true, okText:'Delete'})) return;
 
             // Remove from modules array
             currentCase.modules = currentCase.modules.filter(m => m !== moduleId);
@@ -1653,7 +1654,7 @@
             const selectedCheckboxes = Array.from(document.querySelectorAll('.export-tab-checkbox:checked'));
             
             if (selectedCheckboxes.length === 0) {
-                alert('Please select at least one tab to export');
+                viperToast('Please select at least one tab to export', 'error');
                 return;
             }
 
@@ -1680,7 +1681,7 @@
                 }
             } catch (error) {
                 console.error('Export error:', error);
-                alert('Error generating export: ' + error.message);
+                viperToast('Error generating export: ' + error.message, 'error');
             } finally {
                 hideExportProgress();
             }
@@ -2126,16 +2127,16 @@
                         caseNumber: currentCase.caseNumber,
                     });
                     if (savedPath) {
-                        alert(`DA Export saved to:\n${savedPath}\n\nIncludes PDF report and all evidence files.`);
+                        viperToast(`DA Export saved to:\n${savedPath}\n\nIncludes PDF report and all evidence files.`, 'success');
                     }
                 } catch (e) {
                     console.error('DA export IPC failed, falling back to PDF download:', e);
                     doc.save(`${currentCase.caseNumber}_DA_Report_${new Date().toISOString().split('T')[0]}.pdf`);
-                    alert('Export complete! PDF downloaded (evidence files not bundled — requires desktop app).');
+                    viperToast('Export complete! PDF downloaded (evidence files not bundled — requires desktop app, 'info').');
                 }
             } else {
                 doc.save(`${currentCase.caseNumber}_DA_Report_${new Date().toISOString().split('T')[0]}.pdf`);
-                alert('Export complete! PDF downloaded.');
+                viperToast('Export complete! PDF downloaded.', 'success');
             }
         }
 
@@ -2620,7 +2621,7 @@
 
         async function bundleFilesOnly(fileTabs) {
             if (!window.electronAPI || !window.electronAPI.saveDAExport) {
-                alert('File bundling requires the VIPER desktop app.'); return;
+                viperToast('File bundling requires the VIPER desktop app.', 'info'); return;
             }
             try {
                 const savedPath = await window.electronAPI.saveDAExport({
@@ -2628,8 +2629,8 @@
                     pdfBytes: [],
                     caseNumber: currentCase.caseNumber,
                 });
-                if (savedPath) alert(`Evidence files saved to:\n${savedPath}`);
-            } catch (e) { alert('Error bundling files: ' + e.message); }
+                if (savedPath) viperToast(`Evidence files saved to:\n${savedPath}`, 'success');
+            } catch (e) { viperToast('Error bundling files: ' + e.message, 'error'); }
         }
 
         function addSelectedTabs() {
@@ -2637,7 +2638,7 @@
                 .map(cb => cb.value);
             
             if (selectedModules.length === 0) {
-                alert('Please select at least one tab to add');
+                viperToast('Please select at least one tab to add', 'error');
                 return;
             }
 
@@ -2669,7 +2670,7 @@
 
             // Show success message
             const addedModules = selectedModules.length;
-            alert(`✓ Added ${addedModules} tab${addedModules > 1 ? 's' : ''} to this case successfully!`);
+            viperToast(`✓ Added ${addedModules} tab${addedModules > 1 ? 's' : ''} to this case successfully!`, 'success');
         }
 
         function renderTabContent(tabId) {
@@ -3111,7 +3112,7 @@
                 document.getElementById('noteFileInfo').classList.remove('hidden');
                 document.getElementById('noteFileButtonText').textContent = 'Change PDF';
             } else if (file) {
-                alert('Please select a PDF file');
+                viperToast('Please select a PDF file', 'error');
                 event.target.value = '';
             }
         }
@@ -3164,8 +3165,8 @@
             renderTabContent('notes');
         }
         
-        function deleteNote(noteId) {
-            if (!confirm('Are you sure you want to delete this note? This action cannot be undone.')) {
+        async function deleteNote(noteId) {
+            if (!await viperConfirm('Are you sure you want to delete this note? This action cannot be undone.', {danger:true, okText:'Delete'})) {
                 return;
             }
             
@@ -3276,7 +3277,7 @@
             const filename = `Case_${currentCase.caseNumber}_Notes_${new Date().toISOString().split('T')[0]}.pdf`;
             doc.save(filename);
             
-            alert('Case notes exported successfully!');
+            viperToast('Case notes exported successfully!', 'success');
         }
         
         function renderReportsTab() {
@@ -3567,7 +3568,7 @@
             const content = editor.innerText || editor.textContent;
             
             if (!content.trim() || content.trim() === 'Start typing your report here...') {
-                alert('Report is empty. Please add content before exporting.');
+                viperToast('Report is empty. Please add content before exporting.', 'info');
                 return;
             }
             
@@ -3678,7 +3679,7 @@
             const filename = `Case_${currentCase.caseNumber}_Report_${new Date().toISOString().split('T')[0]}.pdf`;
             doc.save(filename);
             
-            alert('Report exported successfully!');
+            viperToast('Report exported successfully!', 'success');
         }
         
         function renderEvidenceTab() {
@@ -4175,8 +4176,8 @@
             renderTabContent('evidence');
         }
         
-        function deleteEvidence(evidenceId) {
-            if (!confirm('Are you sure you want to delete this evidence? This action cannot be undone.')) {
+        async function deleteEvidence(evidenceId) {
+            if (!await viperConfirm('Are you sure you want to delete this evidence? This action cannot be undone.', {danger:true, okText:'Delete'})) {
                 return;
             }
             
@@ -4707,7 +4708,7 @@
                 document.getElementById('warrantFileInfo').classList.remove('hidden');
                 document.getElementById('warrantFileButtonText').textContent = 'Change warrant file';
             } else if (file) {
-                alert('Please select a PDF file');
+                viperToast('Please select a PDF file', 'error');
                 event.target.value = '';
             }
         }
@@ -4869,7 +4870,7 @@
                 if (!file) return;
                 
                 if (file.type !== 'application/pdf') {
-                    alert('Please select a PDF file');
+                    viperToast('Please select a PDF file', 'error');
                     return;
                 }
                 
@@ -4952,8 +4953,8 @@
             document.getElementById('evidenceViewerModal').classList.add('show');
         }
         
-        function deleteWarrant(warrantId) {
-            if (!confirm('Are you sure you want to delete this warrant? This action cannot be undone.')) {
+        async function deleteWarrant(warrantId) {
+            if (!await viperConfirm('Are you sure you want to delete this warrant? This action cannot be undone.', {danger:true, okText:'Delete'})) {
                 return;
             }
             
@@ -5433,8 +5434,8 @@
             }
         }
         
-        function deleteSuspect(index) {
-            if (confirm('Are you sure you want to delete this suspect?')) {
+        async function deleteSuspect(index) {
+            if (await viperConfirm('Are you sure you want to delete this suspect?', {danger:true, okText:'Delete'})) {
                 suspects.splice(index, 1);
                 saveSuspects();
                 currentSuspectView = null;
@@ -5709,8 +5710,8 @@
             };
         }
 
-        function removeSuspectIdentifier(suspectIdx, identIdx) {
-            if (!confirm('Remove this identifier?')) return;
+        async function removeSuspectIdentifier(suspectIdx, identIdx) {
+            if (!await viperConfirm('Remove this identifier?', {danger:true, okText:'Delete'})) return;
             suspects[suspectIdx].identifiers.splice(identIdx, 1);
             saveSuspects();
             renderTabContent('suspects');
@@ -5767,8 +5768,8 @@
             };
         }
         
-        function removeFirearm(suspectIndex, firearmIndex) {
-            if (confirm('Remove this firearm?')) {
+        async function removeFirearm(suspectIndex, firearmIndex) {
+            if (await viperConfirm('Remove this firearm?', {danger:true, okText:'Delete'})) {
                 suspects[suspectIndex].firearms.splice(firearmIndex, 1);
                 saveSuspects();
                 renderTabContent('suspects');
@@ -5831,8 +5832,8 @@
             };
         }
         
-        function removeVehicle(suspectIndex, vehicleIndex) {
-            if (confirm('Remove this vehicle?')) {
+        async function removeVehicle(suspectIndex, vehicleIndex) {
+            if (await viperConfirm('Remove this vehicle?', {danger:true, okText:'Delete'})) {
                 suspects[suspectIndex].vehicles.splice(vehicleIndex, 1);
                 saveSuspects();
                 renderTabContent('suspects');
@@ -5903,7 +5904,7 @@
             }
             
             if (suspectsToExport.length === 0) {
-                alert('Please select at least one suspect to export');
+                viperToast('Please select at least one suspect to export', 'error');
                 return;
             }
             
@@ -6640,8 +6641,8 @@
             }
         }
         
-        function deleteVictim(index) {
-            if (confirm('Are you sure you want to delete this victim?')) {
+        async function deleteVictim(index) {
+            if (await viperConfirm('Are you sure you want to delete this victim?', {danger:true, okText:'Delete'})) {
                 victims.splice(index, 1);
                 saveVictims();
                 currentVictimView = null;
@@ -6822,7 +6823,7 @@
                 const formData = new FormData(e.target);
                 const url = formData.get('url');
                 if (!url) {
-                    alert('Please provide a photo URL or upload a file');
+                    viperToast('Please provide a photo URL or upload a file', 'error');
                     return;
                 }
                 if (!victims[victimIndex].injuryPhotos) victims[victimIndex].injuryPhotos = [];
@@ -6836,8 +6837,8 @@
             };
         }
         
-        function removeInjuryPhoto(victimIndex, photoIndex) {
-            if (confirm('Remove this injury photograph?')) {
+        async function removeInjuryPhoto(victimIndex, photoIndex) {
+            if (await viperConfirm('Remove this injury photograph?', {danger:true, okText:'Delete'})) {
                 victims[victimIndex].injuryPhotos.splice(photoIndex, 1);
                 saveVictims();
                 renderTabContent('victims');
@@ -6877,7 +6878,7 @@
                 const formData = new FormData(e.target);
                 const url = formData.get('url');
                 if (!url) {
-                    alert('Please provide a photo URL or upload a file');
+                    viperToast('Please provide a photo URL or upload a file', 'error');
                     return;
                 }
                 if (!victims[victimIndex].propertyPhotos) victims[victimIndex].propertyPhotos = [];
@@ -6891,8 +6892,8 @@
             };
         }
         
-        function removePropertyPhoto(victimIndex, photoIndex) {
-            if (confirm('Remove this property damage photograph?')) {
+        async function removePropertyPhoto(victimIndex, photoIndex) {
+            if (await viperConfirm('Remove this property damage photograph?', {danger:true, okText:'Delete'})) {
                 victims[victimIndex].propertyPhotos.splice(photoIndex, 1);
                 saveVictims();
                 renderTabContent('victims');
@@ -6966,8 +6967,8 @@
             };
         }
         
-        function removeVictimVehicle(victimIndex, vehicleIndex) {
-            if (confirm('Remove this vehicle?')) {
+        async function removeVictimVehicle(victimIndex, vehicleIndex) {
+            if (await viperConfirm('Remove this vehicle?', {danger:true, okText:'Delete'})) {
                 victims[victimIndex].vehicles.splice(vehicleIndex, 1);
                 saveVictims();
                 renderTabContent('victims');
@@ -7038,7 +7039,7 @@
             }
             
             if (victimsToExport.length === 0) {
-                alert('Please select at least one victim to export');
+                viperToast('Please select at least one victim to export', 'error');
                 return;
             }
             
@@ -7518,8 +7519,8 @@
             renderTabContent('victimBusiness');
         }
 
-        function deleteVictimBusiness(index) {
-            if (!confirm('Delete this business record?')) return;
+        async function deleteVictimBusiness(index) {
+            if (!await viperConfirm('Delete this business record?', {danger:true, okText:'Delete'})) return;
             victimBusinesses.splice(index, 1);
             saveVictimBusinesses();
             currentVBView = null;
@@ -7826,7 +7827,7 @@
             if (!typeEl || !inputEl) return;
             const searchType = typeEl.value;
             const searchString = inputEl.value.trim();
-            if (!searchString) { alert('Enter a search term.'); return; }
+            if (!searchString) { viperToast('Enter a search term.', 'error'); return; }
 
             openFmcsaDrawer();
             setFmcsaDrawerLoading(searchString);
@@ -8270,8 +8271,8 @@
             renderTabContent('cargo');
         }
 
-        function deleteCargoItem(index) {
-            if (!confirm('Delete this cargo/merchandise item?')) return;
+        async function deleteCargoItem(index) {
+            if (!await viperConfirm('Delete this cargo/merchandise item?', {danger:true, okText:'Delete'})) return;
             cargoItems.splice(index, 1);
             saveCargo();
             currentCargoView = null;
@@ -8592,8 +8593,8 @@
             }
         }
         
-        function deleteWitness(index) {
-            if (confirm('Are you sure you want to delete this witness?')) {
+        async function deleteWitness(index) {
+            if (await viperConfirm('Are you sure you want to delete this witness?', {danger:true, okText:'Delete'})) {
                 witnesses.splice(index, 1);
                 saveWitnesses();
                 currentWitnessView = null;
@@ -8798,7 +8799,7 @@
             }
             
             if (witnessesToExport.length === 0) {
-                alert('Please select at least one witness to export');
+                viperToast('Please select at least one witness to export', 'error');
                 return;
             }
             
@@ -9249,8 +9250,8 @@
             showRecoveredVehicleModal(index);
         }
         
-        function deleteRecoveredVehicle(index) {
-            if (confirm('Are you sure you want to delete this recovered vehicle?')) {
+        async function deleteRecoveredVehicle(index) {
+            if (await viperConfirm('Are you sure you want to delete this recovered vehicle?', {danger:true, okText:'Delete'})) {
                 recoveredVehicles.splice(index, 1);
                 saveRecoveredVehicles();
                 currentRecoveredVehicleView = null;
@@ -9420,7 +9421,7 @@
             }
             
             if (vehiclesToExport.length === 0) {
-                alert('Please select at least one vehicle to export');
+                viperToast('Please select at least one vehicle to export', 'error');
                 return;
             }
             
@@ -10146,8 +10147,8 @@
             };
         }
         
-        function deleteMissingPersonLocation(personIndex, locIndex) {
-            if (confirm('Are you sure you want to delete this location?')) {
+        async function deleteMissingPersonLocation(personIndex, locIndex) {
+            if (await viperConfirm('Are you sure you want to delete this location?', {danger:true, okText:'Delete'})) {
                 const person = missingPersons[personIndex];
                 person.locations.splice(locIndex, 1);
                 saveMissingPersons();
@@ -10208,7 +10209,7 @@
         
         async function geocodeAndAddToMap(personIndex, locationType, address, name, label) {
             if (!address || address === 'N/A') {
-                alert('No address to geocode');
+                viperToast('No address to geocode', 'info');
                 return;
             }
             
@@ -10259,7 +10260,7 @@
                 // Center map on marker
                 map.setView([result.lat, result.lon], 13);
             } else {
-                alert('Could not geocode address. Please check the address format.');
+                viperToast('Could not geocode address. Please check the address format.', 'info');
             }
         }
         
@@ -10288,7 +10289,7 @@
                 const result = await geocodeAddress(loc.address);
                 if (!result) {
                     if (loading) loading.classList.add('hidden');
-                    alert('Could not geocode address. Try adding lat/long coordinates manually.');
+                    viperToast('Could not geocode address. Try adding lat/long coordinates manually.', 'info');
                     return;
                 }
                 lat = result.lat;
@@ -10296,7 +10297,7 @@
                 display_name = result.display_name;
             } else {
                 if (loading) loading.classList.add('hidden');
-                alert('No address or coordinates available');
+                viperToast('No address or coordinates available', 'info');
                 return;
             }
             
@@ -10335,7 +10336,7 @@
             const person = missingPersons[personIndex];
             
             if (!person.locations || person.locations.length === 0) {
-                alert('No locations to plot. Click "Add Location" to begin.');
+                viperToast('No locations to plot. Click "Add Location" to begin.', 'info');
                 return;
             }
             
@@ -10380,7 +10381,7 @@
             if (loading) loading.classList.add('hidden');
             
             if (locations.length === 0) {
-                alert('No locations could be geocoded. Try adding lat/long coordinates manually.');
+                viperToast('No locations could be geocoded. Try adding lat/long coordinates manually.', 'info');
                 return;
             }
             
@@ -10416,7 +10417,7 @@
                 map.setView([locations[0].lat, locations[0].lon], 15);
             }
             
-            alert(`Successfully plotted ${locations.length} out of ${person.locations.length} locations on the map`);
+            viperToast(`Successfully plotted ${locations.length} out of ${person.locations.length} locations on the map`, 'success');
         }
         
         // Legacy function for backward compatibility with old data
@@ -10491,7 +10492,7 @@
             if (loading) loading.classList.add('hidden');
             
             if (locations.length === 0) {
-                alert('No addresses could be geocoded');
+                viperToast('No addresses could be geocoded', 'info');
                 return;
             }
             
@@ -11126,8 +11127,8 @@
             }
         }
 
-        function deleteMissingPerson(index) {
-            if (confirm('Are you sure you want to delete this missing person record?')) {
+        async function deleteMissingPerson(index) {
+            if (await viperConfirm('Are you sure you want to delete this missing person record?', {danger:true, okText:'Delete'})) {
                 missingPersons.splice(index, 1);
                 saveMissingPersons();
                 backToMissingPersonsList();
@@ -11191,7 +11192,7 @@
             const locatedNotes = document.getElementById('locatedNotes').value.trim();
             
             if (!dateLocated || !locatedNotes) {
-                alert('Please fill in all fields');
+                viperToast('Please fill in all fields', 'error');
                 return;
             }
             
@@ -12252,8 +12253,8 @@
             }
         }
 
-        function removeVehiclePhoto(personIndex, vehIdx, photoIdx) {
-            if (confirm('Remove this photo?')) {
+        async function removeVehiclePhoto(personIndex, vehIdx, photoIdx) {
+            if (await viperConfirm('Remove this photo?', {danger:true, okText:'Delete'})) {
                 missingPersons[personIndex].vehicles[vehIdx].photos.splice(photoIdx, 1);
                 saveMissingPersons();
                 // Refresh the modal
@@ -12262,8 +12263,8 @@
             }
         }
 
-        function deleteMissingPersonVehicle(personIndex, vehIdx) {
-            if (confirm('Are you sure you want to delete this vehicle?')) {
+        async function deleteMissingPersonVehicle(personIndex, vehIdx) {
+            if (await viperConfirm('Are you sure you want to delete this vehicle?', {danger:true, okText:'Delete'})) {
                 missingPersons[personIndex].vehicles.splice(vehIdx, 1);
                 saveMissingPersons();
                 renderTabContent('missingpersons');
@@ -12432,7 +12433,7 @@
             if (loading) loading.classList.add('hidden');
             
             if (locations.length === 0) {
-                alert('No addresses could be geocoded');
+                viperToast('No addresses could be geocoded', 'info');
                 return;
             }
             
@@ -12517,7 +12518,7 @@
                 canvasMap.setView([locations[0].lat, locations[0].lon], 15);
             }
             
-            alert(`Successfully plotted ${locations.length} out of ${canvasData.length} locations on the map`);
+            viperToast(`Successfully plotted ${locations.length} out of ${canvasData.length} locations on the map`, 'success');
         }
 
         function renderAreaCanvasTab() {
@@ -12901,12 +12902,12 @@
             if (modal) modal.remove();
         }
 
-        function processCanvasCSV() {
+        async function processCanvasCSV() {
             const fileInput = document.getElementById('csvFileInput');
             const file = fileInput.files[0];
             
             if (!file) {
-                alert('Please select a CSV file');
+                viperToast('Please select a CSV file', 'error');
                 return;
             }
             
@@ -12919,7 +12920,7 @@
                 const lines = text.split('\n').filter(line => line.trim());
                 
                 if (lines.length < 2) {
-                    alert('CSV file appears to be empty');
+                    viperToast('CSV file appears to be empty', 'info');
                     return;
                 }
                 
@@ -12963,7 +12964,7 @@
                 }
                 
                 if (newData.length === 0) {
-                    alert('No valid data found in CSV file');
+                    viperToast('No valid data found in CSV file', 'info');
                     return;
                 }
                 
@@ -13011,7 +13012,7 @@
                     message = `Add ${newData.length} new entries to existing ${canvasData.length} entries?\n\n⚠️ This may create duplicates if addresses already exist.`;
                 }
                 
-                if (confirm(message)) {
+                if (await viperConfirm(message)) {
                     canvasData = finalData;
                     saveCanvasData();
                     closeCanvasUploadModal();
@@ -13019,7 +13020,7 @@
                     
                     // Show success message
                     setTimeout(() => {
-                        alert(`✓ Import successful!\n\nTotal canvas entries: ${canvasData.length}`);
+                        viperToast(`✓ Import successful!\n\nTotal canvas entries: ${canvasData.length}`, 'success');
                     }, 100);
                 }
             };
@@ -13321,8 +13322,8 @@
             renderTabContent('areacanvas');
         }
 
-        function deleteCanvasLocation(index) {
-            if (confirm('Are you sure you want to delete this canvas entry?')) {
+        async function deleteCanvasLocation(index) {
+            if (await viperConfirm('Are you sure you want to delete this canvas entry?', {danger:true, okText:'Delete'})) {
                 canvasData.splice(index, 1);
                 saveCanvasData();
                 backToCanvasList();
@@ -13336,7 +13337,7 @@
                 console.log('window.html2canvas:', window.html2canvas);
                 
                 if (!window.jspdf) {
-                    alert('PDF library not loaded. Please refresh the page and try again.\n\nIf using Tauri, this may be a script loading issue.');
+                    viperToast('PDF library not loaded. Please refresh the page and try again.\n\nIf using Tauri, this may be a script loading issue.', 'info');
                     console.error('window.jspdf is not defined');
                     return;
                 }
@@ -13345,7 +13346,7 @@
                 const { jsPDF } = window.jspdf;
                 
                 if (!jsPDF) {
-                    alert('jsPDF constructor not found. Please refresh the page.');
+                    viperToast('jsPDF constructor not found. Please refresh the page.', 'error');
                     console.error('jsPDF constructor not found in window.jspdf');
                     return;
                 }
@@ -13582,7 +13583,7 @@
             
             } catch (error) {
                 console.error('Error generating PDF:', error);
-                alert('Error generating PDF report: ' + error.message + '\n\nCheck the browser console for details.');
+                viperToast('Error generating PDF report: ' + error.message + '\n\nCheck the browser console for details.', 'error');
             }
         }
 
@@ -13818,8 +13819,8 @@
             prosecutionData.charges[index][field] = value;
         }
 
-        function removeCharge(index) {
-            if (confirm('Remove this charge?')) {
+        async function removeCharge(index) {
+            if (await viperConfirm('Remove this charge?', {danger:true, okText:'Delete'})) {
                 prosecutionData.charges.splice(index, 1);
                 saveProsecutionData();
                 if (document.getElementById('prosecutionModal')) {
@@ -14301,8 +14302,8 @@
             renderTabContent('narcotics');
         }
 
-        function deleteNarcotic(index) {
-            if (confirm('Are you sure you want to delete this narcotic entry?')) {
+        async function deleteNarcotic(index) {
+            if (await viperConfirm('Are you sure you want to delete this narcotic entry?', {danger:true, okText:'Delete'})) {
                 narcotics.splice(index, 1);
                 saveNarcotics();
                 backToNarcoticsList();
@@ -14749,8 +14750,8 @@
             renderTabContent('firearms');
         }
 
-        function deleteFirearm(index) {
-            if (confirm('Are you sure you want to delete this firearm?')) {
+        async function deleteFirearm(index) {
+            if (await viperConfirm('Are you sure you want to delete this firearm?', {danger:true, okText:'Delete'})) {
                 firearms.splice(index, 1);
                 saveFirearms();
                 backToFirearmsList();
@@ -15205,8 +15206,8 @@
             renderTabContent('money');
         }
 
-        function deleteMoney(index) {
-            if (confirm('Are you sure you want to delete this money seizure?')) {
+        async function deleteMoney(index) {
+            if (await viperConfirm('Are you sure you want to delete this money seizure?', {danger:true, okText:'Delete'})) {
                 moneySeized.splice(index, 1);
                 saveMoneySeized();
                 backToMoneyList();
@@ -15348,7 +15349,7 @@
             const file = fileInput.files[0];
             
             if (!file) {
-                alert('Please select a file');
+                viperToast('Please select a file', 'error');
                 return;
             }
 
@@ -15465,8 +15466,8 @@
             renderTabContent('opsplan');
         }
 
-        function deleteOpsPlan(index) {
-            if (confirm('Are you sure you want to delete this operations plan?')) {
+        async function deleteOpsPlan(index) {
+            if (await viperConfirm('Are you sure you want to delete this operations plan?', {danger:true, okText:'Delete'})) {
                 opsPlans.splice(index, 1);
                 saveOpsPlans();
                 renderTabContent('opsplan');
@@ -15720,7 +15721,7 @@
             const query = document.getElementById('wigleQuery').value.trim();
 
             if (!query) {
-                alert('Please enter a search query');
+                viperToast('Please enter a search query', 'error');
                 return;
             }
 
@@ -15985,8 +15986,8 @@
             }
         }
 
-        function deleteQuery(queryId) {
-            if (!confirm('Delete this query from history?')) return;
+        async function deleteQuery(queryId) {
+            if (!await viperConfirm('Delete this query from history?', {danger:true, okText:'Delete'})) return;
 
             const networkData = loadNetworkIntelligenceData();
             networkData.queries = networkData.queries.filter(q => q.id !== queryId);
@@ -15994,8 +15995,8 @@
             renderQueryHistory();
         }
 
-        function clearQueryHistory() {
-            if (!confirm('Clear all query history for this case?')) return;
+        async function clearQueryHistory() {
+            if (!await viperConfirm('Clear all query history for this case?', {danger:true, okText:'Delete'})) return;
 
             saveNetworkIntelligenceData({ queries: [] });
             renderQueryHistory();
@@ -16039,7 +16040,7 @@
             const availableTools = investigativeTools.filter(m => !currentCase.modules.includes(m.id));
 
             if (availableCaseMgmt.length === 0 && availableTools.length === 0) {
-                alert('All available modules have been added to this case!');
+                viperToast('All available modules have been added to this case!', 'success');
                 return;
             }
 
@@ -16144,7 +16145,7 @@
             const selectedModules = Array.from(checkboxes).map(cb => cb.value);
 
             if (selectedModules.length === 0) {
-                alert('Please select at least one module to add');
+                viperToast('Please select at least one module to add', 'error');
                 return;
             }
 
@@ -16168,7 +16169,7 @@
             renderTabs();
 
             // Show success message
-            alert(`Successfully added ${selectedModules.length} module(s) to this case!`);
+            viperToast(`Successfully added ${selectedModules.length} module(s, 'success') to this case!`);
         }
         
         function toggleOverviewEdit() {
@@ -19048,8 +19049,8 @@
             }
         }
 
-        function deleteRmsImport(index) {
-            if (!confirm('Remove this imported RMS report?')) return;
+        async function deleteRmsImport(index) {
+            if (!await viperConfirm('Remove this imported RMS report?', {danger:true, okText:'Delete'})) return;
             rmsImports.splice(index, 1);
             saveRmsImports(rmsImports);
             currentRmsView = null;
@@ -19434,7 +19435,7 @@
             </div>`;
         }
 
-        function handleTraceFileImport() {
+        async function handleTraceFileImport() {
             const input = document.createElement('input');
             input.type = 'file';
             input.accept = '.json';
@@ -19487,7 +19488,7 @@
                         // Check for duplicate import (same case_ref)
                         const existingIdx = imports.findIndex(i => i.case?.case_ref === importRecord.case?.case_ref);
                         if (existingIdx >= 0) {
-                            if (!confirm(`TRACE case ${importRecord.case.case_ref} has already been imported. Replace it?`)) {
+                            if (!await viperConfirm(`TRACE case ${importRecord.case.case_ref} has already been imported. Replace it?`)) {
                                 continue;
                             }
                             imports[existingIdx] = importRecord;
@@ -19503,7 +19504,7 @@
                 }
 
                 if (errors.length) {
-                    alert('Import errors:\n' + errors.join('\n'));
+                    viperToast('Import errors:\n' + errors.join('\n', 'error'));
                 }
                 if (imported > 0) {
                     showToast(`Imported ${imported} TRACE package${imported !== 1 ? 's' : ''}`, 'success');
@@ -19514,10 +19515,10 @@
             input.click();
         }
 
-        function deleteTraceImport(idx) {
+        async function deleteTraceImport(idx) {
             const imports = getTraceImports();
             const imp = imports[idx];
-            if (!confirm(`Remove imported TRACE case "${imp.case?.case_ref || 'Unknown'}" from this case?`)) return;
+            if (!await viperConfirm(`Remove imported TRACE case "${imp.case?.case_ref || 'Unknown'}" from this case?`, {danger:true, okText:'Delete'})) return;
             imports.splice(idx, 1);
             saveTraceImports(imports);
             renderTabContent('traceImport');
@@ -19803,7 +19804,7 @@
         function viewTraceEvidence(importIdx, evidenceIdx) {
             const imports = getTraceImports();
             const ev = imports[importIdx]?.evidence?.[evidenceIdx];
-            if (!ev || !ev.data) { alert('No image data embedded in this evidence file.'); return; }
+            if (!ev || !ev.data) { viperToast('No image data embedded in this evidence file.', 'info'); return; }
 
             const mimeType = ev.file_type || 'image/jpeg';
             const imgSrc = 'data:' + mimeType + ';base64,' + ev.data;
@@ -19838,7 +19839,7 @@
         function downloadTraceEvidence(importIdx, evidenceIdx) {
             const imports = getTraceImports();
             const ev = imports[importIdx]?.evidence?.[evidenceIdx];
-            if (!ev || !ev.data) { alert('No file data available for this evidence item.'); return; }
+            if (!ev || !ev.data) { viperToast('No file data available for this evidence item.', 'info'); return; }
 
             const mimeType = ev.file_type || 'application/octet-stream';
             const byteString = atob(ev.data);
@@ -20087,8 +20088,8 @@
             closeImportApertureModal();
         }
 
-        function deleteApertureResult(index) {
-            if (!confirm('Are you sure you want to remove this Aperture result from the case?')) {
+        async function deleteApertureResult(index) {
+            if (!await viperConfirm('Are you sure you want to remove this Aperture result from the case?', {danger:true, okText:'Delete'})) {
                 return;
             }
 
@@ -20281,7 +20282,7 @@
 
     async function executeTraceSearch() {
         const reason = document.getElementById('tsReason').value.trim();
-        if (!reason) { alert('A reason for search is required (audit compliance).'); return; }
+        if (!reason) { viperToast('A reason for search is required (audit compliance, 'info').'); return; }
 
         const fields = {
             plate: document.getElementById('tsPlate').value.trim(),
@@ -20298,7 +20299,7 @@
 
         // Check at least one field
         const hasValue = Object.values(fields).some(v => v.length > 0);
-        if (!hasValue) { alert('Enter at least one search token.'); return; }
+        if (!hasValue) { viperToast('Enter at least one search token.', 'error'); return; }
 
         const btn = document.getElementById('tsSearchBtn');
         const resultsEl = document.getElementById('traceSearchResults');
@@ -20385,7 +20386,7 @@
     // ── Scan functions for TRACE imports and Cargo module ─────────
     async function scanTraceImports() {
         if (!TraceSearch.isEnabled() || !TraceSearch.isRegistered()) {
-            alert('Enable and register TRACE Network Search in Settings first.');
+            viperToast('Enable and register TRACE Network Search in Settings first.', 'info');
             return;
         }
 
@@ -20410,7 +20411,7 @@
         }
 
         if (allTokens.length === 0) {
-            alert('No searchable tokens found in TRACE imports for this case.');
+            viperToast('No searchable tokens found in TRACE imports for this case.', 'error');
             return;
         }
 
@@ -20439,7 +20440,7 @@
 
     async function scanCargoNetwork() {
         if (!TraceSearch.isEnabled() || !TraceSearch.isRegistered()) {
-            alert('Enable and register TRACE Network Search in Settings first.');
+            viperToast('Enable and register TRACE Network Search in Settings first.', 'info');
             return;
         }
 
@@ -20469,7 +20470,7 @@
         });
 
         if (allTokens.length === 0) {
-            alert('No searchable tokens found in cargo/suspects/vehicles for this case.');
+            viperToast('No searchable tokens found in cargo/suspects/vehicles for this case.', 'error');
             return;
         }
 
@@ -20490,7 +20491,7 @@
 
     async function scanAllCasesTrace() {
         if (!TraceSearch.isEnabled() || !TraceSearch.isRegistered()) {
-            alert('Enable and register TRACE Network Search in Settings first.');
+            viperToast('Enable and register TRACE Network Search in Settings first.', 'info');
             return;
         }
 

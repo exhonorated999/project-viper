@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' data: https:; connect-src 'self' http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://api.genlogs.io https://trace-broker-production.up.railway.app; font-src 'self' data:; frame-src https: http:;">
     <title>V.I.P.E.R. - Dashboard</title>
+    <script src="modules/viper-ui.js"></script>
     <script src="modules/licensing.js"></script>
     <script src="modules/genlogs-api.js"></script>
     <script src="modules/trace-search-api.js"></script>
@@ -1713,7 +1714,7 @@
                 if (tempQuickStatsPreferences.length < 4) {
                     tempQuickStatsPreferences.push(metric);
                 } else {
-                    alert('You can only select 4 metrics for Quick Stats');
+                    viperToast('You can only select 4 metrics for Quick Stats', 'info');
                     // Don't re-render, just return - the checkbox will stay unchecked
                     return;
                 }
@@ -1746,7 +1747,7 @@
         
         function saveQuickStatsConfig() {
             if (tempQuickStatsPreferences.length !== 4) {
-                alert('Please select exactly 4 metrics');
+                viperToast('Please select exactly 4 metrics', 'error');
                 return;
             }
             
@@ -1816,7 +1817,7 @@
             // Check for duplicate case number
             const existing = cases.find(c => c.caseNumber === meta.caseNumber);
             if (existing) {
-                if (!confirm(`Case ${meta.caseNumber} already exists locally. Importing will REPLACE its data. Continue?`)) return;
+                if (!await viperConfirm(`Case ${meta.caseNumber} already exists locally. Importing will REPLACE its data. Continue?`)) return;
                 const idx = cases.indexOf(existing);
                 if (idx !== -1) cases.splice(idx, 1);
             }
@@ -1863,7 +1864,7 @@
             }
 
             const count = backupCases.length;
-            if (!confirm(`This backup contains ${count} case(s). Importing will merge them with your existing data. Any cases with the same case number will be replaced.\n\nContinue?`)) return;
+            if (!await viperConfirm(`This backup contains ${count} case(s). Importing will merge them with your existing data. Any cases with the same case number will be replaced.\n\nContinue?`)) return;
 
             let imported = 0;
 
@@ -1953,7 +1954,7 @@
                 
                 // Check if case number already exists
                 if (cases.find(c => c.caseNumber === caseNumber)) {
-                    alert('A case with this number already exists. Please use a different case number.');
+                    viperToast('A case with this number already exists. Please use a different case number.', 'warning');
                     return;
                 }
                 
@@ -2041,7 +2042,7 @@
                 .map(cb => cb.value);
             
             if (selectedSections.length === 0) {
-                alert('Please select at least one section to include in the report');
+                viperToast('Please select at least one section to include in the report', 'error');
                 return;
             }
             
@@ -2387,7 +2388,7 @@
             
             // Show success message
             setTimeout(() => {
-                alert('Report generated successfully! The PDF has been downloaded and will open shortly.');
+                viperToast('Report generated successfully! The PDF has been downloaded and will open shortly.', 'success');
                 closeGenerateReportModal();
             }, 500);
         }
@@ -2444,7 +2445,7 @@
                 document.getElementById('fileInfo').classList.remove('hidden');
                 document.getElementById('fileButtonText').textContent = 'Change PDF';
             } else if (file) {
-                alert('Please select a PDF file');
+                viperToast('Please select a PDF file', 'error');
                 event.target.value = '';
             }
         }
@@ -2633,8 +2634,8 @@
             }
         }
         
-        function deleteTask(taskId) {
-            if (confirm('Are you sure you want to delete this task?')) {
+        async function deleteTask(taskId) {
+            if (await viperConfirm('Are you sure you want to delete this task?', {danger:true, okText:'Delete'})) {
                 tasks = tasks.filter(t => t.id !== taskId);
                 localStorage.setItem('viperTasks', JSON.stringify(tasks));
                 renderTasks();
@@ -3262,7 +3263,7 @@
             if (!typeEl || !inputEl) return;
             const searchType = typeEl.value;
             const searchString = inputEl.value.trim();
-            if (!searchString) { alert('Enter a search term.'); return; }
+            if (!searchString) { viperToast('Enter a search term.', 'error'); return; }
 
             openFmcsaDrawer();
             setFmcsaDrawerLoading(searchString);
@@ -3449,7 +3450,7 @@
 
         async function traceDashSearch() {
             const reason = document.getElementById('tdReason').value.trim();
-            if (!reason) { alert('A reason for search is required (audit compliance).'); return; }
+            if (!reason) { viperToast('A reason for search is required (audit compliance, 'info').'); return; }
 
             const plate = document.getElementById('tdPlate').value.trim();
             const plateState = document.getElementById('tdPlateState').value.trim();
@@ -3458,7 +3459,7 @@
             const bolCdl = document.getElementById('tdBolCdl').value.trim();
 
             if (!plate && !name && !mc && !bolCdl) {
-                alert('Enter at least one search field.'); return;
+                viperToast('Enter at least one search field.', 'error'); return;
             }
 
             const fields = { plate, plateState, firstName: '', lastName: '', mc, bol: '', cdl: '' };
@@ -3495,7 +3496,7 @@
 
         async function traceDashScanAll() {
             if (typeof TraceSearch === 'undefined' || !TraceSearch.isEnabled() || !TraceSearch.isRegistered()) {
-                alert('Enable and register TRACE Network Search in Settings first.'); return;
+                viperToast('Enable and register TRACE Network Search in Settings first.', 'info'); return;
             }
 
             const resultsEl = document.getElementById('tdResults');
@@ -3744,7 +3745,7 @@
             }
         }
         
-        function showNotifications() {
+        async function showNotifications() {
             const allWarrants = JSON.parse(localStorage.getItem('viperCaseWarrants')) || {};
             const allCases = JSON.parse(localStorage.getItem('viperCases')) || [];
             const overdueWarrants = [];
@@ -3767,7 +3768,7 @@
             const glAlerts = glEnabled ? JSON.parse(localStorage.getItem('genlogsAlerts') || '[]') : [];
             
             if (overdueWarrants.length === 0 && glAlerts.length === 0) {
-                alert('No notifications');
+                viperToast('No notifications', 'info');
                 return;
             }
             
@@ -3791,14 +3792,14 @@
             }
             
             if (overdueWarrants.length > 0) {
-                if (confirm(message + '\n\nGo to warrants to review?')) {
+                if (await viperConfirm(message + '\n\nGo to warrants to review?')) {
                     if (overdueWarrants[0].caseId) {
                         localStorage.setItem('currentCaseId', overdueWarrants[0].caseId);
                         window.location.href = 'case-detail-with-analytics.html';
                     }
                 }
             } else {
-                alert(message);
+                viperToast(message, 'info');
             }
         }
 
@@ -4048,7 +4049,7 @@
         async function exportOffenseList() {
             loadOffenses();
             if (offenses.length === 0) {
-                alert('No offenses to export.');
+                viperToast('No offenses to export.', 'info');
                 return;
             }
             const exportData = {
@@ -4072,11 +4073,11 @@
             try {
                 parsed = JSON.parse(raw);
                 if (!parsed.offenses || !Array.isArray(parsed.offenses)) {
-                    alert('Invalid offense reference file.');
+                    viperToast('Invalid offense reference file.', 'error');
                     return;
                 }
             } catch (e) {
-                alert('Failed to parse offense file: ' + e.message);
+                viperToast('Failed to parse offense file: ' + e.message, 'error');
                 return;
             }
             // Show import options modal
@@ -4652,8 +4653,8 @@
             }
         }
 
-        function deleteOffense(index) {
-            if (confirm('Are you sure you want to delete this offense?')) {
+        async function deleteOffense(index) {
+            if (await viperConfirm('Are you sure you want to delete this offense?', {danger:true, okText:'Delete'})) {
                 offenses.splice(index, 1);
                 saveOffenses();
                 

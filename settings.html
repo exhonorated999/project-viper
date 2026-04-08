@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' data:; connect-src 'self' http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://api.wigle.net https://api.genlogs.io https://trace-broker-production.up.railway.app; font-src 'self' data:; frame-src https: http:;">
     <title>V.I.P.E.R. - Settings</title>
+    <script src="modules/viper-ui.js"></script>
     <script src="modules/licensing.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -1406,7 +1407,7 @@
         }
 
         async function doNewRecoveryKey() {
-            if (!confirm('This will invalidate your current recovery key. Continue?')) return;
+            if (!await viperConfirm('This will invalidate your current recovery key. Continue?')) return;
             try {
                 const result = await window.electronAPI.securityNewRecoveryKey();
                 if (result.success) {
@@ -1422,7 +1423,7 @@
         }
 
         async function doDisableSecurity() {
-            if (!confirm('This will disable encryption and decrypt your vault. Your case data will be stored unencrypted. Continue?')) return;
+            if (!await viperConfirm('This will disable encryption and decrypt your vault. Your case data will be stored unencrypted. Continue?')) return;
             try {
                 const result = await window.electronAPI.securityDisable();
                 if (result.success) {
@@ -1606,7 +1607,7 @@
         }
 
         async function restoreBackup() {
-            if (!confirm('Restoring from backup will replace all current data. Are you sure you want to continue?')) {
+            if (!await viperConfirm('Restoring from backup will replace all current data. Are you sure you want to continue?')) {
                 return;
             }
 
@@ -2277,8 +2278,8 @@
         if (text) text.textContent = status.label;
     }
 
-    function clearGenlogsCredentials() {
-        if (!confirm('Clear all GenLogs credentials and disconnect?')) return;
+    async function clearGenlogsCredentials() {
+        if (!await viperConfirm('Clear all GenLogs credentials and disconnect?', {danger:true, okText:'Delete'})) return;
         GenLogs.clearCredentials();
         document.getElementById('genlogsApiKeyInput').value = '';
         document.getElementById('genlogsEmailInput').value = '';
@@ -2312,7 +2313,7 @@
         if (!TraceSearch.isEnabled()) {
             const licStatus = typeof getLicenseStatus === 'function' ? getLicenseStatus() : null;
             if (licStatus && (licStatus.licenseType === 'demo' || licStatus.status === 'demo' || licStatus.status === 'demo_expired')) {
-                alert('TRACE Network Search requires a full VIPER license (not demo).');
+                viperToast('TRACE Network Search requires a full VIPER license (not demo, 'info').');
                 return;
             }
         }
@@ -2422,19 +2423,19 @@
         try {
             const result = await TraceSearch.checkStatus();
             if (result.status === 'active') {
-                alert('✅ TRACE connection is active.');
+                viperToast('✅ TRACE connection is active.', 'info');
             } else {
-                alert('⚠️ TRACE connection issue: ' + (result.message || result.status));
+                viperToast('⚠️ TRACE connection issue: ' + (result.message || result.status, 'info'));
             }
         } catch (e) {
-            alert('❌ Connection failed: ' + e.message);
+            viperToast('❌ Connection failed: ' + e.message, 'error');
         }
     }
 
     function viewTraceAuditLog() {
         const log = TraceSearch.getAuditLog();
         if (log.length === 0) {
-            alert('No search activity logged yet.');
+            viperToast('No search activity logged yet.', 'error');
             return;
         }
         // Open audit modal
@@ -2492,8 +2493,8 @@
         URL.revokeObjectURL(url);
     }
 
-    function disconnectTrace() {
-        if (!confirm('Disconnect from TRACE Network? You will need to re-register to use this feature again.')) return;
+    async function disconnectTrace() {
+        if (!await viperConfirm('Disconnect from TRACE Network? You will need to re-register to use this feature again.')) return;
         TraceSearch.disconnect();
         updateTraceToggleUI();
         document.getElementById('traceRegPanel').style.display = 'none';

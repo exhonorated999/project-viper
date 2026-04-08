@@ -127,6 +127,7 @@ function createWindow() {
       contextIsolation: true,
       webSecurity: true,
       webviewTag: true,
+      backgroundThrottling: false,
       preload: path.join(__dirname, 'preload.js')
     },
     title: 'VIPER - Network Intelligence',
@@ -146,6 +147,16 @@ function createWindow() {
   mainWindow.on('focus', () => {
     mainWindow.webContents.focus();
   });
+
+  // Force focus back after native dialogs (file pickers, save dialogs)
+  function restoreFocus() {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      setTimeout(() => {
+        mainWindow.focus();
+        mainWindow.webContents.focus();
+      }, 100);
+    }
+  }
 
   // Gate on security — show login page or main app
   if (security && security.isEnabled()) {
@@ -540,6 +551,7 @@ ipcMain.handle('select-backup-directory', async () => {
     title: 'Select Backup Destination',
     properties: ['openDirectory']
   });
+  restoreFocus();
   if (result.canceled || !result.filePaths.length) return null;
   return result.filePaths[0];
 });
@@ -562,6 +574,7 @@ ipcMain.handle('select-backup-file', async () => {
     properties: ['openFile'],
     filters: [{ name: 'VIPER Backup', extensions: ['json'] }]
   });
+  restoreFocus();
   if (result.canceled || !result.filePaths.length) return null;
   return result.filePaths[0];
 });
@@ -625,6 +638,7 @@ ipcMain.handle('select-rms-files', async () => {
     properties: ['openFile', 'multiSelections'],
     filters: [{ name: 'PDF Reports', extensions: ['pdf'] }]
   });
+  restoreFocus();
   if (result.canceled || !result.filePaths.length) return null;
   return result.filePaths;
 });
@@ -653,6 +667,7 @@ ipcMain.handle('save-case-export', async (event, { fileName, data }) => {
     defaultPath: fileName,
     filters: [{ name: 'VIPER Case Package', extensions: ['vcase'] }]
   });
+  restoreFocus();
   if (result.canceled || !result.filePath) return null;
   const buf = Buffer.from(data, 'utf-8');
   if (security && security.isEnabled() && security.isUnlocked()) {
@@ -670,6 +685,7 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber 
     defaultPath: fileName,
     filters: [{ name: 'ZIP Archive', extensions: ['zip'] }]
   });
+  restoreFocus();
   if (result.canceled || !result.filePath) return null;
 
   // Collect evidence files for this case
@@ -750,6 +766,7 @@ ipcMain.handle('open-case-import', async () => {
       { name: 'VIPER Backup', extensions: ['json'] }
     ]
   });
+  restoreFocus();
   if (result.canceled || !result.filePaths.length) return null;
   const raw = fs.readFileSync(result.filePaths[0]);
   if (security && security.isUnlocked() && security.isEncryptedBuffer(raw)) {
@@ -765,6 +782,7 @@ ipcMain.handle('save-offense-export', async (event, { fileName, data }) => {
     defaultPath: fileName,
     filters: [{ name: 'VIPER Offense List', extensions: ['voffenses'] }]
   });
+  restoreFocus();
   if (result.canceled || !result.filePath) return null;
   fs.writeFileSync(result.filePath, data, 'utf-8');
   return result.filePath;
@@ -776,6 +794,7 @@ ipcMain.handle('open-offense-import', async () => {
     properties: ['openFile'],
     filters: [{ name: 'VIPER Offense List', extensions: ['voffenses'] }]
   });
+  restoreFocus();
   if (result.canceled || !result.filePaths.length) return null;
   return fs.readFileSync(result.filePaths[0], 'utf-8');
 });

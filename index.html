@@ -122,10 +122,10 @@
         
         // Dashboard metrics data
         const dashboardMetrics = {
-            'arrests': { value: 0, subtitle: 'This month', color: 'viper-orange' },
+            'arrests': { value: 0, subtitle: 'Suspects arrested', color: 'viper-orange' },
             'recovered_guns': { value: 0, subtitle: 'Firearms secured', color: 'viper-cyan' },
             'recovered_vehicles': { value: 0, subtitle: 'Vehicles recovered', color: 'viper-purple' },
-            'rescued_individuals': { value: 0, subtitle: 'Individuals rescued', color: 'viper-green' },
+            'rescued_individuals': { value: 0, subtitle: 'Not yet tracked', color: 'viper-green' },
             'located_missing': { value: 0, subtitle: 'Missing persons found', color: 'viper-cyan' },
             'new_cases_assigned': { value: 0, subtitle: 'This month', color: 'viper-cyan' },
             'cases_closed': { value: 0, subtitle: 'Cases resolved', color: 'viper-green' },
@@ -2722,6 +2722,18 @@
             return { totalValue, recoveredValue, lossValue: totalValue - recoveredValue };
         }
 
+        function getTotalArrests() {
+            const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            let total = 0;
+            cases.forEach(caseItem => {
+                const suspects = JSON.parse(localStorage.getItem(`suspects_${caseItem.id}`) || '[]');
+                suspects.forEach(s => { if (s.arrested) total++; });
+            });
+            // Also count closed-with-arrest cases that may not have suspect records
+            const arrestCases = cases.filter(c => c.status === 'closed-arrest').length;
+            return Math.max(total, arrestCases);
+        }
+
         function getNewCasesThisMonth() {
             const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
             const now = new Date();
@@ -3364,6 +3376,9 @@
             dashboardMetrics['cargo_recovered'].value = '$' + cargoStats.recoveredValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
             dashboardMetrics['cargo_loss'].value = '$' + cargoStats.lossValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
             
+            // Update arrests count
+            dashboardMetrics['arrests'].value = getTotalArrests();
+
             // Update case data on dashboard
             updateDashboardCaseData();
             

@@ -276,7 +276,8 @@ app.whenReady().then(async () => {
     mainWindow.addBrowserView(flockBrowserView);
     flockBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 }); // hidden
     flockBrowserView.setAutoResize({ width: false, height: false });
-    flockBrowserView.webContents.loadURL('https://search-2.flocksafety.com/');
+    // Don't load URL here — Electron suspends network I/O for zero-size views.
+    // URL will be loaded on first flock-set-visible(true) call.
 
     // Prevent Flock BrowserView from stealing focus + auto-fill credentials on login page
     flockBrowserView.webContents.on('did-finish-load', () => {
@@ -343,7 +344,8 @@ app.whenReady().then(async () => {
     mainWindow.addBrowserView(tloBrowserView);
     tloBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
     tloBrowserView.setAutoResize({ width: false, height: false });
-    tloBrowserView.webContents.loadURL('https://tloxp.tlo.com/');
+    // Don't load URL here — Electron suspends network I/O for zero-size views.
+    // URL will be loaded on first tlo-set-visible(true) call.
 
     // Prevent TLO BrowserView from stealing focus + auto-fill credentials on login page
     tloBrowserView.webContents.on('did-finish-load', () => {
@@ -1685,6 +1687,11 @@ ipcMain.on('flock-set-visible', (_event, visible) => {
   if (!flockBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
   flockViewVisible = visible;
   if (visible && lastFlockBounds) {
+    // Lazy-load Flock on first show (avoids ERR_NETWORK_IO_SUSPENDED)
+    const currentUrl = flockBrowserView.webContents.getURL();
+    if (!currentUrl || currentUrl === '' || currentUrl === 'about:blank') {
+      flockBrowserView.webContents.loadURL('https://search-2.flocksafety.com/');
+    }
     flockBrowserView.setBounds(lastFlockBounds);
   } else if (!visible) {
     flockBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
@@ -1762,6 +1769,11 @@ ipcMain.on('tlo-set-visible', (_event, visible) => {
   if (!tloBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
   tloViewVisible = visible;
   if (visible && lastTloBounds) {
+    // Lazy-load TLO on first show (avoids ERR_NETWORK_IO_SUSPENDED)
+    const currentUrl = tloBrowserView.webContents.getURL();
+    if (!currentUrl || currentUrl === '' || currentUrl === 'about:blank') {
+      tloBrowserView.webContents.loadURL('https://tloxp.tlo.com/');
+    }
     tloBrowserView.setBounds(lastTloBounds);
   } else if (!visible) {
     tloBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });

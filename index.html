@@ -2758,6 +2758,7 @@
             const closedWithArrestCases = cases.filter(c => c.status === 'closed-arrest');
             
             dashboardMetrics['open_cases'].value = activeCases.length;
+            dashboardMetrics['cases_closed'].value = closedCases.length + closedWithArrestCases.length;
             
             // Update case analytics section
             updateCaseAnalytics(activeCases.length, closedCases.length, closedWithArrestCases.length);

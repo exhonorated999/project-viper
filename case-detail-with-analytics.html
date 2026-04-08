@@ -2132,7 +2132,7 @@
                 } catch (e) {
                     console.error('DA export IPC failed, falling back to PDF download:', e);
                     doc.save(`${currentCase.caseNumber}_DA_Report_${new Date().toISOString().split('T')[0]}.pdf`);
-                    viperToast('Export complete! PDF downloaded (evidence files not bundled — requires desktop app, 'info').');
+                    viperToast('Export complete! PDF downloaded (evidence files not bundled — requires desktop app).', 'info');
                 }
             } else {
                 doc.save(`${currentCase.caseNumber}_DA_Report_${new Date().toISOString().split('T')[0]}.pdf`);
@@ -19504,7 +19504,7 @@
                 }
 
                 if (errors.length) {
-                    viperToast('Import errors:\n' + errors.join('\n', 'error'));
+                    viperToast('Import errors:\n' + errors.join('\n'), 'error');
                 }
                 if (imported > 0) {
                     showToast(`Imported ${imported} TRACE package${imported !== 1 ? 's' : ''}`, 'success');
@@ -20282,7 +20282,7 @@
 
     async function executeTraceSearch() {
         const reason = document.getElementById('tsReason').value.trim();
-        if (!reason) { viperToast('A reason for search is required (audit compliance, 'info').'); return; }
+        if (!reason) { viperToast('A reason for search is required (audit compliance).', 'info'); return; }
 
         const fields = {
             plate: document.getElementById('tsPlate').value.trim(),

@@ -3450,7 +3450,7 @@
 
         async function traceDashSearch() {
             const reason = document.getElementById('tdReason').value.trim();
-            if (!reason) { viperToast('A reason for search is required (audit compliance, 'info').'); return; }
+            if (!reason) { viperToast('A reason for search is required (audit compliance).', 'info'); return; }
 
             const plate = document.getElementById('tdPlate').value.trim();
             const plateState = document.getElementById('tdPlateState').value.trim();

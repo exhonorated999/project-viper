@@ -2075,10 +2075,16 @@
                 if (caseWarrants && caseWarrants.length > 0) {
                     itemHeading('Search Warrants');
                     caseWarrants.forEach((w, i) => {
-                        need(18);
-                        fieldBold(`${i + 1}. ${w.warrantType || 'Warrant'}`, '');
-                        fieldBold('   Location', w.location);
-                        fieldBold('   Executed', w.executionDate ? formatDate(w.executionDate) : 'Not executed');
+                        need(30);
+                        fieldBold(`${i + 1}. ${w.type || 'Warrant'}`, w.issuedTo ? `→ ${w.issuedTo}` : '');
+                        fieldBold('   Description', w.description);
+                        fieldBold('   Date Signed', w.dateSigned ? formatDate(w.dateSigned) : 'Not signed');
+                        fieldBold('   Date Served', w.dateServed ? formatDate(w.dateServed) : 'Not served');
+                        fieldBold('   Due Date', w.dueDate ? formatDate(w.dueDate) : 'None');
+                        fieldBold('   Return Received', w.returnReceived ? 'Yes' : 'No');
+                        if (w.hasWarrantFile) fieldBold('   Signed Warrant File', w.warrantFileName);
+                        if (w.hasProduction) fieldBold('   Production Files', `${w.productionFileCount} file(s)`);
+                        if (w.hasCourtReturn) fieldBold('   Court Return File', w.courtReturnFile?.name || 'Attached');
                         gap();
                     });
                 } else emptyMsg('No warrants recorded.');
@@ -4704,15 +4710,10 @@
         function handleWarrantFileSelect(event) {
             const file = event.target.files[0];
             if (file && file.type === 'application/pdf') {
-                // Convert to base64 data URL so it persists in localStorage
-                const reader = new FileReader();
-                reader.onload = () => {
-                    warrantFile = { name: file.name, dataUrl: reader.result };
-                    document.getElementById('warrantFileName').textContent = file.name;
-                    document.getElementById('warrantFileInfo').classList.remove('hidden');
-                    document.getElementById('warrantFileButtonText').textContent = 'Change warrant file';
-                };
-                reader.readAsDataURL(file);
+                warrantFile = file;  // keep raw File object for disk save
+                document.getElementById('warrantFileName').textContent = file.name;
+                document.getElementById('warrantFileInfo').classList.remove('hidden');
+                document.getElementById('warrantFileButtonText').textContent = 'Change warrant file';
             } else if (file) {
                 viperToast('Please select a PDF file', 'error');
                 event.target.value = '';
@@ -4726,7 +4727,7 @@
             document.getElementById('warrantFileButtonText').textContent = 'Click to upload signed warrant';
         }
         
-        function saveWarrant(event) {
+        async function saveWarrant(event) {
             event.preventDefault();
             
             const type = document.getElementById('warrantType').value;
@@ -4736,6 +4737,25 @@
             const dateServed = document.getElementById('warrantDateServed').value;
             const dueDate = document.getElementById('warrantDueDate').value;
             
+            // Save warrant PDF to disk if a new file was selected
+            let savedFilePath = null;
+            let savedFileName = null;
+            if (warrantFile) {
+                try {
+                    const arrayBuffer = await warrantFile.arrayBuffer();
+                    savedFilePath = await window.electronAPI.saveWarrantFile({
+                        caseNumber: currentCase.caseNumber,
+                        subfolder: 'Signed',
+                        fileName: warrantFile.name,
+                        fileData: Array.from(new Uint8Array(arrayBuffer))
+                    });
+                    savedFileName = warrantFile.name;
+                } catch (err) {
+                    viperToast('Failed to save warrant file: ' + err.message, 'error');
+                    return;
+                }
+            }
+
             if (editingWarrantId) {
                 const warrant = caseWarrants.find(w => w.id === editingWarrantId);
                 if (warrant) {
@@ -4747,10 +4767,10 @@
                     warrant.dueDate = dueDate;
                     warrant.lastModified = new Date().toISOString();
                     
-                    if (warrantFile) {
+                    if (savedFilePath) {
                         warrant.hasWarrantFile = true;
-                        warrant.warrantFileName = warrantFile.name;
-                        warrant.warrantFileUrl = warrantFile.dataUrl;
+                        warrant.warrantFileName = savedFileName;
+                        warrant.warrantFilePath = savedFilePath;
                     }
                 }
             } else {
@@ -4762,9 +4782,9 @@
                     dateSigned: dateSigned,
                     dateServed: dateServed,
                     dueDate: dueDate,
-                    hasWarrantFile: warrantFile !== null,
-                    warrantFileName: warrantFile ? warrantFile.name : null,
-                    warrantFileUrl: warrantFile ? warrantFile.dataUrl : null,
+                    hasWarrantFile: savedFilePath !== null,
+                    warrantFileName: savedFileName,
+                    warrantFilePath: savedFilePath,
                     returnReceived: false,
                     returnReceivedAt: null,
                     hasProduction: false,
@@ -4827,35 +4847,34 @@
             `;
             document.body.appendChild(modal);
 
-            const handleFiles = (files) => {
+            const handleFiles = async (files) => {
                 if (files.length === 0) return;
                 const warrant = caseWarrants.find(w => w.id === warrantId);
                 if (!warrant) return;
                 warrant.hasProduction = true;
                 warrant.productionFileCount = files.length;
-                // Convert all files to base64 data URLs for persistence
-                let converted = 0;
+                // Save all production files to disk
                 const results = [];
-                files.forEach((file, i) => {
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                        results[i] = {
-                            name: file.name,
-                            path: file.webkitRelativePath || file.name,
-                            size: file.size,
-                            type: file.type,
-                            url: reader.result
-                        };
-                        converted++;
-                        if (converted === files.length) {
-                            warrant.productionFiles = results;
-                            saveWarrantsToStorage();
-                            renderTabContent('warrants');
-                            showToast(`Uploaded ${files.length} production file(s)`, 'success');
-                        }
-                    };
-                    reader.readAsDataURL(file);
-                });
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    const arrayBuffer = await file.arrayBuffer();
+                    const savedPath = await window.electronAPI.saveWarrantFile({
+                        caseNumber: currentCase.caseNumber,
+                        subfolder: 'Production',
+                        fileName: file.name,
+                        fileData: Array.from(new Uint8Array(arrayBuffer))
+                    });
+                    results.push({
+                        name: file.name,
+                        path: savedPath,
+                        size: file.size,
+                        type: file.type
+                    });
+                }
+                warrant.productionFiles = results;
+                saveWarrantsToStorage();
+                renderTabContent('warrants');
+                showToast(`Uploaded ${files.length} production file(s)`, 'success');
             };
 
             document.getElementById('prodUploadFolder').onclick = () => {
@@ -4884,7 +4903,7 @@
             input.type = 'file';
             input.accept = '.pdf';
             
-            input.onchange = (e) => {
+            input.onchange = async (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
                 
@@ -4897,82 +4916,104 @@
                 if (!warrant) return;
                 
                 warrant.hasCourtReturn = true;
-                const reader = new FileReader();
-                reader.onload = () => {
-                    warrant.courtReturnFile = {
-                        name: file.name,
-                        size: file.size,
-                        url: reader.result
-                    };
-                    saveWarrantsToStorage();
-                    renderTabContent('warrants');
+                const arrayBuffer = await file.arrayBuffer();
+                const savedPath = await window.electronAPI.saveWarrantFile({
+                    caseNumber: currentCase.caseNumber,
+                    subfolder: 'CourtReturn',
+                    fileName: file.name,
+                    fileData: Array.from(new Uint8Array(arrayBuffer))
+                });
+                warrant.courtReturnFile = {
+                    name: file.name,
+                    size: file.size,
+                    path: savedPath
                 };
-                reader.readAsDataURL(file);
+                saveWarrantsToStorage();
+                renderTabContent('warrants');
             };
             
             input.click();
         }
         
-        function viewWarrantFile(warrantId, fileType) {
+        async function viewWarrantFile(warrantId, fileType) {
             const warrant = caseWarrants.find(w => w.id === warrantId);
             if (!warrant) return;
             
-            let fileUrl = null;
+            let filePath = null;
             let fileName = '';
             
             if (fileType === 'warrant' && warrant.hasWarrantFile) {
-                fileUrl = warrant.warrantFileUrl;
+                filePath = warrant.warrantFilePath || warrant.warrantFileUrl;  // fallback for legacy data
                 fileName = warrant.warrantFileName;
             } else if (fileType === 'production' && warrant.hasProduction) {
-                // Show production files in evidence-style viewer
                 viewWarrantProduction(warrant);
                 return;
             } else if (fileType === 'return' && warrant.hasCourtReturn) {
-                fileUrl = warrant.courtReturnFile.url;
+                filePath = warrant.courtReturnFile.path || warrant.courtReturnFile.url;  // fallback for legacy
                 fileName = warrant.courtReturnFile.name;
             }
             
-            if (fileUrl) {
-                window.open(fileUrl, '_blank');
+            if (filePath) {
+                // If it's an on-disk path, read via IPC and open as blob
+                if (filePath.includes('\\') || filePath.includes('/cases/')) {
+                    try {
+                        const fileData = await window.electronAPI.readWarrantFile(filePath);
+                        const blob = new Blob([new Uint8Array(fileData)], { type: 'application/pdf' });
+                        const url = URL.createObjectURL(blob);
+                        window.open(url, '_blank');
+                    } catch (err) {
+                        viperToast('Failed to open file: ' + err.message, 'error');
+                    }
+                } else {
+                    // Legacy data URL — open directly
+                    window.open(filePath, '_blank');
+                }
             }
         }
         
-        function viewWarrantProduction(warrant) {
+        async function viewWarrantProduction(warrant) {
             document.getElementById('viewerTitle').textContent = `Production Files - ${warrant.issuedTo || 'Warrant'}`;
             const viewerContent = document.getElementById('viewerContent');
-            
-            viewerContent.innerHTML = `
-                <div class="space-y-4">
-                    ${warrant.productionFiles.map(file => {
-                        const fileExt = file.name.split('.').pop().toLowerCase();
-                        const isPDF = fileExt === 'pdf';
-                        const isImage = ['jpg', 'jpeg', 'png', 'gif'].includes(fileExt);
-                        const isVideo = ['mp4', 'webm', 'mov'].includes(fileExt);
-                        
-                        return `
-                            <div class="glass-card rounded-lg p-4">
-                                <div class="flex items-center justify-between mb-3">
-                                    <div class="flex items-center space-x-2">
-                                        <span>📄</span>
-                                        <span class="font-medium">${file.path}</span>
-                                        <span class="text-xs text-gray-400">(${formatFileSize(file.size)})</span>
-                                    </div>
-                                    <a href="${file.url}" download="${file.name}" class="px-3 py-1 rounded text-xs bg-viper-cyan/20 text-viper-cyan">
-                                        Download
-                                    </a>
-                                </div>
-                                
-                                ${isPDF ? `<iframe src="${file.url}" class="w-full h-96 bg-white rounded"></iframe>` :
-                                  isImage ? `<img src="${file.url}" class="max-w-full max-h-96 mx-auto">` :
-                                  isVideo ? `<video controls class="w-full"><source src="${file.url}"></video>` :
-                                  '<p class="text-gray-400 text-center py-4">Preview not available</p>'}
-                            </div>
-                        `;
-                    }).join('')}
-                </div>
-            `;
-            
+            viewerContent.innerHTML = '<p class="text-gray-400 text-center py-4">Loading files...</p>';
             document.getElementById('evidenceViewerModal').classList.add('show');
+
+            // Read each file from disk and create blob URLs for preview
+            const cards = [];
+            for (const file of warrant.productionFiles) {
+                const fileExt = file.name.split('.').pop().toLowerCase();
+                const isPDF = fileExt === 'pdf';
+                const isImage = ['jpg', 'jpeg', 'png', 'gif'].includes(fileExt);
+                const isVideo = ['mp4', 'webm', 'mov'].includes(fileExt);
+
+                let blobUrl = '';
+                try {
+                    const fileData = await window.electronAPI.readWarrantFile(file.path);
+                    const mimeMap = { pdf:'application/pdf', jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', gif:'image/gif', mp4:'video/mp4', webm:'video/webm', mov:'video/quicktime' };
+                    const blob = new Blob([new Uint8Array(fileData)], { type: mimeMap[fileExt] || 'application/octet-stream' });
+                    blobUrl = URL.createObjectURL(blob);
+                } catch (err) {
+                    console.error('Failed to read production file:', file.path, err);
+                }
+
+                cards.push(`
+                    <div class="glass-card rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <div class="flex items-center space-x-2">
+                                <span>📄</span>
+                                <span class="font-medium">${file.name}</span>
+                                <span class="text-xs text-gray-400">(${formatFileSize(file.size)})</span>
+                            </div>
+                            ${blobUrl ? `<a href="${blobUrl}" download="${file.name}" class="px-3 py-1 rounded text-xs bg-viper-cyan/20 text-viper-cyan">Download</a>` : ''}
+                        </div>
+                        ${!blobUrl ? '<p class="text-red-400 text-center py-4">File not found on disk</p>' :
+                          isPDF ? `<iframe src="${blobUrl}" class="w-full h-96 bg-white rounded"></iframe>` :
+                          isImage ? `<img src="${blobUrl}" class="max-w-full max-h-96 mx-auto">` :
+                          isVideo ? `<video controls class="w-full"><source src="${blobUrl}"></video>` :
+                          '<p class="text-gray-400 text-center py-4">Preview not available</p>'}
+                    </div>
+                `);
+            }
+            viewerContent.innerHTML = `<div class="space-y-4">${cards.join('')}</div>`;
         }
         
         async function deleteWarrant(warrantId) {

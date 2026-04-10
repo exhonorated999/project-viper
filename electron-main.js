@@ -688,26 +688,32 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber 
   restoreFocus();
   if (result.canceled || !result.filePath) return null;
 
-  // Collect evidence files for this case
-  const evidenceBase = path.join(casesDir, caseNumber, 'Evidence');
-  const evidenceFiles = [];
-  if (fs.existsSync(evidenceBase)) {
-    const walkDir = (dir, rel) => {
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const full = path.join(dir, entry.name);
-        const relPath = rel ? `${rel}/${entry.name}` : entry.name;
-        if (entry.isDirectory()) walkDir(full, relPath);
-        else {
-          let buf = fs.readFileSync(full);
-          if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
-            buf = security.decryptBuffer(buf);
+  // Walk a directory tree and collect files (decrypting if needed)
+  const collectFiles = (baseDir) => {
+    const files = [];
+    if (fs.existsSync(baseDir)) {
+      const walkDir = (dir, rel) => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name);
+          const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+          if (entry.isDirectory()) walkDir(full, relPath);
+          else {
+            let buf = fs.readFileSync(full);
+            if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
+              buf = security.decryptBuffer(buf);
+            }
+            files.push({ name: relPath, data: buf });
           }
-          evidenceFiles.push({ name: relPath, data: buf });
         }
-      }
-    };
-    walkDir(evidenceBase, '');
-  }
+      };
+      walkDir(baseDir, '');
+    }
+    return files;
+  };
+
+  // Collect evidence and warrant files for this case
+  const evidenceFiles = collectFiles(path.join(casesDir, caseNumber, 'Evidence'));
+  const warrantFiles = collectFiles(path.join(casesDir, caseNumber, 'Warrants'));
 
   // Build ZIP using Node.js built-in zlib (no external lib needed)
   // Use archiver-like manual ZIP construction or write a simple one
@@ -731,6 +737,9 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber 
       for (const f of evidenceFiles) {
         archive.append(f.data, { name: `Evidence/${f.name}` });
       }
+      for (const f of warrantFiles) {
+        archive.append(f.data, { name: `Warrants/${f.name}` });
+      }
       archive.finalize();
     });
   } else {
@@ -748,6 +757,16 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber 
       const evDir = path.join(exportDir, 'Evidence');
       for (const f of evidenceFiles) {
         const dest = path.join(evDir, f.name);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.writeFileSync(dest, f.data);
+      }
+    }
+
+    // Copy warrants
+    if (warrantFiles.length > 0) {
+      const wDir = path.join(exportDir, 'Warrants');
+      for (const f of warrantFiles) {
+        const dest = path.join(wDir, f.name);
         fs.mkdirSync(path.dirname(dest), { recursive: true });
         fs.writeFileSync(dest, f.data);
       }
@@ -1285,6 +1304,46 @@ ipcMain.handle('read-evidence-file', async (event, filePath) => {
     return Array.from(new Uint8Array(raw));
   } catch (error) {
     console.error('Failed to read evidence file:', error);
+    throw error;
+  }
+});
+
+// --- Save warrant file to disk ---
+ipcMain.handle('save-warrant-file', async (event, data) => {
+  try {
+    const { caseNumber, subfolder, fileName, fileData } = data;
+    // subfolder: 'Signed', 'Production', or 'CourtReturn'
+    const warrantDir = path.join(casesDir, caseNumber, 'Warrants', subfolder);
+    fs.mkdirSync(warrantDir, { recursive: true });
+
+    const filePath = path.join(warrantDir, fileName);
+    const buffer = Buffer.from(fileData);
+
+    if (security && security.isEnabled() && security.isUnlocked()) {
+      fs.writeFileSync(filePath, security.encryptBuffer(buffer));
+    } else {
+      fs.writeFileSync(filePath, buffer);
+    }
+
+    console.log(`Warrant file saved: ${filePath} (${buffer.length} bytes)`);
+    return filePath;
+  } catch (error) {
+    console.error('Failed to save warrant file:', error);
+    throw error;
+  }
+});
+
+// --- Read warrant file (for inline preview) ---
+ipcMain.handle('read-warrant-file', async (event, filePath) => {
+  try {
+    const raw = fs.readFileSync(filePath);
+    if (security && security.isUnlocked() && security.isEncryptedBuffer(raw)) {
+      const decrypted = security.decryptBuffer(raw);
+      return Array.from(new Uint8Array(decrypted));
+    }
+    return Array.from(new Uint8Array(raw));
+  } catch (error) {
+    console.error('Failed to read warrant file:', error);
     throw error;
   }
 });

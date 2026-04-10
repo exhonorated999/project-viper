@@ -4704,10 +4704,15 @@
         function handleWarrantFileSelect(event) {
             const file = event.target.files[0];
             if (file && file.type === 'application/pdf') {
-                warrantFile = file;
-                document.getElementById('warrantFileName').textContent = file.name;
-                document.getElementById('warrantFileInfo').classList.remove('hidden');
-                document.getElementById('warrantFileButtonText').textContent = 'Change warrant file';
+                // Convert to base64 data URL so it persists in localStorage
+                const reader = new FileReader();
+                reader.onload = () => {
+                    warrantFile = { name: file.name, dataUrl: reader.result };
+                    document.getElementById('warrantFileName').textContent = file.name;
+                    document.getElementById('warrantFileInfo').classList.remove('hidden');
+                    document.getElementById('warrantFileButtonText').textContent = 'Change warrant file';
+                };
+                reader.readAsDataURL(file);
             } else if (file) {
                 viperToast('Please select a PDF file', 'error');
                 event.target.value = '';
@@ -4745,7 +4750,7 @@
                     if (warrantFile) {
                         warrant.hasWarrantFile = true;
                         warrant.warrantFileName = warrantFile.name;
-                        warrant.warrantFileUrl = URL.createObjectURL(warrantFile);
+                        warrant.warrantFileUrl = warrantFile.dataUrl;
                     }
                 }
             } else {
@@ -4759,7 +4764,7 @@
                     dueDate: dueDate,
                     hasWarrantFile: warrantFile !== null,
                     warrantFileName: warrantFile ? warrantFile.name : null,
-                    warrantFileUrl: warrantFile ? URL.createObjectURL(warrantFile) : null,
+                    warrantFileUrl: warrantFile ? warrantFile.dataUrl : null,
                     returnReceived: false,
                     returnReceivedAt: null,
                     hasProduction: false,
@@ -4828,16 +4833,29 @@
                 if (!warrant) return;
                 warrant.hasProduction = true;
                 warrant.productionFileCount = files.length;
-                warrant.productionFiles = files.map(file => ({
-                    name: file.name,
-                    path: file.webkitRelativePath || file.name,
-                    size: file.size,
-                    type: file.type,
-                    url: URL.createObjectURL(file)
-                }));
-                saveWarrantsToStorage();
-                renderTabContent('warrants');
-                showToast(`Uploaded ${files.length} production file(s)`, 'success');
+                // Convert all files to base64 data URLs for persistence
+                let converted = 0;
+                const results = [];
+                files.forEach((file, i) => {
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        results[i] = {
+                            name: file.name,
+                            path: file.webkitRelativePath || file.name,
+                            size: file.size,
+                            type: file.type,
+                            url: reader.result
+                        };
+                        converted++;
+                        if (converted === files.length) {
+                            warrant.productionFiles = results;
+                            saveWarrantsToStorage();
+                            renderTabContent('warrants');
+                            showToast(`Uploaded ${files.length} production file(s)`, 'success');
+                        }
+                    };
+                    reader.readAsDataURL(file);
+                });
             };
 
             document.getElementById('prodUploadFolder').onclick = () => {
@@ -4879,14 +4897,17 @@
                 if (!warrant) return;
                 
                 warrant.hasCourtReturn = true;
-                warrant.courtReturnFile = {
-                    name: file.name,
-                    size: file.size,
-                    url: URL.createObjectURL(file)
+                const reader = new FileReader();
+                reader.onload = () => {
+                    warrant.courtReturnFile = {
+                        name: file.name,
+                        size: file.size,
+                        url: reader.result
+                    };
+                    saveWarrantsToStorage();
+                    renderTabContent('warrants');
                 };
-                
-                saveWarrantsToStorage();
-                renderTabContent('warrants');
+                reader.readAsDataURL(file);
             };
             
             input.click();

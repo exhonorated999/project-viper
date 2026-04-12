@@ -1214,7 +1214,8 @@
                 aperture: { label: 'Aperture', icon: 'M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z' },
                 analytics: { label: 'CDR', icon: 'M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z' },
                 traceImport: { label: 'Trace Import', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12' },
-                rmsImport: { label: 'RMS Import', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' }
+                rmsImport: { label: 'RMS Import', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
+                oversightImport: { label: 'Oversight', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' }
             };
             
             // Initialize tabOrder if it doesn't exist
@@ -1339,6 +1340,7 @@
             };
 
             allModules.aperture = { label: 'Aperture', icon: '🔍' };
+            allModules.oversightImport = { label: 'Oversight', icon: '🛡️' };
 
             const availableModules = Object.keys(allModules).filter(
                 module => !currentCase.modules.includes(module)
@@ -1420,7 +1422,8 @@
                 notes:'Case Notes', prosecution:'Prosecution', narcotics:'Narcotics Seized',
                 money:'Money Seized', missingpersons:'Missing Persons', areacanvas:'Area Canvas',
                 opsplan:'OPS Plan', analytics:'CDR', aperture:'Aperture',
-                networkIntelligence:'Network Intel', traceImport:'Trace Import', rmsImport:'RMS Import'
+                networkIntelligence:'Network Intel', traceImport:'Trace Import', rmsImport:'RMS Import',
+                oversightImport:'Oversight'
             };
             const label = moduleConfig[moduleId] || moduleId;
             if (!await viperConfirm(`Remove "${label}" from this case?\n\nNote: Any data in this module will remain in storage and can be recovered by re-adding the module.`, {danger:true, okText:'Delete'})) return;
@@ -1467,7 +1470,8 @@
                 areacanvas: { label: 'Area Canvas', icon: '🗺️', type: 'data' },
                 opsplan: { label: 'OPS Plan', icon: '📋', type: 'data' },
                 traceImport: { label: 'Trace Import', icon: '📥', type: 'data' },
-                rmsImport: { label: 'RMS Import', icon: '📄', type: 'data' }
+                rmsImport: { label: 'RMS Import', icon: '📄', type: 'data' },
+                oversightImport: { label: 'Oversight', icon: '🛡️', type: 'data' }
             };
 
             // Get active tabs (overview + enabled modules)
@@ -1558,7 +1562,8 @@
                 'suspects', 'victims', 'victimBusinesses', 'cargo',
                 'witnesses', 'recoveredVehicles', 'missingpersons',
                 'areacanvas', 'prosecution', 'narcotics', 'firearms',
-                'money', 'opsplan', 'rmsImports'
+                'money', 'opsplan', 'rmsImports', 'oversightImport',
+                'canvasForms'
             ];
             const moduleData = {};
             moduleKeys.forEach(k => {
@@ -1646,6 +1651,10 @@
                 case 'rmsImport': {
                     const ri = JSON.parse(localStorage.getItem(`rmsImports_${currentCase.id}`) || '[]');
                     return ri.length;
+                }
+                case 'oversightImport': {
+                    const oi = JSON.parse(localStorage.getItem(`oversightImport_${currentCase.id}`) || '[]');
+                    return oi.length;
                 }
                 default: return 0;
             }
@@ -2035,6 +2044,49 @@
                             gap(); imp.narratives.forEach(n => {
                                 fieldBold('Narrative by', n.officer || 'Unknown');
                                 bodyText(n.text);
+                            });
+                        }
+                        gap(3);
+                    });
+                    break;
+                }
+                case 'oversightImport': {
+                    const oiData = JSON.parse(localStorage.getItem(`oversightImport_${caseId}`) || '[]');
+                    if (!oiData.length) { emptyMsg('No Oversight imports.'); break; }
+                    oiData.forEach((imp, idx) => {
+                        if (imp.offenders) imp.offenders.forEach((o, oi) => {
+                            itemHeading(`Offender ${idx+1}.${oi+1}: ${o.full_name || 'Unknown'}`);
+                            fieldBold('DOB', o.dob); fieldBold('Address', o.address);
+                            fieldBold('Tier', o.tier_status); fieldBold('Status', o.status);
+                            if (o.height) fieldBold('Height', o.height);
+                            if (o.weight) fieldBold('Weight', o.weight + ' lbs');
+                            if (o.hair_color) fieldBold('Hair', o.hair_color);
+                            if (o.eye_color) fieldBold('Eyes', o.eye_color);
+                            if (o.static_99_score != null) fieldBold('Static-99', String(o.static_99_score));
+                            if (o.stable_2007_score != null) fieldBold('Stable-2007', String(o.stable_2007_score));
+                            gap();
+                        });
+                        if (imp.convictions && imp.convictions.length) {
+                            itemHeading('Convictions');
+                            imp.convictions.forEach(c => {
+                                fieldBold('Date', c.conviction_date || 'N/A');
+                                fieldBold('Offenses', c.offenses);
+                                fieldBold('Tier', c.tier_status); gap();
+                            });
+                        }
+                        if (imp.complianceChecks && imp.complianceChecks.length) {
+                            itemHeading('Compliance Checks');
+                            imp.complianceChecks.forEach(c => {
+                                fieldBold('Date', c.check_date);
+                                fieldBold('Compliant', c.in_compliance ? 'Yes' : 'No');
+                                if (c.notes) bodyText(c.notes); gap();
+                            });
+                        }
+                        if (imp.officerNotes && imp.officerNotes.length) {
+                            itemHeading('Officer Notes');
+                            imp.officerNotes.forEach(n => {
+                                fieldBold('Officer', n.officer_name);
+                                bodyText(n.note_text); gap();
                             });
                         }
                         gap(3);
@@ -2752,6 +2804,8 @@
             } else if (tabId === 'rmsImport') {
                 loadRmsData();
                 contentDiv.innerHTML = renderRmsImportTab();
+            } else if (tabId === 'oversightImport') {
+                contentDiv.innerHTML = renderOversightImportTab();
             } else {
                 contentDiv.innerHTML = renderPlaceholderTab(tabId);
             }
@@ -12604,7 +12658,13 @@
                             <h2 class="text-2xl font-bold text-white mb-2">Area Canvas</h2>
                             <p class="text-gray-400">Import and track neighborhood canvas results</p>
                         </div>
-                        <div class="flex gap-3">
+                        <div class="flex gap-3 flex-wrap">
+                            <button onclick="showCreateCanvasFormModal()" class="px-4 py-2 bg-viper-orange/20 hover:bg-viper-orange/30 border border-viper-orange rounded-lg text-viper-orange transition flex items-center gap-2">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+                                </svg>
+                                Create Form
+                            </button>
                             <button onclick="showCanvasUploadModal()" class="px-4 py-2 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green transition flex items-center gap-2">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
@@ -12628,23 +12688,32 @@
                         </div>
                     </div>
 
+                    <!-- Active Canvas Forms Section -->
+                    <div id="activeCanvasFormsSection"></div>
+
                     ${canvasData.length === 0 ? `
                         <div class="glass-card rounded-xl p-12 text-center">
                             <svg class="w-20 h-20 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
                             </svg>
                             <h3 class="text-2xl font-bold text-gray-300 mb-2">No Canvas Data</h3>
-                            <p class="text-gray-400 mb-6">Import CSV data from Microsoft Forms to begin tracking canvas results</p>
-                            <div class="max-w-2xl mx-auto mb-6 text-left bg-gradient-to-r from-viper-green/10 to-viper-cyan/10 border border-viper-green/20 p-4 rounded-lg">
-                                <h4 class="text-viper-green font-semibold mb-2">Expected CSV Format:</h4>
-                                <code class="text-sm text-gray-300 block">
-                                    Address, Contact, Name of Person Contacted, Phone Number, Evidence Located, Notes
-                                </code>
-                                <p class="text-xs text-gray-500 mt-2">Export your Microsoft Forms results as CSV with these columns</p>
+                            <p class="text-gray-400 mb-6">Create a shareable form for field officers or import CSV data</p>
+                            <div class="flex justify-center gap-4 mb-6">
+                                <button onclick="showCreateCanvasFormModal()" class="px-6 py-3 bg-viper-orange/20 hover:bg-viper-orange/30 border border-viper-orange rounded-lg text-viper-orange transition flex items-center gap-2">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                                    Create Shareable Form
+                                </button>
+                                <button onclick="showCanvasUploadModal()" class="px-6 py-3 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green transition flex items-center gap-2">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                                    Import CSV Data
+                                </button>
                             </div>
-                            <button onclick="showCanvasUploadModal()" class="px-6 py-3 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green transition">
-                                Import Canvas Data
-                            </button>
+                            <div class="max-w-2xl mx-auto text-left bg-gradient-to-r from-viper-orange/10 to-viper-cyan/10 border border-viper-orange/20 p-4 rounded-lg">
+                                <h4 class="text-viper-orange font-semibold mb-2">📱 Create a Shareable Form</h4>
+                                <p class="text-sm text-gray-400 mb-2">Generate a mobile-friendly form that field officers can access via QR code or link. Submissions are collected in real-time — no Microsoft Forms needed.</p>
+                                <h4 class="text-viper-green font-semibold mb-2 mt-3">📄 Or Import CSV Data</h4>
+                                <p class="text-sm text-gray-400">Import existing canvas data from a CSV file with columns: Address, Contact, Name, Phone, Evidence Located, Notes</p>
+                            </div>
                         </div>
                     ` : `
                         <!-- Statistics -->
@@ -13649,6 +13718,339 @@
                 viperToast('Error generating PDF report: ' + error.message + '\n\nCheck the browser console for details.', 'error');
             }
         }
+
+        // ============================================
+        // CANVAS FORM MANAGEMENT
+        // ============================================
+        let activeCanvasForms = JSON.parse(localStorage.getItem(`canvasForms_${currentCase?.id}`) || '[]');
+
+        function saveCanvasForms() {
+            localStorage.setItem(`canvasForms_${currentCase.id}`, JSON.stringify(activeCanvasForms));
+        }
+
+        // Load active forms panel when Area Canvas tab renders
+        async function loadActiveCanvasFormsPanel() {
+            const section = document.getElementById('activeCanvasFormsSection');
+            if (!section) return;
+            if (!window.electronAPI || !window.electronAPI.canvasFormServerStatus) {
+                section.innerHTML = '';
+                return;
+            }
+
+            // Refresh submission counts from server
+            for (const form of activeCanvasForms) {
+                try {
+                    const result = await window.electronAPI.canvasFormGetSubmissions(form.formId);
+                    form.submissionCount = result.count;
+                } catch { /* server may not be running */ }
+            }
+
+            if (activeCanvasForms.length === 0) { section.innerHTML = ''; return; }
+
+            section.innerHTML = `
+                <div class="glass-card rounded-xl p-5 border border-viper-orange/30">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                            <svg class="w-5 h-5 text-viper-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                            Active Canvas Forms
+                            <span class="text-sm font-normal text-gray-400">(${activeCanvasForms.length})</span>
+                        </h3>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        ${activeCanvasForms.map((form, idx) => `
+                        <div class="bg-viper-card/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-start justify-between mb-3">
+                                <div>
+                                    <h4 class="text-white font-semibold">${form.title || 'Canvas Form'}</h4>
+                                    <p class="text-xs text-gray-500 mt-1">Created ${new Date(form.createdAt).toLocaleString()}</p>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-lg font-bold text-viper-orange" id="formCount_${form.formId}">${form.submissionCount || 0}</span>
+                                    <span class="text-xs text-gray-500">entries</span>
+                                </div>
+                            </div>
+                            
+                            <!-- QR Code + URL -->
+                            <div class="flex gap-4 mb-3">
+                                <div class="flex-shrink-0 cursor-pointer" onclick="showCanvasFormQRModal('${form.formId}', ${idx})" title="Click to enlarge">
+                                    <img src="${form.qrDataUrl}" class="w-24 h-24 rounded-lg" alt="QR Code">
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <label class="text-xs text-gray-500 block mb-1">Share this link with field officers:</label>
+                                    <div class="flex gap-1">
+                                        <input type="text" readonly value="${form.formUrl}" class="flex-1 px-2 py-1 bg-viper-dark border border-gray-600 rounded text-xs text-viper-cyan truncate focus:outline-none" onclick="this.select()">
+                                        <button onclick="navigator.clipboard.writeText('${form.formUrl}'); viperToast('Link copied!','success');" class="px-2 py-1 bg-viper-cyan/20 border border-viper-cyan/30 rounded text-viper-cyan text-xs hover:bg-viper-cyan/30 transition flex-shrink-0">Copy</button>
+                                    </div>
+                                    <p class="text-xs text-gray-600 mt-2">Officers scan QR or open link on phone → fill form → submit</p>
+                                </div>
+                            </div>
+                            
+                            <!-- Actions -->
+                            <div class="flex gap-2">
+                                <button onclick="collectCanvasFormResults('${form.formId}', ${idx})" class="flex-1 px-3 py-2 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green text-sm transition flex items-center justify-center gap-1">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                                    Import Results
+                                </button>
+                                <button onclick="refreshCanvasFormCount('${form.formId}')" class="px-3 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan text-sm transition" title="Refresh count">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                                </button>
+                                <button onclick="closeCanvasForm('${form.formId}', ${idx})" class="px-3 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-lg text-red-400 text-sm transition" title="Close form">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Call it after the area canvas tab renders
+        const _origRenderAreaCanvas = renderAreaCanvasTab;
+        // Patch: load forms panel after DOM update
+        const _areaCanvasTabObserver = new MutationObserver(() => {
+            if (document.getElementById('activeCanvasFormsSection')) {
+                loadActiveCanvasFormsPanel();
+                _areaCanvasTabObserver.disconnect();
+            }
+        });
+
+        function showCreateCanvasFormModal() {
+            if (!window.electronAPI || !window.electronAPI.canvasFormCreate) {
+                viperToast('Canvas Form Server requires the VIPER desktop app.', 'info');
+                return;
+            }
+
+            const modalHTML = `
+                <div id="createCanvasFormModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id==='createCanvasFormModal') document.getElementById('createCanvasFormModal').remove()">
+                    <div class="glass-card rounded-xl p-6 max-w-lg w-full">
+                        <h3 class="text-2xl font-bold text-white mb-2">Create Canvas Form</h3>
+                        <p class="text-gray-400 mb-6 text-sm">Generate a mobile-friendly form that officers can access via QR code</p>
+                        
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-2">Form Title *</label>
+                                <input type="text" id="cf_title" value="Area Canvas — ${currentCase.caseNumber}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-orange focus:outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-2">Case Reference (shown on form)</label>
+                                <input type="text" id="cf_caseRef" value="${currentCase.caseNumber}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-orange focus:outline-none">
+                            </div>
+
+                            <div class="bg-viper-card/30 border border-gray-700 rounded-lg p-4">
+                                <h4 class="text-sm font-semibold text-viper-cyan mb-3">Form Fields</h4>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <label class="flex items-center gap-2 text-sm text-gray-300"><input type="checkbox" class="cf_field" value="address" checked disabled> Address *</label>
+                                    <label class="flex items-center gap-2 text-sm text-gray-300"><input type="checkbox" class="cf_field" value="contact" checked> Contact Made?</label>
+                                    <label class="flex items-center gap-2 text-sm text-gray-300"><input type="checkbox" class="cf_field" value="contactName" checked> Contact Name</label>
+                                    <label class="flex items-center gap-2 text-sm text-gray-300"><input type="checkbox" class="cf_field" value="phone" checked> Phone Number</label>
+                                    <label class="flex items-center gap-2 text-sm text-gray-300"><input type="checkbox" class="cf_field" value="officerName" checked> Officer Name</label>
+                                    <label class="flex items-center gap-2 text-sm text-gray-300"><input type="checkbox" class="cf_field" value="evidenceLocated" checked> Evidence Located?</label>
+                                    <label class="flex items-center gap-2 text-sm text-gray-300"><input type="checkbox" class="cf_field" value="notes" checked> Notes</label>
+                                </div>
+                            </div>
+
+                            <div class="bg-viper-orange/10 border border-viper-orange/30 rounded-lg p-3 text-sm text-gray-300">
+                                <p>📱 <strong>How it works:</strong> VIPER will start a local server on your network. Officers on the same WiFi can scan the QR code or open the link on their phones to submit canvas entries in real-time.</p>
+                            </div>
+                        </div>
+
+                        <div class="flex gap-3 justify-end mt-6 pt-4 border-t border-gray-700">
+                            <button onclick="document.getElementById('createCanvasFormModal').remove()" class="px-6 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white transition">Cancel</button>
+                            <button onclick="createCanvasForm()" class="px-6 py-2 bg-viper-orange hover:bg-viper-orange/80 rounded-lg text-white font-semibold transition flex items-center gap-2">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                                Create Form
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHTML);
+        }
+
+        async function createCanvasForm() {
+            const title = document.getElementById('cf_title').value.trim();
+            const caseRef = document.getElementById('cf_caseRef').value.trim();
+            const fields = ['address']; // always included
+            document.querySelectorAll('.cf_field:checked').forEach(cb => {
+                if (!fields.includes(cb.value)) fields.push(cb.value);
+            });
+
+            if (!title) { viperToast('Form title is required', 'error'); return; }
+
+            try {
+                viperToast('Starting Canvas Form Server...', 'info');
+
+                const result = await window.electronAPI.canvasFormCreate({
+                    title,
+                    caseRef,
+                    fields,
+                    caseId: currentCase.id,
+                    caseNumber: currentCase.caseNumber
+                });
+
+                // Store form reference locally
+                activeCanvasForms.push({
+                    formId: result.formId,
+                    formUrl: result.formUrl,
+                    qrDataUrl: result.qrDataUrl,
+                    title,
+                    caseRef,
+                    fields,
+                    createdAt: new Date().toISOString(),
+                    submissionCount: 0
+                });
+                saveCanvasForms();
+
+                document.getElementById('createCanvasFormModal')?.remove();
+
+                // Show the QR code modal immediately
+                showCanvasFormQRModal(result.formId, activeCanvasForms.length - 1);
+
+                // Refresh the tab
+                renderTabContent('areacanvas');
+            } catch (error) {
+                console.error('Failed to create canvas form:', error);
+                viperToast('Failed to start form server: ' + error.message, 'error');
+            }
+        }
+
+        function showCanvasFormQRModal(formId, idx) {
+            const form = activeCanvasForms[idx];
+            if (!form) return;
+
+            const modalHTML = `
+                <div id="canvasQRModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id==='canvasQRModal') document.getElementById('canvasQRModal').remove()">
+                    <div class="glass-card rounded-xl p-8 max-w-md w-full text-center">
+                        <h3 class="text-xl font-bold text-white mb-2">${form.title}</h3>
+                        <p class="text-gray-400 text-sm mb-6">Scan this QR code or share the link below</p>
+                        
+                        <div class="bg-white rounded-xl p-4 inline-block mb-6">
+                            <img src="${form.qrDataUrl}" class="w-64 h-64" alt="QR Code">
+                        </div>
+                        
+                        <div class="mb-6">
+                            <label class="text-xs text-gray-500 block mb-2">Or share this URL:</label>
+                            <div class="flex gap-2">
+                                <input type="text" readonly value="${form.formUrl}" class="flex-1 px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-sm text-viper-cyan truncate focus:outline-none" onclick="this.select()">
+                                <button onclick="navigator.clipboard.writeText('${form.formUrl}'); viperToast('Link copied!','success');" class="px-4 py-2 bg-viper-cyan/20 border border-viper-cyan rounded-lg text-viper-cyan text-sm hover:bg-viper-cyan/30 transition">Copy</button>
+                            </div>
+                        </div>
+                        
+                        <p class="text-xs text-gray-500 mb-4">Officers must be on the same WiFi network to access this form.<br>Form remains active until you close it.</p>
+                        
+                        <button onclick="document.getElementById('canvasQRModal').remove()" class="px-6 py-2 bg-viper-orange hover:bg-viper-orange/80 rounded-lg text-white font-semibold transition">Done</button>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHTML);
+        }
+
+        async function refreshCanvasFormCount(formId) {
+            if (!window.electronAPI) return;
+            try {
+                const result = await window.electronAPI.canvasFormGetSubmissions(formId);
+                const el = document.getElementById(`formCount_${formId}`);
+                if (el) el.textContent = result.count;
+                // Update local store
+                const form = activeCanvasForms.find(f => f.formId === formId);
+                if (form) { form.submissionCount = result.count; saveCanvasForms(); }
+            } catch (e) {
+                viperToast('Could not reach form server. It may have been stopped.', 'error');
+            }
+        }
+
+        async function collectCanvasFormResults(formId, idx) {
+            if (!window.electronAPI) return;
+            try {
+                const result = await window.electronAPI.canvasFormGetSubmissions(formId);
+                if (result.submissions.length === 0) {
+                    viperToast('No submissions to import yet.', 'info');
+                    return;
+                }
+
+                const newEntries = result.submissions.map(s => ({
+                    id: s.id || Date.now() + Math.random(),
+                    address: s.address || '',
+                    contact: s.contact || 'No',
+                    contactName: s.contactName || '',
+                    phone: s.phone || '',
+                    officerName: s.officerName || '',
+                    evidenceLocated: s.evidenceLocated || 'No',
+                    notes: s.notes || '',
+                    needsFollowUp: false,
+                    timestamp: s.submittedAt || s.timestamp || new Date().toISOString()
+                }));
+
+                // Check for duplicates by address+timestamp
+                const existingKeys = new Set(canvasData.map(e => e.address.toLowerCase() + '|' + e.timestamp));
+                const unique = newEntries.filter(e => !existingKeys.has(e.address.toLowerCase() + '|' + e.timestamp));
+
+                if (unique.length === 0) {
+                    viperToast('All submissions already imported.', 'info');
+                    return;
+                }
+
+                if (await viperConfirm(`Import ${unique.length} new canvas entries from form submissions?\n\n(${result.submissions.length} total submissions, ${result.submissions.length - unique.length} already imported)`)) {
+                    canvasData.push(...unique);
+                    saveCanvasData();
+                    viperToast(`✓ Imported ${unique.length} entries into Area Canvas`, 'success');
+                    renderTabContent('areacanvas');
+                }
+            } catch (e) {
+                console.error('Failed to collect form results:', e);
+                viperToast('Failed to retrieve submissions: ' + e.message, 'error');
+            }
+        }
+
+        async function closeCanvasForm(formId, idx) {
+            // Check for unimported submissions first
+            let pending = 0;
+            try {
+                if (window.electronAPI) {
+                    const result = await window.electronAPI.canvasFormGetSubmissions(formId);
+                    const existingKeys = new Set(canvasData.map(e => e.address.toLowerCase() + '|' + e.timestamp));
+                    pending = result.submissions.filter(e => !existingKeys.has((e.address || '').toLowerCase() + '|' + (e.submittedAt || e.timestamp || ''))).length;
+                }
+            } catch { /* ok */ }
+
+            const msg = pending > 0
+                ? `Close this form? You have ${pending} unimported submission(s) that will be lost.`
+                : 'Close this canvas form? Officers will no longer be able to submit entries.';
+
+            if (!await viperConfirm(msg, { danger: pending > 0, okText: 'Close Form' })) return;
+
+            // Delete from server
+            try {
+                if (window.electronAPI) await window.electronAPI.canvasFormDelete(formId);
+            } catch { /* ok */ }
+
+            // Remove from local store
+            activeCanvasForms = activeCanvasForms.filter(f => f.formId !== formId);
+            saveCanvasForms();
+            renderTabContent('areacanvas');
+        }
+
+        // Listen for real-time submissions
+        if (window.electronAPI && window.electronAPI.onCanvasFormSubmission) {
+            window.electronAPI.onCanvasFormSubmission((data) => {
+                // Update count display if visible
+                const el = document.getElementById(`formCount_${data.formId}`);
+                if (el) el.textContent = data.count;
+                // Update local store
+                const form = activeCanvasForms.find(f => f.formId === data.formId);
+                if (form) { form.submissionCount = data.count; saveCanvasForms(); }
+            });
+        }
+
+        // Patch renderTabContent to load forms panel after Area Canvas renders
+        const _originalRenderTabContent = renderTabContent;
+        renderTabContent = function(tabId) {
+            _originalRenderTabContent(tabId);
+            if (tabId === 'areacanvas') {
+                setTimeout(() => loadActiveCanvasFormsPanel(), 50);
+            }
+        };
 
         // ============================================
         // PROSECUTION TAB
@@ -16094,6 +16496,7 @@
                 { id: 'networkIntelligence', label: 'Network Intelligence (WiGLE)', icon: 'M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z', desc: 'Wireless network geolocation via WiGLE API' },
                 { id: 'traceImport', label: 'Trace Import', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12', desc: 'Import case packages from TRACE software' },
                 { id: 'rmsImport', label: 'RMS Import', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', desc: 'Import PDF reports from agency Record Management Systems' },
+                { id: 'oversightImport', label: 'Oversight Import', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z', desc: 'Import sex offender intelligence from Project Oversight' },
             ];
 
             const allModules = [...caseManagement, ...investigativeTools];
@@ -19374,6 +19777,546 @@
                 ${propertyHtml}
                 ${narrativesHtml}
                 ${digitalHtml}
+            </div>`;
+        }
+
+        /* ========== Oversight Import Module ========== */
+
+        function getOversightImports() {
+            return JSON.parse(localStorage.getItem(`oversightImport_${currentCase.id}`) || '[]');
+        }
+
+        function saveOversightImports(data) {
+            localStorage.setItem(`oversightImport_${currentCase.id}`, JSON.stringify(data));
+        }
+
+        let currentOversightView = null;
+
+        async function importOversightFile() {
+            if (!window.electronAPI || !window.electronAPI.selectOversightFile) {
+                viperToast('Oversight import requires the VIPER desktop app.', 'info');
+                return;
+            }
+
+            try {
+                const filePath = await window.electronAPI.selectOversightFile();
+                if (!filePath) return;
+
+                viperToast('Importing Oversight file...', 'info');
+
+                const result = await window.electronAPI.importOversightFile({
+                    filePath,
+                    caseNumber: currentCase.caseNumber
+                });
+
+                // Build import record
+                const importRecord = {
+                    id: Date.now(),
+                    importedAt: new Date().toISOString(),
+                    fileName: filePath.split('\\').pop().split('/').pop(),
+                    manifest: result.manifest,
+                    offenders: result.offenders,
+                    vehicles: result.vehicles,
+                    convictions: result.convictions,
+                    supervision: result.supervision,
+                    registrationEvents: result.registrationEvents,
+                    complianceChecks: result.complianceChecks,
+                    officerNotes: result.officerNotes,
+                    drugTests: result.drugTests,
+                    polygraphTests: result.polygraphTests,
+                    savedFiles: result.savedFiles,
+                    oversightDir: result.oversightDir
+                };
+
+                const imports = getOversightImports();
+                imports.push(importRecord);
+                saveOversightImports(imports);
+
+                viperToast(`✓ Imported ${result.offenders.length} offender(s) from Oversight`, 'success');
+                renderTabContent('oversightImport');
+            } catch (error) {
+                console.error('Oversight import error:', error);
+                viperToast('Failed to import Oversight file: ' + error.message, 'error');
+            }
+        }
+
+        async function deleteOversightImport(index) {
+            if (!await viperConfirm('Remove this Oversight import from the case?', { danger: true, okText: 'Remove' })) return;
+            const imports = getOversightImports();
+            imports.splice(index, 1);
+            saveOversightImports(imports);
+            currentOversightView = null;
+            renderTabContent('oversightImport');
+        }
+
+        function formatOversightDate(dateStr) {
+            if (!dateStr) return 'N/A';
+            try {
+                const d = new Date(dateStr);
+                return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+            } catch { return dateStr; }
+        }
+
+        function tierBadge(tier) {
+            const colors = {
+                svp: 'bg-red-500/20 text-red-400 border-red-500/50',
+                tier3: 'bg-red-500/20 text-red-400 border-red-500/50',
+                tier2: 'bg-orange-500/20 text-orange-400 border-orange-500/50',
+                tier1: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/50',
+            };
+            const labels = { svp: 'SVP', tier3: 'Tier 3', tier2: 'Tier 2', tier1: 'Tier 1' };
+            const c = colors[tier] || 'bg-gray-500/20 text-gray-400 border-gray-500/50';
+            const l = labels[tier] || tier || 'Unknown';
+            return `<span class="px-2 py-0.5 text-xs font-bold rounded border ${c}">${l}</span>`;
+        }
+
+        function statusBadge(status) {
+            const colors = {
+                active: 'bg-green-500/20 text-green-400',
+                visiting: 'bg-blue-500/20 text-blue-400',
+                inactive: 'bg-gray-500/20 text-gray-400',
+                transient: 'bg-yellow-500/20 text-yellow-400',
+                incarcerated: 'bg-red-500/20 text-red-400',
+                absconded: 'bg-red-600/20 text-red-500',
+            };
+            const c = colors[status] || 'bg-gray-500/20 text-gray-400';
+            return `<span class="px-2 py-0.5 text-xs font-semibold rounded ${c}">${(status || 'unknown').toUpperCase()}</span>`;
+        }
+
+        async function getOversightPhotoUrl(filePath) {
+            if (!filePath || !window.electronAPI || !window.electronAPI.readOversightFile) return null;
+            try {
+                const data = await window.electronAPI.readOversightFile(filePath);
+                const blob = new Blob([new Uint8Array(data)], { type: 'image/jpeg' });
+                return URL.createObjectURL(blob);
+            } catch { return null; }
+        }
+
+        async function viewOversightDocument(filePath) {
+            if (!filePath || !window.electronAPI) return;
+            try {
+                const data = await window.electronAPI.readOversightFile(filePath);
+                const ext = filePath.split('.').pop().toLowerCase();
+                const mimeMap = { pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png' };
+                const blob = new Blob([new Uint8Array(data)], { type: mimeMap[ext] || 'application/octet-stream' });
+                const url = URL.createObjectURL(blob);
+                window.open(url, '_blank');
+            } catch (e) {
+                viperToast('Could not open file: ' + e.message, 'error');
+            }
+        }
+
+        function renderOversightImportTab() {
+            const imports = getOversightImports();
+
+            if (currentOversightView !== null && imports[currentOversightView]) {
+                return renderOversightDetail(currentOversightView);
+            }
+
+            if (imports.length === 0) {
+                return `
+                <div class="space-y-6">
+                    <div class="flex items-center justify-between">
+                        <h2 class="text-2xl font-bold text-white flex items-center gap-2">
+                            <svg class="w-6 h-6 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                            </svg>
+                            Oversight Import
+                        </h2>
+                    </div>
+                    <div class="glass-card rounded-xl p-12 text-center">
+                        <div class="w-20 h-20 rounded-full bg-viper-green/10 flex items-center justify-center mx-auto mb-6">
+                            <svg class="w-10 h-10 text-viper-green/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                            </svg>
+                        </div>
+                        <h3 class="text-2xl font-bold text-white mb-3">No Oversight Data</h3>
+                        <p class="text-gray-400 mb-2">Import sex offender intelligence from Project Oversight</p>
+                        <p class="text-gray-500 text-sm mb-8">Supports .oversight files exported from Project Oversight software</p>
+                        <button onclick="importOversightFile()" class="px-6 py-3 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green transition flex items-center gap-2 mx-auto">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                            </svg>
+                            Import .oversight File
+                        </button>
+                    </div>
+                </div>`;
+            }
+
+            // List view of all imports
+            return `
+            <div class="space-y-6">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-2">
+                        <svg class="w-6 h-6 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                        </svg>
+                        Oversight Import
+                        <span class="text-sm font-normal text-gray-400 ml-2">${imports.length} import(s)</span>
+                    </h2>
+                    <button onclick="importOversightFile()" class="px-4 py-2 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green transition flex items-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                        Import More
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    ${imports.map((imp, idx) => {
+                        const offender = imp.offenders && imp.offenders[0];
+                        const name = offender ? offender.full_name : 'Unknown';
+                        const tier = offender ? offender.tier_status : '';
+                        const addr = offender ? offender.address : '';
+                        return `
+                        <div class="glass-card rounded-xl p-5 hover:border-viper-green/30 border border-gray-700/50 cursor-pointer transition group" onclick="currentOversightView=${idx}; renderTabContent('oversightImport');">
+                            <div class="flex items-start justify-between mb-3">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-12 h-12 rounded-full bg-viper-green/20 flex items-center justify-center text-viper-green font-bold text-lg" id="oversightThumb_${idx}">
+                                        ${name.charAt(0)}
+                                    </div>
+                                    <div>
+                                        <h4 class="text-white font-semibold group-hover:text-viper-green transition">${name}</h4>
+                                        <div class="flex items-center gap-2 mt-1">
+                                            ${tierBadge(tier)}
+                                            ${offender ? statusBadge(offender.status) : ''}
+                                        </div>
+                                    </div>
+                                </div>
+                                <button onclick="event.stopPropagation(); deleteOversightImport(${idx})" class="text-gray-600 hover:text-red-400 transition p-1" title="Remove">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                </button>
+                            </div>
+                            ${addr ? `<p class="text-xs text-gray-400 truncate mb-2">📍 ${addr}</p>` : ''}
+                            <div class="flex items-center gap-3 text-xs text-gray-500">
+                                <span>${imp.offenders ? imp.offenders.length : 0} offender(s)</span>
+                                <span>•</span>
+                                <span>${imp.convictions ? imp.convictions.length : 0} conviction(s)</span>
+                                <span>•</span>
+                                <span>Imported ${formatOversightDate(imp.importedAt)}</span>
+                            </div>
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>`;
+        }
+
+        function renderOversightDetail(index) {
+            const imports = getOversightImports();
+            const imp = imports[index];
+            if (!imp) { currentOversightView = null; return renderOversightImportTab(); }
+
+            const offender = imp.offenders && imp.offenders[0];
+            const name = offender ? offender.full_name : 'Unknown Offender';
+
+            // Resolve photo paths from savedFiles map
+            const profilePhotoPath = offender && offender.profile_photo_path ? (imp.savedFiles[offender.profile_photo_path] || null) : null;
+            const residencePhotoPath = offender && offender.residence_photo_path ? (imp.savedFiles[offender.residence_photo_path] || null) : null;
+
+            // Load photos asynchronously after render
+            setTimeout(async () => {
+                if (profilePhotoPath) {
+                    const url = await getOversightPhotoUrl(profilePhotoPath);
+                    const el = document.getElementById('oversightProfilePhoto');
+                    if (el && url) { el.src = url; el.classList.remove('hidden'); document.getElementById('oversightProfilePlaceholder')?.classList.add('hidden'); }
+                }
+                if (residencePhotoPath) {
+                    const url = await getOversightPhotoUrl(residencePhotoPath);
+                    const el = document.getElementById('oversightResidencePhoto');
+                    if (el && url) { el.src = url; el.classList.remove('hidden'); document.getElementById('oversightResidencePlaceholder')?.classList.add('hidden'); }
+                }
+            }, 100);
+
+            return `
+            <div class="space-y-6">
+                <!-- Back Button + Header -->
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-4">
+                        <button onclick="currentOversightView=null; renderTabContent('oversightImport');" class="p-2 hover:bg-viper-card/50 rounded-lg transition text-gray-400 hover:text-white">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                        </button>
+                        <div>
+                            <h2 class="text-2xl font-bold text-white flex items-center gap-3">
+                                <svg class="w-6 h-6 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                                </svg>
+                                ${name}
+                            </h2>
+                            <p class="text-sm text-gray-400 mt-1">Imported from: ${imp.fileName} • ${formatOversightDate(imp.importedAt)}</p>
+                        </div>
+                    </div>
+                    <button onclick="deleteOversightImport(${index})" class="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-lg text-red-400 transition text-sm flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        Remove
+                    </button>
+                </div>
+
+                ${offender ? `
+                <!-- Profile Card -->
+                <div class="glass-card rounded-xl p-6">
+                    <div class="flex gap-6">
+                        <!-- Profile Photo -->
+                        <div class="flex-shrink-0">
+                            <div class="w-36 h-44 rounded-xl bg-viper-card/50 border border-gray-700 overflow-hidden flex items-center justify-center">
+                                <div id="oversightProfilePlaceholder" class="text-center">
+                                    <svg class="w-12 h-12 text-gray-600 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                                    <p class="text-xs text-gray-600 mt-1">No Photo</p>
+                                </div>
+                                <img id="oversightProfilePhoto" class="w-full h-full object-cover hidden" alt="Profile">
+                            </div>
+                        </div>
+
+                        <!-- Personal Info -->
+                        <div class="flex-1">
+                            <div class="flex items-center gap-3 mb-4">
+                                <h3 class="text-xl font-bold text-white">${offender.full_name}</h3>
+                                ${tierBadge(offender.tier_status)}
+                                ${statusBadge(offender.status)}
+                                ${offender.is_visiting ? '<span class="px-2 py-0.5 text-xs font-semibold rounded bg-blue-500/20 text-blue-400">VISITING</span>' : ''}
+                                ${offender.is_homeless ? '<span class="px-2 py-0.5 text-xs font-semibold rounded bg-orange-500/20 text-orange-400">HOMELESS</span>' : ''}
+                            </div>
+                            <div class="grid grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+                                <div><span class="text-gray-500 block">Date of Birth</span><span class="text-white font-medium">${formatOversightDate(offender.dob)}</span></div>
+                                <div><span class="text-gray-500 block">Address</span><span class="text-white font-medium">${offender.address || 'N/A'}</span></div>
+                                ${offender.phone ? `<div><span class="text-gray-500 block">Phone</span><span class="text-white font-medium">${offender.phone}</span></div>` : ''}
+                                ${offender.email ? `<div><span class="text-gray-500 block">Email</span><span class="text-white font-medium">${offender.email}</span></div>` : ''}
+                                ${offender.dl_id_number ? `<div><span class="text-gray-500 block">DL/ID</span><span class="text-white font-medium">${offender.dl_id_number}</span></div>` : ''}
+                                ${offender.advised_departure_date ? `<div><span class="text-gray-500 block">Departure Date</span><span class="text-white font-medium">${formatOversightDate(offender.advised_departure_date)}</span></div>` : ''}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Physical Description -->
+                    <div class="mt-6 pt-4 border-t border-gray-700/50">
+                        <h4 class="text-sm font-semibold text-viper-cyan mb-3 uppercase tracking-wider">Physical Description</h4>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                            ${offender.height ? `<div class="bg-viper-card/30 rounded-lg p-3"><span class="text-gray-500 block text-xs">Height</span><span class="text-white font-medium">${offender.height}</span></div>` : ''}
+                            ${offender.weight ? `<div class="bg-viper-card/30 rounded-lg p-3"><span class="text-gray-500 block text-xs">Weight</span><span class="text-white font-medium">${offender.weight} lbs</span></div>` : ''}
+                            ${offender.hair_color ? `<div class="bg-viper-card/30 rounded-lg p-3"><span class="text-gray-500 block text-xs">Hair</span><span class="text-white font-medium">${offender.hair_color}</span></div>` : ''}
+                            ${offender.eye_color ? `<div class="bg-viper-card/30 rounded-lg p-3"><span class="text-gray-500 block text-xs">Eyes</span><span class="text-white font-medium">${offender.eye_color}</span></div>` : ''}
+                            ${offender.sex ? `<div class="bg-viper-card/30 rounded-lg p-3"><span class="text-gray-500 block text-xs">Sex</span><span class="text-white font-medium">${offender.sex}</span></div>` : ''}
+                            ${offender.ethnicity ? `<div class="bg-viper-card/30 rounded-lg p-3"><span class="text-gray-500 block text-xs">Ethnicity</span><span class="text-white font-medium">${offender.ethnicity}</span></div>` : ''}
+                        </div>
+                    </div>
+
+                    <!-- Risk Assessment -->
+                    ${offender.static_99_score != null || offender.stable_2007_score != null ? `
+                    <div class="mt-6 pt-4 border-t border-gray-700/50">
+                        <h4 class="text-sm font-semibold text-red-400 mb-3 uppercase tracking-wider">Risk Assessment</h4>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            ${offender.static_99_score != null ? `
+                            <div class="bg-red-500/10 border border-red-500/20 rounded-lg p-4 text-center">
+                                <p class="text-3xl font-bold ${offender.static_99_score >= 6 ? 'text-red-400' : offender.static_99_score >= 4 ? 'text-orange-400' : 'text-yellow-400'}">${offender.static_99_score}</p>
+                                <p class="text-xs text-gray-400 mt-1">Static-99R</p>
+                                <p class="text-xs mt-1 ${offender.static_99_score >= 6 ? 'text-red-400' : offender.static_99_score >= 4 ? 'text-orange-400' : 'text-yellow-400'}">${offender.static_99_score >= 6 ? 'Well Above Average' : offender.static_99_score >= 4 ? 'Above Average' : offender.static_99_score >= 2 ? 'Average' : 'Below Average'}</p>
+                            </div>` : ''}
+                            ${offender.stable_2007_score != null ? `
+                            <div class="bg-red-500/10 border border-red-500/20 rounded-lg p-4 text-center">
+                                <p class="text-3xl font-bold ${offender.stable_2007_score >= 12 ? 'text-red-400' : offender.stable_2007_score >= 8 ? 'text-orange-400' : 'text-yellow-400'}">${offender.stable_2007_score}</p>
+                                <p class="text-xs text-gray-400 mt-1">Stable-2007</p>
+                                <p class="text-xs mt-1 ${offender.stable_2007_score >= 12 ? 'text-red-400' : offender.stable_2007_score >= 8 ? 'text-orange-400' : 'text-yellow-400'}">${offender.stable_2007_score >= 12 ? 'High Need' : offender.stable_2007_score >= 8 ? 'Moderate Need' : 'Low Need'}</p>
+                            </div>` : ''}
+                        </div>
+                    </div>` : ''}
+
+                    <!-- Emergency Contact -->
+                    ${offender.emergency_contact_name ? `
+                    <div class="mt-6 pt-4 border-t border-gray-700/50">
+                        <h4 class="text-sm font-semibold text-gray-400 mb-3 uppercase tracking-wider">Emergency Contact</h4>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                            <div><span class="text-gray-500 block">Name</span><span class="text-white">${offender.emergency_contact_name}</span></div>
+                            ${offender.emergency_contact_relationship ? `<div><span class="text-gray-500 block">Relationship</span><span class="text-white">${offender.emergency_contact_relationship}</span></div>` : ''}
+                            ${offender.emergency_contact_phone ? `<div><span class="text-gray-500 block">Phone</span><span class="text-white">${offender.emergency_contact_phone}</span></div>` : ''}
+                            ${offender.emergency_contact_address ? `<div><span class="text-gray-500 block">Address</span><span class="text-white">${offender.emergency_contact_address}</span></div>` : ''}
+                        </div>
+                    </div>` : ''}
+                </div>
+
+                <!-- Residence Photo -->
+                ${residencePhotoPath ? `
+                <div class="glass-card rounded-xl p-6">
+                    <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+                        Residence Photo
+                    </h3>
+                    <div class="rounded-lg overflow-hidden border border-gray-700 max-w-2xl">
+                        <div id="oversightResidencePlaceholder" class="h-48 bg-viper-card/50 flex items-center justify-center text-gray-600">Loading...</div>
+                        <img id="oversightResidencePhoto" class="w-full h-auto hidden" alt="Residence" style="max-height:400px; object-fit:contain;">
+                    </div>
+                </div>` : ''}
+                ` : '<div class="glass-card rounded-xl p-6 text-center text-gray-400">No offender data in this import.</div>'}
+
+                <!-- Convictions -->
+                ${imp.convictions && imp.convictions.length > 0 ? `
+                <div class="glass-card rounded-xl p-6">
+                    <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                        Convictions
+                        <span class="text-sm font-normal text-gray-400">(${imp.convictions.length})</span>
+                    </h3>
+                    <div class="space-y-3">
+                        ${imp.convictions.map(c => `
+                        <div class="bg-red-500/5 border border-red-500/20 rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-white font-semibold">${c.offenses}</span>
+                                ${tierBadge(c.tier_status)}
+                            </div>
+                            ${c.conviction_date ? `<p class="text-sm text-gray-400">Date: ${formatOversightDate(c.conviction_date)}</p>` : ''}
+                        </div>`).join('')}
+                    </div>
+                </div>` : ''}
+
+                <!-- Registration Events -->
+                ${imp.registrationEvents && imp.registrationEvents.length > 0 ? `
+                <div class="glass-card rounded-xl p-6">
+                    <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                        Registration Events
+                        <span class="text-sm font-normal text-gray-400">(${imp.registrationEvents.length})</span>
+                    </h3>
+                    <div class="space-y-3">
+                        ${imp.registrationEvents.map(r => `
+                        <div class="flex items-center gap-4 p-3 rounded-lg bg-viper-card/30 border border-gray-700/50">
+                            <div class="w-10 h-10 rounded-full flex items-center justify-center ${r.in_compliance ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${r.in_compliance ? 'M5 13l4 4L19 7' : 'M6 18L18 6M6 6l12 12'}"/></svg>
+                            </div>
+                            <div class="flex-1">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-white font-medium">${formatOversightDate(r.registration_date)}</span>
+                                    <span class="text-xs ${r.in_compliance ? 'text-green-400' : 'text-red-400'}">${r.in_compliance ? 'COMPLIANT' : 'NON-COMPLIANT'}</span>
+                                </div>
+                                <p class="text-sm text-gray-400">${r.registering_officer ? 'Officer: ' + r.registering_officer : ''} ${r.notes ? '— ' + r.notes : ''}</p>
+                                ${r.next_registration_date ? `<p class="text-xs text-gray-500 mt-1">Next: ${formatOversightDate(r.next_registration_date)}</p>` : ''}
+                            </div>
+                        </div>`).join('')}
+                    </div>
+                </div>` : ''}
+
+                <!-- Compliance Checks -->
+                ${imp.complianceChecks && imp.complianceChecks.length > 0 ? `
+                <div class="glass-card rounded-xl p-6">
+                    <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        Compliance Checks
+                        <span class="text-sm font-normal text-gray-400">(${imp.complianceChecks.length})</span>
+                    </h3>
+                    <div class="space-y-3">
+                        ${imp.complianceChecks.map(c => `
+                        <div class="flex items-center gap-4 p-3 rounded-lg bg-viper-card/30 border border-gray-700/50">
+                            <div class="w-10 h-10 rounded-full flex items-center justify-center ${c.in_compliance ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${c.in_compliance ? 'M5 13l4 4L19 7' : 'M6 18L18 6M6 6l12 12'}"/></svg>
+                            </div>
+                            <div class="flex-1">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-white font-medium">${formatOversightDate(c.check_date)}</span>
+                                    <span class="text-xs ${c.in_compliance ? 'text-green-400' : 'text-red-400'}">${c.in_compliance ? 'COMPLIANT' : 'NON-COMPLIANT'}</span>
+                                    ${c.sweep_id ? '<span class="text-xs bg-viper-purple/20 text-viper-purple px-2 py-0.5 rounded">SWEEP</span>' : ''}
+                                </div>
+                                ${c.notes ? `<p class="text-sm text-gray-400 mt-1">${c.notes}</p>` : ''}
+                                ${c.officer_name ? `<p class="text-xs text-gray-500 mt-1">Officer: ${c.officer_name}</p>` : ''}
+                            </div>
+                        </div>`).join('')}
+                    </div>
+                </div>` : ''}
+
+                <!-- Officer Notes -->
+                ${imp.officerNotes && imp.officerNotes.length > 0 ? `
+                <div class="glass-card rounded-xl p-6">
+                    <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-viper-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                        Officer Notes
+                        <span class="text-sm font-normal text-gray-400">(${imp.officerNotes.length})</span>
+                    </h3>
+                    <div class="space-y-3">
+                        ${imp.officerNotes.map(n => `
+                        <div class="p-4 rounded-lg bg-viper-card/30 border border-gray-700/50">
+                            <div class="flex items-center gap-2 mb-2">
+                                <span class="text-viper-orange font-semibold text-sm">${n.officer_name || 'Unknown Officer'}</span>
+                                <span class="text-xs text-gray-500">${formatOversightDate(n.created_at)}</span>
+                            </div>
+                            <p class="text-gray-300 text-sm">${n.note_text}</p>
+                        </div>`).join('')}
+                    </div>
+                </div>` : ''}
+
+                <!-- Drug Tests -->
+                ${imp.drugTests && imp.drugTests.length > 0 ? `
+                <div class="glass-card rounded-xl p-6">
+                    <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+                        Drug Tests
+                        <span class="text-sm font-normal text-gray-400">(${imp.drugTests.length})</span>
+                    </h3>
+                    <div class="space-y-3">
+                        ${imp.drugTests.map(d => `
+                        <div class="flex items-center gap-4 p-3 rounded-lg bg-viper-card/30 border border-gray-700/50">
+                            <div class="w-10 h-10 rounded-full flex items-center justify-center ${d.result === 'pass' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}">
+                                ${d.result === 'pass' ? '✓' : '✗'}
+                            </div>
+                            <div class="flex-1">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-white font-medium">${formatOversightDate(d.test_date)}</span>
+                                    ${d.test_time ? `<span class="text-xs text-gray-500">${d.test_time}</span>` : ''}
+                                    <span class="text-xs font-bold ${d.result === 'pass' ? 'text-green-400' : 'text-red-400'}">${(d.result || 'unknown').toUpperCase()}</span>
+                                </div>
+                                ${d.officer_name ? `<p class="text-xs text-gray-500">Officer: ${d.officer_name}</p>` : ''}
+                                ${d.comments ? `<p class="text-sm text-gray-400 mt-1">${d.comments}</p>` : ''}
+                                ${d.document_path && imp.savedFiles[d.document_path] ? `
+                                <button onclick="viewOversightDocument('${imp.savedFiles[d.document_path].replace(/\\/g, '\\\\')}')" class="mt-2 text-xs text-viper-cyan hover:text-viper-cyan/80 flex items-center gap-1">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                    View Document
+                                </button>` : ''}
+                            </div>
+                        </div>`).join('')}
+                    </div>
+                </div>` : ''}
+
+                <!-- Polygraph Tests -->
+                ${imp.polygraphTests && imp.polygraphTests.length > 0 ? `
+                <div class="glass-card rounded-xl p-6">
+                    <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                        Polygraph Tests
+                        <span class="text-sm font-normal text-gray-400">(${imp.polygraphTests.length})</span>
+                    </h3>
+                    <div class="space-y-3">
+                        ${imp.polygraphTests.map(p => `
+                        <div class="p-3 rounded-lg bg-viper-card/30 border border-gray-700/50">
+                            <span class="text-white">${formatOversightDate(p.test_date)}</span>
+                            <span class="text-sm text-gray-400 ml-2">${p.result || ''}</span>
+                            ${p.notes ? `<p class="text-sm text-gray-400 mt-1">${p.notes}</p>` : ''}
+                        </div>`).join('')}
+                    </div>
+                </div>` : ''}
+
+                <!-- Vehicles -->
+                ${imp.vehicles && imp.vehicles.length > 0 ? `
+                <div class="glass-card rounded-xl p-6">
+                    <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+                        Vehicles
+                        <span class="text-sm font-normal text-gray-400">(${imp.vehicles.length})</span>
+                    </h3>
+                    <div class="space-y-3">
+                        ${imp.vehicles.map(v => `
+                        <div class="p-4 rounded-lg bg-viper-card/30 border border-gray-700/50">
+                            <span class="text-white font-medium">${[v.year, v.color, v.make, v.model].filter(Boolean).join(' ') || 'Unknown Vehicle'}</span>
+                            ${v.plate ? `<span class="ml-3 text-sm bg-viper-purple/20 text-viper-purple px-2 py-0.5 rounded">${v.plate}</span>` : ''}
+                        </div>`).join('')}
+                    </div>
+                </div>` : ''}
+
+                <!-- Supervision -->
+                ${imp.supervision && imp.supervision.length > 0 ? `
+                <div class="glass-card rounded-xl p-6">
+                    <h3 class="text-lg font-bold text-white mb-4">Supervision Details</h3>
+                    <div class="space-y-3">
+                        ${imp.supervision.map(s => `
+                        <div class="p-4 rounded-lg bg-viper-card/30 border border-gray-700/50">
+                            <p class="text-white font-medium">${s.supervisor || 'Unknown Supervisor'}</p>
+                            <p class="text-sm text-gray-400">${s.type || ''} ${s.notes || ''}</p>
+                        </div>`).join('')}
+                    </div>
+                </div>` : ''}
             </div>`;
         }
 

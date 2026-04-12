@@ -92,6 +92,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Aperture: report generation
   apertureGenerateReport: (data) => ipcRenderer.invoke('aperture-generate-report', data),
 
+  // Canvas Forms
+  canvasFormStartServer: () => ipcRenderer.invoke('canvas-form-start-server'),
+  canvasFormStopServer: () => ipcRenderer.invoke('canvas-form-stop-server'),
+  canvasFormCreate: (config) => ipcRenderer.invoke('canvas-form-create', config),
+  canvasFormGetSubmissions: (formId) => ipcRenderer.invoke('canvas-form-get-submissions', formId),
+  canvasFormDelete: (formId) => ipcRenderer.invoke('canvas-form-delete', formId),
+  canvasFormServerStatus: () => ipcRenderer.invoke('canvas-form-server-status'),
+  onCanvasFormSubmission: (callback) => ipcRenderer.on('canvas-form-submission', (_e, data) => callback(data)),
+
+  // Oversight Import
+  selectOversightFile: () => ipcRenderer.invoke('select-oversight-file'),
+  importOversightFile: (data) => ipcRenderer.invoke('import-oversight-file', data),
+  readOversightFile: (filePath) => ipcRenderer.invoke('read-oversight-file', filePath),
+
   // Auto-Update
   updateCheck: () => ipcRenderer.invoke('update-check'),
   updateDownload: () => ipcRenderer.invoke('update-download'),

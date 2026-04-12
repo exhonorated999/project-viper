@@ -13722,14 +13722,24 @@
         // ============================================
         // CANVAS FORM MANAGEMENT
         // ============================================
-        let activeCanvasForms = JSON.parse(localStorage.getItem(`canvasForms_${currentCase?.id}`) || '[]');
+        let activeCanvasForms = [];
+        let _canvasFormsLoaded = false;
+
+        function ensureCanvasFormsLoaded() {
+            if (!_canvasFormsLoaded && currentCase) {
+                activeCanvasForms = JSON.parse(localStorage.getItem(`canvasForms_${currentCase.id}`) || '[]');
+                _canvasFormsLoaded = true;
+            }
+        }
 
         function saveCanvasForms() {
+            if (!currentCase) return;
             localStorage.setItem(`canvasForms_${currentCase.id}`, JSON.stringify(activeCanvasForms));
         }
 
         // Load active forms panel when Area Canvas tab renders
         async function loadActiveCanvasFormsPanel() {
+            ensureCanvasFormsLoaded();
             const section = document.getElementById('activeCanvasFormsSection');
             if (!section) return;
             if (!window.electronAPI || !window.electronAPI.canvasFormServerStatus) {
@@ -13869,6 +13879,7 @@
         }
 
         async function createCanvasForm() {
+            ensureCanvasFormsLoaded();
             const title = document.getElementById('cf_title').value.trim();
             const caseRef = document.getElementById('cf_caseRef').value.trim();
             const fields = ['address']; // always included
@@ -14032,16 +14043,19 @@
         }
 
         // Listen for real-time submissions
-        if (window.electronAPI && window.electronAPI.onCanvasFormSubmission) {
-            window.electronAPI.onCanvasFormSubmission((data) => {
-                // Update count display if visible
-                const el = document.getElementById(`formCount_${data.formId}`);
-                if (el) el.textContent = data.count;
-                // Update local store
-                const form = activeCanvasForms.find(f => f.formId === data.formId);
-                if (form) { form.submissionCount = data.count; saveCanvasForms(); }
-            });
-        }
+        try {
+            if (window.electronAPI && window.electronAPI.onCanvasFormSubmission) {
+                window.electronAPI.onCanvasFormSubmission((data) => {
+                    ensureCanvasFormsLoaded();
+                    // Update count display if visible
+                    const el = document.getElementById(`formCount_${data.formId}`);
+                    if (el) el.textContent = data.count;
+                    // Update local store
+                    const form = activeCanvasForms.find(f => f.formId === data.formId);
+                    if (form) { form.submissionCount = data.count; saveCanvasForms(); }
+                });
+            }
+        } catch(e) { /* not in electron */ }
 
         // Patch renderTabContent to load forms panel after Area Canvas renders
         const _originalRenderTabContent = renderTabContent;

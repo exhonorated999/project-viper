@@ -4,6 +4,7 @@ const http = require('http');
 const fs = require('fs');
 const url = require('url');
 const { spawn } = require('child_process');
+const os = require('os');
 const SecurityManager = require('./modules/security');
 
 // electron-updater: lazy-load to avoid crashing in dev mode
@@ -1344,6 +1345,397 @@ ipcMain.handle('read-warrant-file', async (event, filePath) => {
     return Array.from(new Uint8Array(raw));
   } catch (error) {
     console.error('Failed to read warrant file:', error);
+    throw error;
+  }
+});
+
+// ====== Canvas Form Server ======
+let canvasFormServer = null;
+let canvasFormPort = null;
+const canvasFormData = {}; // { formId: { config, submissions: [] } }
+
+function getLocalIP() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+    }
+  }
+  return '127.0.0.1';
+}
+
+function buildCanvasFormHTML(formId, config) {
+  const title = config.title || 'Area Canvas';
+  const caseRef = config.caseRef || '';
+  const fields = config.fields || ['address','contact','contactName','phone','officerName','evidenceLocated','notes'];
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>${title}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0f1117;color:#e2e8f0;min-height:100vh;padding:16px}
+.header{background:linear-gradient(135deg,#1e293b,#0f172a);border:1px solid #334155;border-radius:16px;padding:20px;margin-bottom:16px;text-align:center}
+.header h1{font-size:20px;color:#22d3ee;margin-bottom:4px}
+.header p{font-size:13px;color:#94a3b8}
+.badge{display:inline-block;background:#22d3ee20;color:#22d3ee;border:1px solid #22d3ee40;padding:2px 10px;border-radius:20px;font-size:11px;margin-top:8px}
+.card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin-bottom:12px}
+.card h3{font-size:14px;color:#22d3ee;margin-bottom:12px;text-transform:uppercase;letter-spacing:1px}
+label{display:block;font-size:13px;color:#94a3b8;margin-bottom:4px}
+input[type=text],input[type=tel],textarea,select{width:100%;padding:10px 12px;background:#0f172a;border:1px solid #475569;border-radius:8px;color:#e2e8f0;font-size:15px;margin-bottom:12px;-webkit-appearance:none}
+input:focus,textarea:focus,select:focus{outline:none;border-color:#22d3ee;box-shadow:0 0 0 2px #22d3ee30}
+textarea{height:80px;resize:vertical}
+select{background:#0f172a}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;margin-bottom:12px}
+.toggle-row span{font-size:14px;color:#e2e8f0}
+.toggle{width:50px;height:28px;background:#475569;border-radius:14px;position:relative;cursor:pointer;transition:.3s}
+.toggle.on{background:#22d3ee}
+.toggle::after{content:'';position:absolute;width:22px;height:22px;background:#fff;border-radius:50%;top:3px;left:3px;transition:.3s}
+.toggle.on::after{left:25px}
+.btn{width:100%;padding:14px;border:none;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;margin-bottom:8px;transition:.2s}
+.btn-primary{background:#22d3ee;color:#0f172a}.btn-primary:active{background:#06b6d4}
+.btn-secondary{background:#334155;color:#e2e8f0}.btn-secondary:active{background:#475569}
+.counter{text-align:center;padding:12px;background:#22d3ee15;border:1px solid #22d3ee30;border-radius:10px;margin-bottom:16px}
+.counter .num{font-size:28px;font-weight:700;color:#22d3ee}
+.counter .lbl{font-size:12px;color:#94a3b8}
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#22c55e;color:#fff;padding:10px 20px;border-radius:8px;font-size:14px;z-index:999;opacity:0;transition:.3s}
+.toast.show{opacity:1}
+.entry-list .entry{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px;margin-bottom:8px;font-size:13px}
+.entry .addr{color:#22d3ee;font-weight:600}.entry .meta{color:#64748b;font-size:11px;margin-top:2px}
+</style></head><body>
+<div class="header">
+  <h1>🗺️ ${title}</h1>
+  ${caseRef ? '<p>Case: ' + caseRef + '</p>' : ''}
+  <div class="badge">V.I.P.E.R. Area Canvas</div>
+</div>
+<div class="counter"><div class="num" id="count">0</div><div class="lbl">Entries Submitted</div></div>
+<div id="formSection">
+  <div class="card">
+    <h3>New Canvas Entry</h3>
+    <form id="canvasForm">
+      ${fields.includes('address') ? '<label>Address *</label><input type="text" id="f_address" required placeholder="123 Main St">' : ''}
+      ${fields.includes('contact') ? `
+      <div class="toggle-row"><span>Contact Made?</span><div class="toggle" id="f_contact" onclick="this.classList.toggle('on')"></div></div>` : ''}
+      ${fields.includes('contactName') ? '<label>Name of Person Contacted</label><input type="text" id="f_contactName" placeholder="John Doe">' : ''}
+      ${fields.includes('phone') ? '<label>Phone Number</label><input type="tel" id="f_phone" placeholder="(555) 123-4567">' : ''}
+      ${fields.includes('officerName') ? '<label>Officer Name</label><input type="text" id="f_officerName" placeholder="Your name">' : ''}
+      ${fields.includes('evidenceLocated') ? `
+      <div class="toggle-row"><span>Evidence / Lead Located?</span><div class="toggle" id="f_evidence" onclick="this.classList.toggle('on')"></div></div>` : ''}
+      ${fields.includes('notes') ? '<label>Notes</label><textarea id="f_notes" placeholder="Additional observations..."></textarea>' : ''}
+      <button type="submit" class="btn btn-primary">Submit Entry</button>
+    </form>
+  </div>
+</div>
+<div class="card" id="historyCard" style="display:none">
+  <h3>Submitted Entries</h3>
+  <div id="entryList" class="entry-list"></div>
+</div>
+<div id="toast" class="toast"></div>
+<script>
+const SERVER='';
+let count=0;
+const officerEl=document.getElementById('f_officerName');
+if(officerEl){const saved=localStorage.getItem('canvas_officer_name');if(saved)officerEl.value=saved;}
+document.getElementById('canvasForm').addEventListener('submit',async function(e){
+  e.preventDefault();
+  const data={
+    address:(document.getElementById('f_address')||{}).value||'',
+    contact:document.getElementById('f_contact')?.classList.contains('on')?'Yes':'No',
+    contactName:(document.getElementById('f_contactName')||{}).value||'',
+    phone:(document.getElementById('f_phone')||{}).value||'',
+    officerName:(document.getElementById('f_officerName')||{}).value||'',
+    evidenceLocated:document.getElementById('f_evidence')?.classList.contains('on')?'Yes':'No',
+    notes:(document.getElementById('f_notes')||{}).value||'',
+    timestamp:new Date().toISOString()
+  };
+  if(!data.address){showToast('Address is required','#ef4444');return;}
+  if(officerEl&&data.officerName)localStorage.setItem('canvas_officer_name',data.officerName);
+  try{
+    const r=await fetch('/api/canvas/${formId}/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    if(r.ok){count++;document.getElementById('count').textContent=count;showToast('Entry submitted!','#22c55e');addToHistory(data);e.target.reset();if(officerEl){const s=localStorage.getItem('canvas_officer_name');if(s)officerEl.value=s;}document.querySelectorAll('.toggle').forEach(t=>t.classList.remove('on'));}
+    else showToast('Failed to submit','#ef4444');
+  }catch(err){showToast('Connection error - are you on the same network?','#ef4444');}
+});
+function addToHistory(d){
+  const list=document.getElementById('entryList');
+  const card=document.getElementById('historyCard');card.style.display='block';
+  const div=document.createElement('div');div.className='entry';
+  div.innerHTML='<div class="addr">'+d.address+'</div><div class="meta">'+d.contact+(d.contactName?' - '+d.contactName:'')+(d.officerName?' | '+d.officerName:'')+'</div>';
+  list.insertBefore(div,list.firstChild);
+}
+function showToast(msg,bg){const t=document.getElementById('toast');t.textContent=msg;t.style.background=bg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
+</script></body></html>`;
+}
+
+function startCanvasFormServer() {
+  return new Promise((resolve, reject) => {
+    if (canvasFormServer) { resolve(canvasFormPort); return; }
+
+    canvasFormServer = http.createServer((req, res) => {
+      const parsed = new URL(req.url, 'http://localhost');
+      const pathname = parsed.pathname;
+
+      // CORS headers for mobile browsers
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+      if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+      // Serve form page
+      const formMatch = pathname.match(/^\/form\/(.+)$/);
+      if (req.method === 'GET' && formMatch) {
+        const formId = formMatch[1];
+        const formStore = canvasFormData[formId];
+        if (!formStore) { res.writeHead(404); res.end('Form not found'); return; }
+        const html = buildCanvasFormHTML(formId, formStore.config);
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(html);
+        return;
+      }
+
+      // Accept submissions
+      const submitMatch = pathname.match(/^\/api\/canvas\/(.+)\/submit$/);
+      if (req.method === 'POST' && submitMatch) {
+        const formId = submitMatch[1];
+        const formStore = canvasFormData[formId];
+        if (!formStore) { res.writeHead(404); res.end('Form not found'); return; }
+        let body = '';
+        req.on('data', chunk => { body += chunk; if (body.length > 1e6) req.destroy(); });
+        req.on('end', () => {
+          try {
+            const entry = JSON.parse(body);
+            entry.id = Date.now() + Math.floor(Math.random() * 1000);
+            entry.submittedAt = new Date().toISOString();
+            formStore.submissions.push(entry);
+            // Notify renderer
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('canvas-form-submission', { formId, entry, count: formStore.submissions.length });
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, count: formStore.submissions.length }));
+          } catch (e) {
+            res.writeHead(400); res.end('Invalid JSON');
+          }
+        });
+        return;
+      }
+
+      // Status endpoint
+      if (req.method === 'GET' && pathname === '/api/canvas/status') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ active: true, forms: Object.keys(canvasFormData).length }));
+        return;
+      }
+
+      res.writeHead(404); res.end('Not found');
+    });
+
+    // Find an available port starting from 3100
+    let port = 3100;
+    const tryListen = () => {
+      canvasFormServer.listen(port, '0.0.0.0', () => {
+        canvasFormPort = port;
+        console.log(`Canvas Form Server running on http://0.0.0.0:${port}`);
+        resolve(port);
+      });
+      canvasFormServer.once('error', (err) => {
+        if (err.code === 'EADDRINUSE') { port++; if (port > 3199) { reject(new Error('No available ports')); return; } tryListen(); }
+        else reject(err);
+      });
+    };
+    tryListen();
+  });
+}
+
+function stopCanvasFormServer() {
+  return new Promise(resolve => {
+    if (canvasFormServer) {
+      canvasFormServer.close(() => {
+        canvasFormServer = null;
+        canvasFormPort = null;
+        console.log('Canvas Form Server stopped');
+        resolve();
+      });
+    } else resolve();
+  });
+}
+
+// Canvas Form IPC handlers
+ipcMain.handle('canvas-form-start-server', async () => {
+  const port = await startCanvasFormServer();
+  const ip = getLocalIP();
+  return { port, ip, url: `http://${ip}:${port}` };
+});
+
+ipcMain.handle('canvas-form-stop-server', async () => {
+  await stopCanvasFormServer();
+  return { success: true };
+});
+
+ipcMain.handle('canvas-form-create', async (event, config) => {
+  // Ensure server is running
+  if (!canvasFormServer) await startCanvasFormServer();
+
+  const formId = config.formId || Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  canvasFormData[formId] = { config, submissions: [] };
+
+  const ip = getLocalIP();
+  const formUrl = `http://${ip}:${canvasFormPort}/form/${formId}`;
+
+  // Generate QR code
+  const QRCode = require('qrcode');
+  const qrDataUrl = await QRCode.toDataURL(formUrl, { width: 300, margin: 2, color: { dark: '#22d3ee', light: '#0f1117' } });
+
+  return { formId, formUrl, qrDataUrl, port: canvasFormPort, ip };
+});
+
+ipcMain.handle('canvas-form-get-submissions', async (event, formId) => {
+  const formStore = canvasFormData[formId];
+  if (!formStore) return { submissions: [], count: 0 };
+  return { submissions: formStore.submissions, count: formStore.submissions.length };
+});
+
+ipcMain.handle('canvas-form-delete', async (event, formId) => {
+  delete canvasFormData[formId];
+  // If no more forms, stop the server
+  if (Object.keys(canvasFormData).length === 0) await stopCanvasFormServer();
+  return { success: true };
+});
+
+ipcMain.handle('canvas-form-server-status', async () => {
+  return {
+    running: !!canvasFormServer,
+    port: canvasFormPort,
+    ip: getLocalIP(),
+    formCount: Object.keys(canvasFormData).length,
+    forms: Object.keys(canvasFormData).map(id => ({
+      id,
+      title: canvasFormData[id].config.title,
+      submissions: canvasFormData[id].submissions.length
+    }))
+  };
+});
+
+// --- Oversight file import (.oversight is a ZIP) ---
+ipcMain.handle('select-oversight-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import Oversight File',
+    filters: [{ name: 'Oversight Files', extensions: ['oversight'] }],
+    properties: ['openFile']
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle('import-oversight-file', async (event, data) => {
+  const { filePath, caseNumber } = data;
+  const AdmZip = require('adm-zip');
+  try {
+    const zip = new AdmZip(filePath);
+    const entries = zip.getEntries();
+
+    // Read all JSON data files
+    const readJson = (name) => {
+      const entry = entries.find(e => e.entryName === name);
+      return entry ? JSON.parse(entry.getData().toString('utf8')) : [];
+    };
+
+    const manifest = (() => {
+      const e = entries.find(e => e.entryName === 'manifest.json');
+      return e ? JSON.parse(e.getData().toString('utf8')) : {};
+    })();
+
+    const offenders = readJson('data/offenders.json');
+    const vehicles = readJson('data/vehicles.json');
+    const convictions = readJson('data/convictions.json');
+    const supervision = readJson('data/supervision.json');
+    const registrationEvents = readJson('data/registration_events.json');
+    const complianceChecks = readJson('data/compliance_checks.json');
+    const officerNotes = readJson('data/officer_notes.json');
+    const drugTests = readJson('data/drug_tests.json');
+    const polygraphTests = readJson('data/polygraph_tests.json');
+
+    // Save embedded files to disk under cases/{caseNumber}/Oversight/
+    const oversightDir = path.join(casesDir, caseNumber, 'Oversight');
+    fs.mkdirSync(oversightDir, { recursive: true });
+
+    // Read file_map.json which contains base64-encoded file data
+    const fileMapEntry = entries.find(e => e.entryName === 'files/file_map.json');
+    const fileMap = fileMapEntry ? JSON.parse(fileMapEntry.getData().toString('utf8')) : [];
+
+    // Map of original @files/ paths to saved disk paths
+    const savedFiles = {};
+
+    // Save files from the ZIP (actual binary entries under files/)
+    const fileDirs = ['profile_photos', 'residence_photos', 'vehicle_photos', 'documents'];
+    for (const dir of fileDirs) {
+      const dirPath = path.join(oversightDir, dir);
+      fs.mkdirSync(dirPath, { recursive: true });
+    }
+
+    for (const entry of entries) {
+      if (entry.isDirectory) continue;
+      if (!entry.entryName.startsWith('files/')) continue;
+      if (entry.entryName === 'files/file_map.json') continue;
+
+      const relativeName = entry.entryName.replace('files/', '');
+      const destPath = path.join(oversightDir, relativeName);
+      const destDir = path.dirname(destPath);
+      fs.mkdirSync(destDir, { recursive: true });
+
+      let buffer = entry.getData();
+      if (security && security.isEnabled() && security.isUnlocked()) {
+        fs.writeFileSync(destPath, security.encryptBuffer(buffer));
+      } else {
+        fs.writeFileSync(destPath, buffer);
+      }
+
+      savedFiles[`@files/${relativeName}`] = destPath;
+    }
+
+    // Also handle file_map entries (base64 data for files referenced as data: URIs)
+    for (const item of fileMap) {
+      if (item.original_path && item.original_path.startsWith('data:') && item.zip_path) {
+        const relativeName = item.zip_path.replace('files/', '');
+        const destPath = path.join(oversightDir, relativeName);
+        // Already saved above from ZIP binary entries, just map the reference
+        savedFiles[item.original_path] = destPath;
+        savedFiles[`@files/${relativeName}`] = destPath;
+      }
+    }
+
+    console.log(`Oversight imported: ${offenders.length} offenders, ${Object.keys(savedFiles).length} files saved to ${oversightDir}`);
+
+    return {
+      manifest,
+      offenders,
+      vehicles,
+      convictions,
+      supervision,
+      registrationEvents,
+      complianceChecks,
+      officerNotes,
+      drugTests,
+      polygraphTests,
+      savedFiles,
+      oversightDir
+    };
+  } catch (error) {
+    console.error('Failed to import oversight file:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('read-oversight-file', async (event, filePath) => {
+  try {
+    const raw = fs.readFileSync(filePath);
+    if (security && security.isUnlocked() && security.isEncryptedBuffer(raw)) {
+      const decrypted = security.decryptBuffer(raw);
+      return Array.from(new Uint8Array(decrypted));
+    }
+    return Array.from(new Uint8Array(raw));
+  } catch (error) {
+    console.error('Failed to read oversight file:', error);
     throw error;
   }
 });

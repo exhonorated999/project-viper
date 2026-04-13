@@ -92,14 +92,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Aperture: report generation
   apertureGenerateReport: (data) => ipcRenderer.invoke('aperture-generate-report', data),
 
-  // Canvas Forms
-  canvasFormStartServer: () => ipcRenderer.invoke('canvas-form-start-server'),
-  canvasFormStopServer: () => ipcRenderer.invoke('canvas-form-stop-server'),
-  canvasFormCreate: (config) => ipcRenderer.invoke('canvas-form-create', config),
-  canvasFormGetSubmissions: (formId) => ipcRenderer.invoke('canvas-form-get-submissions', formId),
-  canvasFormDelete: (formId) => ipcRenderer.invoke('canvas-form-delete', formId),
-  canvasFormServerStatus: () => ipcRenderer.invoke('canvas-form-server-status'),
-  onCanvasFormSubmission: (callback) => ipcRenderer.on('canvas-form-submission', (_e, data) => callback(data)),
+  // Canvas Forms (Railway-hosted)
+  canvasFormCreate: (params) => ipcRenderer.invoke('canvas-form-create', params),
+  canvasFormGetInfo: (params) => ipcRenderer.invoke('canvas-form-get-info', params),
+  canvasFormDownload: (params) => ipcRenderer.invoke('canvas-form-download', params),
+  canvasFormDelete: (params) => ipcRenderer.invoke('canvas-form-delete', params),
 
   // Oversight Import
   selectOversightFile: () => ipcRenderer.invoke('select-oversight-file'),

@@ -13725,6 +13725,10 @@
         let activeCanvasForms = [];
         let _canvasFormsLoaded = false;
 
+        function _getViperApiKey() {
+            return localStorage.getItem('viper_api_key') || null;
+        }
+
         function ensureCanvasFormsLoaded() {
             if (!_canvasFormsLoaded && currentCase) {
                 activeCanvasForms = JSON.parse(localStorage.getItem(`canvasForms_${currentCase.id}`) || '[]');
@@ -13737,23 +13741,50 @@
             localStorage.setItem(`canvasForms_${currentCase.id}`, JSON.stringify(activeCanvasForms));
         }
 
+        function _isFormExpired(form) {
+            if (!form.expiresAt) return false;
+            return new Date(form.expiresAt) < new Date();
+        }
+
+        function _timeRemaining(expiresAt) {
+            if (!expiresAt) return '';
+            const diff = new Date(expiresAt) - new Date();
+            if (diff <= 0) return 'Expired';
+            const hrs = Math.floor(diff / 3600000);
+            const mins = Math.floor((diff % 3600000) / 60000);
+            return hrs > 0 ? `${hrs}h ${mins}m remaining` : `${mins}m remaining`;
+        }
+
         // Load active forms panel when Area Canvas tab renders
         async function loadActiveCanvasFormsPanel() {
             ensureCanvasFormsLoaded();
             const section = document.getElementById('activeCanvasFormsSection');
             if (!section) return;
-            if (!window.electronAPI || !window.electronAPI.canvasFormServerStatus) {
+            if (!window.electronAPI || !window.electronAPI.canvasFormCreate) {
                 section.innerHTML = '';
                 return;
             }
 
-            // Refresh submission counts from server
+            const apiKey = _getViperApiKey();
+
+            // Refresh submission counts from server for non-expired forms
             for (const form of activeCanvasForms) {
+                if (_isFormExpired(form)) { form._expired = true; continue; }
+                if (!apiKey) continue;
                 try {
-                    const result = await window.electronAPI.canvasFormGetSubmissions(form.formId);
-                    form.submissionCount = result.count;
-                } catch { /* server may not be running */ }
+                    const info = await window.electronAPI.canvasFormGetInfo({ apiKey, formId: form.formId });
+                    form.submissionCount = info.submission_count;
+                    form._expired = false;
+                } catch {
+                    // Might be deleted server-side (expired/cleaned up)
+                    form._expired = true;
+                }
             }
+
+            // Remove expired forms from local store
+            const hadExpired = activeCanvasForms.some(f => f._expired);
+            activeCanvasForms = activeCanvasForms.filter(f => !f._expired);
+            if (hadExpired) saveCanvasForms();
 
             if (activeCanvasForms.length === 0) { section.innerHTML = ''; return; }
 
@@ -13773,6 +13804,7 @@
                                 <div>
                                     <h4 class="text-white font-semibold">${form.title || 'Canvas Form'}</h4>
                                     <p class="text-xs text-gray-500 mt-1">Created ${new Date(form.createdAt).toLocaleString()}</p>
+                                    <p class="text-xs text-viper-cyan mt-1">⏱ ${_timeRemaining(form.expiresAt)}</p>
                                 </div>
                                 <div class="flex items-center gap-2">
                                     <span class="text-lg font-bold text-viper-orange" id="formCount_${form.formId}">${form.submissionCount || 0}</span>
@@ -13791,15 +13823,15 @@
                                         <input type="text" readonly value="${form.formUrl}" class="flex-1 px-2 py-1 bg-viper-dark border border-gray-600 rounded text-xs text-viper-cyan truncate focus:outline-none" onclick="this.select()">
                                         <button onclick="navigator.clipboard.writeText('${form.formUrl}'); viperToast('Link copied!','success');" class="px-2 py-1 bg-viper-cyan/20 border border-viper-cyan/30 rounded text-viper-cyan text-xs hover:bg-viper-cyan/30 transition flex-shrink-0">Copy</button>
                                     </div>
-                                    <p class="text-xs text-gray-600 mt-2">Officers scan QR or open link on phone → fill form → submit</p>
+                                    <p class="text-xs text-gray-600 mt-2">Officers open link on any device → fill form → submit</p>
                                 </div>
                             </div>
                             
                             <!-- Actions -->
                             <div class="flex gap-2">
-                                <button onclick="collectCanvasFormResults('${form.formId}', ${idx})" class="flex-1 px-3 py-2 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green text-sm transition flex items-center justify-center gap-1">
+                                <button onclick="downloadCanvasFormResults('${form.formId}', ${idx})" class="flex-1 px-3 py-2 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green text-sm transition flex items-center justify-center gap-1">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                                    Import Results
+                                    Download & Import
                                 </button>
                                 <button onclick="refreshCanvasFormCount('${form.formId}')" class="px-3 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan text-sm transition" title="Refresh count">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
@@ -13815,19 +13847,14 @@
             `;
         }
 
-        // Call it after the area canvas tab renders
-        const _origRenderAreaCanvas = renderAreaCanvasTab;
-        // Patch: load forms panel after DOM update
-        const _areaCanvasTabObserver = new MutationObserver(() => {
-            if (document.getElementById('activeCanvasFormsSection')) {
-                loadActiveCanvasFormsPanel();
-                _areaCanvasTabObserver.disconnect();
-            }
-        });
-
         function showCreateCanvasFormModal() {
             if (!window.electronAPI || !window.electronAPI.canvasFormCreate) {
-                viperToast('Canvas Form Server requires the VIPER desktop app.', 'info');
+                viperToast('Canvas Forms require the VIPER desktop app.', 'info');
+                return;
+            }
+            const apiKey = _getViperApiKey();
+            if (!apiKey) {
+                viperToast('You must register/activate VIPER before creating forms.', 'error');
                 return;
             }
 
@@ -13835,7 +13862,7 @@
                 <div id="createCanvasFormModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id==='createCanvasFormModal') document.getElementById('createCanvasFormModal').remove()">
                     <div class="glass-card rounded-xl p-6 max-w-lg w-full">
                         <h3 class="text-2xl font-bold text-white mb-2">Create Canvas Form</h3>
-                        <p class="text-gray-400 mb-6 text-sm">Generate a mobile-friendly form that officers can access via QR code</p>
+                        <p class="text-gray-400 mb-6 text-sm">Generate a mobile-friendly form that officers can access via QR code or link</p>
                         
                         <div class="space-y-4">
                             <div>
@@ -13861,7 +13888,7 @@
                             </div>
 
                             <div class="bg-viper-orange/10 border border-viper-orange/30 rounded-lg p-3 text-sm text-gray-300">
-                                <p>📱 <strong>How it works:</strong> VIPER will start a local server on your network. Officers on the same WiFi can scan the QR code or open the link on their phones to submit canvas entries in real-time.</p>
+                                <p>📱 <strong>How it works:</strong> A form will be created on the Intellect server. Officers anywhere can scan the QR code or open the link on their phones — no WiFi or VPN needed. Form auto-expires after 48 hours. When you download results, submissions are removed from the server.</p>
                             </div>
                         </div>
 
@@ -13889,15 +13916,17 @@
 
             if (!title) { viperToast('Form title is required', 'error'); return; }
 
+            const apiKey = _getViperApiKey();
+            if (!apiKey) { viperToast('VIPER not registered — cannot create forms', 'error'); return; }
+
             try {
-                viperToast('Starting Canvas Form Server...', 'info');
+                viperToast('Creating canvas form...', 'info');
 
                 const result = await window.electronAPI.canvasFormCreate({
+                    apiKey,
                     title,
                     caseRef,
                     fields,
-                    caseId: currentCase.id,
-                    caseNumber: currentCase.caseNumber
                 });
 
                 // Store form reference locally
@@ -13905,6 +13934,7 @@
                     formId: result.formId,
                     formUrl: result.formUrl,
                     qrDataUrl: result.qrDataUrl,
+                    expiresAt: result.expiresAt,
                     title,
                     caseRef,
                     fields,
@@ -13922,7 +13952,7 @@
                 renderTabContent('areacanvas');
             } catch (error) {
                 console.error('Failed to create canvas form:', error);
-                viperToast('Failed to start form server: ' + error.message, 'error');
+                viperToast('Failed to create form: ' + error.message, 'error');
             }
         }
 
@@ -13948,7 +13978,8 @@
                             </div>
                         </div>
                         
-                        <p class="text-xs text-gray-500 mb-4">Officers must be on the same WiFi network to access this form.<br>Form remains active until you close it.</p>
+                        <p class="text-xs text-gray-500 mb-1">Officers can access this form from any device with internet.</p>
+                        <p class="text-xs text-viper-cyan mb-4">⏱ ${_timeRemaining(form.expiresAt)}</p>
                         
                         <button onclick="document.getElementById('canvasQRModal').remove()" class="px-6 py-2 bg-viper-orange hover:bg-viper-orange/80 rounded-lg text-white font-semibold transition">Done</button>
                     </div>
@@ -13959,24 +13990,30 @@
 
         async function refreshCanvasFormCount(formId) {
             if (!window.electronAPI) return;
+            const apiKey = _getViperApiKey();
+            if (!apiKey) return;
             try {
-                const result = await window.electronAPI.canvasFormGetSubmissions(formId);
+                const info = await window.electronAPI.canvasFormGetInfo({ apiKey, formId });
                 const el = document.getElementById(`formCount_${formId}`);
-                if (el) el.textContent = result.count;
+                if (el) el.textContent = info.submission_count;
                 // Update local store
                 const form = activeCanvasForms.find(f => f.formId === formId);
-                if (form) { form.submissionCount = result.count; saveCanvasForms(); }
+                if (form) { form.submissionCount = info.submission_count; saveCanvasForms(); }
             } catch (e) {
-                viperToast('Could not reach form server. It may have been stopped.', 'error');
+                viperToast('Could not reach server: ' + e.message, 'error');
             }
         }
 
-        async function collectCanvasFormResults(formId, idx) {
+        async function downloadCanvasFormResults(formId, idx) {
             if (!window.electronAPI) return;
+            const apiKey = _getViperApiKey();
+            if (!apiKey) { viperToast('VIPER not registered', 'error'); return; }
+
             try {
-                const result = await window.electronAPI.canvasFormGetSubmissions(formId);
-                if (result.submissions.length === 0) {
-                    viperToast('No submissions to import yet.', 'info');
+                // Download results (server deletes them after retrieval)
+                const result = await window.electronAPI.canvasFormDownload({ apiKey, formId });
+                if (!result.submissions || result.submissions.length === 0) {
+                    viperToast('No submissions to download yet.', 'info');
                     return;
                 }
 
@@ -14002,60 +14039,40 @@
                     return;
                 }
 
-                if (await viperConfirm(`Import ${unique.length} new canvas entries from form submissions?\n\n(${result.submissions.length} total submissions, ${result.submissions.length - unique.length} already imported)`)) {
+                if (await viperConfirm(`Import ${unique.length} canvas entries?\n\nSubmissions have been removed from the server.`)) {
                     canvasData.push(...unique);
                     saveCanvasData();
+
+                    // Update local count
+                    const form = activeCanvasForms.find(f => f.formId === formId);
+                    if (form) { form.submissionCount = 0; saveCanvasForms(); }
+
                     viperToast(`✓ Imported ${unique.length} entries into Area Canvas`, 'success');
                     renderTabContent('areacanvas');
                 }
             } catch (e) {
-                console.error('Failed to collect form results:', e);
-                viperToast('Failed to retrieve submissions: ' + e.message, 'error');
+                console.error('Failed to download form results:', e);
+                viperToast('Failed to download: ' + e.message, 'error');
             }
         }
 
         async function closeCanvasForm(formId, idx) {
-            // Check for unimported submissions first
-            let pending = 0;
-            try {
-                if (window.electronAPI) {
-                    const result = await window.electronAPI.canvasFormGetSubmissions(formId);
-                    const existingKeys = new Set(canvasData.map(e => e.address.toLowerCase() + '|' + e.timestamp));
-                    pending = result.submissions.filter(e => !existingKeys.has((e.address || '').toLowerCase() + '|' + (e.submittedAt || e.timestamp || ''))).length;
-                }
-            } catch { /* ok */ }
-
-            const msg = pending > 0
-                ? `Close this form? You have ${pending} unimported submission(s) that will be lost.`
-                : 'Close this canvas form? Officers will no longer be able to submit entries.';
-
-            if (!await viperConfirm(msg, { danger: pending > 0, okText: 'Close Form' })) return;
+            const apiKey = _getViperApiKey();
+            const msg = 'Close and delete this canvas form? Any undownloaded submissions on the server will be lost.';
+            if (!await viperConfirm(msg, { danger: true, okText: 'Close Form' })) return;
 
             // Delete from server
             try {
-                if (window.electronAPI) await window.electronAPI.canvasFormDelete(formId);
-            } catch { /* ok */ }
+                if (window.electronAPI && apiKey) {
+                    await window.electronAPI.canvasFormDelete({ apiKey, formId });
+                }
+            } catch { /* ok — may already be expired */ }
 
             // Remove from local store
             activeCanvasForms = activeCanvasForms.filter(f => f.formId !== formId);
             saveCanvasForms();
             renderTabContent('areacanvas');
         }
-
-        // Listen for real-time submissions
-        try {
-            if (window.electronAPI && window.electronAPI.onCanvasFormSubmission) {
-                window.electronAPI.onCanvasFormSubmission((data) => {
-                    ensureCanvasFormsLoaded();
-                    // Update count display if visible
-                    const el = document.getElementById(`formCount_${data.formId}`);
-                    if (el) el.textContent = data.count;
-                    // Update local store
-                    const form = activeCanvasForms.find(f => f.formId === data.formId);
-                    if (form) { form.submissionCount = data.count; saveCanvasForms(); }
-                });
-            }
-        } catch(e) { /* not in electron */ }
 
         // Patch renderTabContent to load forms panel after Area Canvas renders
         const _originalRenderTabContent = renderTabContent;

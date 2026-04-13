@@ -14039,15 +14039,20 @@
                     return;
                 }
 
-                if (await viperConfirm(`Import ${unique.length} canvas entries?\n\nSubmissions have been removed from the server.`)) {
+                if (await viperConfirm(`Import ${unique.length} canvas entries?\n\nThe form will be closed and all data removed from the server.`)) {
                     canvasData.push(...unique);
                     saveCanvasData();
 
-                    // Update local count
-                    const form = activeCanvasForms.find(f => f.formId === formId);
-                    if (form) { form.submissionCount = 0; saveCanvasForms(); }
+                    // Delete form from server (link goes dead immediately)
+                    try {
+                        await window.electronAPI.canvasFormDelete({ apiKey, formId });
+                    } catch { /* may already be expired */ }
 
-                    viperToast(`✓ Imported ${unique.length} entries into Area Canvas`, 'success');
+                    // Remove from local store
+                    activeCanvasForms = activeCanvasForms.filter(f => f.formId !== formId);
+                    saveCanvasForms();
+
+                    viperToast(`✓ Imported ${unique.length} entries — form closed`, 'success');
                     renderTabContent('areacanvas');
                 }
             } catch (e) {

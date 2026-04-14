@@ -153,14 +153,7 @@ function createWindow() {
   });
 
   // Force focus back after native dialogs (file pickers, save dialogs)
-  function restoreFocus() {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      setTimeout(() => {
-        mainWindow.focus();
-        mainWindow.webContents.focus();
-      }, 100);
-    }
-  }
+  // NOTE: restoreFocus is defined at module scope (see below createWindow)
 
   // Gate on security — show login page or main app
   if (security && security.isEnabled()) {
@@ -189,6 +182,17 @@ function createWindow() {
       apertureProcess = null;
     }
   });
+}
+
+// Force focus back after native dialogs (file pickers, save dialogs)
+// Defined at module scope so all IPC handlers can access it
+function restoreFocus() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    setTimeout(() => {
+      mainWindow.focus();
+      mainWindow.webContents.focus();
+    }, 100);
+  }
 }
 
 // Encrypt localStorage snapshot to vault, clear sensitive data, then quit

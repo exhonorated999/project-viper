@@ -30,6 +30,9 @@ let lastFlockBounds = null;
 let tloBrowserView = null;
 let tloViewVisible = false;
 let lastTloBounds = null;
+let accurintBrowserView = null;
+let accurintViewVisible = false;
+let lastAccurintBounds = null;
 
 // Icon path: use unpacked asar path in production, normal path in dev
 const iconPath = app.isPackaged
@@ -343,6 +346,9 @@ app.whenReady().then(async () => {
       if (tloViewVisible && lastTloBounds) {
         tloBrowserView.setBounds(lastTloBounds);
       }
+      if (accurintViewVisible && lastAccurintBounds) {
+        accurintBrowserView.setBounds(lastAccurintBounds);
+      }
     });
 
     // Create persistent BrowserView for TLO (TransUnion) — people search / skip tracing
@@ -380,6 +386,57 @@ app.whenReady().then(async () => {
               (function() {
                 function fill() {
                   const userInput = document.querySelector('input[name="Username"], input[name="username"], input[name="email"], input[type="email"], input[id*="user"], input[id*="User"]');
+                  const passInput = document.querySelector('input[name="Password"], input[name="password"], input[type="password"]');
+                  function setVal(el, val) {
+                    if (!el || !val) return;
+                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                    nativeSetter.call(el, val);
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                  }
+                  setVal(userInput, ${JSON.stringify(creds.username)});
+                  setVal(passInput, ${JSON.stringify(creds.password)});
+                }
+                setTimeout(fill, 500);
+                setTimeout(fill, 1500);
+              })();
+            `).catch(() => {});
+          }
+        }).catch(() => {});
+      }
+    });
+
+    // Create persistent BrowserView for LexisNexis Accurint — people/asset search
+    accurintBrowserView = new BrowserView({
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        partition: 'persist:accurint',
+      },
+    });
+    mainWindow.addBrowserView(accurintBrowserView);
+    accurintBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    accurintBrowserView.setAutoResize({ width: false, height: false });
+
+    accurintBrowserView.webContents.on('did-finish-load', () => {
+      if (!accurintViewVisible) mainWindow.webContents.focus();
+      accurintBrowserView.webContents.insertCSS(`
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0d1117; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+      `).catch(() => {});
+
+      const url = accurintBrowserView.webContents.getURL();
+      if (url.includes('accurint.com') && (url.includes('login') || url.includes('Login') || url.includes('bps/main'))) {
+        mainWindow.webContents.executeJavaScript(
+          `JSON.stringify({ username: localStorage.getItem('accurintUsername') || '', password: localStorage.getItem('accurintPassword') || '' })`
+        ).then(json => {
+          const creds = JSON.parse(json);
+          if (creds.username || creds.password) {
+            accurintBrowserView.webContents.executeJavaScript(`
+              (function() {
+                function fill() {
+                  const userInput = document.querySelector('input[name="UserID"], input[name="userid"], input[name="username"], input[id*="user" i], input[id*="User" i], input[type="text"]');
                   const passInput = document.querySelector('input[name="Password"], input[name="password"], input[type="password"]');
                   function setVal(el, val) {
                     if (!el || !val) return;
@@ -2642,4 +2699,77 @@ ipcMain.handle('tlo-reset', async () => {
   const ses = tloBrowserView.webContents.session;
   await ses.clearStorageData();
   tloBrowserView.webContents.loadURL('https://tloxp.tlo.com/');
+});
+
+// ── LexisNexis Accurint IPC ────────────────────────────────
+ipcMain.on('accurint-set-bounds', (_event, bounds) => {
+  if (!accurintBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  const b = {
+    x: Math.round(bounds.x),
+    y: Math.round(bounds.y),
+    width: Math.round(bounds.width),
+    height: Math.round(bounds.height),
+  };
+  lastAccurintBounds = b;
+  if (accurintViewVisible) {
+    accurintBrowserView.setBounds(b);
+  }
+});
+
+ipcMain.on('accurint-set-visible', (_event, visible) => {
+  if (!accurintBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  accurintViewVisible = visible;
+  if (visible && lastAccurintBounds) {
+    const currentUrl = accurintBrowserView.webContents.getURL();
+    if (!currentUrl || currentUrl === '' || currentUrl === 'about:blank') {
+      accurintBrowserView.webContents.loadURL('https://secure.accurint.com/app/bps/main');
+    }
+    accurintBrowserView.setBounds(lastAccurintBounds);
+  } else if (!visible) {
+    accurintBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+  }
+});
+
+ipcMain.handle('accurint-search-person', async (_event, { firstName, lastName, state, dob }) => {
+  if (!accurintBrowserView) return { success: false, error: 'Accurint not initialized' };
+  try {
+    const currentUrl = accurintBrowserView.webContents.getURL();
+    if (!currentUrl.includes('accurint.com') || currentUrl.includes('login') || currentUrl.includes('Login')) {
+      accurintBrowserView.webContents.loadURL('https://secure.accurint.com/app/bps/main');
+      await new Promise(resolve => {
+        accurintBrowserView.webContents.once('did-finish-load', resolve);
+        setTimeout(resolve, 8000);
+      });
+    }
+    if (firstName || lastName) {
+      await new Promise(r => setTimeout(r, 1500));
+      await accurintBrowserView.webContents.executeJavaScript(`
+        (function() {
+          function setVal(el, val) {
+            if (!el || !val) return;
+            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            nativeSetter.call(el, val);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          const fnInput = document.querySelector('input[name*="irstName" i], input[id*="irstName" i], input[placeholder*="First" i]');
+          const lnInput = document.querySelector('input[name*="astName" i], input[id*="astName" i], input[placeholder*="Last" i]');
+          const stInput = document.querySelector('select[name*="tate" i], select[id*="tate" i]');
+          setVal(fnInput, ${JSON.stringify(firstName || '')});
+          setVal(lnInput, ${JSON.stringify(lastName || '')});
+          ${state ? `if (stInput) { stInput.value = ${JSON.stringify(state)}; stInput.dispatchEvent(new Event('change', { bubbles: true })); }` : ''}
+        })();
+      `);
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('accurint-reset', async () => {
+  if (!accurintBrowserView) return;
+  const ses = accurintBrowserView.webContents.session;
+  await ses.clearStorageData();
+  accurintBrowserView.webContents.loadURL('https://secure.accurint.com/app/bps/main');
 });

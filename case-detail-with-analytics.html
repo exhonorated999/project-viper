@@ -2023,6 +2023,16 @@
                         }
                         if (od.location) fieldBold('Location', od.location);
                         if (od.suspectInfo) { gap(); fieldBold('Suspect Information', ''); bodyText(od.suspectInfo); }
+                        if (od.otherResidents && od.otherResidents.length > 0) {
+                            gap(); fieldBold('Other Residents at Location', '');
+                            od.otherResidents.forEach((r, ri) => {
+                                let rLine = (r.name || 'Unknown');
+                                if (r.dob) rLine += ' | DOB: ' + r.dob;
+                                if (r.hasFirearms) rLine += ' | Firearms: ' + (r.firearms || 'Yes');
+                                if (r.hasCrimHistory) rLine += ' | Criminal History: ' + (r.crimHistory || 'Yes');
+                                bodyText('  ' + (ri + 1) + '. ' + rLine);
+                            });
+                        }
                         if (od.caseSummary) { gap(); fieldBold('Case Summary', ''); bodyText(od.caseSummary); }
                         if (od.tacticalPlan) { gap(); fieldBold('Tactical Plan', ''); bodyText(od.tacticalPlan); }
                         if (od.pursuitPlan) { gap(); fieldBold('Pursuit Plan', ''); bodyText(od.pursuitPlan); }
@@ -2682,6 +2692,15 @@
                             if (opsDataRaw.caseAgent) pdfField('Case Agent', opsDataRaw.caseAgent);
                             if (opsDataRaw.location) pdfField('Location', opsDataRaw.location);
                             if (opsDataRaw.suspectInfo) pdfField('Suspect Information', opsDataRaw.suspectInfo);
+                            if (opsDataRaw.otherResidents && opsDataRaw.otherResidents.length > 0) {
+                                pdfField('Other Residents at Location', opsDataRaw.otherResidents.map((r, ri) => {
+                                    let line = (ri+1) + '. ' + (r.name || 'Unknown');
+                                    if (r.dob) line += ' | DOB: ' + r.dob;
+                                    if (r.hasFirearms) line += ' | Firearms: ' + (r.firearms || 'Yes');
+                                    if (r.hasCrimHistory) line += ' | Crim History: ' + (r.crimHistory || 'Yes');
+                                    return line;
+                                }).join('\n'));
+                            }
                             if (opsDataRaw.caseSummary) pdfField('Case Summary', opsDataRaw.caseSummary);
                             if (opsDataRaw.tacticalPlan) pdfField('Tactical Plan', opsDataRaw.tacticalPlan);
                             if (opsDataRaw.pursuitPlan) pdfField('Pursuit Plan', opsDataRaw.pursuitPlan);
@@ -5524,6 +5543,11 @@
                                 <button onclick="event.stopPropagation(); openTloPanel('${(suspect.name.split(' ')[0]||'').replace(/'/g,"\\'")}', '${(suspect.name.split(' ').slice(1).join(' ')||'').replace(/'/g,"\\'")}', '')" class="px-4 py-2 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500 rounded-lg text-indigo-400 transition flex items-center gap-2">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                                     Search TLO
+                                </button>` : ''}
+                                ${isAccurintEnabled() && suspect.name ? `
+                                <button onclick="event.stopPropagation(); openAccurintPanel('${(suspect.name.split(' ')[0]||'').replace(/'/g,"\\'")}', '${(suspect.name.split(' ').slice(1).join(' ')||'').replace(/'/g,"\\'")}', '')" class="px-4 py-2 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500 rounded-lg text-blue-400 transition flex items-center gap-2">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                                    Search Accurint
                                 </button>` : ''}
                                 <button onclick="deleteSuspect(${index})" class="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500 rounded-lg text-red-500 transition">
                                     Delete
@@ -8892,10 +8916,13 @@
             if (tloPanelOpen) reportTloBounds();
         });
 
-        // Hide TLO BrowserView when navigating away
+        // Hide TLO & Accurint BrowserViews when navigating away
         window.addEventListener('beforeunload', () => {
             if (window.electronAPI && window.electronAPI.tloSetVisible) {
                 window.electronAPI.tloSetVisible(false);
+            }
+            if (window.electronAPI && window.electronAPI.accurintSetVisible) {
+                window.electronAPI.accurintSetVisible(false);
             }
         });
 
@@ -8908,6 +8935,141 @@
             return `<button onclick="event.stopPropagation(); openTloPanel('${fn}', '${ln}', '${st}')" class="px-3 py-1.5 text-xs rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 text-indigo-400 font-medium transition-colors inline-flex items-center gap-1.5" title="Search TLO / TransUnion">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                 Search TLO
+            </button>`;
+        }
+
+        /* ── LexisNexis Accurint Panel ───────────────────────────── */
+        let accurintPanelOpen = false;
+        let accurintPanelExpanded = false;
+
+        function isAccurintEnabled() {
+            return localStorage.getItem('accurintEnabled') === 'true';
+        }
+
+        function openAccurintPanel(firstName, lastName, state, dob) {
+            if (!window.electronAPI || !window.electronAPI.accurintSetBounds) return;
+            firstName = (firstName || '').trim();
+            lastName = (lastName || '').trim();
+
+            let panel = document.getElementById('accurintPanel');
+            if (!panel) {
+                panel = document.createElement('div');
+                panel.id = 'accurintPanel';
+                panel.className = 'fixed top-0 right-0 h-full z-[9997] transition-transform duration-300 translate-x-full';
+                panel.style.width = '560px';
+                panel.innerHTML = `
+                    <div class="h-full flex flex-col" style="background:rgba(10,15,28,0.98);border-left:1px solid rgba(59,130,246,0.3);">
+                        <div class="flex items-center justify-between px-5 py-3 border-b border-blue-500/20" style="background:rgba(59,130,246,0.08);">
+                            <div class="flex items-center gap-3">
+                                <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:rgba(59,130,246,0.15);">
+                                    <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                                </div>
+                                <div>
+                                    <h3 class="text-sm font-bold text-white tracking-wide">LexisNexis Accurint</h3>
+                                    <p id="accurintPanelNameLabel" class="text-xs text-blue-400 font-mono"></p>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <button onclick="toggleAccurintExpand()" id="accurintExpandBtn" title="Expand panel" class="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-blue-400 transition">
+                                    <svg id="accurintExpandIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+                                </button>
+                                <button onclick="accurintOpenExternal()" title="Open in browser" class="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-blue-400 transition">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                </button>
+                                <button onclick="closeAccurintPanel()" class="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="accurintBrowserArea" class="flex-1 relative">
+                            <!-- BrowserView overlays here -->
+                        </div>
+                    </div>`;
+                document.body.appendChild(panel);
+            }
+
+            const label = document.getElementById('accurintPanelNameLabel');
+            if (label) label.textContent = (firstName || lastName) ? `${firstName} ${lastName}`.trim() : 'Search';
+
+            requestAnimationFrame(() => {
+                panel.classList.remove('translate-x-full');
+                accurintPanelOpen = true;
+                setTimeout(() => reportAccurintBounds(), 320);
+            });
+
+            if (firstName || lastName) {
+                setTimeout(() => {
+                    window.electronAPI.accurintSearchPerson({ firstName, lastName, state, dob });
+                }, 500);
+            }
+        }
+
+        function closeAccurintPanel() {
+            const panel = document.getElementById('accurintPanel');
+            if (panel) {
+                panel.classList.add('translate-x-full');
+                accurintPanelOpen = false;
+                accurintPanelExpanded = false;
+                panel.style.width = '560px';
+                panel.style.left = '';
+                if (window.electronAPI && window.electronAPI.accurintSetVisible) {
+                    window.electronAPI.accurintSetVisible(false);
+                }
+            }
+        }
+
+        function reportAccurintBounds() {
+            if (!accurintPanelOpen) return;
+            const area = document.getElementById('accurintBrowserArea');
+            if (!area || !window.electronAPI || !window.electronAPI.accurintSetBounds) return;
+            const rect = area.getBoundingClientRect();
+            window.electronAPI.accurintSetBounds({
+                x: Math.round(rect.x),
+                y: Math.round(rect.y),
+                width: Math.round(rect.width),
+                height: Math.round(rect.height)
+            });
+            window.electronAPI.accurintSetVisible(true);
+        }
+
+        function toggleAccurintExpand() {
+            const panel = document.getElementById('accurintPanel');
+            if (!panel) return;
+            accurintPanelExpanded = !accurintPanelExpanded;
+            const icon = document.getElementById('accurintExpandIcon');
+            if (accurintPanelExpanded) {
+                panel.style.width = 'calc(100vw - 256px)';
+                panel.style.left = '256px';
+                panel.style.right = '0';
+                if (icon) icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 9L4 4m0 0v4m0-4h4m7 11l5 5m0 0v-4m0 4h-4M9 15l-5 5m0 0h4m-4 0v-4m11-7l5-5m0 0h-4m4 0v4"/>';
+            } else {
+                panel.style.width = '560px';
+                panel.style.left = '';
+                panel.style.right = '0';
+                if (icon) icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>';
+            }
+            setTimeout(() => reportAccurintBounds(), 50);
+        }
+
+        function accurintOpenExternal() {
+            if (window.electronAPI && window.electronAPI.openExternalUrl) {
+                window.electronAPI.openExternalUrl('https://secure.accurint.com/app/bps/main');
+            }
+        }
+
+        window.addEventListener('resize', () => {
+            if (accurintPanelOpen) reportAccurintBounds();
+        });
+
+        function renderAccurintButton(firstName, lastName, state) {
+            if (!isAccurintEnabled()) return '';
+            if (!firstName && !lastName) return '';
+            const fn = (firstName||'').replace(/'/g, "\\'");
+            const ln = (lastName||'').replace(/'/g, "\\'");
+            const st = (state||'').replace(/'/g, "\\'");
+            return `<button onclick="event.stopPropagation(); openAccurintPanel('${fn}', '${ln}', '${st}')" class="px-3 py-1.5 text-xs rounded-lg bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-blue-400 font-medium transition-colors inline-flex items-center gap-1.5" title="Search LexisNexis Accurint">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                Search Accurint
             </button>`;
         }
 
@@ -16387,6 +16549,113 @@
             `).join('');
         }
 
+        function renderOpsResidentCard(r, i) {
+            const photoHtml = r.photo
+                ? '<img src="' + r.photo + '" class="w-20 h-20 rounded-lg object-cover border border-gray-600" onclick="viewOpsResidentPhoto(' + i + ')">'
+                : '<div class="w-20 h-20 rounded-lg bg-viper-dark border border-gray-600 flex items-center justify-center text-gray-500 text-xs">No Photo</div>';
+            return '<div class="flex gap-4 items-start p-3 bg-viper-dark/50 rounded-lg border border-gray-700 mb-2" id="opsResident_' + i + '">'
+                + '<div class="shrink-0 flex flex-col items-center gap-1">'
+                +   photoHtml
+                +   '<button type="button" onclick="uploadOpsResidentPhoto(' + i + ')" class="text-xs text-viper-cyan hover:underline">📷 Photo</button>'
+                + '</div>'
+                + '<div class="flex-1 min-w-0 grid grid-cols-2 gap-x-4 gap-y-2">'
+                +   '<div><label class="text-xs text-gray-400">Name</label><input type="text" value="' + (r.name || '').replace(/"/g, '&quot;') + '" data-resident="' + i + '" data-rfield="name" class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Full Name"></div>'
+                +   '<div><label class="text-xs text-gray-400">Date of Birth</label><input type="date" value="' + (r.dob || '') + '" data-resident="' + i + '" data-rfield="dob" class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none"></div>'
+                +   '<div class="col-span-2"><label class="flex items-center gap-2 text-xs text-gray-400 cursor-pointer"><input type="checkbox" ' + (r.hasFirearms ? 'checked' : '') + ' data-resident="' + i + '" data-rfield="hasFirearms" onchange="toggleOpsResidentField(' + i + ',\'firearms\')" class="accent-viper-cyan">Known Firearms</label>'
+                +     '<div id="opsResFirearms_' + i + '" class="' + (r.hasFirearms ? '' : 'hidden') + ' mt-1"><textarea data-resident="' + i + '" data-rfield="firearms" rows="2" class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-xs focus:border-viper-cyan focus:outline-none" placeholder="List firearms...">' + (r.firearms || '') + '</textarea></div>'
+                +   '</div>'
+                +   '<div class="col-span-2"><label class="flex items-center gap-2 text-xs text-gray-400 cursor-pointer"><input type="checkbox" ' + (r.hasCrimHistory ? 'checked' : '') + ' data-resident="' + i + '" data-rfield="hasCrimHistory" onchange="toggleOpsResidentField(' + i + ',\'crimHistory\')" class="accent-viper-cyan">Criminal History</label>'
+                +     '<div id="opsResCrimHistory_' + i + '" class="' + (r.hasCrimHistory ? '' : 'hidden') + ' mt-1"><textarea data-resident="' + i + '" data-rfield="crimHistory" rows="2" class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-xs focus:border-viper-cyan focus:outline-none" placeholder="List criminal history...">' + (r.crimHistory || '') + '</textarea></div>'
+                +   '</div>'
+                + '</div>'
+                + '<button type="button" onclick="removeOpsResident(' + i + ')" class="shrink-0 text-red-500 hover:text-red-400 mt-1"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>'
+                + '</div>';
+        }
+
+        function addOpsResident() {
+            if (!opsPlanData) opsPlanData = { _version: 2 };
+            if (!opsPlanData.otherResidents) opsPlanData.otherResidents = [];
+            opsPlanData.otherResidents.push({ name: '', dob: '', photo: null, hasFirearms: false, firearms: '', hasCrimHistory: false, crimHistory: '' });
+            saveOpsPlanData();
+            refreshOpsResidentsUI();
+        }
+
+        function removeOpsResident(idx) {
+            if (!opsPlanData || !opsPlanData.otherResidents) return;
+            opsPlanData.otherResidents.splice(idx, 1);
+            saveOpsPlanData();
+            refreshOpsResidentsUI();
+        }
+
+        function collectOpsResidents() {
+            if (!opsPlanData || !opsPlanData.otherResidents) return [];
+            const residents = [];
+            opsPlanData.otherResidents.forEach((r, i) => {
+                const get = (field) => {
+                    const el = document.querySelector('[data-resident="' + i + '"][data-rfield="' + field + '"]');
+                    if (!el) return r[field] || '';
+                    if (el.type === 'checkbox') return el.checked;
+                    return el.value || '';
+                };
+                residents.push({
+                    name: get('name'),
+                    dob: get('dob'),
+                    photo: r.photo || null,
+                    hasFirearms: get('hasFirearms'),
+                    firearms: get('firearms'),
+                    hasCrimHistory: get('hasCrimHistory'),
+                    crimHistory: get('crimHistory')
+                });
+            });
+            return residents;
+        }
+
+        function refreshOpsResidentsUI() {
+            const container = document.getElementById('ops_residentsContainer');
+            if (!container) return;
+            const res = opsPlanData?.otherResidents || [];
+            if (res.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 text-xs">No other residents added</p>';
+            } else {
+                container.innerHTML = res.map((r, i) => renderOpsResidentCard(r, i)).join('');
+            }
+        }
+
+        function toggleOpsResidentField(idx, field) {
+            const id = field === 'firearms' ? 'opsResFirearms_' + idx : 'opsResCrimHistory_' + idx;
+            const el = document.getElementById(id);
+            if (el) el.classList.toggle('hidden');
+        }
+
+        function uploadOpsResidentPhoto(idx) {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    // Collect current form state first
+                    if (opsPlanData && opsPlanData.otherResidents) {
+                        opsPlanData.otherResidents = collectOpsResidents();
+                        opsPlanData.otherResidents[idx].photo = ev.target.result;
+                        saveOpsPlanData();
+                        refreshOpsResidentsUI();
+                    }
+                };
+                reader.readAsDataURL(file);
+            };
+            input.click();
+        }
+
+        function viewOpsResidentPhoto(idx) {
+            const r = opsPlanData?.otherResidents?.[idx];
+            if (!r || !r.photo) return;
+            const w = window.open('', '_blank', 'width=600,height=600');
+            w.document.write('<html><head><title>Resident Photo</title><style>body{margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh}img{max-width:100%;max-height:100%}</style></head><body><img src="' + r.photo + '"></body></html>');
+        }
+
         function addEntryTeamRowInPlan() {
             const body = document.getElementById('ops_entryTeamBody');
             if (!body) return;
@@ -16450,6 +16719,7 @@
             opsPlanData.comms           = document.getElementById('ops_comms')?.value || '';
             opsPlanData.hospital        = document.getElementById('ops_hospital')?.value || '';
             opsPlanData.suspectInfo     = document.getElementById('ops_suspectInfo')?.value || '';
+            opsPlanData.otherResidents  = collectOpsResidents();
             opsPlanData.entryTeam       = collectEntryTeamFromPlan();
             opsPlanData.caseSummary     = document.getElementById('ops_caseSummary')?.value || '';
             opsPlanData.tacticalPlan    = document.getElementById('ops_tacticalPlan')?.value || '';
@@ -16588,6 +16858,17 @@
                                 <button type="button" onclick="autoPopulateSuspects()" class="text-xs text-viper-orange hover:text-viper-orange/80 transition">↻ Refresh from Suspects Tab</button>
                             </div>
                             <textarea id="ops_suspectInfo" rows="6" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none font-mono" placeholder="Click 'Auto-Populate Suspects' to fill from case data...">${d.suspectInfo || ''}</textarea>
+                        </div>
+
+                        <!-- Other Residents -->
+                        <div class="glass-card rounded-xl p-5">
+                            <div class="flex justify-between items-center mb-3">
+                                <label class="text-xs text-gray-400">Other Residents at Location</label>
+                                <button type="button" onclick="addOpsResident()" class="px-3 py-1 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded text-viper-cyan text-xs transition">+ Add Resident</button>
+                            </div>
+                            <div id="ops_residentsContainer">
+                                ${(d.otherResidents && d.otherResidents.length > 0) ? d.otherResidents.map((r, i) => renderOpsResidentCard(r, i)).join('') : '<p class="text-gray-500 text-xs">No other residents added</p>'}
+                            </div>
                         </div>
 
                         <!-- Entry Team Table -->
@@ -17019,6 +17300,7 @@
                 { id: 'ops-location', label: 'Location & Hazards' },
                 { id: 'ops-suspects', label: 'Suspect Information' },
             ];
+            if (d.otherResidents && d.otherResidents.length > 0) tocEntries.push({ id: 'ops-residents', label: 'Other Residents at Location' });
             if (d.entryTeam && d.entryTeam.length > 0) tocEntries.push({ id: 'ops-entryteam', label: 'Entry Team / Assignments' });
             tocEntries.push({ id: 'ops-casesummary', label: 'Case Summary' });
             tocEntries.push({ id: 'ops-tactical', label: 'Tactical Plan' });
@@ -17049,7 +17331,7 @@ body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; color:
 .page { max-width: 8.5in; margin: 0 auto; padding: 0.75in; }
 
 /* Cover Page */
-.cover { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; text-align: center; border-bottom: 4px solid #0a0e14; }
+.cover { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; text-align: center; border-bottom: none; }
 .cover-badge { max-width: 180px; max-height: 180px; margin-bottom: 30px; }
 .cover h1 { font-size: 36px; color: #0a0e14; margin: 0 0 8px 0; letter-spacing: 2px; text-transform: uppercase; }
 .cover h2 { font-size: 20px; color: #555; margin: 0 0 40px 0; font-weight: normal; }
@@ -17092,7 +17374,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 .map-container img { max-width: 100%; border: 1px solid #ddd; border-radius: 6px; }
 
 /* Suspect Profiles */
-.suspect-profile { border: 2px solid #ddd; border-radius: 8px; padding: 20px; margin: 20px 0; page-break-inside: avoid; }
+.suspect-profile { border: 2px solid #ddd; border-radius: 8px; padding: 20px; margin: 20px 0; }
 .suspect-profile-header { background: #0a0e14; color: white; padding: 12px 18px; margin: -20px -20px 18px -20px; border-radius: 6px 6px 0 0; font-size: 16px; font-weight: 700; }
 .suspect-photo { width: 150px; height: 150px; object-fit: cover; border: 2px solid #ddd; border-radius: 6px; }
 .suspect-section h4 { color: #00d9ff; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid #00d9ff; padding-bottom: 4px; margin: 15px 0 8px 0; }
@@ -17121,7 +17403,6 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
     </div>
 
     <!-- TABLE OF CONTENTS -->
-    <div class="page-break"></div>
     <div class="toc">
         <h2>Table of Contents</h2>
         ${tocEntries.map((t, i) => `
@@ -17179,6 +17460,22 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
     <div id="ops-suspects" class="section-header"><span class="num">3</span> Suspect Information</div>
     ${d.suspectInfo ? '<div class="text-block red" style="white-space:pre-wrap">' + d.suspectInfo.replace(/</g,'&lt;') + '</div>' : '<p style="color:#999;font-size:13px">No suspect information entered.</p>'}
 
+    <!-- Other Residents -->
+    ${d.otherResidents && d.otherResidents.length > 0 ? `
+        <div id="ops-residents" class="section-header"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-residents') + 1}</span> Other Residents at Location</div>
+        ${d.otherResidents.map((r, ri) => `
+            <div style="display:flex;gap:16px;align-items:flex-start;padding:14px;margin:10px 0;border:1px solid #ddd;border-radius:8px;background:#fafafa">
+                ${r.photo ? '<img src="' + r.photo + '" style="width:80px;height:80px;border-radius:8px;object-fit:cover;border:1px solid #ccc">' : '<div style="width:80px;height:80px;border-radius:8px;background:#eee;display:flex;align-items:center;justify-content:center;color:#999;font-size:11px;border:1px solid #ccc">No Photo</div>'}
+                <div style="flex:1">
+                    <div style="font-weight:700;font-size:15px;margin-bottom:4px">${r.name || 'Unknown'}</div>
+                    ${r.dob ? '<div style="font-size:13px;color:#555">DOB: ' + r.dob + '</div>' : ''}
+                    ${r.hasFirearms ? '<div style="margin-top:8px"><span style="font-weight:600;font-size:13px;color:#c62828">⚠ Firearms:</span> <span style="font-size:13px">' + (r.firearms || 'Yes (details not specified)').replace(/</g,'&lt;') + '</span></div>' : ''}
+                    ${r.hasCrimHistory ? '<div style="margin-top:4px"><span style="font-weight:600;font-size:13px;color:#e65100">Criminal History:</span> <span style="font-size:13px">' + (r.crimHistory || 'Yes (details not specified)').replace(/</g,'&lt;') + '</span></div>' : ''}
+                </div>
+            </div>
+        `).join('')}
+    ` : ''}
+
     <!-- Entry Team -->
     ${d.entryTeam && d.entryTeam.length > 0 ? `
         <div id="ops-entryteam" class="section-header"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-entryteam') + 1}</span> Entry Team / Assignments</div>
@@ -17214,17 +17511,20 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
     <!-- Directions & Routes -->
     ${(d.directions || includeMaps || (d.savedRoutes && (d.savedRoutes.route1 || d.savedRoutes.route2))) ? `
-        <div class="page-break"></div>
-        <div id="ops-directions" class="section-header"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-directions') + 1}</span> Directions & Routes</div>
+        <div id="ops-directions" class="section-header" style="page-break-before:always"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-directions') + 1}</span> Directions & Routes</div>
         ${(d.savedRoutes && d.savedRoutes.route1) ? `
             <div style="margin:15px 0;padding:12px;background:#f0f9ff;border-radius:8px;border:1px solid #b6e3ff">
                 <p style="font-size:13px;font-weight:700;color:#0a0e14;margin:0 0 4px 0">📍 Briefing → Operation Location</p>
+                <p style="font-size:12px;color:#333;margin:0 0 2px 0"><strong>From:</strong> ${(d.briefingLocation || '—').replace(/</g,'&lt;')}</p>
+                <p style="font-size:12px;color:#333;margin:0 0 6px 0"><strong>To:</strong> ${(d.location || '—').replace(/</g,'&lt;')}</p>
                 <p style="font-size:12px;color:#555;margin:0">${d.savedRoutes.route1.distanceText} · ${d.savedRoutes.route1.durationText}</p>
             </div>
         ` : ''}
         ${(d.savedRoutes && d.savedRoutes.route2) ? `
             <div style="margin:15px 0;padding:12px;background:#fff8f0;border-radius:8px;border:1px solid #ffd6a0">
                 <p style="font-size:13px;font-weight:700;color:#0a0e14;margin:0 0 4px 0">🏥 Operation Location → Hospital</p>
+                <p style="font-size:12px;color:#333;margin:0 0 2px 0"><strong>From:</strong> ${(d.location || '—').replace(/</g,'&lt;')}</p>
+                <p style="font-size:12px;color:#333;margin:0 0 6px 0"><strong>To:</strong> ${(d.hospital || '—').replace(/</g,'&lt;')}</p>
                 <p style="font-size:12px;color:#555;margin:0">${d.savedRoutes.route2.distanceText} · ${d.savedRoutes.route2.durationText}</p>
             </div>
         ` : ''}
@@ -17233,8 +17533,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
     <!-- Location Photos -->
     ${(includePhotos && d.locationPhotos && d.locationPhotos.length > 0) ? `
-        <div class="page-break"></div>
-        <div id="ops-photos" class="section-header"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-photos') + 1}</span> Location Photos</div>
+        <div id="ops-photos" class="section-header" style="page-break-before:always"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-photos') + 1}</span> Location Photos</div>
         <div class="photo-grid">
             ${d.locationPhotos.map(p => '<div class="photo-card"><img src="' + p.data + '" alt="' + (p.caption || '') + '"><p>' + (p.caption || p.fileName || '') + '</p></div>').join('')}
         </div>
@@ -17242,8 +17541,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
     <!-- Detailed Suspect Profiles -->
     ${(includeSuspects && suspects.length > 0) ? `
-        <div class="page-break"></div>
-        <div id="ops-suspectprofiles" class="section-header"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-suspectprofiles') + 1}</span> Detailed Suspect Profiles</div>
+        <div id="ops-suspectprofiles" class="section-header" style="page-break-before:always"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-suspectprofiles') + 1}</span> Detailed Suspect Profiles</div>
         ${suspects.map((s, si) => {
             const hasFirearmsDoc = s.firearmsDoc && s.firearmsDoc.fileData;
             const hasRapSheet = s.rapSheet && s.rapSheet.fileData;
@@ -17314,8 +17612,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
         <!-- Attached Documents -->
         ${suspects.some(s => (s.firearmsDoc && s.firearmsDoc.fileData) || (s.rapSheet && s.rapSheet.fileData)) ? `
-            <div class="page-break"></div>
-            <div class="section-header"><span class="num">★</span> Attached Documents</div>
+            <div class="section-header" style="page-break-before:always"><span class="num">★</span> Attached Documents</div>
             ${suspects.map((s, si) => {
                 let html = '';
                 if (s.firearmsDoc && s.firearmsDoc.fileData) {

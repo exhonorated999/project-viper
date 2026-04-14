@@ -139,4 +139,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   tloSetVisible: (visible) => ipcRenderer.send('tlo-set-visible', visible),
   tloSearchPerson: (params) => ipcRenderer.invoke('tlo-search-person', params),
   tloReset: () => ipcRenderer.invoke('tlo-reset'),
+  accurintSetBounds: (bounds) => ipcRenderer.send('accurint-set-bounds', bounds),
+  accurintSetVisible: (visible) => ipcRenderer.send('accurint-set-visible', visible),
+  accurintSearchPerson: (params) => ipcRenderer.invoke('accurint-search-person', params),
+  accurintReset: () => ipcRenderer.invoke('accurint-reset'),
 });

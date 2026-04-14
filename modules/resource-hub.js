@@ -13,10 +13,11 @@
 
   /* ── Resource definitions ─────────────────────────────────── */
   const RESOURCES = [
-    { id: 'flock',  label: 'Flock Safety',     enabledKey: 'flockEnabled',        isBV: true },
-    { id: 'tlo',    label: 'TLO / TransUnion', enabledKey: 'tloEnabled',          isBV: true },
-    { id: 'trace',  label: 'TRACE Network',    enabledKey: 'traceSearch_enabled', isBV: false },
-    { id: 'fmcsa',  label: 'FMCSA Carrier',    enabledKey: 'fmcsaEnabled',        isBV: false },
+    { id: 'flock',    label: 'Flock Safety',        enabledKey: 'flockEnabled',        isBV: true },
+    { id: 'tlo',      label: 'TLO / TransUnion',    enabledKey: 'tloEnabled',          isBV: true },
+    { id: 'accurint', label: 'LexisNexis Accurint', enabledKey: 'accurintEnabled',     isBV: true },
+    { id: 'trace',    label: 'TRACE Network',       enabledKey: 'traceSearch_enabled', isBV: false },
+    { id: 'fmcsa',    label: 'FMCSA Carrier',       enabledKey: 'fmcsaEnabled',        isBV: false },
   ];
 
   let rhOpen = false;
@@ -45,6 +46,7 @@
       .rh-tab.rh-active{color:#fff}
       .rh-tab[data-res=flock].rh-active::after{width:100%;background:#2dd4bf}
       .rh-tab[data-res=tlo].rh-active::after{width:100%;background:#818cf8}
+      .rh-tab[data-res=accurint].rh-active::after{width:100%;background:#60a5fa}
       .rh-tab[data-res=trace].rh-active::after{width:100%;background:#fbbf24}
       .rh-tab[data-res=fmcsa].rh-active::after{width:100%;background:#60a5fa}
       .rh-bv-placeholder{background:rgba(10,15,28,.5);border:1px dashed rgba(255,255,255,.08);border-radius:8px}
@@ -102,6 +104,9 @@
           </div>
           <div id="rhPanel_tlo" class="absolute inset-0 hidden">
             <div id="rhBV_tlo" class="rh-bv-placeholder w-full h-full flex items-center justify-center"><p class="text-gray-600 text-xs">Loading TLO / TransUnion…</p></div>
+          </div>
+          <div id="rhPanel_accurint" class="absolute inset-0 hidden">
+            <div id="rhBV_accurint" class="rh-bv-placeholder w-full h-full flex items-center justify-center"><p class="text-gray-600 text-xs">Loading LexisNexis Accurint…</p></div>
           </div>
           <div id="rhPanel_trace" class="absolute inset-0 hidden overflow-y-auto">
             <div class="p-5 space-y-4">
@@ -227,12 +232,14 @@
     if (b.width < 10 || b.height < 10) return;
     if (resId === 'flock') { window.electronAPI.flockSetBounds(b); window.electronAPI.flockSetVisible(true); }
     if (resId === 'tlo')   { window.electronAPI.tloSetBounds(b);   window.electronAPI.tloSetVisible(true); }
+    if (resId === 'accurint') { window.electronAPI.accurintSetBounds(b); window.electronAPI.accurintSetVisible(true); }
   }
 
   function hideBV(resId) {
     if (!window.electronAPI) return;
     if (resId === 'flock') window.electronAPI.flockSetVisible(false);
     if (resId === 'tlo')   window.electronAPI.tloSetVisible(false);
+    if (resId === 'accurint') window.electronAPI.accurintSetVisible(false);
   }
 
   function hideAllBVs() { RESOURCES.filter(r => r.isBV).forEach(r => hideBV(r.id)); }

@@ -1296,6 +1296,11 @@ ipcMain.handle('save-evidence-file', async (event, data) => {
 // --- Read evidence file (for inline preview) ---
 ipcMain.handle('read-evidence-file', async (event, filePath) => {
   try {
+    // Skip files > 500MB (too large for inline preview / memory)
+    const stat = fs.statSync(filePath);
+    if (stat.size > 500 * 1024 * 1024) {
+      throw new Error('File too large for inline preview (' + Math.round(stat.size / 1024 / 1024 / 1024 * 10) / 10 + ' GB)');
+    }
     const raw = fs.readFileSync(filePath);
     // Decrypt if security is active and file is encrypted
     if (security && security.isUnlocked() && security.isEncryptedBuffer(raw)) {
@@ -1436,6 +1441,520 @@ ipcMain.handle('canvas-form-download', async (event, { apiKey, formId }) => {
 
 ipcMain.handle('canvas-form-delete', async (event, { apiKey, formId }) => {
   return await _canvasApiFetch(apiKey, `/api/canvas/${formId}`, { method: 'DELETE' });
+});
+
+// ====== Cellebrite Report Integration ======
+ipcMain.handle('select-cellebrite-folder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Cellebrite Report Folder',
+    properties: ['openDirectory']
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle('scan-cellebrite-folder', async (event, folderPath) => {
+  try {
+    // Recursively search for CellebriteReader.exe (max 4 levels deep)
+    let readerExePath = null;
+    let ufdxPath = null;
+    let ufdPath = null;
+    let ufdrPath = null;
+    let summaryPdfPath = null;
+
+    const scanDir = (dir, depth) => {
+      if (depth > 4) return;
+      let items;
+      try { items = fs.readdirSync(dir); } catch { return; }
+      for (const item of items) {
+        const full = path.join(dir, item);
+        let stat;
+        try { stat = fs.statSync(full); } catch { continue; }
+        const lower = item.toLowerCase();
+        if (stat.isFile()) {
+          if (lower === 'cellebritereader.exe') readerExePath = full;
+          if (lower.endsWith('.ufdx')) ufdxPath = full;
+          if (lower.endsWith('.ufd')) ufdPath = full;
+          if (lower.endsWith('.ufdr')) ufdrPath = full;
+          if (lower === 'summaryreport.pdf') summaryPdfPath = full;
+        } else if (stat.isDirectory()) {
+          scanDir(full, depth + 1);
+        }
+      }
+    };
+    scanDir(folderPath, 0);
+
+    if (!readerExePath) {
+      return { success: false, error: 'CellebriteReader.exe not found in the selected folder. Make sure you selected the correct Cellebrite report folder.' };
+    }
+
+    // Parse metadata from .ufdx (XML)
+    let caseInfo = {};
+    let deviceInfo = {};
+    if (ufdxPath) {
+      try {
+        const xml = fs.readFileSync(ufdxPath, 'utf8');
+        // Parse DeviceInfo attributes
+        const devMatch = xml.match(/<DeviceInfo\s+([^>]+)\/>/);
+        if (devMatch) {
+          const attrs = devMatch[1];
+          const getAttr = (name) => { const m = attrs.match(new RegExp(name + '="([^"]*)"')); return m ? m[1] : ''; };
+          deviceInfo.vendor = getAttr('Vendor');
+          deviceInfo.familyName = getAttr('FamilyName');
+        }
+        // Parse CrimeCase fields
+        const fieldsRegex = /<Fields\s+Caption="([^"]*)"\s+Value="([^"]*)"\s*\/>/g;
+        let fm;
+        while ((fm = fieldsRegex.exec(xml)) !== null) {
+          const key = fm[1].replace(/\s+/g, '').toLowerCase();
+          if (key.includes('caseidentifier')) caseInfo.caseIdentifier = fm[2];
+          if (key.includes('examinername')) caseInfo.examinerName = fm[2];
+          if (key.includes('devicename') || key.includes('evidencenumber')) caseInfo.deviceName = fm[2];
+          if (key.includes('crimetype')) caseInfo.crimeType = fm[2];
+          if (key.includes('department')) caseInfo.department = fm[2];
+          if (key.includes('location')) caseInfo.location = fm[2];
+        }
+      } catch (e) { console.error('Error parsing .ufdx:', e); }
+    }
+
+    // Parse metadata from .ufd (INI-style)
+    if (ufdPath) {
+      try {
+        const ini = fs.readFileSync(ufdPath, 'utf8');
+        const getVal = (key) => { const m = ini.match(new RegExp('^' + key + '=(.*)$', 'm')); return m ? m[1].trim() : ''; };
+        deviceInfo.chipset = getVal('Chipset');
+        deviceInfo.model = getVal('Model');
+        deviceInfo.os = getVal('OS');
+        deviceInfo.securityPatch = getVal('SecurityPatchLevel');
+        if (!deviceInfo.vendor) deviceInfo.vendor = getVal('Vendor');
+        deviceInfo.version = getVal('Version');
+      } catch (e) { console.error('Error parsing .ufd:', e); }
+    }
+
+    // Get .ufdr file size if present
+    let ufdrSize = 0;
+    if (ufdrPath) {
+      try { ufdrSize = fs.statSync(ufdrPath).size; } catch {}
+    }
+
+    return {
+      success: true,
+      readerExePath,
+      ufdrPath,
+      ufdxPath,
+      ufdPath,
+      summaryPdfPath,
+      ufdrSize,
+      deviceInfo,
+      caseInfo,
+      folderPath
+    };
+  } catch (error) {
+    console.error('Error scanning Cellebrite folder:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('launch-cellebrite-reader', async (event, exePath) => {
+  try {
+    if (!fs.existsSync(exePath)) {
+      return { success: false, error: 'CellebriteReader.exe not found at: ' + exePath };
+    }
+
+    const { spawn } = require('child_process');
+    const child = spawn(exePath, [], {
+      detached: true,
+      stdio: 'ignore',
+      cwd: path.dirname(exePath)
+    });
+    child.unref();
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to launch Cellebrite Reader:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// ====== Cellebrite Embedded Viewer (Win32 window reparenting) ======
+let _cellebriteChild = null;
+let _cellebriteHwnd = null;  // stored as integer (intptr)
+let _cellebriteWatcher = null; // interval that re-reparents new windows
+let _cellebriteParentHwnd = null;
+let _cellebriteBounds = null;
+let _cellebriteScale = 1;
+let _win32 = null;
+
+function loadWin32() {
+  if (_win32) return _win32;
+  try {
+    const koffi = require('koffi');
+    const u32 = koffi.load('user32.dll');
+    // Use intptr for all HWND params — Electron's getNativeWindowHandle() gives a Buffer
+    // that we read as integer. koffi void* won't accept raw integers.
+    const WNDENUMPROC = koffi.proto('int __stdcall wndenumproc(intptr hwnd, intptr param)');
+    _win32 = {
+      koffi,
+      WNDENUMPROC,
+      SetParent: u32.func('intptr __stdcall SetParent(intptr child, intptr parent)'),
+      MoveWindow: u32.func('int __stdcall MoveWindow(intptr hWnd, int x, int y, int w, int h, int repaint)'),
+      ShowWindow: u32.func('int __stdcall ShowWindow(intptr hWnd, int cmd)'),
+      GetWindowLongPtrW: u32.func('intptr __stdcall GetWindowLongPtrW(intptr hWnd, int idx)'),
+      SetWindowLongPtrW: u32.func('intptr __stdcall SetWindowLongPtrW(intptr hWnd, int idx, intptr val)'),
+      SetWindowPos: u32.func('int __stdcall SetWindowPos(intptr hWnd, intptr hWndAfter, int x, int y, int cx, int cy, uint flags)'),
+      EnumWindows: u32.func('int __stdcall EnumWindows(wndenumproc *cb, intptr param)'),
+      GetWindowThreadProcessId: u32.func('uint __stdcall GetWindowThreadProcessId(intptr hWnd, _Out_ uint *pid)'),
+      IsWindowVisible: u32.func('int __stdcall IsWindowVisible(intptr hWnd)'),
+      GetWindowTextW: u32.func('int __stdcall GetWindowTextW(intptr hWnd, str16 *lpString, int nMaxCount)'),
+      GetWindowTextLengthW: u32.func('int __stdcall GetWindowTextLengthW(intptr hWnd)'),
+    };
+    return _win32;
+  } catch (e) {
+    console.error('Win32 embed not available:', e.message);
+    return null;
+  }
+}
+
+function hwndFromBuffer(buf) {
+  // Electron getNativeWindowHandle() returns a Buffer containing the HWND
+  // Read as integer — pointer-sized (8 bytes on x64, 4 on x86)
+  if (buf.length >= 8) return Number(buf.readBigInt64LE(0));
+  return buf.readInt32LE(0);
+}
+
+function findHwndByPid(targetPid) {
+  const w = loadWin32();
+  if (!w) return null;
+  let found = null;
+  const cb = w.koffi.register((hwnd, _) => {
+    const pidBuf = [0];
+    w.GetWindowThreadProcessId(hwnd, pidBuf);
+    if (pidBuf[0] === targetPid && w.IsWindowVisible(hwnd)) {
+      found = hwnd;  // hwnd is already intptr (integer)
+      return 0; // stop enumeration
+    }
+    return 1; // continue
+  }, w.koffi.pointer(w.WNDENUMPROC));
+  w.EnumWindows(cb, 0);
+  w.koffi.unregister(cb);
+  return found;
+}
+
+// Find ALL visible top-level windows for a given PID
+function findAllHwndsByPid(targetPid) {
+  const w = loadWin32();
+  if (!w) return [];
+  const results = [];
+  const cb = w.koffi.register((hwnd, _) => {
+    const pidBuf = [0];
+    w.GetWindowThreadProcessId(hwnd, pidBuf);
+    if (pidBuf[0] === targetPid && w.IsWindowVisible(hwnd)) {
+      results.push(hwnd);
+    }
+    return 1; // continue — find all
+  }, w.koffi.pointer(w.WNDENUMPROC));
+  w.EnumWindows(cb, 0);
+  w.koffi.unregister(cb);
+  return results;
+}
+
+// Reparent a window into the Electron host
+function reparentWindow(childHwnd, parentHwnd, bounds, scaleFactor) {
+  const w = loadWin32();
+  if (!w) return false;
+
+  const GWL_STYLE = -16;
+  const GWL_EXSTYLE = -20;
+  const WS_CAPTION = 0x00C00000;
+  const WS_THICKFRAME = 0x00040000;
+  const WS_POPUP = 0x80000000;
+  const WS_EX_APPWINDOW = 0x00040000; // remove from taskbar
+  const SWP_FRAMECHANGED = 0x0020;
+  const SWP_NOZORDER = 0x0004;
+
+  // Strip title bar + thick frame + popup. Do NOT set WS_CHILD — apps like
+  // Cellebrite (likely .NET/WPF) fight WS_CHILD and re-detach themselves.
+  let style = Number(w.GetWindowLongPtrW(childHwnd, GWL_STYLE));
+  style = style & ~WS_CAPTION & ~WS_THICKFRAME & ~WS_POPUP;
+  w.SetWindowLongPtrW(childHwnd, GWL_STYLE, style);
+
+  // Remove taskbar entry
+  let exStyle = Number(w.GetWindowLongPtrW(childHwnd, GWL_EXSTYLE));
+  exStyle = exStyle & ~WS_EX_APPWINDOW;
+  w.SetWindowLongPtrW(childHwnd, GWL_EXSTYLE, exStyle);
+
+  // Reparent
+  const prev = w.SetParent(childHwnd, parentHwnd);
+  console.log('[Cellebrite] SetParent returned:', prev, '(0 = failed) for hwnd:', childHwnd);
+
+  // Apply style changes
+  const x = Math.round(bounds.x * scaleFactor);
+  const y = Math.round(bounds.y * scaleFactor);
+  const width = Math.round(bounds.width * scaleFactor);
+  const height = Math.round(bounds.height * scaleFactor);
+  w.SetWindowPos(childHwnd, 0, x, y, width, height, SWP_FRAMECHANGED | SWP_NOZORDER);
+  w.ShowWindow(childHwnd, 5);
+  return prev !== 0;
+}
+
+// Find a top-level window by title substring (case-insensitive)
+function findWindowByTitle(pattern) {
+  const w = loadWin32();
+  if (!w) return null;
+  let found = null;
+  const lowerPattern = pattern.toLowerCase();
+  const cb = w.koffi.register((hwnd, _) => {
+    if (!w.IsWindowVisible(hwnd)) return 1;
+    const len = w.GetWindowTextLengthW(hwnd);
+    if (len <= 0) return 1;
+    const buf = Buffer.alloc((len + 2) * 2);
+    w.GetWindowTextW(hwnd, buf, len + 1);
+    const title = buf.toString('utf16le').replace(/\0/g, '');
+    if (title.toLowerCase().includes(lowerPattern)) {
+      found = { hwnd, title };
+      return 0;
+    }
+    return 1;
+  }, w.koffi.pointer(w.WNDENUMPROC));
+  w.EnumWindows(cb, 0);
+  w.koffi.unregister(cb);
+  return found;
+}
+
+// Continuous watcher: monitors for escaped Cellebrite windows
+// Checks both by PID and by title (in case app spawns child processes)
+function startCellebriteWatcher() {
+  stopCellebriteWatcher();
+  const viperHwnd = _cellebriteParentHwnd;
+
+  _cellebriteWatcher = setInterval(() => {
+    if (!_cellebriteChild || !viperHwnd || !_cellebriteBounds) {
+      stopCellebriteWatcher();
+      return;
+    }
+    const w = loadWin32();
+    if (!w) return;
+
+    // Strategy 1: check by PID for windows that aren't children yet
+    const hwnds = findAllHwndsByPid(_cellebriteChild.pid);
+    for (const hwnd of hwnds) {
+      // Check if already reparented (parent is our window)
+      const GWL_STYLE = -16;
+      const WS_CHILD = 0x40000000;
+      const curStyle = Number(w.GetWindowLongPtrW(hwnd, GWL_STYLE));
+      // Check if this window still has a caption (not reparented by us)
+      const WS_CAPTION = 0x00C00000;
+      if (curStyle & WS_CAPTION) {
+        console.log('[Cellebrite] Watcher: reparenting escaped PID window:', hwnd);
+        reparentWindow(hwnd, viperHwnd, _cellebriteBounds, _cellebriteScale);
+        _cellebriteHwnd = hwnd;
+      }
+    }
+
+    // Strategy 2: search by title for child-process windows
+    const result = findWindowByTitle('Cellebrite');
+    if (result && result.hwnd !== viperHwnd) {
+      // Verify this window still has a caption (not already reparented)
+      const GWL_STYLE = -16;
+      const WS_CAPTION = 0x00C00000;
+      const curStyle = Number(w.GetWindowLongPtrW(result.hwnd, GWL_STYLE));
+      if (curStyle & WS_CAPTION) {
+        console.log('[Cellebrite] Watcher: reparenting by title:', result.title, 'hwnd:', result.hwnd);
+        reparentWindow(result.hwnd, viperHwnd, _cellebriteBounds, _cellebriteScale);
+        _cellebriteHwnd = result.hwnd;
+      }
+    }
+  }, 300); // check every 300ms
+}
+
+function stopCellebriteWatcher() {
+  if (_cellebriteWatcher) {
+    clearInterval(_cellebriteWatcher);
+    _cellebriteWatcher = null;
+  }
+}
+
+ipcMain.handle('cellebrite-launch-embedded', async (event, { exePath, bounds }) => {
+  try {
+    // Kill existing
+    if (_cellebriteChild) {
+      try { _cellebriteChild.kill(); } catch {}
+      _cellebriteChild = null;
+      _cellebriteHwnd = null;
+    }
+
+    if (!fs.existsSync(exePath)) {
+      return { success: false, error: 'CellebriteReader.exe not found' };
+    }
+
+    const w = loadWin32();
+    if (!w) {
+      return { success: false, error: 'Win32 embedding not available — launching externally' };
+    }
+
+    const { spawn } = require('child_process');
+    _cellebriteChild = spawn(exePath, [], {
+      stdio: 'ignore',
+      cwd: path.dirname(exePath)
+    });
+
+    _cellebriteChild.on('exit', () => {
+      stopCellebriteWatcher();
+      _cellebriteChild = null;
+      _cellebriteHwnd = null;
+      _cellebriteParentHwnd = null;
+      _cellebriteBounds = null;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('cellebrite-embed-closed');
+      }
+    });
+
+    // Convert Electron's Buffer HWND to integer for koffi intptr params
+    const parentHwndBuf = mainWindow.getNativeWindowHandle();
+    _cellebriteParentHwnd = hwndFromBuffer(parentHwndBuf);
+    _cellebriteScale = require('electron').screen.getPrimaryDisplay().scaleFactor;
+    _cellebriteBounds = bounds;
+    console.log('[Cellebrite] Parent HWND:', _cellebriteParentHwnd, 'Scale:', _cellebriteScale, 'PID:', _cellebriteChild.pid);
+
+    return new Promise((resolve) => {
+      let attempts = 0;
+      const poll = setInterval(() => {
+        attempts++;
+        if (attempts > 60) {
+          clearInterval(poll);
+          console.log('[Cellebrite] Window not found after 30s');
+          resolve({ success: false, error: 'Cellebrite Reader window did not appear within 30s' });
+          return;
+        }
+        if (!_cellebriteChild) {
+          clearInterval(poll);
+          resolve({ success: false, error: 'Cellebrite Reader exited unexpectedly' });
+          return;
+        }
+
+        const childHwnd = findHwndByPid(_cellebriteChild.pid);
+        if (!childHwnd) return;
+        clearInterval(poll);
+        _cellebriteHwnd = childHwnd;
+        console.log('[Cellebrite] Found initial window:', childHwnd, 'at attempt', attempts);
+
+        // Reparent the first window
+        reparentWindow(childHwnd, _cellebriteParentHwnd, _cellebriteBounds, _cellebriteScale);
+
+        // Start continuous watcher to catch when the app replaces its window
+        startCellebriteWatcher();
+
+        resolve({ success: true });
+      }, 500);
+    });
+  } catch (error) {
+    console.error('Cellebrite embed failed:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.on('cellebrite-set-bounds', (event, bounds) => {
+  _cellebriteBounds = bounds; // update for watcher
+  if (!_cellebriteHwnd) return;
+  const w = loadWin32();
+  if (!w) return;
+  const sf = _cellebriteScale || require('electron').screen.getPrimaryDisplay().scaleFactor;
+  w.MoveWindow(_cellebriteHwnd,
+    Math.round(bounds.x * sf),
+    Math.round(bounds.y * sf),
+    Math.round(bounds.width * sf),
+    Math.round(bounds.height * sf), 1);
+});
+
+ipcMain.on('cellebrite-set-visible', (event, visible) => {
+  if (!_cellebriteHwnd) return;
+  const w = loadWin32();
+  if (!w) return;
+  w.ShowWindow(_cellebriteHwnd, visible ? 5 : 0);
+});
+
+ipcMain.handle('cellebrite-close', async () => {
+  stopCellebriteWatcher();
+  if (_cellebriteChild) {
+    try { _cellebriteChild.kill(); } catch {}
+    _cellebriteChild = null;
+  }
+  _cellebriteHwnd = null;
+  _cellebriteParentHwnd = null;
+  _cellebriteBounds = null;
+  return { success: true };
+});
+
+ipcMain.handle('copy-cellebrite-folder', async (event, { sourcePath, caseNumber, evidenceTag }) => {
+  try {
+    const casesDir = path.join(app.getPath('userData'), 'cases');
+    const destDir = path.join(casesDir, caseNumber, 'Evidence', evidenceTag);
+    fs.mkdirSync(destDir, { recursive: true });
+
+    // Recursively enumerate source files
+    const allFiles = [];
+    const walk = (dir, rel) => {
+      const items = fs.readdirSync(dir);
+      for (const item of items) {
+        const full = path.join(dir, item);
+        const relPath = rel ? `${rel}/${item}` : item;
+        const stat = fs.statSync(full);
+        if (stat.isDirectory()) {
+          walk(full, relPath);
+        } else {
+          allFiles.push({ src: full, rel: relPath, size: stat.size });
+        }
+      }
+    };
+    walk(sourcePath, '');
+
+    const totalSize = allFiles.reduce((s, f) => s + f.size, 0);
+    let copiedSize = 0;
+    const fileRecords = [];
+    let readerExePath = null;
+    let ufdrPath = null;
+
+    // Copy each file using streams for memory efficiency
+    for (const file of allFiles) {
+      const destFile = path.join(destDir, file.rel);
+      fs.mkdirSync(path.dirname(destFile), { recursive: true });
+
+      // Stream copy
+      await new Promise((resolve, reject) => {
+        const rs = fs.createReadStream(file.src);
+        const ws = fs.createWriteStream(destFile);
+        rs.on('data', (chunk) => {
+          copiedSize += chunk.length;
+          // Send progress to renderer
+          const pct = Math.round((copiedSize / totalSize) * 100);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('cellebrite-copy-progress', { percent: pct, copiedSize, totalSize, currentFile: file.rel });
+          }
+        });
+        rs.on('error', reject);
+        ws.on('error', reject);
+        ws.on('finish', resolve);
+        rs.pipe(ws);
+      });
+
+      fileRecords.push({ name: path.basename(file.rel), path: destFile, size: file.size, type: '' });
+
+      const lower = path.basename(file.rel).toLowerCase();
+      if (lower === 'cellebritereader.exe') readerExePath = destFile;
+      if (lower.endsWith('.ufdr')) ufdrPath = destFile;
+    }
+
+    return {
+      success: true,
+      fileCount: fileRecords.length,
+      totalSize,
+      files: fileRecords,
+      readerExePath,
+      ufdrPath
+    };
+  } catch (error) {
+    console.error('Copy Cellebrite folder failed:', error);
+    return { success: false, error: error.message };
+  }
 });
 
 // --- Oversight file import (.oversight is a ZIP) ---
@@ -1596,16 +2115,20 @@ ipcMain.handle('launch-aperture', async (event, caseData) => {
 ipcMain.handle('open-file', async (event, filePath) => {
   try {
     // If file is encrypted, decrypt to temp and open the temp copy
+    // Skip encryption check for files > 500MB (too large to read into memory)
     if (security && security.isUnlocked() && fs.existsSync(filePath)) {
-      const raw = fs.readFileSync(filePath);
-      if (security.isEncryptedBuffer(raw)) {
-        const decrypted = security.decryptBuffer(raw);
-        const tempDir = path.join(app.getPath('temp'), 'viper-view');
-        fs.mkdirSync(tempDir, { recursive: true });
-        const tempPath = path.join(tempDir, path.basename(filePath));
-        fs.writeFileSync(tempPath, decrypted);
-        await shell.openPath(tempPath);
-        return { success: true };
+      const stat = fs.statSync(filePath);
+      if (stat.size < 500 * 1024 * 1024) {
+        const raw = fs.readFileSync(filePath);
+        if (security.isEncryptedBuffer(raw)) {
+          const decrypted = security.decryptBuffer(raw);
+          const tempDir = path.join(app.getPath('temp'), 'viper-view');
+          fs.mkdirSync(tempDir, { recursive: true });
+          const tempPath = path.join(tempDir, path.basename(filePath));
+          fs.writeFileSync(tempPath, decrypted);
+          await shell.openPath(tempPath);
+          return { success: true };
+        }
       }
     }
     await shell.openPath(filePath);

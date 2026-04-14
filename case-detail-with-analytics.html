@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://d3js.org https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.genlogs.io https://trace-broker-production.up.railway.app; font-src 'self' data:; frame-src 'self' blob: https: http:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://d3js.org https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.genlogs.io https://trace-broker-production.up.railway.app https://router.project-osrm.org; font-src 'self' data:; frame-src 'self' blob: https: http:;">
     <title>V.I.P.E.R. - Case Detail</title>
     <script src="modules/viper-ui.js"></script>
     <script src="modules/licensing.js"></script>
@@ -2012,8 +2012,28 @@
                     const od = JSON.parse(localStorage.getItem(`opsplan_${caseId}`) || 'null')
                             || (JSON.parse(localStorage.getItem('viperCaseOPSPlans') || '{}'))[caseNum];
                     if (!od) { emptyMsg('No operational plan recorded.'); break; }
-                    fieldBold('Objective', od.objective);
-                    if (od.plan) { gap(); bodyText(od.plan); }
+                    // v2 format
+                    if (od._version === 2) {
+                        if (od.date || od.time) fieldBold('Date/Time', [od.date, od.time].filter(Boolean).join(' '));
+                        if (od.reportNumber) fieldBold('Report #', od.reportNumber);
+                        if (od.caseAgent) fieldBold('Case Agent', od.caseAgent);
+                        if (od.operationType) {
+                            const types = Object.entries(od.operationType).filter(([k,v]) => v).map(([k]) => k).join(', ');
+                            if (types) fieldBold('Type of Operation', types);
+                        }
+                        if (od.location) fieldBold('Location', od.location);
+                        if (od.suspectInfo) { gap(); fieldBold('Suspect Information', ''); bodyText(od.suspectInfo); }
+                        if (od.caseSummary) { gap(); fieldBold('Case Summary', ''); bodyText(od.caseSummary); }
+                        if (od.tacticalPlan) { gap(); fieldBold('Tactical Plan', ''); bodyText(od.tacticalPlan); }
+                        if (od.pursuitPlan) { gap(); fieldBold('Pursuit Plan', ''); bodyText(od.pursuitPlan); }
+                        if (od.medicalPlan) { gap(); fieldBold('Medical Plan', ''); bodyText(od.medicalPlan); }
+                        if (od.barricadePlan) { gap(); fieldBold('Barricade Plan', ''); bodyText(od.barricadePlan); }
+                        if (od.contingencyPlan) { gap(); fieldBold('Contingency Plan', ''); bodyText(od.contingencyPlan); }
+                    } else {
+                        // Legacy format
+                        fieldBold('Objective', od.objective);
+                        if (od.plan) { gap(); bodyText(od.plan); }
+                    }
                     break;
                 }
                 case 'traceImport': {
@@ -2638,32 +2658,39 @@
                     break;
 
                 case 'opsplan':
-                    const opsData = JSON.parse(localStorage.getItem('viperCaseOPSPlans') || '{}');
-                    const opsPlan = opsData[currentCase.caseNumber];
-                    if (opsPlan) {
+                    const opsDataRaw = JSON.parse(localStorage.getItem(`opsplan_${currentCase.id}`) || 'null')
+                                    || (JSON.parse(localStorage.getItem('viperCaseOPSPlans') || '{}'))[currentCase.caseNumber];
+                    if (opsDataRaw) {
                         doc.setFont(undefined, 'bold');
                         doc.text('Operation Plan', margin, yPos);
                         yPos += 7;
                         doc.setFont(undefined, 'normal');
-                        
-                        if (opsPlan.objective) {
-                            doc.setFont(undefined, 'bold');
-                            doc.text('Objective:', margin, yPos);
-                            yPos += 5;
-                            doc.setFont(undefined, 'normal');
-                            const lines = doc.splitTextToSize(opsPlan.objective, contentWidth);
-                            doc.text(lines, margin + 5, yPos);
-                            yPos += (lines.length * 5) + 5;
-                        }
-                        
-                        if (opsPlan.plan) {
+
+                        const pdfField = (label, val) => {
+                            if (!val) return;
                             checkPage();
                             doc.setFont(undefined, 'bold');
-                            doc.text('Plan Details:', margin, yPos);
-                            yPos += 5;
+                            doc.text(label + ':', margin, yPos);
                             doc.setFont(undefined, 'normal');
-                            const lines = doc.splitTextToSize(opsPlan.plan, contentWidth);
-                            doc.text(lines, margin + 5, yPos);
+                            const lines = doc.splitTextToSize(val, contentWidth - 5);
+                            doc.text(lines, margin + 5, yPos + 5);
+                            yPos += (lines.length * 5) + 8;
+                        };
+
+                        if (opsDataRaw._version === 2) {
+                            if (opsDataRaw.date) pdfField('Date/Time', [opsDataRaw.date, opsDataRaw.time].filter(Boolean).join(' '));
+                            if (opsDataRaw.caseAgent) pdfField('Case Agent', opsDataRaw.caseAgent);
+                            if (opsDataRaw.location) pdfField('Location', opsDataRaw.location);
+                            if (opsDataRaw.suspectInfo) pdfField('Suspect Information', opsDataRaw.suspectInfo);
+                            if (opsDataRaw.caseSummary) pdfField('Case Summary', opsDataRaw.caseSummary);
+                            if (opsDataRaw.tacticalPlan) pdfField('Tactical Plan', opsDataRaw.tacticalPlan);
+                            if (opsDataRaw.pursuitPlan) pdfField('Pursuit Plan', opsDataRaw.pursuitPlan);
+                            if (opsDataRaw.medicalPlan) pdfField('Medical Plan', opsDataRaw.medicalPlan);
+                            if (opsDataRaw.barricadePlan) pdfField('Barricade Plan', opsDataRaw.barricadePlan);
+                            if (opsDataRaw.contingencyPlan) pdfField('Contingency Plan', opsDataRaw.contingencyPlan);
+                        } else {
+                            if (opsDataRaw.objective) pdfField('Objective', opsDataRaw.objective);
+                            if (opsDataRaw.plan) pdfField('Plan Details', opsDataRaw.plan);
                         }
                     } else {
                         doc.text('No operational plan recorded', margin, yPos);
@@ -2734,6 +2761,13 @@
 
         function renderTabContent(tabId) {
             currentTab = tabId;
+
+            // Hide/close Cellebrite embedded viewer when switching away from evidence
+            if (cellebriteEmbedActive && tabId !== 'evidence') {
+                window.electronAPI.cellebriteSetVisible(false);
+            } else if (cellebriteEmbedActive && tabId === 'evidence') {
+                window.electronAPI.cellebriteSetVisible(true);
+            }
             
             // Update active tab
             document.querySelectorAll('.tab-button').forEach(btn => {
@@ -3769,7 +3803,7 @@
                                 <div class="grid grid-cols-2 gap-4">
                                     <div>
                                         <label class="block text-sm font-medium text-gray-300 mb-2">Evidence Type *</label>
-                                        <select id="evidenceType" required class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none text-white">
+                                        <select id="evidenceType" required onchange="onEvidenceTypeChange(this.value)" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none text-white">
                                             <option value="">Select type...</option>
                                             <option value="digital">Digital Evidence</option>
                                             <option value="document">Document/Report</option>
@@ -3781,6 +3815,7 @@
                                             <option value="autopsy">Autopsy Report</option>
                                             <option value="toxicology">Toxicology Report</option>
                                             <option value="phone">Cell Phone Extraction</option>
+                                            <option value="cellebrite">Cellebrite Report</option>
                                             <option value="other">Other</option>
                                         </select>
                                     </div>
@@ -3795,9 +3830,10 @@
                                     <textarea id="evidenceDescription" required rows="3" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none text-white placeholder-gray-500 resize-none" placeholder="Describe the evidence, chain of custody, collection details..."></textarea>
                                 </div>
                                 
-                                <div>
+                                <div id="evidenceUploadSection">
                                     <label class="block text-sm font-medium text-gray-300 mb-2">Upload Files</label>
-                                    <div class="relative">
+                                    <!-- Standard file/folder upload (hidden when Cellebrite selected) -->
+                                    <div id="standardUploadUI" class="relative">
                                         <input type="file" id="evidenceFiles" multiple webkitdirectory directory class="hidden" onchange="handleEvidenceFilesSelect(event)">
                                         <div class="flex space-x-3">
                                             <button type="button" onclick="document.getElementById('evidenceFiles').removeAttribute('webkitdirectory'); document.getElementById('evidenceFiles').removeAttribute('directory'); document.getElementById('evidenceFiles').click();" class="flex-1 px-4 py-3 bg-viper-card/50 border-2 border-dashed border-gray-600 rounded-lg hover:border-viper-cyan transition-colors flex items-center justify-center space-x-2 text-gray-400 hover:text-viper-cyan">
@@ -3813,24 +3849,34 @@
                                                 <span>Upload Folder</span>
                                             </button>
                                         </div>
-                                        <div id="evidenceFilesInfo" class="hidden mt-3 p-4 bg-viper-cyan/10 border border-viper-cyan/30 rounded-lg">
-                                            <div class="flex items-start justify-between mb-2">
-                                                <div class="flex items-center space-x-2">
-                                                    <svg class="w-5 h-5 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                                                    </svg>
-                                                    <span id="evidenceFileCount" class="text-sm font-medium text-viper-cyan"></span>
-                                                </div>
-                                                <button type="button" onclick="clearEvidenceFiles()" class="text-gray-400 hover:text-red-400">
-                                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                                                    </svg>
-                                                </button>
-                                            </div>
-                                            <div id="evidenceFilesList" class="text-xs text-gray-400 max-h-32 overflow-y-auto space-y-1"></div>
-                                        </div>
                                     </div>
-                                    <p class="text-xs text-gray-500 mt-2">✓ All formats supported: MP4, MOV, AVI • JPG, PNG, HEIC • PDF, DOC • Forensic data preserved in original format</p>
+                                    <!-- Cellebrite folder picker (shown when Cellebrite selected) -->
+                                    <div id="cellebriteUploadUI" class="hidden">
+                                        <button type="button" onclick="selectCellebriteFolder()" class="w-full px-4 py-4 bg-viper-card/50 border-2 border-dashed border-viper-orange/40 rounded-lg hover:border-viper-orange transition-colors flex items-center justify-center space-x-3 text-gray-400 hover:text-viper-orange">
+                                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                                            </svg>
+                                            <span class="font-medium">Select Cellebrite Folder</span>
+                                        </button>
+                                        <p class="text-xs text-viper-orange/70 mt-2">📱 Select the folder containing CellebriteReader.exe and the .ufdr report file</p>
+                                    </div>
+                                    <div id="evidenceFilesInfo" class="hidden mt-3 p-4 bg-viper-cyan/10 border border-viper-cyan/30 rounded-lg">
+                                        <div class="flex items-start justify-between mb-2">
+                                            <div class="flex items-center space-x-2">
+                                                <svg class="w-5 h-5 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                                </svg>
+                                                <span id="evidenceFileCount" class="text-sm font-medium text-viper-cyan"></span>
+                                            </div>
+                                            <button type="button" onclick="clearEvidenceFiles()" class="text-gray-400 hover:text-red-400">
+                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                        <div id="evidenceFilesList" class="text-xs text-gray-400 max-h-32 overflow-y-auto space-y-1"></div>
+                                    </div>
+                                    <p id="standardUploadHint" class="text-xs text-gray-500 mt-2">✓ All formats supported: MP4, MOV, AVI • JPG, PNG, HEIC • PDF, DOC • Forensic data preserved in original format</p>
                                 </div>
                                 
                                 <div class="flex justify-end space-x-3 pt-4">
@@ -3965,6 +4011,7 @@
                 autopsy: '⚕️',
                 toxicology: '🧪',
                 phone: '📱',
+                cellebrite: '📱',
                 other: '📎'
             };
             
@@ -4002,14 +4049,89 @@
         
         function openAddEvidenceForm() {
             editingEvidenceId = null;
+            cellebriteFolderPath = null;
+            cellebriteScanResult = null;
             document.getElementById('evidenceFormTitle').textContent = 'Add New Evidence';
             document.getElementById('evidenceType').value = '';
             document.getElementById('evidenceTag').value = '';
             document.getElementById('evidenceDescription').value = '';
             clearEvidenceFiles();
+            onEvidenceTypeChange('');
             document.getElementById('evidenceForm').classList.remove('hidden');
             document.getElementById('evidenceType').focus();
         }
+
+        // ====== Cellebrite Upload Integration ======
+        let cellebriteFolderPath = null;
+        let cellebriteScanResult = null;
+
+        function onEvidenceTypeChange(val) {
+            const stdUI = document.getElementById('standardUploadUI');
+            const celUI = document.getElementById('cellebriteUploadUI');
+            const hint = document.getElementById('standardUploadHint');
+            if (val === 'cellebrite') {
+                stdUI.classList.add('hidden');
+                celUI.classList.remove('hidden');
+                if (hint) hint.classList.add('hidden');
+            } else {
+                stdUI.classList.remove('hidden');
+                celUI.classList.add('hidden');
+                if (hint) hint.classList.remove('hidden');
+            }
+        }
+
+        async function selectCellebriteFolder() {
+            const folderPath = await window.electronAPI.selectCellebriteFolder();
+            if (!folderPath) return;
+
+            viperToast('Scanning for Cellebrite Reader...', 'info');
+            const result = await window.electronAPI.scanCellebriteFolder(folderPath);
+
+            if (!result.success) {
+                viperToast(result.error, 'error');
+                return;
+            }
+
+            cellebriteFolderPath = folderPath;
+            cellebriteScanResult = result;
+
+            // Show selected info
+            const infoDiv = document.getElementById('evidenceFilesInfo');
+            const countEl = document.getElementById('evidenceFileCount');
+            const listEl = document.getElementById('evidenceFilesList');
+
+            const deviceLabel = result.deviceInfo.model || result.caseInfo.deviceName || 'Cellebrite Report';
+            const vendorLabel = result.deviceInfo.vendor || '';
+            countEl.textContent = `📱 ${deviceLabel} ${vendorLabel ? '(' + vendorLabel + ')' : ''}`;
+            countEl.className = 'text-sm font-medium text-viper-orange';
+
+            let details = [];
+            if (result.readerExePath) details.push('✓ CellebriteReader.exe found');
+            if (result.ufdrPath) details.push(`✓ Report: ${formatFileSize(result.ufdrSize)}`);
+            if (result.deviceInfo.os) details.push(`✓ OS: ${result.deviceInfo.os}`);
+            if (result.caseInfo.examinerName) details.push(`✓ Examiner: ${result.caseInfo.examinerName}`);
+            listEl.innerHTML = details.map(d => `<div class="text-viper-orange/80">${d}</div>`).join('');
+
+            infoDiv.classList.remove('hidden');
+            infoDiv.className = 'mt-3 p-4 bg-viper-orange/10 border border-viper-orange/30 rounded-lg';
+
+            // Auto-fill tag if empty
+            const tagEl = document.getElementById('evidenceTag');
+            if (!tagEl.value) tagEl.value = deviceLabel;
+
+            // Auto-fill description if empty
+            const descEl = document.getElementById('evidenceDescription');
+            if (!descEl.value) {
+                let desc = `Cellebrite extraction — ${deviceLabel}`;
+                if (vendorLabel) desc += ` (${vendorLabel})`;
+                if (result.deviceInfo.os) desc += `, OS ${result.deviceInfo.os}`;
+                if (result.caseInfo.examinerName) desc += `. Examiner: ${result.caseInfo.examinerName}`;
+                descEl.value = desc;
+            }
+
+            viperToast(`✓ Found Cellebrite Reader — ${deviceLabel}`, 'success');
+        }
+        // ====== End Cellebrite Upload ======
         
         function editEvidence(evidenceId) {
             const evidence = caseEvidence.find(e => e.id === evidenceId);
@@ -4049,9 +4171,125 @@
         
         function clearEvidenceFiles() {
             evidenceFiles = [];
+            cellebriteFolderPath = null;
+            cellebriteScanResult = null;
             document.getElementById('evidenceFiles').value = '';
             document.getElementById('evidenceFilesInfo').classList.add('hidden');
+            // Reset info styling
+            const infoDiv = document.getElementById('evidenceFilesInfo');
+            infoDiv.className = 'hidden mt-3 p-4 bg-viper-cyan/10 border border-viper-cyan/30 rounded-lg';
         }
+
+        // ====== Cellebrite Report Helpers ======
+        let cellebriteEmbedActive = false;
+
+        async function openCellebriteReader(evidenceId) {
+            const evidence = caseEvidence.find(e => e.id === evidenceId);
+            if (!evidence || !evidence.cellebrite || !evidence.cellebrite.readerExePath) {
+                viperToast('Cellebrite Reader path not found in this evidence', 'error');
+                return;
+            }
+
+            // Get viewer pane bounds
+            const viewer = document.getElementById('viewerContent');
+            if (!viewer) return;
+
+            // Clear viewer content and remove padding so Reader fills the area
+            viewer.innerHTML = `
+                <div class="flex items-center justify-center h-full">
+                    <div class="text-center">
+                        <div class="animate-spin w-12 h-12 border-4 border-viper-orange/30 border-t-viper-orange rounded-full mx-auto mb-4"></div>
+                        <p class="text-viper-orange font-medium">Launching Cellebrite Reader...</p>
+                        <p class="text-xs text-gray-400 mt-2">Embedding into viewer pane</p>
+                    </div>
+                </div>
+            `;
+            viewer.style.padding = '0';
+            viewer.style.overflow = 'hidden';
+
+            // Small delay for layout to settle
+            await new Promise(r => setTimeout(r, 100));
+            const rect = viewer.getBoundingClientRect();
+            const bounds = {
+                x: Math.round(rect.left),
+                y: Math.round(rect.top),
+                width: Math.round(rect.width),
+                height: Math.round(rect.height)
+            };
+
+            const result = await window.electronAPI.cellebriteLaunchEmbedded({
+                exePath: evidence.cellebrite.readerExePath,
+                bounds
+            });
+
+            if (!result.success) {
+                viperToast(result.error + ' — launching externally', 'warning');
+                viewer.style.padding = '';
+                viewer.style.overflow = '';
+                // Fallback: external launch
+                await window.electronAPI.launchCellebriteReader(evidence.cellebrite.readerExePath);
+                renderTabContent('evidence');
+                return;
+            }
+
+            cellebriteEmbedActive = true;
+
+            // Replace viewer with close button overlay
+            viewer.innerHTML = `
+                <div class="absolute top-2 right-2 z-10 flex gap-2">
+                    <button onclick="closeCellebriteEmbed()" class="px-3 py-1.5 rounded-lg bg-red-500/90 text-white text-xs font-bold hover:bg-red-600 transition-all shadow-lg backdrop-blur-sm flex items-center gap-1">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        Close Reader
+                    </button>
+                </div>
+            `;
+
+            viperToast('✓ Cellebrite Reader embedded', 'success');
+
+            // Track resize to keep embedded window in sync
+            startCellebriteBoundsSync();
+        }
+
+        function startCellebriteBoundsSync() {
+            const viewer = document.getElementById('viewerContent');
+            if (!viewer) return;
+
+            const sync = () => {
+                if (!cellebriteEmbedActive) return;
+                const r = viewer.getBoundingClientRect();
+                window.electronAPI.cellebriteSetBounds({
+                    x: Math.round(r.left),
+                    y: Math.round(r.top),
+                    width: Math.round(r.width),
+                    height: Math.round(r.height)
+                });
+            };
+
+            const observer = new ResizeObserver(sync);
+            observer.observe(viewer);
+            window.addEventListener('resize', sync);
+            window._cellebriteCleanup = () => {
+                observer.disconnect();
+                window.removeEventListener('resize', sync);
+            };
+        }
+
+        async function closeCellebriteEmbed() {
+            cellebriteEmbedActive = false;
+            await window.electronAPI.cellebriteClose();
+            if (window._cellebriteCleanup) {
+                window._cellebriteCleanup();
+                window._cellebriteCleanup = null;
+            }
+            // Restore viewer pane
+            const viewer = document.getElementById('viewerContent');
+            if (viewer) {
+                viewer.style.padding = '';
+                viewer.style.overflow = '';
+            }
+            renderTabContent('evidence');
+        }
+        // ====== End Cellebrite ======
         
         function formatFileSize(bytes) {
             if (bytes < 1024) return bytes + ' B';
@@ -4088,6 +4326,67 @@
                 
                 renderTabContent('evidence');
             } else {
+                // ===== Cellebrite Report: native folder copy =====
+                if (type === 'cellebrite' && cellebriteFolderPath && cellebriteScanResult) {
+                    const progressModal = document.getElementById('uploadProgressModal');
+                    if (progressModal) {
+                        progressModal.classList.add('show');
+                        document.getElementById('uploadStatusText').textContent = 'Copying Cellebrite files (this may take a while for large reports)...';
+                        document.getElementById('uploadProgressBar').style.width = '0%';
+                        document.getElementById('uploadProgressPercent').textContent = '0%';
+                    }
+
+                    try {
+                        const evidenceTag = tag || `cellebrite_${Date.now()}`;
+                        const result = await window.electronAPI.copyCellebriteFolder({
+                            sourcePath: cellebriteFolderPath,
+                            caseNumber: currentCase.caseNumber,
+                            evidenceTag: evidenceTag
+                        });
+
+                        if (!result.success) throw new Error(result.error);
+
+                        // Build evidence item with Cellebrite metadata
+                        const newEvidence = {
+                            id: Date.now(),
+                            type: 'cellebrite',
+                            tag: tag,
+                            description: description,
+                            fileCount: result.fileCount,
+                            totalSize: result.totalSize,
+                            files: result.files,
+                            cellebrite: {
+                                readerExePath: result.readerExePath || null,
+                                ufdrPath: result.ufdrPath || null,
+                                deviceInfo: cellebriteScanResult.deviceInfo || {},
+                                caseInfo: cellebriteScanResult.caseInfo || {}
+                            },
+                            createdAt: new Date().toISOString()
+                        };
+
+                        caseEvidence.push(newEvidence);
+                        const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
+                        allEvidence[currentCase.caseNumber] = caseEvidence;
+                        localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
+
+                        progressModal.classList.remove('show');
+                        document.getElementById('uploadSuccessModal').classList.add('show');
+
+                        cellebriteFolderPath = null;
+                        cellebriteScanResult = null;
+                        evidenceFiles = [];
+                        cancelEvidenceForm();
+
+                        setTimeout(() => closeUploadSuccessModal(), 2000);
+                    } catch (error) {
+                        console.error('Cellebrite copy failed:', error);
+                        progressModal.classList.remove('show');
+                        viperToast('Failed to copy Cellebrite files: ' + error.message, 'error');
+                    }
+                    return;
+                }
+
+                // ===== Standard file upload =====
                 // Show upload progress modal
                 if (evidenceFiles.length > 0) {
                     console.log('Showing upload progress modal');
@@ -4349,6 +4648,25 @@
                         ${evidence.files && evidence.files.length > 0 && evidence.files[0].path ? `
                             <div class="mt-3 p-2 bg-viper-dark rounded text-xs font-mono text-gray-500">
                                 📂 ${evidence.files[0].path.split('/').slice(0, -1).join('/')}
+                            </div>
+                        ` : ''}
+                        ${evidence.cellebrite && evidence.cellebrite.readerExePath ? `
+                            <div class="mt-4 space-y-3">
+                                ${evidence.cellebrite.deviceInfo ? `
+                                    <div class="flex flex-wrap gap-2 text-xs">
+                                        ${evidence.cellebrite.deviceInfo.model ? `<span class="px-2 py-1 bg-viper-orange/20 text-viper-orange rounded-full">📱 ${evidence.cellebrite.deviceInfo.model}</span>` : ''}
+                                        ${evidence.cellebrite.deviceInfo.vendor ? `<span class="px-2 py-1 bg-viper-orange/10 text-viper-orange/80 rounded-full">${evidence.cellebrite.deviceInfo.vendor}</span>` : ''}
+                                        ${evidence.cellebrite.deviceInfo.os ? `<span class="px-2 py-1 bg-viper-orange/10 text-viper-orange/80 rounded-full">OS ${evidence.cellebrite.deviceInfo.os}</span>` : ''}
+                                        ${evidence.cellebrite.caseInfo && evidence.cellebrite.caseInfo.examinerName ? `<span class="px-2 py-1 bg-viper-cyan/10 text-viper-cyan/80 rounded-full">👤 ${evidence.cellebrite.caseInfo.examinerName}</span>` : ''}
+                                    </div>
+                                ` : ''}
+                                <button onclick="openCellebriteReader(${evidence.id})" class="w-full px-4 py-3 rounded-lg bg-gradient-to-r from-viper-orange/20 to-amber-600/20 text-viper-orange border border-viper-orange/30 hover:from-viper-orange/30 hover:to-amber-600/30 transition-all text-sm font-bold flex items-center justify-center space-x-2 shadow-lg shadow-viper-orange/10">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                    </svg>
+                                    <span>Open in UFED Reader</span>
+                                </button>
                             </div>
                         ` : ''}
                     </div>
@@ -5220,59 +5538,50 @@
                         </div>
                     </div>
                     
-                    <div class="space-y-6">
-                        <!-- Personal Information -->
-                        <div class="glass-card rounded-xl p-6">
-                            <h3 class="text-xl font-bold text-viper-cyan mb-4">Personal Information</h3>
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                <div class="col-span-1">
-                                    <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark">
-                                        <img id="suspect-photo-${index}" src="${suspect.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"%3E%3Crect fill="%231a2332" width="400" height="400"/%3E%3Cpath fill="%2300d9ff" d="M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z" opacity="0.3"/%3E%3C/svg%3E'}" alt="${suspect.name || 'Suspect'}" class="w-full h-full object-cover">
-                                    </div>
-                                    ${isEditingInline ? `
-                                        <div class="mt-2">
-                                            <input type="file" accept="image/*" onchange="handleInlineImageUpload(event, 'suspect-photo-${index}')" class="text-xs text-gray-400">
+                    <div class="space-y-4">
+                        <!-- Personal Info + Residence — side by side -->
+                        <div class="grid grid-cols-2 gap-4">
+                            <!-- Personal Information Card -->
+                            <div class="glass-card rounded-xl p-5">
+                                <h3 class="text-lg font-bold text-viper-cyan mb-4">Personal Information</h3>
+                                <div class="flex gap-5">
+                                    <div class="shrink-0">
+                                        <div class="w-48 h-48 rounded-lg overflow-hidden bg-viper-dark">
+                                            <img id="suspect-photo-${index}" src="${suspect.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"%3E%3Crect fill="%231a2332" width="400" height="400"/%3E%3Cpath fill="%2300d9ff" d="M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z" opacity="0.3"/%3E%3C/svg%3E'}" alt="${suspect.name || 'Suspect'}" class="w-full h-full object-cover">
                                         </div>
-                                    ` : ''}
-                                </div>
-                                <div class="col-span-2 grid grid-cols-2 gap-4">
-                                    ${renderEditableField('Name', 'name', suspect.name, index)}
-                                    ${renderEditableField('Date of Birth', 'dob', suspect.dob, index, 'date')}
-                                    ${renderEditableField('Driver\'s License', 'dlNumber', suspect.dlNumber, index)}
-                                    ${renderEditableField('Height (inches)', 'height', suspect.height, index)}
-                                    ${renderEditableField('Weight (lbs)', 'weight', suspect.weight, index)}
-                                    ${renderEditableField('Hair Color', 'hairColor', suspect.hairColor, index)}
-                                    ${renderEditableField('Eye Color', 'eyeColor', suspect.eyeColor, index)}
+                                        ${isEditingInline ? `<input type="file" accept="image/*" onchange="handleInlineImageUpload(event, 'suspect-photo-${index}')" class="text-xs text-gray-400 mt-2 w-48">` : ''}
+                                    </div>
+                                    <div class="flex-1 min-w-0 grid grid-cols-3 gap-x-5 gap-y-2 content-start">
+                                        ${renderEditableField('Name', 'name', suspect.name, index)}
+                                        ${renderEditableField('Date of Birth', 'dob', suspect.dob, index, 'date')}
+                                        ${renderEditableField('Driver\'s License', 'dlNumber', suspect.dlNumber, index)}
+                                        ${renderEditableField('Height', 'height', suspect.height, index)}
+                                        ${renderEditableField('Weight', 'weight', suspect.weight, index)}
+                                        ${renderEditableField('Hair Color', 'hairColor', suspect.hairColor, index)}
+                                        ${renderEditableField('Eye Color', 'eyeColor', suspect.eyeColor, index)}
+                                        ${renderEditableField('Scars/Marks/Tattoos', 'scarsMarksTattoos', suspect.scarsMarksTattoos, index)}
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                        
-                        <!-- Address Information -->
-                        <div class="glass-card rounded-xl p-6">
-                            <h3 class="text-xl font-bold text-viper-cyan mb-4">Address</h3>
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                <div class="col-span-2">
-                                    ${renderEditableField('Street Address', 'address', suspect.address, index)}
+                            <!-- Residence Information Card -->
+                            <div class="glass-card rounded-xl p-5">
+                                <h3 class="text-lg font-bold text-viper-cyan mb-4">🏠 Residence Information</h3>
+                                <div class="space-y-3">
+                                    ${renderEditableField('Address', 'address', suspect.address, index)}
                                     ${renderEditableField('City, State, ZIP', 'addressCityStateZip', suspect.addressCityStateZip, index)}
                                 </div>
-                                <div class="col-span-1">
-                                    <div class="aspect-video rounded-lg overflow-hidden bg-viper-dark ${!suspect.residencePhoto ? 'flex items-center justify-center border border-dashed border-gray-600' : ''}">
-                                        <img id="suspect-residence-${index}" src="${suspect.residencePhoto || ''}" alt="Residence" class="w-full h-full object-cover ${!suspect.residencePhoto ? 'hidden' : ''}">
-                                        ${!suspect.residencePhoto ? `<p id="suspect-residence-placeholder-${index}" class="text-gray-500 text-sm">No residence photo</p>` : ''}
-                                    </div>
-                                    ${isEditingInline ? `
-                                        <div class="mt-2">
-                                            <input type="file" accept="image/*" onchange="handleInlineImageUpload(event, 'suspect-residence-${index}')" class="text-xs text-gray-400">
-                                        </div>
-                                    ` : ''}
+                                <div class="mt-4 w-full h-48 rounded-lg overflow-hidden bg-viper-dark ${!suspect.residencePhoto ? 'flex items-center justify-center border border-dashed border-gray-600' : ''}">
+                                    <img id="suspect-residence-${index}" src="${suspect.residencePhoto || ''}" alt="Residence" class="w-full h-full object-cover ${!suspect.residencePhoto ? 'hidden' : ''}">
+                                    ${!suspect.residencePhoto ? `<p id="suspect-residence-placeholder-${index}" class="text-gray-500 text-sm">No residence photo</p>` : ''}
                                 </div>
+                                ${isEditingInline ? `<input type="file" accept="image/*" onchange="handleInlineImageUpload(event, 'suspect-residence-${index}')" class="text-xs text-gray-400 mt-2">` : ''}
                             </div>
                         </div>
-                        
-                        <!-- Employer Information -->
-                        <div class="glass-card rounded-xl p-6">
-                            <h3 class="text-xl font-bold text-viper-cyan mb-4">Employer</h3>
-                            <div class="grid grid-cols-2 gap-4">
+
+                        <!-- Employer (compact single row) -->
+                        <div class="glass-card rounded-xl p-5">
+                            <h3 class="text-lg font-bold text-viper-cyan mb-3">Employer</h3>
+                            <div class="grid grid-cols-4 gap-x-6 gap-y-2">
                                 ${renderEditableField('Employer Name', 'employerName', suspect.employerName, index)}
                                 ${renderEditableField('Occupation', 'occupation', suspect.occupation, index)}
                                 ${renderEditableField('Employer Address', 'employerAddress', suspect.employerAddress, index)}
@@ -5281,9 +5590,9 @@
                         </div>
                         
                         <!-- Identifiers -->
-                        <div class="glass-card rounded-xl p-6">
-                            <div class="flex justify-between items-center mb-4">
-                                <h3 class="text-xl font-bold text-viper-green">Identifiers</h3>
+                        <div class="glass-card rounded-xl p-5">
+                            <div class="flex justify-between items-center mb-3">
+                                <h3 class="text-lg font-bold text-viper-green">Identifiers</h3>
                                 <button onclick="addSuspectIdentifierInline(${index})" class="px-3 py-1 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green text-sm transition">
                                     + Add Identifier
                                 </button>
@@ -5331,88 +5640,167 @@
                             ` : '<p class="text-gray-500">No identifiers added</p>'}
                         </div>
                         
-                        <!-- Registered Firearms -->
-                        <div class="glass-card rounded-xl p-6">
-                            <div class="flex justify-between items-center mb-4">
-                                <h3 class="text-xl font-bold text-viper-orange">Registered Firearms</h3>
-                                <button onclick="addFirearm(${index})" class="px-3 py-1 bg-viper-orange/20 hover:bg-viper-orange/30 border border-viper-orange rounded-lg text-viper-orange text-sm transition">
-                                    + Add Firearm
-                                </button>
-                            </div>
-                            ${suspect.firearms && suspect.firearms.length > 0 ? `
-                                <div class="space-y-3">
-                                    ${suspect.firearms.map((firearm, fIndex) => `
-                                        <div class="bg-gradient-to-r from-viper-cyan/10 to-viper-purple/10 border border-viper-cyan/20 rounded-lg p-4 flex justify-between items-start">
-                                            <div class="grid grid-cols-3 gap-4 flex-1">
-                                                <div>
-                                                    <p class="text-xs text-gray-500">Make/Model</p>
-                                                    <p class="text-white">${firearm.makeModel || 'N/A'}</p>
-                                                </div>
-                                                <div>
-                                                    <p class="text-xs text-gray-500">Calibre</p>
-                                                    <p class="text-white">${firearm.calibre || 'N/A'}</p>
-                                                </div>
-                                                <div>
-                                                    <p class="text-xs text-gray-500">Serial Number</p>
-                                                    <p class="text-white">${firearm.serialNumber || 'N/A'}</p>
-                                                </div>
-                                            </div>
-                                            <button onclick="removeFirearm(${index}, ${fIndex})" class="text-red-500 hover:text-red-400 ml-4">
-                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                                                </svg>
-                                            </button>
-                                        </div>
-                                    `).join('')}
+                        <!-- Firearms + Criminal History — side by side -->
+                        <div class="grid grid-cols-2 gap-4">
+                            <!-- Registered Firearms -->
+                            <div class="glass-card rounded-xl p-5">
+                                <div class="flex justify-between items-center mb-3">
+                                    <h3 class="text-lg font-bold text-viper-orange">Registered Firearms</h3>
+                                    <div class="flex gap-2">
+                                        <button onclick="uploadFirearmsDoc(${index})" class="px-3 py-1 bg-viper-orange/20 hover:bg-viper-orange/30 border border-viper-orange rounded-lg text-viper-orange text-sm transition">
+                                            📄 Upload Firearms Doc
+                                        </button>
+                                        <button onclick="addFirearm(${index})" class="px-3 py-1 bg-viper-orange/20 hover:bg-viper-orange/30 border border-viper-orange rounded-lg text-viper-orange text-sm transition">
+                                            + Add Firearm
+                                        </button>
+                                    </div>
                                 </div>
-                            ` : '<p class="text-gray-500">No registered firearms</p>'}
-                        </div>
-                        
-                        <!-- Registered Vehicles -->
-                        <div class="glass-card rounded-xl p-6">
-                            <div class="flex justify-between items-center mb-4">
-                                <h3 class="text-xl font-bold text-viper-cyan">Registered Vehicles</h3>
-                                <button onclick="addVehicle(${index})" class="px-3 py-1 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan text-sm transition">
-                                    + Add Vehicle
-                                </button>
-                            </div>
-                            ${suspect.vehicles && suspect.vehicles.length > 0 ? `
-                                <div class="space-y-4">
-                                    ${suspect.vehicles.map((vehicle, vIndex) => `
-                                        <div class="bg-gradient-to-r from-viper-cyan/10 to-viper-purple/10 border border-viper-cyan/20 rounded-lg p-4">
-                                            <div class="flex justify-between items-start mb-3">
-                                                <div class="grid grid-cols-3 gap-4 flex-1">
+                                ${suspect.firearmsDoc ? `
+                                    <div class="mb-3 p-3 bg-viper-orange/10 border border-viper-orange/20 rounded-lg flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-lg">📄</span>
+                                            <span class="text-white text-sm font-medium">${suspect.firearmsDoc.fileName}</span>
+                                            <span class="text-gray-400 text-xs">${formatFileSize(suspect.firearmsDoc.fileSize)}</span>
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <button onclick="viewFirearmsDoc(${index})" class="px-3 py-1 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green text-xs transition">View</button>
+                                            <button onclick="removeFirearmsDoc(${index})" class="text-red-500 hover:text-red-400 p-1"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+                                        </div>
+                                    </div>
+                                ` : ''}
+                                ${suspect.firearms && suspect.firearms.length > 0 ? `
+                                    <div class="space-y-2">
+                                        ${suspect.firearms.map((firearm, fIndex) => `
+                                            <div class="bg-gradient-to-r from-viper-cyan/10 to-viper-purple/10 border border-viper-cyan/20 rounded-lg p-3 flex justify-between items-start">
+                                                <div class="grid grid-cols-3 gap-3 flex-1">
                                                     <div>
                                                         <p class="text-xs text-gray-500">Make/Model</p>
-                                                        <p class="text-white">${vehicle.makeModel || 'N/A'}</p>
+                                                        <p class="text-white text-sm">${firearm.makeModel || 'N/A'}</p>
                                                     </div>
                                                     <div>
-                                                        <p class="text-xs text-gray-500">Color</p>
-                                                        <p class="text-white">${vehicle.color || 'N/A'}</p>
+                                                        <p class="text-xs text-gray-500">Calibre</p>
+                                                        <p class="text-white text-sm">${firearm.calibre || 'N/A'}</p>
                                                     </div>
                                                     <div>
-                                                        <p class="text-xs text-gray-500">Plate Number</p>
-                                                        <div class="flex items-center gap-2">
-                                                            <p class="text-white">${vehicle.plateNumber || 'N/A'}</p>
-                                                            ${renderFlockButton(vehicle.plateNumber, '', true)}
-                                                        </div>
+                                                        <p class="text-xs text-gray-500">Serial Number</p>
+                                                        <p class="text-white text-sm">${firearm.serialNumber || 'N/A'}</p>
                                                     </div>
                                                 </div>
-                                                <button onclick="removeVehicle(${index}, ${vIndex})" class="text-red-500 hover:text-red-400 ml-4">
-                                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <button onclick="removeFirearm(${index}, ${fIndex})" class="text-red-500 hover:text-red-400 ml-2">
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                                                     </svg>
                                                 </button>
                                             </div>
-                                            ${vehicle.photo ? `
-                                                <div class="aspect-video rounded-lg overflow-hidden bg-viper-dark">
-                                                    <img src="${vehicle.photo}" alt="Vehicle" class="w-full h-full object-cover">
-                                                </div>
-                                            ` : ''}
-                                        </div>
-                                    `).join('')}
+                                        `).join('')}
+                                    </div>
+                                ` : '<p class="text-gray-500">No registered firearms</p>'}
+                            </div>
+                            <!-- Criminal History -->
+                            <div class="glass-card rounded-xl p-5">
+                                <div class="flex justify-between items-center mb-3">
+                                    <h3 class="text-lg font-bold text-red-400">Criminal History</h3>
+                                    <div class="flex gap-2">
+                                        <button onclick="uploadRapSheet(${index})" class="px-3 py-1 bg-red-500/20 hover:bg-red-500/30 border border-red-500 rounded-lg text-red-400 text-sm transition">
+                                            📄 Upload Rap Sheet
+                                        </button>
+                                        <button onclick="addCriminalRecord(${index})" class="px-3 py-1 bg-red-500/20 hover:bg-red-500/30 border border-red-500 rounded-lg text-red-400 text-sm transition">
+                                            + Add Record
+                                        </button>
+                                    </div>
                                 </div>
-                            ` : '<p class="text-gray-500">No registered vehicles</p>'}
+                                ${suspect.rapSheet ? `
+                                    <div class="mb-3 p-3 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-lg">📄</span>
+                                            <span class="text-white text-sm font-medium">${suspect.rapSheet.fileName}</span>
+                                            <span class="text-gray-400 text-xs">${formatFileSize(suspect.rapSheet.fileSize)}</span>
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <button onclick="viewRapSheet(${index})" class="px-3 py-1 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green text-xs transition">View</button>
+                                            <button onclick="removeRapSheet(${index})" class="text-red-500 hover:text-red-400 p-1"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+                                        </div>
+                                    </div>
+                                ` : ''}
+                                ${suspect.criminalHistory && suspect.criminalHistory.length > 0 ? `
+                                    <div class="space-y-2">
+                                        ${suspect.criminalHistory.map((record, rIdx) => `
+                                            <div class="bg-gradient-to-r from-red-500/10 to-transparent border border-red-500/20 rounded-lg p-3 flex justify-between items-start">
+                                                <div class="space-y-1 flex-1">
+                                                    <div class="flex gap-4">
+                                                        <div>
+                                                            <p class="text-xs text-gray-500">Date</p>
+                                                            <p class="text-white text-sm">${record.date ? formatDate(record.date) : 'N/A'}</p>
+                                                        </div>
+                                                        <div class="flex-1">
+                                                            <p class="text-xs text-gray-500">Offense</p>
+                                                            <p class="text-white text-sm">${record.offense || 'N/A'}</p>
+                                                        </div>
+                                                    </div>
+                                                    ${record.caseNumber || record.sentence ? `
+                                                    <div class="flex gap-4">
+                                                        ${record.caseNumber ? `<div><p class="text-xs text-gray-500">Case #</p><p class="text-white text-sm">${record.caseNumber}</p></div>` : ''}
+                                                        ${record.sentence ? `<div class="flex-1"><p class="text-xs text-gray-500">Sentence</p><p class="text-white text-sm">${record.sentence}</p></div>` : ''}
+                                                    </div>` : ''}
+                                                    ${record.notes ? `<p class="text-gray-400 text-xs">${record.notes}</p>` : ''}
+                                                </div>
+                                                <button onclick="removeCriminalRecord(${index}, ${rIdx})" class="text-red-500 hover:text-red-400 ml-2">
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                                    </svg>
+                                                </button>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                ` : `${!suspect.rapSheet ? '<p class="text-gray-500">No criminal history recorded</p>' : ''}`}
+                            </div>
+                        </div>
+
+                        <!-- Registered Vehicles — half width, grows with content -->
+                        <div class="w-1/2">
+                            <div class="glass-card rounded-xl p-5">
+                                <div class="flex justify-between items-center mb-3">
+                                    <h3 class="text-lg font-bold text-viper-cyan">Registered Vehicles</h3>
+                                    <button onclick="addVehicle(${index})" class="px-3 py-1 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan text-sm transition">
+                                        + Add Vehicle
+                                    </button>
+                                </div>
+                                ${suspect.vehicles && suspect.vehicles.length > 0 ? `
+                                    <div class="space-y-2">
+                                        ${suspect.vehicles.map((vehicle, vIndex) => `
+                                            <div class="bg-gradient-to-r from-viper-cyan/10 to-viper-purple/10 border border-viper-cyan/20 rounded-lg p-3 flex gap-3 items-start">
+                                                ${vehicle.photo ? `
+                                                    <div class="shrink-0 w-32 h-24 rounded-lg overflow-hidden bg-viper-dark">
+                                                        <img src="${vehicle.photo}" alt="Vehicle" class="w-full h-full object-cover">
+                                                    </div>
+                                                ` : ''}
+                                                <div class="flex-1 grid grid-cols-3 gap-3">
+                                                    <div>
+                                                        <p class="text-xs text-gray-500">Make/Model</p>
+                                                        <p class="text-white text-sm">${vehicle.makeModel || 'N/A'}</p>
+                                                    </div>
+                                                    <div>
+                                                        <p class="text-xs text-gray-500">Color</p>
+                                                        <p class="text-white text-sm">${vehicle.color || 'N/A'}</p>
+                                                    </div>
+                                                    <div>
+                                                        <p class="text-xs text-gray-500">Plate Number</p>
+                                                        <div class="flex items-center gap-2">
+                                                            <p class="text-white text-sm">${vehicle.plateNumber || 'N/A'}</p>
+                                                            ${renderFlockButton(vehicle.plateNumber, '', true)}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <button onclick="removeVehicle(${index}, ${vIndex})" class="text-red-500 hover:text-red-400 shrink-0">
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                                    </svg>
+                                                </button>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                ` : '<p class="text-gray-500">No registered vehicles</p>'}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -5652,6 +6040,12 @@
                             </button>
                         </div>
                         
+                        <!-- Criminal History -->
+                        <div>
+                            <h3 class="text-lg font-bold text-viper-cyan mb-3">Criminal History</h3>
+                            <p class="text-sm text-gray-400 italic">Criminal records and rap sheets can be added from the suspect detail view after saving.</p>
+                        </div>
+
                         <div class="flex justify-end gap-3 pt-4 border-t border-gray-700">
                             <button type="button" onclick="this.closest('.fixed').remove()" class="px-6 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white hover:border-white transition">
                                 Cancel
@@ -5678,6 +6072,7 @@
                     weight: formData.get('weight'),
                     hairColor: formData.get('hairColor'),
                     eyeColor: formData.get('eyeColor'),
+                    scarsMarksTattoos: isEdit ? suspect.scarsMarksTattoos || '' : '',
                     address: formData.get('address'),
                     addressCityStateZip: formData.get('addressCityStateZip'),
                     residencePhoto: formData.get('residencePhoto'),
@@ -5687,7 +6082,10 @@
                     employerPhone: formData.get('employerPhone'),
                     firearms: isEdit ? suspect.firearms : [],
                     vehicles: isEdit ? suspect.vehicles : [],
-                    identifiers: collectSuspectIdentifiers()
+                    identifiers: collectSuspectIdentifiers(),
+                    criminalHistory: isEdit ? suspect.criminalHistory || [] : [],
+                    rapSheet: isEdit ? suspect.rapSheet || null : null,
+                    firearmsDoc: isEdit ? suspect.firearmsDoc || null : null
                 };
                 
                 if (isEdit) {
@@ -5892,6 +6290,159 @@
                 renderTabContent('suspects');
             }
         }
+
+        function addCriminalRecord(suspectIndex) {
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4';
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+            modal.innerHTML = `
+                <div class="glass-card rounded-xl p-6 max-w-lg w-full" onclick="event.stopPropagation()">
+                    <h3 class="text-xl font-bold text-white mb-4">Add Criminal Record</h3>
+                    <form id="crimRecordForm" class="space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1">Date of Conviction *</label>
+                                <input type="date" name="date" required class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-red-400 focus:outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1">Case Number</label>
+                                <input type="text" name="caseNumber" placeholder="e.g. 2024-CF-12345" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-red-400 focus:outline-none">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Offense *</label>
+                            <input type="text" name="offense" placeholder="e.g. 487(a) PC - Grand Theft" required class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-red-400 focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Sentence</label>
+                            <input type="text" name="sentence" placeholder="e.g. 3 years probation, 180 days county jail" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-red-400 focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Notes</label>
+                            <textarea name="notes" rows="2" placeholder="Additional details..." class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-red-400 focus:outline-none"></textarea>
+                        </div>
+                        <div class="flex justify-end gap-3 pt-4">
+                            <button type="button" onclick="this.closest('.fixed').remove()" class="px-4 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white transition">Cancel</button>
+                            <button type="submit" class="px-4 py-2 bg-red-500 hover:bg-red-600 rounded-lg text-white font-semibold transition">Add Record</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            document.getElementById('crimRecordForm').onsubmit = (e) => {
+                e.preventDefault();
+                const fd = new FormData(e.target);
+                if (!suspects[suspectIndex].criminalHistory) suspects[suspectIndex].criminalHistory = [];
+                suspects[suspectIndex].criminalHistory.push({
+                    date: fd.get('date'),
+                    offense: fd.get('offense'),
+                    caseNumber: fd.get('caseNumber') || '',
+                    sentence: fd.get('sentence') || '',
+                    notes: fd.get('notes') || ''
+                });
+                saveSuspects();
+                modal.remove();
+                renderTabContent('suspects');
+            };
+        }
+
+        async function removeCriminalRecord(suspectIndex, recordIndex) {
+            if (await viperConfirm('Remove this criminal record?', {danger:true, okText:'Delete'})) {
+                suspects[suspectIndex].criminalHistory.splice(recordIndex, 1);
+                saveSuspects();
+                renderTabContent('suspects');
+            }
+        }
+
+        function uploadRapSheet(suspectIndex) {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.pdf,image/*';
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    suspects[suspectIndex].rapSheet = {
+                        fileName: file.name,
+                        fileSize: file.size,
+                        fileType: file.type,
+                        fileData: ev.target.result
+                    };
+                    saveSuspects();
+                    renderTabContent('suspects');
+                    viperToast('Rap sheet uploaded', 'success');
+                };
+                reader.readAsDataURL(file);
+            };
+            input.click();
+        }
+
+        function viewRapSheet(suspectIndex) {
+            const rs = suspects[suspectIndex]?.rapSheet;
+            if (!rs) return;
+            const win = window.open('', '_blank');
+            if (win) {
+                if (rs.fileType.includes('pdf')) {
+                    win.document.write(`<html><head><title>${rs.fileName}</title><style>body{margin:0}iframe{width:100%;height:100vh;border:none}</style></head><body><iframe src="${rs.fileData}"></iframe></body></html>`);
+                } else {
+                    win.document.write(`<html><head><title>${rs.fileName}</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img src="${rs.fileData}"></body></html>`);
+                }
+            }
+        }
+
+        async function removeRapSheet(suspectIndex) {
+            if (await viperConfirm('Remove the rap sheet?', {danger:true, okText:'Delete'})) {
+                delete suspects[suspectIndex].rapSheet;
+                saveSuspects();
+                renderTabContent('suspects');
+            }
+        }
+
+        function uploadFirearmsDoc(suspectIndex) {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.pdf,image/*';
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    suspects[suspectIndex].firearmsDoc = {
+                        fileName: file.name,
+                        fileSize: file.size,
+                        fileType: file.type,
+                        fileData: ev.target.result
+                    };
+                    saveSuspects();
+                    renderTabContent('suspects');
+                    viperToast('Firearms document uploaded', 'success');
+                };
+                reader.readAsDataURL(file);
+            };
+            input.click();
+        }
+
+        function viewFirearmsDoc(suspectIndex) {
+            const fd = suspects[suspectIndex]?.firearmsDoc;
+            if (!fd) return;
+            const win = window.open('', '_blank');
+            if (win) {
+                if (fd.fileType.includes('pdf')) {
+                    win.document.write('<html><head><title>' + fd.fileName + '</title><style>body{margin:0}iframe{width:100%;height:100vh;border:none}</style></head><body><iframe src="' + fd.fileData + '"></iframe></body></html>');
+                } else {
+                    win.document.write('<html><head><title>' + fd.fileName + '</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img src="' + fd.fileData + '"></body></html>');
+                }
+            }
+        }
+
+        async function removeFirearmsDoc(suspectIndex) {
+            if (await viperConfirm('Remove the firearms document?', {danger:true, okText:'Delete'})) {
+                delete suspects[suspectIndex].firearmsDoc;
+                saveSuspects();
+                renderTabContent('suspects');
+            }
+        }
         
         function addVehicle(suspectIndex) {
             const modal = document.createElement('div');
@@ -6035,7 +6586,10 @@
         
         function generatePDFHTML(suspectsToExport) {
             const pdfWindow = window.open('', '_blank');
-            const currentUser = JSON.parse(localStorage.getItem('viperCurrentUser')) || { username: 'Unknown Detective' };
+            const userName = localStorage.getItem('viper_customer_name') || 'Unknown Detective';
+            const userInfo = JSON.parse(localStorage.getItem('viperUserInfo')) || {};
+            const badge = userInfo.badgeNumber || '';
+            const agency = localStorage.getItem('viper_agency') || userInfo.agencyName || '';
             
             const html = `
                 <!DOCTYPE html>
@@ -6175,7 +6729,7 @@
                             </div>
                             <div class="header-field">
                                 <label>Detective:</label>
-                                <div>${currentUser.username}</div>
+                                <div>${userName}${badge ? ' (#' + badge + ')' : ''}</div>
                             </div>
                             <div class="header-field">
                                 <label>Report Date:</label>
@@ -6185,6 +6739,10 @@
                                 <label>Suspect Count:</label>
                                 <div>${suspectsToExport.length}</div>
                             </div>
+                            ${agency ? `<div class="header-field">
+                                <label>Agency:</label>
+                                <div>${agency}</div>
+                            </div>` : ''}
                         </div>
                     </div>
                     
@@ -15723,86 +16281,1145 @@
 
         // OPS Plan Tab
         let opsPlans = [];
+        let opsPlanData = null; // The active generated plan
 
         function loadOpsPlans() {
             const stored = localStorage.getItem(`opsplan_${currentCase.id}`);
-            opsPlans = stored ? JSON.parse(stored) : [];
+            const parsed = stored ? JSON.parse(stored) : null;
+            // Migration: old format was array of uploaded files
+            if (Array.isArray(parsed)) {
+                opsPlans = parsed;
+                opsPlanData = null;
+            } else if (parsed && parsed._version === 2) {
+                opsPlanData = parsed;
+                opsPlans = parsed.uploadedFiles || [];
+            } else {
+                opsPlanData = null;
+                opsPlans = [];
+            }
         }
 
-        function saveOpsPlans() {
-            localStorage.setItem(`opsplan_${currentCase.id}`, JSON.stringify(opsPlans));
+        function saveOpsPlanData() {
+            const data = opsPlanData || { _version: 2 };
+            data._version = 2;
+            data.uploadedFiles = opsPlans;
+            localStorage.setItem(`opsplan_${currentCase.id}`, JSON.stringify(data));
+        }
+
+        function saveOpsPlans() { saveOpsPlanData(); }
+
+        function getOpsTemplates() {
+            return JSON.parse(localStorage.getItem('viperOpsTemplates') || '{}');
+        }
+
+        function getSuspectSummary() {
+            const key1 = `suspects_${currentCase.id}`;
+            const suspects = JSON.parse(localStorage.getItem(key1) || '[]');
+            return suspects;
+        }
+
+        function importTemplatesIntoForm() {
+            const t = getOpsTemplates();
+            // Hospital
+            if (t.hospitalName) document.getElementById('ops_hospital').value = [t.hospitalName, t.hospitalAddress, t.hospitalPhone].filter(Boolean).join(' — ');
+            // Briefing
+            if (t.briefingName) document.getElementById('ops_briefingLocation').value = [t.briefingName, t.briefingAddress].filter(Boolean).join(' — ');
+            // Comms
+            if (t.commsChannel) document.getElementById('ops_comms').value = t.commsChannel;
+            // Notifications
+            if (t.notifications) document.getElementById('ops_notifications').value = t.notifications;
+            // Boilerplate plans
+            if (t.tacticalPlan) document.getElementById('ops_tacticalPlan').value = t.tacticalPlan;
+            if (t.pursuitPlan) document.getElementById('ops_pursuitPlan').value = t.pursuitPlan;
+            if (t.medicalPlan) document.getElementById('ops_medicalPlan').value = t.medicalPlan;
+            if (t.barricadePlan) document.getElementById('ops_barricadePlan').value = t.barricadePlan;
+            if (t.contingencyPlan) document.getElementById('ops_contingencyPlan').value = t.contingencyPlan;
+            // Entry team
+            if (t.entryTeam && t.entryTeam.length > 0) renderEntryTeamInPlan(t.entryTeam);
+            viperToast('Templates imported from Settings', 'success');
+        }
+
+        function autoPopulateSuspects() {
+            const suspects = getSuspectSummary();
+            if (!suspects.length) { viperToast('No suspects in this case', 'warning'); return; }
+            const container = document.getElementById('ops_suspectInfo');
+            const lines = suspects.map((s, i) => {
+                let parts = [`Suspect ${i + 1}: ${s.name || 'Unknown'}`];
+                if (s.dob) parts.push(`DOB: ${s.dob}`);
+                if (s.height) parts.push(`Ht: ${s.height}`);
+                if (s.weight) parts.push(`Wt: ${s.weight}`);
+                if (s.hairColor) parts.push(`Hair: ${s.hairColor}`);
+                if (s.eyeColor) parts.push(`Eyes: ${s.eyeColor}`);
+                if (s.scarsMarksTattoos) parts.push(`SMT: ${s.scarsMarksTattoos}`);
+                let line = parts.join(' | ');
+                // Vehicles
+                if (s.vehicles && s.vehicles.length > 0) {
+                    const veh = s.vehicles.map(v => [v.color, v.makeModel, v.plateNumber ? `(${v.plateNumber})` : ''].filter(Boolean).join(' ')).join('; ');
+                    line += `\n   Vehicles: ${veh}`;
+                }
+                // Firearms
+                if (s.firearms && s.firearms.length > 0) {
+                    const fa = s.firearms.map(f => [f.makeModel, f.calibre, f.serialNumber ? `SN:${f.serialNumber}` : ''].filter(Boolean).join(' ')).join('; ');
+                    line += `\n   Firearms: ${fa}`;
+                }
+                // Criminal History
+                if (s.criminalHistory && s.criminalHistory.length > 0) {
+                    const ch = s.criminalHistory.map(r => `${r.date || '?'} — ${r.offense || '?'}`).join('; ');
+                    line += `\n   Criminal History: ${ch}`;
+                }
+                return line;
+            });
+            container.value = lines.join('\n\n');
+            viperToast(`${suspects.length} suspect(s) populated`, 'success');
+        }
+
+        function renderEntryTeamInPlan(team) {
+            const container = document.getElementById('ops_entryTeamBody');
+            if (!container) return;
+            container.innerHTML = team.map((m, i) => `
+                <tr class="border-b border-gray-700/50">
+                    <td class="py-1 pr-2"><input type="text" value="${m.name || ''}" data-et="${i}" data-field="name" class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none"></td>
+                    <td class="py-1 pr-2"><input type="text" value="${m.assignment || ''}" data-et="${i}" data-field="assignment" class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none"></td>
+                    <td class="py-1 pr-2"><input type="text" value="${m.vehicle || ''}" data-et="${i}" data-field="vehicle" class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none"></td>
+                    <td class="py-1 pr-2"><input type="text" value="${m.callSign || ''}" data-et="${i}" data-field="callSign" class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none"></td>
+                    <td class="py-1"><button onclick="removeEntryTeamRow(${i})" class="text-red-500 hover:text-red-400 p-1"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button></td>
+                </tr>
+            `).join('');
+        }
+
+        function addEntryTeamRowInPlan() {
+            const body = document.getElementById('ops_entryTeamBody');
+            if (!body) return;
+            const rows = body.querySelectorAll('tr');
+            const i = rows.length;
+            body.insertAdjacentHTML('beforeend', `
+                <tr class="border-b border-gray-700/50">
+                    <td class="py-1 pr-2"><input type="text" value="" data-et="${i}" data-field="name" class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Name"></td>
+                    <td class="py-1 pr-2"><input type="text" value="" data-et="${i}" data-field="assignment" class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Assignment"></td>
+                    <td class="py-1 pr-2"><input type="text" value="" data-et="${i}" data-field="vehicle" class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Vehicle"></td>
+                    <td class="py-1 pr-2"><input type="text" value="" data-et="${i}" data-field="callSign" class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Call Sign"></td>
+                    <td class="py-1"><button onclick="removeEntryTeamRow(${i})" class="text-red-500 hover:text-red-400 p-1"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button></td>
+                </tr>
+            `);
+        }
+
+        function removeEntryTeamRow(idx) {
+            const body = document.getElementById('ops_entryTeamBody');
+            if (!body) return;
+            const rows = body.querySelectorAll('tr');
+            if (rows[idx]) rows[idx].remove();
+        }
+
+        function collectEntryTeamFromPlan() {
+            const rows = document.querySelectorAll('#ops_entryTeamBody tr');
+            const team = [];
+            rows.forEach(row => {
+                const inputs = row.querySelectorAll('input');
+                if (inputs.length >= 4) {
+                    team.push({
+                        name:       inputs[0].value.trim(),
+                        assignment: inputs[1].value.trim(),
+                        vehicle:    inputs[2].value.trim(),
+                        callSign:   inputs[3].value.trim()
+                    });
+                }
+            });
+            return team;
+        }
+
+        function saveCurrentOpsPlan() {
+            const form = document.getElementById('opsPlanForm');
+            if (!form) return;
+            opsPlanData = opsPlanData || {};
+            opsPlanData._version = 2;
+            opsPlanData.date            = document.getElementById('ops_date')?.value || '';
+            opsPlanData.time            = document.getElementById('ops_time')?.value || '';
+            opsPlanData.reportNumber    = document.getElementById('ops_reportNumber')?.value || '';
+            opsPlanData.caseAgent       = document.getElementById('ops_caseAgent')?.value || '';
+            // Operation type checkboxes
+            opsPlanData.operationType = {};
+            document.querySelectorAll('input[name="ops_type"]').forEach(cb => {
+                opsPlanData.operationType[cb.value] = cb.checked;
+            });
+            opsPlanData.location        = document.getElementById('ops_location')?.value || '';
+            opsPlanData.fortifications  = document.getElementById('ops_fortifications')?.value || '';
+            opsPlanData.cameras         = document.getElementById('ops_cameras')?.value || '';
+            opsPlanData.dogs            = document.getElementById('ops_dogs')?.value || '';
+            opsPlanData.children        = document.getElementById('ops_children')?.value || '';
+            opsPlanData.notifications   = document.getElementById('ops_notifications')?.value || '';
+            opsPlanData.comms           = document.getElementById('ops_comms')?.value || '';
+            opsPlanData.hospital        = document.getElementById('ops_hospital')?.value || '';
+            opsPlanData.suspectInfo     = document.getElementById('ops_suspectInfo')?.value || '';
+            opsPlanData.entryTeam       = collectEntryTeamFromPlan();
+            opsPlanData.caseSummary     = document.getElementById('ops_caseSummary')?.value || '';
+            opsPlanData.tacticalPlan    = document.getElementById('ops_tacticalPlan')?.value || '';
+            opsPlanData.pursuitPlan     = document.getElementById('ops_pursuitPlan')?.value || '';
+            opsPlanData.medicalPlan     = document.getElementById('ops_medicalPlan')?.value || '';
+            opsPlanData.barricadePlan   = document.getElementById('ops_barricadePlan')?.value || '';
+            opsPlanData.contingencyPlan = document.getElementById('ops_contingencyPlan')?.value || '';
+            opsPlanData.rallyPoint      = document.getElementById('ops_rallyPoint')?.value || '';
+            opsPlanData.directions      = document.getElementById('ops_directions')?.value || '';
+            opsPlanData.briefingLocation= document.getElementById('ops_briefingLocation')?.value || '';
+            opsPlanData.uploadedFiles   = opsPlans;
+            saveOpsPlanData();
         }
 
         function renderOpsPlanTab() {
             loadOpsPlans();
+            const d = opsPlanData || {};
+            const ot = d.operationType || {};
+            const opTypes = ['Search Warrant','Arrest Warrant','Undercover Op','Surveillance','Buy/Bust','Probation/Parole','Knock & Talk','Other'];
+
+            const agentName = localStorage.getItem('viper_customer_name') || '';
 
             return `
                 <div>
-                    <div class="flex justify-between items-center mb-6">
+                    <div class="flex justify-between items-center mb-5">
                         <h2 class="text-2xl font-bold text-white">Operations Plan</h2>
-                        <button onclick="addOpsPlan()" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition flex items-center gap-2">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-                            </svg>
-                            Upload OPS Plan
-                        </button>
-                    </div>
-
-                    ${opsPlans.length === 0 ? `
-                        <div class="glass-card rounded-xl p-12 text-center">
-                            <svg class="w-20 h-20 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                            </svg>
-                            <h3 class="text-2xl font-bold text-gray-300 mb-2">No OPS Plans</h3>
-                            <p class="text-gray-400 mb-6">Upload signed operations plans for this case</p>
-                            <button onclick="addOpsPlan()" class="px-6 py-3 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition">
-                                Upload OPS Plan
+                        <div class="flex gap-2">
+                            <button onclick="showGenerateOpsPlanModal()" class="px-4 py-2 bg-viper-green hover:bg-viper-green/80 rounded-lg text-black font-semibold transition text-sm flex items-center gap-2">
+                                📄 Generate OPS Plan
+                            </button>
+                            <button onclick="importTemplatesIntoForm()" class="px-4 py-2 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded-lg text-viper-purple transition text-sm flex items-center gap-2">
+                                ⚙️ Import from Settings
+                            </button>
+                            <button onclick="autoPopulateSuspects()" class="px-4 py-2 bg-viper-orange/20 hover:bg-viper-orange/30 border border-viper-orange rounded-lg text-viper-orange transition text-sm flex items-center gap-2">
+                                👤 Auto-Populate Suspects
+                            </button>
+                            <button onclick="addOpsPlan()" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition text-sm flex items-center gap-2">
+                                📎 Upload Signed Plan
                             </button>
                         </div>
-                    ` : `
-                        <div class="space-y-4">
-                            ${opsPlans.map((plan, index) => `
-                                <div class="glass-card rounded-xl p-6">
-                                    <div class="flex items-start justify-between gap-4">
-                                        <div class="flex-1">
-                                            <div class="flex items-center gap-3 mb-2">
-                                                <svg class="w-6 h-6 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                                                </svg>
-                                                <h3 class="text-lg font-bold text-white">${plan.fileName}</h3>
+                    </div>
+
+                    <form id="opsPlanForm" onchange="saveCurrentOpsPlan()" class="space-y-4">
+                        <!-- Row 1: Date, Time, Report#, Case Agent -->
+                        <div class="glass-card rounded-xl p-5">
+                            <div class="grid grid-cols-4 gap-4">
+                                <div>
+                                    <label class="text-xs text-gray-400 block mb-1">Date</label>
+                                    <input type="date" id="ops_date" value="${d.date || ''}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-400 block mb-1">Time</label>
+                                    <input type="time" id="ops_time" value="${d.time || ''}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-400 block mb-1">Report #</label>
+                                    <input type="text" id="ops_reportNumber" value="${d.reportNumber || currentCase.caseNumber || ''}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-400 block mb-1">Case Agent</label>
+                                    <input type="text" id="ops_caseAgent" value="${d.caseAgent || agentName || ''}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Type of Operation -->
+                        <div class="glass-card rounded-xl p-5">
+                            <label class="text-xs text-gray-400 block mb-3">Type of Operation</label>
+                            <div class="flex flex-wrap gap-4">
+                                ${opTypes.map(t => `
+                                    <label class="flex items-center gap-2 text-sm text-white cursor-pointer">
+                                        <input type="checkbox" name="ops_type" value="${t}" ${ot[t] ? 'checked' : ''} class="accent-viper-cyan w-4 h-4"> ${t}
+                                    </label>
+                                `).join('')}
+                            </div>
+                        </div>
+
+                        <!-- Location + Hazards -->
+                        <div class="glass-card rounded-xl p-5">
+                            <div class="grid grid-cols-2 gap-4 mb-4">
+                                <div>
+                                    <label class="text-xs text-gray-400 block mb-1">Location of Operation</label>
+                                    <input type="text" id="ops_location" value="${d.location || ''}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Address of target location">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-400 block mb-1">Briefing Location</label>
+                                    <input type="text" id="ops_briefingLocation" value="${d.briefingLocation || ''}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Where team will brief">
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-4 gap-4">
+                                <div>
+                                    <label class="text-xs text-gray-400 block mb-1">Fortifications</label>
+                                    <input type="text" id="ops_fortifications" value="${d.fortifications || ''}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Bars, gates, etc.">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-400 block mb-1">Cameras</label>
+                                    <input type="text" id="ops_cameras" value="${d.cameras || ''}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Yes/No, locations">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-400 block mb-1">Dogs</label>
+                                    <input type="text" id="ops_dogs" value="${d.dogs || ''}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Yes/No, type">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-400 block mb-1">Children Present</label>
+                                    <input type="text" id="ops_children" value="${d.children || ''}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Yes/No, ages">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Comms, Notifications, Hospital -->
+                        <div class="glass-card rounded-xl p-5">
+                            <div class="grid grid-cols-3 gap-4">
+                                <div>
+                                    <label class="text-xs text-gray-400 block mb-1">Communications / Radio</label>
+                                    <input type="text" id="ops_comms" value="${d.comms || ''}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Channel / frequency">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-400 block mb-1">Hospital</label>
+                                    <input type="text" id="ops_hospital" value="${d.hospital || ''}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Nearest hospital">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-400 block mb-1">Rally Point</label>
+                                    <input type="text" id="ops_rallyPoint" value="${d.rallyPoint || ''}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Designated rally point">
+                                </div>
+                            </div>
+                            <div class="mt-4">
+                                <label class="text-xs text-gray-400 block mb-1">Notifications (who to notify prior)</label>
+                                <textarea id="ops_notifications" rows="2" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Watch Commander, Dispatch, etc.">${d.notifications || ''}</textarea>
+                            </div>
+                        </div>
+
+                        <!-- Suspect Info (auto-populated) -->
+                        <div class="glass-card rounded-xl p-5">
+                            <div class="flex justify-between items-center mb-2">
+                                <label class="text-xs text-gray-400">Suspect Information</label>
+                                <button type="button" onclick="autoPopulateSuspects()" class="text-xs text-viper-orange hover:text-viper-orange/80 transition">↻ Refresh from Suspects Tab</button>
+                            </div>
+                            <textarea id="ops_suspectInfo" rows="6" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none font-mono" placeholder="Click 'Auto-Populate Suspects' to fill from case data...">${d.suspectInfo || ''}</textarea>
+                        </div>
+
+                        <!-- Entry Team Table -->
+                        <div class="glass-card rounded-xl p-5">
+                            <div class="flex justify-between items-center mb-3">
+                                <label class="text-xs text-gray-400">Entry Team / Assignments</label>
+                                <button type="button" onclick="addEntryTeamRowInPlan()" class="px-3 py-1 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded text-viper-cyan text-xs transition">+ Add Row</button>
+                            </div>
+                            <table class="w-full text-sm">
+                                <thead>
+                                    <tr class="text-left text-xs text-gray-400 border-b border-gray-700">
+                                        <th class="pb-2 pr-2">Name</th>
+                                        <th class="pb-2 pr-2">Assignment</th>
+                                        <th class="pb-2 pr-2">Vehicle</th>
+                                        <th class="pb-2 pr-2">Call Sign</th>
+                                        <th class="pb-2 w-8"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ops_entryTeamBody"></tbody>
+                            </table>
+                            ${(!d.entryTeam || d.entryTeam.length === 0) ? '<p class="text-gray-500 text-xs mt-2">Import from Settings or add rows manually</p>' : ''}
+                        </div>
+
+                        <!-- Case Summary -->
+                        <div class="glass-card rounded-xl p-5">
+                            <label class="text-xs text-gray-400 block mb-1">Case Summary</label>
+                            <textarea id="ops_caseSummary" rows="4" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Brief summary of the case and reason for the operation...">${d.caseSummary || ''}</textarea>
+                        </div>
+
+                        <!-- Plans (2-col) -->
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="glass-card rounded-xl p-5">
+                                <label class="text-xs text-gray-400 block mb-1">Tactical Plan</label>
+                                <textarea id="ops_tacticalPlan" rows="5" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Tactical operations plan...">${d.tacticalPlan || ''}</textarea>
+                            </div>
+                            <div class="glass-card rounded-xl p-5">
+                                <label class="text-xs text-gray-400 block mb-1">Pursuit Plan / Runners</label>
+                                <textarea id="ops_pursuitPlan" rows="5" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Pursuit and runners plan...">${d.pursuitPlan || ''}</textarea>
+                            </div>
+                            <div class="glass-card rounded-xl p-5">
+                                <label class="text-xs text-gray-400 block mb-1">Medical Plan / Officer Down</label>
+                                <textarea id="ops_medicalPlan" rows="5" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Medical plan and officer down procedure...">${d.medicalPlan || ''}</textarea>
+                            </div>
+                            <div class="glass-card rounded-xl p-5">
+                                <label class="text-xs text-gray-400 block mb-1">Barricade Plan</label>
+                                <textarea id="ops_barricadePlan" rows="5" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Barricade procedure...">${d.barricadePlan || ''}</textarea>
+                            </div>
+                        </div>
+                        <div class="glass-card rounded-xl p-5">
+                            <label class="text-xs text-gray-400 block mb-1">Contingency Plan</label>
+                            <textarea id="ops_contingencyPlan" rows="3" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Contingency plan...">${d.contingencyPlan || ''}</textarea>
+                        </div>
+
+                        <!-- Directions & Route Maps -->
+                        <div class="glass-card rounded-xl p-5">
+                            <div class="flex justify-between items-center mb-3">
+                                <label class="text-xs text-gray-400">Directions & Route Maps</label>
+                                <button type="button" onclick="generateOpsRoutes()" class="px-4 py-2 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green text-sm transition flex items-center gap-2">
+                                    🗺️ Generate Routes
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-500 mb-3">Uses Briefing Location, Operation Location, and Hospital fields above. Click "Generate Routes" to map both routes.</p>
+                            <div class="grid grid-cols-2 gap-4">
+                                <!-- Briefing → Operation -->
+                                <div>
+                                    <p class="text-xs text-viper-cyan font-semibold mb-2">📍 Briefing → Operation Location</p>
+                                    <div id="ops_routeMap1" class="w-full h-64 rounded-lg bg-viper-dark border border-gray-700 flex items-center justify-center">
+                                        <p class="text-gray-500 text-sm">Click "Generate Routes"</p>
+                                    </div>
+                                    <div id="ops_routeInfo1" class="mt-2 text-xs text-gray-400"></div>
+                                </div>
+                                <!-- Operation → Hospital -->
+                                <div>
+                                    <p class="text-xs text-viper-orange font-semibold mb-2">🏥 Operation Location → Hospital</p>
+                                    <div id="ops_routeMap2" class="w-full h-64 rounded-lg bg-viper-dark border border-gray-700 flex items-center justify-center">
+                                        <p class="text-gray-500 text-sm">Click "Generate Routes"</p>
+                                    </div>
+                                    <div id="ops_routeInfo2" class="mt-2 text-xs text-gray-400"></div>
+                                </div>
+                            </div>
+                            <div class="mt-4">
+                                <label class="text-xs text-gray-400 block mb-1">Additional Directions / Notes</label>
+                                <textarea id="ops_directions" rows="2" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Extra notes, landmarks, rally points...">${d.directions || ''}</textarea>
+                            </div>
+
+                            <!-- Location Photos -->
+                            <div class="mt-4">
+                                <div class="flex justify-between items-center mb-2">
+                                    <label class="text-xs text-gray-400">📷 Location Photos</label>
+                                    <button type="button" onclick="addOpsLocationPhoto()" class="px-3 py-1 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded text-viper-purple text-xs transition">+ Add Photos</button>
+                                </div>
+                                <div id="ops_locationPhotos" class="grid grid-cols-4 gap-3">
+                                    ${(d.locationPhotos && d.locationPhotos.length > 0) ? d.locationPhotos.map((photo, pi) => `
+                                        <div class="relative group rounded-lg overflow-hidden bg-viper-dark border border-gray-700 h-40">
+                                            <img src="${photo.data}" alt="${photo.caption || 'Location'}" class="w-full h-full object-cover">
+                                            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center gap-2">
+                                                <button onclick="viewOpsLocationPhoto(${pi})" class="px-3 py-1 bg-viper-green/30 rounded text-viper-green text-xs">View</button>
+                                                <button onclick="removeOpsLocationPhoto(${pi})" class="px-3 py-1 bg-red-500/30 rounded text-red-400 text-xs">Remove</button>
                                             </div>
-                                            <div class="text-sm text-gray-400 mb-3">
-                                                <p>Uploaded: ${new Date(plan.uploadedDate).toLocaleString()}</p>
-                                                <p>Size: ${formatFileSize(plan.fileSize)}</p>
-                                            </div>
-                                            ${plan.notes ? `
-                                                <div class="p-3 bg-viper-dark/50 rounded-lg border border-gray-700">
-                                                    <p class="text-sm text-gray-300">${plan.notes}</p>
-                                                </div>
-                                            ` : ''}
+                                            ${photo.caption ? '<p class="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-xs px-2 py-1 truncate">' + photo.caption + '</p>' : ''}
                                         </div>
-                                        <div class="flex flex-col gap-2">
-                                            <button onclick="viewOpsPlan(${index})" class="px-4 py-2 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green transition flex items-center gap-2">
-                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-                                                </svg>
-                                                View
-                                            </button>
-                                            <button onclick="editOpsPlanNotes(${index})" class="px-4 py-2 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded-lg text-viper-purple transition">
-                                                Edit Notes
-                                            </button>
-                                            <button onclick="deleteOpsPlan(${index})" class="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500 rounded-lg text-red-500 transition">
-                                                Delete
-                                            </button>
+                                    `).join('') : '<p class="text-gray-500 text-xs col-span-4">No location photos added</p>'}
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+
+                    <!-- Uploaded Signed Plans -->
+                    ${opsPlans.length > 0 ? `
+                        <div class="mt-6">
+                            <h3 class="text-lg font-bold text-white mb-3">📎 Uploaded Signed Plans</h3>
+                            <div class="space-y-2">
+                                ${opsPlans.map((plan, index) => `
+                                    <div class="glass-card rounded-lg p-3 flex items-center justify-between">
+                                        <div class="flex items-center gap-3">
+                                            <svg class="w-5 h-5 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                            </svg>
+                                            <span class="text-white text-sm">${plan.fileName}</span>
+                                            <span class="text-gray-500 text-xs">${formatFileSize(plan.fileSize)}</span>
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <button onclick="viewOpsPlan(${index})" class="px-3 py-1 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green text-xs transition">View</button>
+                                            <button onclick="deleteOpsPlan(${index})" class="px-3 py-1 bg-red-500/20 hover:bg-red-500/30 border border-red-500 rounded-lg text-red-500 text-xs transition">Delete</button>
                                         </div>
                                     </div>
-                                </div>
-                            `).join('')}
+                                `).join('')}
+                            </div>
                         </div>
-                    `}
+                    ` : ''}
                 </div>
             `;
+        }
+
+        // After render, populate entry team rows + restore saved maps
+        const _origRenderOpsTab = renderOpsPlanTab;
+        renderOpsPlanTab = function() {
+            const html = _origRenderOpsTab();
+            // Schedule entry team + map rendering after DOM update
+            setTimeout(() => {
+                const d = opsPlanData || {};
+                if (d.entryTeam && d.entryTeam.length > 0) {
+                    renderEntryTeamInPlan(d.entryTeam);
+                }
+                // Restore saved route maps
+                restoreSavedRoutes();
+            }, 100);
+            return html;
+        };
+
+        // ── OPS Plan Route Maps ──
+        let _opsMap1 = null, _opsMap2 = null;
+
+        function restoreSavedRoutes() {
+            const d = opsPlanData || {};
+            if (!d.savedRoutes) return;
+            const sr = d.savedRoutes;
+
+            // Route 1: Briefing → Operation
+            if (sr.route1) {
+                const r = sr.route1;
+                _opsMap1 = buildRouteMap('ops_routeMap1', r.from, r.to, { geometry: { coordinates: r.coordinates } }, 'Briefing', 'Operation', '#00d9ff');
+                const info1 = document.getElementById('ops_routeInfo1');
+                if (info1) info1.innerHTML = `<span class="text-viper-cyan font-semibold">${r.distanceText}</span> · <span class="text-white">${r.durationText}</span>`;
+            }
+
+            // Route 2: Operation → Hospital
+            if (sr.route2) {
+                const r = sr.route2;
+                _opsMap2 = buildRouteMap('ops_routeMap2', r.from, r.to, { geometry: { coordinates: r.coordinates } }, 'Operation', 'Hospital', '#ffa726');
+                const info2 = document.getElementById('ops_routeInfo2');
+                if (info2) info2.innerHTML = `<span class="text-viper-orange font-semibold">${r.distanceText}</span> · <span class="text-white">${r.durationText}</span>`;
+            }
+        }
+
+        async function geocodeAddress(address) {
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`;
+            const res = await fetch(url, { headers: { 'User-Agent': 'VIPER-App' } });
+            const data = await res.json();
+            if (!data.length) return null;
+            return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), display: data[0].display_name };
+        }
+
+        async function getRoute(from, to) {
+            const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson&steps=true`;
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.code !== 'Ok' || !data.routes.length) return null;
+            return data.routes[0];
+        }
+
+        function formatDuration(seconds) {
+            const m = Math.round(seconds / 60);
+            if (m < 60) return `${m} min`;
+            return `${Math.floor(m / 60)}h ${m % 60}m`;
+        }
+
+        function formatDistance(meters) {
+            const mi = (meters * 0.000621371).toFixed(1);
+            return `${mi} mi`;
+        }
+
+        function buildRouteMap(containerId, from, to, route, fromLabel, toLabel, color) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.innerHTML = '';
+            container.style.display = 'block';
+
+            const map = L.map(container, { zoomControl: true, attributionControl: false }).fitBounds([
+                [from.lat, from.lng], [to.lat, to.lng]
+            ], { padding: [30, 30] });
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 18
+            }).addTo(map);
+
+            // Route line
+            const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
+            L.polyline(coords, { color, weight: 4, opacity: 0.8 }).addTo(map);
+
+            // Markers
+            L.circleMarker([from.lat, from.lng], { radius: 8, color, fillColor: color, fillOpacity: 1 })
+                .bindPopup(`<b>${fromLabel}</b>`)
+                .addTo(map);
+            L.circleMarker([to.lat, to.lng], { radius: 8, color: '#ff4444', fillColor: '#ff4444', fillOpacity: 1 })
+                .bindPopup(`<b>${toLabel}</b>`)
+                .addTo(map);
+
+            // Fit bounds to route
+            const bounds = L.latLngBounds(coords);
+            map.fitBounds(bounds, { padding: [30, 30] });
+
+            // Invalidate size after render
+            setTimeout(() => map.invalidateSize(), 100);
+            return map;
+        }
+
+        function renderTurnByTurn(steps) {
+            if (!steps || !steps.length) return '';
+            return steps.map((s, i) => {
+                if (!s.maneuver || !s.name) return '';
+                const instr = s.maneuver.modifier ? `${s.maneuver.type} ${s.maneuver.modifier}` : s.maneuver.type;
+                const dist = s.distance > 0 ? ` (${formatDistance(s.distance)})` : '';
+                return `${i + 1}. ${instr.charAt(0).toUpperCase() + instr.slice(1)}${s.name ? ' onto ' + s.name : ''}${dist}`;
+            }).filter(Boolean).join('\n');
+        }
+
+        const _loadingSpinnerHTML = `<div class="flex flex-col items-center justify-center h-full gap-3"><svg class="animate-spin w-8 h-8 text-viper-cyan" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><p class="text-gray-400 text-sm">Generating route...</p></div>`;
+
+        async function generateOpsRoutes() {
+            const briefingAddr = document.getElementById('ops_briefingLocation')?.value?.trim();
+            const operationAddr = document.getElementById('ops_location')?.value?.trim();
+            const hospitalAddr = document.getElementById('ops_hospital')?.value?.trim();
+
+            if (!operationAddr) { viperToast('Enter an Operation Location first', 'warning'); return; }
+
+            // Clean up old maps + clear saved routes
+            if (_opsMap1) { _opsMap1.remove(); _opsMap1 = null; }
+            if (_opsMap2) { _opsMap2.remove(); _opsMap2 = null; }
+            if (!opsPlanData) opsPlanData = { _version: 2 };
+            opsPlanData.savedRoutes = {};
+
+            // Show loading spinners
+            const map1El = document.getElementById('ops_routeMap1');
+            const map2El = document.getElementById('ops_routeMap2');
+            const info1El = document.getElementById('ops_routeInfo1');
+            const info2El = document.getElementById('ops_routeInfo2');
+            if (map1El) map1El.innerHTML = _loadingSpinnerHTML;
+            if (map2El) map2El.innerHTML = _loadingSpinnerHTML;
+            if (info1El) info1El.innerHTML = '';
+            if (info2El) info2El.innerHTML = '';
+
+            // Disable button during generation
+            const btn = document.querySelector('[onclick="generateOpsRoutes()"]');
+            if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; btn.innerHTML = '⏳ Generating...'; }
+
+            try {
+                const opGeo = await geocodeAddress(operationAddr);
+                if (!opGeo) {
+                    if (map1El) map1El.innerHTML = '<p class="text-red-400 text-sm p-4">Could not geocode operation location</p>';
+                    if (map2El) map2El.innerHTML = '<p class="text-red-400 text-sm p-4">Could not geocode operation location</p>';
+                    viperToast('Could not geocode operation location', 'error');
+                    return;
+                }
+
+                // Route 1: Briefing → Operation
+                if (briefingAddr) {
+                    const briefGeo = await geocodeAddress(briefingAddr);
+                    if (briefGeo) {
+                        const route1 = await getRoute(briefGeo, opGeo);
+                        if (route1) {
+                            _opsMap1 = buildRouteMap('ops_routeMap1', briefGeo, opGeo, route1, 'Briefing', 'Operation', '#00d9ff');
+                            const legs = route1.legs[0];
+                            const dist1 = formatDistance(route1.distance);
+                            const dur1 = formatDuration(route1.duration);
+                            info1El.innerHTML = `<span class="text-viper-cyan font-semibold">${dist1}</span> · <span class="text-white">${dur1}</span>`;
+                            // Save route data for persistence
+                            opsPlanData.savedRoutes.route1 = {
+                                from: briefGeo, to: opGeo,
+                                coordinates: route1.geometry.coordinates,
+                                distanceText: dist1, durationText: dur1
+                            };
+                            const turns1 = renderTurnByTurn(legs.steps);
+                            const dirBox = document.getElementById('ops_directions');
+                            if (dirBox && !dirBox.value.includes('BRIEFING → OPERATION')) {
+                                dirBox.value = (dirBox.value ? dirBox.value + '\n\n' : '') + `BRIEFING → OPERATION (${dist1}, ${dur1}):\n${turns1}`;
+                            }
+                        } else {
+                            map1El.innerHTML = '<p class="text-red-400 text-sm p-4">No route found</p>';
+                        }
+                    } else {
+                        map1El.innerHTML = '<p class="text-red-400 text-sm p-4">Could not geocode briefing location</p>';
+                    }
+                } else {
+                    map1El.innerHTML = '<p class="text-gray-500 text-sm p-4">No briefing location set</p>';
+                }
+
+                // Route 2: Operation → Hospital
+                if (hospitalAddr) {
+                    const hospGeo = await geocodeAddress(hospitalAddr);
+                    if (hospGeo) {
+                        const route2 = await getRoute(opGeo, hospGeo);
+                        if (route2) {
+                            _opsMap2 = buildRouteMap('ops_routeMap2', opGeo, hospGeo, route2, 'Operation', 'Hospital', '#ffa726');
+                            const legs2 = route2.legs[0];
+                            const dist2 = formatDistance(route2.distance);
+                            const dur2 = formatDuration(route2.duration);
+                            info2El.innerHTML = `<span class="text-viper-orange font-semibold">${dist2}</span> · <span class="text-white">${dur2}</span>`;
+                            // Save route data for persistence
+                            opsPlanData.savedRoutes.route2 = {
+                                from: opGeo, to: hospGeo,
+                                coordinates: route2.geometry.coordinates,
+                                distanceText: dist2, durationText: dur2
+                            };
+                            const turns2 = renderTurnByTurn(legs2.steps);
+                            const dirBox = document.getElementById('ops_directions');
+                            if (dirBox && !dirBox.value.includes('OPERATION → HOSPITAL')) {
+                                dirBox.value = (dirBox.value ? dirBox.value + '\n\n' : '') + `OPERATION → HOSPITAL (${dist2}, ${dur2}):\n${turns2}`;
+                            }
+                        } else {
+                            map2El.innerHTML = '<p class="text-red-400 text-sm p-4">No route found</p>';
+                        }
+                    } else {
+                        map2El.innerHTML = '<p class="text-red-400 text-sm p-4">Could not geocode hospital address</p>';
+                    }
+                } else {
+                    map2El.innerHTML = '<p class="text-gray-500 text-sm p-4">No hospital set</p>';
+                }
+
+                saveCurrentOpsPlan();
+                viperToast('Routes generated', 'success');
+            } catch (err) {
+                console.error('Route generation error:', err);
+                viperToast('Error generating routes: ' + err.message, 'error');
+            } finally {
+                if (btn) { btn.disabled = false; btn.style.opacity = ''; btn.innerHTML = '🗺️ Generate Routes'; }
+            }
+        }
+
+        // ── Generate OPS Plan Report ──
+        function showGenerateOpsPlanModal() {
+            saveCurrentOpsPlan();
+            const suspects = getSuspectSummary();
+            const html = `
+                <div id="genOpsPlanModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id==='genOpsPlanModal') document.getElementById('genOpsPlanModal').remove()">
+                    <div class="glass-card rounded-xl p-6 max-w-md w-full">
+                        <h3 class="text-xl font-bold text-white mb-4">📄 Generate Operations Plan</h3>
+                        <p class="text-gray-400 text-sm mb-5">This will generate a complete, printable Operations Plan report from all data entered above.</p>
+                        <div class="space-y-3 mb-6">
+                            <label class="flex items-center gap-3 p-3 bg-viper-dark rounded-lg cursor-pointer hover:bg-viper-dark/70">
+                                <input type="checkbox" id="genOps_includeSuspectPDF" class="accent-viper-cyan w-4 h-4" ${suspects.length > 0 ? 'checked' : 'disabled'}>
+                                <div>
+                                    <span class="text-white text-sm">Include Detailed Suspect Profiles</span>
+                                    <p class="text-xs text-gray-500">${suspects.length > 0 ? suspects.length + ' suspect(s) — full profile with photos, vehicles, firearms, criminal history' : 'No suspects in this case'}</p>
+                                </div>
+                            </label>
+                            <label class="flex items-center gap-3 p-3 bg-viper-dark rounded-lg cursor-pointer hover:bg-viper-dark/70">
+                                <input type="checkbox" id="genOps_includePhotos" class="accent-viper-cyan w-4 h-4" checked>
+                                <div>
+                                    <span class="text-white text-sm">Include Location Photos</span>
+                                    <p class="text-xs text-gray-500">Embed uploaded location photos in the report</p>
+                                </div>
+                            </label>
+                            <label class="flex items-center gap-3 p-3 bg-viper-dark rounded-lg cursor-pointer hover:bg-viper-dark/70">
+                                <input type="checkbox" id="genOps_includeMaps" class="accent-viper-cyan w-4 h-4" checked>
+                                <div>
+                                    <span class="text-white text-sm">Include Route Maps</span>
+                                    <p class="text-xs text-gray-500">Capture route maps as images in the report</p>
+                                </div>
+                            </label>
+                        </div>
+                        <div class="flex gap-3 justify-end">
+                            <button onclick="document.getElementById('genOpsPlanModal').remove()" class="px-4 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white transition text-sm">Cancel</button>
+                            <button onclick="generateOpsPlanReport()" class="px-5 py-2 bg-viper-green hover:bg-viper-green/80 rounded-lg text-black font-semibold transition text-sm">Generate Report</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', html);
+        }
+
+        function generateOpsPlanReport() {
+            const includeSuspects = document.getElementById('genOps_includeSuspectPDF')?.checked;
+            const includePhotos = document.getElementById('genOps_includePhotos')?.checked;
+            const includeMaps = document.getElementById('genOps_includeMaps')?.checked;
+            document.getElementById('genOpsPlanModal')?.remove();
+
+            const d = opsPlanData || {};
+            const suspects = includeSuspects ? getSuspectSummary() : [];
+            const userName = localStorage.getItem('viper_customer_name') || 'Unknown';
+            const userInfo = JSON.parse(localStorage.getItem('viperUserInfo')) || {};
+            const badge = userInfo.badgeNumber || '';
+            const agency = localStorage.getItem('viper_agency') || userInfo.agencyName || '';
+            const deptBadge = localStorage.getItem('viperDeptBadge') || '';
+            const opTypes = d.operationType ? Object.entries(d.operationType).filter(([k,v]) => v).map(([k]) => k) : [];
+
+            // Capture map images if available
+            let map1Img = '', map2Img = '';
+            if (includeMaps) {
+                const canvas1 = document.querySelector('#ops_routeMap1 canvas');
+                const canvas2 = document.querySelector('#ops_routeMap2 canvas');
+                if (canvas1) try { map1Img = canvas1.toDataURL(); } catch(e) {}
+                if (canvas2) try { map2Img = canvas2.toDataURL(); } catch(e) {}
+            }
+
+            // Build TOC entries
+            const tocEntries = [
+                { id: 'ops-info', label: 'Operation Information' },
+                { id: 'ops-location', label: 'Location & Hazards' },
+                { id: 'ops-suspects', label: 'Suspect Information' },
+            ];
+            if (d.entryTeam && d.entryTeam.length > 0) tocEntries.push({ id: 'ops-entryteam', label: 'Entry Team / Assignments' });
+            tocEntries.push({ id: 'ops-casesummary', label: 'Case Summary' });
+            tocEntries.push({ id: 'ops-tactical', label: 'Tactical Plan' });
+            tocEntries.push({ id: 'ops-pursuit', label: 'Pursuit Plan / Runners' });
+            tocEntries.push({ id: 'ops-medical', label: 'Medical Plan / Officer Down' });
+            tocEntries.push({ id: 'ops-barricade', label: 'Barricade Plan' });
+            tocEntries.push({ id: 'ops-contingency', label: 'Contingency Plan' });
+            if (d.directions || includeMaps || (d.savedRoutes && (d.savedRoutes.route1 || d.savedRoutes.route2))) tocEntries.push({ id: 'ops-directions', label: 'Directions & Routes' });
+            if (includePhotos && d.locationPhotos && d.locationPhotos.length > 0) tocEntries.push({ id: 'ops-photos', label: 'Location Photos' });
+            if (includeSuspects && suspects.length > 0) tocEntries.push({ id: 'ops-suspectprofiles', label: 'Detailed Suspect Profiles' });
+
+            const pdfWindow = window.open('', '_blank');
+            if (!pdfWindow) { viperToast('Pop-up blocked — allow pop-ups and try again', 'error'); return; }
+
+            pdfWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+<title>Operations Plan - Case ${currentCase.caseNumber}</title>
+<style>
+@media print {
+    .no-print { display: none !important; }
+    .page-break { page-break-before: always; }
+    body { margin: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; color: #1a1a1a; background: white; }
+.print-btn { position: fixed; top: 20px; right: 20px; background: #00d9ff; color: #000; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 15px; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,0.2); z-index: 100; }
+.print-btn:hover { background: #00b8dd; }
+.page { max-width: 8.5in; margin: 0 auto; padding: 0.75in; }
+
+/* Cover Page */
+.cover { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; text-align: center; border-bottom: 4px solid #0a0e14; }
+.cover-badge { max-width: 180px; max-height: 180px; margin-bottom: 30px; }
+.cover h1 { font-size: 36px; color: #0a0e14; margin: 0 0 8px 0; letter-spacing: 2px; text-transform: uppercase; }
+.cover h2 { font-size: 20px; color: #555; margin: 0 0 40px 0; font-weight: normal; }
+.cover-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 40px; text-align: left; background: #f8f9fa; border-radius: 8px; padding: 25px 35px; border-left: 4px solid #0a0e14; }
+.cover-meta label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; display: block; }
+.cover-meta span { font-size: 15px; color: #1a1a1a; font-weight: 600; }
+.cover-classification { margin-top: 50px; font-size: 14px; color: #cc0000; font-weight: bold; letter-spacing: 3px; text-transform: uppercase; border: 2px solid #cc0000; padding: 8px 30px; }
+
+/* TOC */
+.toc { padding: 40px 0; }
+.toc h2 { font-size: 22px; color: #0a0e14; border-bottom: 3px solid #0a0e14; padding-bottom: 10px; margin-bottom: 20px; }
+.toc-item { display: flex; align-items: baseline; padding: 8px 0; border-bottom: 1px dotted #ccc; }
+.toc-item a { color: #0a0e14; text-decoration: none; font-size: 14px; font-weight: 500; }
+.toc-item a:hover { color: #00d9ff; }
+.toc-num { width: 30px; color: #00d9ff; font-weight: 700; flex-shrink: 0; }
+.toc-dots { flex: 1; border-bottom: 1px dotted #ccc; margin: 0 8px; }
+
+/* Sections */
+.section-header { font-size: 18px; color: #0a0e14; border-bottom: 3px solid #00d9ff; padding-bottom: 8px; margin: 30px 0 15px 0; display: flex; align-items: center; gap: 10px; }
+.section-header .num { background: #0a0e14; color: #00d9ff; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; }
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 30px; margin-bottom: 8px; }
+.field-row-4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px 20px; margin-bottom: 8px; }
+.field label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 2px; }
+.field value, .field span { font-size: 13px; color: #1a1a1a; display: block; }
+.checkbox-row { display: flex; flex-wrap: wrap; gap: 15px; margin: 10px 0; }
+.checkbox-item { font-size: 13px; display: flex; align-items: center; gap: 5px; }
+.checkbox-item .cb { width: 14px; height: 14px; border: 2px solid #333; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; }
+.checkbox-item .cb.checked { background: #0a0e14; color: #00d9ff; }
+.text-block { background: #f8f9fa; border-left: 3px solid #00d9ff; padding: 12px 16px; margin: 10px 0; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+.text-block.orange { border-color: #ffa726; }
+.text-block.red { border-color: #cc0000; }
+table.entry-team { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 12px; }
+table.entry-team th { background: #0a0e14; color: #00d9ff; padding: 8px 12px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+table.entry-team td { padding: 6px 12px; border-bottom: 1px solid #e0e0e0; }
+table.entry-team tr:nth-child(even) { background: #f8f9fa; }
+.photo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 15px 0; }
+.photo-card img { width: 100%; height: 200px; object-fit: cover; border-radius: 6px; border: 1px solid #ddd; }
+.photo-card p { font-size: 11px; color: #666; text-align: center; margin-top: 5px; }
+.map-container { margin: 15px 0; text-align: center; }
+.map-container img { max-width: 100%; border: 1px solid #ddd; border-radius: 6px; }
+
+/* Suspect Profiles */
+.suspect-profile { border: 2px solid #ddd; border-radius: 8px; padding: 20px; margin: 20px 0; page-break-inside: avoid; }
+.suspect-profile-header { background: #0a0e14; color: white; padding: 12px 18px; margin: -20px -20px 18px -20px; border-radius: 6px 6px 0 0; font-size: 16px; font-weight: 700; }
+.suspect-photo { width: 150px; height: 150px; object-fit: cover; border: 2px solid #ddd; border-radius: 6px; }
+.suspect-section h4 { color: #00d9ff; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid #00d9ff; padding-bottom: 4px; margin: 15px 0 8px 0; }
+.item-card { background: #f8f9fa; border-radius: 6px; padding: 10px; margin-bottom: 8px; font-size: 12px; }
+.item-card strong { color: #333; }
+</style>
+</head>
+<body>
+<button class="no-print print-btn" onclick="window.print()">🖨️ Print / Save as PDF</button>
+
+<div class="page">
+    <!-- COVER PAGE -->
+    <div class="cover">
+        ${deptBadge ? '<img src="' + deptBadge + '" class="cover-badge" alt="Department Badge">' : ''}
+        <h1>Operations Plan</h1>
+        <h2>${agency || 'Law Enforcement Agency'}</h2>
+        <div class="cover-meta">
+            <div><label>Case Number</label><span>${d.reportNumber || currentCase.caseNumber || '—'}</span></div>
+            <div><label>Date / Time</label><span>${d.date || '—'}${d.time ? ' ' + d.time : ''}</span></div>
+            <div><label>Case Agent</label><span>${d.caseAgent || userName || '—'}${badge ? ' #' + badge : ''}</span></div>
+            <div><label>Operation Type</label><span>${opTypes.length ? opTypes.join(', ') : '—'}</span></div>
+            <div><label>Location</label><span>${d.location || '—'}</span></div>
+            <div><label>Generated</label><span>${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</span></div>
+        </div>
+        <div class="cover-classification">LAW ENFORCEMENT SENSITIVE</div>
+    </div>
+
+    <!-- TABLE OF CONTENTS -->
+    <div class="page-break"></div>
+    <div class="toc">
+        <h2>Table of Contents</h2>
+        ${tocEntries.map((t, i) => `
+            <div class="toc-item">
+                <span class="toc-num">${i + 1}</span>
+                <a href="#${t.id}">${t.label}</a>
+            </div>
+        `).join('')}
+    </div>
+
+    <!-- SECTIONS -->
+    <div class="page-break"></div>
+
+    <!-- 1. Operation Information -->
+    <div id="ops-info" class="section-header"><span class="num">1</span> Operation Information</div>
+    <div class="field-row">
+        <div class="field"><label>Date</label><span>${d.date || '—'}</span></div>
+        <div class="field"><label>Time</label><span>${d.time || '—'}</span></div>
+    </div>
+    <div class="field-row">
+        <div class="field"><label>Report Number</label><span>${d.reportNumber || currentCase.caseNumber || '—'}</span></div>
+        <div class="field"><label>Case Agent</label><span>${d.caseAgent || '—'}</span></div>
+    </div>
+    <div class="field-row">
+        <div class="field"><label>Communications</label><span>${d.comms || '—'}</span></div>
+        <div class="field"><label>Hospital</label><span>${d.hospital || '—'}</span></div>
+    </div>
+    <div style="margin: 12px 0;">
+        <div class="field"><label>Type of Operation</label></div>
+        <div class="checkbox-row">
+            ${['Search Warrant','Arrest Warrant','Undercover Op','Surveillance','Buy/Bust','Probation/Parole','Knock & Talk','Other'].map(t => `
+                <span class="checkbox-item"><span class="cb ${(d.operationType && d.operationType[t]) ? 'checked' : ''}">${(d.operationType && d.operationType[t]) ? '✓' : ''}</span> ${t}</span>
+            `).join('')}
+        </div>
+    </div>
+    ${d.notifications ? '<div class="field"><label>Notifications</label></div><div class="text-block">' + d.notifications.replace(/</g,'&lt;') + '</div>' : ''}
+
+    <!-- 2. Location & Hazards -->
+    <div id="ops-location" class="section-header"><span class="num">2</span> Location & Hazards</div>
+    <div class="field-row">
+        <div class="field"><label>Operation Location</label><span>${d.location || '—'}</span></div>
+        <div class="field"><label>Briefing Location</label><span>${d.briefingLocation || '—'}</span></div>
+    </div>
+    <div class="field-row-4">
+        <div class="field"><label>Fortifications</label><span>${d.fortifications || '—'}</span></div>
+        <div class="field"><label>Cameras</label><span>${d.cameras || '—'}</span></div>
+        <div class="field"><label>Dogs</label><span>${d.dogs || '—'}</span></div>
+        <div class="field"><label>Children Present</label><span>${d.children || '—'}</span></div>
+    </div>
+    <div class="field-row">
+        <div class="field"><label>Rally Point</label><span>${d.rallyPoint || '—'}</span></div>
+    </div>
+
+    <!-- 3. Suspect Information -->
+    <div id="ops-suspects" class="section-header"><span class="num">3</span> Suspect Information</div>
+    ${d.suspectInfo ? '<div class="text-block red" style="white-space:pre-wrap">' + d.suspectInfo.replace(/</g,'&lt;') + '</div>' : '<p style="color:#999;font-size:13px">No suspect information entered.</p>'}
+
+    <!-- Entry Team -->
+    ${d.entryTeam && d.entryTeam.length > 0 ? `
+        <div id="ops-entryteam" class="section-header"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-entryteam') + 1}</span> Entry Team / Assignments</div>
+        <table class="entry-team">
+            <thead><tr><th>Name</th><th>Assignment</th><th>Vehicle</th><th>Call Sign</th></tr></thead>
+            <tbody>${d.entryTeam.map(m => '<tr><td>' + (m.name || '—') + '</td><td>' + (m.assignment || '—') + '</td><td>' + (m.vehicle || '—') + '</td><td>' + (m.callSign || '—') + '</td></tr>').join('')}</tbody>
+        </table>
+    ` : ''}
+
+    <!-- Case Summary -->
+    <div id="ops-casesummary" class="section-header"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-casesummary') + 1}</span> Case Summary</div>
+    ${d.caseSummary ? '<div class="text-block">' + d.caseSummary.replace(/</g,'&lt;') + '</div>' : '<p style="color:#999;font-size:13px">No case summary entered.</p>'}
+
+    <!-- Tactical Plan -->
+    <div id="ops-tactical" class="section-header"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-tactical') + 1}</span> Tactical Plan</div>
+    ${d.tacticalPlan ? '<div class="text-block">' + d.tacticalPlan.replace(/</g,'&lt;') + '</div>' : '<p style="color:#999;font-size:13px">—</p>'}
+
+    <!-- Pursuit Plan -->
+    <div id="ops-pursuit" class="section-header"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-pursuit') + 1}</span> Pursuit Plan / Runners</div>
+    ${d.pursuitPlan ? '<div class="text-block">' + d.pursuitPlan.replace(/</g,'&lt;') + '</div>' : '<p style="color:#999;font-size:13px">—</p>'}
+
+    <!-- Medical Plan -->
+    <div id="ops-medical" class="section-header"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-medical') + 1}</span> Medical Plan / Officer Down</div>
+    ${d.medicalPlan ? '<div class="text-block orange">' + d.medicalPlan.replace(/</g,'&lt;') + '</div>' : '<p style="color:#999;font-size:13px">—</p>'}
+
+    <!-- Barricade Plan -->
+    <div id="ops-barricade" class="section-header"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-barricade') + 1}</span> Barricade Plan</div>
+    ${d.barricadePlan ? '<div class="text-block">' + d.barricadePlan.replace(/</g,'&lt;') + '</div>' : '<p style="color:#999;font-size:13px">—</p>'}
+
+    <!-- Contingency Plan -->
+    <div id="ops-contingency" class="section-header"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-contingency') + 1}</span> Contingency Plan</div>
+    ${d.contingencyPlan ? '<div class="text-block">' + d.contingencyPlan.replace(/</g,'&lt;') + '</div>' : '<p style="color:#999;font-size:13px">—</p>'}
+
+    <!-- Directions & Routes -->
+    ${(d.directions || includeMaps || (d.savedRoutes && (d.savedRoutes.route1 || d.savedRoutes.route2))) ? `
+        <div class="page-break"></div>
+        <div id="ops-directions" class="section-header"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-directions') + 1}</span> Directions & Routes</div>
+        ${(d.savedRoutes && d.savedRoutes.route1) ? `
+            <div style="margin:15px 0;padding:12px;background:#f0f9ff;border-radius:8px;border:1px solid #b6e3ff">
+                <p style="font-size:13px;font-weight:700;color:#0a0e14;margin:0 0 4px 0">📍 Briefing → Operation Location</p>
+                <p style="font-size:12px;color:#555;margin:0">${d.savedRoutes.route1.distanceText} · ${d.savedRoutes.route1.durationText}</p>
+            </div>
+        ` : ''}
+        ${(d.savedRoutes && d.savedRoutes.route2) ? `
+            <div style="margin:15px 0;padding:12px;background:#fff8f0;border-radius:8px;border:1px solid #ffd6a0">
+                <p style="font-size:13px;font-weight:700;color:#0a0e14;margin:0 0 4px 0">🏥 Operation Location → Hospital</p>
+                <p style="font-size:12px;color:#555;margin:0">${d.savedRoutes.route2.distanceText} · ${d.savedRoutes.route2.durationText}</p>
+            </div>
+        ` : ''}
+        ${d.directions ? '<div class="text-block" style="white-space:pre-wrap">' + d.directions.replace(/</g,'&lt;') + '</div>' : ''}
+    ` : ''}
+
+    <!-- Location Photos -->
+    ${(includePhotos && d.locationPhotos && d.locationPhotos.length > 0) ? `
+        <div class="page-break"></div>
+        <div id="ops-photos" class="section-header"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-photos') + 1}</span> Location Photos</div>
+        <div class="photo-grid">
+            ${d.locationPhotos.map(p => '<div class="photo-card"><img src="' + p.data + '" alt="' + (p.caption || '') + '"><p>' + (p.caption || p.fileName || '') + '</p></div>').join('')}
+        </div>
+    ` : ''}
+
+    <!-- Detailed Suspect Profiles -->
+    ${(includeSuspects && suspects.length > 0) ? `
+        <div class="page-break"></div>
+        <div id="ops-suspectprofiles" class="section-header"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-suspectprofiles') + 1}</span> Detailed Suspect Profiles</div>
+        ${suspects.map((s, si) => {
+            const hasFirearmsDoc = s.firearmsDoc && s.firearmsDoc.fileData;
+            const hasRapSheet = s.rapSheet && s.rapSheet.fileData;
+            const hasFirearmsData = s.firearms && s.firearms.length > 0;
+            const hasCrimHistory = s.criminalHistory && s.criminalHistory.length > 0;
+            return `
+            <div class="suspect-profile">
+                <div class="suspect-profile-header">Suspect ${si + 1}: ${s.name || 'Unknown'}</div>
+                <div style="display:flex;gap:20px">
+                    ${s.photo ? '<img src="' + s.photo + '" class="suspect-photo">' : ''}
+                    <div style="flex:1">
+                        <div class="field-row">
+                            <div class="field"><label>Name</label><span>${s.name || '—'}</span></div>
+                            <div class="field"><label>Date of Birth</label><span>${s.dob || '—'}</span></div>
+                        </div>
+                        <div class="field-row">
+                            <div class="field"><label>Driver's License</label><span>${s.dlNumber || '—'}</span></div>
+                            <div class="field"><label>Height / Weight</label><span>${[s.height, s.weight ? s.weight + ' lbs' : ''].filter(Boolean).join(' / ') || '—'}</span></div>
+                        </div>
+                        <div class="field-row">
+                            <div class="field"><label>Hair / Eyes</label><span>${[s.hairColor, s.eyeColor].filter(Boolean).join(' / ') || '—'}</span></div>
+                            <div class="field"><label>Scars/Marks/Tattoos</label><span>${s.scarsMarksTattoos || '—'}</span></div>
+                        </div>
+                        <div class="field-row">
+                            <div class="field"><label>Address</label><span>${[s.address, s.addressCityStateZip].filter(Boolean).join(', ') || '—'}</span></div>
+                            <div class="field"><label>Employer</label><span>${[s.employerName, s.occupation].filter(Boolean).join(' — ') || '—'}</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                ${s.identifiers && s.identifiers.length > 0 ? `
+                    <div class="suspect-section"><h4>Identifiers</h4>
+                        ${s.identifiers.map(id => {
+                            let extra = '';
+                            if (id.platform) extra += ' (' + id.platform + ')';
+                            if (id.provider) extra += ' — ISP: ' + id.provider;
+                            return '<div class="item-card"><strong style="text-transform:uppercase;font-size:11px;color:#00d9ff">' + (id.type || '?') + '</strong> &nbsp; ' + (id.value || '—') + extra + '</div>';
+                        }).join('')}
+                    </div>
+                ` : ''}
+
+                ${s.vehicles && s.vehicles.length > 0 ? `
+                    <div class="suspect-section"><h4>Vehicles</h4>
+                        ${s.vehicles.map(v => `
+                            <div class="item-card" style="display:flex;gap:12px;align-items:start">
+                                ${v.photo ? '<img src="' + v.photo + '" style="width:120px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #ddd;flex-shrink:0">' : ''}
+                                <div><strong>${[v.color, v.makeModel].filter(Boolean).join(' ')}</strong>${v.plateNumber ? ' — Plate: ' + v.plateNumber : ''}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : ''}
+
+                <div class="suspect-section"><h4>Registered Firearms${hasFirearmsDoc && !hasFirearmsData ? ' <span style="color:#cc0000;font-style:italic;font-size:11px;font-weight:normal">(See Attached Document)</span>' : ''}</h4>
+                    ${hasFirearmsData ? s.firearms.map(f => '<div class="item-card"><strong>' + (f.makeModel || '—') + '</strong> — ' + (f.calibre || '—') + (f.serialNumber ? ' (SN: ' + f.serialNumber + ')' : '') + '</div>').join('') : ''}
+                    ${hasFirearmsDoc ? '<div class="item-card" style="border-left:3px solid #ffa726"><strong>📄 Attached:</strong> ' + s.firearmsDoc.fileName + '</div>' : ''}
+                    ${!hasFirearmsData && !hasFirearmsDoc ? '<p style="color:#999;font-size:12px">No registered firearms on file</p>' : ''}
+                </div>
+
+                <div class="suspect-section"><h4>Criminal History${hasRapSheet && !hasCrimHistory ? ' <span style="color:#cc0000;font-style:italic;font-size:11px;font-weight:normal">(See Attached Document)</span>' : ''}</h4>
+                    ${hasCrimHistory ? s.criminalHistory.map(r => '<div class="item-card"><strong>' + (r.date || '?') + '</strong> — ' + (r.offense || '?') + (r.caseNumber ? ' (Case #' + r.caseNumber + ')' : '') + (r.sentence ? '<br>Sentence: ' + r.sentence : '') + (r.notes ? '<br><em style="color:#666">' + r.notes + '</em>' : '') + '</div>').join('') : ''}
+                    ${hasRapSheet ? '<div class="item-card" style="border-left:3px solid #cc0000"><strong>📄 Attached:</strong> ' + s.rapSheet.fileName + '</div>' : ''}
+                    ${!hasCrimHistory && !hasRapSheet ? '<p style="color:#999;font-size:12px">No criminal history on file</p>' : ''}
+                </div>
+
+                ${s.residencePhoto ? '<div class="suspect-section"><h4>Residence Photo</h4><img src="' + s.residencePhoto + '" style="max-width:100%;max-height:250px;border-radius:6px;border:1px solid #ddd"></div>' : ''}
+            </div>
+        `; }).join('')}
+
+        <!-- Attached Documents -->
+        ${suspects.some(s => (s.firearmsDoc && s.firearmsDoc.fileData) || (s.rapSheet && s.rapSheet.fileData)) ? `
+            <div class="page-break"></div>
+            <div class="section-header"><span class="num">★</span> Attached Documents</div>
+            ${suspects.map((s, si) => {
+                let html = '';
+                if (s.firearmsDoc && s.firearmsDoc.fileData) {
+                    if (s.firearmsDoc.fileType && s.firearmsDoc.fileType.includes('image')) {
+                        html += '<div style="margin:15px 0;page-break-inside:avoid"><p style="font-weight:700;font-size:13px;margin:0 0 8px 0">Firearms Document — ' + (s.name || 'Suspect ' + (si+1)) + '</p><img src="' + s.firearmsDoc.fileData + '" style="max-width:100%;border:1px solid #ddd;border-radius:6px"></div>';
+                    } else {
+                        html += '<div style="margin:15px 0"><p style="font-weight:700;font-size:13px">Firearms Document — ' + (s.name || 'Suspect ' + (si+1)) + ': <a href="' + s.firearmsDoc.fileData + '" target="_blank">' + s.firearmsDoc.fileName + '</a></p></div>';
+                    }
+                }
+                if (s.rapSheet && s.rapSheet.fileData) {
+                    if (s.rapSheet.fileType && s.rapSheet.fileType.includes('image')) {
+                        html += '<div style="margin:15px 0;page-break-inside:avoid"><p style="font-weight:700;font-size:13px;margin:0 0 8px 0">Criminal History / Rap Sheet — ' + (s.name || 'Suspect ' + (si+1)) + '</p><img src="' + s.rapSheet.fileData + '" style="max-width:100%;border:1px solid #ddd;border-radius:6px"></div>';
+                    } else {
+                        html += '<div style="margin:15px 0"><p style="font-weight:700;font-size:13px">Criminal History / Rap Sheet — ' + (s.name || 'Suspect ' + (si+1)) + ': <a href="' + s.rapSheet.fileData + '" target="_blank">' + s.rapSheet.fileName + '</a></p></div>';
+                    }
+                }
+                return html;
+            }).join('')}
+        ` : ''}
+    ` : ''}
+
+    <!-- Footer -->
+    <div style="margin-top:60px;padding-top:20px;border-top:2px solid #0a0e14;text-align:center;color:#999;font-size:11px;">
+        <p>This document is the property of ${agency || 'the issuing agency'} and is intended for law enforcement use only.</p>
+        <p>Generated by Project VIPER — ${new Date().toLocaleString()}</p>
+    </div>
+</div>
+</body>
+</html>`);
+            pdfWindow.document.close();
+            viperToast('OPS Plan report generated', 'success');
+        }
+
+        // ── OPS Plan Location Photos ──
+        function addOpsLocationPhoto() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.multiple = true;
+            input.onchange = async (e) => {
+                const files = Array.from(e.target.files);
+                if (!files.length) return;
+
+                if (!opsPlanData) opsPlanData = { _version: 2 };
+                if (!opsPlanData.locationPhotos) opsPlanData.locationPhotos = [];
+
+                for (const file of files) {
+                    const data = await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = (ev) => resolve(ev.target.result);
+                        reader.readAsDataURL(file);
+                    });
+
+                    // Prompt for caption
+                    const caption = await new Promise((resolve) => {
+                        const html = `
+                            <div id="captionModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id==='captionModal'){document.getElementById('captionModal').remove();window._captionResolve('')}">
+                                <div class="glass-card rounded-xl p-5 max-w-md w-full">
+                                    <h3 class="text-lg font-bold text-white mb-3">Photo Caption</h3>
+                                    <p class="text-xs text-gray-400 mb-2">${file.name}</p>
+                                    <img src="${data}" class="w-full h-32 object-cover rounded-lg mb-3">
+                                    <input type="text" id="captionInput" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none mb-4" placeholder="Optional caption (e.g. Front entrance, Side gate)">
+                                    <div class="flex gap-2 justify-end">
+                                        <button onclick="document.getElementById('captionModal').remove();window._captionResolve('')" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white text-sm transition">Skip</button>
+                                        <button onclick="window._captionResolve(document.getElementById('captionInput').value);document.getElementById('captionModal').remove()" class="px-4 py-2 bg-viper-cyan hover:bg-viper-cyan/80 rounded-lg text-black font-semibold text-sm transition">Add</button>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        window._captionResolve = resolve;
+                        document.body.insertAdjacentHTML('beforeend', html);
+                        setTimeout(() => document.getElementById('captionInput')?.focus(), 100);
+                    });
+
+                    opsPlanData.locationPhotos.push({
+                        data,
+                        fileName: file.name,
+                        caption: caption || '',
+                        addedAt: new Date().toISOString()
+                    });
+                }
+                saveOpsPlanData();
+                renderTabContent('opsplan');
+                viperToast(`${files.length} photo(s) added`, 'success');
+            };
+            input.click();
+        }
+
+        function viewOpsLocationPhoto(index) {
+            if (!opsPlanData || !opsPlanData.locationPhotos || !opsPlanData.locationPhotos[index]) return;
+            const photo = opsPlanData.locationPhotos[index];
+            const w = window.open('', '_blank');
+            if (w) {
+                w.document.write('<html><head><title>' + (photo.caption || photo.fileName) + '</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img src="' + photo.data + '"></body></html>');
+            }
+        }
+
+        async function removeOpsLocationPhoto(index) {
+            if (!opsPlanData || !opsPlanData.locationPhotos) return;
+            if (await viperConfirm('Remove this photo?', { danger: true, okText: 'Remove' })) {
+                opsPlanData.locationPhotos.splice(index, 1);
+                saveOpsPlanData();
+                renderTabContent('opsplan');
+            }
         }
 
         function addOpsPlan() {
@@ -15879,42 +17496,19 @@
 
         function viewOpsPlan(index) {
             const plan = opsPlans[index];
+            if (!plan || !plan.fileData) {
+                viperToast('File data not available', 'error');
+                return;
+            }
             
-            // Open the file in a new window/tab
+            // Open the file in a new window
             const newWindow = window.open('', '_blank');
             if (newWindow) {
-                if (plan.fileType.includes('pdf')) {
-                    newWindow.document.write(`
-                        <html>
-                            <head>
-                                <title>${plan.fileName}</title>
-                                <style>
-                                    body { margin: 0; padding: 0; }
-                                    iframe { width: 100%; height: 100vh; border: none; }
-                                </style>
-                            </head>
-                            <body>
-                                <iframe src="${plan.fileData}"></iframe>
-                            </body>
-                        </html>
-                    `);
-                } else if (plan.fileType.includes('image')) {
-                    newWindow.document.write(`
-                        <html>
-                            <head>
-                                <title>${plan.fileName}</title>
-                                <style>
-                                    body { margin: 0; padding: 20px; background: #000; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-                                    img { max-width: 100%; height: auto; }
-                                </style>
-                            </head>
-                            <body>
-                                <img src="${plan.fileData}" alt="${plan.fileName}">
-                            </body>
-                        </html>
-                    `);
+                if (plan.fileType && plan.fileType.includes('pdf')) {
+                    newWindow.document.write('<html><head><title>' + plan.fileName + '</title><style>body{margin:0;padding:0}iframe{width:100%;height:100vh;border:none}</style></head><body><iframe src="' + plan.fileData + '"></iframe></body></html>');
+                } else if (plan.fileType && plan.fileType.includes('image')) {
+                    newWindow.document.write('<html><head><title>' + plan.fileName + '</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img src="' + plan.fileData + '" alt="' + plan.fileName + '"></body></html>');
                 } else {
-                    // For DOC/DOCX, offer download
                     const link = document.createElement('a');
                     link.href = plan.fileData;
                     link.download = plan.fileName;
@@ -16814,6 +18408,31 @@
             loadTheme();
             updateUserDisplay();
             loadCase();
+
+            // Cellebrite copy progress listener
+            if (window.electronAPI && window.electronAPI.onCellebriteCopyProgress) {
+                window.electronAPI.onCellebriteCopyProgress((data) => {
+                    const bar = document.getElementById('uploadProgressBar');
+                    const pct = document.getElementById('uploadProgressPercent');
+                    const status = document.getElementById('uploadStatusText');
+                    if (bar) bar.style.width = data.percent + '%';
+                    if (pct) pct.textContent = data.percent + '%';
+                    if (status) status.textContent = `Copying: ${data.currentFile} (${formatFileSize(data.copiedSize)} / ${formatFileSize(data.totalSize)})`;
+                });
+            }
+
+            // Cellebrite embedded viewer closed externally
+            if (window.electronAPI && window.electronAPI.onCellebriteEmbedClosed) {
+                window.electronAPI.onCellebriteEmbedClosed(() => {
+                    if (cellebriteEmbedActive) {
+                        cellebriteEmbedActive = false;
+                        if (window._cellebriteCleanup) { window._cellebriteCleanup(); window._cellebriteCleanup = null; }
+                        const viewer = document.getElementById('viewerContent');
+                        if (viewer) { viewer.style.padding = ''; viewer.style.overflow = ''; }
+                        renderTabContent('evidence');
+                    }
+                });
+            }
             
             // Auto-focus first input in any dynamically-added modal
             new MutationObserver((mutations) => {

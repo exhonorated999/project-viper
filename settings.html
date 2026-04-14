@@ -401,18 +401,31 @@
 
                 <!-- Registered User Profile -->
                 <div class="glass-card rounded-xl p-6">
-                    <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
-                        <svg class="w-6 h-6 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
-                        </svg>
-                        Registered User
-                    </h3>
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-xl font-bold flex items-center gap-2">
+                            <svg class="w-6 h-6 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+                            </svg>
+                            Registered User
+                        </h3>
+                        <button id="editProfileBtn" onclick="toggleProfileEdit()" class="px-3 py-1.5 rounded-lg bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/30 hover:bg-viper-cyan/30 transition-colors text-xs font-medium flex items-center gap-1">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                            <span>Edit</span>
+                        </button>
+                    </div>
 
                     <div class="flex items-start gap-5">
                         <!-- Avatar -->
                         <div class="w-16 h-16 rounded-full bg-gradient-to-br from-viper-green to-viper-cyan flex items-center justify-center font-bold text-xl flex-shrink-0" id="profileInitials">--</div>
-                        <!-- Info grid -->
-                        <div class="flex-1 grid grid-cols-2 gap-x-8 gap-y-3">
+                        <!-- Department Badge / Logo -->
+                        <div class="flex-shrink-0 text-center">
+                            <div id="deptBadgePreview" class="w-16 h-16 rounded-lg bg-viper-dark border border-dashed border-gray-600 flex items-center justify-center cursor-pointer hover:border-viper-cyan transition overflow-hidden" onclick="uploadDeptBadge()" title="Upload department badge or logo">
+                                <svg class="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                            </div>
+                            <p class="text-[10px] text-gray-500 mt-1">Badge/Logo</p>
+                        </div>
+                        <!-- Display mode -->
+                        <div id="profileDisplay" class="flex-1 grid grid-cols-2 gap-x-8 gap-y-3">
                             <div>
                                 <span class="text-xs text-gray-500 block">Officer Name</span>
                                 <span class="text-white font-medium" id="profileName">—</span>
@@ -432,6 +445,31 @@
                             <div>
                                 <span class="text-xs text-gray-500 block">Registered</span>
                                 <span class="text-gray-300 text-sm" id="profileRegDate">—</span>
+                            </div>
+                        </div>
+                        <!-- Edit mode (hidden by default) -->
+                        <div id="profileEditForm" class="flex-1 hidden">
+                            <div class="grid grid-cols-2 gap-x-6 gap-y-4">
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Officer Name</label>
+                                    <input type="text" id="editProfileName" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-viper-green outline-none" placeholder="Full name">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Badge Number</label>
+                                    <input type="text" id="editProfileBadge" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-viper-green outline-none" placeholder="Badge #">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Agency</label>
+                                    <input type="text" id="editProfileAgency" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-viper-green outline-none" placeholder="Department / Agency">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Email</label>
+                                    <input type="email" id="editProfileEmail" class="w-full px-3 py-2 rounded-lg bg-viper-dark border border-gray-600 text-white text-sm focus:border-viper-green outline-none" placeholder="Email address">
+                                </div>
+                            </div>
+                            <div class="flex gap-2 mt-4">
+                                <button onclick="saveProfileEdit()" class="px-4 py-2 rounded-lg bg-viper-green/20 text-viper-green border border-viper-green/30 hover:bg-viper-green/30 transition-colors text-sm font-medium">Save</button>
+                                <button onclick="toggleProfileEdit()" class="px-4 py-2 rounded-lg border border-gray-600 text-gray-400 hover:text-white transition-colors text-sm">Cancel</button>
                             </div>
                         </div>
                     </div>
@@ -490,6 +528,140 @@
                             </div>
                             <p class="text-xs text-gray-500 mb-2">Case data and settings stored in browser localStorage</p>
                             <code id="appDataPath" class="block text-xs text-viper-green font-mono bg-viper-dark rounded px-3 py-2 border border-gray-700 select-all">Detecting...</code>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- OPS Plan Templates -->
+                <div class="glass-card rounded-xl p-6">
+                    <div class="flex justify-between items-center cursor-pointer" onclick="toggleOpsTemplates()">
+                        <h3 class="text-xl font-bold flex items-center gap-2">
+                            <svg class="w-6 h-6 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                            OPS Plan Templates
+                        </h3>
+                        <svg id="opsTemplatesChevron" class="w-5 h-5 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </div>
+                    <p class="text-gray-400 mt-1 text-sm">Reusable data imported into Operations Plans across cases. Fill once, use everywhere.</p>
+
+                    <div id="opsTemplatesBody" class="hidden mt-5 space-y-4">
+                        <!-- Entry Team Roster -->
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex justify-between items-center mb-3">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-lg">👥</span>
+                                    <span class="text-sm font-medium text-white">Entry Team Roster</span>
+                                </div>
+                                <button onclick="addEntryTeamMember()" class="px-3 py-1 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan text-xs transition">+ Add Member</button>
+                            </div>
+                            <div id="entryTeamList" class="space-y-2">
+                                <p class="text-gray-500 text-xs">No team members configured</p>
+                            </div>
+                        </div>
+
+                        <!-- Hospital Info -->
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="text-lg">🏥</span>
+                                <span class="text-sm font-medium text-white">Hospital Information</span>
+                            </div>
+                            <div class="grid grid-cols-3 gap-3">
+                                <div>
+                                    <label class="text-xs text-gray-500 block mb-1">Hospital Name</label>
+                                    <input type="text" id="opsHospitalName" class="w-full px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" onchange="saveOpsTemplates()" placeholder="e.g. Kaiser Fontana">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-500 block mb-1">Address</label>
+                                    <input type="text" id="opsHospitalAddress" class="w-full px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" onchange="saveOpsTemplates()" placeholder="e.g. 9961 Sierra Ave">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-500 block mb-1">Phone</label>
+                                    <input type="text" id="opsHospitalPhone" class="w-full px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" onchange="saveOpsTemplates()" placeholder="e.g. (909) 427-5000">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Briefing Location -->
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="text-lg">📍</span>
+                                <span class="text-sm font-medium text-white">Briefing Location</span>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="text-xs text-gray-500 block mb-1">Location Name</label>
+                                    <input type="text" id="opsBriefingName" class="w-full px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" onchange="saveOpsTemplates()" placeholder="e.g. FPD Briefing Room A">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-500 block mb-1">Address</label>
+                                    <input type="text" id="opsBriefingAddress" class="w-full px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" onchange="saveOpsTemplates()" placeholder="e.g. 17005 Upland Ave, Fontana">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Communications -->
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="text-lg">📻</span>
+                                <span class="text-sm font-medium text-white">Communications / Radio</span>
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-500 block mb-1">Primary Channel / Frequency</label>
+                                <input type="text" id="opsCommsChannel" class="w-full px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" onchange="saveOpsTemplates()" placeholder="e.g. TAC 2 / 154.860 MHz">
+                            </div>
+                        </div>
+
+                        <!-- Notifications -->
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="text-lg">📞</span>
+                                <span class="text-sm font-medium text-white">Notifications</span>
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-500 block mb-1">Who to notify prior to operation (one per line)</label>
+                                <textarea id="opsNotifications" rows="3" class="w-full px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" onchange="saveOpsTemplates()" placeholder="e.g. Watch Commander — Sgt. Smith&#10;Dispatch — ext. 1234&#10;SWAT Sgt — Lt. Johnson"></textarea>
+                            </div>
+                        </div>
+
+                        <!-- Boilerplate Plans -->
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="text-lg">📝</span>
+                                <span class="text-sm font-medium text-white">Boilerplate Plans</span>
+                            </div>
+                            <p class="text-xs text-gray-500 mb-3">Default text auto-filled into OPS Plans. Edit per-case as needed.</p>
+                            <div class="space-y-3">
+                                <div>
+                                    <label class="text-xs text-gray-500 block mb-1">Tactical Plan</label>
+                                    <textarea id="opsTacticalPlan" rows="3" class="w-full px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" onchange="saveOpsTemplates()" placeholder="Standard tactical approach..."></textarea>
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-500 block mb-1">Pursuit Plan / Runners</label>
+                                    <textarea id="opsPursuitPlan" rows="3" class="w-full px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" onchange="saveOpsTemplates()" placeholder="Standard pursuit/runners plan..."></textarea>
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-500 block mb-1">Medical Plan / Officer Down</label>
+                                    <textarea id="opsMedicalPlan" rows="3" class="w-full px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" onchange="saveOpsTemplates()" placeholder="Standard medical plan / officer down procedure..."></textarea>
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-500 block mb-1">Barricade Plan</label>
+                                    <textarea id="opsBarricadePlan" rows="3" class="w-full px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" onchange="saveOpsTemplates()" placeholder="Standard barricade procedure..."></textarea>
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-500 block mb-1">Contingency Plan</label>
+                                    <textarea id="opsContingencyPlan" rows="3" class="w-full px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" onchange="saveOpsTemplates()" placeholder="Standard contingency plan..."></textarea>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Save Button -->
+                        <div class="flex justify-end pt-2">
+                            <button onclick="saveOpsTemplates(); this.textContent='✓ Saved'; setTimeout(() => this.textContent='Save Templates', 1500)" class="px-6 py-2 bg-viper-cyan hover:bg-viper-cyan/80 rounded-lg text-black font-semibold text-sm transition">
+                                Save Templates
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1205,7 +1377,7 @@
             }, true);
         });
 
-        // User Profile (read-only, populated from registration + viperUserInfo)
+        // User Profile (editable)
         function loadUserProfile() {
             const userInfo = JSON.parse(localStorage.getItem('viperUserInfo')) || {};
             const regName = localStorage.getItem('viper_customer_name') || '';
@@ -1225,6 +1397,66 @@
 
             const initials = name !== '—' ? name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : '--';
             document.getElementById('profileInitials').textContent = initials;
+        }
+
+        function toggleProfileEdit() {
+            const display = document.getElementById('profileDisplay');
+            const form = document.getElementById('profileEditForm');
+            const btn = document.getElementById('editProfileBtn');
+            const isEditing = !form.classList.contains('hidden');
+
+            if (isEditing) {
+                // Cancel — switch back to display
+                form.classList.add('hidden');
+                display.classList.remove('hidden');
+                btn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg><span>Edit</span>';
+            } else {
+                // Switch to edit mode — populate fields
+                const userInfo = JSON.parse(localStorage.getItem('viperUserInfo')) || {};
+                document.getElementById('editProfileName').value = localStorage.getItem('viper_customer_name') || userInfo.officerName || '';
+                document.getElementById('editProfileBadge').value = userInfo.badgeNumber || '';
+                document.getElementById('editProfileAgency').value = localStorage.getItem('viper_agency') || userInfo.agencyName || '';
+                document.getElementById('editProfileEmail').value = localStorage.getItem('viper_contact_email') || '';
+
+                display.classList.add('hidden');
+                form.classList.remove('hidden');
+                btn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg><span>Cancel</span>';
+                document.getElementById('editProfileName').focus();
+            }
+        }
+
+        function saveProfileEdit() {
+            const name = document.getElementById('editProfileName').value.trim();
+            const badge = document.getElementById('editProfileBadge').value.trim();
+            const agency = document.getElementById('editProfileAgency').value.trim();
+            const email = document.getElementById('editProfileEmail').value.trim();
+
+            // Save to localStorage (same keys used by registration + PDF export)
+            if (name) localStorage.setItem('viper_customer_name', name);
+            if (email) localStorage.setItem('viper_contact_email', email);
+            if (agency) localStorage.setItem('viper_agency', agency);
+
+            // Also update viperUserInfo for badge and other fields
+            const userInfo = JSON.parse(localStorage.getItem('viperUserInfo')) || {};
+            if (name) userInfo.officerName = name;
+            if (badge) userInfo.badgeNumber = badge;
+            if (agency) userInfo.agencyName = agency;
+            userInfo.name = name;
+            localStorage.setItem('viperUserInfo', JSON.stringify(userInfo));
+
+            // Refresh display
+            loadUserProfile();
+            toggleProfileEdit();
+
+            // Update sidebar display name
+            const nameEl = document.getElementById('userDisplayName');
+            if (nameEl && name) nameEl.textContent = name;
+            const avatarEl = document.getElementById('userAvatar');
+            if (avatarEl && name) {
+                avatarEl.textContent = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+            }
+
+            showNotification('Profile updated', 'success');
         }
 
         async function loadSettings() {
@@ -2502,6 +2734,159 @@
         localStorage.setItem('traceSearch_enabled', 'false');
         updateTraceToggleUI();
     }
+
+    // ── Department Badge / Logo ──
+    function loadDeptBadge() {
+        const badge = localStorage.getItem('viperDeptBadge');
+        const preview = document.getElementById('deptBadgePreview');
+        if (badge && preview) {
+            preview.innerHTML = `<img src="${badge}" class="w-full h-full object-contain">`;
+            preview.classList.remove('border-dashed');
+        }
+    }
+
+    function uploadDeptBadge() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                localStorage.setItem('viperDeptBadge', ev.target.result);
+                loadDeptBadge();
+            };
+            reader.readAsDataURL(file);
+        };
+        input.click();
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(loadDeptBadge, 50);
+    });
+
+    // ── OPS Plan Templates ──
+    const OPS_TEMPLATES_KEY = 'viperOpsTemplates';
+
+    function toggleOpsTemplates() {
+        const body = document.getElementById('opsTemplatesBody');
+        const chevron = document.getElementById('opsTemplatesChevron');
+        const isHidden = body.classList.contains('hidden');
+        if (isHidden) {
+            body.classList.remove('hidden');
+            chevron.style.transform = 'rotate(180deg)';
+        } else {
+            body.classList.add('hidden');
+            chevron.style.transform = '';
+        }
+    }
+
+    function loadOpsTemplates() {
+        const t = JSON.parse(localStorage.getItem(OPS_TEMPLATES_KEY) || '{}');
+        // Simple fields
+        document.getElementById('opsHospitalName').value     = t.hospitalName || '';
+        document.getElementById('opsHospitalAddress').value   = t.hospitalAddress || '';
+        document.getElementById('opsHospitalPhone').value     = t.hospitalPhone || '';
+        document.getElementById('opsBriefingName').value      = t.briefingName || '';
+        document.getElementById('opsBriefingAddress').value   = t.briefingAddress || '';
+        document.getElementById('opsCommsChannel').value      = t.commsChannel || '';
+        document.getElementById('opsNotifications').value     = t.notifications || '';
+        // Boilerplate
+        document.getElementById('opsTacticalPlan').value      = t.tacticalPlan || '';
+        document.getElementById('opsPursuitPlan').value       = t.pursuitPlan || '';
+        document.getElementById('opsMedicalPlan').value       = t.medicalPlan || '';
+        document.getElementById('opsBarricadePlan').value     = t.barricadePlan || '';
+        document.getElementById('opsContingencyPlan').value   = t.contingencyPlan || '';
+        // Entry team
+        renderEntryTeam(t.entryTeam || []);
+    }
+
+    function getOpsTemplates() {
+        return {
+            hospitalName:    document.getElementById('opsHospitalName').value.trim(),
+            hospitalAddress: document.getElementById('opsHospitalAddress').value.trim(),
+            hospitalPhone:   document.getElementById('opsHospitalPhone').value.trim(),
+            briefingName:    document.getElementById('opsBriefingName').value.trim(),
+            briefingAddress: document.getElementById('opsBriefingAddress').value.trim(),
+            commsChannel:    document.getElementById('opsCommsChannel').value.trim(),
+            notifications:   document.getElementById('opsNotifications').value.trim(),
+            tacticalPlan:    document.getElementById('opsTacticalPlan').value.trim(),
+            pursuitPlan:     document.getElementById('opsPursuitPlan').value.trim(),
+            medicalPlan:     document.getElementById('opsMedicalPlan').value.trim(),
+            barricadePlan:   document.getElementById('opsBarricadePlan').value.trim(),
+            contingencyPlan: document.getElementById('opsContingencyPlan').value.trim(),
+            entryTeam:       collectEntryTeam()
+        };
+    }
+
+    function saveOpsTemplates() {
+        localStorage.setItem(OPS_TEMPLATES_KEY, JSON.stringify(getOpsTemplates()));
+    }
+
+    // Entry Team
+    function collectEntryTeam() {
+        const rows = document.querySelectorAll('.entry-team-row');
+        const team = [];
+        rows.forEach(row => {
+            const inputs = row.querySelectorAll('input');
+            const member = {
+                name:       inputs[0].value.trim(),
+                assignment: inputs[1].value.trim(),
+                vehicle:    inputs[2].value.trim(),
+                callSign:   inputs[3].value.trim()
+            };
+            if (member.name || member.assignment) team.push(member);
+        });
+        return team;
+    }
+
+    function renderEntryTeam(team) {
+        const container = document.getElementById('entryTeamList');
+        if (!team || team.length === 0) {
+            container.innerHTML = '<p class="text-gray-500 text-xs">No team members configured</p>';
+            return;
+        }
+        container.innerHTML = `
+            <div class="grid grid-cols-[1fr_1fr_1fr_1fr_auto] gap-2 text-xs text-gray-400 mb-1 px-1">
+                <span>Name</span><span>Assignment</span><span>Vehicle</span><span>Call Sign</span><span></span>
+            </div>
+            ${team.map((m, i) => `
+                <div class="entry-team-row grid grid-cols-[1fr_1fr_1fr_1fr_auto] gap-2 items-center">
+                    <input type="text" value="${m.name || ''}" class="px-2 py-1.5 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none" onchange="saveOpsTemplates()" placeholder="Name">
+                    <input type="text" value="${m.assignment || ''}" class="px-2 py-1.5 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none" onchange="saveOpsTemplates()" placeholder="Assignment">
+                    <input type="text" value="${m.vehicle || ''}" class="px-2 py-1.5 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none" onchange="saveOpsTemplates()" placeholder="Vehicle">
+                    <input type="text" value="${m.callSign || ''}" class="px-2 py-1.5 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none" onchange="saveOpsTemplates()" placeholder="Call Sign">
+                    <button onclick="removeEntryTeamMember(${i})" class="text-red-500 hover:text-red-400 p-1">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+            `).join('')}
+        `;
+    }
+
+    function addEntryTeamMember() {
+        const t = JSON.parse(localStorage.getItem(OPS_TEMPLATES_KEY) || '{}');
+        const team = t.entryTeam || [];
+        team.push({ name: '', assignment: '', vehicle: '', callSign: '' });
+        t.entryTeam = team;
+        localStorage.setItem(OPS_TEMPLATES_KEY, JSON.stringify(t));
+        renderEntryTeam(team);
+    }
+
+    function removeEntryTeamMember(index) {
+        const t = JSON.parse(localStorage.getItem(OPS_TEMPLATES_KEY) || '{}');
+        const team = t.entryTeam || [];
+        team.splice(index, 1);
+        t.entryTeam = team;
+        localStorage.setItem(OPS_TEMPLATES_KEY, JSON.stringify(t));
+        renderEntryTeam(team);
+    }
+
+    // Load OPS templates on page load
+    document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(loadOpsTemplates, 100);
+    });
 
     initTraceUI();
     </script>

@@ -98,6 +98,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   canvasFormDownload: (params) => ipcRenderer.invoke('canvas-form-download', params),
   canvasFormDelete: (params) => ipcRenderer.invoke('canvas-form-delete', params),
 
+  // Cellebrite Report Integration
+  selectCellebriteFolder: () => ipcRenderer.invoke('select-cellebrite-folder'),
+  scanCellebriteFolder: (folderPath) => ipcRenderer.invoke('scan-cellebrite-folder', folderPath),
+  launchCellebriteReader: (exePath) => ipcRenderer.invoke('launch-cellebrite-reader', exePath),
+  copyCellebriteFolder: (data) => ipcRenderer.invoke('copy-cellebrite-folder', data),
+  onCellebriteCopyProgress: (callback) => ipcRenderer.on('cellebrite-copy-progress', (_e, data) => callback(data)),
+  // Cellebrite embedded viewer (Win32)
+  cellebriteLaunchEmbedded: (data) => ipcRenderer.invoke('cellebrite-launch-embedded', data),
+  cellebriteSetBounds: (bounds) => ipcRenderer.send('cellebrite-set-bounds', bounds),
+  cellebriteSetVisible: (visible) => ipcRenderer.send('cellebrite-set-visible', visible),
+  cellebriteClose: () => ipcRenderer.invoke('cellebrite-close'),
+  onCellebriteEmbedClosed: (callback) => ipcRenderer.on('cellebrite-embed-closed', callback),
+
   // Oversight Import
   selectOversightFile: () => ipcRenderer.invoke('select-oversight-file'),
   importOversightFile: (data) => ipcRenderer.invoke('import-oversight-file', data),

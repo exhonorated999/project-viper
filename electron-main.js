@@ -140,6 +140,51 @@ function createWindow() {
     backgroundColor: '#1a1a1a'
   });
 
+  // Handle window.open calls from renderer — create properly-sized popup windows
+  // instead of letting Electron create blank default BrowserWindows
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    // For blank windows (window.open('', '_blank')) used for in-app previews,
+    // allow but configure the popup properly
+    if (!url || url === '' || url === 'about:blank') {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          width: 800,
+          height: 700,
+          icon: iconPath,
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            webSecurity: false  // allow blob: and data: URLs in popups
+          }
+        }
+      };
+    }
+    // For blob: and data: URLs, allow in popup
+    if (url.startsWith('blob:') || url.startsWith('data:')) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          width: 800,
+          height: 700,
+          icon: iconPath,
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            webSecurity: false
+          }
+        }
+      };
+    }
+    // For http/https URLs, open in system browser
+    if (url.startsWith('http:') || url.startsWith('https:')) {
+      shell.openExternal(url);
+      return { action: 'deny' };
+    }
+    // Deny everything else
+    return { action: 'deny' };
+  });
+
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
     mainWindow.focus();
@@ -1423,6 +1468,45 @@ ipcMain.handle('read-warrant-file', async (event, filePath) => {
   } catch (error) {
     console.error('Failed to read warrant file:', error);
     throw error;
+  }
+});
+
+ipcMain.handle('view-warrant-external', async (event, filePath) => {
+  try {
+    console.log('view-warrant-external called with:', filePath);
+
+    // Reject blob: and data: URLs — these are stale references from old data
+    if (!filePath || filePath.startsWith('blob:') || filePath.startsWith('data:')) {
+      return { success: false, error: 'Invalid file path — file may need to be re-uploaded' };
+    }
+
+    // Check file exists on disk
+    if (!fs.existsSync(filePath)) {
+      return { success: false, error: 'File not found on disk: ' + path.basename(filePath) };
+    }
+
+    let viewPath = filePath;
+    // If encrypted, decrypt to temp first
+    if (security && security.isUnlocked()) {
+      const raw = fs.readFileSync(filePath);
+      if (security.isEncryptedBuffer(raw)) {
+        const decrypted = security.decryptBuffer(raw);
+        const tempDir = path.join(app.getPath('temp'), 'viper-warrants');
+        fs.mkdirSync(tempDir, { recursive: true });
+        viewPath = path.join(tempDir, path.basename(filePath));
+        fs.writeFileSync(viewPath, decrypted);
+      }
+    }
+
+    // Use Windows 'start' command to open in system default viewer
+    const { exec } = require('child_process');
+    exec(`start "" "${viewPath}"`, (err) => {
+      if (err) console.error('exec start failed:', err);
+    });
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to open warrant file externally:', error);
+    return { success: false, error: error.message };
   }
 });
 

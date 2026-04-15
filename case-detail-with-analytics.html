@@ -847,6 +847,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="wigleAPI.js"></script>
     <script>
+        // Constant to avoid Chromium preload scanner 404s on img/iframe src in string literals
+        const _S = 'src';
+
         // Apply font size preference from Settings
         (function() {
             const sizes = { small: '13px', medium: '15px', large: '17px', 'x-large': '20px' };
@@ -4726,18 +4729,18 @@
                                 ${isPDF ? `
                                     <div class="space-y-3">
                                         <div class="bg-white rounded overflow-hidden">
-                                            <iframe src="${fileUrl}" class="w-full" style="height: 800px;" frameborder="0"></iframe>
+                                            <iframe ${_S}="${fileUrl}" class="w-full" style="height: 800px;" frameborder="0"></iframe>
                                         </div>
                                     </div>
                                 ` : isImage ? `
                                     <div class="bg-black rounded flex items-center justify-center p-4 min-h-[400px]">
-                                        <img src="${fileUrl}" alt="${file.name}" class="max-w-full max-h-[600px] object-contain" 
+                                        <img ${_S}="${fileUrl}" alt="${file.name}" class="max-w-full max-h-[600px] object-contain" 
                                             onerror="this.parentElement.innerHTML='<div class=text-center><p class=text-viper-orange>Cannot display this image format</p><p class=text-sm text-gray-400 mt-2>Click Open Externally to view</p></div>'">
                                     </div>
                                 ` : isVideo ? `
                                     <div class="bg-black rounded overflow-hidden">
                                         <video controls class="w-full" preload="metadata" style="max-height: 600px;">
-                                            <source src="${fileUrl}" type="${file.type || 'video/' + fileExt}">
+                                            <source ${_S}="${fileUrl}" type="${file.type || 'video/' + fileExt}">
                                             <p class="text-center text-gray-400 p-8">
                                                 Video format: ${fileExt.toUpperCase()}<br>
                                                 Click "Open Externally" to view in your media player
@@ -4752,7 +4755,7 @@
                                             </svg>
                                         </div>
                                         <audio controls class="w-full" preload="metadata">
-                                            <source src="${fileUrl}" type="${file.type || 'audio/' + fileExt}">
+                                            <source ${_S}="${fileUrl}" type="${file.type || 'audio/' + fileExt}">
                                             Your browser does not support this audio format.
                                         </audio>
                                         <p class="text-center text-sm text-gray-400 mt-3">Audio: ${fileExt.toUpperCase()}</p>
@@ -5435,8 +5438,8 @@
                         </div>
                         ${!fileExists ? '<p class="text-red-400 text-center py-4">File not found on disk</p>' :
                           isPDF ? `<div class="flex items-center justify-center py-8 bg-viper-card/30 rounded">${openExternalBtn}</div>` :
-                          isImage ? `<img src="${blobUrl}" class="max-w-full max-h-96 mx-auto">` :
-                          isVideo ? `<video controls class="w-full"><source src="${blobUrl}"></video>` :
+                          isImage ? `<img ${_S}="${blobUrl}" class="max-w-full max-h-96 mx-auto">` :
+                          isVideo ? `<video controls class="w-full"><source ${_S}="${blobUrl}"></video>` :
                           '<p class="text-gray-400 text-center py-4">Preview not available</p>'}
                     </div>
                 `);
@@ -5536,7 +5539,7 @@
             return `
                 <div class="glass-card rounded-xl p-6 hover:border-viper-cyan transition cursor-pointer mx-auto" style="max-width: 400px; width: 100%;" onclick="viewSuspectDetail(${index})">
                     <div class="aspect-square rounded-lg overflow-hidden mb-4 bg-viper-dark">
-                        <img src="${photoUrl}" alt="${suspect.name || 'Suspect'}" class="w-full h-full object-cover">
+                        <img ${_S}="${photoUrl}" alt="${suspect.name || 'Suspect'}" class="w-full h-full object-cover">
                     </div>
                     <h3 class="text-xl font-bold text-white mb-2">${suspect.name || 'Unknown Suspect'}</h3>
                     <div class="space-y-1 text-sm text-gray-400">
@@ -5620,7 +5623,7 @@
                                 <div class="flex gap-5">
                                     <div class="shrink-0">
                                         <div class="w-48 h-48 rounded-lg overflow-hidden bg-viper-dark">
-                                            <img id="suspect-photo-${index}" src="${suspect.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"%3E%3Crect fill="%231a2332" width="400" height="400"/%3E%3Cpath fill="%2300d9ff" d="M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z" opacity="0.3"/%3E%3C/svg%3E'}" alt="${suspect.name || 'Suspect'}" class="w-full h-full object-cover">
+                                            <img id="suspect-photo-${index}" ${_S}="${suspect.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"%3E%3Crect fill="%231a2332" width="400" height="400"/%3E%3Cpath fill="%2300d9ff" d="M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z" opacity="0.3"/%3E%3C/svg%3E'}" alt="${suspect.name || 'Suspect'}" class="w-full h-full object-cover">
                                         </div>
                                         ${isEditingInline ? `<input type="file" accept="image/*" onchange="handleInlineImageUpload(event, 'suspect-photo-${index}')" class="text-xs text-gray-400 mt-2 w-48">` : ''}
                                     </div>
@@ -5644,7 +5647,7 @@
                                     ${renderEditableField('City, State, ZIP', 'addressCityStateZip', suspect.addressCityStateZip, index)}
                                 </div>
                                 <div class="mt-4 w-full h-48 rounded-lg overflow-hidden bg-viper-dark ${!suspect.residencePhoto ? 'flex items-center justify-center border border-dashed border-gray-600' : ''}">
-                                    <img id="suspect-residence-${index}" src="${suspect.residencePhoto || ''}" alt="Residence" class="w-full h-full object-cover ${!suspect.residencePhoto ? 'hidden' : ''}">
+                                    <img id="suspect-residence-${index}" ${_S}="${suspect.residencePhoto || ''}" alt="Residence" class="w-full h-full object-cover ${!suspect.residencePhoto ? 'hidden' : ''}">
                                     ${!suspect.residencePhoto ? `<p id="suspect-residence-placeholder-${index}" class="text-gray-500 text-sm">No residence photo</p>` : ''}
                                 </div>
                                 ${isEditingInline ? `<input type="file" accept="image/*" onchange="handleInlineImageUpload(event, 'suspect-residence-${index}')" class="text-xs text-gray-400 mt-2">` : ''}
@@ -5844,7 +5847,7 @@
                                             <div class="bg-gradient-to-r from-viper-cyan/10 to-viper-purple/10 border border-viper-cyan/20 rounded-lg p-3 flex gap-3 items-start">
                                                 ${vehicle.photo ? `
                                                     <div class="shrink-0 w-32 h-24 rounded-lg overflow-hidden bg-viper-dark">
-                                                        <img src="${vehicle.photo}" alt="Vehicle" class="w-full h-full object-cover">
+                                                        <img ${_S}="${vehicle.photo}" alt="Vehicle" class="w-full h-full object-cover">
                                                     </div>
                                                 ` : ''}
                                                 <div class="flex-1 grid grid-cols-3 gap-3">
@@ -6697,9 +6700,9 @@
             const win = window.open('', '_blank');
             if (win) {
                 if (rs.fileType.includes('pdf')) {
-                    win.document.write(`<html><head><title>${rs.fileName}</title><style>body{margin:0}iframe{width:100%;height:100vh;border:none}</style></head><body><iframe src="${rs.fileData}"></iframe></body></html>`);
+                    win.document.write(`<html><head><title>${rs.fileName}</title><style>body{margin:0}iframe{width:100%;height:100vh;border:none}</style></head><body><iframe ${_S}="${rs.fileData}"></iframe></body></html>`);
                 } else {
-                    win.document.write(`<html><head><title>${rs.fileName}</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img src="${rs.fileData}"></body></html>`);
+                    win.document.write(`<html><head><title>${rs.fileName}</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img ${_S}="${rs.fileData}"></body></html>`);
                 }
             }
         }
@@ -6742,9 +6745,9 @@
             const win = window.open('', '_blank');
             if (win) {
                 if (fd.fileType.includes('pdf')) {
-                    win.document.write('<html><head><title>' + fd.fileName + '</title><style>body{margin:0}iframe{width:100%;height:100vh;border:none}</style></head><body><iframe src="' + fd.fileData + '"></iframe></body></html>');
+                    win.document.write('<html><head><title>' + fd.fileName + '</title><style>body{margin:0}iframe{width:100%;height:100vh;border:none}</style></head><body><iframe ' + _S + '="' + fd.fileData + '"></iframe></body></html>');
                 } else {
-                    win.document.write('<html><head><title>' + fd.fileName + '</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img src="' + fd.fileData + '"></body></html>');
+                    win.document.write('<html><head><title>' + fd.fileName + '</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img ' + _S + '="' + fd.fileData + '"></body></html>');
                 }
             }
         }
@@ -7073,7 +7076,7 @@
                             <div class="section">
                                 <h3>Personal Information</h3>
                                 <div style="display: flex; gap: 20px;">
-                                    ${suspect.photo ? `<img src="${suspect.photo}" class="photo" alt="Suspect Photo">` : ''}
+                                    ${suspect.photo ? `<img ${_S}="${suspect.photo}" class="photo" alt="Suspect Photo">` : ''}
                                     <div class="field-grid" style="flex: 1;">
                                         <div class="field">
                                             <label>Full Name:</label>
@@ -7120,7 +7123,7 @@
                                             <div>${suspect.addressCityStateZip || 'N/A'}</div>
                                         </div>
                                     </div>
-                                    ${suspect.residencePhoto ? `<img src="${suspect.residencePhoto}" class="photo" alt="Residence Photo">` : ''}
+                                    ${suspect.residencePhoto ? `<img ${_S}="${suspect.residencePhoto}" class="photo" alt="Residence Photo">` : ''}
                                 </div>
                             </div>
                             
@@ -7215,7 +7218,7 @@
                                                     <div>${v.plateNumber || 'N/A'}</div>
                                                 </div>
                                             </div>
-                                            ${v.photo ? `<img src="${v.photo}" class="photo" alt="Vehicle Photo" style="margin-top: 10px;">` : ''}
+                                            ${v.photo ? `<img ${_S}="${v.photo}" class="photo" alt="Vehicle Photo" style="margin-top: 10px;">` : ''}
                                         </div>
                                     `).join('')}
                                 </div>
@@ -7301,7 +7304,7 @@
             return `
                 <div class="glass-card rounded-xl p-6 hover:border-viper-purple transition cursor-pointer mx-auto" style="max-width: 400px; width: 100%;" onclick="viewVictimDetail(${index})">
                     <div class="aspect-square rounded-lg overflow-hidden mb-4 bg-viper-dark">
-                        <img src="${photoUrl}" alt="${victim.name || 'Victim'}" class="w-full h-full object-cover">
+                        <img ${_S}="${photoUrl}" alt="${victim.name || 'Victim'}" class="w-full h-full object-cover">
                     </div>
                     <h3 class="text-xl font-bold text-white mb-2">${victim.name || 'Unknown Victim'}</h3>
                     <div class="space-y-1 text-sm text-gray-400">
@@ -7367,7 +7370,7 @@
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div class="col-span-1">
                                     <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark border-2 border-viper-purple/30">
-                                        <img id="victim-photo-${index}" src="${victim.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"%3E%3Crect fill="%231a2332" width="400" height="400"/%3E%3Cpath fill="%239d4edd" d="M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z" opacity="0.3"/%3E%3C/svg%3E'}" alt="${victim.name || 'Victim'}" class="w-full h-full object-cover">
+                                        <img id="victim-photo-${index}" ${_S}="${victim.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"%3E%3Crect fill="%231a2332" width="400" height="400"/%3E%3Cpath fill="%239d4edd" d="M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z" opacity="0.3"/%3E%3C/svg%3E'}" alt="${victim.name || 'Victim'}" class="w-full h-full object-cover">
                                     </div>
                                     ${isEditingInline ? `
                                         <div class="mt-2">
@@ -7404,7 +7407,7 @@
                                 </div>
                                 <div class="col-span-1">
                                     <div class="aspect-video rounded-lg overflow-hidden bg-viper-dark ${!victim.residencePhoto ? 'flex items-center justify-center border-2 border-dashed border-gray-600' : 'border-2 border-viper-purple/30'}">
-                                        <img id="victim-residence-${index}" src="${victim.residencePhoto || ''}" alt="Residence" class="w-full h-full object-cover ${!victim.residencePhoto ? 'hidden' : ''}">
+                                        <img id="victim-residence-${index}" ${_S}="${victim.residencePhoto || ''}" alt="Residence" class="w-full h-full object-cover ${!victim.residencePhoto ? 'hidden' : ''}">
                                         ${!victim.residencePhoto ? `<p class="text-gray-400 text-sm">No residence photo</p>` : ''}
                                     </div>
                                     ${isEditingInline ? `
@@ -7440,7 +7443,7 @@
                                     ${victim.injuryPhotos.map((photo, pIndex) => `
                                         <div class="relative group">
                                             <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark">
-                                                <img src="${photo.url}" alt="${photo.description || 'Injury'}" class="w-full h-full object-cover cursor-pointer" onclick="viewPhotoModal('${photo.url}', '${photo.description || ''}')">
+                                                <img ${_S}="${photo.url}" alt="${photo.description || 'Injury'}" class="w-full h-full object-cover cursor-pointer" onclick="viewPhotoModal('${photo.url}', '${photo.description || ''}')">
                                             </div>
                                             <button onclick="removeInjuryPhoto(${index}, ${pIndex})" class="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition">
                                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -7467,7 +7470,7 @@
                                     ${victim.propertyPhotos.map((photo, pIndex) => `
                                         <div class="relative group">
                                             <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark">
-                                                <img src="${photo.url}" alt="${photo.description || 'Property Damage'}" class="w-full h-full object-cover cursor-pointer" onclick="viewPhotoModal('${photo.url}', '${photo.description || ''}')">
+                                                <img ${_S}="${photo.url}" alt="${photo.description || 'Property Damage'}" class="w-full h-full object-cover cursor-pointer" onclick="viewPhotoModal('${photo.url}', '${photo.description || ''}')">
                                             </div>
                                             <button onclick="removePropertyPhoto(${index}, ${pIndex})" class="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition">
                                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -7519,7 +7522,7 @@
                                             </div>
                                             ${vehicle.photo ? `
                                                 <div class="aspect-video rounded-lg overflow-hidden bg-viper-dark">
-                                                    <img src="${vehicle.photo}" alt="Vehicle" class="w-full h-full object-cover">
+                                                    <img ${_S}="${vehicle.photo}" alt="Vehicle" class="w-full h-full object-cover">
                                                 </div>
                                             ` : ''}
                                         </div>
@@ -7903,7 +7906,7 @@
                             </svg>
                         </button>
                     </div>
-                    <img src="${url}" alt="${description || 'Photo'}" class="w-full h-auto max-h-[80vh] object-contain rounded-lg">
+                    <img ${_S}="${url}" alt="${description || 'Photo'}" class="w-full h-auto max-h-[80vh] object-contain rounded-lg">
                 </div>
             `;
             
@@ -8212,7 +8215,7 @@
                             <div class="section">
                                 <h3>Personal Information</h3>
                                 <div style="display: flex; gap: 20px;">
-                                    ${victim.photo ? `<img src="${victim.photo}" class="photo" alt="Victim Photo">` : ''}
+                                    ${victim.photo ? `<img ${_S}="${victim.photo}" class="photo" alt="Victim Photo">` : ''}
                                     <div class="field-grid" style="flex: 1;">
                                         <div class="field">
                                             <label>Full Name:</label>
@@ -8259,7 +8262,7 @@
                                             <div>${victim.addressCityStateZip || 'N/A'}</div>
                                         </div>
                                     </div>
-                                    ${victim.residencePhoto ? `<img src="${victim.residencePhoto}" class="photo" alt="Residence Photo">` : ''}
+                                    ${victim.residencePhoto ? `<img ${_S}="${victim.residencePhoto}" class="photo" alt="Residence Photo">` : ''}
                                 </div>
                             </div>
                             
@@ -8291,7 +8294,7 @@
                                     <div class="photo-gallery">
                                         ${victim.injuryPhotos.map(p => `
                                             <div>
-                                                <img src="${p.url}" alt="${p.description || 'Injury'}">
+                                                <img ${_S}="${p.url}" alt="${p.description || 'Injury'}">
                                                 ${p.description ? `<div class="photo-caption">${p.description}</div>` : ''}
                                             </div>
                                         `).join('')}
@@ -8305,7 +8308,7 @@
                                     <div class="photo-gallery">
                                         ${victim.propertyPhotos.map(p => `
                                             <div>
-                                                <img src="${p.url}" alt="${p.description || 'Property Damage'}">
+                                                <img ${_S}="${p.url}" alt="${p.description || 'Property Damage'}">
                                                 ${p.description ? `<div class="photo-caption">${p.description}</div>` : ''}
                                             </div>
                                         `).join('')}
@@ -8332,7 +8335,7 @@
                                                     <div>${v.plateNumber || 'N/A'}</div>
                                                 </div>
                                             </div>
-                                            ${v.photo ? `<img src="${v.photo}" class="photo" alt="Vehicle Photo" style="margin-top: 10px;">` : ''}
+                                            ${v.photo ? `<img ${_S}="${v.photo}" class="photo" alt="Vehicle Photo" style="margin-top: 10px;">` : ''}
                                         </div>
                                     `).join('')}
                                 </div>
@@ -9476,7 +9479,7 @@
             return `
                 <div class="glass-card rounded-xl p-6 hover:border-viper-green transition cursor-pointer mx-auto" style="max-width: 400px; width: 100%;" onclick="viewWitnessDetail(${index})">
                     <div class="aspect-square rounded-lg overflow-hidden mb-4 bg-viper-dark">
-                        <img src="${photoUrl}" alt="${witness.name || 'Witness'}" class="w-full h-full object-cover">
+                        <img ${_S}="${photoUrl}" alt="${witness.name || 'Witness'}" class="w-full h-full object-cover">
                     </div>
                     <h3 class="text-xl font-bold text-white mb-2">${witness.name || 'Unknown Witness'}</h3>
                     <div class="space-y-1 text-sm text-gray-400">
@@ -9541,7 +9544,7 @@
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div class="col-span-1">
                                     <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark border-2 border-viper-green/30">
-                                        <img id="witness-photo-${index}" src="${witness.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"%3E%3Crect fill="%231a2332" width="400" height="400"/%3E%3Cpath fill="%2300ff88" d="M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z" opacity="0.3"/%3E%3C/svg%3E'}" alt="${witness.name || 'Witness'}" class="w-full h-full object-cover">
+                                        <img id="witness-photo-${index}" ${_S}="${witness.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"%3E%3Crect fill="%231a2332" width="400" height="400"/%3E%3Cpath fill="%2300ff88" d="M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z" opacity="0.3"/%3E%3C/svg%3E'}" alt="${witness.name || 'Witness'}" class="w-full h-full object-cover">
                                     </div>
                                     ${isEditingInline ? `
                                         <div class="mt-2">
@@ -9578,7 +9581,7 @@
                                 </div>
                                 <div class="col-span-1">
                                     <div class="aspect-video rounded-lg overflow-hidden bg-viper-dark ${!witness.residencePhoto ? 'flex items-center justify-center border-2 border-dashed border-gray-600' : 'border-2 border-viper-green/30'}">
-                                        <img id="witness-residence-${index}" src="${witness.residencePhoto || ''}" alt="Residence" class="w-full h-full object-cover ${!witness.residencePhoto ? 'hidden' : ''}">
+                                        <img id="witness-residence-${index}" ${_S}="${witness.residencePhoto || ''}" alt="Residence" class="w-full h-full object-cover ${!witness.residencePhoto ? 'hidden' : ''}">
                                         ${!witness.residencePhoto ? `<p class="text-gray-400 text-sm">No residence photo</p>` : ''}
                                     </div>
                                     ${isEditingInline ? `
@@ -10099,7 +10102,7 @@
                             <div class="section">
                                 <h3>Personal Information</h3>
                                 <div style="display: flex; gap: 20px;">
-                                    ${witness.photo ? `<img src="${witness.photo}" class="photo" alt="Witness Photo">` : ''}
+                                    ${witness.photo ? `<img ${_S}="${witness.photo}" class="photo" alt="Witness Photo">` : ''}
                                     <div class="field-grid" style="flex: 1;">
                                         <div class="field">
                                             <label>Full Name:</label>
@@ -10154,7 +10157,7 @@
                                             <div>${witness.email || 'N/A'}</div>
                                         </div>
                                     </div>
-                                    ${witness.residencePhoto ? `<img src="${witness.residencePhoto}" class="photo" alt="Residence Photo">` : ''}
+                                    ${witness.residencePhoto ? `<img ${_S}="${witness.residencePhoto}" class="photo" alt="Residence Photo">` : ''}
                                 </div>
                             </div>
                             
@@ -10267,7 +10270,7 @@
             return `
                 <div class="glass-card rounded-xl p-6 hover:border-viper-orange transition cursor-pointer" onclick="viewRecoveredVehicleDetail(${index})">
                     <div class="aspect-video rounded-lg overflow-hidden mb-4 bg-viper-dark">
-                        <img src="${photoUrl}" alt="${vehicle.makeModel || 'Vehicle'}" class="w-full h-full object-cover">
+                        <img ${_S}="${photoUrl}" alt="${vehicle.makeModel || 'Vehicle'}" class="w-full h-full object-cover">
                     </div>
                     <h3 class="text-xl font-bold text-white mb-2">${vehicle.makeModel || 'Unknown Vehicle'}</h3>
                     <div class="space-y-1 text-sm text-gray-400">
@@ -10318,7 +10321,7 @@
                             <h3 class="text-xl font-bold text-viper-orange mb-4">Vehicle Photo</h3>
                             ${vehicle.photo ? `
                                 <div class="aspect-video rounded-lg overflow-hidden bg-viper-dark max-w-2xl">
-                                    <img src="${vehicle.photo}" alt="Vehicle" class="w-full h-full object-cover cursor-pointer" onclick="viewPhotoModal('${vehicle.photo}', '${vehicle.makeModel || 'Vehicle Photo'}')">
+                                    <img ${_S}="${vehicle.photo}" alt="Vehicle" class="w-full h-full object-cover cursor-pointer" onclick="viewPhotoModal('${vehicle.photo}', '${vehicle.makeModel || 'Vehicle Photo'}')">
                                 </div>
                             ` : `
                                 <div class="aspect-video rounded-lg bg-viper-dark flex items-center justify-center border border-dashed border-gray-600 max-w-2xl">
@@ -10720,7 +10723,7 @@
                             
                             ${vehicle.photo ? `
                                 <div class="section">
-                                    <img src="${vehicle.photo}" class="photo" alt="Vehicle Photo">
+                                    <img ${_S}="${vehicle.photo}" class="photo" alt="Vehicle Photo">
                                 </div>
                             ` : ''}
                             
@@ -10845,7 +10848,7 @@
                         </div>
                     `}
                     <div class="aspect-square rounded-lg overflow-hidden mb-4 bg-viper-dark">
-                        <img src="${photoUrl}" alt="${person.name || 'Missing Person'}" class="w-full h-full object-cover">
+                        <img ${_S}="${photoUrl}" alt="${person.name || 'Missing Person'}" class="w-full h-full object-cover">
                     </div>
                     <h3 class="text-xl font-bold text-white mb-2">${person.name || 'Unknown'}</h3>
                     <div class="space-y-1 text-sm text-gray-400">
@@ -10910,7 +10913,7 @@
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div class="md:col-span-1">
                                     <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark mb-4">
-                                        <img id="missing-photo-${index}" src="${person.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"%3E%3Crect fill="%231a2332" width="200" height="200"/%3E%3Cpath fill="%23ffa726" d="M100 50a30 30 0 110 60 30 30 0 010-60zm0 80c-25 0-50 12.5-50 25v20h100v-20c0-12.5-25-25-50-25z" opacity="0.3"/%3E%3C/svg%3E'}" alt="${person.name}" class="w-full h-full object-cover">
+                                        <img id="missing-photo-${index}" ${_S}="${person.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"%3E%3Crect fill="%231a2332" width="200" height="200"/%3E%3Cpath fill="%23ffa726" d="M100 50a30 30 0 110 60 30 30 0 010-60zm0 80c-25 0-50 12.5-50 25v20h100v-20c0-12.5-25-25-50-25z" opacity="0.3"/%3E%3C/svg%3E'}" alt="${person.name}" class="w-full h-full object-cover">
                                     </div>
                                     ${isEditingInline ? `
                                         <div class="text-center">
@@ -11787,7 +11790,7 @@
             if (input.files && input.files[0]) {
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    preview.innerHTML = `<img src="${e.target.result}" class="w-32 h-32 object-cover rounded-lg border border-viper-orange">`;
+                    preview.innerHTML = `<img ${_S}="${e.target.result}" class="w-32 h-32 object-cover rounded-lg border border-viper-orange">`;
                 };
                 reader.readAsDataURL(input.files[0]);
             }
@@ -11798,7 +11801,7 @@
             if (input.files && input.files[0]) {
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    preview.innerHTML = `<img src="${e.target.result}" class="w-48 h-32 object-cover rounded-lg border border-viper-orange">`;
+                    preview.innerHTML = `<img ${_S}="${e.target.result}" class="w-48 h-32 object-cover rounded-lg border border-viper-orange">`;
                 };
                 reader.readAsDataURL(input.files[0]);
             }
@@ -12060,7 +12063,7 @@
                                     </div>
                                     <div class="md:col-span-2">
                                         <label class="block text-sm text-gray-400 mb-2">Photo</label>
-                                        ${person.photo ? `<img src="${person.photo}" class="w-32 h-32 object-cover rounded-lg border border-viper-orange mb-2">` : ''}
+                                        ${person.photo ? `<img ${_S}="${person.photo}" class="w-32 h-32 object-cover rounded-lg border border-viper-orange mb-2">` : ''}
                                         <input type="file" id="mp_photo" accept="image/*" onchange="previewMissingPersonPhoto(this)" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-orange focus:outline-none">
                                         <div id="mp_photoPreview" class="mt-2"></div>
                                     </div>
@@ -12131,7 +12134,7 @@
                                     </div>
                                     <div class="md:col-span-2">
                                         <label class="block text-sm text-gray-400 mb-2">Vehicle Photo</label>
-                                        ${person.vehicle?.photo ? `<img src="${person.vehicle.photo}" class="w-48 h-32 object-cover rounded-lg border border-viper-orange mb-2">` : ''}
+                                        ${person.vehicle?.photo ? `<img ${_S}="${person.vehicle.photo}" class="w-48 h-32 object-cover rounded-lg border border-viper-orange mb-2">` : ''}
                                         <input type="file" id="mp_vehicle_photo" accept="image/*" onchange="previewVehiclePhoto(this)" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-orange focus:outline-none">
                                         <div id="mp_vehicle_photoPreview" class="mt-2"></div>
                                     </div>
@@ -12389,7 +12392,7 @@
                             <p class="text-xs text-gray-500 mt-1">Upload your agency logo or badge image</p>
                             <div id="agency_logo_preview" class="mt-3">
                                 ${savedAgencyInfo.logo ? `
-                                    <img src="${savedAgencyInfo.logo}" class="h-20 rounded border border-viper-orange">
+                                    <img ${_S}="${savedAgencyInfo.logo}" class="h-20 rounded border border-viper-orange">
                                 ` : ''}
                             </div>
                         </div>
@@ -12471,7 +12474,7 @@
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     window.tempAgencyLogo = e.target.result;
-                    preview.innerHTML = `<img src="${e.target.result}" class="h-20 rounded border border-viper-orange">`;
+                    preview.innerHTML = `<img ${_S}="${e.target.result}" class="h-20 rounded border border-viper-orange">`;
                 };
                 reader.readAsDataURL(input.files[0]);
             }
@@ -12717,7 +12720,7 @@
                 <body>
                     <div class="page">
                         <div class="header">
-                            ${agencyInfo.logo ? `<img src="${agencyInfo.logo}" alt="Agency Logo" class="agency-logo">` : ''}
+                            ${agencyInfo.logo ? `<img ${_S}="${agencyInfo.logo}" alt="Agency Logo" class="agency-logo">` : ''}
                             <h1>⚠ MISSING PERSON ⚠</h1>
                             <h2>${person.name || 'UNKNOWN'}</h2>
                         </div>
@@ -12726,7 +12729,7 @@
                             <div class="main-section">
                                 <div class="photo-container">
                                     ${person.photo ? `
-                                        <img src="${person.photo}" alt="${person.name}" class="main-photo">
+                                        <img ${_S}="${person.photo}" alt="${person.name}" class="main-photo">
                                     ` : `
                                         <div class="no-photo">
                                             NO PHOTO<br>AVAILABLE
@@ -12854,7 +12857,7 @@
                                     ${vehicleInfo.photos && vehicleInfo.photos.length > 0 ? `
                                         <div class="vehicle-photos" style="grid-column: span 2; margin-top: 6px;">
                                             ${vehicleInfo.photos.slice(0, 2).map(photo => `
-                                                <img src="${photo}" alt="Vehicle" class="vehicle-photo">
+                                                <img ${_S}="${photo}" alt="Vehicle" class="vehicle-photo">
                                             `).join('')}
                                         </div>
                                     ` : ''}
@@ -12997,7 +13000,7 @@
                             <div class="grid grid-cols-3 gap-2">
                                 ${vehicle.photos.slice(0, 3).map((photo, idx) => `
                                     <div class="aspect-video rounded-lg overflow-hidden bg-viper-dark cursor-pointer" onclick="viewVehiclePhoto(${personIndex}, ${vehIdx}, ${idx})">
-                                        <img src="${photo}" alt="Vehicle Photo ${idx + 1}" class="w-full h-full object-cover">
+                                        <img ${_S}="${photo}" alt="Vehicle Photo ${idx + 1}" class="w-full h-full object-cover">
                                     </div>
                                 `).join('')}
                                 ${vehicle.photos.length > 3 ? `
@@ -13211,7 +13214,7 @@
                         window.tempVehiclePhotos.push(e.target.result);
                         const img = document.createElement('div');
                         img.className = 'aspect-video rounded-lg overflow-hidden bg-viper-dark border border-viper-cyan';
-                        img.innerHTML = `<img src="${e.target.result}" class="w-full h-full object-cover">`;
+                        img.innerHTML = `<img ${_S}="${e.target.result}" class="w-full h-full object-cover">`;
                         preview.appendChild(img);
                     };
                     reader.readAsDataURL(file);
@@ -13297,7 +13300,7 @@
                                 <div class="grid grid-cols-4 gap-2 mb-2">
                                     ${vehicle.photos.map((photo, idx) => `
                                         <div class="relative aspect-video rounded-lg overflow-hidden bg-viper-dark border border-viper-cyan">
-                                            <img src="${photo}" class="w-full h-full object-cover">
+                                            <img ${_S}="${photo}" class="w-full h-full object-cover">
                                             <button type="button" onclick="removeVehiclePhoto(${personIndex}, ${vehIdx}, ${idx})" 
                                                     class="absolute top-1 right-1 w-6 h-6 bg-red-500 hover:bg-red-600 rounded-full text-white text-xs">
                                                 ×
@@ -13371,7 +13374,7 @@
                         window.tempAdditionalVehiclePhotos.push(e.target.result);
                         const img = document.createElement('div');
                         img.className = 'aspect-video rounded-lg overflow-hidden bg-viper-dark border border-viper-cyan';
-                        img.innerHTML = `<img src="${e.target.result}" class="w-full h-full object-cover">`;
+                        img.innerHTML = `<img ${_S}="${e.target.result}" class="w-full h-full object-cover">`;
                         preview.appendChild(img);
                     };
                     reader.readAsDataURL(file);
@@ -13411,7 +13414,7 @@
                         <h3 class="text-xl font-bold text-white">Photo ${photoIdx + 1} of ${photos.length}</h3>
                         <button onclick="this.closest('.fixed').remove()" class="text-white hover:text-viper-cyan text-2xl">×</button>
                     </div>
-                    <img src="${photos[photoIdx]}" class="w-full h-auto rounded-lg">
+                    <img ${_S}="${photos[photoIdx]}" class="w-full h-auto rounded-lg">
                     <div class="flex justify-between mt-4">
                         ${photoIdx > 0 ? `
                             <button onclick="this.closest('.fixed').remove(); viewVehiclePhoto(${personIndex}, ${vehIdx}, ${photoIdx - 1})" 
@@ -14824,7 +14827,7 @@
                             <!-- QR Code + URL -->
                             <div class="flex gap-4 mb-3">
                                 <div class="flex-shrink-0 cursor-pointer" onclick="showCanvasFormQRModal('${form.formId}', ${idx})" title="Click to enlarge">
-                                    <img src="${form.qrDataUrl}" class="w-24 h-24 rounded-lg" alt="QR Code">
+                                    <img ${_S}="${form.qrDataUrl}" class="w-24 h-24 rounded-lg" alt="QR Code">
                                 </div>
                                 <div class="flex-1 min-w-0">
                                     <label class="text-xs text-gray-500 block mb-1">Share this link with field officers:</label>
@@ -14976,7 +14979,7 @@
                         <p class="text-gray-400 text-sm mb-6">Scan this QR code or share the link below</p>
                         
                         <div class="bg-white rounded-xl p-4 inline-block mb-6">
-                            <img src="${form.qrDataUrl}" class="w-64 h-64" alt="QR Code">
+                            <img ${_S}="${form.qrDataUrl}" class="w-64 h-64" alt="QR Code">
                         </div>
                         
                         <div class="mb-6">
@@ -15469,7 +15472,7 @@
             return `
                 <div class="glass-card rounded-xl p-6 hover:border-viper-orange transition cursor-pointer" onclick="viewNarcoticDetail(${index})">
                     <div class="aspect-square rounded-lg overflow-hidden mb-4 bg-viper-dark flex items-center justify-center">
-                        <img src="${hasPhoto ? narcotic.photo : placeholderImage}" 
+                        <img ${_S}="${hasPhoto ? narcotic.photo : placeholderImage}" 
                              alt="${narcotic.type}" 
                              class="w-full h-full object-cover">
                     </div>
@@ -15517,7 +15520,7 @@
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div class="md:col-span-1">
                                     <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark mb-4">
-                                        <img src="${narcotic.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"%3E%3Crect fill="%231a2332" width="200" height="200"/%3E%3Cpath fill="%23ffa726" d="M100 60l-15 20h10v40h10V80h10z" opacity="0.3"/%3E%3C/svg%3E'}" alt="${narcotic.type}" class="w-full h-full object-cover">
+                                        <img ${_S}="${narcotic.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"%3E%3Crect fill="%231a2332" width="200" height="200"/%3E%3Cpath fill="%23ffa726" d="M100 60l-15 20h10v40h10V80h10z" opacity="0.3"/%3E%3C/svg%3E'}" alt="${narcotic.type}" class="w-full h-full object-cover">
                                     </div>
                                     <div class="text-center">
                                         <label class="cursor-pointer px-4 py-2 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded-lg text-viper-purple text-sm transition inline-block">
@@ -15662,7 +15665,7 @@
             if (input.files && input.files[0]) {
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    preview.innerHTML = `<img src="${e.target.result}" class="w-32 h-32 object-cover rounded-lg border border-viper-orange">`;
+                    preview.innerHTML = `<img ${_S}="${e.target.result}" class="w-32 h-32 object-cover rounded-lg border border-viper-orange">`;
                 };
                 reader.readAsDataURL(input.files[0]);
             }
@@ -15759,7 +15762,7 @@
 
                             <div>
                                 <label class="block text-sm text-gray-400 mb-2">Photo</label>
-                                ${narcotic.photo ? `<img src="${narcotic.photo}" class="w-32 h-32 object-cover rounded-lg border border-viper-orange mb-2">` : ''}
+                                ${narcotic.photo ? `<img ${_S}="${narcotic.photo}" class="w-32 h-32 object-cover rounded-lg border border-viper-orange mb-2">` : ''}
                                 <input type="file" id="narc_photo" accept="image/*" onchange="previewNarcoticPhoto(this)" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-orange focus:outline-none">
                                 <div id="narc_photoPreview" class="mt-2"></div>
                             </div>
@@ -15915,7 +15918,7 @@
             return `
                 <div class="glass-card rounded-xl p-6 hover:border-viper-purple transition cursor-pointer" onclick="viewFirearmDetail(${index})">
                     <div class="aspect-video rounded-lg overflow-hidden mb-4 bg-viper-dark flex items-center justify-center">
-                        <img src="${hasPhoto ? firearm.photo : placeholderImage}" 
+                        <img ${_S}="${hasPhoto ? firearm.photo : placeholderImage}" 
                              alt="${firearm.make} ${firearm.model}" 
                              class="w-full h-full object-cover">
                     </div>
@@ -15962,7 +15965,7 @@
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div class="md:col-span-1">
                                     <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark mb-4">
-                                        <img src="${firearm.photo || 'https://images.unsplash.com/photo-1595590424283-b8f17842773f?w=800&auto=format&fit=crop&q=80'}" alt="${firearm.make} ${firearm.model}" class="w-full h-full object-cover">
+                                        <img ${_S}="${firearm.photo || 'https://images.unsplash.com/photo-1595590424283-b8f17842773f?w=800&auto=format&fit=crop&q=80'}" alt="${firearm.make} ${firearm.model}" class="w-full h-full object-cover">
                                     </div>
                                     <div class="text-center">
                                         <label class="cursor-pointer px-4 py-2 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded-lg text-viper-purple text-sm transition inline-block">
@@ -16115,7 +16118,7 @@
             if (input.files && input.files[0]) {
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    preview.innerHTML = `<img src="${e.target.result}" class="w-48 h-32 object-cover rounded-lg border border-viper-purple">`;
+                    preview.innerHTML = `<img ${_S}="${e.target.result}" class="w-48 h-32 object-cover rounded-lg border border-viper-purple">`;
                 };
                 reader.readAsDataURL(input.files[0]);
             }
@@ -16207,7 +16210,7 @@
 
                             <div>
                                 <label class="block text-sm text-gray-400 mb-2">Photo (Optional)</label>
-                                ${firearm.photo ? `<img src="${firearm.photo}" class="w-48 h-32 object-cover rounded-lg border border-viper-purple mb-2">` : ''}
+                                ${firearm.photo ? `<img ${_S}="${firearm.photo}" class="w-48 h-32 object-cover rounded-lg border border-viper-purple mb-2">` : ''}
                                 <input type="file" id="firearm_photo" accept="image/*" onchange="previewFirearmPhoto(this)" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-purple focus:outline-none">
                                 <div id="firearm_photoPreview" class="mt-2"></div>
                             </div>
@@ -16840,7 +16843,7 @@
 
         function renderOpsResidentCard(r, i) {
             const photoHtml = r.photo
-                ? '<img src="' + r.photo + '" class="w-20 h-20 rounded-lg object-cover border border-gray-600" onclick="viewOpsResidentPhoto(' + i + ')">'
+                ? '<img ' + _S + '="' + r.photo + '" class="w-20 h-20 rounded-lg object-cover border border-gray-600" onclick="viewOpsResidentPhoto(' + i + ')">'
                 : '<div class="w-20 h-20 rounded-lg bg-viper-dark border border-gray-600 flex items-center justify-center text-gray-500 text-xs">No Photo</div>';
             return '<div class="flex gap-4 items-start p-3 bg-viper-dark/50 rounded-lg border border-gray-700 mb-2" id="opsResident_' + i + '">'
                 + '<div class="shrink-0 flex flex-col items-center gap-1">'
@@ -16942,7 +16945,7 @@
             const r = opsPlanData?.otherResidents?.[idx];
             if (!r || !r.photo) return;
             const w = window.open('', '_blank', 'width=600,height=600');
-            w.document.write('<html><head><title>Resident Photo</title><style>body{margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh}img{max-width:100%;max-height:100%}</style></head><body><img src="' + r.photo + '"></body></html>');
+            w.document.write('<html><head><title>Resident Photo</title><style>body{margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh}img{max-width:100%;max-height:100%}</style></head><body><img ' + _S + '="' + r.photo + '"></body></html>');
         }
 
         function addEntryTeamRowInPlan() {
@@ -17252,7 +17255,7 @@
                                 <div id="ops_locationPhotos" class="grid grid-cols-4 gap-3">
                                     ${(d.locationPhotos && d.locationPhotos.length > 0) ? d.locationPhotos.map((photo, pi) => `
                                         <div class="relative group rounded-lg overflow-hidden bg-viper-dark border border-gray-700 h-40">
-                                            <img src="${photo.data}" alt="${photo.caption || 'Location'}" class="w-full h-full object-cover">
+                                            <img ${_S}="${photo.data}" alt="${photo.caption || 'Location'}" class="w-full h-full object-cover">
                                             <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center gap-2">
                                                 <button onclick="viewOpsLocationPhoto(${pi})" class="px-3 py-1 bg-viper-green/30 rounded text-viper-green text-xs">View</button>
                                                 <button onclick="removeOpsLocationPhoto(${pi})" class="px-3 py-1 bg-red-500/30 rounded text-red-400 text-xs">Remove</button>
@@ -17677,7 +17680,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 <div class="page">
     <!-- COVER PAGE -->
     <div class="cover">
-        ${deptBadge ? '<img src="' + deptBadge + '" class="cover-badge" alt="Department Badge">' : ''}
+        ${deptBadge ? '<img ' + _S + '="' + deptBadge + '" class="cover-badge" alt="Department Badge">' : ''}
         <h1>Operations Plan</h1>
         <h2>${agency || 'Law Enforcement Agency'}</h2>
         <div class="cover-meta">
@@ -17754,7 +17757,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         <div id="ops-residents" class="section-header"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-residents') + 1}</span> Other Residents at Location</div>
         ${d.otherResidents.map((r, ri) => `
             <div style="display:flex;gap:16px;align-items:flex-start;padding:14px;margin:10px 0;border:1px solid #ddd;border-radius:8px;background:#fafafa">
-                ${r.photo ? '<img src="' + r.photo + '" style="width:80px;height:80px;border-radius:8px;object-fit:cover;border:1px solid #ccc">' : '<div style="width:80px;height:80px;border-radius:8px;background:#eee;display:flex;align-items:center;justify-content:center;color:#999;font-size:11px;border:1px solid #ccc">No Photo</div>'}
+                ${r.photo ? '<img ' + _S + '="' + r.photo + '" style="width:80px;height:80px;border-radius:8px;object-fit:cover;border:1px solid #ccc">' : '<div style="width:80px;height:80px;border-radius:8px;background:#eee;display:flex;align-items:center;justify-content:center;color:#999;font-size:11px;border:1px solid #ccc">No Photo</div>'}
                 <div style="flex:1">
                     <div style="font-weight:700;font-size:15px;margin-bottom:4px">${r.name || 'Unknown'}</div>
                     ${r.dob ? '<div style="font-size:13px;color:#555">DOB: ' + r.dob + '</div>' : ''}
@@ -17824,7 +17827,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
     ${(includePhotos && d.locationPhotos && d.locationPhotos.length > 0) ? `
         <div id="ops-photos" class="section-header" style="page-break-before:always"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-photos') + 1}</span> Location Photos</div>
         <div class="photo-grid">
-            ${d.locationPhotos.map(p => '<div class="photo-card"><img src="' + p.data + '" alt="' + (p.caption || '') + '"><p>' + (p.caption || p.fileName || '') + '</p></div>').join('')}
+            ${d.locationPhotos.map(p => '<div class="photo-card"><img ' + _S + '="' + p.data + '" alt="' + (p.caption || '') + '"><p>' + (p.caption || p.fileName || '') + '</p></div>').join('')}
         </div>
     ` : ''}
 
@@ -17840,7 +17843,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             <div class="suspect-profile">
                 <div class="suspect-profile-header">Suspect ${si + 1}: ${s.name || 'Unknown'}</div>
                 <div style="display:flex;gap:20px">
-                    ${s.photo ? '<img src="' + s.photo + '" class="suspect-photo">' : ''}
+                    ${s.photo ? '<img ' + _S + '="' + s.photo + '" class="suspect-photo">' : ''}
                     <div style="flex:1">
                         <div class="field-row">
                             <div class="field"><label>Name</label><span>${s.name || '—'}</span></div>
@@ -17876,7 +17879,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     <div class="suspect-section"><h4>Vehicles</h4>
                         ${s.vehicles.map(v => `
                             <div class="item-card" style="display:flex;gap:12px;align-items:start">
-                                ${v.photo ? '<img src="' + v.photo + '" style="width:120px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #ddd;flex-shrink:0">' : ''}
+                                ${v.photo ? '<img ' + _S + '="' + v.photo + '" style="width:120px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #ddd;flex-shrink:0">' : ''}
                                 <div><strong>${[v.color, v.makeModel].filter(Boolean).join(' ')}</strong>${v.plateNumber ? ' — Plate: ' + v.plateNumber : ''}</div>
                             </div>
                         `).join('')}
@@ -17895,7 +17898,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     ${!hasCrimHistory && !hasRapSheet ? '<p style="color:#999;font-size:12px">No criminal history on file</p>' : ''}
                 </div>
 
-                ${s.residencePhoto ? '<div class="suspect-section"><h4>Residence Photo</h4><img src="' + s.residencePhoto + '" style="max-width:100%;max-height:250px;border-radius:6px;border:1px solid #ddd"></div>' : ''}
+                ${s.residencePhoto ? '<div class="suspect-section"><h4>Residence Photo</h4><img ' + _S + '="' + s.residencePhoto + '" style="max-width:100%;max-height:250px;border-radius:6px;border:1px solid #ddd"></div>' : ''}
             </div>
         `; }).join('')}
 
@@ -17906,16 +17909,16 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 let html = '';
                 if (s.firearmsDoc && s.firearmsDoc.fileData) {
                     if (s.firearmsDoc.fileType && s.firearmsDoc.fileType.includes('image')) {
-                        html += '<div style="margin:15px 0;page-break-inside:avoid"><p style="font-weight:700;font-size:13px;margin:0 0 8px 0">Firearms Document — ' + (s.name || 'Suspect ' + (si+1)) + '</p><img src="' + s.firearmsDoc.fileData + '" style="max-width:100%;border:1px solid #ddd;border-radius:6px"></div>';
+                        html += '<div style="margin:15px 0;page-break-inside:avoid"><p style="font-weight:700;font-size:13px;margin:0 0 8px 0">Firearms Document — ' + (s.name || 'Suspect ' + (si+1)) + '</p><img ' + _S + '="' + s.firearmsDoc.fileData + '" style="max-width:100%;border:1px solid #ddd;border-radius:6px"></div>';
                     } else {
-                        html += '<div style="margin:15px 0"><p style="font-weight:700;font-size:13px">Firearms Document — ' + (s.name || 'Suspect ' + (si+1)) + ': <a href="' + s.firearmsDoc.fileData + '" target="_blank">' + s.firearmsDoc.fileName + '</a></p></div>';
+                        html += '<div style="margin:15px 0"><p style="font-weight:700;font-size:13px">Firearms Document — ' + (s.name || 'Suspect ' + (si+1)) + ': <a hr' + 'ef="' + s.firearmsDoc.fileData + '" target="_blank">' + s.firearmsDoc.fileName + '</a></p></div>';
                     }
                 }
                 if (s.rapSheet && s.rapSheet.fileData) {
                     if (s.rapSheet.fileType && s.rapSheet.fileType.includes('image')) {
-                        html += '<div style="margin:15px 0;page-break-inside:avoid"><p style="font-weight:700;font-size:13px;margin:0 0 8px 0">Criminal History / Rap Sheet — ' + (s.name || 'Suspect ' + (si+1)) + '</p><img src="' + s.rapSheet.fileData + '" style="max-width:100%;border:1px solid #ddd;border-radius:6px"></div>';
+                        html += '<div style="margin:15px 0;page-break-inside:avoid"><p style="font-weight:700;font-size:13px;margin:0 0 8px 0">Criminal History / Rap Sheet — ' + (s.name || 'Suspect ' + (si+1)) + '</p><img ' + _S + '="' + s.rapSheet.fileData + '" style="max-width:100%;border:1px solid #ddd;border-radius:6px"></div>';
                     } else {
-                        html += '<div style="margin:15px 0"><p style="font-weight:700;font-size:13px">Criminal History / Rap Sheet — ' + (s.name || 'Suspect ' + (si+1)) + ': <a href="' + s.rapSheet.fileData + '" target="_blank">' + s.rapSheet.fileName + '</a></p></div>';
+                        html += '<div style="margin:15px 0"><p style="font-weight:700;font-size:13px">Criminal History / Rap Sheet — ' + (s.name || 'Suspect ' + (si+1)) + ': <a hr' + 'ef="' + s.rapSheet.fileData + '" target="_blank">' + s.rapSheet.fileName + '</a></p></div>';
                     }
                 }
                 return html;
@@ -17962,7 +17965,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                 <div class="glass-card rounded-xl p-5 max-w-md w-full">
                                     <h3 class="text-lg font-bold text-white mb-3">Photo Caption</h3>
                                     <p class="text-xs text-gray-400 mb-2">${file.name}</p>
-                                    <img src="${data}" class="w-full h-32 object-cover rounded-lg mb-3">
+                                    <img ${_S}="${data}" class="w-full h-32 object-cover rounded-lg mb-3">
                                     <input type="text" id="captionInput" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none mb-4" placeholder="Optional caption (e.g. Front entrance, Side gate)">
                                     <div class="flex gap-2 justify-end">
                                         <button onclick="document.getElementById('captionModal').remove();window._captionResolve('')" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white text-sm transition">Skip</button>
@@ -17995,7 +17998,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const photo = opsPlanData.locationPhotos[index];
             const w = window.open('', '_blank');
             if (w) {
-                w.document.write('<html><head><title>' + (photo.caption || photo.fileName) + '</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img src="' + photo.data + '"></body></html>');
+                w.document.write('<html><head><title>' + (photo.caption || photo.fileName) + '</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img ' + _S + '="' + photo.data + '"></body></html>');
             }
         }
 
@@ -18091,9 +18094,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const newWindow = window.open('', '_blank');
             if (newWindow) {
                 if (plan.fileType && plan.fileType.includes('pdf')) {
-                    newWindow.document.write('<html><head><title>' + plan.fileName + '</title><style>body{margin:0;padding:0}iframe{width:100%;height:100vh;border:none}</style></head><body><iframe src="' + plan.fileData + '"></iframe></body></html>');
+                    newWindow.document.write('<html><head><title>' + plan.fileName + '</title><style>body{margin:0;padding:0}iframe{width:100%;height:100vh;border:none}</style></head><body><iframe ' + _S + '="' + plan.fileData + '"></iframe></body></html>');
                 } else if (plan.fileType && plan.fileType.includes('image')) {
-                    newWindow.document.write('<html><head><title>' + plan.fileName + '</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img src="' + plan.fileData + '" alt="' + plan.fileName + '"></body></html>');
+                    newWindow.document.write('<html><head><title>' + plan.fileName + '</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img ' + _S + '="' + plan.fileData + '" alt="' + plan.fileName + '"></body></html>');
                 } else {
                     const link = document.createElement('a');
                     link.href = plan.fileData;

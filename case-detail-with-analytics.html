@@ -5344,12 +5344,12 @@
             if (fileType === 'warrant' && warrant.hasWarrantFile) {
                 filePath = warrant.warrantFilePath;
                 fileName = warrant.warrantFileName;
-                // Auto-resolve missing path from case number + file name
-                if (!filePath && fileName) {
+                // Auto-resolve: try stored filename, or scan directory
+                if (!filePath) {
                     filePath = await window.electronAPI.resolveWarrantPath({
                         caseNumber: currentCase.caseNumber,
                         subfolder: 'Signed',
-                        fileName: fileName
+                        fileName: fileName || ''
                     });
                     if (filePath) {
                         warrant.warrantFilePath = filePath;
@@ -5362,12 +5362,12 @@
             } else if (fileType === 'return' && warrant.hasCourtReturn) {
                 filePath = warrant.courtReturnFile ? warrant.courtReturnFile.path : null;
                 fileName = warrant.courtReturnFile ? warrant.courtReturnFile.name : '';
-                // Auto-resolve missing court return path
-                if (!filePath && fileName) {
+                // Auto-resolve court return path
+                if (!filePath) {
                     filePath = await window.electronAPI.resolveWarrantPath({
                         caseNumber: currentCase.caseNumber,
                         subfolder: 'CourtReturn',
-                        fileName: fileName
+                        fileName: fileName || ''
                     });
                     if (filePath && warrant.courtReturnFile) {
                         warrant.courtReturnFile.path = filePath;

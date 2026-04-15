@@ -1472,8 +1472,24 @@ ipcMain.handle('read-warrant-file', async (event, filePath) => {
 });
 
 ipcMain.handle('resolve-warrant-path', async (event, { caseNumber, subfolder, fileName }) => {
-  const filePath = path.join(casesDir, caseNumber, 'Warrants', subfolder, fileName);
-  if (fs.existsSync(filePath)) return filePath;
+  const warrantDir = path.join(casesDir, caseNumber, 'Warrants', subfolder);
+  // Try exact filename first
+  if (fileName) {
+    const filePath = path.join(warrantDir, fileName);
+    if (fs.existsSync(filePath)) return filePath;
+  }
+  // Fallback: scan directory for any file (handles missing/mismatched fileName)
+  try {
+    if (fs.existsSync(warrantDir)) {
+      const files = fs.readdirSync(warrantDir).filter(f => !f.startsWith('.'));
+      if (files.length > 0) {
+        console.log('resolve-warrant-path: found', files[0], 'in', warrantDir);
+        return path.join(warrantDir, files[0]);
+      }
+    }
+  } catch (err) {
+    console.error('resolve-warrant-path scan error:', err);
+  }
   return null;
 });
 

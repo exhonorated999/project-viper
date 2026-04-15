@@ -5344,16 +5344,40 @@
             if (fileType === 'warrant' && warrant.hasWarrantFile) {
                 filePath = warrant.warrantFilePath;
                 fileName = warrant.warrantFileName;
+                // Auto-resolve missing path from case number + file name
+                if (!filePath && fileName) {
+                    filePath = await window.electronAPI.resolveWarrantPath({
+                        caseNumber: currentCase.caseNumber,
+                        subfolder: 'Signed',
+                        fileName: fileName
+                    });
+                    if (filePath) {
+                        warrant.warrantFilePath = filePath;
+                        saveWarrantsToStorage();
+                    }
+                }
             } else if (fileType === 'production' && warrant.hasProduction) {
                 viewWarrantProduction(warrant);
                 return;
             } else if (fileType === 'return' && warrant.hasCourtReturn) {
                 filePath = warrant.courtReturnFile ? warrant.courtReturnFile.path : null;
                 fileName = warrant.courtReturnFile ? warrant.courtReturnFile.name : '';
+                // Auto-resolve missing court return path
+                if (!filePath && fileName) {
+                    filePath = await window.electronAPI.resolveWarrantPath({
+                        caseNumber: currentCase.caseNumber,
+                        subfolder: 'CourtReturn',
+                        fileName: fileName
+                    });
+                    if (filePath && warrant.courtReturnFile) {
+                        warrant.courtReturnFile.path = filePath;
+                        saveWarrantsToStorage();
+                    }
+                }
             }
             
             if (!filePath) {
-                showToast('File path not found — file may need to be re-uploaded', 'error');
+                showToast('File not found on disk — file may need to be re-uploaded', 'error');
                 return;
             }
 
@@ -21295,12 +21319,367 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             rmsImports = getRmsImports();
         }
 
+        /* ---------- Prosecution Report Parser (Westminster PD / case filing format) ---------- */
+        function parseProsecutionReport(text, fileName) {
+            const rawLines = text.split('\n').map(l => l.trim());
+            // Strip page headers: "Page N of N", "Westminster PD Prosecution Report - Continued",
+            // "Defendant: Name  DOB: ...", "Filing Type: ...", "WPD Case Number: ..."
+            const cleaned = [];
+            for (let i = 0; i < rawLines.length; i++) {
+                const l = rawLines[i];
+                if (/^Page \d+ of \d+$/.test(l)) continue;
+                if (/Prosecution Report\s*-\s*Continued/i.test(l)) continue;
+                if (/^Defendant:\s+.+\s+DOB:/i.test(l)) continue;
+                if (/^Filing Type:\s+/i.test(l) && /^\w/.test(rawLines[i-1] || '')) continue; // skip header-repeat filing type
+                if (/^WPD Case Number:\s+/i.test(l)) continue;
+                if (/^\w+ Police Department$/.test(l) && /^Prosecution Report$/i.test(rawLines[i+1] || '')) { i++; continue; }
+                if (/^Prosecution Report$/i.test(l)) continue;
+                if (/^\w+ County Court$/i.test(l)) continue;
+                cleaned.push(l);
+            }
+            const lines = cleaned;
+
+            const report = {
+                id: 'rms_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+                fileName, importedAt: new Date().toISOString(),
+                reportNumber: '', reportDate: '', reportType: 'Prosecution Report',
+                supplementNo: '', agencyName: '', location: '', beat: '',
+                fromDateTime: '', toDateTime: '',
+                offenses: [], personsInvolved: [], vehicles: [], property: [],
+                narratives: [], digital: [], confidentialPersons: [], rawText: text
+            };
+
+            // Helper: get value after a label line
+            function valAfter(label, startIdx) {
+                for (let j = startIdx || 0; j < lines.length - 1; j++) {
+                    if (lines[j] === label || lines[j].startsWith(label)) return { val: lines[j + 1], idx: j + 1 };
+                }
+                return { val: '', idx: -1 };
+            }
+
+            // Find major section starts
+            const defIdx = lines.indexOf('Defendant Information');
+            const filingIdx = lines.findIndex(l => /Case Filing Information/.test(l));
+            const incIdx = lines.indexOf('Incident Information');
+            const chargesIdx = lines.findIndex(l => /^Charges\s*\(\d+\)/.test(l));
+            const witnessIdx = lines.indexOf('Witnesses');
+            const empWitIdx = lines.findIndex(l => /Employee Witnesses/.test(l));
+            const evidIdx = lines.indexOf('Evidence');
+            const vicLabelIdx = lines.indexOf('Victim Name');
+
+            // ---- Defendant ----
+            if (defIdx >= 0) {
+                const end = filingIdx > defIdx ? filingIdx : incIdx > defIdx ? incIdx : lines.length;
+                const defLines = lines.slice(defIdx, end);
+                const def = { involvement: 'DEFENDANT', name: '', dob: '', age: '', race: '', sex: '', detail: '' };
+                const extras = {};
+                for (let j = 0; j < defLines.length - 1; j++) {
+                    const dl = defLines[j];
+                    const nv = defLines[j + 1];
+                    if (dl === 'Defendant Name') { def.name = nv; j++; }
+                    else if (dl === 'Date Of Birth') { def.dob = nv; j++; }
+                    else if (dl === 'Age') { def.age = nv; j++; }
+                    else if (dl === 'Race') { def.race = nv; j++; }
+                    else if (dl === 'Sex') { def.sex = nv; j++; }
+                    else if (dl === 'Ethnicity') { extras.ethnicity = nv; j++; }
+                    else if (dl === "Defendant's Address" || dl === 'Defendant Address') { extras.address = nv; j++; }
+                    else if (dl === 'Phone 1' && nv && /\d/.test(nv)) { extras.phone = nv; j++; }
+                    else if (dl === 'Height') { extras.height = nv; j++; }
+                    else if (dl === 'Weight') { extras.weight = nv; j++; }
+                    else if (dl === 'Hair') { extras.hair = nv; j++; }
+                    else if (dl === 'Eyes') { extras.eyes = nv; j++; }
+                    else if (dl === "Driver's License #" || dl === 'Driver License #') { extras.dl = nv; j++; }
+                    else if (dl === 'License State') { extras.dlState = nv; j++; }
+                    else if (dl === 'SID Number') { extras.sid = nv; j++; }
+                    else if (dl === 'FBI Number') { extras.fbi = nv; j++; }
+                }
+                def.detail = Object.entries(extras).filter(([,v]) => v).map(([k,v]) => k + ': ' + v).join('; ');
+                report.personsInvolved.push(def);
+            }
+
+            // ---- Filing Info ----
+            if (filingIdx >= 0) {
+                const end = incIdx > filingIdx ? incIdx : lines.length;
+                const fLines = lines.slice(filingIdx, end);
+                for (let j = 0; j < fLines.length - 1; j++) {
+                    if (fLines[j] === 'Date Of Filing') report.reportDate = fLines[j + 1];
+                    if (/Filing Officer/i.test(fLines[j])) {
+                        const narr = { officer: fLines[j + 1].replace(/\s+\d+$/, ''), badge: (fLines[j + 1].match(/(\d+)$/) || [])[1] || '', text: 'Filing Officer/Detective' };
+                        report.narratives.push(narr);
+                    }
+                }
+            }
+
+            // ---- Incident Info ----
+            if (incIdx >= 0) {
+                const end = vicLabelIdx > incIdx ? vicLabelIdx : chargesIdx > incIdx ? chargesIdx : witnessIdx > incIdx ? witnessIdx : lines.length;
+                const iLines = lines.slice(incIdx, end);
+                for (let j = 0; j < iLines.length - 1; j++) {
+                    if (iLines[j] === 'Date Reported') report.reportDate = report.reportDate || iLines[j + 1];
+                    if (iLines[j] === 'Occurred From') report.fromDateTime = iLines[j + 1];
+                    if (iLines[j] === 'Occurred To') report.toDateTime = iLines[j + 1];
+                    if (iLines[j] === 'Incident Location') report.location = iLines[j + 1];
+                    if (iLines[j] === 'Case Number') report.reportNumber = iLines[j + 1];
+                }
+            }
+
+            // ---- Victim ----
+            if (vicLabelIdx >= 0) {
+                const end = chargesIdx > vicLabelIdx ? chargesIdx : witnessIdx > vicLabelIdx ? witnessIdx : lines.length;
+                const vLines = lines.slice(vicLabelIdx, end);
+                const vic = { involvement: 'VICTIM', name: '', dob: '', age: '', race: '', sex: '', detail: '' };
+                for (let j = 0; j < vLines.length - 1; j++) {
+                    if (vLines[j] === 'Victim Name') { vic.name = vLines[j + 1]; j++; }
+                    else if (vLines[j] === 'Date Of Birth' && !vic.dob) { vic.dob = vLines[j + 1]; j++; }
+                    else if (vLines[j] === 'Age' && !vic.age) { vic.age = vLines[j + 1]; j++; }
+                    else if (vLines[j] === 'Race' && !vic.race) { vic.race = vLines[j + 1]; j++; }
+                    else if (vLines[j] === 'Sex' && !vic.sex) { vic.sex = vLines[j + 1]; j++; }
+                }
+                if (vic.name) report.personsInvolved.push(vic);
+            }
+
+            // ---- Charges ----
+            if (chargesIdx >= 0) {
+                const end = witnessIdx > chargesIdx ? witnessIdx : vicLabelIdx > chargesIdx ? vicLabelIdx : lines.length;
+                const cLines = lines.slice(chargesIdx + 1, end);
+                let currentCharge = null;
+                for (let j = 0; j < cLines.length; j++) {
+                    const cl = cLines[j];
+                    if (/^Charge\s+/.test(cl) || (cl === 'Charge' && cLines[j + 1])) {
+                        if (currentCharge) report.offenses.push(currentCharge);
+                        const statuteText = cl.replace(/^Charge\s*/, '') || cLines[j + 1] || '';
+                        currentCharge = { number: report.offenses.length + 1, status: '', statute: '', description: statuteText, severity: '' };
+                        if (cl === 'Charge') j++; // skip next line (already consumed)
+                    } else if (/^\d+$/.test(cl) && currentCharge) {
+                        currentCharge.number = parseInt(cl);
+                    } else if (/Attempted or Completed/i.test(cl) && currentCharge) {
+                        const m = cl.match(/Attempted or Completed\s+(Completed|Attempted)/i);
+                        if (m) currentCharge.status = m[1].toUpperCase();
+                    } else if (/Severity\/Class/i.test(cl) && currentCharge) {
+                        const m = cl.match(/Severity\/Class\s+(.*)/i);
+                        if (m) currentCharge.severity = m[1].trim();
+                    } else if (currentCharge && !currentCharge.description && cl.length > 10) {
+                        currentCharge.description += ' ' + cl;
+                    }
+                }
+                if (currentCharge) report.offenses.push(currentCharge);
+            }
+
+            // ---- Witnesses ----
+            if (witnessIdx >= 0) {
+                const end = empWitIdx > witnessIdx ? empWitIdx : evidIdx > witnessIdx ? evidIdx : lines.length;
+                const wLines = lines.slice(witnessIdx + 1, end);
+                let currentWit = null;
+                for (let j = 0; j < wLines.length; j++) {
+                    const wl = wLines[j];
+                    if (/^Witness #\d+/.test(wl)) {
+                        if (currentWit) report.personsInvolved.push(currentWit);
+                        currentWit = { involvement: 'WITNESS', name: '', dob: '', age: '', race: '', sex: '', detail: '' };
+                        // Next line is the name
+                        if (wLines[j + 1] && !/^Date Of Birth|^Age|^Race|^Sex/.test(wLines[j + 1])) {
+                            currentWit.name = wLines[j + 1]; j++;
+                        }
+                    } else if (currentWit) {
+                        if (wl === 'Date Of Birth' && wLines[j + 1]) { currentWit.dob = wLines[j + 1]; j++; }
+                        else if (wl === 'Age' && wLines[j + 1]) { currentWit.age = wLines[j + 1]; j++; }
+                        else if (wl === 'Race' && wLines[j + 1]) { currentWit.race = wLines[j + 1]; j++; }
+                        else if (wl === 'Sex' && wLines[j + 1]) { currentWit.sex = wLines[j + 1]; j++; }
+                        else if (/^Witness Comments:/i.test(wl)) {
+                            currentWit.detail = wl.replace(/^Witness Comments:\s*/i, '');
+                        } else if (/^Parent\/Guardian/i.test(wl)) {
+                            currentWit.detail = (currentWit.detail ? currentWit.detail + '; ' : '') + wl;
+                        }
+                    }
+                }
+                if (currentWit) report.personsInvolved.push(currentWit);
+            }
+
+            // ---- Employee Witnesses ----
+            if (empWitIdx >= 0) {
+                const end = evidIdx > empWitIdx ? evidIdx : lines.length;
+                const eLines = lines.slice(empWitIdx + 1, end);
+                for (let j = 0; j < eLines.length; j++) {
+                    if (eLines[j] === 'Employee Name and Badge/ID Number' && eLines[j + 1]) {
+                        const m = eLines[j + 1].match(/^(.+?)\s+(\d{3,5})$/);
+                        if (m) {
+                            report.narratives.push({ officer: m[1].trim(), badge: m[2], text: 'Employee Witness' });
+                        }
+                        j++;
+                    }
+                }
+            }
+
+            // ---- Evidence ----
+            if (evidIdx >= 0) {
+                const eLine = lines.slice(evidIdx + 1).find(l => l && l !== 'Evidence');
+                if (eLine) report.digital.push({ officer: '', badge: '', description: eLine });
+            }
+
+            // Agency from filename or content
+            report.agencyName = (text.match(/(\w+ Police Department)/)?.[1]) || '';
+            if (!report.reportNumber) {
+                const fnNum = fileName.match(/(\d{6,12})/);
+                if (fnNum) report.reportNumber = fnNum[1];
+            }
+
+            return report;
+        }
+
+        /* ---------- Incident Summary Parser (Westminster PD / officer report summary format) ---------- */
+        function parseIncidentSummary(text, fileName) {
+            const rawLines = text.split('\n').map(l => l.trim());
+            // Strip page headers
+            const cleaned = [];
+            for (let i = 0; i < rawLines.length; i++) {
+                const l = rawLines[i];
+                if (/^Page \d+ of \d+$/.test(l)) continue;
+                if (/^Printed by\s+/i.test(l)) continue;
+                if (/^Case Number:\s*$/i.test(l)) { if (rawLines[i + 1] && /^\d/.test(rawLines[i + 1])) i++; continue; }
+                if (/^\d+ \w+ Street?$/i.test(l)) continue; // agency address
+                if (/^\w+, [A-Z]{2} \d{5}$/.test(l)) continue; // city state zip
+                if (/^\d{3}-\d{3}-\d{4}$/.test(l)) continue; // phone
+                if (/Summary of\s*$/i.test(l)) { if (/Officer Report/i.test(rawLines[i + 1] || '')) i++; continue; }
+                if (/^Officer Report Contents$/i.test(l)) continue;
+                cleaned.push(l);
+            }
+            const lines = cleaned;
+
+            const report = {
+                id: 'rms_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+                fileName, importedAt: new Date().toISOString(),
+                reportNumber: '', reportDate: '', reportType: 'Incident Summary',
+                supplementNo: '', agencyName: '', location: '', beat: '',
+                fromDateTime: '', toDateTime: '',
+                offenses: [], personsInvolved: [], vehicles: [], property: [],
+                narratives: [], digital: [], confidentialPersons: [], rawText: text
+            };
+
+            // Extract case number from raw text
+            const caseMatch = text.match(/Case Number:\s*\n?\s*(\d[\d-]+)/i);
+            if (caseMatch) report.reportNumber = caseMatch[1].trim();
+            if (!report.reportNumber) {
+                const fnNum = fileName.match(/(\d{6,12})/);
+                if (fnNum) report.reportNumber = fnNum[1];
+            }
+
+            // Extract agency
+            report.agencyName = (text.match(/(\w+ Police Department)/)?.[1]) || '';
+
+            // Find section boundaries
+            const suspectSecIdx = lines.findIndex(l => /Suspect\(s\)\s*-\s*\d+\s*Involved/i.test(l));
+            const victimSecIdx = lines.findIndex(l => /Victim\(s\)\s*-\s*\d+\s*Involved/i.test(l));
+            const otherSecIdx = lines.findIndex(l => /Other Person\(s\)\s*-\s*\d+\s*Involved/i.test(l));
+            const eventSecIdx = lines.findIndex(l => /^Event Information$/i.test(l));
+            const narrSecIdx = lines.findIndex(l => /Original Report Narrative By/i.test(l));
+            const empSecIdx = lines.findIndex(l => /^Reporting Employee\(s\)$/i.test(l));
+
+            // Generic person parser for this format
+            function parsePersonBlock(startIdx, endIdx, defaultRole) {
+                const persons = [];
+                let cur = null;
+                for (let j = startIdx; j < endIdx; j++) {
+                    const l = lines[j];
+                    // New person block: "Suspect\n1" or "Victim\n1" or "Person\n1"
+                    if (/^(Suspect|Victim|Person)$/i.test(l) && /^\d+$/.test(lines[j + 1] || '')) {
+                        if (cur) persons.push(cur);
+                        cur = { involvement: defaultRole, name: '', dob: '', age: '', race: '', sex: '', detail: '' };
+                        j++; // skip number
+                        continue;
+                    }
+                    if (!cur) continue;
+                    const nv = lines[j + 1] || '';
+                    if (l === 'Name (Last, First, Middle, Suffix)') { cur.name = nv; j++; }
+                    else if (l === 'Involvement Type') { cur.involvement = nv.toUpperCase(); j++; }
+                    else if (l === 'Date Of Birth') { cur.dob = nv; j++; }
+                    else if (l === 'Age') { cur.age = nv; j++; }
+                    else if (l === 'Race') { cur.race = nv; j++; }
+                    else if (l === 'Ethnicity') { cur.detail = (cur.detail ? cur.detail + '; ' : '') + 'Ethnicity: ' + nv; j++; }
+                    else if (l === 'Sex') { cur.sex = nv; j++; }
+                    else if (l === 'Height' && nv && /\d/.test(nv)) { cur.detail = (cur.detail ? cur.detail + '; ' : '') + 'Height: ' + nv; j++; }
+                    else if (l === 'Weight' && nv && /\d/.test(nv)) { cur.detail = (cur.detail ? cur.detail + '; ' : '') + 'Weight: ' + nv; j++; }
+                    else if (l === 'Hair Color' && nv && nv.length <= 10) { cur.detail = (cur.detail ? cur.detail + '; ' : '') + 'Hair: ' + nv; j++; }
+                    else if (l === 'Eye Color' && nv && nv.length <= 10) { cur.detail = (cur.detail ? cur.detail + '; ' : '') + 'Eyes: ' + nv; j++; }
+                    else if (/^Parent \/ Guardian/i.test(l)) {
+                        if (nv && nv !== '-') cur.detail = (cur.detail ? cur.detail + '; ' : '') + 'Guardian: ' + nv;
+                        j++;
+                    }
+                }
+                if (cur) persons.push(cur);
+                return persons;
+            }
+
+            // Parse person sections
+            const secBounds = [suspectSecIdx, victimSecIdx, otherSecIdx, eventSecIdx, narrSecIdx, empSecIdx, lines.length]
+                .filter(x => x >= 0).sort((a, b) => a - b);
+            function nextBound(after) { return secBounds.find(b => b > after) || lines.length; }
+
+            if (suspectSecIdx >= 0) {
+                report.personsInvolved.push(...parsePersonBlock(suspectSecIdx + 1, nextBound(suspectSecIdx), 'SUSPECT'));
+            }
+            if (victimSecIdx >= 0) {
+                report.personsInvolved.push(...parsePersonBlock(victimSecIdx + 1, nextBound(victimSecIdx), 'VICTIM'));
+            }
+            if (otherSecIdx >= 0) {
+                report.personsInvolved.push(...parsePersonBlock(otherSecIdx + 1, nextBound(otherSecIdx), 'WITNESS'));
+            }
+
+            // ---- Event Information ----
+            if (eventSecIdx >= 0) {
+                const end = nextBound(eventSecIdx);
+                for (let j = eventSecIdx + 1; j < end - 1; j++) {
+                    if (lines[j] === 'Date Reported') { report.reportDate = lines[j + 1]; j++; }
+                    else if (lines[j] === 'Occurred From') { report.fromDateTime = lines[j + 1]; j++; }
+                    else if (lines[j] === 'Occurred To') { report.toDateTime = lines[j + 1]; j++; }
+                    else if (lines[j] === 'Incident Location') { report.location = lines[j + 1]; j++; }
+                    else if (lines[j] === 'Description of Incident') {
+                        const desc = lines[j + 1];
+                        if (desc) { report.offenses.push({ number: 1, status: '', statute: '', description: desc, severity: '' }); j++; }
+                    }
+                }
+            }
+
+            // ---- Narratives (metadata only in summaries) ----
+            if (narrSecIdx >= 0) {
+                const end = empSecIdx > narrSecIdx ? empSecIdx : lines.length;
+                for (let j = narrSecIdx; j < end; j++) {
+                    const m = lines[j].match(/(?:Original|Supplemental) Report Narrative By\s+(.+?)\s+(\d{3,5})/i);
+                    if (m) {
+                        const suppMatch = lines[j].match(/\(Supplement #(\d+)\)/);
+                        const meta = [];
+                        // Check next line for Photos/BWC/Evidence metadata
+                        if (lines[j + 1] && /Photos Taken:/i.test(lines[j + 1])) { meta.push(lines[j + 1].trim()); j++; }
+                        report.narratives.push({
+                            officer: m[1].trim(), badge: m[2],
+                            text: (suppMatch ? 'Supplement #' + suppMatch[1] + '. ' : 'Original Report. ') + (meta.join('; ') || 'See individual officer reports for full narrative.')
+                        });
+                    }
+                }
+            }
+
+            // ---- Reporting Employees ----
+            if (empSecIdx >= 0) {
+                for (let j = empSecIdx + 1; j < lines.length; j++) {
+                    const em = lines[j].match(/^(.+?)\s+(\d{3,5})$/);
+                    if (em && !/^(Reporting|Supplementing)$/i.test(lines[j - 1] || '')) {
+                        // Already captured in narratives usually, skip dupes
+                    }
+                }
+            }
+
+            return report;
+        }
+
         /* ---------- RMS PDF Text Parser ---------- */
         function parseRmsReport(text, fileName) {
-            // Step 1: Strip page-break headers / footers that appear throughout INFORM RMS PDF text
-            // Patterns vary: "Generated By: INFORM RMS..." or "Generated By: OFFICER_NAME"
-            // Followed by: date, page "N/N", "*DRAFT COPY*", "Confidential Incident Report/Summary",
-            //              "NNNNNN Supplement No: ...", "Reported Date/Time: ...", agency, address, city, phone
+            // --- Format detection ---
+            if (/Defendant Information/i.test(text) && /Case Filing Information/i.test(text)) {
+                return parseProsecutionReport(text, fileName);
+            }
+            if (/Summary of\s*\n?\s*Officer Report Contents/i.test(text) || /Suspect\(s\)\s*-\s*\d+\s*Involved/i.test(text)) {
+                return parseIncidentSummary(text, fileName);
+            }
+
+            // --- Original INFORM RMS parser continues below ---
             const rawLines = text.split('\n').map(l => l.trim());
             const cleaned = [];
             let i = 0;

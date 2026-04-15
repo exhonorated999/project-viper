@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectRmsFiles: () => ipcRenderer.invoke('select-rms-files'),
   selectDmvFile: () => ipcRenderer.invoke('select-dmv-file'),
   extractPdfText: (filePath) => ipcRenderer.invoke('extract-pdf-text', filePath),
+  resolveWarrantPath: (data) => ipcRenderer.invoke('resolve-warrant-path', data),
   viewWarrantExternal: (filePath) => ipcRenderer.invoke('view-warrant-external', filePath),
 
   // Case Export / Import

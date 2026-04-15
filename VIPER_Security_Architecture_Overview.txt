@@ -1,0 +1,227 @@
+═══════════════════════════════════════════════════════════════════════════
+                    INTELLECT LAW ENFORCEMENT
+              Software Security & Architecture Overview
+                        Project VIPER
+═══════════════════════════════════════════════════════════════════════════
+
+Prepared for: Agency IT Security Review
+Date:         April 2026
+Version:      2.2.6+
+
+
+1. ARCHITECTURE OVERVIEW
+────────────────────────────────────────────────────────────────────────
+
+Project VIPER is a desktop application built on the Electron framework,
+designed for investigative case management. The application operates on
+a LOCAL-FIRST architecture — all case data, evidence, notes, and
+investigative materials are stored exclusively on the end user's machine
+or designated portable drive. No case data is transmitted to or stored
+on any cloud server under normal operation.
+
+The application communicates with the Intellect Dashboard (a secure
+management server) only for the following administrative functions:
+
+  • License activation and periodic validation
+  • Software update availability checks
+  • Demo registration
+  • Bug report submission
+  • Area Canvas form hosting (detailed in Section 5)
+
+All communication is CLIENT-INITIATED. The server never establishes
+connections back to the client machine. There are no webhooks, no push
+notifications, no inbound network connections, and no listening ports
+exposed to the network.
+
+
+2. NETWORK COMMUNICATION
+────────────────────────────────────────────────────────────────────────
+
+┌─────────────────────────┬────────────┬──────────┬───────────────────┐
+│ Function                │ Direction  │ Protocol │ Authentication    │
+├─────────────────────────┼────────────┼──────────┼───────────────────┤
+│ License Validation      │ App → Svr  │ HTTPS    │ X-API-Key Header  │
+│ License Activation      │ App → Svr  │ HTTPS    │ X-API-Key Header  │
+│ Update Check            │ App → Svr  │ HTTPS    │ Public (read-only)│
+│ Demo Registration       │ App → Svr  │ HTTPS    │ None (one-time)   │
+│ Bug Report Submission   │ App → Svr  │ HTTPS    │ X-API-Key Header  │
+│ Canvas Form Management  │ App → Svr  │ HTTPS    │ X-API-Key Header  │
+└─────────────────────────┴────────────┴──────────┴───────────────────┘
+
+  • All external traffic uses TLS-encrypted HTTPS exclusively.
+  • No unencrypted HTTP connections are made.
+  • The local development server (localhost:8000) is an internal
+    Electron process accessible only on the host machine — it does
+    not bind to network interfaces and is not reachable from other
+    devices on the network.
+  • No webhooks are used. No server-to-client push mechanisms exist.
+  • No open ports are required on the client machine or network
+    firewall for inbound traffic.
+
+
+3. LOCAL DATA STORAGE
+────────────────────────────────────────────────────────────────────────
+
+All investigative data remains on the local machine:
+
+  • Case files, evidence, documents, warrants, and imported reports
+    are stored in a local directory structure:
+        [Install Path]/cases/[CaseNumber]/
+
+  • Case metadata, module data, notes, and investigative records are
+    stored in the browser's localStorage, scoped to the application.
+
+  • No case data is uploaded to any cloud service, third-party server,
+    or external storage under normal operation. The sole exception is
+    the Area Canvas feature (Section 5), which temporarily hosts
+    user-defined form submissions on the server — never case evidence
+    or investigative data.
+
+  PORTABLE MODE:
+  When installed on a removable drive (USB, external HDD), VIPER
+  operates in Portable Mode. All data resides entirely on the
+  removable media, leaving no data on the host machine. The cases
+  directory is additionally hidden from casual directory browsing
+  via file system attributes when Field Security is enabled.
+
+
+4. OPTIONAL ENCRYPTION (FIELD SECURITY)
+────────────────────────────────────────────────────────────────────────
+
+VIPER includes an optional Field Security mode that provides
+encryption-at-rest for all case data on disk:
+
+  • Algorithm:  AES-256-GCM (256-bit Advanced Encryption Standard
+                in Galois/Counter Mode)
+  • Scope:     All case file read/write operations — evidence files,
+               warrant documents, exported case files, and imported
+               data (RMS reports, Oversight files, TRACE imports)
+  • Key:       Derived from the user's security passphrase
+  • Activation: User-configurable via application settings; once
+               enabled, all subsequent file I/O is encrypted
+  • Effect:    Raw files on disk are unreadable without the correct
+               passphrase. If the drive is lost or stolen, the data
+               cannot be accessed.
+
+  Additionally, when Field Security is active:
+  • The cases directory is hidden via OS-level file attributes
+  • Case export/import (.vcase files) are encrypted
+  • Warrant files are encrypted on save and decrypted on view
+
+
+5. AREA CANVAS — SECURE TEMPORARY FORM HOSTING
+────────────────────────────────────────────────────────────────────────
+
+Area Canvas is a feature that allows investigators to collect
+structured information from officers in the field via mobile-friendly
+web forms. This is the ONLY feature that temporarily stores data on
+the Intellect server.
+
+  HOW IT WORKS:
+  ─────────────
+  1. The investigator creates a custom form within VIPER, defining
+     the fields needed (e.g., "Did you observe any vehicles?",
+     "Description of individual seen", etc.).
+
+  2. VIPER sends the form definition (field names and types only —
+     no case data, no evidence, no PII) to the Intellect Dashboard
+     server via an authenticated HTTPS request (X-API-Key).
+
+  3. The server generates:
+       • A unique, non-guessable form ID (UUID)
+       • A public URL for the form
+       • A QR code that encodes the URL
+
+  4. The investigator shares the QR code or URL with officers in the
+     field. Officers scan the QR code with their personal device and
+     fill out the mobile-optimized form via their web browser.
+
+  5. Officer submissions are stored on the server, associated only
+     with the form ID — no case numbers, no investigator PII, and
+     no link to the originating investigation is exposed in the
+     form URL or submission data.
+
+  6. The investigator clicks "Download & Import" in VIPER. All
+     submissions are downloaded to the local machine and
+     IMMEDIATELY DELETED from the server. This is an atomic
+     operation — the download response triggers server-side
+     deletion.
+
+  DATA SECURITY MEASURES:
+  ───────────────────────
+  • 48-HOUR AUTO-EXPIRY: Every form has a strict 48-hour
+    time-to-live. After expiration, the form and ALL associated
+    submissions are automatically deleted by a background cleanup
+    process that runs hourly on the server.
+
+  • DELETE-ON-DOWNLOAD: When the investigator retrieves submissions,
+    they are permanently deleted from the server in the same
+    transaction. Data does not persist after retrieval.
+
+  • NO CASE LINKAGE: The form URL and server-stored data contain
+    no reference to the case number, investigator name, agency,
+    or any identifying information about the investigation.
+
+  • UNIQUE NON-GUESSABLE IDs: Form IDs are UUIDs — they cannot be
+    enumerated, predicted, or brute-forced.
+
+  • AUTHENTICATED MANAGEMENT: Only the API key holder (the licensed
+    VIPER installation) can create forms, check status, download
+    results, or delete forms. Officers can only submit to a form
+    they have the URL for.
+
+  • HTTPS ONLY: All form submissions from officer devices travel
+    over TLS-encrypted HTTPS.
+
+  • NO PERSISTENT STORAGE: The server is not a data warehouse.
+    It functions as a temporary relay — form submissions exist
+    only in transit between officer submission and investigator
+    download, with a maximum lifespan of 48 hours.
+
+  WHAT IS NEVER ON THE SERVER:
+  • Case files or evidence
+  • Investigator or suspect PII
+  • Case numbers or investigation details
+  • Warrant documents
+  • Imported reports (RMS, Oversight, TRACE)
+
+
+6. API KEY SECURITY
+────────────────────────────────────────────────────────────────────────
+
+  • Each licensed installation receives a unique API key in the
+    format INT-XXXX-XXXX-XXXX-XXXX.
+  • API keys are transmitted only in HTTP headers (X-API-Key),
+    never in URLs or query parameters, preventing exposure in
+    server logs or browser history.
+  • License keys are SHA-256 hashed before server-side storage —
+    raw license keys are never stored in the database.
+
+
+7. SOFTWARE UPDATE MECHANISM
+────────────────────────────────────────────────────────────────────────
+
+  • Update checks are read-only HTTPS GET requests that compare
+    the installed version against the latest available version.
+  • Update downloads are served from GitHub Releases over HTTPS.
+  • No auto-install occurs — the user is notified and must
+    manually download and install updates.
+  • Users are advised to back up data before updating.
+
+
+8. SUMMARY
+────────────────────────────────────────────────────────────────────────
+
+  ✓  No webhooks or inbound connections
+  ✓  No open ports required
+  ✓  All network traffic is outbound HTTPS only
+  ✓  All case data stored locally — never uploaded to cloud
+  ✓  Optional AES-256-GCM encryption at rest
+  ✓  Area Canvas data: 48-hour max, deleted on download, no case linkage
+  ✓  API keys transmitted in headers only, license keys hashed at rest
+  ✓  Portable mode available for air-gapped or removable-media workflows
+
+═══════════════════════════════════════════════════════════════════════════
+                    Intellect Law Enforcement
+                    https://intellect-le.com
+═══════════════════════════════════════════════════════════════════════════

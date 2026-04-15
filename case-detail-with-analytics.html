@@ -21374,8 +21374,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             if (defIdx >= 0) {
                 const end = filingIdx > defIdx ? filingIdx : incIdx > defIdx ? incIdx : lines.length;
                 const defLines = lines.slice(defIdx, end);
-                const def = { involvement: 'DEFENDANT', name: '', dob: '', age: '', race: '', sex: '', detail: '' };
-                const extras = {};
+                const def = { involvement: 'DEFENDANT', name: '', dob: '', age: '', race: '', sex: '',
+                    ethnicity: '', address: '', phone: '', height: '', weight: '', hair: '', eyes: '',
+                    dl: '', dlState: '', sid: '', fbi: '', comments: '', guardian: '', detail: '' };
                 for (let j = 0; j < defLines.length - 1; j++) {
                     const dl = defLines[j];
                     const nv = defLines[j + 1];
@@ -21384,19 +21385,18 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     else if (dl === 'Age') { def.age = nv; j++; }
                     else if (dl === 'Race') { def.race = nv; j++; }
                     else if (dl === 'Sex') { def.sex = nv; j++; }
-                    else if (dl === 'Ethnicity') { extras.ethnicity = nv; j++; }
-                    else if (dl === "Defendant's Address" || dl === 'Defendant Address') { extras.address = nv; j++; }
-                    else if (dl === 'Phone 1' && nv && /\d/.test(nv)) { extras.phone = nv; j++; }
-                    else if (dl === 'Height') { extras.height = nv; j++; }
-                    else if (dl === 'Weight') { extras.weight = nv; j++; }
-                    else if (dl === 'Hair') { extras.hair = nv; j++; }
-                    else if (dl === 'Eyes') { extras.eyes = nv; j++; }
-                    else if (dl === "Driver's License #" || dl === 'Driver License #') { extras.dl = nv; j++; }
-                    else if (dl === 'License State') { extras.dlState = nv; j++; }
-                    else if (dl === 'SID Number') { extras.sid = nv; j++; }
-                    else if (dl === 'FBI Number') { extras.fbi = nv; j++; }
+                    else if (dl === 'Ethnicity') { def.ethnicity = nv; j++; }
+                    else if (dl === "Defendant's Address" || dl === 'Defendant Address') { def.address = nv; j++; }
+                    else if (/^Phone\s*\d?$/i.test(dl) && nv && /\(\d{3}\)|\d{3}-\d{3}/.test(nv)) { def.phone = def.phone ? def.phone + '; ' + nv : nv; j++; }
+                    else if (dl === 'Height') { def.height = nv; j++; }
+                    else if (dl === 'Weight') { def.weight = nv; j++; }
+                    else if (dl === 'Hair') { def.hair = nv; j++; }
+                    else if (dl === 'Eyes') { def.eyes = nv; j++; }
+                    else if (dl === "Driver's License #" || dl === 'Driver License #') { def.dl = nv; j++; }
+                    else if (dl === 'License State') { def.dlState = nv; j++; }
+                    else if (dl === 'SID Number') { def.sid = nv; j++; }
+                    else if (dl === 'FBI Number') { def.fbi = nv; j++; }
                 }
-                def.detail = Object.entries(extras).filter(([,v]) => v).map(([k,v]) => k + ': ' + v).join('; ');
                 report.personsInvolved.push(def);
             }
 
@@ -21430,14 +21430,30 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             if (vicLabelIdx >= 0) {
                 const end = chargesIdx > vicLabelIdx ? chargesIdx : witnessIdx > vicLabelIdx ? witnessIdx : lines.length;
                 const vLines = lines.slice(vicLabelIdx, end);
-                const vic = { involvement: 'VICTIM', name: '', dob: '', age: '', race: '', sex: '', detail: '' };
-                for (let j = 0; j < vLines.length - 1; j++) {
-                    if (vLines[j] === 'Victim Name') { vic.name = vLines[j + 1]; j++; }
-                    else if (vLines[j] === 'Date Of Birth' && !vic.dob) { vic.dob = vLines[j + 1]; j++; }
-                    else if (vLines[j] === 'Age' && !vic.age) { vic.age = vLines[j + 1]; j++; }
-                    else if (vLines[j] === 'Race' && !vic.race) { vic.race = vLines[j + 1]; j++; }
-                    else if (vLines[j] === 'Sex' && !vic.sex) { vic.sex = vLines[j + 1]; j++; }
+                const vic = { involvement: 'VICTIM', name: '', dob: '', age: '', race: '', sex: '',
+                    ethnicity: '', address: '', phone: '', height: '', weight: '', hair: '', eyes: '',
+                    comments: '', guardian: '', detail: '' };
+                const knownVicLabels = /^(Date Of Birth|Age|Race|Sex|Phone|Ethnicity|Height|Weight|Hair|Eyes|Case Synopsis|Victim Name|Charges?|Witness)$/;
+                let collectAddr = false;
+                const addrParts = [];
+                for (let j = 0; j < vLines.length; j++) {
+                    const vl = vLines[j];
+                    const nv = vLines[j + 1] || '';
+                    if (vl === 'Victim Name') { vic.name = nv; collectAddr = true; j++; }
+                    else if (collectAddr && !knownVicLabels.test(vl) && vl.length > 2) { addrParts.push(vl); }
+                    else if (vl === 'Date Of Birth' && !vic.dob) { collectAddr = false; vic.dob = nv; j++; }
+                    else if (vl === 'Age' && !vic.age) { collectAddr = false; vic.age = nv; j++; }
+                    else if (vl === 'Race' && !vic.race) { collectAddr = false; vic.race = nv; j++; }
+                    else if (vl === 'Sex' && !vic.sex) { collectAddr = false; vic.sex = nv; j++; }
+                    else if (vl === 'Ethnicity') { collectAddr = false; vic.ethnicity = nv; j++; }
+                    else if (vl === 'Phone' && nv && /\(\d{3}\)/.test(nv)) { collectAddr = false; vic.phone = nv; j++; }
+                    else if (vl === 'Height' && nv && /\d/.test(nv)) { collectAddr = false; vic.height = nv; j++; }
+                    else if (vl === 'Weight' && nv && /\d/.test(nv)) { collectAddr = false; vic.weight = nv; j++; }
+                    else if (vl === 'Hair' && nv) { collectAddr = false; vic.hair = nv; j++; }
+                    else if (vl === 'Eyes' && nv) { collectAddr = false; vic.eyes = nv; j++; }
+                    else { collectAddr = false; }
                 }
+                if (addrParts.length) vic.address = addrParts.join(', ');
                 if (vic.name) report.personsInvolved.push(vic);
             }
 
@@ -21470,31 +21486,66 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
             // ---- Witnesses ----
             if (witnessIdx >= 0) {
-                const end = empWitIdx > witnessIdx ? empWitIdx : evidIdx > witnessIdx ? evidIdx : lines.length;
+                // Extend range past Employee Witnesses to capture all Witness #N blocks
+                const end = evidIdx > witnessIdx ? evidIdx : lines.length;
                 const wLines = lines.slice(witnessIdx + 1, end);
                 let currentWit = null;
+                let collectAddr = false;
+                let addrParts = [];
+                let inEmployeeBlock = false;
                 for (let j = 0; j < wLines.length; j++) {
                     const wl = wLines[j];
+                    const nv = wLines[j + 1] || '';
+                    // Skip employee witness blocks embedded between civilian witnesses
+                    if (/Employee (Witnesses|Name)/i.test(wl)) { inEmployeeBlock = true; continue; }
+                    if (inEmployeeBlock) {
+                        if (/^Witness #\d+/.test(wl)) inEmployeeBlock = false;
+                        else continue;
+                    }
                     if (/^Witness #\d+/.test(wl)) {
-                        if (currentWit) report.personsInvolved.push(currentWit);
-                        currentWit = { involvement: 'WITNESS', name: '', dob: '', age: '', race: '', sex: '', detail: '' };
-                        // Next line is the name
-                        if (wLines[j + 1] && !/^Date Of Birth|^Age|^Race|^Sex/.test(wLines[j + 1])) {
-                            currentWit.name = wLines[j + 1]; j++;
+                        if (currentWit) {
+                            if (addrParts.length) currentWit.address = addrParts.join(', ');
+                            report.personsInvolved.push(currentWit);
+                        }
+                        currentWit = { involvement: 'WITNESS', name: '', dob: '', age: '', race: '', sex: '',
+                            ethnicity: '', address: '', phone: '', height: '', weight: '', hair: '', eyes: '',
+                            comments: '', guardian: '', detail: '' };
+                        addrParts = [];
+                        collectAddr = false;
+                        if (nv && !/^Date Of Birth|^Age|^Race|^Sex/.test(nv)) {
+                            currentWit.name = nv; collectAddr = true; j++;
                         }
                     } else if (currentWit) {
-                        if (wl === 'Date Of Birth' && wLines[j + 1]) { currentWit.dob = wLines[j + 1]; j++; }
-                        else if (wl === 'Age' && wLines[j + 1]) { currentWit.age = wLines[j + 1]; j++; }
-                        else if (wl === 'Race' && wLines[j + 1]) { currentWit.race = wLines[j + 1]; j++; }
-                        else if (wl === 'Sex' && wLines[j + 1]) { currentWit.sex = wLines[j + 1]; j++; }
-                        else if (/^Witness Comments:/i.test(wl)) {
-                            currentWit.detail = wl.replace(/^Witness Comments:\s*/i, '');
-                        } else if (/^Parent\/Guardian/i.test(wl)) {
-                            currentWit.detail = (currentWit.detail ? currentWit.detail + '; ' : '') + wl;
+                        if (collectAddr && !/^(Date Of Birth|Age|Race|Sex|Phone|Ethnicity|Height|Weight|Hair|Eyes|Witness Comments|Parent\/Guardian|Victims?)$/.test(wl)
+                            && !/^Witness #/.test(wl) && wl.length > 2 && !/^\(\d{3}\)/.test(wl) && !/^Employee/.test(wl)) {
+                            addrParts.push(wl);
                         }
+                        else if (wl === 'Date Of Birth' && nv) { collectAddr = false; currentWit.dob = nv; j++; }
+                        else if (wl === 'Age' && nv) { collectAddr = false; currentWit.age = nv; j++; }
+                        else if (wl === 'Race' && nv) { collectAddr = false; currentWit.race = nv; j++; }
+                        else if (wl === 'Sex' && nv) { collectAddr = false; currentWit.sex = nv; j++; }
+                        else if (wl === 'Ethnicity' && nv) { collectAddr = false; currentWit.ethnicity = nv; j++; }
+                        else if (/^\(\d{3}\)\s*\d{3}-\d{4}/.test(wl)) {
+                            collectAddr = false;
+                            const phoneParts = wl.match(/^(\(\d{3}\)\s*\d{3}-\d{4})\s*(.*)/);
+                            currentWit.phone = phoneParts ? (phoneParts[2] ? phoneParts[1] + ' ' + phoneParts[2].trim() : phoneParts[1]) : wl;
+                        }
+                        else if (/^Witness Comments:/i.test(wl)) {
+                            collectAddr = false;
+                            currentWit.comments = wl.replace(/^Witness Comments:\s*/i, '');
+                        }
+                        else if (/^Parent\/Guardian/i.test(wl)) {
+                            collectAddr = false;
+                            const gm = wl.match(/Parent\/Guardian.*?:\s*(.*)/i);
+                            currentWit.guardian = gm ? gm[1].trim() : wl;
+                        }
+                        else { collectAddr = false; }
                     }
                 }
-                if (currentWit) report.personsInvolved.push(currentWit);
+                if (currentWit) {
+                    if (addrParts.length) currentWit.address = addrParts.join(', ');
+                    report.personsInvolved.push(currentWit);
+                }
             }
 
             // ---- Employee Witnesses ----
@@ -21585,7 +21636,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     // New person block: "Suspect\n1" or "Victim\n1" or "Person\n1"
                     if (/^(Suspect|Victim|Person)$/i.test(l) && /^\d+$/.test(lines[j + 1] || '')) {
                         if (cur) persons.push(cur);
-                        cur = { involvement: defaultRole, name: '', dob: '', age: '', race: '', sex: '', detail: '' };
+                        cur = { involvement: defaultRole, name: '', dob: '', age: '', race: '', sex: '',
+                            ethnicity: '', address: '', phone: '', height: '', weight: '', hair: '', eyes: '',
+                            comments: '', guardian: '', detail: '' };
                         j++; // skip number
                         continue;
                     }
@@ -21596,14 +21649,14 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     else if (l === 'Date Of Birth') { cur.dob = nv; j++; }
                     else if (l === 'Age') { cur.age = nv; j++; }
                     else if (l === 'Race') { cur.race = nv; j++; }
-                    else if (l === 'Ethnicity') { cur.detail = (cur.detail ? cur.detail + '; ' : '') + 'Ethnicity: ' + nv; j++; }
+                    else if (l === 'Ethnicity') { cur.ethnicity = nv; j++; }
                     else if (l === 'Sex') { cur.sex = nv; j++; }
-                    else if (l === 'Height' && nv && /\d/.test(nv)) { cur.detail = (cur.detail ? cur.detail + '; ' : '') + 'Height: ' + nv; j++; }
-                    else if (l === 'Weight' && nv && /\d/.test(nv)) { cur.detail = (cur.detail ? cur.detail + '; ' : '') + 'Weight: ' + nv; j++; }
-                    else if (l === 'Hair Color' && nv && nv.length <= 10) { cur.detail = (cur.detail ? cur.detail + '; ' : '') + 'Hair: ' + nv; j++; }
-                    else if (l === 'Eye Color' && nv && nv.length <= 10) { cur.detail = (cur.detail ? cur.detail + '; ' : '') + 'Eyes: ' + nv; j++; }
+                    else if (l === 'Height' && nv && /\d/.test(nv)) { cur.height = nv; j++; }
+                    else if (l === 'Weight' && nv && /\d/.test(nv)) { cur.weight = nv; j++; }
+                    else if (l === 'Hair Color' && nv && nv.length <= 10) { cur.hair = nv; j++; }
+                    else if (l === 'Eye Color' && nv && nv.length <= 10) { cur.eyes = nv; j++; }
                     else if (/^Parent \/ Guardian/i.test(l)) {
-                        if (nv && nv !== '-') cur.detail = (cur.detail ? cur.detail + '; ' : '') + 'Guardian: ' + nv;
+                        if (nv && nv !== '-') cur.guardian = nv;
                         j++;
                     }
                 }
@@ -21860,7 +21913,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 const isRole = roles.some(r => il === r || il.startsWith(r + ' '));
                 if (isRole) {
                     if (currentPerson) report.personsInvolved.push(currentPerson);
-                    currentPerson = { involvement: il, name: '', dob: '', sex: '', race: '', detail: '' };
+                    currentPerson = { involvement: il, name: '', dob: '', sex: '', race: '',
+                        ethnicity: '', address: '', phone: '', height: '', weight: '', hair: '', eyes: '',
+                        age: '', comments: '', guardian: '', detail: '' };
                 } else if (il === 'INVOLVED' && currentPerson && currentPerson.involvement === 'PERSON') {
                     // "PERSON" + "INVOLVED" on separate lines → combine
                     currentPerson.involvement = 'PERSON INVOLVED';
@@ -21965,7 +22020,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     const sl = suspExtLines[j];
                     if (sl === 'Involvement' && suspExtLines[j + 1]) {
                         if (se) report.personsInvolved.push(se);
-                        se = { involvement: suspExtLines[j + 1], name: '', dob: '', age: '', sex: '', race: '', detail: 'Extended' };
+                        se = { involvement: suspExtLines[j + 1], name: '', dob: '', age: '', sex: '', race: '',
+                            ethnicity: '', address: '', phone: '', height: '', weight: '', hair: '', eyes: '',
+                            comments: '', guardian: '', detail: 'Extended' };
                         j++;
                     } else if (se) {
                         if (sl === 'Name' && suspExtLines[j + 1]) { se.name = suspExtLines[j + 1]; j++; }
@@ -22051,7 +22108,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     const isRole = roles.some(r => cl.startsWith(r));
                     if (isRole) {
                         if (cp) report.confidentialPersons.push(cp);
-                        cp = { involvement: cl, name: '', address: '', phone: '', dob: '', age: '', sex: '', race: '' };
+                        cp = { involvement: cl, name: '', address: '', phone: '', dob: '', age: '', sex: '', race: '',
+                            ethnicity: '', height: '', weight: '', hair: '', eyes: '', comments: '', guardian: '', detail: '' };
                     } else if (cp) {
                         if (cl === 'Name' && lines[j + 1]) { cp.name = lines[j + 1]; j++; }
                         else if (cl === 'Address' && lines[j + 1]) { cp.address = lines[j + 1]; j++; }
@@ -22268,14 +22326,23 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const personsHtml = rpt.personsInvolved.length ? sectionCard('Persons Involved', '👥', `
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                     ${rpt.personsInvolved.map(p => {
-                        const invColor = p.involvement.startsWith('SUSPECT') ? 'red' : p.involvement.startsWith('VICTIM') ? 'orange' : p.involvement.startsWith('WITNESS') ? 'blue' : 'gray';
+                        const invColor = p.involvement.startsWith('SUSPECT') ? 'red' : p.involvement.startsWith('VICTIM') ? 'orange' : p.involvement.startsWith('WITNESS') ? 'blue' : p.involvement.startsWith('DEFENDANT') ? 'red' : 'gray';
+                        const physicals = [p.height ? 'Ht: ' + p.height : '', p.weight ? 'Wt: ' + p.weight : '', p.hair ? 'Hair: ' + p.hair : '', p.eyes ? 'Eyes: ' + p.eyes : ''].filter(Boolean).join(' | ');
                         return `
                         <div class="p-3 bg-viper-dark/50 rounded-lg">
                             <span class="text-xs px-2 py-0.5 rounded bg-${invColor}-500/20 text-${invColor}-400 border border-${invColor}-500/30">${p.involvement}</span>
                             <p class="text-white font-medium mt-2">${p.name || 'Unknown'}</p>
                             <div class="text-xs text-gray-400 mt-1">
-                                ${p.dob ? `DOB: ${p.dob}` : ''} ${p.sex ? `| ${p.sex}` : ''} ${p.race ? `| ${p.race}` : ''}
+                                ${p.dob ? 'DOB: ' + p.dob : ''}${p.age ? ' (' + p.age + ')' : ''} ${p.sex ? '| ' + p.sex : ''} ${p.race ? '| ' + p.race : ''}${p.ethnicity ? ' | ' + p.ethnicity : ''}
                             </div>
+                            ${p.address ? '<div class="text-xs text-gray-400 mt-1">\uD83D\uDCCD ' + p.address + '</div>' : ''}
+                            ${p.phone ? '<div class="text-xs text-gray-400 mt-1">\uD83D\uDCDE ' + p.phone + '</div>' : ''}
+                            ${physicals ? '<div class="text-xs text-gray-400 mt-1">' + physicals + '</div>' : ''}
+                            ${p.dl ? '<div class="text-xs text-gray-400 mt-1">DL: ' + p.dl + (p.dlState ? ' (' + p.dlState + ')' : '') + '</div>' : ''}
+                            ${p.sid || p.fbi ? '<div class="text-xs text-gray-400 mt-1">' + (p.sid ? 'SID: ' + p.sid + ' ' : '') + (p.fbi ? 'FBI: ' + p.fbi : '') + '</div>' : ''}
+                            ${p.guardian ? '<div class="text-xs text-gray-400 mt-1">\uD83D\uDC64 Guardian: ' + p.guardian + '</div>' : ''}
+                            ${p.comments ? '<div class="text-xs text-cyan-400/70 mt-1 italic">' + p.comments + '</div>' : ''}
+                            ${p.detail ? '<div class="text-xs text-gray-500 mt-1">' + p.detail + '</div>' : ''}
                         </div>`;
                     }).join('')}
                 </div>

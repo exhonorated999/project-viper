@@ -1226,7 +1226,8 @@
                 analytics: { label: 'CDR', icon: 'M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z' },
                 traceImport: { label: 'Trace Import', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12' },
                 rmsImport: { label: 'RMS Import', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
-                oversightImport: { label: 'Oversight', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' }
+                oversightImport: { label: 'Oversight', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
+                cyberTips: { label: 'Cyber Tips', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' }
             };
             
             // Initialize tabOrder if it doesn't exist
@@ -1352,6 +1353,7 @@
 
             allModules.aperture = { label: 'Aperture', icon: '🔍' };
             allModules.oversightImport = { label: 'Oversight', icon: '🛡️' };
+            allModules.cyberTips = { label: 'Cyber Tips', icon: '🌐' };
 
             const availableModules = Object.keys(allModules).filter(
                 module => !currentCase.modules.includes(module)
@@ -1434,7 +1436,7 @@
                 money:'Money Seized', missingpersons:'Missing Persons', areacanvas:'Area Canvas',
                 opsplan:'OPS Plan', analytics:'CDR', aperture:'Aperture',
                 networkIntelligence:'Network Intel', traceImport:'Trace Import', rmsImport:'RMS Import',
-                oversightImport:'Oversight'
+                oversightImport:'Oversight', cyberTips:'Cyber Tips'
             };
             const label = moduleConfig[moduleId] || moduleId;
             if (!await viperConfirm(`Remove "${label}" from this case?\n\nNote: Any data in this module will remain in storage and can be recovered by re-adding the module.`, {danger:true, okText:'Delete'})) return;
@@ -1482,7 +1484,8 @@
                 opsplan: { label: 'OPS Plan', icon: '📋', type: 'data' },
                 traceImport: { label: 'Trace Import', icon: '📥', type: 'data' },
                 rmsImport: { label: 'RMS Import', icon: '📄', type: 'data' },
-                oversightImport: { label: 'Oversight', icon: '🛡️', type: 'data' }
+                oversightImport: { label: 'Oversight', icon: '🛡️', type: 'data' },
+                cyberTips: { label: 'Cyber Tips', icon: '🌐', type: 'data' }
             };
 
             // Get active tabs (overview + enabled modules)
@@ -1574,7 +1577,7 @@
                 'witnesses', 'recoveredVehicles', 'missingpersons',
                 'areacanvas', 'prosecution', 'narcotics', 'firearms',
                 'money', 'opsplan', 'rmsImports', 'oversightImport',
-                'canvasForms'
+                'canvasForms', 'cyberTips'
             ];
             const moduleData = {};
             moduleKeys.forEach(k => {
@@ -1666,6 +1669,10 @@
                 case 'oversightImport': {
                     const oi = JSON.parse(localStorage.getItem(`oversightImport_${currentCase.id}`) || '[]');
                     return oi.length;
+                }
+                case 'cyberTips': {
+                    const ct = JSON.parse(localStorage.getItem(`cyberTips_${currentCase.id}`) || '[]');
+                    return ct.length;
                 }
                 default: return 0;
             }
@@ -2085,6 +2092,30 @@
                             gap(); imp.narratives.forEach(n => {
                                 fieldBold('Narrative by', n.officer || 'Unknown');
                                 bodyText(n.text);
+                            });
+                        }
+                        gap(3);
+                    });
+                    break;
+                }
+                case 'cyberTips': {
+                    const ctData = JSON.parse(localStorage.getItem(`cyberTips_${caseId}`) || '[]');
+                    if (!ctData.length) { emptyMsg('No CyberTip imports.'); break; }
+                    ctData.forEach((ct, i) => {
+                        itemHeading(`CyberTip ${i+1}: CT# ${ct.reportNumber || ct.fileName}`);
+                        fieldBold('ESP', ct.esp?.name || ''); fieldBold('Incident Type', ct.incidentType);
+                        fieldBold('Incident Time', ct.incidentTime); fieldBold('Received', ct.receivedDate);
+                        fieldBold('Priority', ct.priorityLevel);
+                        if (ct.persons && ct.persons.length) {
+                            gap(); itemHeading('Persons');
+                            ct.persons.forEach(p => {
+                                fieldBold(p.role, p.name || '(unnamed)');
+                                if (p.dob) fieldBold('DOB', p.dob);
+                                if (p.emails.length) fieldBold('Email', p.emails.join(', '));
+                                if (p.phones.length) fieldBold('Phone', p.phones.join(', '));
+                                if (p.ipAddresses.length) fieldBold('IPs', p.ipAddresses.map(ip => ip.address).join(', '));
+                                if (p.estimatedLocation) fieldBold('Location', p.estimatedLocation);
+                                gap();
                             });
                         }
                         gap(3);
@@ -2870,6 +2901,8 @@
                 contentDiv.innerHTML = renderRmsImportTab();
             } else if (tabId === 'oversightImport') {
                 contentDiv.innerHTML = renderOversightImportTab();
+            } else if (tabId === 'cyberTips') {
+                contentDiv.innerHTML = renderCyberTipTab();
             } else {
                 contentDiv.innerHTML = renderPlaceholderTab(tabId);
             }
@@ -4976,9 +5009,14 @@
                                                     </svg>
                                                     <span class="text-sm">Signed Warrant</span>
                                                 </div>
-                                                <button onclick="viewWarrantFile(${warrant.id}, 'warrant')" class="text-xs px-3 py-1 rounded bg-viper-orange/20 text-viper-orange hover:bg-viper-orange/30">
-                                                    View
-                                                </button>
+                                                <div class="flex gap-1">
+                                                    <button onclick="viewWarrantFile(${warrant.id}, 'warrant')" class="text-xs px-3 py-1 rounded bg-viper-orange/20 text-viper-orange hover:bg-viper-orange/30">
+                                                        View
+                                                    </button>
+                                                    <button onclick="removeWarrantFile(${warrant.id}, 'warrant')" class="text-xs px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20" title="Remove file reference">
+                                                        ✕
+                                                    </button>
+                                                </div>
                                             </div>
                                         ` : ''}
                                         
@@ -5016,9 +5054,14 @@
                                                     </svg>
                                                     <span class="text-sm">Court Return</span>
                                                 </div>
-                                                <button onclick="viewWarrantFile(${warrant.id}, 'return')" class="text-xs px-3 py-1 rounded bg-viper-green/20 text-viper-green hover:bg-viper-green/30">
-                                                    View
-                                                </button>
+                                                <div class="flex gap-1">
+                                                    <button onclick="viewWarrantFile(${warrant.id}, 'return')" class="text-xs px-3 py-1 rounded bg-viper-green/20 text-viper-green hover:bg-viper-green/30">
+                                                        View
+                                                    </button>
+                                                    <button onclick="removeWarrantFile(${warrant.id}, 'return')" class="text-xs px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20" title="Remove file reference">
+                                                        ✕
+                                                    </button>
+                                                </div>
                                             </div>
                                         ` : `
                                             <button onclick="uploadCourtReturn(${warrant.id})" class="w-full text-left flex items-center justify-between bg-viper-card/30 rounded p-2 hover:bg-viper-card/50 transition-colors">
@@ -5394,6 +5437,24 @@
             if (!result.success) {
                 showToast('Failed to open file: ' + (result.error || 'Unknown error'), 'error');
             }
+        }
+
+        async function removeWarrantFile(warrantId, fileType) {
+            const warrant = caseWarrants.find(w => w.id === warrantId);
+            if (!warrant) return;
+            const label = fileType === 'warrant' ? 'Signed Warrant' : fileType === 'return' ? 'Court Return' : 'file';
+            if (!await viperConfirm(`Remove ${label} file reference? The file on disk will not be deleted, but you can re-upload a new one.`, { danger: true, okText: 'Remove' })) return;
+            if (fileType === 'warrant') {
+                warrant.hasWarrantFile = false;
+                warrant.warrantFilePath = null;
+                warrant.warrantFileName = '';
+            } else if (fileType === 'return') {
+                warrant.hasCourtReturn = false;
+                warrant.courtReturnFile = null;
+            }
+            saveWarrantsToStorage();
+            renderTabContent('warrants');
+            showToast(`${label} reference removed — you can now re-upload`, 'success');
         }
         
         async function viewWarrantProduction(warrant) {
@@ -17012,6 +17073,7 @@
             opsPlanData.hospital        = document.getElementById('ops_hospital')?.value || '';
             opsPlanData.suspectInfo     = document.getElementById('ops_suspectInfo')?.value || '';
             opsPlanData.otherResidents  = collectOpsResidents();
+            opsPlanData.vehicles        = collectOpsVehicles();
             opsPlanData.entryTeam       = collectEntryTeamFromPlan();
             opsPlanData.caseSummary     = document.getElementById('ops_caseSummary')?.value || '';
             opsPlanData.tacticalPlan    = document.getElementById('ops_tacticalPlan')?.value || '';
@@ -17123,7 +17185,7 @@
 
                         <!-- Comms, Notifications, Hospital -->
                         <div class="glass-card rounded-xl p-5">
-                            <div class="grid grid-cols-3 gap-4">
+                            <div class="grid grid-cols-2 gap-4">
                                 <div>
                                     <label class="text-xs text-gray-400 block mb-1">Communications / Radio</label>
                                     <input type="text" id="ops_comms" value="${d.comms || ''}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Channel / frequency">
@@ -17132,14 +17194,35 @@
                                     <label class="text-xs text-gray-400 block mb-1">Hospital</label>
                                     <input type="text" id="ops_hospital" value="${d.hospital || ''}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Nearest hospital">
                                 </div>
-                                <div>
-                                    <label class="text-xs text-gray-400 block mb-1">Rally Point</label>
-                                    <input type="text" id="ops_rallyPoint" value="${d.rallyPoint || ''}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Designated rally point">
-                                </div>
                             </div>
                             <div class="mt-4">
                                 <label class="text-xs text-gray-400 block mb-1">Notifications (who to notify prior)</label>
                                 <textarea id="ops_notifications" rows="2" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Watch Commander, Dispatch, etc.">${d.notifications || ''}</textarea>
+                            </div>
+                        </div>
+
+                        <!-- Rally Point (highlighted) -->
+                        <div class="glass-card rounded-xl p-5 border-2 border-viper-orange/50 bg-viper-orange/5">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="text-viper-orange text-lg">📍</span>
+                                <label class="text-sm font-bold text-viper-orange uppercase tracking-wide">Rally Point</label>
+                            </div>
+                            <input type="text" id="ops_rallyPoint" value="${d.rallyPoint || ''}" class="w-full px-3 py-2 bg-viper-dark border border-viper-orange/40 rounded-lg text-white text-sm focus:border-viper-orange focus:outline-none mb-3" placeholder="Designated rally point address / location">
+                            <div class="flex justify-between items-center mb-2">
+                                <label class="text-xs text-gray-400">📷 Rally Point Photo / Map</label>
+                                <button type="button" onclick="addOpsRallyPointPhoto()" class="px-3 py-1 bg-viper-orange/20 hover:bg-viper-orange/30 border border-viper-orange rounded text-viper-orange text-xs transition">+ Add Photo</button>
+                            </div>
+                            <div id="ops_rallyPointPhotos" class="grid grid-cols-3 gap-3">
+                                ${(d.rallyPointPhotos && d.rallyPointPhotos.length > 0) ? d.rallyPointPhotos.map((photo, pi) => `
+                                    <div class="relative group rounded-lg overflow-hidden bg-viper-dark border border-gray-700 h-32">
+                                        <img ${_S}="${photo.data}" alt="${photo.caption || 'Rally Point'}" class="w-full h-full object-cover">
+                                        <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center gap-2">
+                                            <button onclick="viewOpsRallyPointPhoto(${pi})" class="px-3 py-1 bg-viper-green/30 rounded text-viper-green text-xs">View</button>
+                                            <button onclick="removeOpsRallyPointPhoto(${pi})" class="px-3 py-1 bg-red-500/30 rounded text-red-400 text-xs">Remove</button>
+                                        </div>
+                                        ${photo.caption ? '<p class="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-xs px-2 py-1 truncate">' + photo.caption + '</p>' : ''}
+                                    </div>
+                                `).join('') : '<p class="text-gray-500 text-xs col-span-3">No rally point photos added</p>'}
                             </div>
                         </div>
 
@@ -17160,6 +17243,17 @@
                             </div>
                             <div id="ops_residentsContainer">
                                 ${(d.otherResidents && d.otherResidents.length > 0) ? d.otherResidents.map((r, i) => renderOpsResidentCard(r, i)).join('') : '<p class="text-gray-500 text-xs">No other residents added</p>'}
+                            </div>
+                        </div>
+
+                        <!-- Vehicles at Location -->
+                        <div class="glass-card rounded-xl p-5">
+                            <div class="flex justify-between items-center mb-3">
+                                <label class="text-xs text-gray-400">Vehicles at Location</label>
+                                <button type="button" onclick="addOpsVehicle()" class="px-3 py-1 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded text-viper-cyan text-xs transition">+ Add Vehicle</button>
+                            </div>
+                            <div id="ops_vehiclesContainer">
+                                ${(d.vehicles && d.vehicles.length > 0) ? d.vehicles.map((v, i) => renderOpsVehicleCard(v, i)).join('') : '<p class="text-gray-500 text-xs">No vehicles added</p>'}
                             </div>
                         </div>
 
@@ -17593,6 +17687,7 @@
                 { id: 'ops-suspects', label: 'Suspect Information' },
             ];
             if (d.otherResidents && d.otherResidents.length > 0) tocEntries.push({ id: 'ops-residents', label: 'Other Residents at Location' });
+            if (d.vehicles && d.vehicles.length > 0) tocEntries.push({ id: 'ops-vehicles', label: 'Vehicles at Location' });
             if (d.entryTeam && d.entryTeam.length > 0) tocEntries.push({ id: 'ops-entryteam', label: 'Entry Team / Assignments' });
             tocEntries.push({ id: 'ops-casesummary', label: 'Case Summary' });
             tocEntries.push({ id: 'ops-tactical', label: 'Tactical Plan' });
@@ -17744,9 +17839,22 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         <div class="field"><label>Dogs</label><span>${d.dogs || '—'}</span></div>
         <div class="field"><label>Children Present</label><span>${d.children || '—'}</span></div>
     </div>
-    <div class="field-row">
-        <div class="field"><label>Rally Point</label><span>${d.rallyPoint || '—'}</span></div>
+
+    <!-- Rally Point Callout -->
+    ${d.rallyPoint ? `
+    <div style="margin:16px 0;padding:16px 20px;background:#fff3e0;border:3px solid #ff9800;border-radius:10px;page-break-inside:avoid">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <span style="font-size:20px">📍</span>
+            <span style="font-size:16px;font-weight:800;color:#e65100;text-transform:uppercase;letter-spacing:1px">Rally Point</span>
+        </div>
+        <div style="font-size:15px;font-weight:600;color:#1a1a1a">${(d.rallyPoint || '').replace(/</g,'&lt;')}</div>
     </div>
+    ` : ''}
+    ${(includePhotos && d.rallyPointPhotos && d.rallyPointPhotos.length > 0) ? `
+    <div class="photo-grid" style="margin-top:8px">
+        ${d.rallyPointPhotos.map(p => '<div class="photo-card"><img ' + _S + '="' + p.data + '"><p>' + (p.caption || 'Rally Point') + '</p></div>').join('')}
+    </div>
+    ` : ''}
 
     <!-- 3. Suspect Information -->
     <div id="ops-suspects" class="section-header"><span class="num">3</span> Suspect Information</div>
@@ -17763,6 +17871,24 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     ${r.dob ? '<div style="font-size:13px;color:#555">DOB: ' + r.dob + '</div>' : ''}
                     ${r.hasFirearms ? '<div style="margin-top:8px"><span style="font-weight:600;font-size:13px;color:#c62828">⚠ Firearms:</span> <span style="font-size:13px">' + (r.firearms || 'Yes (details not specified)').replace(/</g,'&lt;') + '</span></div>' : ''}
                     ${r.hasCrimHistory ? '<div style="margin-top:4px"><span style="font-weight:600;font-size:13px;color:#e65100">Criminal History:</span> <span style="font-size:13px">' + (r.crimHistory || 'Yes (details not specified)').replace(/</g,'&lt;') + '</span></div>' : ''}
+                </div>
+            </div>
+        `).join('')}
+    ` : ''}
+
+    <!-- Vehicles at Location -->
+    ${d.vehicles && d.vehicles.length > 0 ? `
+        <div id="ops-vehicles" class="section-header"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-vehicles') + 1}</span> Vehicles at Location</div>
+        ${d.vehicles.map((v, vi) => `
+            <div style="display:flex;gap:16px;align-items:flex-start;padding:14px;margin:10px 0;border:1px solid #ddd;border-radius:8px;background:#fafafa;page-break-inside:avoid">
+                ${v.photo ? '<img ' + _S + '="' + v.photo + '" style="width:120px;height:80px;border-radius:8px;object-fit:cover;border:1px solid #ccc">' : '<div style="width:120px;height:80px;border-radius:8px;background:#eee;display:flex;align-items:center;justify-content:center;color:#999;font-size:11px;border:1px solid #ccc">No Photo</div>'}
+                <div style="flex:1">
+                    <div style="font-weight:700;font-size:14px;margin-bottom:4px">${v.description || 'Vehicle ' + (vi + 1)}</div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;font-size:12px">
+                        ${v.plate ? '<div><span style="color:#888">Plate:</span> <strong>' + v.plate.replace(/</g,'&lt;') + '</strong></div>' : ''}
+                        ${v.vin ? '<div><span style="color:#888">VIN:</span> <span style="font-family:monospace">' + v.vin.replace(/</g,'&lt;') + '</span></div>' : ''}
+                    </div>
+                    ${v.notes ? '<div style="margin-top:4px;font-size:12px;color:#555">' + v.notes.replace(/</g,'&lt;') + '</div>' : ''}
                 </div>
             </div>
         `).join('')}
@@ -18000,6 +18126,145 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             if (w) {
                 w.document.write('<html><head><title>' + (photo.caption || photo.fileName) + '</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img ' + _S + '="' + photo.data + '"></body></html>');
             }
+        }
+
+        // ── Rally Point Photos ──
+        function addOpsRallyPointPhoto() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.multiple = true;
+            input.onchange = async (e) => {
+                const files = Array.from(e.target.files);
+                if (!files.length) return;
+                if (!opsPlanData) opsPlanData = { _version: 2 };
+                if (!opsPlanData.rallyPointPhotos) opsPlanData.rallyPointPhotos = [];
+                for (const file of files) {
+                    const data = await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = (ev) => resolve(ev.target.result);
+                        reader.readAsDataURL(file);
+                    });
+                    const caption = await new Promise((resolve) => {
+                        const html = `<div id="captionModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id==='captionModal'){document.getElementById('captionModal').remove();window._captionResolve('')}">
+                            <div class="glass-card rounded-xl p-5 max-w-md w-full">
+                                <h3 class="text-lg font-bold text-white mb-3">Rally Point Photo</h3>
+                                <p class="text-xs text-gray-400 mb-2">${file.name}</p>
+                                <img ${_S}="${data}" class="w-full h-32 object-cover rounded-lg mb-3">
+                                <input type="text" id="captionInput" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none mb-4" placeholder="Optional caption (e.g. Rally point map, Aerial view)">
+                                <div class="flex gap-2 justify-end">
+                                    <button onclick="document.getElementById('captionModal').remove();window._captionResolve('')" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white text-sm transition">Skip</button>
+                                    <button onclick="window._captionResolve(document.getElementById('captionInput').value);document.getElementById('captionModal').remove()" class="px-4 py-2 bg-viper-orange hover:bg-viper-orange/80 rounded-lg text-black font-semibold text-sm transition">Add</button>
+                                </div>
+                            </div>
+                        </div>`;
+                        window._captionResolve = resolve;
+                        document.body.insertAdjacentHTML('beforeend', html);
+                        setTimeout(() => document.getElementById('captionInput')?.focus(), 100);
+                    });
+                    opsPlanData.rallyPointPhotos.push({ data, fileName: file.name, caption: caption || '', addedAt: new Date().toISOString() });
+                }
+                saveOpsPlanData();
+                renderTabContent('opsplan');
+                viperToast(`${files.length} rally point photo(s) added`, 'success');
+            };
+            input.click();
+        }
+
+        function viewOpsRallyPointPhoto(index) {
+            if (!opsPlanData?.rallyPointPhotos?.[index]) return;
+            const photo = opsPlanData.rallyPointPhotos[index];
+            const w = window.open('', '_blank');
+            if (w) w.document.write('<html><head><title>' + (photo.caption || photo.fileName) + '</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img ' + _S + '="' + photo.data + '"></body></html>');
+        }
+
+        async function removeOpsRallyPointPhoto(index) {
+            if (!opsPlanData?.rallyPointPhotos) return;
+            if (await viperConfirm('Remove this rally point photo?', { danger: true, okText: 'Remove' })) {
+                opsPlanData.rallyPointPhotos.splice(index, 1);
+                saveOpsPlanData();
+                renderTabContent('opsplan');
+            }
+        }
+
+        // ── Vehicles at Location ──
+        function renderOpsVehicleCard(v, i) {
+            const photoHtml = v.photo
+                ? '<img ' + _S + '="' + v.photo + '" class="w-24 h-20 rounded-lg object-cover border border-gray-600" onclick="viewOpsVehiclePhoto(' + i + ')">'
+                : '<div class="w-24 h-20 rounded-lg bg-viper-dark border border-gray-600 flex items-center justify-center text-gray-500 text-xs cursor-pointer" onclick="uploadOpsVehiclePhoto(' + i + ')">+ Photo</div>';
+            return '<div class="flex gap-4 items-start p-3 bg-viper-dark/50 rounded-lg border border-gray-700 mb-2" id="opsVehicle_' + i + '">'
+                + '<div class="shrink-0 flex flex-col items-center gap-1">'
+                +   photoHtml
+                +   '<button type="button" onclick="uploadOpsVehiclePhoto(' + i + ')" class="text-xs text-viper-cyan hover:underline">📷 Photo</button>'
+                + '</div>'
+                + '<div class="flex-1 min-w-0 grid grid-cols-2 gap-x-4 gap-y-2">'
+                +   '<div><label class="text-xs text-gray-400">Year / Make / Model / Color</label><input type="text" value="' + (v.description || '').replace(/"/g, '&quot;') + '" data-vehicle="' + i + '" data-vfield="description" class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="2019 Honda Civic Silver"></div>'
+                +   '<div><label class="text-xs text-gray-400">License Plate</label><input type="text" value="' + (v.plate || '').replace(/"/g, '&quot;') + '" data-vehicle="' + i + '" data-vfield="plate" class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none uppercase" placeholder="ABC1234"></div>'
+                +   '<div><label class="text-xs text-gray-400">VIN</label><input type="text" value="' + (v.vin || '').replace(/"/g, '&quot;') + '" data-vehicle="' + i + '" data-vfield="vin" class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm font-mono focus:border-viper-cyan focus:outline-none uppercase" placeholder="1HGBH41JXMN109186"></div>'
+                +   '<div><label class="text-xs text-gray-400">Notes</label><input type="text" value="' + (v.notes || '').replace(/"/g, '&quot;') + '" data-vehicle="' + i + '" data-vfield="notes" class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Parked in driveway, etc."></div>'
+                + '</div>'
+                + '<button type="button" onclick="removeOpsVehicle(' + i + ')" class="shrink-0 text-red-500 hover:text-red-400 mt-1"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>'
+                + '</div>';
+        }
+
+        function addOpsVehicle() {
+            if (!opsPlanData) opsPlanData = { _version: 2 };
+            if (!opsPlanData.vehicles) opsPlanData.vehicles = [];
+            opsPlanData.vehicles.push({ description: '', plate: '', vin: '', notes: '', photo: null });
+            saveOpsPlanData();
+            refreshOpsVehiclesUI();
+        }
+
+        function removeOpsVehicle(idx) {
+            if (!opsPlanData?.vehicles) return;
+            opsPlanData.vehicles.splice(idx, 1);
+            saveOpsPlanData();
+            refreshOpsVehiclesUI();
+        }
+
+        function collectOpsVehicles() {
+            if (!opsPlanData?.vehicles) return [];
+            return opsPlanData.vehicles.map((v, i) => {
+                const get = (field) => {
+                    const el = document.querySelector('[data-vehicle="' + i + '"][data-vfield="' + field + '"]');
+                    return el ? el.value : (v[field] || '');
+                };
+                return { description: get('description'), plate: get('plate'), vin: get('vin'), notes: get('notes'), photo: v.photo || null };
+            });
+        }
+
+        function refreshOpsVehiclesUI() {
+            const container = document.getElementById('ops_vehiclesContainer');
+            if (!container) return;
+            const vehs = opsPlanData?.vehicles || [];
+            container.innerHTML = vehs.length === 0
+                ? '<p class="text-gray-500 text-xs">No vehicles added</p>'
+                : vehs.map((v, i) => renderOpsVehicleCard(v, i)).join('');
+        }
+
+        function uploadOpsVehiclePhoto(idx) {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    if (!opsPlanData?.vehicles?.[idx]) return;
+                    opsPlanData.vehicles[idx] = { ...opsPlanData.vehicles[idx], ...collectOpsVehicles()[idx], photo: ev.target.result };
+                    saveOpsPlanData();
+                    refreshOpsVehiclesUI();
+                };
+                reader.readAsDataURL(file);
+            };
+            input.click();
+        }
+
+        function viewOpsVehiclePhoto(idx) {
+            if (!opsPlanData?.vehicles?.[idx]?.photo) return;
+            const w = window.open('', '_blank');
+            if (w) w.document.write('<html><head><title>Vehicle Photo</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img ' + _S + '="' + opsPlanData.vehicles[idx].photo + '"></body></html>');
         }
 
         async function removeOpsLocationPhoto(index) {
@@ -18716,6 +18981,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 { id: 'traceImport', label: 'Trace Import', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12', desc: 'Import case packages from TRACE software' },
                 { id: 'rmsImport', label: 'RMS Import', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', desc: 'Import PDF reports from agency Record Management Systems' },
                 { id: 'oversightImport', label: 'Oversight Import', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z', desc: 'Import sex offender intelligence from Project Oversight' },
+                { id: 'cyberTips', label: 'Cyber Tips (NCMEC)', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z', desc: 'Import & parse NCMEC CyberTipline report PDFs' },
             ];
 
             const allModules = [...caseManagement, ...investigativeTools];
@@ -21584,14 +21850,25 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const rawLines = text.split('\n').map(l => l.trim());
             // Strip page headers
             const cleaned = [];
+            let _rptType = '', _rptNum = '';
             for (let i = 0; i < rawLines.length; i++) {
                 const l = rawLines[i];
                 if (/^Page \d+ of \d+$/.test(l)) continue;
-                if (/^Printed by\s+/i.test(l)) continue;
-                if (/^Case Number:\s*$/i.test(l)) { if (rawLines[i + 1] && /^\d/.test(rawLines[i + 1])) i++; continue; }
+                if (/^Printed by\s+/i.test(l)) {
+                    // Next line may be standalone time (e.g. "7:40:32 AM")
+                    if (rawLines[i + 1] && /^\d{1,2}:\d{2}:\d{2}\s*(AM|PM)$/i.test(rawLines[i + 1].trim())) i++;
+                    continue;
+                }
+                if (/^Case Number:\s*$/i.test(l)) { if (rawLines[i + 1] && /^\d/.test(rawLines[i + 1].trim())) i++; continue; }
                 if (/^\d+ \w+ Street?$/i.test(l)) continue; // agency address
                 if (/^\w+, [A-Z]{2} \d{5}$/.test(l)) continue; // city state zip
                 if (/^\d{3}-\d{3}-\d{4}$/.test(l)) continue; // phone
+                if (/Police Department$/i.test(l)) continue; // agency name
+                if (/^(Initial Incident Report|Supplemental Report)$/i.test(l)) { if (!_rptType) _rptType = l; continue; }
+                if (/^Report Number:\s*$/i.test(l)) {
+                    if (rawLines[i + 1] && /\d/.test(rawLines[i + 1].trim())) { _rptNum = rawLines[i + 1].trim(); i++; }
+                    continue;
+                }
                 if (/Summary of\s*$/i.test(l)) { if (/Officer Report/i.test(rawLines[i + 1] || '')) i++; continue; }
                 if (/^Officer Report Contents$/i.test(l)) continue;
                 cleaned.push(l);
@@ -21618,14 +21895,18 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
             // Extract agency
             report.agencyName = (text.match(/(\w+ Police Department)/)?.[1]) || '';
+            // Apply metadata extracted from page headers
+            if (_rptType) report.reportType = _rptType;
+            if (_rptNum && !report.reportNumber) report.reportNumber = _rptNum;
 
             // Find section boundaries
+            const offenseSecIdx = lines.findIndex(l => /^Offense\(s\)$/i.test(l));
             const suspectSecIdx = lines.findIndex(l => /Suspect\(s\)\s*-\s*\d+\s*Involved/i.test(l));
             const victimSecIdx = lines.findIndex(l => /Victim\(s\)\s*-\s*\d+\s*Involved/i.test(l));
             const otherSecIdx = lines.findIndex(l => /Other Person\(s\)\s*-\s*\d+\s*Involved/i.test(l));
             const eventSecIdx = lines.findIndex(l => /^Event Information$/i.test(l));
-            const narrSecIdx = lines.findIndex(l => /Original Report Narrative By/i.test(l));
-            const empSecIdx = lines.findIndex(l => /^Reporting Employee\(s\)$/i.test(l));
+            const narrSecIdx = lines.findIndex(l => /Report Narrative By/i.test(l));
+            const empSecIdx = lines.findIndex(l => /^Reporting Employee\(?s?\)?$/i.test(l));
 
             // Generic person parser for this format
             function parsePersonBlock(startIdx, endIdx, defaultRole) {
@@ -21659,15 +21940,50 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         if (nv && nv !== '-') cur.guardian = nv;
                         j++;
                     }
+                    else if (l === 'Home Address') { if (nv) cur.address = nv; j++; }
+                    else if (/^Phone\s*[12]$/i.test(l)) {
+                        const pv = nv.trim();
+                        if (pv && /[\d(]/.test(pv)) cur.phone = cur.phone ? cur.phone + '; ' + pv : pv;
+                        j++;
+                    }
+                    else if (l === 'Employer Name and Address') { j++; }
+                    else if (/^Job Title/i.test(l)) { /* skip */ }
+                    else if (/^(Suspect|Victim) Of:$/i.test(l)) {
+                        if (nv) cur.comments = (cur.comments ? cur.comments + '; ' : '') + l + ' ' + nv;
+                        j++;
+                    }
                 }
                 if (cur) persons.push(cur);
                 return persons;
             }
 
             // Parse person sections
-            const secBounds = [suspectSecIdx, victimSecIdx, otherSecIdx, eventSecIdx, narrSecIdx, empSecIdx, lines.length]
+            const secBounds = [offenseSecIdx, suspectSecIdx, victimSecIdx, otherSecIdx, eventSecIdx, narrSecIdx, empSecIdx, lines.length]
                 .filter(x => x >= 0).sort((a, b) => a - b);
             function nextBound(after) { return secBounds.find(b => b > after) || lines.length; }
+
+            // ---- Structured Offenses (individual officer reports) ----
+            if (offenseSecIdx >= 0) {
+                const end = nextBound(offenseSecIdx);
+                let off = null;
+                for (let j = offenseSecIdx + 1; j < end; j++) {
+                    if (lines[j] === 'Offense' && /^\d+$/.test(lines[j + 1] || '')) {
+                        if (off) report.offenses.push(off);
+                        off = { number: parseInt(lines[j + 1]), status: '', statute: '', description: '', severity: '' };
+                        j++; continue;
+                    }
+                    if (!off) continue;
+                    const onv = lines[j + 1] || '';
+                    if (lines[j] === 'Statute/Ordinance Number and Description') { off.description = onv; j++; }
+                    else if (lines[j] === 'Attempted or Completed') { off.status = onv; j++; }
+                    else if (lines[j] === 'Felony/Misdemeanor') { off.severity = onv; j++; }
+                    else if (lines[j] === 'Degree') {
+                        if (onv && off.severity) off.severity += ' (' + onv + ')';
+                        j++;
+                    }
+                }
+                if (off) report.offenses.push(off);
+            }
 
             if (suspectSecIdx >= 0) {
                 report.personsInvolved.push(...parsePersonBlock(suspectSecIdx + 1, nextBound(suspectSecIdx), 'SUSPECT'));
@@ -21689,30 +22005,52 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     else if (lines[j] === 'Incident Location') { report.location = lines[j + 1]; j++; }
                     else if (lines[j] === 'Description of Incident') {
                         const desc = lines[j + 1];
-                        if (desc) { report.offenses.push({ number: 1, status: '', statute: '', description: desc, severity: '' }); j++; }
+                        // Only add as offense if no structured offenses were parsed
+                        if (desc && report.offenses.length === 0) { report.offenses.push({ number: 1, status: '', statute: '', description: desc, severity: '' }); j++; }
+                        else j++;
                     }
                 }
             }
 
-            // ---- Narratives (metadata only in summaries) ----
+            // ---- Narratives (full text for individual reports, metadata for summaries) ----
             if (narrSecIdx >= 0) {
-                const end = empSecIdx > narrSecIdx ? empSecIdx : lines.length;
-                for (let j = narrSecIdx; j < end; j++) {
-                    const m = lines[j].match(/(?:Original|Supplemental) Report Narrative By\s+(.+?)\s+(\d{3,5})/i);
+                for (let j = narrSecIdx; j < lines.length; j++) {
+                    const m = lines[j].match(/(?:(?:Original|Supplemental)\s+)?Report Narrative By\s+(.+?)\s+(\d{3,5})/i);
                     if (m) {
                         const suppMatch = lines[j].match(/\(Supplement #(\d+)\)/);
                         const meta = [];
-                        // Check next line for Photos/BWC/Evidence metadata
-                        if (lines[j + 1] && /Photos Taken:/i.test(lines[j + 1])) { meta.push(lines[j + 1].trim()); j++; }
+                        j++;
+                        // Capture Photos/BWC/Evidence metadata line
+                        if (j < lines.length && /Photos Taken:/i.test(lines[j])) { meta.push(lines[j].trim()); j++; }
+                        // Collect actual narrative text (individual reports have inline text)
+                        const narrLines = [];
+                        while (j < lines.length) {
+                            const nl = lines[j];
+                            // Stop at next narrative header
+                            if (/Report Narrative By/i.test(nl)) { j--; break; }
+                            // Skip Reporting Employee blocks embedded in narrative
+                            if (/^Reporting Employee\(?s?\)?$/i.test(nl)) {
+                                j++;
+                                while (j < lines.length && lines[j] && !/^\s*$/.test(lines[j])) j++;
+                                j++; continue;
+                            }
+                            narrLines.push(nl);
+                            j++;
+                        }
+                        // Trim empty lines
+                        while (narrLines.length && !narrLines[0]) narrLines.shift();
+                        while (narrLines.length && !narrLines[narrLines.length - 1]) narrLines.pop();
+                        const narrativeText = narrLines.join('\n').trim();
+                        const prefix = suppMatch ? 'Supplement #' + suppMatch[1] + '.' : 'Original Report.';
                         report.narratives.push({
                             officer: m[1].trim(), badge: m[2],
-                            text: (suppMatch ? 'Supplement #' + suppMatch[1] + '. ' : 'Original Report. ') + (meta.join('; ') || 'See individual officer reports for full narrative.')
+                            text: narrativeText || (prefix + ' ' + (meta.join('; ') || 'See individual officer reports for full narrative.'))
                         });
                     }
                 }
             }
 
-            // ---- Reporting Employees ----
+            // ---- Reporting Employees (already captured via narrative section) ----
             if (empSecIdx >= 0) {
                 for (let j = empSecIdx + 1; j < lines.length; j++) {
                     const em = lines[j].match(/^(.+?)\s+(\d{3,5})$/);
@@ -21731,7 +22069,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             if (/Defendant Information/i.test(text) && /Case Filing Information/i.test(text)) {
                 return parseProsecutionReport(text, fileName);
             }
-            if (/Summary of\s*\n?\s*Officer Report Contents/i.test(text) || /Suspect\(s\)\s*-\s*\d+\s*Involved/i.test(text)) {
+            if (/Summary of\s*\n?\s*Officer Report Contents/i.test(text) || /Suspect\(s\)\s*-\s*\d+\s*Involved/i.test(text) || /Other Person\(s\)\s*-\s*\d+\s*Involved/i.test(text) || /Victim\(s\)\s*-\s*\d+\s*Involved/i.test(text) || /^\s*(Initial Incident Report|Supplemental Report)\s*$/m.test(text)) {
                 return parseIncidentSummary(text, fileName);
             }
 
@@ -22570,6 +22908,472 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             } catch (e) {
                 viperToast('Could not open file: ' + e.message, 'error');
             }
+        }
+
+        /* ========== CyberTip Module ========== */
+
+        function parseCyberTip(text, fileName) {
+            const report = {
+                id: 'ct_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+                fileName, importedAt: new Date().toISOString(),
+                reportNumber: '', priorityLevel: '', receivedDate: '',
+                incidentType: '', incidentTime: '',
+                esp: { name: '', address: '', url: '' },
+                persons: [], uploadedFiles: [],
+                lawEnforcement: '', rawText: text
+            };
+            // Strip page footers
+            const clean = text.replace(/CyberTipline Report \d+ \| [\di]+\nThis Report is provided solely for informational purposes pursuant to NCMEC's nonprofit mission\.\nPlease treat all information in this Report as confidential\.\n?/g, '\n');
+            const lines = clean.split('\n');
+
+            const rptMatch = text.match(/CyberTipline Report (\d+)/);
+            if (rptMatch) report.reportNumber = rptMatch[1];
+
+            const priMatch = clean.match(/NCMEC Priority Level:(.+)/);
+            if (priMatch) report.priorityLevel = priMatch[1].trim();
+            else { const p2 = clean.match(/Priority Level:\s*(.+)/); if (p2) report.priorityLevel = p2[1].trim(); }
+
+            const rcvMatch = clean.match(/Received by NCMEC on (.+? UTC)/);
+            if (rcvMatch) report.receivedDate = rcvMatch[1];
+
+            // ESP
+            const espIdx = lines.findIndex(l => /^Submitter:/.test(l));
+            if (espIdx >= 0) {
+                for (let i = espIdx + 1; i < Math.min(espIdx + 10, lines.length); i++) {
+                    const ln = lines[i].trim();
+                    if (ln && ln.length > 1 && ln.length < 50 && !ln.includes(':') && !ln.includes('http') && !/^\d/.test(ln) && !/Business Address/i.test(ln)) {
+                        report.esp.name = ln; break;
+                    }
+                }
+            }
+            const espUrl = clean.match(/Reporting Electronic Service Provider[\s\S]*?(https?:\/\/\S+)/);
+            if (espUrl) report.esp.url = espUrl[1];
+
+            // Incident Type & Time
+            const incIdx = lines.findIndex(l => /^Incident Information$/.test(l.trim()));
+            if (incIdx >= 0) {
+                for (let i = incIdx; i < Math.min(incIdx + 10, lines.length); i++) {
+                    const ln = lines[i].trim();
+                    if (ln.startsWith('Incident Type:')) report.incidentType = ln.substring(14).trim();
+                    else if (ln.startsWith('Incident Time:')) report.incidentTime = ln.substring(14).trim();
+                }
+            }
+            if (!report.incidentType) { const m = clean.match(/Incident Type:(.+)/); if (m) report.incidentType = m[1].trim(); }
+
+            // Persons
+            for (let i = 0; i < lines.length; i++) {
+                const ln = lines[i].trim();
+                if (ln !== 'Suspect' && ln !== 'Recipient') continue;
+                const nextLine = (lines[i + 1] || '').trim();
+                if (!nextLine.startsWith('Name:') && !nextLine.startsWith('Date of Birth:') && !nextLine.startsWith('Mobile Phone:') && !nextLine.startsWith('Email Address:') && !nextLine.startsWith('Screen/User Name:')) continue;
+
+                const person = { role: ln, name: '', dob: '', age: '',
+                    emails: [], phones: [], screenNames: [], userIds: [],
+                    profileUrls: [], ipAddresses: [], priorReports: '',
+                    estimatedLocation: '', additionalInfo: '' };
+
+                let j = i + 1;
+                while (j < lines.length) {
+                    const fl = lines[j].trim();
+                    if (fl === 'Suspect' || fl === 'Recipient') break;
+                    if (/^Section [A-D]:/.test(fl) || /^Additional Information Submitted/.test(fl) || /^Uploaded File Information/.test(fl) || /^Sent in product:/.test(fl) || /^The number of recipients/.test(fl)) break;
+
+                    if (fl.startsWith('Name:')) person.name = fl.substring(5).trim();
+                    else if (/^(Mobile Phone|Home Phone|Phone):/.test(fl)) { const ph = fl.split(':').slice(1).join(':').trim(); if (ph) person.phones.push(ph); }
+                    else if (fl.startsWith('Date of Birth:')) person.dob = fl.substring(14).trim();
+                    else if (fl.startsWith('Approximate Age:')) person.age = fl.substring(16).trim();
+                    else if (fl.startsWith('Email Address:')) person.emails.push(fl.substring(14).trim());
+                    else if (fl.startsWith('Screen/User Name:')) person.screenNames.push(fl.substring(17).trim());
+                    else if (fl.startsWith('ESP User ID:')) person.userIds.push(fl.substring(12).trim());
+                    else if (fl.startsWith('Profile URL:')) person.profileUrls.push(fl.substring(12).trim());
+                    else if (fl.startsWith('IP Address:')) {
+                        const ipPart = fl.substring(11).trim();
+                        const ipM = ipPart.match(/^(.+?)\s*\((\w+)\)\s*$/);
+                        const ip = { address: ipM ? ipM[1].trim() : ipPart, type: ipM ? ipM[2] : '', timestamp: '' };
+                        if (j + 1 < lines.length && /^\d{2}-\d{2}-\d{4}/.test(lines[j + 1].trim())) { ip.timestamp = lines[++j].trim(); }
+                        person.ipAddresses.push(ip);
+                    }
+                    else if (fl.startsWith('Prior CT Reports:')) { person.priorReports = fl.substring(17).trim(); while (j + 1 < lines.length && /^\d/.test(lines[j + 1].trim())) { j++; person.priorReports += lines[j].trim(); } }
+                    else if (fl.startsWith('Estimated Location:')) person.estimatedLocation = fl.substring(19).trim();
+                    else if (fl.startsWith('Additional Information:')) {
+                        const al = [fl.substring(22).trim()];
+                        while (j + 1 < lines.length) {
+                            const nl = lines[j + 1].trim();
+                            if (/^(Name|IP Address|Email Address|Estimated Location|Prior CT):/.test(nl) || nl === 'Suspect' || nl === 'Recipient' || /^Section [A-D]:/.test(nl)) break;
+                            j++; al.push(lines[j].trim());
+                        }
+                        person.additionalInfo = (person.additionalInfo ? person.additionalInfo + '\n' : '') + al.join('\n').trim();
+                    }
+                    j++;
+                }
+                report.persons.push(person);
+                i = j - 1;
+            }
+
+            // Uploaded Files
+            const fileRe = /Uploaded File Information\n/g;
+            let fm2;
+            while ((fm2 = fileRe.exec(clean)) !== null) {
+                const start = fm2.index + fm2[0].length;
+                const bl = []; let ls = start;
+                while (ls < clean.length) {
+                    const le = clean.indexOf('\n', ls); if (le < 0) break;
+                    const line = clean.substring(ls, le).trim();
+                    if (/^(Section [A-D]:|Uploaded File Information$|This concludes)/.test(line)) break;
+                    bl.push(line); ls = le + 1;
+                }
+                let cf = null;
+                for (let k = 0; k < bl.length; k++) {
+                    if (bl[k].startsWith('Filename:')) {
+                        if (cf && cf.filename) report.uploadedFiles.push(cf);
+                        cf = { filename: bl[k].substring(9).trim(), md5: '', categorization: '' };
+                        while (k + 1 < bl.length && !bl[k + 1].includes(':') && bl[k + 1].length > 0 && !/^Number/.test(bl[k + 1])) { k++; cf.filename += bl[k]; }
+                    } else if (cf && bl[k].startsWith('MD5:')) cf.md5 = bl[k].substring(4).trim();
+                    else if (cf && /^Image Categorization/.test(bl[k])) cf.categorization = bl[k].split(':').slice(1).join(':').trim();
+                }
+                if (cf && cf.filename) report.uploadedFiles.push(cf);
+            }
+            const seen = new Set();
+            report.uploadedFiles = report.uploadedFiles.filter(f => { if (!f.md5 || seen.has(f.md5)) return false; seen.add(f.md5); return true; });
+
+            // Law Enforcement
+            const leMatch = clean.match(/The report was made available[\s\S]*?\n([A-Z][\w\s]+(?:Police|Sheriff|Bureau) (?:Department|Office)[^\n]*)/i);
+            if (leMatch) report.lawEnforcement = leMatch[1].trim();
+
+            return report;
+        }
+
+        let currentCyberTipView = null;
+
+        function getCyberTips() {
+            return JSON.parse(localStorage.getItem(`cyberTips_${currentCase.id}`) || '[]');
+        }
+        function saveCyberTips(data) {
+            localStorage.setItem(`cyberTips_${currentCase.id}`, JSON.stringify(data));
+        }
+
+        async function importCyberTipPdf() {
+            try {
+                const filePaths = await window.electronAPI.selectRmsFiles();
+                if (!filePaths || filePaths.length === 0) return;
+                showLoadingIndicator('Parsing CyberTip reports...');
+                const tips = getCyberTips();
+                let added = 0;
+                for (const filePath of filePaths) {
+                    try {
+                        const result = await window.electronAPI.extractPdfText(filePath);
+                        if (!result.text) continue;
+                        // Check if it's a CyberTip PDF
+                        if (!/CyberTipline Report/i.test(result.text)) {
+                            viperToast(`${result.fileName} does not appear to be a CyberTip PDF`, 'error');
+                            continue;
+                        }
+                        const parsed = parseCyberTip(result.text, result.fileName);
+                        // Skip duplicates by report number
+                        if (parsed.reportNumber && tips.some(t => t.reportNumber === parsed.reportNumber)) {
+                            viperToast(`CT# ${parsed.reportNumber} already imported`, 'info');
+                            continue;
+                        }
+                        tips.push(parsed);
+                        added++;
+                    } catch (err) {
+                        console.error('CyberTip parse error:', err);
+                        viperToast(`Error parsing PDF: ${err.message}`, 'error');
+                    }
+                }
+                hideLoadingIndicator();
+                if (added) {
+                    saveCyberTips(tips);
+                    viperToast(`Imported ${added} CyberTip${added > 1 ? 's' : ''}`, 'success');
+                    renderTabContent('cyberTips');
+                }
+            } catch (err) {
+                hideLoadingIndicator();
+                console.error('CyberTip import error:', err);
+                viperToast('Failed to import CyberTip PDFs', 'error');
+            }
+        }
+
+        function deleteCyberTip(idx) {
+            const tips = getCyberTips();
+            if (!tips[idx]) return;
+            viperConfirm(`Delete CyberTip CT# ${tips[idx].reportNumber || tips[idx].fileName}?`, { danger: true, okText: 'Delete' }).then(ok => {
+                if (!ok) return;
+                tips.splice(idx, 1);
+                saveCyberTips(tips);
+                currentCyberTipView = null;
+                renderTabContent('cyberTips');
+            });
+        }
+
+        function renderCyberTipTab() {
+            const tips = getCyberTips();
+
+            // Detail view
+            if (currentCyberTipView !== null && tips[currentCyberTipView]) {
+                return renderCyberTipDetail(currentCyberTipView);
+            }
+
+            // List / Empty view
+            if (!tips.length) {
+                return `
+                <div class="space-y-6">
+                    <div class="flex items-center justify-between">
+                        <h2 class="text-2xl font-bold text-white flex items-center gap-2">
+                            <svg class="w-6 h-6 text-viper-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                            </svg>
+                            Cyber Tips
+                        </h2>
+                        <button onclick="importCyberTipPdf()" class="px-4 py-2 bg-viper-orange/20 hover:bg-viper-orange/30 text-viper-orange rounded-lg border border-viper-orange/50 flex items-center gap-2 transition-colors">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                            Import CyberTip PDF
+                        </button>
+                    </div>
+                    <div class="text-center py-16 glass-card rounded-xl">
+                        <svg class="w-16 h-16 mx-auto text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                        <p class="text-gray-400 text-lg mb-2">No CyberTip reports imported</p>
+                        <p class="text-gray-500 text-sm mb-6">Import NCMEC CyberTipline report PDFs to parse and display case data</p>
+                        <button onclick="importCyberTipPdf()" class="px-6 py-3 bg-viper-orange hover:bg-viper-orange/80 text-black font-semibold rounded-lg transition-colors">
+                            Import CyberTip PDF
+                        </button>
+                    </div>
+                </div>`;
+            }
+
+            // Card list view
+            return `
+            <div class="space-y-6">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-2">
+                        <svg class="w-6 h-6 text-viper-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                        Cyber Tips <span class="text-sm font-normal text-gray-400 ml-2">${tips.length} report${tips.length !== 1 ? 's' : ''}</span>
+                    </h2>
+                    <button onclick="importCyberTipPdf()" class="px-4 py-2 bg-viper-orange/20 hover:bg-viper-orange/30 text-viper-orange rounded-lg border border-viper-orange/50 flex items-center gap-2 transition-colors">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z"/></svg>
+                        Import More
+                    </button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    ${tips.map((t, i) => {
+                        const suspects = t.persons.filter(p => p.role === 'Suspect');
+                        const recipients = t.persons.filter(p => p.role === 'Recipient');
+                        const totalIPs = t.persons.reduce((sum, p) => sum + p.ipAddresses.length, 0);
+                        return `
+                        <div class="glass-card rounded-xl p-5 cursor-pointer hover:border-viper-orange/50 border border-gray-700/50 transition-all" onclick="currentCyberTipView=${i}; renderTabContent('cyberTips')">
+                            <div class="flex items-start justify-between mb-3">
+                                <div>
+                                    <div class="text-viper-orange font-bold text-lg">CT# ${t.reportNumber || 'Unknown'}</div>
+                                    <div class="text-xs text-gray-400">${t.esp?.name || ''} · ${t.receivedDate || ''}</div>
+                                </div>
+                                <button onclick="event.stopPropagation(); deleteCyberTip(${i})" class="text-gray-500 hover:text-red-400 p-1" title="Delete">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                </button>
+                            </div>
+                            <div class="text-sm text-gray-300 mb-3 line-clamp-2">${t.incidentType || ''}</div>
+                            <div class="flex flex-wrap gap-2 text-xs">
+                                ${suspects.length ? `<span class="px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30">${suspects.length} Suspect${suspects.length > 1 ? 's' : ''}</span>` : ''}
+                                ${recipients.length ? `<span class="px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">${recipients.length} Recipient${recipients.length > 1 ? 's' : ''}</span>` : ''}
+                                ${totalIPs ? `<span class="px-2 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-500/30">${totalIPs} IP${totalIPs > 1 ? 's' : ''}</span>` : ''}
+                                ${t.uploadedFiles.length ? `<span class="px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">${t.uploadedFiles.length} File${t.uploadedFiles.length > 1 ? 's' : ''}</span>` : ''}
+                            </div>
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>`;
+        }
+
+        async function ctArinLookup(ipAddress, uid) {
+            const btn = document.querySelector(`#${uid}_card button`);
+            const resultDiv = document.getElementById(`${uid}_result`);
+            if (!btn || !resultDiv) return;
+            btn.disabled = true;
+            btn.innerHTML = '<svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Looking up...';
+            try {
+                const result = await window.electronAPI.arinLookup(ipAddress);
+                if (result.success && result.provider) {
+                    let html = `<div class="mt-2 space-y-1 text-xs">`;
+                    html += `<div class="flex items-center gap-2"><span class="text-gray-400">ISP:</span><span class="text-green-400 font-semibold">${result.provider}</span></div>`;
+                    if (result.network) html += `<div class="flex items-center gap-2"><span class="text-gray-400">Network:</span><span class="text-gray-300">${result.network}</span></div>`;
+                    if (result.netRange) html += `<div class="flex items-center gap-2"><span class="text-gray-400">Range:</span><span class="text-gray-300 font-mono">${result.netRange}</span></div>`;
+                    if (result.org) html += `<div class="flex items-center gap-2"><span class="text-gray-400">Org:</span><span class="text-gray-300">${result.org}</span></div>`;
+                    if (result.country) html += `<div class="flex items-center gap-2"><span class="text-gray-400">Country:</span><span class="text-gray-300">${result.country}</span></div>`;
+                    html += `</div>`;
+                    resultDiv.innerHTML = html;
+                    btn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Resolved';
+                    btn.classList.remove('text-cyan-400', 'bg-cyan-500/20', 'border-cyan-500/40');
+                    btn.classList.add('text-green-400', 'bg-green-500/20', 'border-green-500/40');
+                } else {
+                    resultDiv.innerHTML = `<div class="mt-2 text-xs text-red-400">${result.error || 'No results found'}</div>`;
+                    btn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg> ARIN Lookup';
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                resultDiv.innerHTML = `<div class="mt-2 text-xs text-red-400">Lookup failed: ${e.message}</div>`;
+                btn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg> ARIN Lookup';
+                btn.disabled = false;
+            }
+        }
+
+        function renderCyberTipDetail(idx) {
+            const tips = getCyberTips();
+            const t = tips[idx];
+            if (!t) return '';
+
+            const suspects = t.persons.filter(p => p.role === 'Suspect');
+            const recipients = t.persons.filter(p => p.role === 'Recipient');
+
+            function identifierCard(type, value, role, espName, extra) {
+                const roleColor = role === 'Suspect' ? 'bg-red-500/20 text-red-400 border-red-500/40' : 'bg-blue-500/20 text-blue-400 border-blue-500/40';
+                const espColor = 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40';
+                return `
+                <div class="glass-card rounded-lg p-4 border border-gray-700/50">
+                    <div class="flex items-center gap-2 mb-2 flex-wrap">
+                        <span class="text-xs font-bold text-gray-400 uppercase">${type}</span>
+                        <span class="text-xs px-1.5 py-0.5 rounded border ${roleColor}">${role}</span>
+                        ${espName ? `<span class="text-xs px-1.5 py-0.5 rounded border ${espColor}">${espName}</span>` : ''}
+                    </div>
+                    <div class="text-white font-semibold text-lg break-all">${value}</div>
+                    ${extra || ''}
+                </div>`;
+            }
+
+            function ipCard(ip, role, espName) {
+                const roleColor = role === 'Suspect' ? 'bg-red-500/20 text-red-400 border-red-500/40' : 'bg-blue-500/20 text-blue-400 border-blue-500/40';
+                const espColor = 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40';
+                const typeLabel = ip.type ? `${role} - ${ip.type}` : role;
+                const tsLabel = ip.timestamp ? ` ${ip.timestamp}` : '';
+                const uid = 'arin_' + ip.address.replace(/[.:]/g, '_') + '_' + Math.random().toString(36).slice(2, 8);
+                return `
+                <div class="glass-card rounded-lg p-4 border border-gray-700/50" id="${uid}_card">
+                    <div class="flex items-center gap-2 mb-2 flex-wrap">
+                        <span class="text-xs font-bold text-gray-400 uppercase">IP</span>
+                        <span class="text-xs px-1.5 py-0.5 rounded border ${roleColor}">${typeLabel}${tsLabel}</span>
+                        ${espName ? `<span class="text-xs px-1.5 py-0.5 rounded border ${espColor}">${espName}</span>` : ''}
+                    </div>
+                    <div class="text-white font-semibold text-lg break-all font-mono">${ip.address}</div>
+                    <div id="${uid}_result"></div>
+                    <div class="flex gap-2 mt-3">
+                        <button onclick="ctArinLookup('${ip.address}','${uid}')" class="px-3 py-1 text-xs bg-cyan-500/20 text-cyan-400 rounded border border-cyan-500/40 hover:bg-cyan-500/30 transition-colors flex items-center gap-1">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>
+                            ARIN Lookup
+                        </button>
+                    </div>
+                </div>`;
+            }
+
+            // Build all identifier cards
+            const idCards = [];
+            for (const p of t.persons) {
+                const espName = t.esp?.name || '';
+                if (p.name) idCards.push(identifierCard('NAME', p.name, p.role, espName));
+                for (const email of p.emails) {
+                    const verifyBtn = `<div class="mt-2"><a href="https://epieos.com/?q=${encodeURIComponent(email.replace(/ \(Verified\)/, ''))}&t=email" target="_blank" class="text-xs px-3 py-1 bg-cyan-500/20 text-cyan-400 rounded border border-cyan-500/40 hover:bg-cyan-500/30 inline-flex items-center gap-1"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4"/></svg>Verify Email</a></div>`;
+                    idCards.push(identifierCard('EMAIL', email, p.role, espName, verifyBtn));
+                }
+                for (const phone of p.phones) idCards.push(identifierCard('PHONE', phone, p.role, espName));
+                for (const sn of p.screenNames) idCards.push(identifierCard('USERNAME', sn, p.role, espName));
+                for (const uid of p.userIds) idCards.push(identifierCard('USERID', uid, p.role, espName));
+                for (const ip of p.ipAddresses) idCards.push(ipCard(ip, p.role, espName));
+            }
+
+            return `
+            <div class="space-y-6">
+                <!-- Back button -->
+                <div class="flex items-center justify-between">
+                    <button onclick="currentCyberTipView=null; renderTabContent('cyberTips')" class="flex items-center gap-2 text-gray-400 hover:text-white transition-colors">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                        Back to CyberTips
+                    </button>
+                    <button onclick="deleteCyberTip(${idx})" class="px-3 py-1.5 text-xs bg-red-500/20 text-red-400 rounded border border-red-500/40 hover:bg-red-500/30 transition-colors">Delete</button>
+                </div>
+
+                <!-- CyberTip Information -->
+                <div class="glass-card rounded-xl p-6 border border-gray-700/50">
+                    <h3 class="text-xl font-bold text-white mb-4">CyberTip Information</h3>
+                    <div class="grid grid-cols-2 gap-x-8 gap-y-3">
+                        <div>
+                            <div class="text-xs text-gray-400">CyberTipline Report Number</div>
+                            <div class="text-white font-bold text-lg">${t.reportNumber || 'N/A'}</div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-400">Priority Level</div>
+                            <div class="text-viper-orange font-semibold">${t.priorityLevel || 'N/A'}</div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-400">Reporting Company</div>
+                            <div class="text-white font-bold">${t.esp?.name || 'N/A'}</div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-400">Incident Type</div>
+                            <div class="text-white">${t.incidentType || 'N/A'}</div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-400">Incident Time</div>
+                            <div class="text-white">${t.incidentTime || 'N/A'}</div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-400">Date Received (UTC)</div>
+                            <div class="text-white">${t.receivedDate || 'N/A'}</div>
+                        </div>
+                        ${t.lawEnforcement ? `<div class="col-span-2"><div class="text-xs text-gray-400">Assigned Law Enforcement</div><div class="text-white">${t.lawEnforcement}</div></div>` : ''}
+                    </div>
+                </div>
+
+                <!-- Identifiers -->
+                ${idCards.length ? `
+                <div class="glass-card rounded-xl p-6 border border-gray-700/50">
+                    <h3 class="text-xl font-bold text-white mb-4">Identifiers</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        ${idCards.join('')}
+                    </div>
+                </div>` : ''}
+
+                <!-- Persons Detail -->
+                ${t.persons.length ? `
+                <div class="glass-card rounded-xl p-6 border border-gray-700/50">
+                    <h3 class="text-xl font-bold text-white mb-4">Persons (${t.persons.length})</h3>
+                    <div class="space-y-4">
+                        ${t.persons.map(p => {
+                            const roleColor = p.role === 'Suspect' ? 'text-red-400 bg-red-500/20 border-red-500/40' : 'text-blue-400 bg-blue-500/20 border-blue-500/40';
+                            return `
+                            <div class="border border-gray-700 rounded-lg p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <span class="text-xs px-2 py-0.5 rounded border font-semibold ${roleColor}">${p.role}</span>
+                                    <span class="text-white font-bold">${p.name || '(unnamed)'}</span>
+                                </div>
+                                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                                    ${p.dob ? `<div><span class="text-gray-500">DOB:</span> <span class="text-gray-300">${p.dob}</span></div>` : ''}
+                                    ${p.age ? `<div><span class="text-gray-500">Age:</span> <span class="text-gray-300">${p.age}</span></div>` : ''}
+                                    ${p.estimatedLocation ? `<div class="col-span-2"><span class="text-gray-500">Location:</span> <span class="text-gray-300">${p.estimatedLocation}</span></div>` : ''}
+                                    ${p.priorReports ? `<div class="col-span-2"><span class="text-gray-500">Prior CTs:</span> <span class="text-yellow-400 text-xs">${p.priorReports}</span></div>` : ''}
+                                    ${p.profileUrls.length ? `<div class="col-span-2"><span class="text-gray-500">Profile:</span> ${p.profileUrls.map(u => `<a href="${u}" target="_blank" class="text-cyan-400 hover:underline text-xs break-all">${u}</a>`).join(', ')}</div>` : ''}
+                                </div>
+                            </div>`;
+                        }).join('')}
+                    </div>
+                </div>` : ''}
+
+                <!-- Uploaded Files -->
+                ${t.uploadedFiles.length ? `
+                <div class="glass-card rounded-xl p-6 border border-gray-700/50">
+                    <h3 class="text-xl font-bold text-white mb-4">NCMEC Files (${t.uploadedFiles.length})</h3>
+                    <div class="space-y-3">
+                        ${t.uploadedFiles.map(f => `
+                        <div class="border border-gray-700 rounded-lg p-4">
+                            <div class="text-white font-medium text-sm break-all mb-1">${f.filename}</div>
+                            <div class="flex flex-wrap gap-4 text-xs text-gray-400">
+                                <span>MD5: <span class="text-gray-300 font-mono">${f.md5}</span></span>
+                                ${f.categorization ? `<span>Category: <span class="text-yellow-400">${f.categorization}</span></span>` : ''}
+                            </div>
+                        </div>`).join('')}
+                    </div>
+                </div>` : ''}
+            </div>`;
         }
 
         function renderOversightImportTab() {

@@ -1471,6 +1471,12 @@ ipcMain.handle('read-warrant-file', async (event, filePath) => {
   }
 });
 
+ipcMain.handle('resolve-warrant-path', async (event, { caseNumber, subfolder, fileName }) => {
+  const filePath = path.join(casesDir, caseNumber, 'Warrants', subfolder, fileName);
+  if (fs.existsSync(filePath)) return filePath;
+  return null;
+});
+
 ipcMain.handle('view-warrant-external', async (event, filePath) => {
   try {
     console.log('view-warrant-external called with:', filePath);

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://d3js.org https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.genlogs.io https://trace-broker-production.up.railway.app https://router.project-osrm.org; font-src 'self' data:; frame-src 'self' blob: https: http:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://d3js.org https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; img-src 'self' data: blob: file: https:; media-src 'self' blob: file:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.genlogs.io https://trace-broker-production.up.railway.app https://router.project-osrm.org; font-src 'self' data:; frame-src 'self' blob: file: https: http:;">
     <title>V.I.P.E.R. - Case Detail</title>
     <script src="modules/viper-ui.js"></script>
     <script src="modules/licensing.js"></script>
@@ -4671,10 +4671,12 @@
                             file.displayUrl = URL.createObjectURL(blob);
                         } catch (error) {
                             console.error('Error creating blob URL for', file.name, error);
-                            file.displayUrl = file.path;
+                            // Convert Windows path to file:// URL as fallback
+                            file.displayUrl = 'file:///' + file.path.replace(/\\/g, '/');
+                            file.loadError = error.message || 'Failed to read file';
                         }
                     } else {
-                        file.displayUrl = file.path;
+                        file.displayUrl = 'file:///' + file.path.replace(/\\/g, '/');
                     }
                 }
             }
@@ -4739,7 +4741,7 @@
                         const isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'heic', 'heif', 'tiff', 'tif', 'svg'].includes(fileExt);
                         const isVideo = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv', 'flv', 'm4v', 'wmv'].includes(fileExt);
                         const isAudio = ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'wma'].includes(fileExt);
-                        const isDocument = ['doc', 'docx', 'txt', 'rtf'].includes(fileExt);
+                        const isDocument = ['doc', 'docx', 'txt', 'rtf', 'html', 'htm', 'xls', 'xlsx', 'csv'].includes(fileExt);
                         const fileUrl = file.displayUrl || file.url || file.path;
                         
                         return `
@@ -4752,12 +4754,17 @@
                                     </div>
                                     <div class="flex gap-2">
                                         ${file.path ? `
-                                            <button onclick="window.electronAPI.openFile('${file.path.replace(/\\/g, '\\\\')}')" class="px-3 py-1 rounded text-xs bg-viper-purple/20 text-viper-purple border border-viper-purple/30 hover:bg-viper-purple/30 transition-colors">
+                                            <button onclick="window.electronAPI.openFile('${file.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')" class="px-3 py-1 rounded text-xs bg-viper-purple/20 text-viper-purple border border-viper-purple/30 hover:bg-viper-purple/30 transition-colors">
                                                 Open Externally
                                             </button>
                                         ` : ''}
                                     </div>
                                 </div>
+                                ${file.loadError ? `
+                                    <div class="bg-viper-orange/10 border border-viper-orange/30 rounded-lg p-3 mb-3 text-xs text-viper-orange">
+                                        ⚠ Preview error: ${file.loadError}. Use "Open Externally" to view this file.
+                                    </div>
+                                ` : ''}
                                 
                                 ${isPDF ? `
                                     <div class="space-y-3">
@@ -4800,19 +4807,20 @@
                                         </svg>
                                         <p class="text-gray-400 mb-2">${fileExt.toUpperCase()} Document</p>
                                         <p class="text-sm text-gray-500 mb-4">Original file preserved in case folder</p>
-                                        <a href="${fileUrl}" download="${file.name}" class="px-4 py-2 rounded-lg bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/30 hover:bg-viper-cyan/30 transition-colors inline-block">
-                                            Download Document
-                                        </a>
+                                        ${file.path ? `<button onclick="window.electronAPI.openFile('${file.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')" class="px-4 py-2 rounded-lg bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/30 hover:bg-viper-cyan/30 transition-colors">
+                                            Open Document
+                                        </button>` : ''}
                                     </div>
                                 ` : `
                                     <div class="text-center py-8">
                                         <svg class="w-16 h-16 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
                                         </svg>
-                                        <p class="text-gray-400 mb-4">Preview not available for this file type</p>
-                                        <a href="${fileUrl}" download="${file.name}" class="px-4 py-2 rounded-lg bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/30 hover:bg-viper-cyan/30 transition-colors inline-block">
-                                            Download to View
-                                        </a>
+                                        <p class="text-gray-400 mb-2">${fileExt.toUpperCase()} File</p>
+                                        <p class="text-sm text-gray-500 mb-4">Click to open with default application</p>
+                                        ${file.path ? `<button onclick="window.electronAPI.openFile('${file.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')" class="px-4 py-2 rounded-lg bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/30 hover:bg-viper-cyan/30 transition-colors">
+                                            Open File
+                                        </button>` : ''}
                                     </div>
                                 `}
                             </div>
@@ -5320,6 +5328,39 @@
                 saveWarrantsToStorage();
                 renderTabContent('warrants');
                 showToast(`Uploaded ${files.length} production file(s)`, 'success');
+
+                // Also add to Evidence tab so files are browsable there
+                try {
+                    const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
+                    const caseEv = allEvidence[currentCase.caseNumber] || [];
+                    const tag = `Warrant Production - ${warrant.issuedTo || 'Warrant #' + warrantId}`;
+                    // Check if an evidence entry already exists for this warrant production
+                    const existingIdx = caseEv.findIndex(e => e.warrantId === warrantId && e.type === 'document');
+                    const evidenceEntry = {
+                        id: existingIdx >= 0 ? caseEv[existingIdx].id : Date.now(),
+                        warrantId: warrantId,
+                        type: 'document',
+                        tag: tag,
+                        description: `Production files for warrant: ${warrant.issuedTo || ''} (${warrant.type || ''})`.trim(),
+                        fileCount: results.length,
+                        totalSize: results.reduce((sum, f) => sum + f.size, 0),
+                        files: results,
+                        createdAt: new Date().toISOString()
+                    };
+                    if (existingIdx >= 0) {
+                        caseEv[existingIdx] = evidenceEntry;
+                    } else {
+                        caseEv.push(evidenceEntry);
+                    }
+                    allEvidence[currentCase.caseNumber] = caseEv;
+                    localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
+                    // Update in-memory array if evidence tab has been loaded
+                    if (typeof caseEvidence !== 'undefined') {
+                        caseEvidence = caseEv;
+                    }
+                } catch (evErr) {
+                    console.error('Failed to mirror production to evidence tab:', evErr);
+                }
             };
 
             document.getElementById('prodUploadFolder').onclick = () => {
@@ -5458,10 +5499,27 @@
         }
         
         async function viewWarrantProduction(warrant) {
-            document.getElementById('viewerTitle').textContent = `Production Files - ${warrant.issuedTo || 'Warrant'}`;
-            const viewerContent = document.getElementById('viewerContent');
-            viewerContent.innerHTML = '<p class="text-gray-400 text-center py-4">Loading files...</p>';
-            document.getElementById('evidenceViewerModal').classList.add('show');
+            // Create a standalone modal for production files (evidence viewer may not be in DOM)
+            let modal = document.getElementById('warrantProductionModal');
+            if (modal) modal.remove();
+            modal = document.createElement('div');
+            modal.id = 'warrantProductionModal';
+            modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4';
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+            modal.innerHTML = `
+                <div class="glass-card rounded-xl max-w-4xl w-full max-h-[90vh] flex flex-col" onclick="event.stopPropagation()">
+                    <div class="p-4 border-b border-gray-700 flex items-center justify-between">
+                        <h3 class="text-xl font-bold text-viper-cyan">Production Files - ${warrant.issuedTo || 'Warrant'}</h3>
+                        <button onclick="document.getElementById('warrantProductionModal').remove()" class="p-2 text-gray-400 hover:text-white"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+                    </div>
+                    <div class="flex-1 p-6 overflow-auto" id="warrantProductionContent">
+                        <p class="text-gray-400 text-center py-4">Loading files...</p>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+
+            const contentEl = document.getElementById('warrantProductionContent');
 
             const cards = [];
             for (const file of warrant.productionFiles) {
@@ -5505,7 +5563,7 @@
                     </div>
                 `);
             }
-            viewerContent.innerHTML = `<div class="space-y-4">${cards.join('')}</div>`;
+            contentEl.innerHTML = `<div class="space-y-4">${cards.join('')}</div>`;
         }
         
         async function deleteWarrant(warrantId) {

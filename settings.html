@@ -1235,9 +1235,25 @@
 
                     <!-- State: Enabled (management) -->
                     <div id="secEnabled" class="hidden">
-                        <div class="flex items-center gap-3 p-4 bg-viper-dark rounded-lg border border-viper-green/20 mb-5">
+                        <div class="flex items-center gap-3 p-4 bg-viper-dark rounded-lg border border-viper-green/20 mb-4">
                             <div class="w-3 h-3 rounded-full bg-viper-green animate-pulse"></div>
                             <span class="text-gray-300 text-sm">Field Security is <span class="text-viper-green font-medium">active</span></span>
+                        </div>
+
+                        <!-- Encryption notice -->
+                        <div class="p-4 bg-amber-500/5 border border-amber-500/30 rounded-lg mb-5">
+                            <div class="flex items-start gap-3">
+                                <svg class="w-5 h-5 text-amber-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                                <div>
+                                    <p class="text-amber-400 font-semibold text-sm mb-1">Files are encrypted on disk</p>
+                                    <p class="text-gray-400 text-xs leading-relaxed">
+                                        Evidence, warrant files, and other case attachments are encrypted with AES-256 and <span class="text-gray-300">cannot be opened outside of V.I.P.E.R.</span>
+                                        To share unencrypted files with a DA's office or other agency, use the <span class="text-gray-300 font-medium">Export to DA</span> function on the case detail page — exported files are automatically decrypted.
+                                    </p>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- Change Password -->

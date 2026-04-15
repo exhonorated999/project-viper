@@ -705,6 +705,17 @@ ipcMain.handle('select-rms-files', async () => {
   return result.filePaths;
 });
 
+ipcMain.handle('select-dmv-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import DMV Printout',
+    properties: ['openFile'],
+    filters: [{ name: 'PDF Documents', extensions: ['pdf'] }]
+  });
+  restoreFocus();
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
+});
+
 ipcMain.handle('extract-pdf-text', async (event, filePath) => {
   try {
     const pdfParse = require('pdf-parse');

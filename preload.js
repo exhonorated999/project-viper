@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   reportGet: (caseNumber) => ipcRenderer.invoke('report-get', caseNumber),
   reportSave: (caseNumber, content, lastSaved) => ipcRenderer.invoke('report-save', caseNumber, content, lastSaved),
   selectRmsFiles: () => ipcRenderer.invoke('select-rms-files'),
+  selectDmvFile: () => ipcRenderer.invoke('select-dmv-file'),
   extractPdfText: (filePath) => ipcRenderer.invoke('extract-pdf-text', filePath),
 
   // Case Export / Import

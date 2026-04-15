@@ -5450,6 +5450,12 @@
                     <div class="flex justify-between items-center mb-6">
                         <h2 class="text-2xl font-bold text-white">Suspects</h2>
                         <div class="flex gap-3">
+                            <button onclick="importDmvPrintout()" class="px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500 rounded-lg text-amber-400 transition flex items-center gap-2">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                </svg>
+                                Import DMV
+                            </button>
                             <button onclick="addNewSuspect()" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition flex items-center gap-2">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
@@ -5539,6 +5545,12 @@
                                 <button onclick="startInlineEditSuspect(${index})" class="px-4 py-2 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded-lg text-viper-purple transition">
                                     Edit
                                 </button>
+                                <button onclick="importDmvPrintout(${index})" class="px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500 rounded-lg text-amber-400 transition flex items-center gap-2">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                    </svg>
+                                    Import DMV
+                                </button>
                                 ${isTloEnabled() && suspect.name ? `
                                 <button onclick="event.stopPropagation(); openTloPanel('${(suspect.name.split(' ')[0]||'').replace(/'/g,"\\'")}', '${(suspect.name.split(' ').slice(1).join(' ')||'').replace(/'/g,"\\'")}', '')" class="px-4 py-2 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500 rounded-lg text-indigo-400 transition flex items-center gap-2">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
@@ -5624,8 +5636,8 @@
                             ${suspect.identifiers && suspect.identifiers.length > 0 ? `
                                 <div class="space-y-3">
                                     ${suspect.identifiers.map((ident, iIdx) => {
-                                        const typeColors = { email: 'viper-cyan', phone: 'viper-orange', username: 'viper-purple', ip: 'yellow-400' };
-                                        const typeIcons = { email: '📧', phone: '📱', username: '👤', ip: '🌐' };
+                                        const typeColors = { email: 'viper-cyan', phone: 'viper-orange', username: 'viper-purple', ip: 'yellow-400', ssn: 'red-400', dl: 'amber-400' };
+                                        const typeIcons = { email: '📧', phone: '📱', username: '👤', ip: '🌐', ssn: '🔒', dl: '🪪' };
                                         const color = typeColors[ident.type] || 'gray-400';
                                         return `
                                         <div class="bg-gradient-to-r from-${color}/10 to-transparent border border-${color}/20 rounded-lg p-4 flex items-center justify-between">
@@ -5852,6 +5864,240 @@
             currentSuspectView = null;
             renderTabContent('suspects');
         }
+
+        // ---- DMV Printout Import ----
+        const DMV_COLOR_MAP = {
+            'BLK': 'Black', 'BRO': 'Brown', 'BRN': 'Brown', 'BLN': 'Blonde', 'BLD': 'Blonde',
+            'RED': 'Red', 'GRY': 'Gray', 'GRA': 'Gray', 'WHI': 'White', 'SDY': 'Sandy',
+            'BLU': 'Blue', 'GRN': 'Green', 'HAZ': 'Hazel', 'MAR': 'Maroon',
+            'PNK': 'Pink', 'MUL': 'Multicolored', 'ONG': 'Orange',
+            'XXX': 'Unknown', 'UNK': 'Unknown'
+        };
+
+        function parseDmvText(text) {
+            const result = {};
+
+            // DL / OLN number — handles OLN, DL, DLN, License No, Lic No, DL Number, Driver License
+            const dlMatch = text.match(/(?:OLN|DLN?|Driver.?s?\s*Lic(?:ense)?(?:\s*(?:No|Number|#))?|Lic(?:ense)?\s*(?:No|Number|#))[\s:]*([A-Z0-9*\-]+(?:\s[A-Z0-9*\-]+)*)(?:\s*\(([A-Z]{2})\))?/i);
+            if (dlMatch) {
+                const num = dlMatch[1].trim();
+                const state = dlMatch[2] || '';
+                result.dlNumber = state ? `${num} (${state})` : num;
+            }
+
+            // DOB — Dob, DOB, Date of Birth, Birth Date, DB
+            const dobMatch = text.match(/(?:Dob|DOB|Date\s*of\s*Birth|Birth\s*Date|DB)[\s:]*(\d{4}[/-]\d{2}[/-]\d{2}|\d{2}[/-]\d{2}[/-]\d{4}|\d{2}[/-]\d{2}[/-]\d{2})/i);
+            if (dobMatch) {
+                const raw = dobMatch[1].replace(/\//g, '-');
+                if (/^\d{4}-/.test(raw)) {
+                    result.dob = raw;
+                } else {
+                    const parts = raw.split('-');
+                    if (parts[2].length === 4) {
+                        result.dob = `${parts[2]}-${parts[0]}-${parts[1]}`;
+                    } else {
+                        const yr = parseInt(parts[2]);
+                        result.dob = `${yr > 25 ? 1900 + yr : 2000 + yr}-${parts[0]}-${parts[1]}`;
+                    }
+                }
+            }
+
+            // Sex
+            const sexMatch = text.match(/\bSex[\s:]*(\w+)/i);
+            if (sexMatch) result.sex = sexMatch[1];
+
+            // Height — 3-digit FtIn (e.g. 503 = 5'03"), or 5'03, 5-03
+            let htMatch = text.match(/Height[\s:]*(\d{3})\b/i);
+            if (htMatch) {
+                const raw = htMatch[1];
+                result.height = String(parseInt(raw[0]) * 12 + parseInt(raw.slice(1)));
+            } else {
+                htMatch = text.match(/Height[\s:]*(\d+)['\-](\d{1,2})/i);
+                if (htMatch) result.height = String(parseInt(htMatch[1]) * 12 + parseInt(htMatch[2]));
+            }
+
+            // Weight
+            const wtMatch = text.match(/Weight[\s:]*(\d+)/i);
+            if (wtMatch) result.weight = wtMatch[1];
+
+            // Eye Color
+            const eyeMatch = text.match(/Eye\s*(?:Color)?[\s:]*([A-Z]{2,4})\b/i);
+            if (eyeMatch) {
+                const code = eyeMatch[1].toUpperCase();
+                result.eyeColor = DMV_COLOR_MAP[code] || code;
+            }
+
+            // Hair Color
+            const hairMatch = text.match(/Hair\s*(?:Color)?[\s:]*([A-Z]{2,4})\b/i);
+            if (hairMatch) {
+                const code = hairMatch[1].toUpperCase();
+                result.hairColor = DMV_COLOR_MAP[code] || code;
+            }
+
+            // SSN
+            const ssnMatch = text.match(/SSN[\s:]*(\d{3}[- ]?\d{2}[- ]?\d{4})/i);
+            if (ssnMatch) result.ssn = ssnMatch[1];
+
+            // Name + Address — find city/state/zip line, then work backward
+            const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l);
+            for (let i = 0; i < lines.length; i++) {
+                // Match city, STATE ZIP pattern
+                if (/[A-Z]{2}\s+\d{5}/.test(lines[i]) && !/^(?:Request|Response|Query|Operator|Generated|Requested)/i.test(lines[i])) {
+                    result.addressCityStateZip = lines[i];
+                    // Street address is previous line (should contain a number)
+                    if (i >= 1 && /\d/.test(lines[i-1]) && !/[:=]/.test(lines[i-1])) {
+                        result.address = lines[i-1];
+                    }
+                    // Name is the line before address (all letters/spaces/hyphens, 2+ words)
+                    const nameIdx = result.address ? i - 2 : i - 1;
+                    if (nameIdx >= 0) {
+                        const candidate = lines[nameIdx];
+                        if (/^[A-Za-z\s.\-']+$/.test(candidate) && candidate.split(/\s+/).length >= 2 && !/^(?:Request|Response|Query|Operator|None|Unit)/i.test(candidate)) {
+                            result.name = candidate;
+                        }
+                    }
+                    break;
+                }
+            }
+
+            // Fallback name from "Name:" or "Full Name:" field
+            if (!result.name) {
+                const nameField = text.match(/(?:Full\s*)?Name[\s:]+([A-Za-z\s.\-']{4,})/i);
+                if (nameField && nameField[1].split(/\s+/).length >= 2) result.name = nameField[1].trim();
+            }
+
+            return result;
+        }
+
+        async function importDmvPrintout(existingSuspectIndex) {
+            try {
+                const filePath = await window.electronAPI.selectDmvFile();
+                if (!filePath) return;
+
+                const pdfResult = await window.electronAPI.extractPdfText(filePath);
+                if (!pdfResult || !pdfResult.text) {
+                    showToast('Could not extract text from the PDF. The file may be image-only.', 'error');
+                    return;
+                }
+
+                const parsed = parseDmvText(pdfResult.text);
+                if (!parsed.name && !parsed.dlNumber && !parsed.dob) {
+                    showToast('Could not identify DMV fields in this document. The format may not be supported.', 'error');
+                    return;
+                }
+
+                // Build a preview of what was found
+                const fields = [];
+                if (parsed.name) fields.push(`<b>Name:</b> ${parsed.name}`);
+                if (parsed.dob) fields.push(`<b>DOB:</b> ${formatDate(parsed.dob)}`);
+                if (parsed.dlNumber) fields.push(`<b>DL#:</b> ${parsed.dlNumber}`);
+                if (parsed.sex) fields.push(`<b>Sex:</b> ${parsed.sex}`);
+                if (parsed.height) fields.push(`<b>Height:</b> ${parsed.height}"`);
+                if (parsed.weight) fields.push(`<b>Weight:</b> ${parsed.weight} lbs`);
+                if (parsed.eyeColor) fields.push(`<b>Eyes:</b> ${parsed.eyeColor}`);
+                if (parsed.hairColor) fields.push(`<b>Hair:</b> ${parsed.hairColor}`);
+                if (parsed.address) fields.push(`<b>Address:</b> ${parsed.address}`);
+                if (parsed.addressCityStateZip) fields.push(`<b>City/State:</b> ${parsed.addressCityStateZip}`);
+                if (parsed.ssn) fields.push(`<b>SSN:</b> ***-**-${parsed.ssn.slice(-4)}`);
+
+                const previewHtml = `
+                    <div style="text-align:left;margin:12px 0;">
+                        <p style="color:#facc15;font-weight:600;margin-bottom:8px;">Extracted from: ${pdfResult.fileName}</p>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;font-size:14px;">
+                            ${fields.map(f => `<div>${f}</div>`).join('')}
+                        </div>
+                        ${parsed.ssn ? '<p style="color:#f87171;font-size:12px;margin-top:8px;">⚠ SSN detected — will be stored as an identifier</p>' : ''}
+                    </div>
+                `;
+
+                const isUpdate = existingSuspectIndex !== undefined && existingSuspectIndex !== null;
+                const confirmMsg = isUpdate
+                    ? `Import DMV data into this suspect? Only empty fields will be filled — existing data will not be overwritten.${previewHtml}`
+                    : `Create a new suspect from DMV data?${previewHtml}`;
+
+                const confirmed = await viperConfirm(confirmMsg, { okText: isUpdate ? 'Import' : 'Create Suspect', html: true });
+                if (!confirmed) return;
+
+                if (isUpdate) {
+                    // Merge into existing suspect (don't overwrite existing values)
+                    const suspect = suspects[existingSuspectIndex];
+                    if (parsed.name && !suspect.name) suspect.name = parsed.name;
+                    if (parsed.dob && !suspect.dob) suspect.dob = parsed.dob;
+                    if (parsed.dlNumber && !suspect.dlNumber) suspect.dlNumber = parsed.dlNumber;
+                    if (parsed.height && !suspect.height) suspect.height = parsed.height;
+                    if (parsed.weight && !suspect.weight) suspect.weight = parsed.weight;
+                    if (parsed.eyeColor && !suspect.eyeColor) suspect.eyeColor = parsed.eyeColor;
+                    if (parsed.hairColor && !suspect.hairColor) suspect.hairColor = parsed.hairColor;
+                    if (parsed.address && !suspect.address) suspect.address = parsed.address;
+                    if (parsed.addressCityStateZip && !suspect.addressCityStateZip) suspect.addressCityStateZip = parsed.addressCityStateZip;
+                    if (parsed.sex && !suspect.sex) suspect.sex = parsed.sex;
+
+                    // Add SSN as identifier if not already present
+                    if (parsed.ssn) {
+                        if (!suspect.identifiers) suspect.identifiers = [];
+                        const hasSsn = suspect.identifiers.some(id => id.type === 'ssn');
+                        if (!hasSsn) {
+                            suspect.identifiers.push({ type: 'ssn', value: parsed.ssn, platform: 'DMV' });
+                        }
+                    }
+                    // Add DL as identifier too
+                    if (parsed.dlNumber) {
+                        if (!suspect.identifiers) suspect.identifiers = [];
+                        const hasDl = suspect.identifiers.some(id => id.type === 'dl');
+                        if (!hasDl) {
+                            suspect.identifiers.push({ type: 'dl', value: parsed.dlNumber, platform: 'DMV' });
+                        }
+                    }
+
+                    saveSuspects();
+                    renderTabContent('suspects');
+                } else {
+                    // Create new suspect
+                    const newSuspect = {
+                        name: parsed.name || '',
+                        dob: parsed.dob || '',
+                        dlNumber: parsed.dlNumber || '',
+                        sex: parsed.sex || '',
+                        height: parsed.height || '',
+                        weight: parsed.weight || '',
+                        hairColor: parsed.hairColor || '',
+                        eyeColor: parsed.eyeColor || '',
+                        scarsMarksTattoos: '',
+                        address: parsed.address || '',
+                        addressCityStateZip: parsed.addressCityStateZip || '',
+                        photo: '',
+                        residencePhoto: '',
+                        employerName: '',
+                        occupation: '',
+                        employerAddress: '',
+                        employerPhone: '',
+                        firearms: [],
+                        vehicles: [],
+                        identifiers: [],
+                        criminalHistory: [],
+                        rapSheet: null,
+                        firearmsDoc: null
+                    };
+
+                    // Add SSN as identifier
+                    if (parsed.ssn) {
+                        newSuspect.identifiers.push({ type: 'ssn', value: parsed.ssn, platform: 'DMV' });
+                    }
+                    // Add DL as identifier
+                    if (parsed.dlNumber) {
+                        newSuspect.identifiers.push({ type: 'dl', value: parsed.dlNumber, platform: 'DMV' });
+                    }
+
+                    suspects.push(newSuspect);
+                    saveSuspects();
+                    currentSuspectView = suspects.length - 1;
+                    renderTabContent('suspects');
+                }
+            } catch (err) {
+                console.error('DMV import error:', err);
+                showToast('Error importing DMV printout: ' + err.message, 'error');
+            }
+        }
         
         function addNewSuspect() {
             showSuspectModal();
@@ -6050,6 +6296,8 @@
                                             <option value="phone" ${id.type === 'phone' ? 'selected' : ''}>Phone</option>
                                             <option value="username" ${id.type === 'username' ? 'selected' : ''}>Username</option>
                                             <option value="ip" ${id.type === 'ip' ? 'selected' : ''}>IP Address</option>
+                                            <option value="dl" ${id.type === 'dl' ? 'selected' : ''}>Driver's License</option>
+                                            <option value="ssn" ${id.type === 'ssn' ? 'selected' : ''}>SSN</option>
                                         </select>
                                         <input type="text" class="ident-value flex-1 bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white text-sm focus:border-viper-cyan focus:outline-none" value="${id.value || ''}" placeholder="Value">
                                         <button type="button" onclick="this.closest('[data-ident-row]').remove()" class="text-red-400 hover:text-red-300 p-1">
@@ -6137,6 +6385,8 @@
                     <option value="phone">Phone</option>
                     <option value="username">Username</option>
                     <option value="ip">IP Address</option>
+                    <option value="dl">Driver's License</option>
+                    <option value="ssn">SSN</option>
                 </select>
                 <input type="text" class="ident-value flex-1 bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Value">
                 <button type="button" onclick="this.closest('[data-ident-row]').remove()" class="text-red-400 hover:text-red-300 p-1">
@@ -6216,6 +6466,8 @@
                             <option value="phone">Phone</option>
                             <option value="username">Username</option>
                             <option value="ip">IP Address</option>
+                            <option value="dl">Driver's License</option>
+                            <option value="ssn">SSN</option>
                         </select>
                         <div id="identPlatformRow" style="display:none;">
                             <input type="text" name="platform" placeholder="Platform (e.g. Snapchat, Instagram, Discord)" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">

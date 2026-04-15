@@ -43,7 +43,7 @@ nsis:
   shortcutName: V.I.P.E.R.
   installerIcon: build/icon.ico
   uninstallerIcon: build/icon.ico
-  perMachine: false
+  perMachine: true
   runAfterFinish: true
   deleteAppDataOnUninstall: false
   artifactName: ${productName}-${version}-Setup.${ext}

@@ -2422,7 +2422,9 @@
                         fieldBold('   Date Signed', w.dateSigned ? formatDate(w.dateSigned) : 'Not signed');
                         fieldBold('   Date Served', w.dateServed ? formatDate(w.dateServed) : 'Not served');
                         fieldBold('   Due Date', w.dueDate ? formatDate(w.dueDate) : 'None');
+                        if (w.judge) fieldBold('   Judge/Magistrate', w.judge);
                         fieldBold('   Return Received', w.returnReceived ? 'Yes' : 'No');
+                        if (w.courtReturnDate) fieldBold('   Court Return Filed', formatDate(w.courtReturnDate));
                         if (w.hasWarrantFile) fieldBold('   Signed Warrant File', w.warrantFileName);
                         if (w.hasProduction) fieldBold('   Production Files', `${w.productionFileCount} file(s)`);
                         if (w.hasCourtReturn) fieldBold('   Court Return File', w.courtReturnFile?.name || 'Attached');
@@ -5107,6 +5109,17 @@
                                     </div>
                                 </div>
                                 
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">Issuing Judge / Magistrate</label>
+                                        <input type="text" id="warrantJudge" placeholder="e.g., Hon. Jane Smith" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white placeholder-gray-500">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">Court Return Submitted</label>
+                                        <input type="date" id="warrantCourtReturnDate" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white">
+                                    </div>
+                                </div>
+                                
                                 <div>
                                     <label class="block text-sm font-medium text-gray-300 mb-2">Upload Signed Warrant (PDF)</label>
                                     <input type="file" id="warrantFile" accept=".pdf" class="hidden" onchange="handleWarrantFileSelect(event)">
@@ -5183,8 +5196,14 @@
                                 
                                 <p class="text-gray-300 mb-3">${warrant.description}</p>
                                 
+                                ${warrant.judge ? `
+                                    <p class="text-sm text-gray-400 mb-3">
+                                        <span class="text-gray-500">Judge/Magistrate:</span> <span class="text-white">${warrant.judge}</span>
+                                    </p>
+                                ` : ''}
+                                
                                 <!-- Dates Grid -->
-                                <div class="grid grid-cols-3 gap-4 mb-4 text-sm">
+                                <div class="grid grid-cols-4 gap-4 mb-4 text-sm">
                                     ${warrant.dateSigned ? `
                                         <div class="bg-viper-card/50 rounded p-2">
                                             <p class="text-gray-400 text-xs">Signed</p>
@@ -5206,6 +5225,12 @@
                                                     ${isOverdue ? `${Math.abs(daysUntilDue)} days overdue` : `${daysUntilDue} days remaining`}
                                                 </p>
                                             ` : ''}
+                                        </div>
+                                    ` : ''}
+                                    ${warrant.courtReturnDate ? `
+                                        <div class="bg-viper-card/50 rounded p-2 border border-viper-green/30">
+                                            <p class="text-gray-400 text-xs">Court Return Filed</p>
+                                            <p class="text-viper-green">${formatDate(warrant.courtReturnDate)}</p>
                                         </div>
                                     ` : ''}
                                 </div>
@@ -5344,6 +5369,8 @@
             document.getElementById('warrantDateSigned').value = '';
             document.getElementById('warrantDateServed').value = '';
             document.getElementById('warrantDueDate').value = '';
+            document.getElementById('warrantJudge').value = '';
+            document.getElementById('warrantCourtReturnDate').value = '';
             clearWarrantFile();
             document.getElementById('warrantForm').classList.remove('hidden');
         }
@@ -5360,6 +5387,8 @@
             document.getElementById('warrantDateSigned').value = warrant.dateSigned || '';
             document.getElementById('warrantDateServed').value = warrant.dateServed || '';
             document.getElementById('warrantDueDate').value = warrant.dueDate || '';
+            document.getElementById('warrantJudge').value = warrant.judge || '';
+            document.getElementById('warrantCourtReturnDate').value = warrant.courtReturnDate || '';
             
             if (warrant.hasWarrantFile) {
                 document.getElementById('warrantFileName').textContent = warrant.warrantFileName;
@@ -5406,6 +5435,8 @@
             const dateSigned = document.getElementById('warrantDateSigned').value;
             const dateServed = document.getElementById('warrantDateServed').value;
             const dueDate = document.getElementById('warrantDueDate').value;
+            const judge = document.getElementById('warrantJudge').value;
+            const courtReturnDate = document.getElementById('warrantCourtReturnDate').value;
             
             // Save warrant PDF to disk if a new file was selected
             let savedFilePath = null;
@@ -5435,6 +5466,8 @@
                     warrant.dateSigned = dateSigned;
                     warrant.dateServed = dateServed;
                     warrant.dueDate = dueDate;
+                    warrant.judge = judge;
+                    warrant.courtReturnDate = courtReturnDate;
                     warrant.lastModified = new Date().toISOString();
                     
                     if (savedFilePath) {
@@ -5452,6 +5485,8 @@
                     dateSigned: dateSigned,
                     dateServed: dateServed,
                     dueDate: dueDate,
+                    judge: judge,
+                    courtReturnDate: courtReturnDate,
                     hasWarrantFile: savedFilePath !== null,
                     warrantFileName: savedFileName,
                     warrantFilePath: savedFilePath,

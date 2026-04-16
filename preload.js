@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Storage paths
   getStoragePaths: () => ipcRenderer.invoke('get-storage-paths'),
+  deleteCaseFolder: (caseNumber) => ipcRenderer.invoke('delete-case-folder', caseNumber),
+  deleteCaseEvidence: (caseNumber) => ipcRenderer.invoke('delete-case-evidence', caseNumber),
 
   // Backup & Restore
   selectBackupDirectory: () => ipcRenderer.invoke('select-backup-directory'),

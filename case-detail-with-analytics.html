@@ -1050,6 +1050,9 @@
             renderCaseHeader();
             renderTabs();
 
+            // Check for pending RMS import from case creation
+            processPendingRmsImport();
+
             // Support opening a specific tab from URL (for pop-out windows)
             const startTab = params.get('tab');
             renderTabContent(startTab && (startTab === 'overview' || currentCase.modules.includes(startTab)) ? startTab : 'overview');
@@ -1063,6 +1066,181 @@
             const updatedTasks = [...otherTasks, ...caseTasks];
             localStorage.setItem('viperTasks', JSON.stringify(updatedTasks));
             markAsModified();
+        }
+
+        // --- Process Pending RMS Import (from "Import from RMS PDF" on case creation) ---
+        function processPendingRmsImport() {
+            const key = 'pendingRmsImport_' + currentCase.id;
+            const raw = localStorage.getItem(key);
+            if (!raw) return;
+
+            try {
+                const { text, fileName } = JSON.parse(raw);
+                localStorage.removeItem(key); // consume immediately
+
+                // Parse using the full RMS parser
+                const report = parseRmsReport(text, fileName);
+                if (!report) {
+                    viperToast('Failed to parse RMS report', 'error');
+                    return;
+                }
+
+                let populated = [];
+
+                // 1. Save to RMS Imports tab (full report, same as normal import)
+                const rmsImports = getRmsImports();
+                rmsImports.push(report);
+                saveRmsImports(rmsImports);
+                populated.push('RMS Imports');
+
+                // 2. Route suspects
+                if (report.personsInvolved && report.personsInvolved.length > 0) {
+                    const suspectPersons = report.personsInvolved.filter(p =>
+                        /SUSPECT|ARRESTED|DEFENDANT/i.test(p.involvement || ''));
+                    if (suspectPersons.length > 0) {
+                        const existing = JSON.parse(localStorage.getItem(`suspects_${currentCase.id}`) || '[]');
+                        for (const p of suspectPersons) {
+                            existing.push({
+                                name: p.name || '',
+                                dob: p.dob || '',
+                                dlNumber: '',
+                                sex: p.sex || '',
+                                height: p.height || '',
+                                weight: p.weight || '',
+                                hairColor: p.hair || '',
+                                eyeColor: p.eyes || '',
+                                scarsMarksTattoos: '',
+                                address: p.address || '',
+                                addressCityStateZip: '',
+                                photo: '',
+                                residencePhoto: '',
+                                employerName: '',
+                                occupation: '',
+                                employerAddress: '',
+                                employerPhone: '',
+                                firearms: [],
+                                vehicles: [],
+                                identifiers: [],
+                                criminalHistory: [],
+                                rapSheet: null,
+                                firearmsDoc: null,
+                                rmsSource: report.reportNumber || fileName
+                            });
+                        }
+                        localStorage.setItem(`suspects_${currentCase.id}`, JSON.stringify(existing));
+                        populated.push(`Suspects (${suspectPersons.length})`);
+                    }
+
+                    // 3. Route victims
+                    const victimPersons = report.personsInvolved.filter(p =>
+                        /VICTIM/i.test(p.involvement || ''));
+                    if (victimPersons.length > 0) {
+                        const existing = JSON.parse(localStorage.getItem(`victims_${currentCase.id}`) || '[]');
+                        for (const p of victimPersons) {
+                            existing.push({
+                                name: p.name || '',
+                                dob: p.dob || '',
+                                dlNumber: '',
+                                phone: p.phone || '',
+                                phone2: '',
+                                email: '',
+                                email2: '',
+                                height: p.height || '',
+                                weight: p.weight || '',
+                                hairColor: p.hair || '',
+                                eyeColor: p.eyes || '',
+                                address: p.address || '',
+                                addressCityStateZip: '',
+                                photo: '',
+                                residencePhoto: '',
+                                employerName: '',
+                                occupation: '',
+                                employerAddress: '',
+                                employerPhone: '',
+                                injuryPhotos: [],
+                                propertyPhotos: [],
+                                vehicles: [],
+                                rmsSource: report.reportNumber || fileName
+                            });
+                        }
+                        localStorage.setItem(`victims_${currentCase.id}`, JSON.stringify(existing));
+                        populated.push(`Victims (${victimPersons.length})`);
+                    }
+
+                    // 4. Route witnesses
+                    const witnessPersons = report.personsInvolved.filter(p =>
+                        /WITNESS|REPORTING\s*PARTY|INFORMANT/i.test(p.involvement || ''));
+                    if (witnessPersons.length > 0) {
+                        const existing = JSON.parse(localStorage.getItem(`witnesses_${currentCase.id}`) || '[]');
+                        for (const p of witnessPersons) {
+                            existing.push({
+                                name: p.name || '',
+                                dob: p.dob || '',
+                                dlNumber: '',
+                                phone: p.phone || '',
+                                phone2: '',
+                                email: '',
+                                email2: '',
+                                height: p.height || '',
+                                weight: p.weight || '',
+                                hairColor: p.hair || '',
+                                eyeColor: p.eyes || '',
+                                address: p.address || '',
+                                addressCityStateZip: '',
+                                photo: '',
+                                residencePhoto: '',
+                                employerName: '',
+                                occupation: '',
+                                employerAddress: '',
+                                employerPhone: '',
+                                statement: '',
+                                rmsSource: report.reportNumber || fileName
+                            });
+                        }
+                        localStorage.setItem(`witnesses_${currentCase.id}`, JSON.stringify(existing));
+                        populated.push(`Witnesses (${witnessPersons.length})`);
+                    }
+                }
+
+                // 5. Route vehicles
+                if (report.vehicles && report.vehicles.length > 0) {
+                    const existing = JSON.parse(localStorage.getItem(`recoveredVehicles_${currentCase.id}`) || '[]');
+                    for (const v of report.vehicles) {
+                        const makeModel = [v.year, v.make, v.model || v.type].filter(Boolean).join(' ').trim();
+                        existing.push({
+                            makeModel: makeModel,
+                            licensePlate: v.license || '',
+                            vin: v.vin || '',
+                            color: v.colors || '',
+                            year: v.year || '',
+                            recoveryDate: '',
+                            recoveryLocation: '',
+                            photo: '',
+                            notes: v.status ? `Status: ${v.status}` + (v.state ? ` | State: ${v.state}` : '') : '',
+                            rmsSource: report.reportNumber || fileName
+                        });
+                    }
+                    localStorage.setItem(`recoveredVehicles_${currentCase.id}`, JSON.stringify(existing));
+                    populated.push(`Vehicles (${report.vehicles.length})`);
+                }
+
+                // Show result
+                if (populated.length > 0) {
+                    viperToast(`RMS data imported to: ${populated.join(', ')}`, 'success', 5000);
+                }
+
+                // Reload module data so tabs reflect the import
+                loadSuspects();
+                loadVictims();
+                loadWitnesses();
+                loadRecoveredVehicles();
+                loadRmsData();
+
+            } catch (err) {
+                console.error('RMS import processing error:', err);
+                viperToast('Error processing RMS import: ' + err.message, 'error');
+                localStorage.removeItem(key);
+            }
         }
 
         function loadCaseTasks() {

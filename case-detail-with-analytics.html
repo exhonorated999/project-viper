@@ -1200,6 +1200,45 @@
                         localStorage.setItem(`witnesses_${currentCase.id}`, JSON.stringify(existing));
                         populated.push(`Witnesses (${witnessPersons.length})`);
                     }
+
+                    // 4b. Route unmatched persons (Otherwise Involved, Person of Interest, etc.) → suspects
+                    const matchedRoles = /SUSPECT|ARRESTED|DEFENDANT|VICTIM|WITNESS|REPORTING\s*PARTY|INFORMANT/i;
+                    const unmatchedPersons = report.personsInvolved.filter(p =>
+                        !matchedRoles.test(p.involvement || ''));
+                    if (unmatchedPersons.length > 0) {
+                        const existing = JSON.parse(localStorage.getItem(`suspects_${currentCase.id}`) || '[]');
+                        for (const p of unmatchedPersons) {
+                            existing.push({
+                                name: p.name || '',
+                                dob: p.dob || '',
+                                dlNumber: '',
+                                sex: p.sex || '',
+                                height: p.height || '',
+                                weight: p.weight || '',
+                                hairColor: p.hair || '',
+                                eyeColor: p.eyes || '',
+                                scarsMarksTattoos: '',
+                                address: p.address || '',
+                                addressCityStateZip: '',
+                                photo: '',
+                                residencePhoto: '',
+                                employerName: '',
+                                occupation: '',
+                                employerAddress: '',
+                                employerPhone: '',
+                                firearms: [],
+                                vehicles: [],
+                                identifiers: [],
+                                criminalHistory: [],
+                                rapSheet: null,
+                                firearmsDoc: null,
+                                rmsSource: report.reportNumber || fileName,
+                                rmsRole: p.involvement || 'Unknown'
+                            });
+                        }
+                        localStorage.setItem(`suspects_${currentCase.id}`, JSON.stringify(existing));
+                        populated.push(`Suspects/POI (${unmatchedPersons.length})`);
+                    }
                 }
 
                 // 5. Route vehicles

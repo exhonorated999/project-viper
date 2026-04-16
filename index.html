@@ -2005,7 +2005,7 @@
                 }
 
                 // Auto-check module checkboxes based on detected data
-                const moduleMap = { suspects: 'suspects', victims: 'victims', witnesses: 'witnesses', vehicles: 'vehicles', rmsImports: 'rmsImports' };
+                const moduleMap = { suspects: 'suspects', victims: 'victims', witnesses: 'witnesses', vehicles: 'vehicles', rmsImports: 'rmsImport' };
                 for (const [key, moduleVal] of Object.entries(moduleMap)) {
                     if (detected[key]) {
                         const cb = document.querySelector(`.case-module[value="${moduleVal}"]`);

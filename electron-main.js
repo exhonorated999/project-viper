@@ -553,6 +553,32 @@ ipcMain.handle('get-storage-paths', async () => {
   };
 });
 
+// --- Delete case folder (entire case directory on disk) ---
+ipcMain.handle('delete-case-folder', async (_e, caseNumber) => {
+  if (!caseNumber || typeof caseNumber !== 'string') return { success: false, error: 'Invalid case number' };
+  const caseDir = path.join(casesDir, caseNumber);
+  if (!fs.existsSync(caseDir)) return { success: true };
+  try {
+    fs.rmSync(caseDir, { recursive: true, force: true });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// --- Delete only evidence files for a case ---
+ipcMain.handle('delete-case-evidence', async (_e, caseNumber) => {
+  if (!caseNumber || typeof caseNumber !== 'string') return { success: false, error: 'Invalid case number' };
+  const evidenceDir = path.join(casesDir, caseNumber, 'Evidence');
+  if (!fs.existsSync(evidenceDir)) return { success: true, message: 'No evidence folder found' };
+  try {
+    fs.rmSync(evidenceDir, { recursive: true, force: true });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 // --- Open external URL in system browser ---
 ipcMain.handle('open-external-url', async (_e, url) => {
   if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
@@ -638,6 +664,11 @@ ipcMain.handle('update-check', async () => {
 ipcMain.handle('update-download', async () => {
   if (!autoUpdater) return { success: false, error: 'Auto-updater not available.' };
   try {
+    // Clear stale cached installer before downloading to prevent
+    // electron-updater from running an old cached installer.exe
+    const cachePath = require('path').join(app.getPath('userData'), '..', 'viper-electron-updater');
+    const cachedInstaller = require('path').join(cachePath, 'installer.exe');
+    try { require('fs').unlinkSync(cachedInstaller); } catch (_) { /* no cached file, fine */ }
     await autoUpdater.downloadUpdate();
     return { success: true };
   } catch (err) {

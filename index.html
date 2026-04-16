@@ -961,6 +961,33 @@
                     <textarea id="caseSynopsis" required rows="4" placeholder="Brief description of the case, including initial allegations, involved parties, and investigative focus..." class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none text-white placeholder-gray-500 resize-none"></textarea>
                 </div>
                 
+                <!-- Import from RMS -->
+                <div id="rmsImportSection" class="p-4 border border-dashed border-gray-600 rounded-xl hover:border-viper-cyan/50 transition-colors">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-lg bg-viper-purple/10 flex items-center justify-center">
+                                <svg class="w-5 h-5 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                                </svg>
+                            </div>
+                            <div>
+                                <p class="text-sm font-medium text-gray-200">Import from RMS PDF</p>
+                                <p class="text-xs text-gray-500">Auto-populate case data from an agency incident report</p>
+                            </div>
+                        </div>
+                        <button type="button" id="rmsImportBtn" onclick="importRmsForNewCase()" class="px-4 py-2 rounded-lg bg-viper-purple/10 border border-viper-purple/30 text-viper-purple text-sm font-medium hover:bg-viper-purple/20 transition-colors">
+                            Select PDF
+                        </button>
+                    </div>
+                    <div id="rmsImportStatus" class="hidden mt-3 p-3 bg-viper-dark rounded-lg">
+                        <div class="flex items-center gap-2 text-sm">
+                            <svg class="w-4 h-4 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                            <span id="rmsImportStatusText" class="text-gray-300"></span>
+                        </div>
+                        <div id="rmsImportDetails" class="mt-2 text-xs text-gray-500 space-y-1"></div>
+                    </div>
+                </div>
+                
                 <!-- Module Selection -->
                 <div>
                     <label class="block text-sm font-medium text-gray-300 mb-3">Select Case Modules</label>
@@ -1859,6 +1886,162 @@
             showNotification(`Imported ${imported} case(s) from backup.`, 'success');
         }
 
+        // --- RMS Import for New Case ---
+        let pendingRmsData = null; // holds {text, fileName, detected} until case is created
+
+        async function importRmsForNewCase() {
+            const btn = document.getElementById('rmsImportBtn');
+            const statusDiv = document.getElementById('rmsImportStatus');
+            const statusText = document.getElementById('rmsImportStatusText');
+            const details = document.getElementById('rmsImportDetails');
+
+            try {
+                btn.disabled = true;
+                btn.textContent = 'Selecting...';
+
+                const filePaths = await window.electronAPI.selectRmsFiles();
+                if (!filePaths || filePaths.length === 0) {
+                    btn.disabled = false;
+                    btn.textContent = 'Select PDF';
+                    return;
+                }
+
+                btn.textContent = 'Parsing...';
+                const result = await window.electronAPI.extractPdfText(filePaths[0]);
+                if (!result || !result.text) {
+                    viperToast('Could not extract text from PDF', 'error');
+                    btn.disabled = false;
+                    btn.textContent = 'Select PDF';
+                    return;
+                }
+
+                // Light parse: extract case number and detect which sections have data
+                const text = result.text;
+                const detected = { suspects: false, victims: false, witnesses: false, vehicles: false, rmsImports: true };
+
+                // Extract case number from Event section
+                let caseNum = '';
+                const caseMatch = text.match(/Case\s*(?:Number|#|No\.?)\s*[:\s]*([A-Z0-9][\w\-\/]+)/i);
+                if (caseMatch) caseNum = caseMatch[1].trim();
+                // Supplement format: "Case Number:\n  2025-20660" (number on next line)
+                if (!caseNum) {
+                    const multiLine = text.match(/Case\s*Number\s*:\s*\n\s*(\d[\w\-]+)/i);
+                    if (multiLine) caseNum = multiLine[1].trim();
+                }
+                // Report Number on next line (supplement headers)
+                if (!caseNum) {
+                    const rptMatch = text.match(/Report\s*Number\s*:\s*\n\s*(\d[\w\-\.]+)/i);
+                    if (rptMatch) caseNum = rptMatch[1].trim();
+                }
+                // Fallback: look for "Inc#" or report number in header
+                if (!caseNum) {
+                    const incMatch = text.match(/Inc\s*#?\s*[:\s]*(\d{6,})/i);
+                    if (incMatch) caseNum = incMatch[1];
+                }
+                // Fallback: extract from filename
+                if (!caseNum) {
+                    const fnNum = result.fileName.match(/(\d{9,12})/);
+                    if (fnNum) caseNum = fnNum[1];
+                }
+
+                // Detect sections by looking for INFORM RMS section headers
+                const hasSection = (names) => names.some(n => new RegExp('(?:^|\\n)\\s*' + n + '\\s*(?:\\n|$)', 'im').test(text));
+
+                // --- Standard INFORM format: single Involved section with role keywords ---
+                const involvedBlock = text.match(/(?:Persons?\s+Involved|Involved)\s*\n([\s\S]*?)(?=\n\s*(?:Vehicle|Property|Narrative|Digital|Confidential|\*{3})|$)/i);
+                const involvedText = involvedBlock ? involvedBlock[1] : '';
+
+                if (/SUSPECT|ARRESTED/i.test(involvedText)) detected.suspects = true;
+                if (/VICTIM/i.test(involvedText)) detected.victims = true;
+                if (/WITNESS|REPORTING\s*PARTY/i.test(involvedText)) detected.witnesses = true;
+
+                // --- Supplement/Summary format: separate section headers per role ---
+                if (/Suspect\(s\)\s*-\s*\d+\s*Involved/i.test(text)) detected.suspects = true;
+                if (/Victim\(s\)\s*-\s*\d+\s*Involved/i.test(text)) detected.victims = true;
+                if (/Other Person\(s\)\s*-\s*\d+\s*Involved/i.test(text)) {
+                    // Check Involvement Type field in person data to route correctly
+                    if (/Involvement\s*Type\s*\n\s*(?:Suspect|Arrested)/i.test(text)) detected.suspects = true;
+                    else if (/Involvement\s*Type\s*\n\s*Victim/i.test(text)) detected.victims = true;
+                    else detected.witnesses = true; // default: Other Person → witnesses
+                }
+
+                if (hasSection(['Vehicle\\(s\\)', 'Vehicles'])) {
+                    // Check if there's actual vehicle data (not just the header)
+                    const vehBlock = text.match(/(?:Vehicle\(s\)|Vehicles)\s*\n([\s\S]*?)(?=\n\s*(?:Property|Narrative|Digital|Confidential|\*{3})|$)/i);
+                    if (vehBlock && vehBlock[1].trim().length > 10) detected.vehicles = true;
+                }
+
+                // Auto-generate synopsis from offenses
+                let synopsis = '';
+                const offenseMatch = text.match(/(?:Offense\(s\)|Offenses)\s*\n([\s\S]*?)(?=\n\s*(?:Involved|Persons|Vehicle|Property|Narrative|Digital|Confidential|\*{3})|$)/i);
+                if (offenseMatch) {
+                    const offLines = offenseMatch[1].split('\n').filter(l => l.trim());
+                    const offDescs = offLines.filter(l => /(?:PC|HS|VC|BP|WI)\s*-\s*/i.test(l) || /GRAND THEFT|BURGLARY|ASSAULT|ROBBERY|FRAUD|HOMICIDE|THEFT|BATTERY/i.test(l));
+                    if (offDescs.length > 0) {
+                        synopsis = offDescs.slice(0, 3).map(d => d.trim()).join('; ');
+                    }
+                }
+                // Supplement format: "Description of Incident" or "Statute/Ordinance Number and Description"
+                if (!synopsis) {
+                    const descMatch = text.match(/Description of Incident\s*\n\s*(.+)/i)
+                        || text.match(/Statute\/Ordinance Number and Description\s*\n\s*(.+)/i);
+                    if (descMatch) synopsis = descMatch[1].trim();
+                }
+                // Supplement format: report type as fallback synopsis
+                if (!synopsis) {
+                    const typeMatch = text.match(/^\s*(Initial Incident Report|Supplemental Report)\s*$/m);
+                    if (typeMatch) synopsis = typeMatch[1];
+                }
+
+                // Store for case creation
+                pendingRmsData = { text: result.text, fileName: result.fileName, detected, caseNum, synopsis };
+
+                // Auto-fill form fields
+                if (caseNum) {
+                    document.getElementById('caseNumber').value = caseNum;
+                }
+                if (synopsis) {
+                    document.getElementById('caseSynopsis').value = synopsis;
+                }
+
+                // Auto-check module checkboxes based on detected data
+                const moduleMap = { suspects: 'suspects', victims: 'victims', witnesses: 'witnesses', vehicles: 'vehicles', rmsImports: 'rmsImports' };
+                for (const [key, moduleVal] of Object.entries(moduleMap)) {
+                    if (detected[key]) {
+                        const cb = document.querySelector(`.case-module[value="${moduleVal}"]`);
+                        if (cb) cb.checked = true;
+                    }
+                }
+                // Always ensure notes is checked (for narratives context)
+                const notesCb = document.querySelector('.case-module[value="notes"]');
+                if (notesCb) notesCb.checked = true;
+
+                // Show status
+                const counts = [];
+                if (detected.suspects) counts.push('Suspects');
+                if (detected.victims) counts.push('Victims');
+                if (detected.witnesses) counts.push('Witnesses');
+                if (detected.vehicles) counts.push('Vehicles');
+                counts.push('Narratives (RMS)');
+
+                statusText.textContent = result.fileName;
+                details.innerHTML = `<p>Detected data: <span class="text-viper-cyan">${counts.join(', ')}</span></p>` +
+                    (caseNum ? `<p>Case #: <span class="text-white font-mono">${caseNum}</span></p>` : '') +
+                    `<p class="text-gray-400 italic">Data will be distributed to modules on case creation</p>`;
+                statusDiv.classList.remove('hidden');
+
+                btn.textContent = '✓ PDF Loaded';
+                btn.classList.remove('text-viper-purple', 'border-viper-purple/30', 'bg-viper-purple/10');
+                btn.classList.add('text-viper-green', 'border-viper-green/30', 'bg-viper-green/10');
+
+            } catch (err) {
+                console.error('RMS import error:', err);
+                viperToast('Error importing RMS PDF: ' + err.message, 'error');
+                btn.disabled = false;
+                btn.textContent = 'Select PDF';
+            }
+        }
+
         function openCreateCaseModal() {
             if (window.ViperLicensing && !window.ViperLicensing.canCreateCases()) {
                 showNotification('Your demo has expired. Go to Settings to activate a license.', 'error');
@@ -1870,6 +2053,17 @@
         function closeCreateCaseModal() {
             document.getElementById('createCaseModal').classList.remove('show');
             document.getElementById('createCaseForm').reset();
+            // Reset RMS import state
+            pendingRmsData = null;
+            const statusDiv = document.getElementById('rmsImportStatus');
+            if (statusDiv) statusDiv.classList.add('hidden');
+            const btn = document.getElementById('rmsImportBtn');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Select PDF';
+                btn.classList.remove('text-viper-green', 'border-viper-green/30', 'bg-viper-green/10');
+                btn.classList.add('text-viper-purple', 'border-viper-purple/30', 'bg-viper-purple/10');
+            }
         }
         
         document.addEventListener('DOMContentLoaded', function() {
@@ -1901,6 +2095,15 @@
                 
                 cases.push(newCase);
                 localStorage.setItem('viperCases', JSON.stringify(cases));
+                
+                // Store pending RMS data for case-detail to pick up
+                if (pendingRmsData) {
+                    localStorage.setItem('pendingRmsImport_' + newCase.id, JSON.stringify({
+                        text: pendingRmsData.text,
+                        fileName: pendingRmsData.fileName
+                    }));
+                    pendingRmsData = null;
+                }
                 
                 // Create case folder structure on disk using Tauri
                 if (window.__TAURI__) {

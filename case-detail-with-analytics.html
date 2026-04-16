@@ -6475,6 +6475,167 @@
             }
         }
         
+        // ---- DMV Import for Victims ----
+        async function importDmvVictim(existingIndex) {
+            try {
+                const filePath = await window.electronAPI.selectDmvFile();
+                if (!filePath) return;
+
+                const pdfResult = await window.electronAPI.extractPdfText(filePath);
+                if (!pdfResult || !pdfResult.text) {
+                    showToast('Could not extract text from the PDF. The file may be image-only.', 'error');
+                    return;
+                }
+
+                const parsed = parseDmvText(pdfResult.text);
+                if (!parsed.name && !parsed.dlNumber && !parsed.dob) {
+                    showToast('Could not identify DMV fields in this document.', 'error');
+                    return;
+                }
+
+                const fields = [];
+                if (parsed.name) fields.push(`<b>Name:</b> ${parsed.name}`);
+                if (parsed.dob) fields.push(`<b>DOB:</b> ${formatDate(parsed.dob)}`);
+                if (parsed.dlNumber) fields.push(`<b>DL#:</b> ${parsed.dlNumber}`);
+                if (parsed.sex) fields.push(`<b>Sex:</b> ${parsed.sex}`);
+                if (parsed.height) fields.push(`<b>Height:</b> ${parsed.height}"`);
+                if (parsed.weight) fields.push(`<b>Weight:</b> ${parsed.weight} lbs`);
+                if (parsed.eyeColor) fields.push(`<b>Eyes:</b> ${parsed.eyeColor}`);
+                if (parsed.hairColor) fields.push(`<b>Hair:</b> ${parsed.hairColor}`);
+                if (parsed.address) fields.push(`<b>Address:</b> ${parsed.address}`);
+                if (parsed.addressCityStateZip) fields.push(`<b>City/State:</b> ${parsed.addressCityStateZip}`);
+
+                const previewHtml = `
+                    <div style="text-align:left;margin:12px 0;">
+                        <p style="color:#facc15;font-weight:600;margin-bottom:8px;">Extracted from: ${pdfResult.fileName}</p>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;font-size:14px;">
+                            ${fields.map(f => `<div>${f}</div>`).join('')}
+                        </div>
+                    </div>
+                `;
+
+                const isUpdate = existingIndex !== undefined && existingIndex !== null;
+                const confirmMsg = isUpdate
+                    ? `Import DMV data into this victim? Only empty fields will be filled.${previewHtml}`
+                    : `Create a new victim from DMV data?${previewHtml}`;
+
+                const confirmed = await viperConfirm(confirmMsg, { okText: isUpdate ? 'Import' : 'Create Victim', html: true });
+                if (!confirmed) return;
+
+                if (isUpdate) {
+                    const victim = victims[existingIndex];
+                    if (parsed.name && !victim.name) victim.name = parsed.name;
+                    if (parsed.dob && !victim.dob) victim.dob = parsed.dob;
+                    if (parsed.dlNumber && !victim.dlNumber) victim.dlNumber = parsed.dlNumber;
+                    if (parsed.height && !victim.height) victim.height = parsed.height;
+                    if (parsed.weight && !victim.weight) victim.weight = parsed.weight;
+                    if (parsed.eyeColor && !victim.eyeColor) victim.eyeColor = parsed.eyeColor;
+                    if (parsed.hairColor && !victim.hairColor) victim.hairColor = parsed.hairColor;
+                    if (parsed.address && !victim.address) victim.address = parsed.address;
+                    if (parsed.addressCityStateZip && !victim.addressCityStateZip) victim.addressCityStateZip = parsed.addressCityStateZip;
+                    saveVictims();
+                    renderTabContent('victims');
+                } else {
+                    victims.push({
+                        photo: '', name: parsed.name || '', dob: parsed.dob || '',
+                        dlNumber: parsed.dlNumber || '', phone: '', phone2: '', email: '', email2: '',
+                        height: parsed.height || '', weight: parsed.weight || '',
+                        hairColor: parsed.hairColor || '', eyeColor: parsed.eyeColor || '',
+                        address: parsed.address || '', addressCityStateZip: parsed.addressCityStateZip || '',
+                        residencePhoto: '', employerName: '', occupation: '',
+                        employerAddress: '', employerPhone: '',
+                        injuryPhotos: [], propertyPhotos: [], vehicles: []
+                    });
+                    saveVictims();
+                    currentVictimView = victims.length - 1;
+                    renderTabContent('victims');
+                }
+            } catch (err) {
+                console.error('DMV victim import error:', err);
+                showToast('Error importing DMV printout: ' + err.message, 'error');
+            }
+        }
+
+        // ---- DMV Import for Witnesses ----
+        async function importDmvWitness(existingIndex) {
+            try {
+                const filePath = await window.electronAPI.selectDmvFile();
+                if (!filePath) return;
+
+                const pdfResult = await window.electronAPI.extractPdfText(filePath);
+                if (!pdfResult || !pdfResult.text) {
+                    showToast('Could not extract text from the PDF. The file may be image-only.', 'error');
+                    return;
+                }
+
+                const parsed = parseDmvText(pdfResult.text);
+                if (!parsed.name && !parsed.dlNumber && !parsed.dob) {
+                    showToast('Could not identify DMV fields in this document.', 'error');
+                    return;
+                }
+
+                const fields = [];
+                if (parsed.name) fields.push(`<b>Name:</b> ${parsed.name}`);
+                if (parsed.dob) fields.push(`<b>DOB:</b> ${formatDate(parsed.dob)}`);
+                if (parsed.dlNumber) fields.push(`<b>DL#:</b> ${parsed.dlNumber}`);
+                if (parsed.sex) fields.push(`<b>Sex:</b> ${parsed.sex}`);
+                if (parsed.height) fields.push(`<b>Height:</b> ${parsed.height}"`);
+                if (parsed.weight) fields.push(`<b>Weight:</b> ${parsed.weight} lbs`);
+                if (parsed.eyeColor) fields.push(`<b>Eyes:</b> ${parsed.eyeColor}`);
+                if (parsed.hairColor) fields.push(`<b>Hair:</b> ${parsed.hairColor}`);
+                if (parsed.address) fields.push(`<b>Address:</b> ${parsed.address}`);
+                if (parsed.addressCityStateZip) fields.push(`<b>City/State:</b> ${parsed.addressCityStateZip}`);
+
+                const previewHtml = `
+                    <div style="text-align:left;margin:12px 0;">
+                        <p style="color:#facc15;font-weight:600;margin-bottom:8px;">Extracted from: ${pdfResult.fileName}</p>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;font-size:14px;">
+                            ${fields.map(f => `<div>${f}</div>`).join('')}
+                        </div>
+                    </div>
+                `;
+
+                const isUpdate = existingIndex !== undefined && existingIndex !== null;
+                const confirmMsg = isUpdate
+                    ? `Import DMV data into this witness? Only empty fields will be filled.${previewHtml}`
+                    : `Create a new witness from DMV data?${previewHtml}`;
+
+                const confirmed = await viperConfirm(confirmMsg, { okText: isUpdate ? 'Import' : 'Create Witness', html: true });
+                if (!confirmed) return;
+
+                if (isUpdate) {
+                    const witness = witnesses[existingIndex];
+                    if (parsed.name && !witness.name) witness.name = parsed.name;
+                    if (parsed.dob && !witness.dob) witness.dob = parsed.dob;
+                    if (parsed.dlNumber && !witness.dlNumber) witness.dlNumber = parsed.dlNumber;
+                    if (parsed.height && !witness.height) witness.height = parsed.height;
+                    if (parsed.weight && !witness.weight) witness.weight = parsed.weight;
+                    if (parsed.eyeColor && !witness.eyeColor) witness.eyeColor = parsed.eyeColor;
+                    if (parsed.hairColor && !witness.hairColor) witness.hairColor = parsed.hairColor;
+                    if (parsed.address && !witness.address) witness.address = parsed.address;
+                    if (parsed.addressCityStateZip && !witness.addressCityStateZip) witness.addressCityStateZip = parsed.addressCityStateZip;
+                    saveWitnesses();
+                    renderTabContent('witnesses');
+                } else {
+                    witnesses.push({
+                        photo: '', name: parsed.name || '', dob: parsed.dob || '',
+                        dlNumber: parsed.dlNumber || '', phone: '', phone2: '', email: '', email2: '',
+                        height: parsed.height || '', weight: parsed.weight || '',
+                        hairColor: parsed.hairColor || '', eyeColor: parsed.eyeColor || '',
+                        address: parsed.address || '', addressCityStateZip: parsed.addressCityStateZip || '',
+                        residencePhoto: '', employerName: '', occupation: '',
+                        employerAddress: '', employerPhone: '', statement: ''
+                    });
+                    saveWitnesses();
+                    currentWitnessView = witnesses.length - 1;
+                    renderTabContent('witnesses');
+                }
+            } catch (err) {
+                console.error('DMV witness import error:', err);
+                showToast('Error importing DMV printout: ' + err.message, 'error');
+            }
+        }
+
         function addNewSuspect() {
             showSuspectModal();
         }
@@ -7597,6 +7758,12 @@
                     <div class="flex justify-between items-center mb-6">
                         <h2 class="text-2xl font-bold text-white">Victims</h2>
                         <div class="flex gap-3">
+                            <button onclick="importDmvVictim()" class="px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500 rounded-lg text-amber-400 transition flex items-center gap-2">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                </svg>
+                                Import DMV
+                            </button>
                             <button onclick="addNewVictim()" class="px-4 py-2 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded-lg text-viper-purple transition flex items-center gap-2">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
@@ -7685,6 +7852,12 @@
                             ` : `
                                 <button onclick="startInlineEditVictim(${index})" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition">
                                     Edit
+                                </button>
+                                <button onclick="importDmvVictim(${index})" class="px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500 rounded-lg text-amber-400 transition flex items-center gap-2">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                    </svg>
+                                    Import DMV
                                 </button>
                                 <button onclick="deleteVictim(${index})" class="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500 rounded-lg text-red-500 transition">
                                     Delete
@@ -9772,6 +9945,12 @@
                     <div class="flex justify-between items-center mb-6">
                         <h2 class="text-2xl font-bold text-white">Witnesses</h2>
                         <div class="flex gap-3">
+                            <button onclick="importDmvWitness()" class="px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500 rounded-lg text-amber-400 transition flex items-center gap-2">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                </svg>
+                                Import DMV
+                            </button>
                             <button onclick="addNewWitness()" class="px-4 py-2 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green transition flex items-center gap-2">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
@@ -9859,6 +10038,12 @@
                             ` : `
                                 <button onclick="startInlineEditWitness(${index})" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition">
                                     Edit
+                                </button>
+                                <button onclick="importDmvWitness(${index})" class="px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500 rounded-lg text-amber-400 transition flex items-center gap-2">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                    </svg>
+                                    Import DMV
                                 </button>
                                 <button onclick="deleteWitness(${index})" class="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500 rounded-lg text-red-500 transition">
                                     Delete

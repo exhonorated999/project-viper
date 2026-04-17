@@ -1462,6 +1462,16 @@
                 saveCase();
             }
             
+            // Sync: append any modules not yet in tabOrder
+            let tabOrderChanged = false;
+            for (const mod of currentCase.modules) {
+                if (!currentCase.tabOrder.includes(mod)) {
+                    currentCase.tabOrder.push(mod);
+                    tabOrderChanged = true;
+                }
+            }
+            if (tabOrderChanged) saveCase();
+            
             // Build tabs based on current order
             const tabs = currentCase.tabOrder
                 .filter(tabId => {
@@ -6005,9 +6015,12 @@
             if (!caseModules.includes(destTab)) {
                 caseModules.push(destTab);
                 currentCase.modules = caseModules;
+                if (!currentCase.tabOrder.includes(destTab)) {
+                    currentCase.tabOrder.push(destTab);
+                }
                 const cases = JSON.parse(localStorage.getItem('viperCases') || '[]');
                 const ci = cases.findIndex(c => c.id === currentCase.id);
-                if (ci >= 0) { cases[ci].modules = caseModules; localStorage.setItem('viperCases', JSON.stringify(cases)); }
+                if (ci >= 0) { cases[ci].modules = caseModules; cases[ci].tabOrder = currentCase.tabOrder; localStorage.setItem('viperCases', JSON.stringify(cases)); }
             }
 
             // Remove from source
@@ -6020,6 +6033,7 @@
             document.querySelector('.fixed.inset-0')?.remove();
             const destLabels = { suspects: 'Suspects', victims: 'Victims', witnesses: 'Witnesses', involvedPersons: 'Involved Persons' };
             viperToast(`Moved ${destRecord.name || 'person'} to ${destLabels[destTab]}`, 'success');
+            renderTabs();
             renderTabContent(sourceTab);
         }
 

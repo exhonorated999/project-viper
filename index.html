@@ -1032,6 +1032,16 @@
                         </label>
                         
                         <label class="flex items-center space-x-3 p-3 rounded-lg cursor-pointer hover:bg-viper-card/30 transition-colors border border-gray-700 hover:border-viper-cyan/30">
+                            <input type="checkbox" value="involvedPersons" class="case-module w-4 h-4 rounded border-gray-600 text-viper-cyan focus:ring-viper-cyan">
+                            <div class="flex items-center space-x-2">
+                                <svg class="w-5 h-5 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+                                </svg>
+                                <span class="text-sm font-medium">Involved Persons</span>
+                            </div>
+                        </label>
+                        
+                        <label class="flex items-center space-x-3 p-3 rounded-lg cursor-pointer hover:bg-viper-card/30 transition-colors border border-gray-700 hover:border-viper-cyan/30">
                             <input type="checkbox" value="vehicles" class="case-module w-4 h-4 rounded border-gray-600 text-viper-cyan focus:ring-viper-cyan">
                             <div class="flex items-center space-x-2">
                                 <svg class="w-5 h-5 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1953,7 +1963,8 @@
 
                 if (/SUSPECT|ARRESTED/i.test(involvedText)) detected.suspects = true;
                 if (/VICTIM/i.test(involvedText)) detected.victims = true;
-                if (/WITNESS|REPORTING\s*PARTY/i.test(involvedText)) detected.witnesses = true;
+                if (/WITNESS/i.test(involvedText)) detected.witnesses = true;
+                if (/REPORTING\s*PARTY|INFORMANT|OTHERWISE\s*INVOLVED/i.test(involvedText)) detected.involvedPersons = true;
 
                 // --- Supplement/Summary format: separate section headers per role ---
                 if (/Suspect\(s\)\s*-\s*\d+\s*Involved/i.test(text)) detected.suspects = true;
@@ -1962,7 +1973,8 @@
                     // Check Involvement Type field in person data to route correctly
                     if (/Involvement\s*Type\s*\n\s*(?:Suspect|Arrested)/i.test(text)) detected.suspects = true;
                     else if (/Involvement\s*Type\s*\n\s*Victim/i.test(text)) detected.victims = true;
-                    else detected.witnesses = true; // default: Other Person → witnesses
+                    else if (/Involvement\s*Type\s*\n\s*Witness/i.test(text)) detected.witnesses = true;
+                    else detected.involvedPersons = true; // default: Other Person → involvedPersons
                 }
 
                 if (hasSection(['Vehicle\\(s\\)', 'Vehicles'])) {
@@ -2005,7 +2017,7 @@
                 }
 
                 // Auto-check module checkboxes based on detected data
-                const moduleMap = { suspects: 'suspects', victims: 'victims', witnesses: 'witnesses', vehicles: 'vehicles', rmsImports: 'rmsImport' };
+                const moduleMap = { suspects: 'suspects', victims: 'victims', witnesses: 'witnesses', vehicles: 'vehicles', involvedPersons: 'involvedPersons', rmsImports: 'rmsImport' };
                 for (const [key, moduleVal] of Object.entries(moduleMap)) {
                     if (detected[key]) {
                         const cb = document.querySelector(`.case-module[value="${moduleVal}"]`);
@@ -2021,6 +2033,7 @@
                 if (detected.suspects) counts.push('Suspects');
                 if (detected.victims) counts.push('Victims');
                 if (detected.witnesses) counts.push('Witnesses');
+                if (detected.involvedPersons) counts.push('Involved Persons');
                 if (detected.vehicles) counts.push('Vehicles');
                 counts.push('Narratives (RMS)');
 
@@ -4155,7 +4168,7 @@
 
                     // 3. Clean localStorage — Pattern 2 (per-case keys by case.id)
                     const p2Prefixes = ['suspects_','victims_','victimBusinesses_','cargo_','witnesses_',
-                        'recoveredVehicles_','missingpersons_','areacanvas_','prosecution_','narcotics_',
+                        'involvedPersons_','recoveredVehicles_','missingpersons_','areacanvas_','prosecution_','narcotics_',
                         'firearms_','money_','opsplan_','rmsImports_','oversightImport_','canvasForms_','cyberTips_'];
                     for (const prefix of p2Prefixes) {
                         localStorage.removeItem(prefix + c.id);

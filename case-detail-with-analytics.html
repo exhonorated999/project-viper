@@ -6385,6 +6385,7 @@
                 const filePath = await window.electronAPI.selectDmvFile();
                 if (!filePath) return;
 
+                showToast('Extracting text from PDF…', 'info');
                 const pdfResult = await window.electronAPI.extractPdfText(filePath);
                 if (!pdfResult || !pdfResult.text) {
                     showToast('Could not extract text from the PDF. The file may be image-only.', 'error');
@@ -6516,6 +6517,7 @@
                 const filePath = await window.electronAPI.selectDmvFile();
                 if (!filePath) return;
 
+                showToast('Extracting text from PDF…', 'info');
                 const pdfResult = await window.electronAPI.extractPdfText(filePath);
                 if (!pdfResult || !pdfResult.text) {
                     showToast('Could not extract text from the PDF. The file may be image-only.', 'error');
@@ -6597,6 +6599,7 @@
                 const filePath = await window.electronAPI.selectDmvFile();
                 if (!filePath) return;
 
+                showToast('Extracting text from PDF…', 'info');
                 const pdfResult = await window.electronAPI.extractPdfText(filePath);
                 if (!pdfResult || !pdfResult.text) {
                     showToast('Could not extract text from the PDF. The file may be image-only.', 'error');

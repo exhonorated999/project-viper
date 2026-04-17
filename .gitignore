@@ -8,4 +8,6 @@ security.json
 vault.enc
 vault_plain.json
 cases/
-_parse_pdfs*.py 
+_parse_pdfs*.py
+*.traineddata
+test_pdf_output.txt

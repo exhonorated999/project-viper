@@ -797,11 +797,50 @@ ipcMain.handle('extract-pdf-text', async (event, filePath) => {
     const pdfParse = require('pdf-parse');
     const dataBuffer = fs.readFileSync(filePath);
     const data = await pdfParse(dataBuffer);
+
+    // Check if text looks garbled (Type3 custom fonts) — test for common readable keywords
+    const readable = /[A-Za-z]{3,}/.test(data.text) &&
+      (/\b(?:Name|DOB|Dob|OLN|DLN?|SSN|Sex|Height|Weight|Address|License|Incident|Event|Offense|Suspect|Victim|Witness|Narrative|Report)\b/i.test(data.text));
+
+    if (readable) {
+      return {
+        text: data.text,
+        numPages: data.numpages,
+        info: data.info || {},
+        fileName: path.basename(filePath)
+      };
+    }
+
+    // Garbled text detected — fall back to MuPDF render + Tesseract OCR
+    console.log('PDF text garbled (Type3 font), falling back to OCR...');
+    const mupdf = await import('mupdf');
+    const Tesseract = (await import('tesseract.js')).default;
+
+    const doc = mupdf.Document.openDocument(dataBuffer, 'application/pdf');
+    let ocrText = '';
+    const numPages = doc.countPages();
+
+    for (let i = 0; i < numPages; i++) {
+      const page = doc.loadPage(i);
+      const matrix = mupdf.Matrix.scale(300 / 72, 300 / 72);
+      const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false, true);
+      const pngBuf = pixmap.asPNG();
+      const result = await Tesseract.recognize(Buffer.from(pngBuf), 'eng');
+      ocrText += result.data.text + '\n';
+    }
+
+    // Clean common OCR artifacts
+    ocrText = ocrText
+      .replace(/©/g, '0')           // © misread as 0
+      .replace(/\(([A-Z])0\)/g, '($1O)')  // state code: (C0) → (CO)
+      .replace(/['']/g, "'");        // smart quotes
+
     return {
-      text: data.text,
-      numPages: data.numpages,
+      text: ocrText,
+      numPages,
       info: data.info || {},
-      fileName: path.basename(filePath)
+      fileName: path.basename(filePath),
+      ocr: true
     };
   } catch (error) {
     console.error('PDF parse error:', error);

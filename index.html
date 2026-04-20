@@ -1805,6 +1805,11 @@
             cases.push(importedCase);
             localStorage.setItem('viperCases', JSON.stringify(cases));
 
+            // Ensure case folder exists on disk
+            if (window.electronAPI && window.electronAPI.createCaseFolder) {
+                window.electronAPI.createCaseFolder(meta.caseNumber).catch(e => console.error('Folder create:', e));
+            }
+
             // Restore per-ID module data (Pattern 2)
             if (pkg.moduleData) {
                 Object.entries(pkg.moduleData).forEach(([key, val]) => {
@@ -1858,6 +1863,11 @@
                 backupCase.id = newId;
                 backupCase.lastModified = new Date().toISOString();
                 cases.push(backupCase);
+
+                // Ensure case folder exists on disk
+                if (window.electronAPI && window.electronAPI.createCaseFolder) {
+                    window.electronAPI.createCaseFolder(backupCase.caseNumber).catch(e => console.error('Folder create:', e));
+                }
 
                 // Restore per-ID module data (Pattern 2) — keys like suspects_12345
                 const pattern2Keys = [
@@ -2153,8 +2163,15 @@
                     pendingRmsData = null;
                 }
                 
-                // Create case folder structure on disk using Tauri
-                if (window.__TAURI__) {
+                // Create case folder structure on disk
+                if (window.electronAPI && window.electronAPI.createCaseFolder) {
+                    window.electronAPI.createCaseFolder(caseNumber).then(result => {
+                        if (result.success) console.log('Case folder created at:', result.path);
+                        else console.error('Error creating case folder:', result.error);
+                    }).catch(error => {
+                        console.error('Error creating case folder:', error);
+                    });
+                } else if (window.__TAURI__) {
                     window.__TAURI__.core.invoke('create_case_folder', {
                         caseNumber: caseNumber
                     }).then(path => {
@@ -2596,6 +2613,16 @@
         
         // Case Management
         let cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+
+        // Ensure all existing cases have folders on disk (one-time migration)
+        (async function migrateCaseFolders() {
+            if (!window.electronAPI || !window.electronAPI.createCaseFolder) return;
+            for (const c of cases) {
+                if (c.caseNumber) {
+                    try { await window.electronAPI.createCaseFolder(c.caseNumber); } catch(e) {}
+                }
+            }
+        })();
         
         function openAddTaskModal() {
             // Populate case dropdown with current cases

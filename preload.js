@@ -10,6 +10,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Storage paths
   getStoragePaths: () => ipcRenderer.invoke('get-storage-paths'),
   deleteCaseFolder: (caseNumber) => ipcRenderer.invoke('delete-case-folder', caseNumber),
+  createCaseFolder: (caseNumber) => ipcRenderer.invoke('create-case-folder', caseNumber),
+  caseFolderExists: (caseNumber) => ipcRenderer.invoke('case-folder-exists', caseNumber),
+  saveCaseTextFile: (data) => ipcRenderer.invoke('save-case-text-file', data),
   deleteCaseEvidence: (caseNumber) => ipcRenderer.invoke('delete-case-evidence', caseNumber),
 
   // Backup & Restore

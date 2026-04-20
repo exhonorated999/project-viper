@@ -986,6 +986,87 @@
         }
         
         // Load case data
+        // --- Ensure case folder exists & migrate orphaned localStorage data to disk ---
+        async function ensureCaseFolderAndMigrate() {
+            if (!window.electronAPI || !currentCase) return;
+            const cn = currentCase.caseNumber;
+            const migrationKey = `_migrated_rms_${currentCase.id}`;
+
+            try {
+                // 1. Create case folder if missing
+                if (window.electronAPI.createCaseFolder) {
+                    await window.electronAPI.createCaseFolder(cn);
+                }
+
+                // 2. Skip if already migrated
+                if (localStorage.getItem(migrationKey)) return;
+
+                // 3. Dump RMS imports to text files
+                const rmsImports = JSON.parse(localStorage.getItem(`rmsImports_${currentCase.id}`) || '[]');
+                if (rmsImports.length > 0 && window.electronAPI.saveCaseTextFile) {
+                    for (let i = 0; i < rmsImports.length; i++) {
+                        const r = rmsImports[i];
+                        const safeName = (r.fileName || r.reportNumber || `report_${i + 1}`)
+                            .replace(/[^a-zA-Z0-9_\-. ]/g, '_').replace(/\.pdf$/i, '');
+                        
+                        // Build readable text content
+                        let txt = `=== RMS REPORT: ${r.reportNumber || 'Unknown'} ===\n`;
+                        txt += `File: ${r.fileName || 'N/A'}\n`;
+                        txt += `Report Date: ${r.reportDate || 'N/A'}\n`;
+                        txt += `From: ${r.fromDateTime || 'N/A'}  To: ${r.toDateTime || 'N/A'}\n`;
+                        txt += `Agency: ${r.agencyName || 'N/A'}\n`;
+                        txt += `Title: ${r.reportTitle || 'N/A'}\n`;
+                        txt += `Imported: ${r.importedAt || 'N/A'}\n`;
+                        txt += `${'='.repeat(50)}\n\n`;
+
+                        // Sections
+                        if (r.sections && r.sections.length) {
+                            for (const sec of r.sections) {
+                                txt += `--- ${sec.name || 'Section'} ---\n`;
+                                if (sec.lines && sec.lines.length) {
+                                    txt += sec.lines.join('\n') + '\n';
+                                }
+                                if (sec.entries && sec.entries.length) {
+                                    for (const entry of sec.entries) {
+                                        if (typeof entry === 'string') { txt += entry + '\n'; }
+                                        else if (entry && typeof entry === 'object') {
+                                            for (const [k, v] of Object.entries(entry)) {
+                                                if (v && typeof v !== 'object') txt += `  ${k}: ${v}\n`;
+                                            }
+                                        }
+                                        txt += '\n';
+                                    }
+                                }
+                                txt += '\n';
+                            }
+                        }
+
+                        // Narratives
+                        if (r.narratives && r.narratives.length) {
+                            txt += `--- NARRATIVES ---\n`;
+                            for (const n of r.narratives) {
+                                if (n.officer) txt += `Officer: ${n.officer}\n`;
+                                txt += (n.text || n.content || '') + '\n\n';
+                            }
+                        }
+
+                        await window.electronAPI.saveCaseTextFile({
+                            caseNumber: cn,
+                            subfolder: 'RMS_Reports',
+                            fileName: `${safeName}.txt`,
+                            content: txt
+                        });
+                    }
+                    console.log(`Migrated ${rmsImports.length} RMS reports to disk for case ${cn}`);
+                }
+
+                // Mark as migrated so we don't re-run
+                localStorage.setItem(migrationKey, new Date().toISOString());
+            } catch (err) {
+                console.error('Case folder migration error:', err);
+            }
+        }
+
         function loadCase() {
             const params = new URLSearchParams(window.location.search);
             const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
@@ -1063,6 +1144,9 @@
 
             renderCaseHeader();
             renderTabs();
+
+            // Ensure case folder exists on disk & migrate any orphaned localStorage data
+            ensureCaseFolderAndMigrate();
 
             // Check for pending RMS import from case creation
             processPendingRmsImport();
@@ -21602,7 +21686,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             event.preventDefault();
             try {
                 const date = document.getElementById('tl_date').value;
-                const time = document.getElementById('tl_time').value || '00:00';
+                const rawTime = document.getElementById('tl_time').value || '00:00';
+                // Normalize time — browser may return HH:MM or HH:MM:SS; always use HH:MM:SS
+                const time = rawTime.length <= 5 ? rawTime + ':00' : rawTime;
                 const title = document.getElementById('tl_title').value.trim();
                 const lane = document.getElementById('tl_lane').value;
                 const category = document.getElementById('tl_category').value;
@@ -21611,9 +21697,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 const entity = document.getElementById('tl_entity').value.trim();
                 const desc = document.getElementById('tl_desc').value.trim();
 
-                if (!date || !title) { alert('Date and Title are required.'); return; }
-                const parsed = new Date(`${date}T${time}:00`);
-                if (isNaN(parsed.getTime())) { alert('Invalid date/time. Please check your entry.'); return; }
+                if (!date || !title) { viperToast('Date and Title are required.', 'warning'); return; }
+                const parsed = new Date(`${date}T${time}`);
+                if (isNaN(parsed.getTime())) { viperToast('Invalid date/time. Please check your entry.', 'warning'); return; }
                 const timestamp = parsed.toISOString();
 
             if (editId) {
@@ -21644,7 +21730,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             renderTabContent('overview');
             } catch (err) {
                 console.error('saveTimelineEvent error:', err);
-                alert('Could not save event: ' + err.message);
+                viperToast('Could not save event: ' + err.message, 'error');
             }
         }
 

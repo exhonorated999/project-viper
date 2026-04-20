@@ -23512,6 +23512,383 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             return report;
         }
 
+        /* ---------- Field Incident Report Parser (Virginia / NIBRS-style) ---------- */
+        function parseFieldIncidentReport(text, fileName) {
+            const rawLines = text.split('\n').map(l => l.trim());
+
+            // --- Extract metadata from first page header ---
+            const agencyMatch = text.match(/DRAFT\s*\n\s*([^\n]+)/);
+            const agencyName = agencyMatch ? agencyMatch[1].trim() : '';
+            const incidentNo = (text.match(/Incident No\.\s*\n\s*([^\n]+)/) || [])[1] || '';
+            // Dates: two-column extraction — labels then values
+            let fromDate = '', toDate = '', reportedDate = '';
+            const dateBlock = text.match(/Occurred From Date:\s*\n\s*Occurred To Date:\s*\n\s*(\d{2}-\d{2}-\d{4})\s*\n\s*(\d{2}-\d{2}-\d{4})/);
+            if (dateBlock) { fromDate = dateBlock[1]; toDate = dateBlock[2]; }
+            else {
+                const f = text.match(/Occurred From Date:\s*\n\s*(\d{2}-\d{2}-\d{4})/);
+                const t = text.match(/Occurred To Date:\s*\n\s*(\d{2}-\d{2}-\d{4})/);
+                if (f) fromDate = f[1]; if (t) toDate = t[1];
+            }
+            const rptD = text.match(/Reported Date:\s*\n\s*(\d{2}-\d{2}-\d{4})/);
+            if (rptD) reportedDate = rptD[1];
+
+            // --- Strip page headers and footers ---
+            const cleaned = [];
+            let i = 0;
+            while (i < rawLines.length) {
+                const l = rawLines[i];
+                // Footer: "Printed on ..."  +  "Page X of Y"
+                if (/^Printed on \d/i.test(l)) {
+                    i++;
+                    if (i < rawLines.length && /^Page \d+ of \d+$/i.test(rawLines[i])) i++;
+                    continue;
+                }
+                // Page header block starts with "DRAFT"
+                if (l === 'DRAFT') {
+                    i++;
+                    // Skip agency name / address / phone lines
+                    while (i < rawLines.length) {
+                        const nl = rawLines[i];
+                        if (/SHERIFF|POLICE|DEPARTMENT|OFFICE/i.test(nl) && !/^OFFENSE$|^VICTIM$|^SUSPECT|^PERSON$|^VEHICLE$|^PROPERTY$|^NARRATIVE$|^ADMIN$|^DETAILS$|^SUMMARY$/.test(nl)) { i++; continue; }
+                        if (/^\d+\s+.+\b(ST|AVE|RD|LN|DR|BLVD|WAY)\b/i.test(nl)) { i++; continue; }
+                        if (/^[A-Z]+\s*,?\s*[A-Z]{2}\s+\d{5}/i.test(nl)) { i++; continue; }
+                        if (/^\d{7,}$/.test(nl)) { i++; continue; }
+                        break;
+                    }
+                    // Skip page-type line
+                    if (i < rawLines.length && /^(INCIDENT PAGE \d+|NARRATIVE #\d+|PROPERTIES|APPROVALS)$/i.test(rawLines[i])) i++;
+                    // Skip repeating incident header block ("Incident No." through "Time: HH:MM")
+                    if (i < rawLines.length && /^Incident No\.?$/i.test(rawLines[i])) {
+                        let skip = 0;
+                        while (i < rawLines.length && skip < 25) {
+                            const hl = rawLines[i]; i++; skip++;
+                            if (/^Time:\s*\d{1,2}:\d{2}$/.test(hl)) break;
+                        }
+                    }
+                    continue;
+                }
+                cleaned.push(l);
+                i++;
+            }
+            const lines = cleaned;
+
+            const report = {
+                id: 'rms_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+                fileName, importedAt: new Date().toISOString(),
+                reportNumber: incidentNo.trim(),
+                reportDate: reportedDate,
+                reportType: 'Field Incident Report',
+                supplementNo: '', agencyName,
+                location: '', beat: '',
+                fromDateTime: fromDate, toDateTime: toDate,
+                offenses: [], personsInvolved: [], vehicles: [], property: [],
+                narratives: [], digital: [], confidentialPersons: [], rawText: text
+            };
+            if (!report.reportNumber) {
+                const fn = fileName.match(/(\d{4}[-]?\d{4,})/);
+                if (fn) report.reportNumber = fn[1];
+            }
+
+            // --- Find section boundaries ---
+            const sections = [];
+            for (let j = 0; j < lines.length; j++) {
+                const l = lines[j];
+                if (l === 'DETAILS' || l === 'OFFENSE' || l === 'VICTIM' ||
+                    /^SUSPECT\s*[⁄\/]\s*OFFENDER$/i.test(l) || l === 'PERSON' ||
+                    l === 'VEHICLE' || l === 'PROPERTY' || l === 'NARRATIVE' ||
+                    l === 'ADMIN' || l === 'SUMMARY') {
+                    sections.push({ name: l.replace(/\s*[⁄\/]\s*OFFENDER/i, ''), startLine: j });
+                }
+            }
+            // Get all ranges for a section name (can repeat across pages)
+            function getRanges(name) {
+                const out = [];
+                for (let s = 0; s < sections.length; s++) {
+                    if (sections[s].name === name) {
+                        const end = s + 1 < sections.length ? sections[s + 1].startLine : lines.length;
+                        out.push(lines.slice(sections[s].startLine + 1, end));
+                    }
+                }
+                return out;
+            }
+
+            // Helper: parse a label-value pair block — returns value for a given label
+            // Many fields are just "Label\nValue" — if value is empty the next line is the next label
+            function fieldVal(sl, j) { return j + 1 < sl.length ? sl[j + 1] : ''; }
+
+            // --- Parse DETAILS ---
+            for (const sl of getRanges('DETAILS')) {
+                for (let j = 0; j < sl.length - 1; j++) {
+                    if (sl[j] === 'Location Address') { report.location = sl[j + 1]; j++; }
+                    else if (sl[j] === 'Beat' && !report.beat) { report.beat = sl[j + 1]; j++; }
+                }
+            }
+
+            // --- Parse OFFENSE blocks ---
+            for (const sl of getRanges('OFFENSE')) {
+                let seq = '', desc = '', category = '', ac = '';
+                for (let j = 0; j < sl.length; j++) {
+                    if (sl[j] === 'Seq') { seq = fieldVal(sl, j); j++; }
+                    else if (sl[j] === 'Category') { category = fieldVal(sl, j); j++; }
+                    else if (sl[j] === 'Description') {
+                        // Description may span multiple lines until a known label
+                        const descParts = [];
+                        j++;
+                        while (j < sl.length && !/^(A\/C|Location|Bias Motives|Usings|Domestic|Securities|# of Premises|Entry Method|Entry Locs|Exit Method|Exit Locs|Activities|Weapons|Seq|Category|VCC:)/.test(sl[j])) {
+                            if (sl[j]) descParts.push(sl[j]);
+                            j++;
+                        }
+                        desc = descParts.join(' ').trim();
+                        j--; // back up for for-loop increment
+                    }
+                    else if (sl[j] === 'A/C') { ac = fieldVal(sl, j); j++; }
+                }
+                if (seq && /^\d+$/.test(seq) && desc) {
+                    report.offenses.push({
+                        number: parseInt(seq),
+                        status: ac === 'C' ? 'COMPLETED' : ac === 'A' ? 'ATTEMPTED' : ac || '',
+                        statute: '',
+                        description: desc,
+                        severity: ''
+                    });
+                }
+            }
+
+            // --- Generic person parser for VICTIM / SUSPECT / PERSON blocks ---
+            const _personLabels = new Set(['Seq','Victim Type','Offender Type','Person Type',
+                'Victim (Last, First Middle - Business)','Offender (Last, First Middle)',
+                'Name (Last, First Middle - Business)','DOB','SSN','DL#/ID#','State',
+                'Resident Status','Address','Telephone','Mobile','Work','Occupation',
+                'Employer','Employment Address','Place of Birth','Offense Link',
+                'Age','Unknown','Age Range','Sex','Race','Height','Weight','Hair','Eyes',
+                'Ethnicity','Offender Link/Relationship','Injuries','Treated By',
+                'Transported To','Discovered Crime','Can ID Suspect','Statement Taken',
+                'Victim Crime Rights Served','Circumstances','Justified Homicide Circumstances',
+                'LEOKA Assignment','LEOKA Circumstance','LEOKA Other ORI','LEOKA Status',
+                'State Entry # - Date - By','State Cancellation # - Date - By',
+                'NCIC Entry # - Date - By','NCIC Cancellation # - Date - By',
+                'Scars/Marks/Tattoos/Other','Hair Style','Facial Hair','Complexion',
+                'Build','Speech','Handed','Master Name #','Arrest','Victim Link',
+                'Offender Link','Gang Affiliation','Aliases','Clothing Description',
+                'Injury','Person Link','Loss Type','Stored At','Notes/Remarks',
+                'Ownership Verified By','Owner (Last, First Middle - Business)',
+                'Value Unknown','Evidence','Cargo']);
+            function _isLabel(v) { return _personLabels.has(v) || /^(State |NCIC |LEOKA )/.test(v); }
+            function parsePerson(sl, defaultRole) {
+                let seq = '';
+                const p = { involvement: defaultRole, name: '', dob: '', sex: '', race: '',
+                    ethnicity: '', address: '', phone: '', height: '', weight: '',
+                    hair: '', eyes: '', age: '', comments: '', guardian: '', detail: '' };
+                for (let j = 0; j < sl.length; j++) {
+                    const lab = sl[j], val = fieldVal(sl, j);
+                    const valIsLabel = _isLabel(val);
+                    if (lab === 'Seq') { if (!valIsLabel) { seq = val; j++; } }
+                    // Name fields (different labels per section)
+                    else if (/^(Victim|Offender|Name)\s*\(Last,?\s*First/i.test(lab)) { if (!valIsLabel) { p.name = val; j++; } }
+                    else if (lab === 'Offender Type' || lab === 'Victim Type' || lab === 'Person Type') { if (!valIsLabel) { p.detail = val; j++; } }
+                    else if (lab === 'DOB' && !valIsLabel && /\d/.test(val)) { p.dob = val; j++; }
+                    else if (lab === 'Age' && !valIsLabel && val) {
+                        if (/^\d+$/.test(val)) p.age = val;
+                        j++;
+                    }
+                    else if (lab === 'Age Range' && !valIsLabel && val && val !== '-') { if (!p.age) p.age = val; j++; }
+                    else if (lab === 'Sex' && !valIsLabel && val.length <= 2) { p.sex = val; j++; }
+                    else if (lab === 'Race' && !valIsLabel && val.length <= 3) { p.race = val; j++; }
+                    else if (lab === 'Ethnicity' && !valIsLabel && val.length <= 3) { p.ethnicity = val; j++; }
+                    else if (lab === 'Height' && !valIsLabel && /\d/.test(val)) { p.height = val; j++; }
+                    else if (lab === 'Weight' && !valIsLabel && /\d/.test(val)) { p.weight = val; j++; }
+                    else if (lab === 'Hair' && !valIsLabel && val) { p.hair = val; j++; }
+                    else if (lab === 'Eyes' && !valIsLabel && val) { p.eyes = val; j++; }
+                    else if (lab === 'Address' && !valIsLabel && val) { p.address = val; j++; }
+                    else if (lab === 'Telephone' && !valIsLabel && /[\d(]/.test(val)) { p.phone = val; j++; }
+                    else if (lab === 'Mobile' && !valIsLabel && /[\d(]/.test(val)) {
+                        p.phone = p.phone ? p.phone + '; ' + val : val; j++;
+                    }
+                    else if (lab === 'Occupation' && !valIsLabel && val) { p.comments = (p.comments ? p.comments + '; ' : '') + 'Occupation: ' + val; j++; }
+                    else if (lab === 'Place of Birth' && !valIsLabel && val) { p.comments = (p.comments ? p.comments + '; ' : '') + 'POB: ' + val; j++; }
+                    else if (lab === 'Resident Status' && !valIsLabel && val) { p.comments = (p.comments ? p.comments + '; ' : '') + val; j++; }
+                    else if (lab === 'Scars/Marks/Tattoos/Other' && !valIsLabel && val) { p.comments = (p.comments ? p.comments + '; ' : '') + 'SMT: ' + val; j++; }
+                    else if (lab === 'Aliases' && !valIsLabel && val) { p.comments = (p.comments ? p.comments + '; ' : '') + 'Alias: ' + val; j++; }
+                    else if (lab === 'Clothing Description' && !valIsLabel && val) { p.comments = (p.comments ? p.comments + '; ' : '') + 'Clothing: ' + val; j++; }
+                    else if (lab === 'Injury' && !valIsLabel && val && val !== 'N') { p.comments = (p.comments ? p.comments + '; ' : '') + 'Injury: ' + val; j++; }
+                }
+                if (seq && /^\d+$/.test(seq) && (p.name || p.detail)) return p;
+                return null;
+            }
+
+            // VICTIM sections
+            for (const sl of getRanges('VICTIM')) {
+                const p = parsePerson(sl, 'VICTIM');
+                if (p) report.personsInvolved.push(p);
+            }
+            // SUSPECT sections (header normalized to just "SUSPECT" by section finder)
+            for (const sl of getRanges('SUSPECT')) {
+                const p = parsePerson(sl, 'SUSPECT');
+                if (p) report.personsInvolved.push(p);
+            }
+            // PERSON sections (other involved persons — SUBJECT, WITNESS, etc.)
+            for (const sl of getRanges('PERSON')) {
+                const p = parsePerson(sl, 'PERSON INVOLVED');
+                if (p) {
+                    // Refine role from Person Type field (SUBJECT, WITNESS, etc.)
+                    if (p.detail) {
+                        const dt = p.detail.toUpperCase();
+                        if (/WITNESS/i.test(dt)) p.involvement = 'WITNESS';
+                        else if (/SUSPECT/i.test(dt)) p.involvement = 'SUSPECT';
+                        else if (/VICTIM/i.test(dt)) p.involvement = 'VICTIM';
+                        else if (/REPORTING/i.test(dt)) p.involvement = 'REPORTING PARTY';
+                        else p.involvement = dt; // SUBJECT, etc. — routes to involvedPersons
+                    }
+                    report.personsInvolved.push(p);
+                }
+            }
+
+            // --- Parse VEHICLE blocks ---
+            const _vehLabels = new Set(['Seq','Vehicle Type','Color','Year','Make','Model',
+                'Style','State','Registration','VIN','Value','Value Unknown','Classification',
+                'Towed By','Tow Reason','Offense Link','Victim Link','Offender Link',
+                'Person Link','Loss Type','Stored At','Ownership Verified By',
+                'Owner (Last, First Middle - Business)','Owner Address','Owner Telephone',
+                'Owner Mobile','Insurance Company','Insurance Address','Ins. Telephone',
+                'Notes/Remarks','Reg. Current','Doors Locked','Key in Vehicle','Hold Vehicle',
+                'Damage','Theft from Vehicle','Evidence','Vehicle is Cargo',
+                'Recovered Date','Time','Recovered Location','Recovered By','Recovered Value',
+                'Released Date','Released Location','Released By','Released Contents',
+                'State Entry # - Date - By','State Cancellation # - Date - By',
+                'NCIC Entry # - Date - By','NCIC Cancellation # - Date - By']);
+            function _isVehLabel(v) { return _vehLabels.has(v) || /^(State |NCIC )/.test(v); }
+            for (const sl of getRanges('VEHICLE')) {
+                let seq = '', vType = '', color = '', year = '', make = '', model = '',
+                    style = '', state = '', reg = '', vin = '', notes = '';
+                for (let j = 0; j < sl.length; j++) {
+                    const lab = sl[j], val = fieldVal(sl, j);
+                    const vil = _isVehLabel(val);
+                    if (lab === 'Seq') { if (!vil) { seq = val; j++; } }
+                    else if (lab === 'Vehicle Type' && !vil && val) { vType = val; j++; }
+                    else if (lab === 'Color' && !vil && val) { color = val; j++; }
+                    else if (lab === 'Year' && !vil && /^\d{4}$/.test(val)) { year = val; j++; }
+                    else if (lab === 'Make' && !vil && val) { make = val; j++; }
+                    else if (lab === 'Model' && !vil && val) { model = val; j++; }
+                    else if (lab === 'Style' && !vil && val) { style = val; j++; }
+                    else if (lab === 'State' && !vil && val && val.length <= 3) { state = val; j++; }
+                    else if (lab === 'Registration' && !vil && val) { reg = val; j++; }
+                    else if (lab === 'VIN' && !vil && val) { vin = val; j++; }
+                    else if (lab === 'Notes/Remarks' && !vil && val) { notes = val; j++; }
+                    else if (lab === 'Loss Type' && !vil && val) { notes = (notes ? notes + '; ' : '') + 'Loss: ' + val; j++; }
+                }
+                if (seq && /^\d+$/.test(seq)) {
+                    report.vehicles.push({
+                        status: vType || '', colors: color, year, make,
+                        model: model || style || '', license: reg, state, vin, type: style || vType || ''
+                    });
+                }
+            }
+
+            // --- Parse PROPERTY blocks ---
+            const _propLabels = new Set(['Seq','Property Type','Accessories','Quantity',
+                'Description','Make / Brand','Model','Color','Serial Number','Classification',
+                'Drug Quantity','Drug Measurement','Drug Type Suspected','Value','Value Unknown',
+                'Evidence','Cargo','Offense Link','Victim Link','Offender Link','Person Link',
+                'Loss Type','Stored At','Ownership Verified By',
+                'Owner (Last, First Middle - Business)','Owner Address','Owner Telephone',
+                'Owner Mobile','Notes/Remarks','Recovered Date','Time','Recovered Location',
+                'Recovered By','Recovered Value','Released Date','Released Location',
+                'Released By','State Entry # - Date - By','State Cancellation # - Date - By',
+                'NCIC Entry # - Date - By','NCIC Cancellation # - Date - By']);
+            function _isPropLabel(v) { return _propLabels.has(v) || /^(State |NCIC )/.test(v); }
+            for (const sl of getRanges('PROPERTY')) {
+                let seq = '', propType = '', qty = '', desc = '', makeBrand = '',
+                    model = '', color = '', serial = '', value = '', lossType = '';
+                for (let j = 0; j < sl.length; j++) {
+                    const lab = sl[j], val = fieldVal(sl, j);
+                    const vil = _isPropLabel(val);
+                    if (lab === 'Seq') { if (!vil) { seq = val; j++; } }
+                    else if (lab === 'Property Type' && !vil && val) { propType = val; j++; }
+                    else if (lab === 'Quantity' && !vil && val) { qty = val; j++; }
+                    else if (lab === 'Description' && !vil && val) { desc = val; j++; }
+                    else if (lab === 'Make / Brand' && !vil && val) { makeBrand = val; j++; }
+                    else if (lab === 'Model' && !vil && val) { model = val; j++; }
+                    else if (lab === 'Color' && !vil && val) { color = val; j++; }
+                    else if (lab === 'Serial Number' && !vil && val) { serial = val; j++; }
+                    else if (lab === 'Value' && !vil && val && !/^Unknown$/i.test(val)) { value = val; j++; }
+                    else if (lab === 'Loss Type' && !vil && val) { lossType = val; j++; }
+                }
+                if (seq && /^\d+$/.test(seq) && (desc || propType)) {
+                    const makeModel = [makeBrand, model].filter(Boolean).join(' ');
+                    const fullDesc = [desc, color ? 'Color: ' + color : '', serial ? 'S/N: ' + serial : ''].filter(Boolean).join(' | ');
+                    report.property.push({
+                        holdReason: lossType || propType,
+                        articleType: propType,
+                        make: makeModel,
+                        description: fullDesc,
+                        quantity: qty,
+                        value: value,
+                        recoveredValue: ''
+                    });
+                }
+            }
+
+            // --- Parse NARRATIVE blocks (may span multiple pages — combine by officer) ---
+            const narrativeMap = {}; // key: officer-badge → { officer, badge, text, date }
+            for (const sl of getRanges('NARRATIVE')) {
+                let seq = '', narDate = '', narTime = '', narBy = '', narType = '';
+                let textStart = -1;
+                for (let j = 0; j < sl.length; j++) {
+                    const lab = sl[j], val = fieldVal(sl, j);
+                    if (lab === 'Seq') { seq = val; j++; }
+                    else if (lab === 'Narrative Date') { narDate = val; j++; }
+                    else if (lab === 'Time' && /^\d{2}:\d{2}$/.test(val)) { narTime = val; j++; }
+                    else if (lab === 'Narrative By') { narBy = val; j++; }
+                    else if (/^(Investigative|Supplement|Supplemental|Arrest|Initial|General|Administrative)$/i.test(lab)) {
+                        narType = lab;
+                        textStart = j + 1;
+                        break;
+                    }
+                }
+                if (textStart < 0) continue;
+                // Collect narrative text from textStart to end of section
+                const narLines = sl.slice(textStart).filter(l => l !== '');
+                const narText = narLines.join('\n').trim();
+                if (!narText) continue;
+                // Parse officer name and badge from "LASTNAME, FIRSTNAME - BADGE"
+                const obMatch = narBy.match(/^(.+?)\s*-\s*(\d+)$/);
+                const officer = obMatch ? obMatch[1].trim() : narBy;
+                const badge = obMatch ? obMatch[2] : '';
+                const key = officer + '-' + badge;
+                if (narrativeMap[key]) {
+                    narrativeMap[key].text += '\n\n' + narText;
+                } else {
+                    narrativeMap[key] = { officer, badge, text: narText };
+                }
+            }
+            for (const nar of Object.values(narrativeMap)) {
+                report.narratives.push(nar);
+            }
+
+            // --- Parse ADMIN / SUMMARY for reporting officer ---
+            for (const sl of getRanges('ADMIN')) {
+                for (let j = 0; j < sl.length - 1; j++) {
+                    if (sl[j] === 'Reported By' && sl[j + 1]) {
+                        report.reportType = 'Field Incident Report — Reported by ' + sl[j + 1];
+                        break;
+                    }
+                }
+            }
+            for (const sl of getRanges('SUMMARY')) {
+                for (let j = 0; j < sl.length - 1; j++) {
+                    if (sl[j] === 'Reporting Officer' && sl[j + 1]) {
+                        const ro = sl[j + 1].replace(/^\(\d+\)\s*/, '');
+                        if (!report.reportType.includes('Reported by')) {
+                            report.reportType = 'Field Incident Report — ' + ro;
+                        }
+                        break;
+                    }
+                }
+            }
+
+            return report;
+        }
+
         /* ---------- RMS PDF Text Parser ---------- */
         function parseRmsReport(text, fileName) {
             // --- Format detection ---
@@ -23520,6 +23897,10 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
             if (/Summary of\s*\n?\s*Officer Report Contents/i.test(text) || /Suspect\(s\)\s*-\s*\d+\s*Involved/i.test(text) || /Other Person\(s\)\s*-\s*\d+\s*Involved/i.test(text) || /Victim\(s\)\s*-\s*\d+\s*Involved/i.test(text) || /^\s*(Initial Incident Report|Supplemental Report)\s*$/m.test(text)) {
                 return parseIncidentSummary(text, fileName);
+            }
+            // Virginia / NIBRS-style field incident reports
+            if (/INCIDENT PAGE \d+/i.test(text) && /Incident No\.\s*\n/i.test(text)) {
+                return parseFieldIncidentReport(text, fileName);
             }
 
             // --- Original INFORM RMS parser continues below ---

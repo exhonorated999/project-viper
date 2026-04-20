@@ -21600,16 +21600,21 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
         function saveTimelineEvent(event, editId) {
             event.preventDefault();
-            const date = document.getElementById('tl_date').value;
-            const time = document.getElementById('tl_time').value || '00:00';
-            const title = document.getElementById('tl_title').value.trim();
-            const lane = document.getElementById('tl_lane').value;
-            const category = document.getElementById('tl_category').value;
-            const significance = document.querySelector('input[name="tl_sig"]:checked').value;
-            const entity = document.getElementById('tl_entity').value.trim();
-            const desc = document.getElementById('tl_desc').value.trim();
+            try {
+                const date = document.getElementById('tl_date').value;
+                const time = document.getElementById('tl_time').value || '00:00';
+                const title = document.getElementById('tl_title').value.trim();
+                const lane = document.getElementById('tl_lane').value;
+                const category = document.getElementById('tl_category').value;
+                const sigEl = document.querySelector('input[name="tl_sig"]:checked');
+                const significance = sigEl ? sigEl.value : 'major';
+                const entity = document.getElementById('tl_entity').value.trim();
+                const desc = document.getElementById('tl_desc').value.trim();
 
-            const timestamp = new Date(`${date}T${time}:00`).toISOString();
+                if (!date || !title) { alert('Date and Title are required.'); return; }
+                const parsed = new Date(`${date}T${time}:00`);
+                if (isNaN(parsed.getTime())) { alert('Invalid date/time. Please check your entry.'); return; }
+                const timestamp = parsed.toISOString();
 
             if (editId) {
                 const evt = timelineEvents.find(e => e.id === editId);
@@ -21637,6 +21642,10 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             saveTimelineEvents();
             closeTimelineEventModal();
             renderTabContent('overview');
+            } catch (err) {
+                console.error('saveTimelineEvent error:', err);
+                alert('Could not save event: ' + err.message);
+            }
         }
 
         function openCaseTaskModal() {

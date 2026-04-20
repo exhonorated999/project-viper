@@ -4193,7 +4193,7 @@
                     // 3. Clean localStorage — Pattern 2 (per-case keys by case.id)
                     const p2Prefixes = ['suspects_','victims_','victimBusinesses_','cargo_','witnesses_',
                         'involvedPersons_','recoveredVehicles_','missingpersons_','areacanvas_','prosecution_','narcotics_',
-                        'firearms_','money_','opsplan_','rmsImports_','oversightImport_','canvasForms_','cyberTips_'];
+                        'firearms_','money_','opsplan_','rmsImports_','oversightImport_','canvasForms_','cyberTips_','timelineEvents_'];
                     for (const prefix of p2Prefixes) {
                         localStorage.removeItem(prefix + c.id);
                     }

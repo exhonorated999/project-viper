@@ -869,6 +869,10 @@
         let editingEvidenceId = null;
         let evidenceFiles = [];
         let caseWarrants = [];
+        let timelineEvents = [];
+        let timelineFilter = { lane: 'all', significance: 'all' };
+        let timelineZoom = 'full';
+        let selectedTimelineEvent = null;
         let editingWarrantId = null;
         let warrantFile = null;
         let warrantProductionFiles = [];
@@ -1047,6 +1051,9 @@
             const allProsecution = JSON.parse(localStorage.getItem('viperCaseProsecution')) || {};
             caseProsecution = allProsecution[currentCase.caseNumber] || [];
             
+            // Load timeline events (Pattern 2)
+            loadTimelineEvents();
+
             renderCaseHeader();
             renderTabs();
 
@@ -1815,7 +1822,7 @@
                 'witnesses', 'involvedPersons', 'recoveredVehicles', 'missingpersons',
                 'areacanvas', 'prosecution', 'narcotics', 'firearms',
                 'money', 'opsplan', 'rmsImports', 'oversightImport',
-                'canvasForms', 'cyberTips'
+                'canvasForms', 'cyberTips', 'timelineEvents'
             ];
             const moduleData = {};
             moduleKeys.forEach(k => {
@@ -3331,6 +3338,9 @@
                             }).join('')}
                         </div>
                     </div>
+
+                    <!-- Case Timeline -->
+                    ${renderTimelineSection()}
                 </div>
             `;
         }
@@ -20632,6 +20642,583 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             renderCaseHeader();
         }
         
+        // =====================================================
+        // CASE TIMELINE — SWIMLANE VIEW
+        // =====================================================
+
+        const TIMELINE_LANES = {
+            subject:       { label: 'Subject Activity',       color: '#06b6d4', bg: 'rgba(6,182,212,0.12)',  border: 'rgba(6,182,212,0.4)' },
+            incident:      { label: 'Incident & Reports',     color: '#f87171', bg: 'rgba(248,113,113,0.12)', border: 'rgba(248,113,113,0.4)' },
+            investigation: { label: 'Investigative Actions',   color: '#f59e0b', bg: 'rgba(245,158,11,0.12)',  border: 'rgba(245,158,11,0.4)' },
+            forensics:     { label: 'Forensics & Evidence',    color: '#10b981', bg: 'rgba(16,185,129,0.12)',  border: 'rgba(16,185,129,0.4)' }
+        };
+
+        const TIMELINE_CATEGORIES = {
+            warrant: '📋', surveillance: '👁️', rms: '📄', interview: '🎙️',
+            lab: '🔬', digital: '💻', arrest: '🚔', note: '📝', custom: '📌'
+        };
+
+        function loadTimelineEvents() {
+            timelineEvents = JSON.parse(localStorage.getItem(`timelineEvents_${currentCase.id}`) || '[]');
+        }
+
+        function saveTimelineEvents() {
+            localStorage.setItem(`timelineEvents_${currentCase.id}`, JSON.stringify(timelineEvents));
+        }
+
+        function generateAutoTimelineEvents() {
+            // Remove existing auto events, keep manual
+            const manual = timelineEvents.filter(e => e.sourceType === 'manual');
+            const auto = [];
+            const now = new Date().toISOString();
+
+            // --- Case creation ---
+            if (currentCase.createdAt) {
+                auto.push({
+                    id: 'tl_auto_case_created',
+                    timestamp: currentCase.createdAt,
+                    endTimestamp: null,
+                    title: 'Case Opened',
+                    description: `Case ${currentCase.caseNumber} created`,
+                    lane: 'incident', category: 'custom', significance: 'major',
+                    entityLink: currentCase.createdBy || '',
+                    sourceType: 'auto:case', sourceId: null, color: null, createdAt: now
+                });
+            }
+
+            // --- Warrants ---
+            const allWarrants = JSON.parse(localStorage.getItem('viperCaseWarrants') || '{}');
+            const warrants = allWarrants[currentCase.caseNumber] || [];
+            for (const w of warrants) {
+                if (w.dateSigned) {
+                    auto.push({
+                        id: 'tl_auto_warrant_signed_' + w.id,
+                        timestamp: new Date(w.dateSigned + 'T00:00:00').toISOString(),
+                        endTimestamp: null,
+                        title: `${w.type || 'Warrant'} Signed` + (w.issuedTo ? ` — ${w.issuedTo}` : ''),
+                        description: w.description || '',
+                        lane: 'investigation', category: 'warrant', significance: 'major',
+                        entityLink: w.issuedTo || '', sourceType: 'auto:warrant', sourceId: w.id, color: null, createdAt: now
+                    });
+                }
+                if (w.dateServed) {
+                    auto.push({
+                        id: 'tl_auto_warrant_served_' + w.id,
+                        timestamp: new Date(w.dateServed + 'T00:00:00').toISOString(),
+                        endTimestamp: null,
+                        title: `${w.type || 'Warrant'} Served` + (w.issuedTo ? ` — ${w.issuedTo}` : ''),
+                        description: w.description || '',
+                        lane: 'investigation', category: 'warrant', significance: 'major',
+                        entityLink: w.issuedTo || '', sourceType: 'auto:warrant', sourceId: w.id, color: null, createdAt: now
+                    });
+                }
+                if (w.courtReturnDate) {
+                    auto.push({
+                        id: 'tl_auto_warrant_return_' + w.id,
+                        timestamp: new Date(w.courtReturnDate + 'T00:00:00').toISOString(),
+                        endTimestamp: null,
+                        title: `Court Return` + (w.issuedTo ? ` — ${w.issuedTo}` : ''),
+                        description: w.description || '',
+                        lane: 'investigation', category: 'warrant', significance: 'supporting',
+                        entityLink: w.issuedTo || '', sourceType: 'auto:warrant', sourceId: w.id, color: null, createdAt: now
+                    });
+                }
+            }
+
+            // --- RMS Imports ---
+            const rms = JSON.parse(localStorage.getItem(`rmsImports_${currentCase.id}`) || '[]');
+            for (const r of rms) {
+                if (r.reportDate) {
+                    // Normalize date format (MM-DD-YYYY or MM/DD/YYYY → ISO)
+                    let ts = r.reportDate;
+                    const dm = ts.match(/^(\d{2})[-\/](\d{2})[-\/](\d{4})/);
+                    if (dm) ts = `${dm[3]}-${dm[1]}-${dm[2]}T00:00:00`;
+                    else if (!/T/.test(ts)) ts = ts + 'T00:00:00';
+                    try {
+                        auto.push({
+                            id: 'tl_auto_rms_' + r.id,
+                            timestamp: new Date(ts).toISOString(),
+                            endTimestamp: null,
+                            title: `${r.reportType || 'RMS Report'}` + (r.reportNumber ? ` #${r.reportNumber}` : ''),
+                            description: r.agencyName ? `Agency: ${r.agencyName}` : '',
+                            lane: 'incident', category: 'rms', significance: 'major',
+                            entityLink: '', sourceType: 'auto:rms', sourceId: r.id, color: null, createdAt: now
+                        });
+                    } catch(e) {}
+                }
+                // Narrative dates
+                if (r.narratives) {
+                    for (const n of r.narratives) {
+                        if (n.officer && r.reportDate) {
+                            auto.push({
+                                id: 'tl_auto_rms_nar_' + r.id + '_' + (n.badge || ''),
+                                timestamp: auto.find(a => a.sourceId === r.id)?.timestamp || now,
+                                endTimestamp: null,
+                                title: `Narrative — ${n.officer}`,
+                                description: n.text ? n.text.slice(0, 150) + '...' : '',
+                                lane: 'incident', category: 'rms', significance: 'supporting',
+                                entityLink: n.officer + (n.badge ? ` #${n.badge}` : ''),
+                                sourceType: 'auto:rms', sourceId: r.id, color: null, createdAt: now
+                            });
+                        }
+                    }
+                }
+            }
+
+            // --- Evidence ---
+            const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence') || '{}');
+            const evidence = allEvidence[currentCase.caseNumber] || [];
+            for (const ev of evidence) {
+                if (ev.createdAt) {
+                    auto.push({
+                        id: 'tl_auto_ev_' + ev.id,
+                        timestamp: ev.createdAt,
+                        endTimestamp: null,
+                        title: `Evidence: ${ev.type || 'Item'}`,
+                        description: ev.description || (ev.tag ? `Tag: ${ev.tag}` : ''),
+                        lane: 'forensics', category: 'digital', significance: 'supporting',
+                        entityLink: '', sourceType: 'auto:evidence', sourceId: ev.id, color: null, createdAt: now
+                    });
+                }
+            }
+
+            // --- Case Notes ---
+            const allNotes = JSON.parse(localStorage.getItem('viperCaseNotes') || '{}');
+            const notes = allNotes[currentCase.caseNumber] || [];
+            for (const n of notes) {
+                if (n.createdAt) {
+                    auto.push({
+                        id: 'tl_auto_note_' + n.id,
+                        timestamp: n.createdAt,
+                        endTimestamp: null,
+                        title: 'Case Note',
+                        description: n.content ? n.content.slice(0, 120) : '',
+                        lane: 'investigation', category: 'note', significance: 'supporting',
+                        entityLink: '', sourceType: 'auto:note', sourceId: n.id, color: null, createdAt: now
+                    });
+                }
+            }
+
+            // --- Area Canvas ---
+            const canvas = JSON.parse(localStorage.getItem(`areacanvas_${currentCase.id}`) || '[]');
+            for (const c of canvas) {
+                if (c.timestamp) {
+                    auto.push({
+                        id: 'tl_auto_canvas_' + c.id,
+                        timestamp: c.timestamp,
+                        endTimestamp: null,
+                        title: `Area Canvas — ${c.address || 'Location'}`,
+                        description: c.notes || '',
+                        lane: 'investigation', category: 'surveillance', significance: 'supporting',
+                        entityLink: c.contact || '', sourceType: 'auto:canvas', sourceId: c.id, color: null, createdAt: now
+                    });
+                }
+            }
+
+            // Deduplicate auto by id
+            const seen = new Set();
+            const deduped = [];
+            for (const evt of auto) {
+                if (!seen.has(evt.id)) { seen.add(evt.id); deduped.push(evt); }
+            }
+
+            timelineEvents = [...manual, ...deduped].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            saveTimelineEvents();
+            return timelineEvents.length;
+        }
+
+        function getFilteredTimelineEvents() {
+            return timelineEvents.filter(e => {
+                if (timelineFilter.lane !== 'all' && e.lane !== timelineFilter.lane) return false;
+                if (timelineFilter.significance !== 'all' && e.significance !== timelineFilter.significance) return false;
+                return true;
+            });
+        }
+
+        function deleteTimelineEvent(evtId) {
+            timelineEvents = timelineEvents.filter(e => e.id !== evtId);
+            saveTimelineEvents();
+            selectedTimelineEvent = null;
+            renderTabContent('overview');
+        }
+
+        // ---- Swimlane Renderer ----
+
+        function renderTimelineSection() {
+            const events = getFilteredTimelineEvents();
+            const hasEvents = events.length > 0;
+
+            return `
+            <div class="glass-card rounded-xl p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-xl font-bold flex items-center">
+                        <svg class="w-5 h-5 mr-2 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        Case Timeline
+                    </h3>
+                    <div class="flex items-center gap-2">
+                        <button onclick="showTimelineEventModal()" class="px-3 py-1.5 rounded-lg bg-viper-cyan/10 text-viper-cyan border border-viper-cyan/30 hover:bg-viper-cyan/20 transition text-sm font-medium">+ Add Event</button>
+                        <button onclick="refreshTimeline()" class="px-3 py-1.5 rounded-lg bg-gray-700/50 text-gray-300 border border-gray-600 hover:bg-gray-600/50 transition text-sm font-medium flex items-center gap-1">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+                ${hasEvents ? `
+                <!-- Controls -->
+                <div class="flex items-center gap-4 mb-4 text-sm">
+                    <div class="flex items-center gap-2">
+                        <span class="text-gray-400">Lane:</span>
+                        <select onchange="setTimelineFilter('lane', this.value)" class="bg-viper-dark border border-gray-600 rounded px-2 py-1 text-white text-xs focus:border-viper-cyan outline-none">
+                            <option value="all" ${timelineFilter.lane === 'all' ? 'selected' : ''}>All Lanes</option>
+                            ${Object.entries(TIMELINE_LANES).map(([k, v]) => `<option value="${k}" ${timelineFilter.lane === k ? 'selected' : ''}>${v.label}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-gray-400">Show:</span>
+                        <select onchange="setTimelineFilter('significance', this.value)" class="bg-viper-dark border border-gray-600 rounded px-2 py-1 text-white text-xs focus:border-viper-cyan outline-none">
+                            <option value="all" ${timelineFilter.significance === 'all' ? 'selected' : ''}>All Events</option>
+                            <option value="major" ${timelineFilter.significance === 'major' ? 'selected' : ''}>Major Only</option>
+                            <option value="supporting" ${timelineFilter.significance === 'supporting' ? 'selected' : ''}>Supporting Only</option>
+                        </select>
+                    </div>
+                    <div class="flex items-center gap-1 ml-auto">
+                        <span class="text-gray-400 mr-1">Zoom:</span>
+                        ${['full', 'week', 'day'].map(z => `<button onclick="setTimelineZoom('${z}')" class="px-2 py-1 rounded text-xs ${timelineZoom === z ? 'bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/40' : 'bg-gray-700/50 text-gray-400 border border-gray-600 hover:text-white'} transition">${z.charAt(0).toUpperCase() + z.slice(1)}</button>`).join('')}
+                    </div>
+                </div>
+                <!-- Swimlane -->
+                ${renderSwimlane(events)}
+                <!-- Detail Panel -->
+                <div id="timelineDetailPanel">${selectedTimelineEvent ? renderTimelineDetailPanel(selectedTimelineEvent) : ''}</div>
+                ` : `
+                <div class="text-center py-10">
+                    <svg class="w-16 h-16 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <p class="text-gray-400 mb-4">No timeline events yet</p>
+                    <button onclick="refreshTimeline()" class="px-5 py-2 bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/30 rounded-lg hover:bg-viper-cyan/30 transition font-medium">
+                        Generate Timeline from Case Data
+                    </button>
+                </div>
+                `}
+            </div>`;
+        }
+
+        function renderSwimlane(events) {
+            if (!events.length) return '';
+
+            // Compute time range
+            const timestamps = events.map(e => new Date(e.timestamp).getTime());
+            let minT = Math.min(...timestamps);
+            let maxT = Math.max(...timestamps);
+
+            // Apply zoom
+            if (timelineZoom === 'day') {
+                const center = selectedTimelineEvent ? new Date(events.find(e => e.id === selectedTimelineEvent)?.timestamp || minT).getTime() : maxT;
+                minT = center - 12 * 3600000;
+                maxT = center + 12 * 3600000;
+            } else if (timelineZoom === 'week') {
+                const center = selectedTimelineEvent ? new Date(events.find(e => e.id === selectedTimelineEvent)?.timestamp || minT).getTime() : maxT;
+                minT = center - 3.5 * 86400000;
+                maxT = center + 3.5 * 86400000;
+            }
+
+            // Add padding
+            const span = maxT - minT || 86400000;
+            const pad = span * 0.05;
+            minT -= pad;
+            maxT += pad;
+            const totalSpan = maxT - minT;
+
+            // Generate time ticks
+            const ticks = [];
+            const spanDays = totalSpan / 86400000;
+            let tickInterval;
+            if (spanDays <= 2) tickInterval = 3600000 * 3;       // 3 hour ticks
+            else if (spanDays <= 14) tickInterval = 86400000;     // daily
+            else if (spanDays <= 90) tickInterval = 86400000 * 7; // weekly
+            else tickInterval = 86400000 * 30;                    // monthly
+
+            const firstTick = Math.ceil(minT / tickInterval) * tickInterval;
+            for (let t = firstTick; t <= maxT; t += tickInterval) {
+                const pct = ((t - minT) / totalSpan) * 100;
+                const d = new Date(t);
+                let label;
+                if (tickInterval < 86400000) label = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                else if (tickInterval <= 86400000) label = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+                else label = d.toLocaleDateString([], { month: 'short', day: 'numeric', year: '2-digit' });
+                ticks.push({ pct, label });
+            }
+
+            // Which lanes have events?
+            const laneOrder = ['subject', 'incident', 'investigation', 'forensics'];
+            const activeLanes = laneOrder.filter(l => timelineFilter.lane === 'all' ? events.some(e => e.lane === l) : l === timelineFilter.lane);
+
+            const trackWidth = 2000; // px — scrollable
+
+            function evtPos(e) {
+                const t = new Date(e.timestamp).getTime();
+                return Math.max(0, Math.min(100, ((t - minT) / totalSpan) * 100));
+            }
+
+            return `
+            <div class="rounded-lg border border-gray-700 overflow-hidden" style="background: rgba(15,15,20,0.6)">
+                <!-- Time axis -->
+                <div class="overflow-x-auto" id="timelineSwimlaneScroll">
+                    <div style="min-width:${trackWidth}px; position:relative;">
+                        <!-- Tick marks -->
+                        <div class="relative h-8 border-b border-gray-700" style="min-width:${trackWidth}px;">
+                            ${ticks.map(t => `
+                                <div class="absolute top-0 h-full flex flex-col items-center" style="left:${t.pct}%;">
+                                    <div class="h-3 border-l border-gray-600"></div>
+                                    <span class="text-[10px] text-gray-500 whitespace-nowrap mt-0.5">${t.label}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <!-- Lanes -->
+                        ${activeLanes.map(laneKey => {
+                            const lane = TIMELINE_LANES[laneKey];
+                            const laneEvents = events.filter(e => e.lane === laneKey);
+                            return `
+                            <div class="relative flex border-b border-gray-700/50" style="min-height:80px;">
+                                <!-- Lane label -->
+                                <div class="flex-shrink-0 w-40 px-3 py-3 flex items-center border-r border-gray-700/50" style="background:${lane.bg}; border-left: 3px solid ${lane.border};">
+                                    <span class="text-xs font-bold uppercase tracking-wider" style="color:${lane.color};">${lane.label}</span>
+                                </div>
+                                <!-- Track -->
+                                <div class="flex-1 relative" style="min-width:${trackWidth - 160}px;">
+                                    <!-- Gridlines -->
+                                    ${ticks.map(t => `<div class="absolute top-0 h-full border-l border-gray-800/40" style="left:${t.pct}%;"></div>`).join('')}
+                                    <!-- Connector line -->
+                                    <div class="absolute top-1/2 left-0 right-0 h-px" style="background:${lane.border};"></div>
+                                    <!-- Events -->
+                                    ${laneEvents.map(evt => {
+                                        const pct = evtPos(evt);
+                                        const isMajor = evt.significance === 'major';
+                                        const isSelected = evt.id === selectedTimelineEvent;
+                                        const sz = isMajor ? 14 : 10;
+                                        const glw = isSelected ? `0 0 12px ${lane.color}` : (isMajor ? `0 0 8px ${lane.color}55` : 'none');
+                                        return `
+                                        <div class="absolute flex flex-col items-center cursor-pointer group" style="left:${pct}%; top:50%; transform:translate(-50%,-50%); z-index:${isSelected ? 20 : 10};" onclick="selectTimelineEvent('${evt.id}')">
+                                            <div class="rounded-full border-2 transition-all duration-200" style="width:${sz}px;height:${sz}px;background:${evt.color || lane.color};border-color:${isSelected ? '#fff' : (evt.color || lane.color)};box-shadow:${glw};"></div>
+                                            <!-- Tooltip -->
+                                            <div class="absolute bottom-full mb-2 px-2 py-1 rounded bg-gray-900/95 border border-gray-600 text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-30 max-w-[200px] truncate" style="color:${lane.color};">
+                                                <span class="text-gray-400">${new Date(evt.timestamp).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</span><br>
+                                                ${TIMELINE_CATEGORIES[evt.category] || '📌'} ${evt.title}
+                                            </div>
+                                        </div>`;
+                                    }).join('')}
+                                </div>
+                            </div>`;
+                        }).join('')}
+                    </div>
+                </div>
+                <!-- Legend -->
+                <div class="flex items-center gap-4 px-4 py-2 border-t border-gray-700/50">
+                    <span class="text-[10px] text-gray-500 uppercase tracking-wider mr-2">Legend:</span>
+                    <span class="flex items-center gap-1 text-[10px] text-gray-400"><span class="inline-block w-3 h-3 rounded-full bg-gray-400"></span> Major</span>
+                    <span class="flex items-center gap-1 text-[10px] text-gray-400"><span class="inline-block w-2 h-2 rounded-full bg-gray-500 opacity-60"></span> Supporting</span>
+                    <span class="text-[10px] text-gray-600 ml-auto">${events.length} event${events.length !== 1 ? 's' : ''}</span>
+                </div>
+            </div>`;
+        }
+
+        function renderTimelineDetailPanel(evtId) {
+            const evt = timelineEvents.find(e => e.id === evtId);
+            if (!evt) return '';
+            const lane = TIMELINE_LANES[evt.lane] || TIMELINE_LANES.incident;
+            const isManual = evt.sourceType === 'manual';
+            const catIcon = TIMELINE_CATEGORIES[evt.category] || '📌';
+            const ts = new Date(evt.timestamp);
+
+            // Determine source tab link
+            let sourceTab = '';
+            if (evt.sourceType === 'auto:warrant') sourceTab = 'warrants';
+            else if (evt.sourceType === 'auto:rms') sourceTab = 'rmsImport';
+            else if (evt.sourceType === 'auto:evidence') sourceTab = 'evidence';
+            else if (evt.sourceType === 'auto:note') sourceTab = 'notes';
+            else if (evt.sourceType === 'auto:canvas') sourceTab = 'areacanvas';
+
+            return `
+            <div class="mt-4 p-4 rounded-lg border" style="background:${lane.bg}; border-color:${lane.border};">
+                <div class="flex items-start justify-between">
+                    <div class="flex-1">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="text-lg">${catIcon}</span>
+                            <h4 class="text-lg font-bold" style="color:${lane.color};">${evt.title}</h4>
+                            <span class="text-xs px-2 py-0.5 rounded-full border" style="color:${lane.color}; border-color:${lane.border};">${evt.significance}</span>
+                            ${isManual ? '<span class="text-xs px-2 py-0.5 rounded-full bg-gray-600/50 text-gray-300 border border-gray-500">Manual</span>' : '<span class="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">Auto</span>'}
+                        </div>
+                        <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+                            <div><span class="text-gray-400">Date:</span> <span class="text-white">${ts.toLocaleDateString([], {weekday:'short', month:'long', day:'numeric', year:'numeric'})}</span></div>
+                            <div><span class="text-gray-400">Time:</span> <span class="text-white">${ts.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span></div>
+                            <div><span class="text-gray-400">Lane:</span> <span style="color:${lane.color};">${lane.label}</span></div>
+                            <div><span class="text-gray-400">Category:</span> <span class="text-white">${evt.category}</span></div>
+                            ${evt.entityLink ? `<div class="col-span-2"><span class="text-gray-400">Entity:</span> <span class="text-white">${evt.entityLink}</span></div>` : ''}
+                        </div>
+                        ${evt.description ? `<p class="text-gray-300 text-sm mt-3 leading-relaxed">${evt.description}</p>` : ''}
+                    </div>
+                    <div class="flex flex-col gap-2 ml-4">
+                        ${sourceTab ? `<button onclick="renderTabContent('${sourceTab}')" class="px-3 py-1.5 rounded-lg bg-gray-700/50 text-gray-300 border border-gray-600 hover:bg-gray-600/50 transition text-xs">View Source</button>` : ''}
+                        ${isManual ? `
+                        <button onclick="showTimelineEventModal('${evt.id}')" class="px-3 py-1.5 rounded-lg bg-viper-cyan/10 text-viper-cyan border border-viper-cyan/30 hover:bg-viper-cyan/20 transition text-xs">Edit</button>
+                        <button onclick="confirmDeleteTimelineEvent('${evt.id}')" class="px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20 transition text-xs">Delete</button>
+                        ` : ''}
+                        <button onclick="selectedTimelineEvent=null;document.getElementById('timelineDetailPanel').innerHTML=''" class="px-3 py-1.5 rounded-lg bg-gray-700/50 text-gray-400 border border-gray-600 hover:text-white transition text-xs">Close</button>
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        function selectTimelineEvent(evtId) {
+            selectedTimelineEvent = evtId;
+            const panel = document.getElementById('timelineDetailPanel');
+            if (panel) panel.innerHTML = renderTimelineDetailPanel(evtId);
+        }
+
+        async function confirmDeleteTimelineEvent(evtId) {
+            if (await viperConfirm('Delete this timeline event?', {danger: true, okText: 'Delete'})) {
+                deleteTimelineEvent(evtId);
+            }
+        }
+
+        function refreshTimeline() {
+            const count = generateAutoTimelineEvents();
+            viperToast(`Timeline refreshed — ${count} event${count !== 1 ? 's' : ''}`, 'success');
+            renderTabContent('overview');
+        }
+
+        function setTimelineFilter(key, value) {
+            timelineFilter[key] = value;
+            renderTabContent('overview');
+        }
+
+        function setTimelineZoom(zoom) {
+            timelineZoom = zoom;
+            renderTabContent('overview');
+        }
+
+        // ---- Manual Event Modal ----
+
+        function showTimelineEventModal(editId) {
+            const evt = editId ? timelineEvents.find(e => e.id === editId) : null;
+            const isEdit = !!evt;
+            const ts = evt ? new Date(evt.timestamp) : new Date();
+            const dateVal = evt ? ts.toISOString().slice(0, 10) : '';
+            const timeVal = evt ? ts.toTimeString().slice(0, 5) : '';
+
+            const modalHTML = `
+            <div id="timelineEventModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id==='timelineEventModal')closeTimelineEventModal()">
+                <div class="glass-card rounded-xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto">
+                    <h3 class="text-xl font-bold text-white mb-5">${isEdit ? 'Edit' : 'Add'} Timeline Event</h3>
+                    <form onsubmit="saveTimelineEvent(event, ${isEdit ? `'${editId}'` : 'null'})" class="space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1">Date *</label>
+                                <input type="date" id="tl_date" value="${dateVal}" required class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1">Time</label>
+                                <input type="time" id="tl_time" value="${timeVal}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan outline-none">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Title *</label>
+                            <input type="text" id="tl_title" value="${evt ? evt.title : ''}" required class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan outline-none" placeholder="e.g., Search Warrant Executed">
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1">Lane *</label>
+                                <select id="tl_lane" required class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan outline-none">
+                                    ${Object.entries(TIMELINE_LANES).map(([k, v]) => `<option value="${k}" ${evt && evt.lane === k ? 'selected' : ''}>${v.label}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1">Category</label>
+                                <select id="tl_category" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan outline-none">
+                                    ${Object.entries(TIMELINE_CATEGORIES).map(([k, v]) => `<option value="${k}" ${evt && evt.category === k ? 'selected' : ''}>${v} ${k.charAt(0).toUpperCase() + k.slice(1)}</option>`).join('')}
+                                </select>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Significance</label>
+                            <div class="flex gap-4 mt-1">
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="radio" name="tl_sig" value="major" ${!evt || evt.significance === 'major' ? 'checked' : ''} class="text-viper-cyan focus:ring-viper-cyan">
+                                    <span class="text-white text-sm">Major Milestone</span>
+                                </label>
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="radio" name="tl_sig" value="supporting" ${evt && evt.significance === 'supporting' ? 'checked' : ''} class="text-viper-cyan focus:ring-viper-cyan">
+                                    <span class="text-white text-sm">Supporting Detail</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Entity Link</label>
+                            <input type="text" id="tl_entity" value="${evt ? evt.entityLink : ''}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan outline-none" placeholder="e.g., Det. Miller, FORAND, ALBERT">
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Description</label>
+                            <textarea id="tl_desc" rows="3" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan outline-none resize-y" placeholder="Additional details...">${evt ? evt.description : ''}</textarea>
+                        </div>
+                        <div class="flex gap-3 justify-end mt-6">
+                            <button type="button" onclick="closeTimelineEventModal()" class="px-5 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white transition">Cancel</button>
+                            <button type="submit" class="px-5 py-2 bg-viper-cyan hover:bg-viper-cyan/80 rounded-lg text-black font-semibold transition">${isEdit ? 'Save' : 'Add Event'}</button>
+                        </div>
+                    </form>
+                </div>
+            </div>`;
+            document.body.insertAdjacentHTML('beforeend', modalHTML);
+        }
+
+        function closeTimelineEventModal() {
+            const m = document.getElementById('timelineEventModal');
+            if (m) m.remove();
+        }
+
+        function saveTimelineEvent(event, editId) {
+            event.preventDefault();
+            const date = document.getElementById('tl_date').value;
+            const time = document.getElementById('tl_time').value || '00:00';
+            const title = document.getElementById('tl_title').value.trim();
+            const lane = document.getElementById('tl_lane').value;
+            const category = document.getElementById('tl_category').value;
+            const significance = document.querySelector('input[name="tl_sig"]:checked').value;
+            const entity = document.getElementById('tl_entity').value.trim();
+            const desc = document.getElementById('tl_desc').value.trim();
+
+            const timestamp = new Date(`${date}T${time}:00`).toISOString();
+
+            if (editId) {
+                const evt = timelineEvents.find(e => e.id === editId);
+                if (evt) {
+                    evt.timestamp = timestamp;
+                    evt.title = title;
+                    evt.lane = lane;
+                    evt.category = category;
+                    evt.significance = significance;
+                    evt.entityLink = entity;
+                    evt.description = desc;
+                }
+            } else {
+                timelineEvents.push({
+                    id: 'tl_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+                    timestamp, endTimestamp: null,
+                    title, description: desc, lane, category, significance,
+                    entityLink: entity,
+                    sourceType: 'manual', sourceId: null, color: null,
+                    createdAt: new Date().toISOString()
+                });
+            }
+
+            timelineEvents.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            saveTimelineEvents();
+            closeTimelineEventModal();
+            renderTabContent('overview');
+        }
+
         function openCaseTaskModal() {
             const modalHTML = `
                 <div id="caseTaskModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id === 'caseTaskModal') closeCaseTaskModal()">

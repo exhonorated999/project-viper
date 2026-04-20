@@ -1948,6 +1948,11 @@
                     const incMatch = text.match(/Inc\s*#?\s*[:\s]*(\d{6,})/i);
                     if (incMatch) caseNum = incMatch[1];
                 }
+                // Field Incident format: "Incident No.\n2024-000181"
+                if (!caseNum) {
+                    const incNoMatch = text.match(/Incident No\.\s*\n\s*([^\n]+)/i);
+                    if (incNoMatch) caseNum = incNoMatch[1].trim();
+                }
                 // Fallback: extract from filename
                 if (!caseNum) {
                     const fnNum = result.fileName.match(/(\d{9,12})/);
@@ -1956,6 +1961,20 @@
 
                 // Detect sections by looking for INFORM RMS section headers
                 const hasSection = (names) => names.some(n => new RegExp('(?:^|\\n)\\s*' + n + '\\s*(?:\\n|$)', 'im').test(text));
+
+                // --- Field Incident format: separate VICTIM / SUSPECT / PERSON section headers ---
+                if (/INCIDENT PAGE \d+/i.test(text)) {
+                    // Check for SUSPECT ⁄ OFFENDER section with data (Seq + digit)
+                    if (/SUSPECT[\s\S]*?Seq\s*\n\s*\d+/i.test(text)) detected.suspects = true;
+                    // VICTIM section with name data
+                    if (/\nVICTIM\n[\s\S]*?Seq\s*\n\s*\d+/i.test(text)) detected.victims = true;
+                    // PERSON section (other involved)
+                    if (/\nPERSON\n[\s\S]*?Seq\s*\n\s*\d+/i.test(text)) detected.involvedPersons = true;
+                    // Vehicles with data
+                    if (/\nVEHICLE\n[\s\S]*?Seq\s*\n\s*\d+/i.test(text)) detected.vehicles = true;
+                    // Narrative
+                    if (/\nNARRATIVE\n[\s\S]*?Narrative By/i.test(text)) detected.rmsImports = true;
+                }
 
                 // --- Standard INFORM format: single Involved section with role keywords ---
                 const involvedBlock = text.match(/(?:Persons?\s+Involved|Involved)\s*\n([\s\S]*?)(?=\n\s*(?:Vehicle|Property|Narrative|Digital|Confidential|\*{3})|$)/i);
@@ -2003,6 +2022,11 @@
                 if (!synopsis) {
                     const typeMatch = text.match(/^\s*(Initial Incident Report|Supplemental Report)\s*$/m);
                     if (typeMatch) synopsis = typeMatch[1];
+                }
+                // Field Incident format: offense description
+                if (!synopsis && /INCIDENT PAGE \d+/i.test(text)) {
+                    const offDescMatch = text.match(/\nOFFENSE\n[\s\S]*?Description\s*\n\s*([^\n]+)/i);
+                    if (offDescMatch && offDescMatch[1].trim()) synopsis = offDescMatch[1].trim();
                 }
 
                 // Store for case creation

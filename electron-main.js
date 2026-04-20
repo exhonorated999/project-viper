@@ -553,6 +553,45 @@ ipcMain.handle('get-storage-paths', async () => {
   };
 });
 
+// --- Create case folder on disk ---
+ipcMain.handle('create-case-folder', async (_e, caseNumber) => {
+  if (!caseNumber || typeof caseNumber !== 'string') return { success: false, error: 'Invalid case number' };
+  const caseDir = path.join(casesDir, caseNumber);
+  try {
+    fs.mkdirSync(caseDir, { recursive: true });
+    return { success: true, path: caseDir };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// --- Check if case folder exists on disk ---
+ipcMain.handle('case-folder-exists', async (_e, caseNumber) => {
+  if (!caseNumber || typeof caseNumber !== 'string') return false;
+  return fs.existsSync(path.join(casesDir, caseNumber));
+});
+
+// --- Save text file into case subfolder ---
+ipcMain.handle('save-case-text-file', async (_e, { caseNumber, subfolder, fileName, content }) => {
+  if (!caseNumber || !fileName) return { success: false, error: 'Missing params' };
+  try {
+    const dir = subfolder
+      ? path.join(casesDir, caseNumber, subfolder)
+      : path.join(casesDir, caseNumber);
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, fileName);
+    // Encrypt if security is enabled
+    if (security && security.isEnabled() && security.isUnlocked()) {
+      fs.writeFileSync(filePath, security.encryptBuffer(Buffer.from(content, 'utf8')));
+    } else {
+      fs.writeFileSync(filePath, content, 'utf8');
+    }
+    return { success: true, path: filePath };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 // --- Delete case folder (entire case directory on disk) ---
 ipcMain.handle('delete-case-folder', async (_e, caseNumber) => {
   if (!caseNumber || typeof caseNumber !== 'string') return { success: false, error: 'Invalid case number' };

@@ -19363,9 +19363,14 @@
         const _loadingSpinnerHTML = `<div class="flex flex-col items-center justify-center h-full gap-3"><svg class="animate-spin w-8 h-8 text-viper-cyan" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><p class="text-gray-400 text-sm">Generating route...</p></div>`;
 
         async function generateOpsRoutes() {
-            const briefingAddr = document.getElementById('ops_briefingLocation')?.value?.trim();
+            const briefingRaw = document.getElementById('ops_briefingLocation')?.value?.trim();
             const operationAddr = document.getElementById('ops_location')?.value?.trim();
-            const hospitalAddr = document.getElementById('ops_hospital')?.value?.trim();
+            const hospitalRaw = document.getElementById('ops_hospital')?.value?.trim();
+
+            // Strip name prefix before "—" delimiter (e.g. "ARMC — 400 N Pepper Ave..." → "400 N Pepper Ave...")
+            const stripLabel = (v) => v && v.includes('—') ? v.split('—').slice(1).join('—').trim() : v;
+            const briefingAddr = stripLabel(briefingRaw);
+            const hospitalAddr = stripLabel(hospitalRaw);
 
             if (!operationAddr) { viperToast('Enter an Operation Location first', 'warning'); return; }
 

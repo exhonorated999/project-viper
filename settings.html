@@ -1161,6 +1161,83 @@
                     </div>
                 </div>
 
+                <!-- ═══ Case Configuration Section ═══ -->
+                <div class="glass-card rounded-xl p-6">
+                    <h3 class="text-xl font-bold mb-2 flex items-center gap-2">
+                        <svg class="w-6 h-6 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                        </svg>
+                        Case Configuration
+                    </h3>
+                    <p class="text-gray-400 text-sm mb-5">Customize case statuses and priority tracking to match your agency's workflow.</p>
+
+                    <!-- Case Priority Toggle -->
+                    <div class="mb-6 p-4 bg-viper-dark/50 rounded-lg border border-gray-700/50">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h4 class="text-white font-semibold text-sm">Case Priority Ratings</h4>
+                                <p class="text-xs text-gray-400 mt-1">Add a 1–4 priority field to cases. Shows color-coded in dashboard and is sortable.</p>
+                            </div>
+                            <button id="priorityToggleBtn" onclick="toggleCasePriority()"
+                                class="relative inline-flex items-center h-6 rounded-full w-11 transition-colors focus:outline-none bg-gray-700"
+                                aria-label="Toggle case priority">
+                                <span id="priorityToggleIndicator" class="inline-block w-4 h-4 transform transition-transform bg-white rounded-full translate-x-1"></span>
+                            </button>
+                        </div>
+                        <div id="priorityPreview" class="hidden mt-3 pt-3 border-t border-gray-700/50">
+                            <div class="flex items-center gap-3 text-xs">
+                                <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-red-500"></span> 1 — Critical</span>
+                                <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-orange-500"></span> 2 — High</span>
+                                <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-yellow-500"></span> 3 — Medium</span>
+                                <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-green-500"></span> 4 — Low</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Custom Case Statuses -->
+                    <div class="p-4 bg-viper-dark/50 rounded-lg border border-gray-700/50">
+                        <div class="flex items-center justify-between mb-3">
+                            <div>
+                                <h4 class="text-white font-semibold text-sm">Custom Case Statuses</h4>
+                                <p class="text-xs text-gray-400 mt-1">Add closure sub-types beyond the defaults. These appear in the status dropdown on cases.</p>
+                            </div>
+                            <button onclick="toggleCustomStatuses()"
+                                class="relative inline-flex items-center h-6 rounded-full w-11 transition-colors focus:outline-none bg-gray-700"
+                                id="customStatusToggleBtn" aria-label="Toggle custom statuses">
+                                <span id="customStatusToggleIndicator" class="inline-block w-4 h-4 transform transition-transform bg-white rounded-full translate-x-1"></span>
+                            </button>
+                        </div>
+                        <div id="customStatusBody" class="hidden mt-3 pt-3 border-t border-gray-700/50">
+                            <!-- Defaults (always present, read-only) -->
+                            <div class="mb-3">
+                                <span class="text-[10px] text-gray-500 uppercase tracking-wider">Built-in statuses (always available)</span>
+                                <div class="flex flex-wrap gap-2 mt-1.5">
+                                    <span class="px-2.5 py-1 rounded-full text-xs bg-viper-cyan/10 text-viper-cyan border border-viper-cyan/30">Active</span>
+                                    <span class="px-2.5 py-1 rounded-full text-xs bg-gray-500/10 text-gray-400 border border-gray-500/30">Closed</span>
+                                    <span class="px-2.5 py-1 rounded-full text-xs bg-green-500/10 text-green-400 border border-green-500/30">Closed w/ Arrest</span>
+                                    <span class="px-2.5 py-1 rounded-full text-xs bg-orange-500/10 text-orange-400 border border-orange-500/30">Transferred</span>
+                                </div>
+                            </div>
+                            <!-- User-added statuses -->
+                            <div class="mb-3">
+                                <span class="text-[10px] text-gray-500 uppercase tracking-wider">Your custom statuses</span>
+                                <div id="customStatusList" class="mt-1.5 space-y-1.5"></div>
+                            </div>
+                            <!-- Add new -->
+                            <div class="flex gap-2">
+                                <select id="newStatusCategory" class="px-2 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-xs text-gray-300 focus:border-viper-cyan outline-none">
+                                    <option value="closed">Closed —</option>
+                                    <option value="cleared-arrest">Cleared by Arrest —</option>
+                                    <option value="exceptionally-cleared">Exceptionally Cleared —</option>
+                                    <option value="other">Other —</option>
+                                </select>
+                                <input type="text" id="newStatusLabel" placeholder="e.g. DA Declined" class="flex-1 px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-xs text-white placeholder-gray-500 focus:border-viper-cyan outline-none">
+                                <button onclick="addCustomStatus()" class="px-3 py-1.5 bg-viper-green/20 text-viper-green border border-viper-green/30 rounded-lg text-xs font-medium hover:bg-viper-green/30 transition">Add</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- ═══ Field Security Section ═══ -->
                 <div class="glass-card rounded-xl p-6" id="securitySection">
                     <h3 class="text-xl font-bold mb-2 flex items-center gap-2">
@@ -3047,6 +3124,115 @@
     });
 
     initTraceUI();
+
+    // ═══ Case Configuration ═══
+    const DEFAULT_STATUSES = [
+        { id: 'active', label: 'Active', category: 'builtin' },
+        { id: 'closed', label: 'Closed', category: 'builtin' },
+        { id: 'closed-arrest', label: 'Closed with Arrest', category: 'builtin' },
+        { id: 'transferred', label: 'Transferred', category: 'builtin' }
+    ];
+
+    function getCustomStatuses() {
+        return JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
+    }
+    function saveCustomStatuses(list) {
+        localStorage.setItem('viperCustomStatuses', JSON.stringify(list));
+    }
+    function isCasePriorityEnabled() {
+        return localStorage.getItem('viperCasePriorityEnabled') === 'true';
+    }
+    function isCustomStatusesEnabled() {
+        return localStorage.getItem('viperCustomStatusesEnabled') === 'true';
+    }
+
+    function toggleCasePriority() {
+        const enabled = !isCasePriorityEnabled();
+        localStorage.setItem('viperCasePriorityEnabled', enabled ? 'true' : 'false');
+        refreshPriorityUI();
+    }
+    function refreshPriorityUI() {
+        const enabled = isCasePriorityEnabled();
+        const btn = document.getElementById('priorityToggleBtn');
+        const ind = document.getElementById('priorityToggleIndicator');
+        const preview = document.getElementById('priorityPreview');
+        if (enabled) {
+            btn.classList.remove('bg-gray-700'); btn.classList.add('bg-viper-green');
+            ind.classList.remove('translate-x-1'); ind.classList.add('translate-x-6');
+            preview.classList.remove('hidden');
+        } else {
+            btn.classList.add('bg-gray-700'); btn.classList.remove('bg-viper-green');
+            ind.classList.add('translate-x-1'); ind.classList.remove('translate-x-6');
+            preview.classList.add('hidden');
+        }
+    }
+
+    function toggleCustomStatuses() {
+        const enabled = !isCustomStatusesEnabled();
+        localStorage.setItem('viperCustomStatusesEnabled', enabled ? 'true' : 'false');
+        refreshCustomStatusUI();
+    }
+    function refreshCustomStatusUI() {
+        const enabled = isCustomStatusesEnabled();
+        const btn = document.getElementById('customStatusToggleBtn');
+        const ind = document.getElementById('customStatusToggleIndicator');
+        const body = document.getElementById('customStatusBody');
+        if (enabled) {
+            btn.classList.remove('bg-gray-700'); btn.classList.add('bg-viper-green');
+            ind.classList.remove('translate-x-1'); ind.classList.add('translate-x-6');
+            body.classList.remove('hidden');
+        } else {
+            btn.classList.add('bg-gray-700'); btn.classList.remove('bg-viper-green');
+            ind.classList.add('translate-x-1'); ind.classList.remove('translate-x-6');
+            body.classList.add('hidden');
+        }
+        renderCustomStatusList();
+    }
+
+    function renderCustomStatusList() {
+        const container = document.getElementById('customStatusList');
+        if (!container) return;
+        const list = getCustomStatuses();
+        if (list.length === 0) {
+            container.innerHTML = '<p class="text-xs text-gray-500 italic">No custom statuses added yet.</p>';
+            return;
+        }
+        container.innerHTML = list.map((s, i) => `
+            <div class="flex items-center justify-between px-2.5 py-1.5 bg-viper-card/30 rounded-lg border border-gray-700/50">
+                <span class="text-xs text-gray-300"><span class="text-gray-500">${s.category.replace(/-/g,' ')} —</span> ${s.label}</span>
+                <button onclick="removeCustomStatus(${i})" class="text-gray-500 hover:text-red-400 transition text-xs ml-2">✕</button>
+            </div>
+        `).join('');
+    }
+
+    function addCustomStatus() {
+        const category = document.getElementById('newStatusCategory').value;
+        const label = document.getElementById('newStatusLabel').value.trim();
+        if (!label) return;
+        const list = getCustomStatuses();
+        const id = (category + '-' + label).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '');
+        if (list.some(s => s.id === id) || DEFAULT_STATUSES.some(s => s.id === id)) {
+            viperToast('Status already exists', 'warning'); return;
+        }
+        list.push({ id, label, category });
+        saveCustomStatuses(list);
+        document.getElementById('newStatusLabel').value = '';
+        renderCustomStatusList();
+        viperToast('Status added', 'success');
+    }
+
+    function removeCustomStatus(index) {
+        const list = getCustomStatuses();
+        list.splice(index, 1);
+        saveCustomStatuses(list);
+        renderCustomStatusList();
+    }
+
+    // Init on load
+    document.addEventListener('DOMContentLoaded', () => {
+        refreshPriorityUI();
+        refreshCustomStatusUI();
+    });
     </script>
 </body>
 </html>

@@ -18,6 +18,11 @@
         * {
             box-sizing: border-box;
         }
+        /* Task list scrollbar */
+        #tasks-container::-webkit-scrollbar { width: 6px; }
+        #tasks-container::-webkit-scrollbar-track { background: transparent; }
+        #tasks-container::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 3px; }
+        #tasks-container::-webkit-scrollbar-thumb:hover { background: #718096; }
         
         body, html {
             overflow: hidden;
@@ -827,6 +832,11 @@
                         <div class="flex items-center justify-between mb-6">
                             <h3 class="text-xl font-bold" id="investigationsTitle">Active Investigations</h3>
                             <div class="flex items-center space-x-2">
+                                <!-- Search bar -->
+                                <div class="relative">
+                                    <svg class="w-4 h-4 text-gray-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                                    <input type="text" id="investigationsSearch" oninput="filterInvestigations()" placeholder="Search cases..." class="pl-8 pr-3 py-1.5 w-44 bg-viper-card/50 border border-gray-600 rounded-lg text-xs text-white placeholder-gray-500 focus:border-viper-cyan outline-none">
+                                </div>
                                 <div class="relative">
                                     <button onclick="toggleInvestigationsFilter()" class="p-2 rounded-lg hover:bg-viper-card/50 transition-colors">
                                         <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -848,9 +858,10 @@
                             <table class="w-full">
                                 <thead class="bg-gradient-to-r from-viper-cyan/20 to-viper-purple/20 border-b border-viper-cyan/30 sticky top-0">
                                     <tr class="text-left text-xs text-viper-cyan">
-                                        <th class="px-4 py-3 font-medium">Case ID</th>
-                                        <th class="px-4 py-3 font-medium">Category</th>
-                                        <th class="px-4 py-3 font-medium">Investigator</th>
+                                        <th class="px-4 py-3 font-medium cursor-pointer hover:text-white transition select-none" onclick="setInvestigationsSort('caseNumber')"><span id="sortHead_caseNumber">Case ID ↕</span></th>
+                                        <th class="px-4 py-3 font-medium cursor-pointer hover:text-white transition select-none" onclick="setInvestigationsSort('synopsis')"><span id="sortHead_synopsis">Category ↕</span></th>
+                                        <th class="px-4 py-3 font-medium cursor-pointer hover:text-white transition select-none" onclick="setInvestigationsSort('createdBy')"><span id="sortHead_createdBy">Investigator ↕</span></th>
+                                        <th class="px-4 py-3 font-medium" id="priorityColHead" style="display:none;"><span class="cursor-pointer hover:text-white transition select-none" onclick="setInvestigationsSort('priority')"><span id="sortHead_priority">Priority ↕</span></span></th>
                                         <th class="px-4 py-3 font-medium">Status</th>
                                         <th class="px-4 py-3 font-medium">Actions</th>
                                     </tr>
@@ -867,7 +878,7 @@
                     </div>
                     
                     <!-- Tasks -->
-                    <div class="glass-card rounded-xl p-6" style="position: relative; z-index: 1;">
+                    <div class="glass-card rounded-xl p-6 flex flex-col" style="position: relative; z-index: 1; max-height: 600px;">
                         <div class="flex items-center justify-between mb-4">
                             <h3 class="text-xl font-bold">Tasks</h3>
                             <button onclick="openAddTaskModal()" class="px-4 py-2 rounded-lg bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/30 hover:bg-viper-cyan/30 transition-colors text-xs font-medium">
@@ -883,6 +894,15 @@
                             <button onclick="setTaskView('cases')" id="viewCasesBtn" class="flex-1 px-3 py-2 rounded-md text-xs font-medium transition-all text-gray-400 hover:text-white">
                                 Case Tasks Only
                             </button>
+                        </div>
+                        
+                        <!-- Hide Completed Toggle -->
+                        <div class="flex items-center justify-between mb-3">
+                            <label class="flex items-center gap-2 cursor-pointer select-none">
+                                <input type="checkbox" id="hideCompletedToggle" onchange="toggleHideCompleted()" class="w-3.5 h-3.5 rounded border-gray-600 text-viper-cyan focus:ring-viper-cyan focus:ring-offset-0">
+                                <span class="text-xs text-gray-400">Hide completed</span>
+                            </label>
+                            <span id="completedCountLabel" class="text-[10px] text-gray-500"></span>
                         </div>
                         
                         <!-- Task Stats -->
@@ -901,7 +921,7 @@
                             </div>
                         </div>
                         
-                        <div id="tasks-container" class="space-y-3 max-h-96 overflow-y-auto">
+                        <div id="tasks-container" class="space-y-3 flex-1 overflow-y-auto pr-1" style="min-height:0; scrollbar-width:thin; scrollbar-color:#4a5568 transparent;">
                             <!-- Tasks will be dynamically populated here -->
                         </div>
                         
@@ -955,6 +975,18 @@
                         </div>
                         <p class="text-xs text-gray-500 mt-1">Status can be updated from case overview</p>
                     </div>
+                </div>
+                
+                <!-- Priority (only when enabled) -->
+                <div id="createCasePriorityRow" class="hidden">
+                    <label class="block text-sm font-medium text-gray-300 mb-2">Priority</label>
+                    <select id="newCasePriority" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none text-white">
+                        <option value="0">— None —</option>
+                        <option value="1">🔴 1 — Critical</option>
+                        <option value="2">🟠 2 — High</option>
+                        <option value="3">🟡 3 — Medium</option>
+                        <option value="4">🟢 4 — Low</option>
+                    </select>
                 </div>
                 
                 <!-- Synopsis -->
@@ -2105,6 +2137,8 @@
                 showNotification('Your demo has expired. Go to Settings to activate a license.', 'error');
                 return;
             }
+            const priRow = document.getElementById('createCasePriorityRow');
+            if (priRow) priRow.classList.toggle('hidden', localStorage.getItem('viperCasePriorityEnabled') !== 'true');
             document.getElementById('createCaseModal').classList.add('show');
         }
         
@@ -2144,8 +2178,9 @@
                     caseNumber: caseNumber,
                     synopsis: synopsis,
                     status: 'active',
+                    priority: parseInt(document.getElementById('newCasePriority')?.value) || 0,
                     modules: selectedModules,
-                    tabOrder: ['overview', ...selectedModules], // Initialize tab order
+                    tabOrder: ['overview', ...selectedModules],
                     createdAt: new Date().toISOString(),
                     createdBy: localStorage.getItem('viper_customer_name') || 'Officer',
                     lastModified: new Date().toISOString()
@@ -2737,6 +2772,13 @@
             document.getElementById('low-count').textContent = low;
         }
         
+        let hideCompleted = false;
+
+        function toggleHideCompleted() {
+            hideCompleted = document.getElementById('hideCompletedToggle').checked;
+            renderTasks();
+        }
+
         function renderTasks() {
             const container = document.getElementById('tasks-container');
             const noTasksMsg = document.getElementById('no-tasks-message');
@@ -2753,6 +2795,18 @@
             
             // Update stats
             updateTaskStats(filteredTasks);
+
+            // Show completed count
+            const completedCount = filteredTasks.filter(t => t.completed).length;
+            const completedLabel = document.getElementById('completedCountLabel');
+            if (completedLabel) {
+                completedLabel.textContent = completedCount > 0 ? `${completedCount} completed` : '';
+            }
+
+            // Hide completed if toggle is on
+            if (hideCompleted) {
+                filteredTasks = filteredTasks.filter(t => !t.completed);
+            }
             
             if (filteredTasks.length === 0) {
                 container.innerHTML = '';
@@ -2762,11 +2816,21 @@
             
             noTasksMsg.classList.add('hidden');
             
-            // Sort tasks: Priority first (high > medium > low), then by date
+            // Sort: uncompleted first (priority → due date), completed at bottom (most recently completed first)
             const sortedTasks = [...filteredTasks].sort((a, b) => {
+                // Completed always after uncompleted
+                if (a.completed !== b.completed) return a.completed ? 1 : -1;
+
+                if (a.completed && b.completed) {
+                    // Both completed — newest completion first
+                    const ca = a.completedAt ? new Date(a.completedAt).getTime() : 0;
+                    const cb = b.completedAt ? new Date(b.completedAt).getTime() : 0;
+                    return cb - ca;
+                }
+
+                // Both uncompleted — priority then due date
                 const priorityOrder = { high: 0, medium: 1, low: 2 };
-                const priorityDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
-                
+                const priorityDiff = (priorityOrder[a.priority] ?? 1) - (priorityOrder[b.priority] ?? 1);
                 if (priorityDiff !== 0) return priorityDiff;
                 
                 const dateA = new Date(a.date);
@@ -2836,6 +2900,7 @@
             const task = tasks.find(t => t.id === taskId);
             if (task) {
                 task.completed = !task.completed;
+                task.completedAt = task.completed ? new Date().toISOString() : null;
                 localStorage.setItem('viperTasks', JSON.stringify(tasks));
                 renderTasks();
             }
@@ -3120,9 +3185,38 @@
         }
         
         let currentInvestigationsFilter = 'active';
+        let investigationsSort = { key: 'caseNumber', dir: 'asc' };
 
         function toggleInvestigationsFilter() {
+            // Dynamically rebuild the dropdown to include custom statuses + priority filters
             const dd = document.getElementById('investigationsFilterDropdown');
+            const customEnabled = localStorage.getItem('viperCustomStatusesEnabled') === 'true';
+            const customs = customEnabled ? JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]') : [];
+            const priorityEnabled = localStorage.getItem('viperCasePriorityEnabled') === 'true';
+
+            let html = `
+                <button onclick="setInvestigationsFilter('active')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-viper-cyan/10 transition-colors text-viper-cyan" data-filter="active">Active</button>
+                <button onclick="setInvestigationsFilter('closed')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-gray-400/10 transition-colors text-gray-400" data-filter="closed">Closed</button>
+                <button onclick="setInvestigationsFilter('closed-arrest')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-viper-green/10 transition-colors text-green-400" data-filter="closed-arrest">Closed with Arrest</button>
+                <button onclick="setInvestigationsFilter('transferred')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-viper-orange/10 transition-colors text-viper-orange" data-filter="transferred">Transferred</button>`;
+            if (customs.length > 0) {
+                html += '<div class="border-t border-gray-700 my-1"></div>';
+                customs.forEach(s => {
+                    html += `<button onclick="setInvestigationsFilter('${s.id}')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-viper-purple/10 transition-colors text-gray-300" data-filter="${s.id}">${s.category.replace(/-/g,' ')} — ${s.label}</button>`;
+                });
+            }
+            if (priorityEnabled) {
+                html += '<div class="border-t border-gray-700 my-1"></div>';
+                html += '<div class="px-4 py-1 text-[10px] text-gray-500 uppercase tracking-wider">By Priority</div>';
+                html += '<button onclick="setInvestigationsFilter(\'priority-1\')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-red-500/10 transition-colors text-red-400" data-filter="priority-1">🔴 Critical</button>';
+                html += '<button onclick="setInvestigationsFilter(\'priority-2\')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-orange-500/10 transition-colors text-orange-400" data-filter="priority-2">🟠 High</button>';
+                html += '<button onclick="setInvestigationsFilter(\'priority-3\')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-yellow-500/10 transition-colors text-yellow-400" data-filter="priority-3">🟡 Medium</button>';
+                html += '<button onclick="setInvestigationsFilter(\'priority-4\')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-green-500/10 transition-colors text-green-400" data-filter="priority-4">🟢 Low</button>';
+                html += '<button onclick="setInvestigationsFilter(\'priority-none\')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-white/5 transition-colors text-gray-500" data-filter="priority-none">No Priority</button>';
+            }
+            html += '<div class="border-t border-gray-700 my-1"></div>';
+            html += '<button onclick="setInvestigationsFilter(\'all\')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-white/5 transition-colors text-white font-medium" data-filter="all">Show All Cases</button>';
+            dd.innerHTML = html;
             dd.classList.toggle('hidden');
         }
 
@@ -3138,40 +3232,140 @@
             currentInvestigationsFilter = filter;
             document.getElementById('investigationsFilterDropdown').classList.add('hidden');
 
-            const titles = { active: 'Active Investigations', closed: 'Closed Investigations', 'closed-arrest': 'Closed with Arrest', transferred: 'Transferred Cases' };
-            document.getElementById('investigationsTitle').textContent = titles[filter] || 'Investigations';
-
-            // Highlight active filter button
-            document.querySelectorAll('.inv-filter-btn').forEach(btn => {
-                btn.style.fontWeight = btn.dataset.filter === filter ? '700' : '400';
-            });
+            const builtinTitles = { active: 'Active Investigations', closed: 'Closed Investigations', 'closed-arrest': 'Closed with Arrest', transferred: 'Transferred Cases', all: 'All Cases' };
+            const priorityTitles = { 'priority-1': 'Critical Priority', 'priority-2': 'High Priority', 'priority-3': 'Medium Priority', 'priority-4': 'Low Priority', 'priority-none': 'No Priority Assigned' };
+            let title = builtinTitles[filter] || priorityTitles[filter];
+            if (!title) {
+                const customs = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
+                const cs = customs.find(s => s.id === filter);
+                title = cs ? `${cs.category.replace(/-/g,' ')} — ${cs.label}` : filter;
+            }
+            document.getElementById('investigationsTitle').textContent = title;
 
             const allCases = JSON.parse(localStorage.getItem('viperCases')) || [];
-            const filtered = allCases.filter(c => c.status === filter);
+            let filtered;
+            if (filter === 'all') {
+                filtered = allCases;
+            } else if (filter.startsWith('priority-')) {
+                const pVal = filter === 'priority-none' ? null : parseInt(filter.split('-')[1]);
+                filtered = allCases.filter(c => pVal === null ? !c.priority : c.priority === pVal);
+            } else {
+                filtered = allCases.filter(c => c.status === filter);
+            }
             updateActiveInvestigationsTable(filtered, filter);
         }
 
-        function getStatusBadge(status) {
+        function setInvestigationsSort(key) {
+            if (investigationsSort.key === key) {
+                investigationsSort.dir = investigationsSort.dir === 'asc' ? 'desc' : 'asc';
+            } else {
+                investigationsSort = { key, dir: 'asc' };
+            }
+            // Update header indicators
+            ['caseNumber', 'synopsis', 'createdBy', 'priority'].forEach(k => {
+                const el = document.getElementById('sortHead_' + k);
+                if (!el) return;
+                const baseLabel = { caseNumber: 'Case ID', synopsis: 'Category', createdBy: 'Investigator', priority: 'Priority' }[k];
+                if (k === investigationsSort.key) {
+                    el.textContent = baseLabel + (investigationsSort.dir === 'asc' ? ' ↑' : ' ↓');
+                    el.classList.add('text-white');
+                } else {
+                    el.textContent = baseLabel + ' ↕';
+                    el.classList.remove('text-white');
+                }
+            });
+            // Re-render with current filter
+            filterInvestigations();
+        }
+
+        function filterInvestigations() {
+            const query = (document.getElementById('investigationsSearch')?.value || '').toLowerCase().trim();
+            const allCases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            let filtered;
+            if (currentInvestigationsFilter === 'all') {
+                filtered = allCases;
+            } else if (currentInvestigationsFilter.startsWith('priority-')) {
+                const pVal = currentInvestigationsFilter === 'priority-none' ? null : parseInt(currentInvestigationsFilter.split('-')[1]);
+                filtered = allCases.filter(c => pVal === null ? !c.priority : c.priority === pVal);
+            } else {
+                filtered = allCases.filter(c => c.status === currentInvestigationsFilter);
+            }
+
+            if (query) {
+                filtered = filtered.filter(c =>
+                    (c.caseNumber || '').toLowerCase().includes(query) ||
+                    (c.synopsis || '').toLowerCase().includes(query) ||
+                    (c.createdBy || '').toLowerCase().includes(query) ||
+                    (c.name || '').toLowerCase().includes(query)
+                );
+            }
+
+            // Sort
+            const { key, dir } = investigationsSort;
+            filtered.sort((a, b) => {
+                let va, vb;
+                if (key === 'priority') {
+                    va = a.priority || 99;
+                    vb = b.priority || 99;
+                } else {
+                    va = (a[key] || '').toString().toLowerCase();
+                    vb = (b[key] || '').toString().toLowerCase();
+                }
+                if (va < vb) return dir === 'asc' ? -1 : 1;
+                if (va > vb) return dir === 'asc' ? 1 : -1;
+                return 0;
+            });
+
+            updateActiveInvestigationsTable(filtered, currentInvestigationsFilter);
+        }
+
+        function getCasePriorityBadge(priority) {
+            if (!priority) return '';
             const map = {
+                1: { label: '1', color: 'bg-red-500',    text: 'Critical' },
+                2: { label: '2', color: 'bg-orange-500', text: 'High' },
+                3: { label: '3', color: 'bg-yellow-500', text: 'Medium' },
+                4: { label: '4', color: 'bg-green-500',  text: 'Low' },
+            };
+            const p = map[priority] || map[4];
+            return `<span class="inline-flex items-center gap-1.5 text-xs"><span class="w-2.5 h-2.5 rounded-full ${p.color}"></span>${p.text}</span>`;
+        }
+
+        function getStatusBadge(status) {
+            const builtinMap = {
                 active:         { label: 'Active',             bg: 'bg-viper-cyan/20',   text: 'text-viper-cyan',   border: 'border-viper-cyan/30' },
                 closed:         { label: 'Closed',             bg: 'bg-gray-500/20',     text: 'text-gray-400',     border: 'border-gray-500/30' },
                 'closed-arrest':{ label: 'Closed w/ Arrest',   bg: 'bg-green-500/20',    text: 'text-green-400',    border: 'border-green-500/30' },
                 transferred:    { label: 'Transferred',        bg: 'bg-viper-orange/20', text: 'text-viper-orange', border: 'border-viper-orange/30' },
             };
-            const s = map[status] || map['active'];
-            return `<span class="px-3 py-1 rounded-full text-xs font-medium ${s.bg} ${s.text} border ${s.border}">${s.label}</span>`;
+            if (builtinMap[status]) {
+                const s = builtinMap[status];
+                return `<span class="px-3 py-1 rounded-full text-xs font-medium ${s.bg} ${s.text} border ${s.border}">${s.label}</span>`;
+            }
+            // Check custom statuses
+            const customs = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
+            const cs = customs.find(s => s.id === status);
+            const label = cs ? cs.label : status;
+            return `<span class="px-3 py-1 rounded-full text-xs font-medium bg-purple-500/20 text-purple-300 border border-purple-500/30">${label}</span>`;
         }
 
         function updateActiveInvestigationsTable(filteredCases, status) {
             const tbody = document.getElementById('investigationsTableBody');
             if (!tbody) return;
+            const priorityEnabled = localStorage.getItem('viperCasePriorityEnabled') === 'true';
+
+            // Show/hide priority column header
+            const prHead = document.getElementById('priorityColHead');
+            if (prHead) prHead.style.display = priorityEnabled ? '' : 'none';
+            
+            const colSpan = priorityEnabled ? 6 : 5;
             
             if (filteredCases.length === 0) {
-                const labels = { active: 'active investigations', closed: 'closed cases', 'closed-arrest': 'cases closed with arrest', transferred: 'transferred cases' };
+                const builtinLabels = { active: 'active investigations', closed: 'closed cases', 'closed-arrest': 'cases closed with arrest', transferred: 'transferred cases', all: 'cases' };
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="5" class="py-8 text-center text-gray-400">
-                            No ${labels[status || 'active'] || 'cases'}. Create a case to get started.
+                        <td colspan="${colSpan}" class="py-8 text-center text-gray-400">
+                            No ${builtinLabels[status || 'active'] || 'cases matching this filter'}. Create a case to get started.
                         </td>
                     </tr>
                 `;
@@ -3179,7 +3373,10 @@
                 tbody.innerHTML = filteredCases.map(caseItem => `
                     <tr class="border-b border-gray-800 hover:bg-viper-card/30 transition-colors cursor-pointer" onclick="openCaseDetail(${caseItem.id})">
                         <td class="py-4 px-4">
-                            <div class="font-medium text-viper-cyan">${caseItem.caseNumber}</div>
+                            <div class="flex items-center gap-2">
+                                ${priorityEnabled && caseItem.priority ? `<span class="w-2.5 h-2.5 rounded-full flex-shrink-0 ${({1:'bg-red-500',2:'bg-orange-500',3:'bg-yellow-500',4:'bg-green-500'})[caseItem.priority] || ''}" title="${({1:'Critical',2:'High',3:'Medium',4:'Low'})[caseItem.priority] || ''}"></span>` : ''}
+                                <span class="font-medium text-viper-cyan">${caseItem.caseNumber}</span>
+                            </div>
                         </td>
                         <td class="py-4 px-4">
                             <div class="text-sm text-gray-300">${caseItem.synopsis || 'No synopsis'}</div>
@@ -3187,6 +3384,7 @@
                         <td class="py-4 px-4">
                             <div class="text-sm text-gray-300">${caseItem.createdBy || 'Unknown'}</div>
                         </td>
+                        ${priorityEnabled ? `<td class="py-4 px-4">${getCasePriorityBadge(caseItem.priority)}</td>` : ''}
                         <td class="py-4 px-4">
                             ${getStatusBadge(caseItem.status)}
                         </td>

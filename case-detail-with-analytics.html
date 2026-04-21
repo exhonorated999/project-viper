@@ -1520,7 +1520,13 @@
                 transferred: { color: 'viper-orange', text: 'Transferred', icon: '→' }
             };
             
-            const config = statusConfig[currentCase.status];
+            let config = statusConfig[currentCase.status];
+            if (!config) {
+                // Check custom statuses
+                const customs = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
+                const cs = customs.find(s => s.id === currentCase.status);
+                config = { color: 'purple-400', text: cs ? cs.label : currentCase.status, icon: '●' };
+            }
             statusBadge.className = `px-4 py-2 rounded-lg border border-${config.color}/30 bg-${config.color}/10`;
             statusBadge.innerHTML = `<span class="font-medium text-${config.color}">${config.icon} ${config.text}</span>`;
         }
@@ -3293,12 +3299,21 @@
                                 <div>
                                     <label class="text-sm text-gray-400">Status</label>
                                     <select onchange="updateCaseStatus(this.value)" class="mt-1 w-full px-4 py-2 bg-viper-card/50 border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none">
-                                        <option value="active" ${currentCase.status === 'active' ? 'selected' : ''}>Active</option>
-                                        <option value="closed" ${currentCase.status === 'closed' ? 'selected' : ''}>Closed</option>
-                                        <option value="closed-arrest" ${currentCase.status === 'closed-arrest' ? 'selected' : ''}>Closed with Arrest</option>
-                                        <option value="transferred" ${currentCase.status === 'transferred' ? 'selected' : ''}>Transferred</option>
+                                        ${buildStatusOptions(currentCase.status)}
                                     </select>
                                 </div>
+                                ${localStorage.getItem('viperCasePriorityEnabled') === 'true' ? `
+                                <div>
+                                    <label class="text-sm text-gray-400">Priority</label>
+                                    <select onchange="updateCasePriority(parseInt(this.value)||0)" class="mt-1 w-full px-4 py-2 bg-viper-card/50 border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none">
+                                        <option value="0" ${!currentCase.priority ? 'selected' : ''}>— None —</option>
+                                        <option value="1" ${currentCase.priority===1 ? 'selected' : ''}>🔴 1 — Critical</option>
+                                        <option value="2" ${currentCase.priority===2 ? 'selected' : ''}>🟠 2 — High</option>
+                                        <option value="3" ${currentCase.priority===3 ? 'selected' : ''}>🟡 3 — Medium</option>
+                                        <option value="4" ${currentCase.priority===4 ? 'selected' : ''}>🟢 4 — Low</option>
+                                    </select>
+                                </div>
+                                ` : ''}
                                 <div class="col-span-2">
                                     <label class="text-sm text-gray-400">Synopsis</label>
                                     <p class="text-white mt-2 leading-relaxed">${currentCase.synopsis || '<span class="text-gray-500 italic">No synopsis</span>'}</p>
@@ -3332,12 +3347,21 @@
                                 <div>
                                     <label class="text-sm text-gray-400 block mb-1">Status</label>
                                     <select id="editCaseStatus" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
-                                        <option value="active" ${currentCase.status === 'active' ? 'selected' : ''}>Active</option>
-                                        <option value="closed" ${currentCase.status === 'closed' ? 'selected' : ''}>Closed</option>
-                                        <option value="closed-arrest" ${currentCase.status === 'closed-arrest' ? 'selected' : ''}>Closed with Arrest</option>
-                                        <option value="transferred" ${currentCase.status === 'transferred' ? 'selected' : ''}>Transferred</option>
+                                        ${buildStatusOptions(currentCase.status)}
                                     </select>
                                 </div>
+                                ${localStorage.getItem('viperCasePriorityEnabled') === 'true' ? `
+                                <div>
+                                    <label class="text-sm text-gray-400 block mb-1">Priority</label>
+                                    <select id="editCasePriority" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
+                                        <option value="0" ${!currentCase.priority ? 'selected' : ''}>— None —</option>
+                                        <option value="1" ${currentCase.priority===1 ? 'selected' : ''}>🔴 1 — Critical</option>
+                                        <option value="2" ${currentCase.priority===2 ? 'selected' : ''}>🟠 2 — High</option>
+                                        <option value="3" ${currentCase.priority===3 ? 'selected' : ''}>🟡 3 — Medium</option>
+                                        <option value="4" ${currentCase.priority===4 ? 'selected' : ''}>🟢 4 — Low</option>
+                                    </select>
+                                </div>
+                                ` : ''}
                                 <div>
                                     <label class="text-sm text-gray-400 block mb-1">Created By</label>
                                     <input type="text" id="editCaseCreatedBy" value="${currentCase.createdBy || ''}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
@@ -20993,6 +21017,10 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             currentCase.synopsis = newSynopsis;
             currentCase.charges = newCharges;
 
+            // Save priority if enabled
+            const editPriEl = document.getElementById('editCasePriority');
+            if (editPriEl) currentCase.priority = parseInt(editPriEl.value) || 0;
+
             saveCase();
             renderCaseHeader();
             renderTabContent('overview');
@@ -21016,6 +21044,38 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             localStorage.setItem('viperCases', JSON.stringify(cases));
             
             renderCaseHeader();
+        }
+
+        function buildStatusOptions(currentStatus) {
+            const builtins = [
+                { value: 'active', label: 'Active' },
+                { value: 'closed', label: 'Closed' },
+                { value: 'closed-arrest', label: 'Closed with Arrest' },
+                { value: 'transferred', label: 'Transferred' }
+            ];
+            let html = builtins.map(s =>
+                `<option value="${s.value}" ${currentStatus === s.value ? 'selected' : ''}>${s.label}</option>`
+            ).join('');
+            if (localStorage.getItem('viperCustomStatusesEnabled') === 'true') {
+                const customs = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
+                if (customs.length) {
+                    html += '<option disabled>──────────</option>';
+                    customs.forEach(s => {
+                        const label = s.category.replace(/-/g,' ') + ' — ' + s.label;
+                        html += `<option value="${s.id}" ${currentStatus === s.id ? 'selected' : ''}>${label}</option>`;
+                    });
+                }
+            }
+            return html;
+        }
+
+        function updateCasePriority(level) {
+            currentCase.priority = level || 0;
+            currentCase.lastModified = new Date().toISOString();
+            const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            const index = cases.findIndex(c => c.id === currentCase.id);
+            cases[index] = currentCase;
+            localStorage.setItem('viperCases', JSON.stringify(cases));
         }
         
         // =====================================================
@@ -21554,14 +21614,16 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                         const cid = 'cl_' + laneKey + '_' + Math.round(cluster.centerPx);
                                         const anySelected = cluster.items.some(i => i.evt.id === selectedTimelineEvent);
                                         const sz = 18;
+                                        const maxRadius = 28 + Math.floor((cluster.items.length - 1) / 8) * 20 + 14;
+                                        const hitSize = maxRadius * 2 + 4;
                                         return `
-                                        <div id="${cid}" class="tl-cluster absolute cursor-pointer" style="left:${cluster.centerPx}px; top:50%; transform:translate(-50%,-50%); z-index:${anySelected ? 25 : 15};" onmouseenter="tlClusterExpand('${cid}')" onmouseleave="tlClusterCollapse('${cid}')">
-                                            <!-- Hub dot with count -->
-                                            <div class="tl-cluster-hub relative flex items-center justify-center" style="width:${sz}px;height:${sz}px;">
+                                        <div id="${cid}" class="tl-cluster absolute cursor-pointer" style="left:${cluster.centerPx}px; top:50%; transform:translate(-50%,-50%); width:${hitSize}px; height:${hitSize}px; z-index:${anySelected ? 25 : 15};" onmouseenter="tlClusterExpand('${cid}')" onmouseleave="tlClusterCollapse('${cid}')">
+                                            <!-- Hub dot with count (centered) -->
+                                            <div class="tl-cluster-hub absolute flex items-center justify-center" style="left:50%;top:50%;transform:translate(-50%,-50%);width:${sz}px;height:${sz}px;">
                                                 <div class="rounded-full border-2" style="width:${sz}px;height:${sz}px;background:${lane.color};border-color:${lane.color};box-shadow:0 0 10px ${lane.color}55;"></div>
                                                 <span class="absolute text-[9px] font-bold text-white pointer-events-none" style="text-shadow:0 0 4px rgba(0,0,0,0.9);">${cluster.items.length}</span>
                                             </div>
-                                            <!-- Fan-out spokes (hidden until hover) -->
+                                            <!-- Fan-out spokes (hidden until hover, centered) -->
                                             <div class="tl-cluster-fan absolute" style="display:none; left:50%; top:50%;">
                                                 ${cluster.items.map((item, idx) => {
                                                     const angle = ((idx / cluster.items.length) * 2 * Math.PI) - Math.PI / 2;
@@ -21638,7 +21700,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 if (fan) { fan.style.display = 'none'; }
                 if (hub) { hub.style.opacity = '1'; }
                 el.style.zIndex = '15';
-            }, 200);
+            }, 400);
         }
 
         function renderTimelineDetailPanel(evtId) {

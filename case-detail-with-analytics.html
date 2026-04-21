@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://d3js.org https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com; img-src 'self' data: blob: file: https:; media-src 'self' blob: file:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.genlogs.io https://trace-broker-production.up.railway.app https://router.project-osrm.org; font-src 'self' data:; frame-src 'self' blob: file: https: http:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: https:; media-src 'self' blob: file:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.genlogs.io https://trace-broker-production.up.railway.app https://router.project-osrm.org; font-src 'self' data:; frame-src 'self' blob: file: https: http:;">
     <title>V.I.P.E.R. - Case Detail</title>
     <script src="modules/viper-ui.js"></script>
     <script src="modules/licensing.js"></script>
@@ -11,15 +11,15 @@
     <script src="modules/trace-search-api.js"></script>
     <script src="modules/resource-hub.js"></script>
 
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
-    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    <script src="libs/tailwindcss.js"></script>
+    <link rel="stylesheet" href="libs/leaflet.css" />
+    <script src="libs/leaflet.js"></script>
+    <link rel="stylesheet" href="libs/MarkerCluster.css" />
+    <link rel="stylesheet" href="libs/MarkerCluster.Default.css" />
+    <script src="libs/leaflet.markercluster.js"></script>
     <!-- Analytics CDR Libraries -->
-    <script src="https://cdn.jsdelivr.net/npm/papaparse@5/papaparse.min.js"></script>
-    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="libs/papaparse.min.js"></script>
+    <script src="libs/d3.v7.min.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -141,8 +141,11 @@
         .tl-lane-scroll { overflow-x: auto; overflow-y: visible; }
         .tl-lane-scroll::-webkit-scrollbar { display: none; }
         .tl-lane-scroll { -ms-overflow-style: none; scrollbar-width: none; }
-        .tl-lane-row { position: relative; z-index: 1; }
+        .tl-lane-row { position: relative; z-index: 1; overflow: visible; }
         .tl-lane-row:hover { z-index: 50; }
+        .tl-cluster { transition: z-index 0s; }
+        .tl-cluster-fan { pointer-events: auto; }
+        .tl-cluster-fan > div, .tl-cluster-fan > svg { transition: opacity 0.15s ease; }
         
         .sidebar-item {
             transition: all 0.2s ease;
@@ -848,9 +851,9 @@
         </div>
     </div>
     
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="libs/jspdf.umd.min.js"></script>
+    <script src="libs/jspdf.plugin.autotable.min.js"></script>
+    <script src="libs/html2canvas.min.js"></script>
     <script src="wigleAPI.js"></script>
     <script>
         // Constant to avoid Chromium preload scanner 404s on img/iframe src in string literals
@@ -21363,12 +21366,12 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         function renderSwimlane(events) {
             if (!events.length) return '';
 
-            // Compute time range
-            const timestamps = events.map(e => new Date(e.timestamp).getTime());
-            let minT = Math.min(...timestamps);
-            let maxT = Math.max(...timestamps);
+            // ── Compute time range ──
+            const timestamps = events.map(e => new Date(e.timestamp).getTime()).sort((a, b) => a - b);
+            let minT = timestamps[0];
+            let maxT = timestamps[timestamps.length - 1];
 
-            // Apply zoom
+            // Apply zoom (day/week center on selected event)
             if (timelineZoom === 'day') {
                 const center = selectedTimelineEvent ? new Date(events.find(e => e.id === selectedTimelineEvent)?.timestamp || minT).getTime() : maxT;
                 minT = center - 12 * 3600000;
@@ -21379,89 +21382,224 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 maxT = center + 3.5 * 86400000;
             }
 
-            // Add padding
-            const span = maxT - minT || 86400000;
-            const pad = span * 0.05;
-            minT -= pad;
-            maxT += pad;
-            const totalSpan = maxT - minT;
+            // ── Adaptive density: compress gaps, expand event-dense regions ──
+            // Collect unique event timestamps sorted, then build segments
+            const sortedTimes = [...new Set(timestamps)].filter(t => t >= minT && t <= maxT).sort((a, b) => a - b);
+            const GAP_THRESHOLD = 86400000; // 24 hours — any gap larger than this gets compressed
+            const GAP_COMPRESSED_PX = 40;   // compressed gaps render as 40px
+            const PX_PER_HOUR = 18;         // event-dense regions: 18px per hour
 
-            // Generate time ticks
-            const ticks = [];
-            const spanDays = totalSpan / 86400000;
-            let tickInterval;
-            if (spanDays <= 2) tickInterval = 3600000 * 3;       // 3 hour ticks
-            else if (spanDays <= 14) tickInterval = 86400000;     // daily
-            else if (spanDays <= 90) tickInterval = 86400000 * 7; // weekly
-            else tickInterval = 86400000 * 30;                    // monthly
+            // Build segments: each segment is either an event-region or a gap
+            const segments = [];
+            if (sortedTimes.length === 0) {
+                // Zoom range has no events — single gap
+                segments.push({ type: 'gap', start: minT, end: maxT, weight: GAP_COMPRESSED_PX });
+            } else {
+                // Region before first event
+                if (sortedTimes[0] - minT > GAP_THRESHOLD) {
+                    segments.push({ type: 'gap', start: minT, end: sortedTimes[0], weight: GAP_COMPRESSED_PX });
+                } else if (sortedTimes[0] > minT) {
+                    segments.push({ type: 'region', start: minT, end: sortedTimes[0], weight: Math.max(30, ((sortedTimes[0] - minT) / 3600000) * PX_PER_HOUR) });
+                }
 
-            const firstTick = Math.ceil(minT / tickInterval) * tickInterval;
-            for (let t = firstTick; t <= maxT; t += tickInterval) {
-                const pct = ((t - minT) / totalSpan) * 100;
-                const d = new Date(t);
-                let label;
-                if (tickInterval < 86400000) label = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                else if (tickInterval <= 86400000) label = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-                else label = d.toLocaleDateString([], { month: 'short', day: 'numeric', year: '2-digit' });
-                ticks.push({ pct, label });
+                // Between events
+                for (let i = 0; i < sortedTimes.length - 1; i++) {
+                    const gap = sortedTimes[i + 1] - sortedTimes[i];
+                    if (gap > GAP_THRESHOLD) {
+                        // Event cluster boundary → region for the cluster, then compressed gap
+                        segments.push({ type: 'gap', start: sortedTimes[i], end: sortedTimes[i + 1], weight: GAP_COMPRESSED_PX });
+                    } else {
+                        segments.push({ type: 'region', start: sortedTimes[i], end: sortedTimes[i + 1], weight: Math.max(30, (gap / 3600000) * PX_PER_HOUR) });
+                    }
+                }
+
+                // Region after last event
+                if (maxT - sortedTimes[sortedTimes.length - 1] > GAP_THRESHOLD) {
+                    segments.push({ type: 'gap', start: sortedTimes[sortedTimes.length - 1], end: maxT, weight: GAP_COMPRESSED_PX });
+                } else if (maxT > sortedTimes[sortedTimes.length - 1]) {
+                    segments.push({ type: 'region', start: sortedTimes[sortedTimes.length - 1], end: maxT, weight: Math.max(30, ((maxT - sortedTimes[sortedTimes.length - 1]) / 3600000) * PX_PER_HOUR) });
+                }
             }
 
-            // Which lanes have events?
+            // Compute total weight → track width
+            const totalWeight = segments.reduce((s, seg) => s + seg.weight, 0);
+            const trackWidth = Math.max(800, Math.min(4000, totalWeight + 60)); // clamp
+
+            // Build cumulative pixel offsets for segments
+            let cumPx = 30; // left padding
+            for (const seg of segments) {
+                seg.pxStart = cumPx;
+                seg.pxWidth = (seg.weight / totalWeight) * (trackWidth - 60);
+                seg.pxEnd = cumPx + seg.pxWidth;
+                cumPx = seg.pxEnd;
+            }
+
+            // Map a timestamp → px position
+            function timeToPx(t) {
+                for (const seg of segments) {
+                    if (t >= seg.start && t <= seg.end) {
+                        if (seg.type === 'gap') {
+                            // Snap to middle of the compressed gap
+                            return seg.pxStart + seg.pxWidth / 2;
+                        }
+                        const frac = seg.end === seg.start ? 0.5 : (t - seg.start) / (seg.end - seg.start);
+                        return seg.pxStart + frac * seg.pxWidth;
+                    }
+                }
+                // Outside all segments — clamp to edges
+                if (t < (segments[0]?.start ?? minT)) return segments[0]?.pxStart ?? 30;
+                return segments[segments.length - 1]?.pxEnd ?? (trackWidth - 30);
+            }
+
+            // ── Time ticks (placed at segment boundaries + intermediate marks) ──
+            const ticks = [];
+            for (const seg of segments) {
+                if (seg.type === 'gap') {
+                    // Show a zigzag gap indicator — start and end labels
+                    const dStart = new Date(seg.start);
+                    const dEnd = new Date(seg.end);
+                    ticks.push({ px: seg.pxStart + 2, label: dStart.toLocaleDateString([], { month: 'short', day: 'numeric' }), isGapEdge: true });
+                    ticks.push({ px: seg.pxEnd - 2, label: dEnd.toLocaleDateString([], { month: 'short', day: 'numeric' }), isGapEdge: true });
+                } else {
+                    const spanMs = seg.end - seg.start;
+                    const spanHrs = spanMs / 3600000;
+                    let tickInterval;
+                    if (spanHrs <= 48) tickInterval = 3600000 * 3;        // 3hr
+                    else if (spanHrs <= 336) tickInterval = 86400000;     // daily
+                    else tickInterval = 86400000 * 7;                     // weekly
+
+                    const first = Math.ceil(seg.start / tickInterval) * tickInterval;
+                    for (let t = first; t <= seg.end; t += tickInterval) {
+                        const px = timeToPx(t);
+                        const d = new Date(t);
+                        let label;
+                        if (tickInterval < 86400000) label = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        else label = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+                        ticks.push({ px, label, isGapEdge: false });
+                    }
+                }
+            }
+
+            // ── Gap indicators (zigzag SVG) ──
+            const gapIndicators = segments.filter(s => s.type === 'gap').map(seg => {
+                const x = seg.pxStart;
+                const w = seg.pxWidth;
+                return `<div class="absolute top-0 h-full flex items-center justify-center" style="left:${x}px; width:${w}px;">
+                    <svg width="${Math.min(w, 30)}" height="20" viewBox="0 0 30 20" class="opacity-30">
+                        <path d="M2 10 L8 4 L14 16 L20 4 L26 16" stroke="#6b7280" stroke-width="2" fill="none" stroke-linecap="round"/>
+                    </svg>
+                </div>`;
+            }).join('');
+
+            // ── Lanes ──
             const laneOrder = ['subject', 'incident', 'investigation', 'forensics'];
             const activeLanes = laneOrder.filter(l => timelineFilter.lane === 'all' ? events.some(e => e.lane === l) : l === timelineFilter.lane);
 
-            const trackWidth = 2000; // px — scrollable
+            // ── Cluster detection: group events within 24px on same lane ──
+            const CLUSTER_RADIUS = 24; // px — events closer than this get clustered
 
-            function evtPos(e) {
-                const t = new Date(e.timestamp).getTime();
-                return Math.max(0, Math.min(100, ((t - minT) / totalSpan) * 100));
+            function clusterLaneEvents(laneEvents) {
+                const positioned = laneEvents.map(evt => ({
+                    evt,
+                    px: timeToPx(new Date(evt.timestamp).getTime())
+                })).sort((a, b) => a.px - b.px);
+
+                const clusters = [];
+                let current = null;
+                for (const item of positioned) {
+                    if (!current || item.px - current.centerPx > CLUSTER_RADIUS) {
+                        // Start new cluster
+                        current = { items: [item], centerPx: item.px };
+                        clusters.push(current);
+                    } else {
+                        current.items.push(item);
+                        // Recalculate center as average
+                        current.centerPx = current.items.reduce((s, i) => s + i.px, 0) / current.items.length;
+                    }
+                }
+                return clusters;
             }
 
+            // ── Render ──
             return `
             <div class="rounded-lg border border-gray-700" style="background: rgba(15,15,20,0.6); overflow: visible;">
-                <!-- Lanes: fixed labels + scrollable tracks -->
                 ${activeLanes.map(laneKey => {
                     const lane = TIMELINE_LANES[laneKey];
                     const laneEvents = events.filter(e => e.lane === laneKey);
+                    const clusters = clusterLaneEvents(laneEvents);
                     return `
                     <div class="flex border-b border-gray-700/50 tl-lane-row" style="min-height:80px;">
-                        <!-- Fixed lane label -->
                         <div class="flex-shrink-0 w-40 px-3 py-3 flex items-center border-r border-gray-700/50" style="background:${lane.bg}; border-left: 3px solid ${lane.border};">
                             <span class="text-xs font-bold uppercase tracking-wider" style="color:${lane.color};">${lane.label}</span>
                         </div>
-                        <!-- Scrollable track -->
                         <div class="flex-1 overflow-x-auto tl-lane-scroll">
-                            <div class="relative" style="min-width:${trackWidth}px; height:100%; min-height:80px;">
-                                <!-- Gridlines -->
-                                ${ticks.map(t => `<div class="absolute top-0 h-full border-l border-gray-800/40" style="left:${t.pct}%;"></div>`).join('')}
-                                <!-- Connector line -->
+                            <div class="relative" style="width:${trackWidth}px; height:100%; min-height:80px;">
+                                ${ticks.map(t => `<div class="absolute top-0 h-full border-l border-gray-800/40" style="left:${t.px}px;"></div>`).join('')}
+                                ${gapIndicators}
                                 <div class="absolute top-1/2 left-0 right-0 h-px" style="background:${lane.border};"></div>
-                                <!-- Events -->
-                                ${laneEvents.map(evt => {
-                                    const pct = evtPos(evt);
-                                    const isMajor = evt.significance === 'major';
-                                    const isSelected = evt.id === selectedTimelineEvent;
-                                    const sz = isMajor ? 14 : 10;
-                                    const glw = isSelected ? `0 0 12px ${lane.color}` : (isMajor ? `0 0 8px ${lane.color}55` : 'none');
-                                    return `
-                                    <div class="absolute flex flex-col items-center cursor-pointer group" style="left:${pct}%; top:50%; transform:translate(-50%,-50%); z-index:${isSelected ? 20 : 10};" onclick="selectTimelineEvent('${evt.id}')" onmouseenter="showTlTooltip(event, this)" onmouseleave="hideTlTooltip()" data-tl-date="${new Date(evt.timestamp).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}" data-tl-title="${(TIMELINE_CATEGORIES[evt.category] || '📌') + ' ' + evt.title.replace(/"/g, '&quot;')}" data-tl-color="${lane.color}">
-                                        <div class="rounded-full border-2 transition-all duration-200" style="width:${sz}px;height:${sz}px;background:${evt.color || lane.color};border-color:${isSelected ? '#fff' : (evt.color || lane.color)};box-shadow:${glw};"></div>
-                                    </div>`;
+                                ${clusters.map(cluster => {
+                                    if (cluster.items.length === 1) {
+                                        // Single event — render as normal dot
+                                        const { evt, px } = cluster.items[0];
+                                        const isMajor = evt.significance === 'major';
+                                        const isSelected = evt.id === selectedTimelineEvent;
+                                        const sz = isMajor ? 14 : 10;
+                                        const glw = isSelected ? `0 0 12px ${lane.color}` : (isMajor ? `0 0 8px ${lane.color}55` : 'none');
+                                        return `
+                                        <div class="absolute flex flex-col items-center cursor-pointer" style="left:${px}px; top:50%; transform:translate(-50%,-50%); z-index:${isSelected ? 20 : 10};" onclick="selectTimelineEvent('${evt.id}')" onmouseenter="showTlTooltip(event, this)" onmouseleave="hideTlTooltip()" data-tl-date="${new Date(evt.timestamp).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}" data-tl-title="${(TIMELINE_CATEGORIES[evt.category] || '📌') + ' ' + evt.title.replace(/"/g, '&quot;')}" data-tl-color="${lane.color}">
+                                            <div class="rounded-full border-2 transition-all duration-200" style="width:${sz}px;height:${sz}px;background:${evt.color || lane.color};border-color:${isSelected ? '#fff' : (evt.color || lane.color)};box-shadow:${glw};"></div>
+                                        </div>`;
+                                    } else {
+                                        // Cluster — render hub dot with count badge + fan-out on hover
+                                        const cid = 'cl_' + laneKey + '_' + Math.round(cluster.centerPx);
+                                        const anySelected = cluster.items.some(i => i.evt.id === selectedTimelineEvent);
+                                        const sz = 18;
+                                        return `
+                                        <div id="${cid}" class="tl-cluster absolute cursor-pointer" style="left:${cluster.centerPx}px; top:50%; transform:translate(-50%,-50%); z-index:${anySelected ? 25 : 15};" onmouseenter="tlClusterExpand('${cid}')" onmouseleave="tlClusterCollapse('${cid}')">
+                                            <!-- Hub dot with count -->
+                                            <div class="tl-cluster-hub relative flex items-center justify-center" style="width:${sz}px;height:${sz}px;">
+                                                <div class="rounded-full border-2" style="width:${sz}px;height:${sz}px;background:${lane.color};border-color:${lane.color};box-shadow:0 0 10px ${lane.color}55;"></div>
+                                                <span class="absolute text-[9px] font-bold text-white pointer-events-none" style="text-shadow:0 0 4px rgba(0,0,0,0.9);">${cluster.items.length}</span>
+                                            </div>
+                                            <!-- Fan-out spokes (hidden until hover) -->
+                                            <div class="tl-cluster-fan absolute" style="display:none; left:50%; top:50%;">
+                                                ${cluster.items.map((item, idx) => {
+                                                    const angle = ((idx / cluster.items.length) * 2 * Math.PI) - Math.PI / 2;
+                                                    const radius = 28 + Math.floor(idx / 8) * 20;
+                                                    const dx = Math.cos(angle) * radius;
+                                                    const dy = Math.sin(angle) * radius;
+                                                    const isMajor = item.evt.significance === 'major';
+                                                    const isSelected = item.evt.id === selectedTimelineEvent;
+                                                    const dotSz = isMajor ? 12 : 9;
+                                                    const glw = isSelected ? `0 0 10px ${lane.color}` : 'none';
+                                                    return `
+                                                    <!-- Spoke line -->
+                                                    <svg class="absolute pointer-events-none" style="left:0;top:0;overflow:visible;" width="1" height="1">
+                                                        <line x1="0" y1="0" x2="${dx}" y2="${dy}" stroke="${lane.color}" stroke-width="1" opacity="0.35"/>
+                                                    </svg>
+                                                    <!-- Fan dot -->
+                                                    <div class="absolute cursor-pointer" style="left:${dx - dotSz/2}px; top:${dy - dotSz/2}px; z-index:30;" onclick="event.stopPropagation();selectTimelineEvent('${item.evt.id}')" onmouseenter="showTlTooltip(event, this)" onmouseleave="hideTlTooltip()" data-tl-date="${new Date(item.evt.timestamp).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}" data-tl-title="${(TIMELINE_CATEGORIES[item.evt.category] || '📌') + ' ' + item.evt.title.replace(/"/g, '&quot;')}" data-tl-color="${lane.color}">
+                                                        <div class="rounded-full border-2 transition-all duration-150" style="width:${dotSz}px;height:${dotSz}px;background:${item.evt.color || lane.color};border-color:${isSelected ? '#fff' : (item.evt.color || lane.color)};box-shadow:${glw};"></div>
+                                                    </div>`;
+                                                }).join('')}
+                                            </div>
+                                        </div>`;
+                                    }
                                 }).join('')}
                             </div>
                         </div>
                     </div>`;
                 }).join('')}
-                <!-- Time axis + scrollbar at bottom -->
+                <!-- Time axis -->
                 <div class="flex border-t border-gray-700">
                     <div class="flex-shrink-0 w-40 border-r border-gray-700/50"></div>
                     <div class="flex-1 overflow-x-auto" id="timelineSwimlaneScroll">
-                        <div style="min-width:${trackWidth}px; position:relative;">
-                            <div class="relative h-8" style="min-width:${trackWidth}px;">
+                        <div style="width:${trackWidth}px; position:relative;">
+                            <div class="relative h-8" style="width:${trackWidth}px;">
                                 ${ticks.map(t => `
-                                    <div class="absolute top-0 h-full flex flex-col items-center" style="left:${t.pct}%;">
-                                        <div class="h-3 border-l border-gray-600"></div>
-                                        <span class="text-[10px] text-gray-500 whitespace-nowrap mt-0.5">${t.label}</span>
+                                    <div class="absolute top-0 h-full flex flex-col items-center" style="left:${t.px}px;">
+                                        <div class="h-3 border-l ${t.isGapEdge ? 'border-gray-500' : 'border-gray-600'}"></div>
+                                        <span class="text-[10px] ${t.isGapEdge ? 'text-gray-400 font-medium' : 'text-gray-500'} whitespace-nowrap mt-0.5">${t.label}</span>
                                     </div>
                                 `).join('')}
                             </div>
@@ -21473,9 +21611,34 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     <span class="text-[10px] text-gray-500 uppercase tracking-wider mr-2">Legend:</span>
                     <span class="flex items-center gap-1 text-[10px] text-gray-400"><span class="inline-block w-3 h-3 rounded-full bg-gray-400"></span> Major</span>
                     <span class="flex items-center gap-1 text-[10px] text-gray-400"><span class="inline-block w-2 h-2 rounded-full bg-gray-500 opacity-60"></span> Supporting</span>
+                    <span class="flex items-center gap-1 text-[10px] text-gray-400"><span class="inline-block w-4 h-4 rounded-full bg-gray-400 text-[8px] text-white flex items-center justify-center font-bold" style="line-height:1;">3</span> Cluster (hover to expand)</span>
                     <span class="text-[10px] text-gray-600 ml-auto">${events.length} event${events.length !== 1 ? 's' : ''}</span>
                 </div>
             </div>`;
+        }
+
+        // ── Cluster fan-out expand/collapse ──
+        let _tlClusterTimer = null;
+        function tlClusterExpand(cid) {
+            clearTimeout(_tlClusterTimer);
+            const el = document.getElementById(cid);
+            if (!el) return;
+            const fan = el.querySelector('.tl-cluster-fan');
+            const hub = el.querySelector('.tl-cluster-hub');
+            if (fan) { fan.style.display = 'block'; }
+            if (hub) { hub.style.opacity = '0.3'; }
+            el.style.zIndex = '40';
+        }
+        function tlClusterCollapse(cid) {
+            _tlClusterTimer = setTimeout(() => {
+                const el = document.getElementById(cid);
+                if (!el) return;
+                const fan = el.querySelector('.tl-cluster-fan');
+                const hub = el.querySelector('.tl-cluster-hub');
+                if (fan) { fan.style.display = 'none'; }
+                if (hub) { hub.style.opacity = '1'; }
+                el.style.zIndex = '15';
+            }, 200);
         }
 
         function renderTimelineDetailPanel(evtId) {

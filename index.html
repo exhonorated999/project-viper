@@ -2371,7 +2371,9 @@
                 
                 // Get real case data
                 const allCases = JSON.parse(localStorage.getItem('viperCases')) || [];
-                const openCases = allCases.filter(c => c.status === 'Open' || c.status === 'Active' || c.status === 'active').length;
+                const customSt = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]').map(s => s.id);
+                const inactiveSt = ['closed', 'closed-arrest', 'transferred', ...customSt];
+                const openCases = allCases.filter(c => !inactiveSt.includes(c.status)).length;
                 const closedCases = allCases.filter(c => c.status === 'Closed' || c.status === 'closed').length;
                 const closedWithArrest = allCases.filter(c => c.status === 'Closed with Arrest' || c.status === 'closed-arrest').length;
                 const totalCases = allCases.length;
@@ -2501,7 +2503,9 @@
                 
                 // Get real case data
                 const allCases = JSON.parse(localStorage.getItem('viperCases')) || [];
-                const activeCases = allCases.filter(c => !['closed', 'closed-arrest', 'transferred', 'Closed', 'Closed with Arrest', 'Transferred'].includes(c.status));
+                const customSt2 = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]').map(s => s.id);
+                const inactiveSt2 = ['closed', 'closed-arrest', 'transferred', 'Closed', 'Closed with Arrest', 'Transferred', ...customSt2];
+                const activeCases = allCases.filter(c => !inactiveSt2.includes(c.status));
                 
                 const investigationsData = activeCases.map(caseItem => {
                     // Get synopsis/description (truncate if too long)
@@ -2772,10 +2776,11 @@
             document.getElementById('low-count').textContent = low;
         }
         
-        let hideCompleted = false;
+        let hideCompleted = localStorage.getItem('viperHideCompleted') === 'true';
 
         function toggleHideCompleted() {
             hideCompleted = document.getElementById('hideCompletedToggle').checked;
+            localStorage.setItem('viperHideCompleted', hideCompleted ? 'true' : 'false');
             renderTasks();
         }
 
@@ -3141,8 +3146,10 @@
         function updateDashboardCaseData() {
             const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
             
-            // Update metrics
+            // Update metrics — custom statuses are always inactive (closure types)
             const inactiveStatuses = ['closed', 'closed-arrest', 'transferred'];
+            const customStatuses = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
+            customStatuses.forEach(s => inactiveStatuses.push(s.id));
             const activeCases = cases.filter(c => !inactiveStatuses.includes(c.status));
             const closedCases = cases.filter(c => c.status === 'closed');
             const closedWithArrestCases = cases.filter(c => c.status === 'closed-arrest');
@@ -3898,6 +3905,9 @@
             updateWarrantAlerts();
             
             initializeDropdowns();
+            // Restore hide-completed toggle state
+            const hcToggle = document.getElementById('hideCompletedToggle');
+            if (hcToggle) hcToggle.checked = hideCompleted;
             renderTasks();
             
             // Show overdue warrant notification if any exist

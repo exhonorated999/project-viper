@@ -860,14 +860,18 @@ ipcMain.handle('extract-pdf-text', async (event, filePath) => {
     // (form labels are fine, narrative text is garbled like "OnNovember30th,2025,...")
     let spacesStripped = false;
     if (readable) {
-      // Sample long lines (>60 chars) and check if they lack spaces
       const longLines = data.text.split('\n').filter(l => l.length > 60);
-      if (longLines.length > 5) {
+      if (longLines.length > 0) {
+        // Any single very long line with almost no spaces is a strong signal
+        const veryLongNoSpace = longLines.some(l => l.length > 100 &&
+          (l.match(/ /g) || []).length / l.length < 0.01);
+        // Or a moderate proportion of long lines lacking spaces
         const noSpaceLines = longLines.filter(l => {
           const spaceRatio = (l.match(/ /g) || []).length / l.length;
           return spaceRatio < 0.02; // less than 2% spaces in a long line
         });
-        spacesStripped = noSpaceLines.length > longLines.length * 0.3;
+        spacesStripped = veryLongNoSpace ||
+          (longLines.length >= 3 && noSpaceLines.length > longLines.length * 0.2);
       }
     }
 

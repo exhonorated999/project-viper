@@ -1305,6 +1305,7 @@
             </form>
         </div>
     </div>
+    </div>
     
     <!-- Add Task Modal -->
     <div id="addTaskModal" class="modal">
@@ -2011,6 +2012,11 @@
                     const fnNum = result.fileName.match(/(\d{9,12})/);
                     if (fnNum) caseNum = fnNum[1];
                 }
+                // Fallback: extract alphanumeric case number from filename (e.g., SNB2502566)
+                if (!caseNum) {
+                    const fnAlpha = result.fileName.match(/([A-Z]{2,}\d{5,})/);
+                    if (fnAlpha) caseNum = fnAlpha[1];
+                }
 
                 // Detect sections by looking for INFORM RMS section headers
                 const hasSection = (names) => names.some(n => new RegExp('(?:^|\\n)\\s*' + n + '\\s*(?:\\n|$)', 'im').test(text));
@@ -2055,6 +2061,22 @@
                     if (vehBlock && vehBlock[1].trim().length > 10) detected.vehicles = true;
                 }
 
+                // --- Crime Report format (San Bruno PD style) ---
+                if (/CRIME REPORT/i.test(text) && /CONTROLLED DOCUMENT/i.test(text)) {
+                    // Case number: "Case\nSNB2502566" pattern from form labels
+                    if (!caseNum) {
+                        const crCase = text.match(/(?:^Case\s*\n\s*|Case\s+)([A-Z]{2,}\d{5,})/m);
+                        if (crCase) caseNum = crCase[1];
+                    }
+                    // Person roles from form labels
+                    if (/\bVictim\b/i.test(text)) detected.victims = true;
+                    if (/\bSuspect\s*Arrested\b/i.test(text) || /\bSuspect\b/i.test(text)) detected.suspects = true;
+                    if (/\bWitness\b/i.test(text)) detected.witnesses = true;
+                    if (/\bReporting\s*Party\b/i.test(text)) detected.involvedPersons = true;
+                    // Vehicles from property section
+                    if (/CRIME REPORT\s*-\s*PROPERTY/i.test(text) || /\bVehicle\b.*\b(?:Make|Model|License)\b/i.test(text)) detected.vehicles = true;
+                }
+
                 // Auto-generate synopsis from offenses
                 let synopsis = '';
                 const offenseMatch = text.match(/(?:Offense\(s\)|Offenses)\s*\n([\s\S]*?)(?=\n\s*(?:Involved|Persons|Vehicle|Property|Narrative|Digital|Confidential|\*{3})|$)/i);
@@ -2080,6 +2102,14 @@
                 if (!synopsis && /INCIDENT PAGE \d+/i.test(text)) {
                     const offDescMatch = text.match(/\nOFFENSE\n[\s\S]*?Description\s*\n\s*([^\n]+)/i);
                     if (offDescMatch && offDescMatch[1].trim()) synopsis = offDescMatch[1].trim();
+                }
+                // Crime Report format: offense from OFFENSES section
+                if (!synopsis && /CRIME REPORT/i.test(text) && /OFFENSES/i.test(text)) {
+                    const crOffBlock = text.match(/OFFENSES\s*\n([\s\S]*?)(?=\nNARRATIVE|$)/i);
+                    if (crOffBlock) {
+                        const offLines = crOffBlock[1].split('\n').filter(l => /\b(?:PC|HS|VC|BP|FC|WI)\b/.test(l));
+                        if (offLines.length > 0) synopsis = offLines.slice(0, 3).map(l => l.trim()).join('; ');
+                    }
                 }
 
                 // Store for case creation

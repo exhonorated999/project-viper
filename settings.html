@@ -312,6 +312,12 @@
                         <!-- Activate license (hidden when already licensed) -->
                         <div id="licActivatePanel" class="mt-4 p-4 bg-viper-dark rounded-lg space-y-3">
                             <label class="block text-sm font-medium text-gray-300">Activate License Key</label>
+                            <!-- API Key field (shown when no API key in localStorage) -->
+                            <div id="licApiKeyRow" style="display:none;">
+                                <label class="block text-xs text-gray-500 mb-1">API Key (provided by administrator)</label>
+                                <input type="text" id="licApiKeyInput" placeholder="INT-XXXX-XXXX-XXXX-XXXX"
+                                    class="w-full px-4 py-2 bg-viper-card border border-gray-600 rounded-lg focus:outline-none focus:border-viper-cyan text-white font-mono text-sm mb-2">
+                            </div>
                             <div class="flex gap-2">
                                 <input type="text" id="licKeyInput" placeholder="INT-PROJVIPE-XXXX-XXXX-XXXX"
                                     class="flex-1 px-4 py-2 bg-viper-card border border-gray-600 rounded-lg focus:outline-none focus:border-viper-cyan text-white font-mono text-sm">
@@ -2120,8 +2126,12 @@
             if (!status.registered) {
                 badge.textContent = 'Unregistered';
                 badge.className = 'px-3 py-1 rounded-full text-xs font-bold uppercase bg-gray-700 text-gray-300';
-                return;
             }
+
+            // Show API key field when no API key stored (admin-provisioned users)
+            const hasApiKey = !!localStorage.getItem('viper_api_key');
+            const apiKeyRow = document.getElementById('licApiKeyRow');
+            if (apiKeyRow && !hasApiKey) apiKeyRow.style.display = 'block';
 
             switch (status.status) {
                 case 'demo':
@@ -2160,6 +2170,20 @@
             const msg = document.getElementById('licActivateMsg');
             const btn = document.getElementById('licActivateBtn');
             if (!key) { msg.textContent = 'Enter a license key.'; msg.style.color = '#fca5a5'; msg.style.display = 'block'; return; }
+
+            // If no API key stored, grab from manual input
+            if (!localStorage.getItem('viper_api_key')) {
+                const manualApiKey = document.getElementById('licApiKeyInput')?.value?.trim();
+                if (!manualApiKey) {
+                    msg.textContent = 'Enter the API key provided by your administrator.';
+                    msg.style.color = '#fca5a5'; msg.style.display = 'block'; return;
+                }
+                localStorage.setItem('viper_api_key', manualApiKey);
+            }
+            // Ensure registered_at is set
+            if (!localStorage.getItem('viper_registered_at')) {
+                localStorage.setItem('viper_registered_at', new Date().toISOString());
+            }
 
             btn.disabled = true; btn.textContent = 'Activating...';
             msg.style.display = 'none';

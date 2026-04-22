@@ -1982,10 +1982,11 @@
                 }
 
                 // Update progress
-                updateBackupProgress(50, 'Collecting data...');
+                updateBackupProgress(30, 'Collecting case data...');
 
-                // Write backup via Electron IPC
-                const savedPath = await window.electronAPI.createBackup({
+                // Write ZIP backup (localStorage + case files) via Electron IPC
+                updateBackupProgress(50, 'Packaging case files + evidence...');
+                const savedPath = await window.electronAPI.createBackupZip({
                     backupPath,
                     data: JSON.stringify(backupData)
                 });
@@ -2022,8 +2023,17 @@
                 const selected = await window.electronAPI.selectBackupFile();
                 if (!selected) return;
 
-                const backupData = await window.electronAPI.restoreBackup({ backupPath: selected });
-                const data = JSON.parse(backupData);
+                let data;
+                if (selected.endsWith('.vbak')) {
+                    // New ZIP backup format — extracts case files + returns localStorage JSON
+                    const result = await window.electronAPI.restoreBackupZip({ backupPath: selected });
+                    data = JSON.parse(result.jsonData);
+                    showNotification(`Restoring ${Object.keys(data).length} settings + ${result.filesRestored} case files...`, 'info');
+                } else {
+                    // Legacy .json backup (localStorage only)
+                    const backupRaw = await window.electronAPI.restoreBackup({ backupPath: selected });
+                    data = JSON.parse(backupRaw);
+                }
 
                 // Restore all localStorage data
                 for (let key in data) {

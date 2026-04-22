@@ -760,17 +760,7 @@ ipcMain.handle('create-backup', async (event, { backupPath, data }) => {
   return filePath;
 });
 
-ipcMain.handle('select-backup-file', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Select Backup File to Restore',
-    properties: ['openFile'],
-    filters: [{ name: 'VIPER Backup', extensions: ['json'] }]
-  });
-  restoreFocus();
-  if (result.canceled || !result.filePaths.length) return null;
-  return result.filePaths[0];
-});
-
+// Legacy JSON-only restore (kept for backward compat with old .json backups)
 ipcMain.handle('restore-backup', async (event, { backupPath }) => {
   const raw = fs.readFileSync(backupPath);
   // Decrypt backup if it's encrypted
@@ -778,6 +768,100 @@ ipcMain.handle('restore-backup', async (event, { backupPath }) => {
     return security.decryptBuffer(raw).toString('utf-8');
   }
   return raw.toString('utf-8');
+});
+
+// --- Full ZIP Backup (localStorage + case files) ---
+ipcMain.handle('create-backup-zip', async (event, { backupPath, data }) => {
+  const AdmZip = require('adm-zip');
+  const zip = new AdmZip();
+
+  // 1. Add localStorage data as JSON
+  const jsonBuf = Buffer.from(data, 'utf-8');
+  zip.addFile('viper_data.json', jsonBuf);
+
+  // 2. Add all case folders from casesDir
+  const addDirRecursive = (dirPath, zipPrefix) => {
+    if (!fs.existsSync(dirPath)) return;
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dirPath, entry.name);
+      const zipPath = zipPrefix + '/' + entry.name;
+      if (entry.isDirectory()) {
+        addDirRecursive(fullPath, zipPath);
+      } else if (entry.isFile()) {
+        zip.addLocalFile(fullPath, zipPrefix);
+      }
+    }
+  };
+
+  if (fs.existsSync(casesDir)) {
+    const caseFolders = fs.readdirSync(casesDir, { withFileTypes: true })
+      .filter(d => d.isDirectory());
+    for (const folder of caseFolders) {
+      addDirRecursive(path.join(casesDir, folder.name), 'cases/' + folder.name);
+    }
+  }
+
+  // 3. Write ZIP file
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const filePath = path.join(backupPath, `VIPER_Backup_${timestamp}.vbak`);
+
+  // Encrypt if security is active
+  if (security && security.isEnabled() && security.isUnlocked()) {
+    const zipBuf = zip.toBuffer();
+    fs.writeFileSync(filePath, security.encryptBuffer(zipBuf));
+  } else {
+    zip.writeZip(filePath);
+  }
+
+  return filePath;
+});
+
+ipcMain.handle('restore-backup-zip', async (event, { backupPath }) => {
+  const AdmZip = require('adm-zip');
+  let raw = fs.readFileSync(backupPath);
+
+  // Decrypt if encrypted
+  if (security && security.isUnlocked() && security.isEncryptedBuffer(raw)) {
+    raw = security.decryptBuffer(raw);
+  }
+
+  const zip = new AdmZip(raw);
+  const entries = zip.getEntries();
+
+  // 1. Extract localStorage JSON
+  const jsonEntry = entries.find(e => e.entryName === 'viper_data.json');
+  if (!jsonEntry) throw new Error('Invalid backup: missing viper_data.json');
+  const jsonData = jsonEntry.getData().toString('utf-8');
+
+  // 2. Extract case files to casesDir
+  let filesRestored = 0;
+  for (const entry of entries) {
+    if (entry.entryName.startsWith('cases/') && !entry.isDirectory) {
+      // cases/CASENUMBER/Evidence/file.jpg → casesDir/CASENUMBER/Evidence/file.jpg
+      const relativePath = entry.entryName.slice('cases/'.length);
+      const destPath = path.join(casesDir, relativePath);
+      const destDir = path.dirname(destPath);
+      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+      fs.writeFileSync(destPath, entry.getData());
+      filesRestored++;
+    }
+  }
+
+  return { jsonData, filesRestored };
+});
+
+ipcMain.handle('select-backup-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Backup File to Restore',
+    properties: ['openFile'],
+    filters: [
+      { name: 'VIPER Backup', extensions: ['vbak', 'json'] }
+    ]
+  });
+  restoreFocus();
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
 });
 
 // --- Report Pop-out Window ---
@@ -1067,14 +1151,45 @@ ipcMain.handle('open-case-import', async () => {
     title: 'Import Case Package',
     properties: ['openFile'],
     filters: [
-      { name: 'VIPER Files', extensions: ['vcase', 'json'] },
+      { name: 'VIPER Files', extensions: ['vcase', 'json', 'vbak'] },
       { name: 'VIPER Case Package', extensions: ['vcase'] },
-      { name: 'VIPER Backup', extensions: ['json'] }
+      { name: 'VIPER Backup', extensions: ['json', 'vbak'] }
     ]
   });
   restoreFocus();
   if (result.canceled || !result.filePaths.length) return null;
-  const raw = fs.readFileSync(result.filePaths[0]);
+
+  const filePath = result.filePaths[0];
+
+  // .vbak = ZIP backup — extract localStorage JSON, case files restored by main process
+  if (filePath.endsWith('.vbak')) {
+    const AdmZip = require('adm-zip');
+    let raw = fs.readFileSync(filePath);
+    if (security && security.isUnlocked() && security.isEncryptedBuffer(raw)) {
+      raw = security.decryptBuffer(raw);
+    }
+    const zip = new AdmZip(raw);
+    // Restore case files to casesDir
+    let filesRestored = 0;
+    for (const entry of zip.getEntries()) {
+      if (entry.entryName.startsWith('cases/') && !entry.isDirectory) {
+        const relativePath = entry.entryName.slice('cases/'.length);
+        const destPath = path.join(casesDir, relativePath);
+        const destDir = path.dirname(destPath);
+        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+        fs.writeFileSync(destPath, entry.getData());
+        filesRestored++;
+      }
+    }
+    console.log(`Restored ${filesRestored} case files from .vbak`);
+    // Return the JSON data for localStorage restore
+    const jsonEntry = zip.getEntries().find(e => e.entryName === 'viper_data.json');
+    if (!jsonEntry) throw new Error('Invalid .vbak: missing viper_data.json');
+    return jsonEntry.getData().toString('utf-8');
+  }
+
+  // .vcase or .json — read as text
+  const raw = fs.readFileSync(filePath);
   if (security && security.isUnlocked() && security.isEncryptedBuffer(raw)) {
     return security.decryptBuffer(raw).toString('utf-8');
   }

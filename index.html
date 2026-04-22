@@ -2133,9 +2133,17 @@
         }
 
         function openCreateCaseModal() {
-            if (window.ViperLicensing && !window.ViperLicensing.canCreateCases()) {
-                showNotification('Your demo has expired. Go to Settings to activate a license.', 'error');
-                return;
+            if (window.ViperLicensing) {
+                const status = window.ViperLicensing.getLicenseStatus();
+                if (!status.registered) {
+                    // Not registered — show registration modal instead
+                    const modal = document.getElementById('registrationModal');
+                    if (modal) { modal.style.display = 'flex'; return; }
+                }
+                if (!status.canCreate) {
+                    showNotification('Your demo has expired. Go to Settings to activate a license.', 'error');
+                    return;
+                }
             }
             const priRow = document.getElementById('createCasePriorityRow');
             if (priRow) priRow.classList.toggle('hidden', localStorage.getItem('viperCasePriorityEnabled') !== 'true');
@@ -5118,7 +5126,7 @@
     </script>
 
     <!-- Registration Modal -->
-    <div id="registrationModal" style="display:none; position:fixed; inset:0; z-index:99999; background:rgba(0,0,0,0.92); display:none; align-items:center; justify-content:center;">
+    <div id="registrationModal" style="display:none; position:fixed; inset:0; z-index:99999; background:rgba(0,0,0,0.92); align-items:center; justify-content:center;">
         <div style="background:#1a2332; border:1px solid rgba(0,217,255,0.3); border-radius:16px; padding:40px; max-width:520px; width:90%; box-shadow:0 0 60px rgba(0,217,255,0.15);">
             <div style="text-align:center; margin-bottom:24px;">
                 <img src="assets/icon.png" alt="V.I.P.E.R." style="width:72px; height:72px; border-radius:12px; margin:0 auto 8px;">
@@ -5164,6 +5172,7 @@
     <!-- Demo Expired Banner (injected by license check) -->
     <div id="demoExpiredBanner" style="display:none; position:fixed; top:0; left:0; right:0; z-index:9999; background:linear-gradient(90deg,#991b1b,#7f1d1d); padding:10px 20px; text-align:center; font-size:14px; color:#fca5a5;">
         ⚠️ Your 60-day demo has expired. Existing cases remain accessible. <a href="settings.html" style="color:#00d9ff; text-decoration:underline; font-weight:600;">Activate a license</a> to create new cases.
+        &nbsp;|&nbsp; <a href="#" onclick="resetRegistration(); return false;" style="color:#fde68a; text-decoration:underline; font-weight:500;">New user? Re-register</a>
     </div>
 
     <script>
@@ -5220,6 +5229,14 @@
 
     function closeRegistrationModal() {
         document.getElementById('registrationModal').style.display = 'none';
+    }
+
+    function resetRegistration() {
+        if (!confirm('This will clear the current registration and let you re-register as a new user. Continue?')) return;
+        ['registered_at','api_key','license_key','license_type','expires_at','customer_name','contact_email','agency'].forEach(k =>
+            localStorage.removeItem('viper_' + k)
+        );
+        location.reload();
     }
     </script>
     <script src="/modules/security-ui.js"></script>

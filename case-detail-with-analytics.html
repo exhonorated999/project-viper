@@ -26183,6 +26183,143 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         }
 
         /* ---------- RMS Import Handler ---------- */
+        // Route parsed RMS persons into case tabs (Suspects, Victims, Witnesses, Involved Persons)
+        function routeRmsPersonsToTabs(report) {
+            if (!report.personsInvolved || report.personsInvolved.length === 0) return [];
+            const caseId = currentCase.id;
+            const src = report.reportNumber || report.fileName || 'RMS Import';
+            let populated = [];
+
+            // Suspects
+            const suspectPersons = report.personsInvolved.filter(p =>
+                /SUSPECT|ARRESTED|DEFENDANT/i.test(p.involvement || ''));
+            if (suspectPersons.length > 0) {
+                const existing = JSON.parse(localStorage.getItem(`suspects_${caseId}`) || '[]');
+                for (const p of suspectPersons) {
+                    // Skip if already imported from same source with same name
+                    if (existing.some(e => e.rmsSource === src && e.name === (p.name || ''))) continue;
+                    existing.push({
+                        name: p.name || '', dob: p.dob || '', dlNumber: '',
+                        sex: p.sex || '', height: p.height || '', weight: p.weight || '',
+                        hairColor: p.hair || '', eyeColor: p.eyes || '', scarsMarksTattoos: '',
+                        address: p.address || '', addressCityStateZip: '',
+                        photo: '', residencePhoto: '',
+                        employerName: '', occupation: '', employerAddress: '', employerPhone: '',
+                        firearms: [], vehicles: [], identifiers: [], criminalHistory: [],
+                        rapSheet: null, firearmsDoc: null,
+                        rmsSource: src
+                    });
+                }
+                localStorage.setItem(`suspects_${caseId}`, JSON.stringify(existing));
+                populated.push(`Suspects (${suspectPersons.length})`);
+            }
+
+            // Victims
+            const victimPersons = report.personsInvolved.filter(p =>
+                /VICTIM/i.test(p.involvement || ''));
+            if (victimPersons.length > 0) {
+                const existing = JSON.parse(localStorage.getItem(`victims_${caseId}`) || '[]');
+                for (const p of victimPersons) {
+                    if (existing.some(e => e.rmsSource === src && e.name === (p.name || ''))) continue;
+                    existing.push({
+                        name: p.name || '', dob: p.dob || '', dlNumber: '',
+                        phone: p.phone || '', phone2: '', email: '', email2: '',
+                        height: p.height || '', weight: p.weight || '',
+                        hairColor: p.hair || '', eyeColor: p.eyes || '',
+                        address: p.address || '', addressCityStateZip: '',
+                        photo: '', residencePhoto: '',
+                        employerName: '', occupation: '', employerAddress: '', employerPhone: '',
+                        injuryPhotos: [], propertyPhotos: [], vehicles: [],
+                        rmsSource: src
+                    });
+                }
+                localStorage.setItem(`victims_${caseId}`, JSON.stringify(existing));
+                populated.push(`Victims (${victimPersons.length})`);
+            }
+
+            // Witnesses
+            const witnessPersons = report.personsInvolved.filter(p =>
+                /WITNESS/i.test(p.involvement || ''));
+            if (witnessPersons.length > 0) {
+                const existing = JSON.parse(localStorage.getItem(`witnesses_${caseId}`) || '[]');
+                for (const p of witnessPersons) {
+                    if (existing.some(e => e.rmsSource === src && e.name === (p.name || ''))) continue;
+                    existing.push({
+                        name: p.name || '', dob: p.dob || '', dlNumber: '',
+                        phone: p.phone || '', phone2: '', email: '', email2: '',
+                        height: p.height || '', weight: p.weight || '',
+                        hairColor: p.hair || '', eyeColor: p.eyes || '',
+                        address: p.address || '', addressCityStateZip: '',
+                        photo: '', residencePhoto: '',
+                        employerName: '', occupation: '', employerAddress: '', employerPhone: '',
+                        statement: '',
+                        rmsSource: src
+                    });
+                }
+                localStorage.setItem(`witnesses_${caseId}`, JSON.stringify(existing));
+                populated.push(`Witnesses (${witnessPersons.length})`);
+            }
+
+            // Reporting Party / Informant / unmatched → Involved Persons
+            const matchedRoles = /SUSPECT|ARRESTED|DEFENDANT|VICTIM|WITNESS/i;
+            const involvedRouted = report.personsInvolved.filter(p =>
+                /REPORTING\s*PARTY|INFORMANT/i.test(p.involvement || '') || !matchedRoles.test(p.involvement || ''));
+            if (involvedRouted.length > 0) {
+                const existing = JSON.parse(localStorage.getItem(`involvedPersons_${caseId}`) || '[]');
+                for (const p of involvedRouted) {
+                    if (existing.some(e => e.rmsSource === src && e.name === (p.name || ''))) continue;
+                    existing.push({
+                        name: p.name || '', dob: p.dob || '', dlNumber: '',
+                        sex: p.sex || '', height: p.height || '', weight: p.weight || '',
+                        hairColor: p.hair || '', eyeColor: p.eyes || '',
+                        scarsMarksTattoos: '',
+                        address: p.address || '', addressCityStateZip: '',
+                        phone: p.phone || '', phone2: '', email: '', email2: '',
+                        photo: '', residencePhoto: '',
+                        role: p.involvement || 'Otherwise Involved',
+                        relationship: '', notes: '',
+                        rmsSource: src,
+                        rmsRole: p.involvement || 'Unknown'
+                    });
+                }
+                localStorage.setItem(`involvedPersons_${caseId}`, JSON.stringify(existing));
+                populated.push(`Involved Persons (${involvedRouted.length})`);
+
+                // Auto-add involvedPersons module if not already active
+                const caseModules = currentCase.modules || [];
+                if (!caseModules.includes('involvedPersons')) {
+                    caseModules.push('involvedPersons');
+                    currentCase.modules = caseModules;
+                    const cases = JSON.parse(localStorage.getItem('viperCases') || '[]');
+                    const ci = cases.findIndex(c => c.id === currentCase.id);
+                    if (ci >= 0) { cases[ci].modules = caseModules; localStorage.setItem('viperCases', JSON.stringify(cases)); }
+                }
+            }
+
+            // Vehicles
+            if (report.vehicles && report.vehicles.length > 0) {
+                const existing = JSON.parse(localStorage.getItem(`recoveredVehicles_${caseId}`) || '[]');
+                for (const v of report.vehicles) {
+                    const makeModel = [v.year, v.make, v.model || v.type].filter(Boolean).join(' ').trim();
+                    if (existing.some(e => e.rmsSource === src && e.makeModel === makeModel)) continue;
+                    existing.push({
+                        makeModel: makeModel,
+                        licensePlate: v.license || '',
+                        vin: v.vin || '',
+                        color: v.colors || '',
+                        year: v.year || '',
+                        recoveryDate: '', recoveryLocation: '', photo: '',
+                        notes: v.status ? `Status: ${v.status}` + (v.state ? ` | State: ${v.state}` : '') : '',
+                        rmsSource: src
+                    });
+                }
+                localStorage.setItem(`recoveredVehicles_${caseId}`, JSON.stringify(existing));
+                populated.push(`Vehicles (${report.vehicles.length})`);
+            }
+
+            return populated;
+        }
+
         async function handleRmsImport() {
             try {
                 const filePaths = await window.electronAPI.selectRmsFiles();
@@ -26206,6 +26343,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             rmsImports.push(report);
                         }
                         imported++;
+
+                        // Route persons to case tabs
+                        routeRmsPersonsToTabs(report);
                     } catch (err) {
                         console.error('Failed to parse:', filePath, err);
                     }
@@ -26215,7 +26355,13 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 hideLoadingIndicator();
 
                 if (imported > 0) {
-                    showToast(`Imported ${imported} RMS report${imported !== 1 ? 's' : ''}`, 'success');
+                    // Reload tab data so counts update
+                    loadSuspects();
+                    loadVictims();
+                    loadWitnesses();
+                    loadInvolvedPersons();
+                    loadRecoveredVehicles();
+                    showToast(`Imported ${imported} RMS report${imported !== 1 ? 's' : ''} — persons routed to case tabs`, 'success');
                     renderTabContent('rmsImport');
                 } else {
                     showToast('No reports could be parsed', 'error');

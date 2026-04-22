@@ -312,8 +312,8 @@ app.whenReady().then(async () => {
         preload: path.join(__dirname, 'preload-media.js'),
       },
     });
-    mainWindow.addBrowserView(mediaBrowserView);
-    mediaBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 }); // hidden
+    // Don't add to window yet — will be attached on first media-set-visible(true)
+    mediaBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
     mediaBrowserView.setAutoResize({ width: false, height: false });
     mediaBrowserView.webContents.loadURL('http://localhost:8000/media-player.html');
 
@@ -337,8 +337,8 @@ app.whenReady().then(async () => {
         partition: 'persist:flock', // separate session to persist login cookies
       },
     });
-    mainWindow.addBrowserView(flockBrowserView);
-    flockBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 }); // hidden
+    // Don't add to window yet — will be attached on first flock-set-visible(true)
+    flockBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
     flockBrowserView.setAutoResize({ width: false, height: false });
     // Don't load URL here — Electron suspends network I/O for zero-size views.
     // URL will be loaded on first flock-set-visible(true) call.
@@ -408,7 +408,7 @@ app.whenReady().then(async () => {
         partition: 'persist:tlo', // separate session to persist login cookies
       },
     });
-    mainWindow.addBrowserView(tloBrowserView);
+    // Don't add to window yet — will be attached on first tlo-set-visible(true)
     tloBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
     tloBrowserView.setAutoResize({ width: false, height: false });
     // Don't load URL here — Electron suspends network I/O for zero-size views.
@@ -463,7 +463,7 @@ app.whenReady().then(async () => {
         partition: 'persist:accurint',
       },
     });
-    mainWindow.addBrowserView(accurintBrowserView);
+    // Don't add to window yet — will be attached on first accurint-set-visible(true)
     accurintBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
     accurintBrowserView.setAutoResize({ width: false, height: false });
 
@@ -504,6 +504,21 @@ app.whenReady().then(async () => {
           }
         }).catch(() => {});
       }
+    });
+
+    // On page navigation, detach resource-hub BrowserViews so they can't steal clicks
+    // on the next page. Media player is handled by its own show/hide via reportBounds().
+    mainWindow.webContents.on('did-start-navigation', (_event, _url, isInPlace) => {
+      if (isInPlace) return; // ignore hash/pushState navigations
+      const pageViews = [flockBrowserView, tloBrowserView, accurintBrowserView];
+      for (const bv of pageViews) {
+        if (!bv) continue;
+        try { mainWindow.removeBrowserView(bv); } catch (_) {}
+        bv.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+      }
+      flockViewVisible = false;
+      tloViewVisible = false;
+      accurintViewVisible = false;
     });
 
     // When the renderer page finishes loading, ask it to report media bounds
@@ -841,7 +856,22 @@ ipcMain.handle('extract-pdf-text', async (event, filePath) => {
     const readable = /[A-Za-z]{3,}/.test(data.text) &&
       (/\b(?:Name|DOB|Dob|OLN|DLN?|SSN|Sex|Height|Weight|Address|License|Incident|Event|Offense|Suspect|Victim|Witness|Narrative|Report)\b/i.test(data.text));
 
+    // Secondary check: some PDFs pass readability but have spaces stripped in body text
+    // (form labels are fine, narrative text is garbled like "OnNovember30th,2025,...")
+    let spacesStripped = false;
     if (readable) {
+      // Sample long lines (>60 chars) and check if they lack spaces
+      const longLines = data.text.split('\n').filter(l => l.length > 60);
+      if (longLines.length > 5) {
+        const noSpaceLines = longLines.filter(l => {
+          const spaceRatio = (l.match(/ /g) || []).length / l.length;
+          return spaceRatio < 0.02; // less than 2% spaces in a long line
+        });
+        spacesStripped = noSpaceLines.length > longLines.length * 0.3;
+      }
+    }
+
+    if (readable && !spacesStripped) {
       return {
         text: data.text,
         numPages: data.numpages,
@@ -853,11 +883,37 @@ ipcMain.handle('extract-pdf-text', async (event, filePath) => {
     // Garbled text detected — fall back to MuPDF render + Tesseract OCR
     console.log('PDF text garbled (Type3 font), falling back to OCR...');
     const mupdf = await import('mupdf');
-    const Tesseract = (await import('tesseract.js')).default;
 
+    // First try MuPDF's own text extraction (much faster than OCR)
     const doc = mupdf.Document.openDocument(dataBuffer, 'application/pdf');
-    let ocrText = '';
     const numPages = doc.countPages();
+    let mupdfText = '';
+    for (let i = 0; i < numPages; i++) {
+      const page = doc.loadPage(i);
+      const stext = page.toStructuredText();
+      mupdfText += stext.asText() + '\n';
+    }
+
+    // Check if MuPDF text is usable (has proper spacing)
+    const mupdfLongLines = mupdfText.split('\n').filter(l => l.length > 60);
+    const mupdfSpaceOk = mupdfLongLines.length === 0 || mupdfLongLines.filter(l => {
+      const sr = (l.match(/ /g) || []).length / l.length;
+      return sr >= 0.02;
+    }).length > mupdfLongLines.length * 0.5;
+
+    if (mupdfSpaceOk && /[A-Za-z]{3,}/.test(mupdfText)) {
+      console.log('MuPDF text extraction succeeded');
+      return {
+        text: mupdfText,
+        numPages,
+        info: data.info || {},
+        fileName: path.basename(filePath)
+      };
+    }
+
+    // MuPDF text also bad — full OCR fallback
+    console.log('MuPDF text also garbled, falling back to Tesseract OCR...');
+    const Tesseract = (await import('tesseract.js')).default;
 
     for (let i = 0; i < numPages; i++) {
       const page = doc.loadPage(i);
@@ -2764,9 +2820,11 @@ ipcMain.on('media-set-visible', (_event, visible) => {
   if (!mediaBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
   mediaViewVisible = visible;
   if (visible && lastMediaBounds) {
+    try { mainWindow.addBrowserView(mediaBrowserView); } catch (_) {}
     mediaBrowserView.setBounds(lastMediaBounds);
   } else if (!visible) {
     mediaBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    try { mainWindow.removeBrowserView(mediaBrowserView); } catch (_) {}
   }
 });
 
@@ -2794,9 +2852,11 @@ ipcMain.on('flock-set-visible', (_event, visible) => {
     if (!currentUrl || currentUrl === '' || currentUrl === 'about:blank') {
       flockBrowserView.webContents.loadURL('https://search-2.flocksafety.com/');
     }
+    try { mainWindow.addBrowserView(flockBrowserView); } catch (_) {}
     flockBrowserView.setBounds(lastFlockBounds);
   } else if (!visible) {
     flockBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    try { mainWindow.removeBrowserView(flockBrowserView); } catch (_) {}
   }
 });
 
@@ -2876,9 +2936,11 @@ ipcMain.on('tlo-set-visible', (_event, visible) => {
     if (!currentUrl || currentUrl === '' || currentUrl === 'about:blank') {
       tloBrowserView.webContents.loadURL('https://tloxp.tlo.com/');
     }
+    try { mainWindow.addBrowserView(tloBrowserView); } catch (_) {}
     tloBrowserView.setBounds(lastTloBounds);
   } else if (!visible) {
     tloBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    try { mainWindow.removeBrowserView(tloBrowserView); } catch (_) {}
   }
 });
 
@@ -2954,9 +3016,11 @@ ipcMain.on('accurint-set-visible', (_event, visible) => {
     if (!currentUrl || currentUrl === '' || currentUrl === 'about:blank') {
       accurintBrowserView.webContents.loadURL('https://secure.accurint.com/app/bps/main');
     }
+    try { mainWindow.addBrowserView(accurintBrowserView); } catch (_) {}
     accurintBrowserView.setBounds(lastAccurintBounds);
   } else if (!visible) {
     accurintBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    try { mainWindow.removeBrowserView(accurintBrowserView); } catch (_) {}
   }
 });
 

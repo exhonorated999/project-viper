@@ -25282,6 +25282,496 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             return report;
         }
 
+        /* ---------- Crime Report Parser (San Bruno PD style) ---------- */
+        function parseCrimeReport(text, fileName) {
+            const lines = text.split('\n').map(l => l.trim());
+
+            // --- Agency & case number ---
+            const agencyMatch = text.match(/^([A-Z][A-Z\s]+(?:POLICE DEPARTMENT|SHERIFF['S]*\s*(?:OFFICE|DEPARTMENT)|COUNTY\s+\w+))/m);
+            const agencyName = agencyMatch ? agencyMatch[1].trim() : '';
+            const caseMatch = text.match(/(?:^Case\s*\n\s*|Case\s+)([A-Z]{2,}\d{5,})/m);
+            const caseNumber = caseMatch ? caseMatch[1] : '';
+            // Fallback: extract from filename
+            const fnCase = !caseNumber && fileName.match(/([A-Z]{2,}\d{5,})/);
+
+            const report = {
+                id: 'rms_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+                fileName, importedAt: new Date().toISOString(),
+                reportNumber: caseNumber || (fnCase ? fnCase[1] : ''),
+                reportDate: '', reportType: 'Crime Report',
+                supplementNo: '', agencyName,
+                location: '', beat: '',
+                fromDateTime: '', toDateTime: '',
+                offenses: [], personsInvolved: [], vehicles: [], property: [],
+                narratives: [], digital: [], confidentialPersons: [], rawText: text
+            };
+
+            // --- Dates & location from cover page values ---
+            // Pattern: date range like "11/30/25-11/30/25" or "MM/DD/YYYY"
+            const dateOccM = text.match(/\(A\/C\s*-\s*Attempt\/Completed\)\s*\n(\d{1,2}\/\d{1,2}\/\d{2,4}(?:\s*-\s*\d{1,2}\/\d{1,2}\/\d{2,4})?)/);
+            if (dateOccM) report.fromDateTime = dateOccM[1].trim();
+            // Date reported: appears after the date/time occurred lines
+            const dateRepM = text.match(/\(A\/C[\s\S]*?\n(\d{1,2}\/\d{1,2}\/\d{4})\n\d{3,4}\n/);
+            if (dateRepM) report.reportDate = dateRepM[1];
+            // Location: first address-like line in values section
+            const locM = text.match(/\(A\/C[\s\S]*?\n(\d+\s+[A-Za-z].*\b(?:Dr|St|Ave|Blvd|Rd|Ln|Way|Ct|Pl|Wy|Av|Circle|Pkwy)\b[^\n]*\d{5})\n/i);
+            if (locM) report.location = locM[1].trim();
+
+            // ============================================
+            // PERSONS — heuristic extraction from form data
+            // ============================================
+            // The cover page has labels in left column, values in right column.
+            // PDF extraction gives all labels first, then all values.
+            // We find the values section and parse person blocks sequentially.
+
+            // Person field patterns
+            const isName = (s) => /^[A-Z][a-z]+,\s+[A-Z]/.test(s) || /^\(Confidential/i.test(s);
+            const isDOB = (s) => /^\d{2}\/\d{2}\/\d{4}$/.test(s);
+            const isSex = (s) => /^[MF]$/.test(s);
+            const isRace = (s) => /^[WBHAOI]$/.test(s);
+            const isHeight = (s) => /^\d[`']\d{1,2}"?$/.test(s);
+            const isWeight = (s) => /^\d{2,3}$/.test(s);
+            const isHairEye = (s) => /^[A-Z]{3}$/.test(s) && /^(BLK|BRO|BLN|RED|GRY|WHI|GRN|BLU|HAZ|MRN|SDY|BAL|PNK|ONG|PLE|MUL|XXX)$/.test(s);
+            const isAddress = (s) => /^\d+\s+[A-Za-z]/.test(s) && /\b(Dr|St|Ave|Blvd|Rd|Ln|Way|Ct|Pl|Wy|Av)\b/i.test(s);
+            const isPhone = (s) => /^\d{3}-\d{3}-\d{4}$/.test(s) || /^\(\d{3}\)\s*\d{3}-\d{4}$/.test(s);
+            const isAction = (s) => /^(On-View Arrest|Cited|Warrant Arrest|Complaint Sought)/i.test(s);
+            const isCharge = (s) => /\b(PC|HS|VC|BP|FC|WI|CC)\b/.test(s) && /\d/.test(s);
+
+            // Determine person roles by position on cover page.
+            // Labels section contains role markers: "Victim", "Witness", "Suspect Arrested", etc.
+            // We find what roles exist and their order.
+            const roleLabels = [];
+            const rolePat = /^(Victim|Witness|Suspect\s*(?:Arrested)?|Reporting Party|Parent\/Guardian|Other)\s*$/i;
+            for (let i = 0; i < Math.min(lines.length, 200); i++) {
+                const m = lines[i].match(rolePat);
+                if (m) {
+                    let role = m[1].trim().toUpperCase();
+                    if (role.startsWith('SUSPECT')) role = 'SUSPECT';
+                    if (role === 'PARENT/GUARDIAN') role = 'REPORTING PARTY';
+                    if (!roleLabels.includes(role)) roleLabels.push(role);
+                }
+            }
+            if (!roleLabels.length) roleLabels.push('VICTIM', 'WITNESS', 'SUSPECT');
+
+            // Find start of values section — after the labels block.
+            // Heuristic: look for the first date-range or time value after the "Attempt/Completed" line
+            let valStart = 0;
+            for (let i = 0; i < lines.length; i++) {
+                if (/A\/C.*Attempt/i.test(lines[i]) || /Attempt.*Completed/i.test(lines[i])) {
+                    valStart = i + 1; break;
+                }
+            }
+            // Also try: first line that matches a date range after line 50
+            if (!valStart) {
+                for (let i = 50; i < Math.min(lines.length, 150); i++) {
+                    if (/^\d{1,2}\/\d{1,2}\/\d{2,4}\s*-\s*\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(lines[i])) {
+                        valStart = i; break;
+                    }
+                }
+            }
+
+            // Walk the values section and collect person blocks
+            const persons = [];
+            let currentPerson = null;
+            let roleIdx = 0;
+            let skipCaseInfo = true; // first few values are case-level (date, location, etc.)
+            let fieldsCollected = 0;
+
+            function pushPerson() {
+                if (currentPerson && (currentPerson.name || currentPerson.dob)) {
+                    persons.push(currentPerson);
+                }
+            }
+
+            function newPerson() {
+                pushPerson();
+                const role = roleLabels[roleIdx] || 'PERSON INVOLVED';
+                if (roleIdx < roleLabels.length) roleIdx++;
+                currentPerson = {
+                    involvement: role, name: '', dob: '', age: '', sex: '', race: '',
+                    ethnicity: '', address: '', phone: '', height: '', weight: '',
+                    hair: '', eyes: '', comments: '', guardian: '', detail: ''
+                };
+                fieldsCollected = 0;
+            }
+
+            for (let i = valStart; i < lines.length; i++) {
+                const l = lines[i];
+                if (!l) continue;
+
+                // Stop at OFFENSES section or narrative sections
+                if (/^OFFENSES$/i.test(l) || /^NARRATIVE/i.test(l) || /^SUMMARY:/i.test(l) ||
+                    /^CRIME REPORT\s*-\s*PROPERTY/i.test(l) || /^ARREST REPORT$/i.test(l)) break;
+
+                // Skip case-level values at the start
+                if (skipCaseInfo) {
+                    // First name-like value or "(Confidential" signals persons section
+                    if (isName(l) || /^\(Confidential/i.test(l)) {
+                        skipCaseInfo = false;
+                    } else {
+                        continue;
+                    }
+                }
+
+                // Detect start of new person block — a name-like value
+                if ((isName(l) || /^\(Confidential/i.test(l)) && fieldsCollected > 3) {
+                    // New person
+                    newPerson();
+                    currentPerson.name = l;
+                    fieldsCollected++;
+                    continue;
+                }
+
+                if (!currentPerson) {
+                    newPerson();
+                    currentPerson.name = l;
+                    fieldsCollected++;
+                    continue;
+                }
+
+                // Fill person fields
+                if (isAddress(l) && !currentPerson.address) { currentPerson.address = l; fieldsCollected++; }
+                else if (isPhone(l) && !currentPerson.phone) { currentPerson.phone = l; fieldsCollected++; }
+                else if (isDOB(l) && !currentPerson.dob) { currentPerson.dob = l; fieldsCollected++; }
+                else if (isSex(l) && !currentPerson.sex) { currentPerson.sex = l; fieldsCollected++; }
+                else if (isRace(l) && !currentPerson.race) { currentPerson.race = l; fieldsCollected++; }
+                else if (isHeight(l) && !currentPerson.height) { currentPerson.height = l; fieldsCollected++; }
+                else if (isWeight(l) && !currentPerson.weight && currentPerson.height) { currentPerson.weight = l; fieldsCollected++; }
+                else if (isHairEye(l) && !currentPerson.hair) { currentPerson.hair = l; fieldsCollected++; }
+                else if (isHairEye(l) && currentPerson.hair && !currentPerson.eyes) { currentPerson.eyes = l; fieldsCollected++; }
+                else if (isAction(l)) { currentPerson.comments = (currentPerson.comments ? currentPerson.comments + '; ' : '') + 'Action: ' + l; fieldsCollected++; }
+                else if (isCharge(l)) { currentPerson.comments = (currentPerson.comments ? currentPerson.comments + '; ' : '') + l; fieldsCollected++; }
+                else if (isName(l)) {
+                    // Another name with few fields → start new person
+                    newPerson();
+                    currentPerson.name = l;
+                    fieldsCollected++;
+                }
+                else { fieldsCollected++; }
+            }
+            pushPerson();
+
+            // --- Page 2: Reporting Party / Parent/Guardian ---
+            // These sections have labels-then-values per block (different from page 1)
+            const rpIdx = lines.findIndex(l => /^Reporting Party$/i.test(l));
+            if (rpIdx > 0) {
+                // Find the values after labels for this section
+                let vi = rpIdx + 1;
+                // Skip label lines until we hit a name-like value
+                while (vi < lines.length && vi < rpIdx + 30) {
+                    if (isName(lines[vi])) break;
+                    vi++;
+                }
+                if (vi < lines.length && isName(lines[vi])) {
+                    const rp = {
+                        involvement: 'REPORTING PARTY', name: lines[vi], dob: '', age: '', sex: '', race: '',
+                        ethnicity: '', address: '', phone: '', height: '', weight: '',
+                        hair: '', eyes: '', comments: '', guardian: '', detail: ''
+                    };
+                    // Check if this person is already in persons list (as victim/witness)
+                    const alreadyExists = persons.some(p => p.name === rp.name);
+                    for (let j = vi + 1; j < Math.min(vi + 20, lines.length); j++) {
+                        const v = lines[j];
+                        if (isAddress(v) && !rp.address) rp.address = v;
+                        else if (isDOB(v) && !rp.dob) rp.dob = v;
+                        else if (isSex(v) && !rp.sex) rp.sex = v;
+                        else if (isRace(v) && !rp.race) rp.race = v;
+                        else if (isPhone(v) && !rp.phone) rp.phone = v;
+                        else if (/^Parent\/Guardian$/i.test(v)) break;
+                    }
+                    if (!alreadyExists) persons.push(rp);
+                }
+            }
+
+            report.personsInvolved = persons;
+
+            // ============================================
+            // OFFENSES — from the structured OFFENSES block
+            // ============================================
+            // Pattern: F/M (felony/misdemeanor) then C/A (completed/attempted)
+            // then statute + description
+            const offStart = lines.findIndex(l => l === 'OFFENSES');
+            if (offStart >= 0) {
+                let i = offStart + 1;
+                // Skip non-offense lines (VEHICLES, OFFICERS, ages, phones, coords, CII)
+                while (i < lines.length) {
+                    const l = lines[i];
+                    if (/^[FM]$/.test(l)) {
+                        const severity = l === 'F' ? 'FELONY' : 'MISDEMEANOR';
+                        i++;
+                        let status = '';
+                        if (i < lines.length && /^[CA]$/.test(lines[i])) {
+                            status = lines[i] === 'C' ? 'COMPLETED' : 'ATTEMPTED';
+                            i++;
+                        }
+                        // Next line(s): statute + description (may be on separate lines)
+                        let statute = '', desc = '';
+                        if (i < lines.length) {
+                            const statLine = lines[i];
+                            // Pattern: "311.11(A) PC" or "647(J)(4)(A) PC Description"
+                            const sm = statLine.match(/^([\d.()\/]+(?:\([A-Za-z0-9]+\))*\s*(?:PC|HS|VC|BP|FC|WI|CC))\s*(.*)/i);
+                            if (sm) {
+                                statute = sm[1].trim();
+                                desc = sm[2].trim();
+                                i++;
+                                // Description continues on following lines (not F/M, not Routed)
+                                while (i < lines.length && lines[i] && !/^[FM]$/.test(lines[i]) &&
+                                       !/^Routed/i.test(lines[i])) {
+                                    desc += (desc ? ' ' : '') + lines[i];
+                                    i++;
+                                }
+                            } else { i++; }
+                        }
+                        if (statute) {
+                            report.offenses.push({
+                                number: report.offenses.length + 1,
+                                status, statute, description: desc.trim(), severity
+                            });
+                        }
+                        continue;
+                    }
+                    if (/^Routed To/i.test(l)) break;
+                    i++;
+                }
+            }
+
+            // ============================================
+            // NARRATIVES — main narrative + supplements
+            // ============================================
+            // Narrative pages contain continuous text between header/footer blocks.
+            // Footer pattern includes: agency name, page#, case#, address, phone,
+            //   "NARRATIVE - Title" or "SUPPLEMENT N - Title",
+            //   "Prepared By:", badge/name/date, "Approved By:", badge/name/date,
+            //   "BODY CAMERA RECORDED"
+
+            // Collect narrative sections with their titles and officers
+            const narrSections = [];
+            const narrTitlePat = /^(NARRATIVE\s*-\s*.+|SUPPLEMENT\s+\d+\s*-\s*.+)$/i;
+            // Also detect the inline start of narrative text
+            const summaryIdx = lines.findIndex(l => /^SUMMARY:$/i.test(l));
+            const narrativeTextIdx = lines.findIndex(l => /^NARRATIVE:$/i.test(l));
+
+            // Extract officer info from footer blocks near narrative titles
+            const footerOfficerPat = /^(\d{3,5})\s*$/;
+            const officerNamePat = /^([A-Z][A-Z]+,\s+[A-Z][A-Z]+(?:\s+[A-Z]\.?)?)\s*$/;
+
+            // Find all narrative title lines and their associated officers
+            for (let i = 0; i < lines.length; i++) {
+                const tm = lines[i].match(narrTitlePat);
+                if (tm) {
+                    const title = tm[1].trim();
+                    let officer = '', badge = '';
+                    // Look ahead for Prepared By → badge → name
+                    for (let j = i + 1; j < Math.min(i + 12, lines.length); j++) {
+                        if (/^Prepared By/i.test(lines[j])) {
+                            // Badge and name follow after Date:/Approved By:/Date: lines
+                            for (let k = j + 1; k < Math.min(j + 10, lines.length); k++) {
+                                if (/^\d{3,5}$/.test(lines[k]) && !badge) { badge = lines[k]; }
+                                else if (/^[A-Z][A-Z]+,\s+[A-Z]/.test(lines[k]) && !officer) { officer = lines[k]; }
+                                if (badge && officer) break;
+                            }
+                            break;
+                        }
+                    }
+                    // Avoid duplicate entries for same title
+                    if (!narrSections.find(n => n.title === title)) {
+                        narrSections.push({ title, officer, badge });
+                    }
+                }
+            }
+
+            // Now extract the actual narrative text.
+            // The narrative text is everything between "CONTROLLED DOCUMENT" headers
+            // and the agency footer blocks on narrative pages.
+            // Simplest approach: collect all text from SUMMARY/NARRATIVE to end,
+            // stripping footer blocks.
+
+            const controlledDoc = /CONTROLLED DOCUMENT.*DO NOT DUPLICATE/i;
+            const agencyHeader = agencyName ? new RegExp('^' + agencyName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') : null;
+            const pageNumPat = /^Page \d+$/;
+            const caseNumPat = caseNumber ? new RegExp('^' + caseNumber + '$') : null;
+            const phonePat = /^\d{3}-\d{3}-\d{4}$/;
+            const prepApprPat = /^(Prepared By|Approved By|Date):?$/i;
+            const bodyCamPat = /^\[.\]\s*BODY CAMERA RECORDED$/i;
+
+            let textStart = summaryIdx >= 0 ? summaryIdx : narrativeTextIdx >= 0 ? narrativeTextIdx : -1;
+            if (textStart < 0) {
+                // Try to find where narrative pages begin
+                for (let i = 0; i < lines.length; i++) {
+                    if (narrTitlePat.test(lines[i])) {
+                        // Walk back to find start of this page's text
+                        textStart = i;
+                        break;
+                    }
+                }
+            }
+
+            if (textStart >= 0) {
+                // Two-pass approach:
+                // Pass 1: collect text + record footer positions with their titles
+                // Pass 2: use footer positions to split text into narrative sections
+
+                const rawNarrLines = []; // {line, isFooterEnd, footerTitle}
+                let i = textStart;
+
+                while (i < lines.length) {
+                    const l = lines[i];
+                    if (controlledDoc.test(l)) { i++; continue; }
+
+                    if (agencyHeader && agencyHeader.test(l)) {
+                        let j = i + 1;
+                        let isFooter = false;
+                        while (j < Math.min(i + 20, lines.length)) {
+                            if (narrTitlePat.test(lines[j]) || prepApprPat.test(lines[j])) { isFooter = true; break; }
+                            j++;
+                        }
+                        if (isFooter) {
+                            let footerTitle = '';
+                            for (let fi = i; fi < Math.min(i + 20, lines.length); fi++) {
+                                const ftm = lines[fi].match(narrTitlePat);
+                                if (ftm) { footerTitle = ftm[1].trim(); break; }
+                            }
+                            while (i < lines.length) {
+                                if (bodyCamPat.test(lines[i])) { i++; break; }
+                                i++;
+                                if (i > j + 20) break;
+                            }
+                            // Record that a footer ended here with this title
+                            rawNarrLines.push({ line: null, footerTitle: footerTitle || '' });
+                            continue;
+                        }
+                    }
+
+                    if (pageNumPat.test(l)) { i++; continue; }
+                    if (caseNumPat && caseNumPat.test(l)) { i++; continue; }
+                    if (/^ARREST REPORT$/i.test(l)) break;
+                    if (/^CRIME REPORT\s*-\s*PROPERTY/i.test(l)) { i++; continue; }
+
+                    rawNarrLines.push({ line: l, footerTitle: null });
+                    i++;
+                }
+
+                // Group into sections: text lines between footer markers belong to
+                // the section named by the NEXT footer (since footers appear at the END of their section).
+                // Strategy: walk backwards — each footer title labels the text above it until the previous footer.
+                const sections = []; // {title, textLines}
+                let currentLines = [];
+                let currentTitle = '';
+                // Walk forward, accumulating text. When we hit a footer marker, save section.
+                for (const entry of rawNarrLines) {
+                    if (entry.footerTitle !== null) {
+                        // Footer encountered — the text so far belongs to this footer's section
+                        if (currentLines.length > 0) {
+                            sections.push({ title: entry.footerTitle, lines: currentLines });
+                            currentLines = [];
+                        }
+                    } else {
+                        currentLines.push(entry.line);
+                    }
+                }
+                // Any remaining text after the last footer
+                if (currentLines.length > 0) {
+                    sections.push({ title: '', lines: currentLines });
+                }
+
+                // Merge consecutive sections with the same title
+                const merged = [];
+                for (const sec of sections) {
+                    if (merged.length > 0 && merged[merged.length - 1].title === sec.title) {
+                        merged[merged.length - 1].lines.push(...sec.lines);
+                    } else {
+                        merged.push({ title: sec.title, lines: [...sec.lines] });
+                    }
+                }
+
+                for (const sec of merged) {
+                    const text = sec.lines.join('\n').trim();
+                    if (!text || text.length < 50) continue;
+                    const section = sec.title
+                        ? narrSections.find(n => n.title.toUpperCase() === sec.title.toUpperCase())
+                        : narrSections.find(n => /^NARRATIVE/i.test(n.title)) || narrSections[0];
+                    report.narratives.push({
+                        officer: section ? section.officer : '',
+                        badge: section ? section.badge : '',
+                        text
+                    });
+                }
+                if (report.narratives.length === 0) {
+                    const allText = rawNarrLines.filter(e => e.line !== null).map(e => e.line).join('\n').trim();
+                    if (allText) report.narratives.push({ officer: '', badge: '', text: allText });
+                }
+            }
+
+            // ============================================
+            // PROPERTY — from "CRIME REPORT - PROPERTY" page
+            // ============================================
+            const propPageIdx = lines.findIndex(l => /CRIME REPORT\s*-\s*PROPERTY/i.test(l));
+            if (propPageIdx >= 0) {
+                // Property items: Status/Disposition + description blocks
+                let i = propPageIdx + 1;
+                let currentProp = null;
+                while (i < lines.length) {
+                    const l = lines[i];
+                    if (/^SUMMARY:/i.test(l) || /^NARRATIVE:/i.test(l)) break;
+                    // Skip headers/watermarks within property page
+                    if (controlledDoc.test(l) || /^Page \d+$/.test(l) || !l ||
+                        (caseNumPat && caseNumPat.test(l))) { i++; continue; }
+                    // Stop at next major section
+                    if (agencyHeader && agencyHeader.test(l)) {
+                        // Check if this is a new page header (Crime Report page or Narrative page)
+                        let nextFew = lines.slice(i + 1, i + 5).join(' ');
+                        if (/CRIME REPORT|NARRATIVE|SUPPLEMENT/i.test(nextFew)) break;
+                    }
+                    // New property item: numbered line followed by status
+                    if (/^\d+$/.test(l) && i + 1 < lines.length && /^(Evidence|Stolen|Recovered|Seized|Damaged|Lost|Found)/i.test(lines[i + 1])) {
+                        if (currentProp) report.property.push(currentProp);
+                        currentProp = { holdReason: lines[i + 1], articleType: '', make: '', description: '', quantity: '', value: '', recoveredValue: '' };
+                        i += 2;
+                        continue;
+                    }
+                    // Property description lines
+                    if (currentProp && l && !/^(Status|Property Description|ID No|Value|Val)/i.test(l)) {
+                        currentProp.description = (currentProp.description ? currentProp.description + ' ' : '') + l;
+                    }
+                    i++;
+                }
+                if (currentProp) report.property.push(currentProp);
+            }
+
+            // ============================================
+            // ARREST REPORT — detailed suspect info
+            // ============================================
+            const arrestIdx = lines.findIndex(l => /^ARREST REPORT$/i.test(l));
+            if (arrestIdx >= 0) {
+                // The arrest report has better-structured suspect data
+                // Look for the arrestee name on the next line
+                let arresteeName = '';
+                for (let i = arrestIdx + 1; i < Math.min(arrestIdx + 5, lines.length); i++) {
+                    if (/^[A-Z][A-Z]+,\s+[A-Z]/.test(lines[i])) { arresteeName = lines[i]; break; }
+                }
+                // Find matching suspect in personsInvolved and enrich
+                if (arresteeName) {
+                    const existing = report.personsInvolved.find(p =>
+                        /SUSPECT|ARRESTED/i.test(p.involvement) && p.name &&
+                        arresteeName.toUpperCase().startsWith(p.name.split(',')[0].toUpperCase()));
+                    if (existing) {
+                        // Enrich with arrest page data
+                        for (let i = arrestIdx; i < lines.length; i++) {
+                            const l = lines[i];
+                            if (isDOB(l) && !existing.dob) existing.dob = l;
+                            if (isAddress(l) && !existing.address) existing.address = l;
+                            if (isPhone(l) && !existing.phone) existing.phone = l;
+                            if (/^Booking #$/i.test(l) && lines[i + 1]) {
+                                existing.comments = (existing.comments ? existing.comments + '; ' : '') + 'Booking: ' + lines[i + 1];
+                            }
+                        }
+                    }
+                }
+            }
+
+            return report;
+        }
+
         /* ---------- RMS PDF Text Parser ---------- */
         function parseRmsReport(text, fileName) {
             // --- Format detection ---
@@ -25294,6 +25784,10 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             // Virginia / NIBRS-style field incident reports
             if (/INCIDENT PAGE \d+/i.test(text) && /Incident No\.\s*\n/i.test(text)) {
                 return parseFieldIncidentReport(text, fileName);
+            }
+            // Crime Report format (San Bruno PD style — form-based cover + narrative pages)
+            if (/CRIME REPORT/i.test(text) && /CONTROLLED DOCUMENT/i.test(text)) {
+                return parseCrimeReport(text, fileName);
             }
 
             // --- Original INFORM RMS parser continues below ---

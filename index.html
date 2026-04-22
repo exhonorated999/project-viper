@@ -4102,8 +4102,69 @@
             renderAllCasesView();
         }
 
+        // ============================================
+        // ALL CASES — customizable columns + sorting
+        // ============================================
+        const ALL_CASES_COLUMNS = [
+            { key: 'caseNumber',     label: 'Case Number',     default: true,  sortType: 'text' },
+            { key: 'synopsis',       label: 'Synopsis',        default: true,  sortType: 'text' },
+            { key: 'status',         label: 'Status',          default: true,  sortType: 'text' },
+            { key: 'created',        label: 'Created',         default: true,  sortType: 'date' },
+            { key: 'priority',       label: 'Priority',        default: false, sortType: 'number' },
+            { key: 'suspects',       label: 'Suspect(s)',      default: false, sortType: 'text' },
+            { key: 'victims',        label: 'Victim(s)',       default: false, sortType: 'text' },
+            { key: 'primaryOffense', label: 'Primary Offense', default: false, sortType: 'text' },
+            { key: 'offenseType',    label: 'Offense Type',    default: false, sortType: 'text' },
+            { key: 'dateAssigned',   label: 'Date Assigned',   default: false, sortType: 'date' },
+            { key: 'dateClosed',     label: 'Date Closed',     default: false, sortType: 'date' },
+        ];
+        let allCasesSortKey = 'created';
+        let allCasesSortDir = 'desc';
+
+        function getACVisibleCols() {
+            const saved = localStorage.getItem('viperAllCasesColumns');
+            if (saved) {
+                try { return JSON.parse(saved); } catch {}
+            }
+            return ALL_CASES_COLUMNS.filter(c => c.default).map(c => c.key);
+        }
+        function setACVisibleCols(cols) {
+            localStorage.setItem('viperAllCasesColumns', JSON.stringify(cols));
+        }
+
+        function getCaseExtras(c) {
+            const suspects = JSON.parse(localStorage.getItem('suspects_' + c.id) || '[]');
+            const victims  = JSON.parse(localStorage.getItem('victims_' + c.id) || '[]');
+            const suspectNames = suspects.map(s => s.name || ((s.firstName||'')+ ' '+(s.lastName||'')).trim() || 'Unknown').join(', ');
+            const victimNames  = victims.map(v => v.name || 'Unknown').join(', ');
+            return { suspectNames, victimNames };
+        }
+
+        function getCellValue(c, col, extras) {
+            switch(col) {
+                case 'caseNumber':     return c.caseNumber || '';
+                case 'synopsis':       return c.synopsis || '';
+                case 'status':         return c.status || '';
+                case 'created':        return c.createdAt || '';
+                case 'priority':       return c.priority || 0;
+                case 'suspects':       return extras.suspectNames || '';
+                case 'victims':        return extras.victimNames || '';
+                case 'primaryOffense': return c.primaryOffense || '';
+                case 'offenseType':    return c.offenseType || '';
+                case 'dateAssigned':   return c.dateAssigned || '';
+                case 'dateClosed':     return c.dateClosed || '';
+                default: return '';
+            }
+        }
+
         function renderAllCasesView() {
             const mainContent = document.querySelector('.flex-1.overflow-y-auto');
+            const visCols = getACVisibleCols();
+            const inactiveStatuses = ['closed','closed-arrest','transferred'];
+            const customStatuses = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
+            customStatuses.forEach(s => inactiveStatuses.push(s.id));
+            const activeCases = cases.filter(c => !inactiveStatuses.includes(c.status));
+            const closedCases = cases.filter(c => inactiveStatuses.includes(c.status));
             
             mainContent.innerHTML = `
                 <!-- Header -->
@@ -4121,8 +4182,6 @@
                         </button>
                     </div>
                 </div>
-
-                <!-- Content -->
                 <div class="p-8 space-y-6">
                     ${cases.length === 0 ? `
                         <div class="glass-card rounded-xl p-12 text-center">
@@ -4131,71 +4190,56 @@
                             </svg>
                             <h3 class="text-2xl font-bold text-gray-300 mb-2">No Cases Yet</h3>
                             <p class="text-gray-400 mb-6">Create your first case to get started</p>
-                            <button onclick="openCreateCaseModal()" class="px-6 py-3 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition">
-                                Create First Case
-                            </button>
+                            <button onclick="openCreateCaseModal()" class="px-6 py-3 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition">Create First Case</button>
                         </div>
                     ` : `
-                        <!-- Search and Filter -->
+                        <!-- Search, Filter, Columns gear -->
                         <div class="glass-card rounded-xl p-4">
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div class="md:col-span-2">
-                                    <div class="relative">
-                                        <svg class="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-                                        </svg>
-                                        <input type="text" id="caseSearch" placeholder="Search by case number or synopsis..." onkeyup="filterCases()" class="w-full pl-12 pr-4 py-3 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
-                                    </div>
+                            <div class="flex gap-4 items-center">
+                                <div class="flex-1 relative">
+                                    <svg class="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                                    </svg>
+                                    <input type="text" id="caseSearch" placeholder="Search cases..." onkeyup="filterCases()" class="w-full pl-12 pr-4 py-3 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
                                 </div>
-                                <div>
-                                    <select id="caseStatusFilter" onchange="filterCases()" class="w-full px-4 py-3 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
-                                        <option value="all">All Statuses</option>
-                                        <option value="active">Active</option>
-                                        <option value="pending">Pending</option>
-                                        <option value="closed">Closed</option>
-                                    </select>
-                                </div>
+                                <select id="caseStatusFilter" onchange="filterCases()" class="px-4 py-3 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
+                                    <option value="all">All Statuses</option>
+                                    <option value="active">Active</option>
+                                    <option value="closed">Closed</option>
+                                    <option value="transferred">Transferred</option>
+                                </select>
+                                <button onclick="openACColumnPicker()" class="p-3 bg-viper-dark border border-gray-600 rounded-lg text-gray-400 hover:text-viper-cyan hover:border-viper-cyan transition" title="Customize columns">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                    </svg>
+                                </button>
                             </div>
                         </div>
 
-                        <!-- Statistics -->
+                        <!-- Stats -->
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div class="glass-card rounded-xl p-4">
                                 <div class="flex items-center justify-between">
-                                    <div>
-                                        <p class="text-sm text-gray-400">Total Cases</p>
-                                        <p class="text-2xl font-bold text-white mt-1">${cases.length}</p>
-                                    </div>
+                                    <div><p class="text-sm text-gray-400">Total Cases</p><p class="text-2xl font-bold text-white mt-1">${cases.length}</p></div>
                                     <div class="w-12 h-12 bg-viper-cyan/20 rounded-lg flex items-center justify-center">
-                                        <svg class="w-6 h-6 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                                        </svg>
+                                        <svg class="w-6 h-6 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                                     </div>
                                 </div>
                             </div>
                             <div class="glass-card rounded-xl p-4">
                                 <div class="flex items-center justify-between">
-                                    <div>
-                                        <p class="text-sm text-gray-400">Active Cases</p>
-                                        <p class="text-2xl font-bold text-white mt-1">${cases.filter(c => !['closed','closed-arrest','transferred'].includes(c.status)).length}</p>
-                                    </div>
+                                    <div><p class="text-sm text-gray-400">Active Cases</p><p class="text-2xl font-bold text-white mt-1">${activeCases.length}</p></div>
                                     <div class="w-12 h-12 bg-viper-green/20 rounded-lg flex items-center justify-center">
-                                        <svg class="w-6 h-6 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                                        </svg>
+                                        <svg class="w-6 h-6 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                                     </div>
                                 </div>
                             </div>
                             <div class="glass-card rounded-xl p-4">
                                 <div class="flex items-center justify-between">
-                                    <div>
-                                        <p class="text-sm text-gray-400">Closed Cases</p>
-                                        <p class="text-2xl font-bold text-white mt-1">${cases.filter(c => c.status === 'closed' || c.status === 'closed-arrest').length}</p>
-                                    </div>
+                                    <div><p class="text-sm text-gray-400">Closed Cases</p><p class="text-2xl font-bold text-white mt-1">${closedCases.length}</p></div>
                                     <div class="w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center">
-                                        <svg class="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-                                        </svg>
+                                        <svg class="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                                     </div>
                                 </div>
                             </div>
@@ -4207,11 +4251,13 @@
                                 <table class="w-full">
                                     <thead class="bg-gradient-to-r from-viper-cyan/20 to-viper-purple/20 border-b border-viper-cyan/30">
                                         <tr>
-                                            <th class="px-6 py-4 text-left text-xs font-medium text-viper-cyan uppercase tracking-wider">Case Number</th>
-                                            <th class="px-6 py-4 text-left text-xs font-medium text-viper-cyan uppercase tracking-wider">Synopsis</th>
-                                            <th class="px-6 py-4 text-left text-xs font-medium text-viper-cyan uppercase tracking-wider">Status</th>
-                                            <th class="px-6 py-4 text-left text-xs font-medium text-viper-cyan uppercase tracking-wider">Created</th>
-                                            <th class="px-6 py-4 text-left text-xs font-medium text-viper-cyan uppercase tracking-wider">Actions</th>
+                                            ${visCols.map(key => {
+                                                const col = ALL_CASES_COLUMNS.find(c => c.key === key);
+                                                if (!col) return '';
+                                                const arrow = allCasesSortKey === key ? (allCasesSortDir === 'asc' ? ' ↑' : ' ↓') : ' ↕';
+                                                return '<th onclick="sortAllCases(\'' + key + '\')" class="px-5 py-4 text-left text-xs font-medium text-viper-cyan uppercase tracking-wider cursor-pointer hover:text-white transition select-none whitespace-nowrap">' + col.label + '<span class="ml-1 text-gray-500">' + arrow + '</span></th>';
+                                            }).join('')}
+                                            <th class="px-5 py-4 text-left text-xs font-medium text-viper-cyan uppercase tracking-wider">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody id="casesTableBody" class="divide-y divide-gray-700">
@@ -4227,71 +4273,115 @@
 
         function renderCasesTableRows() {
             let filtered = [...cases];
-            const searchTerm = document.getElementById('caseSearch')?.value.toLowerCase() || '';
+            const searchTerm = document.getElementById('caseSearch')?.value?.toLowerCase() || '';
             const statusFilter = document.getElementById('caseStatusFilter')?.value || 'all';
+            const visCols = getACVisibleCols();
+
+            // Build extras cache
+            const extrasMap = {};
+            filtered.forEach(c => { extrasMap[c.id] = getCaseExtras(c); });
 
             if (searchTerm) {
-                filtered = filtered.filter(c => 
-                    c.caseNumber.toLowerCase().includes(searchTerm) ||
-                    c.synopsis.toLowerCase().includes(searchTerm)
-                );
-            }
-
-            if (statusFilter !== 'all') {
                 filtered = filtered.filter(c => {
-                    // Handle closed status to match both 'closed' and 'closed-arrest'
-                    if (statusFilter === 'closed') {
-                        return c.status === 'closed' || c.status === 'closed-arrest';
-                    }
-                    return c.status === statusFilter;
+                    const ex = extrasMap[c.id];
+                    return c.caseNumber.toLowerCase().includes(searchTerm) ||
+                           (c.synopsis||'').toLowerCase().includes(searchTerm) ||
+                           (c.primaryOffense||'').toLowerCase().includes(searchTerm) ||
+                           (ex.suspectNames||'').toLowerCase().includes(searchTerm) ||
+                           (ex.victimNames||'').toLowerCase().includes(searchTerm);
                 });
             }
 
-            // Sort by creation date, newest first
-            filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-            if (filtered.length === 0) {
-                return `
-                    <tr>
-                        <td colspan="5" class="px-6 py-8 text-center text-gray-400">
-                            No cases found
-                        </td>
-                    </tr>
-                `;
+            if (statusFilter !== 'all') {
+                const inactiveStatuses = ['closed','closed-arrest','transferred'];
+                const customStatuses = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
+                customStatuses.forEach(s => inactiveStatuses.push(s.id));
+                if (statusFilter === 'active') {
+                    filtered = filtered.filter(c => !inactiveStatuses.includes(c.status));
+                } else if (statusFilter === 'closed') {
+                    filtered = filtered.filter(c => inactiveStatuses.includes(c.status));
+                } else if (statusFilter === 'transferred') {
+                    filtered = filtered.filter(c => c.status === 'transferred');
+                } else {
+                    filtered = filtered.filter(c => c.status === statusFilter);
+                }
             }
 
-            return filtered.map(c => {
-                let statusColor = 'gray-400';
-                if (c.status === 'active') statusColor = 'viper-green';
-                else if (c.status === 'pending') statusColor = 'viper-orange';
-                
-                const createdDate = new Date(c.createdAt).toLocaleDateString();
+            // Sort
+            const colDef = ALL_CASES_COLUMNS.find(c => c.key === allCasesSortKey);
+            const sType = colDef ? colDef.sortType : 'text';
+            filtered.sort((a, b) => {
+                const exA = extrasMap[a.id], exB = extrasMap[b.id];
+                let vA = getCellValue(a, allCasesSortKey, exA);
+                let vB = getCellValue(b, allCasesSortKey, exB);
+                let cmp = 0;
+                if (sType === 'date') {
+                    cmp = (new Date(vA||0)) - (new Date(vB||0));
+                } else if (sType === 'number') {
+                    cmp = (Number(vA)||0) - (Number(vB)||0);
+                } else {
+                    cmp = String(vA).localeCompare(String(vB), undefined, {sensitivity:'base'});
+                }
+                return allCasesSortDir === 'asc' ? cmp : -cmp;
+            });
 
-                return `
-                    <tr class="hover:bg-viper-dark/30 cursor-pointer" onclick="openCase('${c.id}')">
-                        <td class="px-6 py-4 text-sm font-semibold text-viper-cyan">${c.caseNumber}</td>
-                        <td class="px-6 py-4 text-sm text-white">${c.synopsis.substring(0, 80)}${c.synopsis.length > 80 ? '...' : ''}</td>
-                        <td class="px-6 py-4 text-sm">
-                            <span class="px-3 py-1 rounded-full text-xs font-semibold bg-${statusColor}/20 text-${statusColor} border border-${statusColor}">
-                                ${c.status.toUpperCase()}
-                            </span>
-                        </td>
-                        <td class="px-6 py-4 text-sm text-gray-400">${createdDate}</td>
-                        <td class="px-6 py-4 text-sm">
-                            <div class="flex items-center gap-3">
-                                <button onclick="event.stopPropagation(); openCase('${c.id}')" class="text-viper-cyan hover:text-white transition">
-                                    Open
-                                </button>
-                                <button onclick="event.stopPropagation(); showDeleteCaseModal('${c.id}')" class="text-gray-500 hover:text-red-400 transition" title="Delete case">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                                    </svg>
-                                </button>
-                            </div>
-                        </td>
-                    </tr>
-                `;
+            if (filtered.length === 0) {
+                return '<tr><td colspan="' + (visCols.length + 1) + '" class="px-6 py-8 text-center text-gray-400">No cases found</td></tr>';
+            }
+
+            const priorityColors = {1:'bg-red-500',2:'bg-orange-500',3:'bg-yellow-500',4:'bg-green-500'};
+            const priorityLabels = {1:'Critical',2:'High',3:'Medium',4:'Low'};
+
+            return filtered.map(c => {
+                const ex = extrasMap[c.id];
+                const cells = visCols.map(col => {
+                    switch(col) {
+                        case 'caseNumber':
+                            return '<td class="px-5 py-4 text-sm font-semibold text-viper-cyan whitespace-nowrap">' + c.caseNumber + '</td>';
+                        case 'synopsis':
+                            const syn = (c.synopsis||'').length > 70 ? c.synopsis.substring(0,70)+'…' : (c.synopsis||'');
+                            return '<td class="px-5 py-4 text-sm text-white max-w-xs truncate">' + syn + '</td>';
+                        case 'status': {
+                            let sc = 'gray-400';
+                            if (c.status === 'active') sc = 'viper-green';
+                            else if (c.status === 'closed' || c.status === 'closed-arrest') sc = 'blue-400';
+                            else if (c.status === 'transferred') sc = 'purple-400';
+                            const label = c.status.replace(/-/g,' ').replace(/\b\w/g,l=>l.toUpperCase());
+                            return '<td class="px-5 py-4 text-sm"><span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-' + sc + '/20 text-' + sc + '">' + label + '</span></td>';
+                        }
+                        case 'created':
+                            return '<td class="px-5 py-4 text-sm text-gray-400 whitespace-nowrap">' + (c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '') + '</td>';
+                        case 'priority': {
+                            if (!c.priority) return '<td class="px-5 py-4 text-sm text-gray-600">—</td>';
+                            return '<td class="px-5 py-4 text-sm whitespace-nowrap"><span class="inline-block w-2.5 h-2.5 rounded-full ' + (priorityColors[c.priority]||'') + ' mr-1.5"></span>' + (priorityLabels[c.priority]||'') + '</td>';
+                        }
+                        case 'suspects':
+                            return '<td class="px-5 py-4 text-sm text-white max-w-[200px] truncate">' + (ex.suspectNames || '<span class="text-gray-600">—</span>') + '</td>';
+                        case 'victims':
+                            return '<td class="px-5 py-4 text-sm text-white max-w-[200px] truncate">' + (ex.victimNames || '<span class="text-gray-600">—</span>') + '</td>';
+                        case 'primaryOffense':
+                            return '<td class="px-5 py-4 text-sm text-white max-w-[200px] truncate">' + (c.primaryOffense || '<span class="text-gray-600">—</span>') + '</td>';
+                        case 'offenseType':
+                            return '<td class="px-5 py-4 text-sm text-white whitespace-nowrap">' + (c.offenseType || '<span class="text-gray-600">—</span>') + '</td>';
+                        case 'dateAssigned':
+                            return '<td class="px-5 py-4 text-sm text-gray-400 whitespace-nowrap">' + (c.dateAssigned ? new Date(c.dateAssigned).toLocaleDateString() : '<span class="text-gray-600">—</span>') + '</td>';
+                        case 'dateClosed':
+                            return '<td class="px-5 py-4 text-sm text-gray-400 whitespace-nowrap">' + (c.dateClosed ? new Date(c.dateClosed).toLocaleDateString() : '<span class="text-gray-600">—</span>') + '</td>';
+                        default: return '<td></td>';
+                    }
+                }).join('');
+                return '<tr class="hover:bg-viper-dark/30 cursor-pointer" onclick="openCase(\'' + c.id + '\')">' + cells + '<td class="px-5 py-4 text-sm"><div class="flex items-center gap-3"><button onclick="event.stopPropagation(); openCase(\'' + c.id + '\')" class="text-viper-cyan hover:text-white transition">Open</button><button onclick="event.stopPropagation(); showDeleteCaseModal(\'' + c.id + '\')" class="text-gray-500 hover:text-red-400 transition" title="Delete"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button></div></td></tr>';
             }).join('');
+        }
+
+        function sortAllCases(key) {
+            if (allCasesSortKey === key) {
+                allCasesSortDir = allCasesSortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                allCasesSortKey = key;
+                allCasesSortDir = 'asc';
+            }
+            renderAllCasesView();
         }
 
         function filterCases() {
@@ -4299,6 +4389,45 @@
             if (tableBody) {
                 tableBody.innerHTML = renderCasesTableRows();
             }
+        }
+
+        function openACColumnPicker() {
+            const existing = document.getElementById('acColumnPickerModal');
+            if (existing) existing.remove();
+            const visCols = getACVisibleCols();
+            const modal = document.createElement('div');
+            modal.id = 'acColumnPickerModal';
+            modal.className = 'fixed inset-0 bg-black/60 flex items-center justify-center z-50';
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+            modal.innerHTML = `
+                <div class="bg-viper-card border border-gray-700 rounded-xl w-full max-w-sm mx-4 overflow-hidden shadow-2xl">
+                    <div class="border-b border-gray-700 px-6 py-4 flex items-center justify-between">
+                        <h3 class="text-lg font-bold text-white">Visible Columns</h3>
+                        <button onclick="document.getElementById('acColumnPickerModal').remove()" class="text-gray-400 hover:text-white">✕</button>
+                    </div>
+                    <div class="p-6 space-y-2 max-h-80 overflow-y-auto">
+                        ${ALL_CASES_COLUMNS.map(col => `
+                            <label class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer">
+                                <input type="checkbox" value="${col.key}" ${visCols.includes(col.key)?'checked':''} ${col.key==='caseNumber'?'disabled checked':''} class="ac-col-cb accent-cyan-400 w-4 h-4">
+                                <span class="text-sm text-gray-200">${col.label}</span>
+                            </label>
+                        `).join('')}
+                    </div>
+                    <div class="border-t border-gray-700 px-6 py-4 flex justify-end">
+                        <button onclick="applyACColumns()" class="px-5 py-2 bg-viper-cyan hover:bg-viper-cyan/80 rounded-lg text-black font-semibold transition text-sm">Apply</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        function applyACColumns() {
+            const checks = document.querySelectorAll('.ac-col-cb:checked');
+            const cols = Array.from(checks).map(cb => cb.value);
+            if (!cols.includes('caseNumber')) cols.unshift('caseNumber');
+            setACVisibleCols(cols);
+            document.getElementById('acColumnPickerModal')?.remove();
+            renderAllCasesView();
         }
 
         function openCase(caseId) {

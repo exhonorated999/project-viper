@@ -3326,6 +3326,22 @@
                                     <label class="text-sm text-gray-400">Created Date</label>
                                     <p class="text-white mt-1">${new Date(currentCase.createdAt).toLocaleString()}</p>
                                 </div>
+                                <div>
+                                    <label class="text-sm text-gray-400">Date Assigned</label>
+                                    <p class="text-white mt-1">${currentCase.dateAssigned ? new Date(currentCase.dateAssigned).toLocaleDateString() : '<span class="text-gray-500 italic">Not set</span>'}</p>
+                                </div>
+                                <div>
+                                    <label class="text-sm text-gray-400">Date Closed</label>
+                                    <p class="text-white mt-1">${currentCase.dateClosed ? new Date(currentCase.dateClosed).toLocaleDateString() : '<span class="text-gray-500 italic">—</span>'}</p>
+                                </div>
+                                <div>
+                                    <label class="text-sm text-gray-400">Primary Offense</label>
+                                    <p class="text-white mt-1">${currentCase.primaryOffense || '<span class="text-gray-500 italic">Not set</span>'}</p>
+                                </div>
+                                <div>
+                                    <label class="text-sm text-gray-400">Offense Type</label>
+                                    <p class="text-white mt-1">${currentCase.offenseType || '<span class="text-gray-500 italic">Not set</span>'}</p>
+                                </div>
                                 ${currentCase.charges ? `
                                 <div class="col-span-2">
                                     <label class="text-sm text-gray-400">Charges</label>
@@ -3365,6 +3381,23 @@
                                 <div>
                                     <label class="text-sm text-gray-400 block mb-1">Created By</label>
                                     <input type="text" id="editCaseCreatedBy" value="${currentCase.createdBy || ''}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
+                                </div>
+                                <div>
+                                    <label class="text-sm text-gray-400 block mb-1">Date Assigned</label>
+                                    <input type="date" id="editDateAssigned" value="${currentCase.dateAssigned ? currentCase.dateAssigned.split('T')[0] : ''}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
+                                </div>
+                                <div>
+                                    <label class="text-sm text-gray-400 block mb-1">Primary Offense</label>
+                                    <input type="text" id="editPrimaryOffense" value="${currentCase.primaryOffense || ''}" placeholder="e.g. 487(a) PC - Grand Theft" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
+                                </div>
+                                <div>
+                                    <label class="text-sm text-gray-400 block mb-1">Offense Type</label>
+                                    <select id="editOffenseType" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
+                                        <option value="" ${!currentCase.offenseType ? 'selected' : ''}>— Select —</option>
+                                        <option value="Felony" ${currentCase.offenseType==='Felony' ? 'selected' : ''}>Felony</option>
+                                        <option value="Misdemeanor" ${currentCase.offenseType==='Misdemeanor' ? 'selected' : ''}>Misdemeanor</option>
+                                        <option value="Infraction" ${currentCase.offenseType==='Infraction' ? 'selected' : ''}>Infraction</option>
+                                    </select>
                                 </div>
                                 <div class="col-span-2">
                                     <label class="text-sm text-gray-400 block mb-1">Synopsis</label>
@@ -21011,20 +21044,37 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const newCreatedBy = document.getElementById('editCaseCreatedBy').value.trim();
             const newSynopsis = document.getElementById('editCaseSynopsis').value.trim();
             const newCharges = document.getElementById('editCaseCharges').value.trim();
+            const newDateAssigned = document.getElementById('editDateAssigned')?.value || '';
+            const newPrimaryOffense = document.getElementById('editPrimaryOffense')?.value?.trim() || '';
+            const newOffenseType = document.getElementById('editOffenseType')?.value || '';
 
             if (!newCaseNumber) { showToast('Case number is required', 'error'); return; }
 
             const oldCaseNumber = currentCase.caseNumber;
+            const oldStatus = currentCase.status;
             currentCase.caseNumber = newCaseNumber;
             currentCase.name = newName || 'Case ' + newCaseNumber;
             currentCase.status = newStatus;
             currentCase.createdBy = newCreatedBy;
             currentCase.synopsis = newSynopsis;
             currentCase.charges = newCharges;
+            currentCase.dateAssigned = newDateAssigned || null;
+            currentCase.primaryOffense = newPrimaryOffense || null;
+            currentCase.offenseType = newOffenseType || null;
 
             // Save priority if enabled
             const editPriEl = document.getElementById('editCasePriority');
             if (editPriEl) currentCase.priority = parseInt(editPriEl.value) || 0;
+
+            // Auto-set dateClosed when status changes to closed/inactive
+            const inactiveStatuses = ['closed', 'closed-arrest', 'transferred'];
+            const customStatuses = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
+            customStatuses.forEach(s => inactiveStatuses.push(s.id));
+            if (inactiveStatuses.includes(newStatus) && !inactiveStatuses.includes(oldStatus)) {
+                currentCase.dateClosed = new Date().toISOString();
+            } else if (!inactiveStatuses.includes(newStatus)) {
+                currentCase.dateClosed = null;
+            }
 
             saveCase();
             renderCaseHeader();
@@ -21040,8 +21090,19 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         }
 
         function updateCaseStatus(newStatus) {
+            const oldStatus = currentCase.status;
             currentCase.status = newStatus;
             currentCase.lastModified = new Date().toISOString();
+
+            // Auto-set dateClosed when moving to inactive status
+            const inactiveStatuses = ['closed', 'closed-arrest', 'transferred'];
+            const customStatuses = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
+            customStatuses.forEach(s => inactiveStatuses.push(s.id));
+            if (inactiveStatuses.includes(newStatus) && !inactiveStatuses.includes(oldStatus)) {
+                currentCase.dateClosed = new Date().toISOString();
+            } else if (!inactiveStatuses.includes(newStatus)) {
+                currentCase.dateClosed = null;
+            }
             
             const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
             const index = cases.findIndex(c => c.id === currentCase.id);

@@ -2423,9 +2423,7 @@
                 const customSt = customStAll.map(s => s.id);
                 const inactiveSt = ['closed', 'closed-arrest', 'transferred', ...customSt];
                 const openCases = allCases.filter(c => !inactiveSt.includes(c.status)).length;
-                const closedCategories2 = ['closed', 'cleared-arrest', 'exceptionally-cleared'];
-                const customClosedIds2 = customStAll.filter(s => closedCategories2.includes(s.category)).map(s => s.id);
-                const closedCases = allCases.filter(c => c.status === 'closed' || customClosedIds2.includes(c.status)).length;
+                const closedCases = allCases.filter(c => c.status === 'closed' || customSt.includes(c.status)).length;
                 const closedWithArrest = allCases.filter(c => c.status === 'closed-arrest').length;
                 const totalCases = allCases.length;
                 
@@ -3205,10 +3203,9 @@
             const closedCases = cases.filter(c => c.status === 'closed');
             const closedWithArrestCases = cases.filter(c => c.status === 'closed-arrest');
             
-            // Custom statuses whose category is a closed/cleared type count towards "Cases Closed"
-            const closedCategories = ['closed', 'cleared-arrest', 'exceptionally-cleared'];
-            const customClosedIds = customStatuses.filter(s => closedCategories.includes(s.category)).map(s => s.id);
-            const customClosedCount = cases.filter(c => customClosedIds.includes(c.status)).length;
+            // All custom statuses are closure types — count them all towards "Cases Closed"
+            const allCustomIds = customStatuses.map(s => s.id);
+            const customClosedCount = cases.filter(c => allCustomIds.includes(c.status)).length;
             
             dashboardMetrics['open_cases'].value = activeCases.length;
             dashboardMetrics['cases_closed'].value = closedCases.length + closedWithArrestCases.length + customClosedCount;

@@ -1909,9 +1909,10 @@
                 // Restore per-ID module data (Pattern 2) — keys like suspects_12345
                 const pattern2Keys = [
                     'suspects', 'victims', 'victimBusinesses', 'cargo',
-                    'witnesses', 'recoveredVehicles', 'missingpersons',
+                    'witnesses', 'involvedPersons', 'recoveredVehicles', 'missingpersons',
                     'areacanvas', 'prosecution', 'narcotics', 'firearms',
-                    'money', 'opsplan', 'rmsImports', 'consentSearches'
+                    'money', 'opsplan', 'rmsImports', 'oversightImport',
+                    'canvasForms', 'cyberTips', 'timelineEvents', 'consentSearches'
                 ];
                 pattern2Keys.forEach(k => {
                     const val = backupData[`${k}_${oldId}`];

@@ -25290,14 +25290,27 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const agencyMatch = text.match(/^([A-Z][A-Z\s]+(?:POLICE DEPARTMENT|SHERIFF['S]*\s*(?:OFFICE|DEPARTMENT)|COUNTY\s+\w+))/m);
             const agencyName = agencyMatch ? agencyMatch[1].trim() : '';
             const caseMatch = text.match(/(?:^Case\s*\n\s*|Case\s+)([A-Z]{2,}\d{5,})/m);
-            const caseNumber = caseMatch ? caseMatch[1] : '';
+            let caseNumber = caseMatch ? caseMatch[1] : '';
+            // Fallback: standalone line with agency-prefix + digits (e.g., SNB2502566)
+            if (!caseNumber) {
+                const standaloneCase = text.match(/^([A-Z]{2,4}\d{6,})$/m);
+                if (standaloneCase) caseNumber = standaloneCase[1];
+            }
+            // Fallback: "Report #" or similar
+            if (!caseNumber) {
+                const rptMatch = text.match(/(?:Report|Case)\s*(?:#|No\.?)\s*[:\s]*([A-Z0-9][\w-]{5,})/i);
+                if (rptMatch) caseNumber = rptMatch[1];
+            }
             // Fallback: extract from filename
-            const fnCase = !caseNumber && fileName.match(/([A-Z]{2,}\d{5,})/);
+            if (!caseNumber) {
+                const fnCase = fileName.match(/([A-Z]{2,}\d{5,})/);
+                if (fnCase) caseNumber = fnCase[1];
+            }
 
             const report = {
                 id: 'rms_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
                 fileName, importedAt: new Date().toISOString(),
-                reportNumber: caseNumber || (fnCase ? fnCase[1] : ''),
+                reportNumber: caseNumber || '',
                 reportDate: '', reportType: 'Crime Report',
                 supplementNo: '', agencyName,
                 location: '', beat: '',

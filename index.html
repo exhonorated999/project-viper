@@ -1985,8 +1985,18 @@
 
                 // Extract case number from Event section
                 let caseNum = '';
-                const caseMatch = text.match(/Case\s*(?:Number|#|No\.?)\s*[:\s]*([A-Z0-9][\w\-\/]+)/i);
-                if (caseMatch) caseNum = caseMatch[1].trim();
+
+                // --- Crime Report format: "Case\nSNB2502566" (label then value on next line) ---
+                if (/CRIME REPORT/i.test(text)) {
+                    const crCase = text.match(/(?:^Case\s*\n\s*|Case\s+)([A-Z]{2,}\d{5,})/m);
+                    if (crCase) caseNum = crCase[1];
+                }
+
+                // Generic: "Case Number: XXXX" (require at least one digit)
+                if (!caseNum) {
+                    const caseMatch = text.match(/Case\s*(?:Number|#|No\.?)\s*[:\s]*([A-Z0-9][\w\-\/]+)/i);
+                    if (caseMatch && /\d/.test(caseMatch[1])) caseNum = caseMatch[1].trim();
+                }
                 // Supplement format: "Case Number:\n  2025-20660" (number on next line)
                 if (!caseNum) {
                     const multiLine = text.match(/Case\s*Number\s*:\s*\n\s*(\d[\w\-]+)/i);
@@ -2063,18 +2073,14 @@
 
                 // --- Crime Report format (San Bruno PD style) ---
                 if (/CRIME REPORT/i.test(text) && /CONTROLLED DOCUMENT/i.test(text)) {
-                    // Case number: "Case\nSNB2502566" pattern from form labels
-                    if (!caseNum) {
-                        const crCase = text.match(/(?:^Case\s*\n\s*|Case\s+)([A-Z]{2,}\d{5,})/m);
-                        if (crCase) caseNum = crCase[1];
-                    }
                     // Person roles from form labels
                     if (/\bVictim\b/i.test(text)) detected.victims = true;
                     if (/\bSuspect\s*Arrested\b/i.test(text) || /\bSuspect\b/i.test(text)) detected.suspects = true;
                     if (/\bWitness\b/i.test(text)) detected.witnesses = true;
                     if (/\bReporting\s*Party\b/i.test(text)) detected.involvedPersons = true;
-                    // Vehicles from property section
-                    if (/CRIME REPORT\s*-\s*PROPERTY/i.test(text) || /\bVehicle\b.*\b(?:Make|Model|License)\b/i.test(text)) detected.vehicles = true;
+                    // Vehicles: only detect if actual vehicle data exists (not just empty form labels)
+                    const vehDataMatch = text.match(/Vehicle Make and Model\s*\n\s*([^\n]+)/i);
+                    if (vehDataMatch && vehDataMatch[1].trim().length > 2 && !/^License/.test(vehDataMatch[1].trim())) detected.vehicles = true;
                 }
 
                 // Auto-generate synopsis from offenses

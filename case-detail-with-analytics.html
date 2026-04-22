@@ -3328,11 +3328,11 @@
                                 </div>
                                 <div>
                                     <label class="text-sm text-gray-400">Date Assigned</label>
-                                    <p class="text-white mt-1">${currentCase.dateAssigned ? new Date(currentCase.dateAssigned).toLocaleDateString() : '<span class="text-gray-500 italic">Not set</span>'}</p>
+                                    <p class="text-white mt-1">${currentCase.dateAssigned ? new Date(currentCase.dateAssigned + 'T00:00').toLocaleDateString() : '<span class="text-gray-500 italic">Not set</span>'}</p>
                                 </div>
                                 <div>
                                     <label class="text-sm text-gray-400">Date Closed</label>
-                                    <p class="text-white mt-1">${currentCase.dateClosed ? new Date(currentCase.dateClosed).toLocaleDateString() : '<span class="text-gray-500 italic">—</span>'}</p>
+                                    <p class="text-white mt-1">${currentCase.dateClosed ? new Date(currentCase.dateClosed + 'T00:00').toLocaleDateString() : '<span class="text-gray-500 italic">—</span>'}</p>
                                 </div>
                                 <div>
                                     <label class="text-sm text-gray-400">Primary Offense</label>

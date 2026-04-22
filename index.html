@@ -111,10 +111,14 @@
             const now = new Date();
             const currentMonth = now.getMonth();
             const currentYear = now.getFullYear();
+            // Only count actual warrants — exclude process/administrative items
+            const warrantTypes = ['search', 'arrest'];
             
             let count = 0;
             Object.values(allWarrants).forEach(caseWarrants => {
                 caseWarrants.forEach(warrant => {
+                    // Only count search & arrest warrants (not preservation, subpoena, court-order, other)
+                    if (warrant.type && !warrantTypes.includes(warrant.type)) return;
                     const createdDate = new Date(warrant.createdAt);
                     if (createdDate.getMonth() === currentMonth && createdDate.getFullYear() === currentYear) {
                         count++;
@@ -2415,11 +2419,14 @@
                 
                 // Get real case data
                 const allCases = JSON.parse(localStorage.getItem('viperCases')) || [];
-                const customSt = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]').map(s => s.id);
+                const customStAll = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
+                const customSt = customStAll.map(s => s.id);
                 const inactiveSt = ['closed', 'closed-arrest', 'transferred', ...customSt];
                 const openCases = allCases.filter(c => !inactiveSt.includes(c.status)).length;
-                const closedCases = allCases.filter(c => c.status === 'Closed' || c.status === 'closed').length;
-                const closedWithArrest = allCases.filter(c => c.status === 'Closed with Arrest' || c.status === 'closed-arrest').length;
+                const closedCategories2 = ['closed', 'cleared-arrest', 'exceptionally-cleared'];
+                const customClosedIds2 = customStAll.filter(s => closedCategories2.includes(s.category)).map(s => s.id);
+                const closedCases = allCases.filter(c => c.status === 'closed' || customClosedIds2.includes(c.status)).length;
+                const closedWithArrest = allCases.filter(c => c.status === 'closed-arrest').length;
                 const totalCases = allCases.length;
                 
                 const caseData = [
@@ -3198,12 +3205,17 @@
             const closedCases = cases.filter(c => c.status === 'closed');
             const closedWithArrestCases = cases.filter(c => c.status === 'closed-arrest');
             
+            // Custom statuses whose category is a closed/cleared type count towards "Cases Closed"
+            const closedCategories = ['closed', 'cleared-arrest', 'exceptionally-cleared'];
+            const customClosedIds = customStatuses.filter(s => closedCategories.includes(s.category)).map(s => s.id);
+            const customClosedCount = cases.filter(c => customClosedIds.includes(c.status)).length;
+            
             dashboardMetrics['open_cases'].value = activeCases.length;
-            dashboardMetrics['cases_closed'].value = closedCases.length + closedWithArrestCases.length;
+            dashboardMetrics['cases_closed'].value = closedCases.length + closedWithArrestCases.length + customClosedCount;
             dashboardMetrics['transferred_cases'].value = cases.filter(c => c.status === 'transferred').length;
             
             // Update case analytics section
-            updateCaseAnalytics(activeCases.length, closedCases.length, closedWithArrestCases.length);
+            updateCaseAnalytics(activeCases.length, closedCases.length + customClosedCount, closedWithArrestCases.length);
             
             // Update investigations table using current filter
             const filtered = cases.filter(c => c.status === currentInvestigationsFilter);
@@ -4400,9 +4412,9 @@
                         case 'offenseType':
                             return '<td class="px-5 py-4 text-sm text-white whitespace-nowrap">' + (c.offenseType || '<span class="text-gray-600">—</span>') + '</td>';
                         case 'dateAssigned':
-                            return '<td class="px-5 py-4 text-sm text-gray-400 whitespace-nowrap">' + (c.dateAssigned ? new Date(c.dateAssigned).toLocaleDateString() : '<span class="text-gray-600">—</span>') + '</td>';
+                            return '<td class="px-5 py-4 text-sm text-gray-400 whitespace-nowrap">' + (c.dateAssigned ? new Date(c.dateAssigned + 'T00:00').toLocaleDateString() : '<span class="text-gray-600">—</span>') + '</td>';
                         case 'dateClosed':
-                            return '<td class="px-5 py-4 text-sm text-gray-400 whitespace-nowrap">' + (c.dateClosed ? new Date(c.dateClosed).toLocaleDateString() : '<span class="text-gray-600">—</span>') + '</td>';
+                            return '<td class="px-5 py-4 text-sm text-gray-400 whitespace-nowrap">' + (c.dateClosed ? new Date(c.dateClosed + 'T00:00').toLocaleDateString() : '<span class="text-gray-600">—</span>') + '</td>';
                         default: return '<td></td>';
                     }
                 }).join('');

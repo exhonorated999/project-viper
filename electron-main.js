@@ -690,6 +690,9 @@ if (autoUpdater) {
   });
 
   autoUpdater.on('update-downloaded', (info) => {
+    // Store the actual downloaded file path for the install handler
+    autoUpdater._downloadedInstallerPath = info.downloadedFile || null;
+    console.log('Update downloaded. File path:', info.downloadedFile);
     sendUpdateStatus('update-status', {
       status: 'downloaded',
       version: info.version
@@ -745,43 +748,51 @@ ipcMain.handle('update-install', async () => {
   if (!autoUpdater) return;
   const path = require('path');
   const fs = require('fs');
-  const { spawn } = require('child_process');
+  const { shell } = require('electron');
 
-  // Find the downloaded installer in the updater cache
-  const cachePath = path.join(app.getPath('userData'), '..', '..', 'Local', 'viper-electron-updater');
-  let installerPath = null;
+  // 1) Use the path captured from the update-downloaded event
+  let installerPath = autoUpdater._downloadedInstallerPath || null;
+  console.log('update-install: downloadedInstallerPath =', installerPath);
 
-  try {
-    const files = fs.readdirSync(cachePath);
-    const exe = files.find(f => f.endsWith('.exe') && f.toLowerCase().includes('v.i.p.e.r'));
-    if (exe) installerPath = path.join(cachePath, exe);
-  } catch (e) {
-    console.error('Could not read updater cache:', e.message);
+  // 2) Fallback: search multiple possible cache locations
+  if (!installerPath || !fs.existsSync(installerPath)) {
+    const localAppData = process.env.LOCALAPPDATA;
+    const possibleCaches = [];
+    if (localAppData) {
+      possibleCaches.push(path.join(localAppData, 'viper-electron-updater'));
+    }
+    try { possibleCaches.push(path.join(app.getPath('userData'), '..', '..', 'Local', 'viper-electron-updater')); } catch (_) {}
+    try { possibleCaches.push(path.join(app.getPath('temp'), 'viper-electron-updater')); } catch (_) {}
+
+    for (const cachePath of possibleCaches) {
+      try {
+        const files = fs.readdirSync(cachePath);
+        console.log('update-install: scanning', cachePath, '→', files);
+        const exe = files.find(f => f.endsWith('.exe') && f.toLowerCase().includes('v.i.p.e.r'));
+        if (exe) {
+          installerPath = path.join(cachePath, exe);
+          break;
+        }
+      } catch (_) {}
+    }
   }
 
   if (installerPath && fs.existsSync(installerPath)) {
-    // Manually spawn the NSIS installer as a detached process so it survives app exit
-    console.log('Spawning installer manually:', installerPath);
-    try {
-      const child = spawn(installerPath, ['/S', '--updated'], {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: false
-      });
-      child.unref();
-      // Give the installer process time to fully start before quitting
-      await new Promise(resolve => setTimeout(resolve, 1500));
-    } catch (e) {
-      console.error('Manual spawn failed, falling back to quitAndInstall:', e.message);
+    // Use shell.openPath — this triggers UAC elevation properly
+    console.log('Launching installer via shell.openPath:', installerPath);
+    const err = await shell.openPath(installerPath);
+    if (err) {
+      console.error('shell.openPath failed:', err, '— falling back to quitAndInstall');
       autoUpdater.quitAndInstall(false, true);
+      await new Promise(resolve => setTimeout(resolve, 2000));
       return;
     }
+    // Give the installer time to start before quitting
+    await new Promise(resolve => setTimeout(resolve, 2000));
     app.quit();
   } else {
-    // Fallback to standard quitAndInstall with a safety delay
-    console.log('No installer found in cache, using standard quitAndInstall');
+    console.log('No installer found in any cache, using standard quitAndInstall');
     autoUpdater.quitAndInstall(false, true);
-    // Safety delay — give the OS time to spawn the installer before Node exits
     await new Promise(resolve => setTimeout(resolve, 2000));
   }
 });

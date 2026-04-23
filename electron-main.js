@@ -1718,6 +1718,75 @@ ipcMain.handle('security-lock', async () => {
   return { success: true };
 });
 
+// --- Select evidence files or folder via native dialog ---
+ipcMain.handle('select-evidence-files', async (event, { mode }) => {
+  // mode: 'files' or 'folder'
+  const props = mode === 'folder'
+    ? ['openDirectory']
+    : ['openFile', 'multiSelections'];
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: mode === 'folder' ? 'Select Evidence Folder' : 'Select Evidence Files',
+    properties: props,
+    filters: mode === 'folder' ? [] : [{ name: 'All Files', extensions: ['*'] }]
+  });
+  restoreFocus();
+  if (result.canceled || !result.filePaths.length) return null;
+
+  if (mode === 'folder') {
+    // Recursively collect all files in folder
+    const dirPath = result.filePaths[0];
+    const files = [];
+    function walk(dir, rel) {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) {
+          walk(full, relPath);
+        } else {
+          const stat = fs.statSync(full);
+          files.push({ name: entry.name, path: full, relativePath: relPath, size: stat.size });
+        }
+      }
+    }
+    walk(dirPath, '');
+    return { folderName: path.basename(dirPath), files };
+  }
+
+  // files mode — return list of selected files
+  const files = result.filePaths.map(fp => {
+    const stat = fs.statSync(fp);
+    return { name: path.basename(fp), path: fp, relativePath: path.basename(fp), size: stat.size };
+  });
+  return { files };
+});
+
+// --- Copy an evidence file from source path to case Evidence dir ---
+ipcMain.handle('copy-evidence-file', async (event, { caseNumber, evidenceTag, sourcePath, relativePath }) => {
+  try {
+    const fileName = relativePath || path.basename(sourcePath);
+    const evidenceDir = path.join(casesDir, caseNumber, 'Evidence', evidenceTag);
+    fs.mkdirSync(evidenceDir, { recursive: true });
+
+    // Preserve subfolder structure
+    const destPath = path.join(evidenceDir, fileName);
+    const destDir = path.dirname(destPath);
+    fs.mkdirSync(destDir, { recursive: true });
+
+    const buffer = fs.readFileSync(sourcePath);
+
+    if (security && security.isEnabled() && security.isUnlocked()) {
+      fs.writeFileSync(destPath, security.encryptBuffer(buffer));
+    } else {
+      fs.writeFileSync(destPath, buffer);
+    }
+
+    return destPath;
+  } catch (error) {
+    console.error('Failed to copy evidence file:', error);
+    throw error;
+  }
+});
+
 // --- Evidence file storage (replaces Tauri save_evidence_file) ---
 ipcMain.handle('save-evidence-file', async (event, data) => {
   try {
@@ -3293,18 +3362,40 @@ ipcMain.handle('google-warrant-scan', async (event, { caseNumber }) => {
       path.join(casesDir, caseNumber, 'Warrants', 'Production')
     ];
 
+    const googlePattern = /\.\d+\.(GoogleAccount|GooglePlayStore|Mail|LocationHistory|GoogleChat|Hangouts|GooglePay|Drive)\./i;
     const files = [];
+
     for (const dir of dirsToScan) {
       if (!fs.existsSync(dir)) continue;
       const scanDir = (d) => {
         const entries = fs.readdirSync(d, { withFileTypes: true });
+
+        // Check if this directory itself contains Google warrant inner ZIPs
+        const innerZips = entries.filter(e => e.isFile() && e.name.toLowerCase().endsWith('.zip') && googlePattern.test(e.name));
+        if (innerZips.length >= 2) {
+          // This folder IS an extracted Google warrant return — report as a scannable folder
+          files.push({
+            name: path.basename(d),
+            path: d,
+            size: entries.filter(e => e.isFile()).reduce((s, e) => {
+              try { return s + fs.statSync(path.join(d, e.name)).size; } catch { return s; }
+            }, 0),
+            isFolder: true
+          });
+          return; // don't recurse deeper into inner zip files
+        }
+
         for (const entry of entries) {
           const fullPath = path.join(d, entry.name);
           if (entry.isDirectory()) {
             scanDir(fullPath);
           } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')) {
             try {
-              const buf = fs.readFileSync(fullPath);
+              let buf = fs.readFileSync(fullPath);
+              // Decrypt if Field Security is active
+              if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
+                buf = security.decryptBuffer(buf);
+              }
               if (GoogleWarrantParser.isGoogleWarrantZip(buf)) {
                 files.push({
                   name: entry.name,
@@ -3312,7 +3403,7 @@ ipcMain.handle('google-warrant-scan', async (event, { caseNumber }) => {
                   size: fs.statSync(fullPath).size
                 });
               }
-            } catch (e) { /* not a valid zip, skip */ }
+            } catch (e) { /* not a valid zip or encrypted, skip */ }
           }
         }
       };
@@ -3328,6 +3419,28 @@ ipcMain.handle('google-warrant-scan', async (event, { caseNumber }) => {
 
 ipcMain.handle('google-warrant-import', async (event, { filePath }) => {
   try {
+    const stat = fs.statSync(filePath);
+
+    if (stat.isDirectory()) {
+      // Folder of extracted inner ZIPs — reassemble into a virtual outer ZIP
+      const AdmZip = require('adm-zip');
+      const outerZip = new AdmZip();
+      const entries = fs.readdirSync(filePath);
+      for (const name of entries) {
+        const full = path.join(filePath, name);
+        if (fs.statSync(full).isFile()) {
+          let buf = fs.readFileSync(full);
+          if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
+            buf = security.decryptBuffer(buf);
+          }
+          outerZip.addFile(name, buf);
+        }
+      }
+      const data = await gwParser.parseOuterZip(outerZip.toBuffer());
+      return { success: true, data };
+    }
+
+    // Single ZIP file
     let buf = fs.readFileSync(filePath);
     // Decrypt if Field Security is active
     if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {

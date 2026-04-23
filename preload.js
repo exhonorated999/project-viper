@@ -70,6 +70,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   securityLock: () => ipcRenderer.invoke('security-lock'),
 
   // Evidence file storage
+  selectEvidenceFiles: (data) => ipcRenderer.invoke('select-evidence-files', data),
+  copyEvidenceFile: (data) => ipcRenderer.invoke('copy-evidence-file', data),
   saveEvidenceFile: (data) => ipcRenderer.invoke('save-evidence-file', data),
   readEvidenceFile: (filePath) => ipcRenderer.invoke('read-evidence-file', filePath),
 

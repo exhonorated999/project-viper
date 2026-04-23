@@ -186,3 +186,6 @@ class GoogleWarrantModule {
         return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
     }
 }
+
+// Expose on window so initializeGoogleWarrant() can find it
+window.GoogleWarrantModule = GoogleWarrantModule;

@@ -730,6 +730,13 @@
                     <span class="font-medium text-gray-400">Dashboard</span>
                 </div>
                 
+                <div class="sidebar-item px-4 py-3 rounded-lg cursor-pointer flex items-center space-x-3" onclick="window.location.href='index.html#all-cases'">
+                    <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+                    </svg>
+                    <span class="font-medium text-gray-400">All Cases</span>
+                </div>
+
                 <div class="sidebar-item active px-4 py-3 rounded-lg cursor-pointer flex items-center space-x-3">
                     <svg class="w-5 h-5 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
@@ -1520,6 +1527,7 @@
             const statusBadge = document.getElementById('statusBadge');
             const statusConfig = {
                 active: { color: 'viper-green', text: 'Active', icon: '●' },
+                inactive: { color: 'yellow-400', text: 'Inactive', icon: '●' },
                 closed: { color: 'gray-400', text: 'Closed', icon: '●' },
                 'closed-arrest': { color: 'viper-purple', text: 'Closed with Arrest', icon: '●' },
                 transferred: { color: 'viper-orange', text: 'Transferred', icon: '→' }
@@ -1935,7 +1943,7 @@
                 'areacanvas', 'prosecution', 'narcotics', 'firearms',
                 'money', 'opsplan', 'rmsImports', 'oversightImport',
                 'canvasForms', 'cyberTips', 'timelineEvents', 'consentSearches',
-                'googleWarrant'
+                'googleWarrant', 'caseMetrics'
             ];
             const moduleData = {};
             moduleKeys.forEach(k => {
@@ -3313,24 +3321,26 @@
                                     <label class="text-sm text-gray-400">Case Number</label>
                                     <p class="text-lg font-medium text-white mt-1">${currentCase.caseNumber}</p>
                                 </div>
-                                <div>
-                                    <label class="text-sm text-gray-400">Status</label>
-                                    <select onchange="updateCaseStatus(this.value)" class="mt-1 w-full px-4 py-2 bg-viper-card/50 border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none">
-                                        ${buildStatusOptions(currentCase.status)}
-                                    </select>
+                                <div class="flex gap-4">
+                                    <div class="flex-1">
+                                        <label class="text-sm text-gray-400">Status</label>
+                                        <select onchange="updateCaseStatus(this.value)" class="mt-1 w-full px-3 py-1.5 text-sm bg-viper-card/50 border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none">
+                                            ${buildStatusOptions(currentCase.status)}
+                                        </select>
+                                    </div>
+                                    ${localStorage.getItem('viperCasePriorityEnabled') === 'true' ? `
+                                    <div class="flex-1">
+                                        <label class="text-sm text-gray-400">Priority</label>
+                                        <select onchange="updateCasePriority(parseInt(this.value)||0)" class="mt-1 w-full px-3 py-1.5 text-sm bg-viper-card/50 border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none">
+                                            <option value="0" ${!currentCase.priority ? 'selected' : ''}>— None —</option>
+                                            <option value="1" ${currentCase.priority===1 ? 'selected' : ''}>🔴 Critical</option>
+                                            <option value="2" ${currentCase.priority===2 ? 'selected' : ''}>🟠 High</option>
+                                            <option value="3" ${currentCase.priority===3 ? 'selected' : ''}>🟡 Medium</option>
+                                            <option value="4" ${currentCase.priority===4 ? 'selected' : ''}>🟢 Low</option>
+                                        </select>
+                                    </div>
+                                    ` : ''}
                                 </div>
-                                ${localStorage.getItem('viperCasePriorityEnabled') === 'true' ? `
-                                <div>
-                                    <label class="text-sm text-gray-400">Priority</label>
-                                    <select onchange="updateCasePriority(parseInt(this.value)||0)" class="mt-1 w-full px-4 py-2 bg-viper-card/50 border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none">
-                                        <option value="0" ${!currentCase.priority ? 'selected' : ''}>— None —</option>
-                                        <option value="1" ${currentCase.priority===1 ? 'selected' : ''}>🔴 1 — Critical</option>
-                                        <option value="2" ${currentCase.priority===2 ? 'selected' : ''}>🟠 2 — High</option>
-                                        <option value="3" ${currentCase.priority===3 ? 'selected' : ''}>🟡 3 — Medium</option>
-                                        <option value="4" ${currentCase.priority===4 ? 'selected' : ''}>🟢 4 — Low</option>
-                                    </select>
-                                </div>
-                                ` : ''}
                                 <div class="col-span-2">
                                     <label class="text-sm text-gray-400">Synopsis</label>
                                     <p class="text-white mt-2 leading-relaxed">${currentCase.synopsis || '<span class="text-gray-500 italic">No synopsis</span>'}</p>
@@ -3405,7 +3415,13 @@
                                 </div>
                                 <div>
                                     <label class="text-sm text-gray-400 block mb-1">Primary Offense</label>
-                                    <input type="text" id="editPrimaryOffense" value="${currentCase.primaryOffense || ''}" placeholder="e.g. 487(a) PC - Grand Theft" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
+                                    <div class="relative">
+                                        <select id="editPrimaryOffenseSelect" onchange="onPrimaryOffenseSelect(this)" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
+                                            <option value="">— Select from Offense Library —</option>
+                                            <option value="__custom__">✏️ Type custom offense...</option>
+                                        </select>
+                                        <input type="text" id="editPrimaryOffense" value="${currentCase.primaryOffense || ''}" placeholder="e.g. 487(a) PC - Grand Theft" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none mt-2 ${currentCase.primaryOffense ? '' : 'hidden'}">
+                                    </div>
                                 </div>
                                 <div>
                                     <label class="text-sm text-gray-400 block mb-1">Offense Type</label>
@@ -3413,7 +3429,9 @@
                                         <option value="" ${!currentCase.offenseType ? 'selected' : ''}>— Select —</option>
                                         <option value="Felony" ${currentCase.offenseType==='Felony' ? 'selected' : ''}>Felony</option>
                                         <option value="Misdemeanor" ${currentCase.offenseType==='Misdemeanor' ? 'selected' : ''}>Misdemeanor</option>
+                                        <option value="Wobbler" ${currentCase.offenseType==='Wobbler' ? 'selected' : ''}>Wobbler</option>
                                         <option value="Infraction" ${currentCase.offenseType==='Infraction' ? 'selected' : ''}>Infraction</option>
+                                        <option value="Non-Criminal" ${currentCase.offenseType==='Non-Criminal' ? 'selected' : ''}>Non-Criminal</option>
                                     </select>
                                 </div>
                                 <div class="col-span-2">
@@ -3474,6 +3492,9 @@
                             </div>
                         </div>`;
                     })()}
+
+                    <!-- Custom Metrics Card -->
+                    ${renderCustomMetricsCard()}
 
                     <!-- Case Tasks -->
                     <div class="glass-card rounded-xl p-6">
@@ -4332,19 +4353,12 @@
                                     <label class="block text-sm font-medium text-gray-300 mb-2">Upload Files</label>
                                     <!-- Standard file/folder upload (hidden when Cellebrite selected) -->
                                     <div id="standardUploadUI" class="relative">
-                                        <input type="file" id="evidenceFiles" multiple webkitdirectory directory class="hidden" onchange="handleEvidenceFilesSelect(event)">
                                         <div class="flex space-x-3">
-                                            <button type="button" onclick="document.getElementById('evidenceFiles').removeAttribute('webkitdirectory'); document.getElementById('evidenceFiles').removeAttribute('directory'); document.getElementById('evidenceFiles').click();" class="flex-1 px-4 py-3 bg-viper-card/50 border-2 border-dashed border-gray-600 rounded-lg hover:border-viper-cyan transition-colors flex items-center justify-center space-x-2 text-gray-400 hover:text-viper-cyan">
+                                            <button type="button" onclick="selectEvidenceViaDialog('files')" class="flex-1 px-4 py-3 bg-viper-card/50 border-2 border-dashed border-gray-600 rounded-lg hover:border-viper-cyan transition-colors flex items-center justify-center space-x-2 text-gray-400 hover:text-viper-cyan">
                                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
                                                 </svg>
                                                 <span>Upload Files</span>
-                                            </button>
-                                            <button type="button" onclick="document.getElementById('evidenceFiles').setAttribute('webkitdirectory', ''); document.getElementById('evidenceFiles').setAttribute('directory', ''); document.getElementById('evidenceFiles').click();" class="flex-1 px-4 py-3 bg-viper-card/50 border-2 border-dashed border-gray-600 rounded-lg hover:border-viper-purple transition-colors flex items-center justify-center space-x-2 text-gray-400 hover:text-viper-purple">
-                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
-                                                </svg>
-                                                <span>Upload Folder</span>
                                             </button>
                                         </div>
                                     </div>
@@ -4667,11 +4681,37 @@
             }
         }
         
+        // Native file paths selected via Electron dialog (bypasses browser file input)
+        let nativeEvidenceFiles = null;
+
+        async function selectEvidenceViaDialog(mode) {
+            const result = await window.electronAPI.selectEvidenceFiles({ mode });
+            if (!result) return;
+
+            nativeEvidenceFiles = result.files;
+            evidenceFiles = []; // clear any browser-selected files
+
+            const count = result.files.length;
+            const totalSize = result.files.reduce((s, f) => s + f.size, 0);
+            const label = result.folderName
+                ? `📁 ${result.folderName} — ${count} file${count !== 1 ? 's' : ''} (${formatFileSize(totalSize)})`
+                : `${count} file${count !== 1 ? 's' : ''} selected (${formatFileSize(totalSize)})`;
+
+            document.getElementById('evidenceFileCount').textContent = label;
+
+            const filesList = document.getElementById('evidenceFilesList');
+            filesList.innerHTML = result.files.slice(0, 50).map(f =>
+                `<div class="truncate">📄 ${f.relativePath}</div>`
+            ).join('') + (count > 50 ? `<div class="text-gray-500">… and ${count - 50} more</div>` : '');
+
+            document.getElementById('evidenceFilesInfo').classList.remove('hidden');
+        }
+
         function clearEvidenceFiles() {
             evidenceFiles = [];
+            nativeEvidenceFiles = null;
             cellebriteFolderPath = null;
             cellebriteScanResult = null;
-            document.getElementById('evidenceFiles').value = '';
             document.getElementById('evidenceFilesInfo').classList.add('hidden');
             // Reset info styling
             const infoDiv = document.getElementById('evidenceFilesInfo');
@@ -4880,6 +4920,68 @@
                         console.error('Cellebrite copy failed:', error);
                         progressModal.classList.remove('show');
                         viperToast('Failed to copy Cellebrite files: ' + error.message, 'error');
+                    }
+                    return;
+                }
+
+                // ===== Native dialog file upload (via Electron IPC copy) =====
+                if (nativeEvidenceFiles && nativeEvidenceFiles.length > 0) {
+                    const fileCount = nativeEvidenceFiles.length;
+                    const totalSize = nativeEvidenceFiles.reduce((s, f) => s + f.size, 0);
+                    const progressModal = document.getElementById('uploadProgressModal');
+                    if (progressModal) {
+                        progressModal.classList.add('show');
+                        document.getElementById('uploadStatusText').textContent = `Copying ${fileCount} file${fileCount !== 1 ? 's' : ''}...`;
+                        document.getElementById('uploadProgressBar').style.width = '0%';
+                        document.getElementById('uploadProgressPercent').textContent = '0%';
+                    }
+
+                    const evidenceTag = tag || `evidence_${Date.now()}`;
+                    const files = [];
+                    let processedSize = 0;
+
+                    try {
+                        for (let i = 0; i < nativeEvidenceFiles.length; i++) {
+                            const nf = nativeEvidenceFiles[i];
+                            const savedPath = await window.electronAPI.copyEvidenceFile({
+                                caseNumber: currentCase.caseNumber,
+                                evidenceTag: evidenceTag,
+                                sourcePath: nf.path,
+                                relativePath: nf.relativePath
+                            });
+                            files.push({ name: nf.name, path: savedPath, size: nf.size, type: '', lastModified: Date.now() });
+                            processedSize += nf.size;
+                            const progress = Math.round((processedSize / totalSize) * 100);
+                            document.getElementById('uploadProgressBar').style.width = progress + '%';
+                            document.getElementById('uploadProgressPercent').textContent = progress + '%';
+                            document.getElementById('uploadStatusText').textContent = `Copying file ${i + 1} of ${fileCount}...`;
+                        }
+
+                        const newEvidence = {
+                            id: Date.now(),
+                            type: type,
+                            tag: tag,
+                            description: description,
+                            fileCount: files.length,
+                            totalSize: totalSize,
+                            files: files,
+                            createdAt: new Date().toISOString()
+                        };
+                        caseEvidence.push(newEvidence);
+                        const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
+                        allEvidence[currentCase.caseNumber] = caseEvidence;
+                        localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
+
+                        document.getElementById('uploadProgressModal').classList.remove('show');
+                        document.getElementById('uploadSuccessModal').classList.add('show');
+                        evidenceFiles = [];
+                        nativeEvidenceFiles = null;
+                        cancelEvidenceForm();
+                        setTimeout(() => closeUploadSuccessModal(), 2000);
+                    } catch (error) {
+                        console.error('Native copy failed:', error);
+                        if (progressModal) progressModal.classList.remove('show');
+                        viperToast('Failed to copy files: ' + error.message, 'error');
                     }
                     return;
                 }
@@ -21042,6 +21144,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 readMode.classList.add('hidden');
                 editMode.classList.remove('hidden');
                 btn.classList.add('hidden');
+                populatePrimaryOffenseDropdown();
             }
         }
 
@@ -21049,6 +21152,74 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             document.getElementById('overviewReadMode').classList.remove('hidden');
             document.getElementById('overviewEditMode').classList.add('hidden');
             document.getElementById('overviewEditBtn').classList.remove('hidden');
+        }
+
+        function populatePrimaryOffenseDropdown() {
+            const sel = document.getElementById('editPrimaryOffenseSelect');
+            const input = document.getElementById('editPrimaryOffense');
+            if (!sel) return;
+            const offenses = JSON.parse(localStorage.getItem('viperOffenseReference') || '[]');
+            // Rebuild options
+            let html = '<option value="">— Select from Offense Library —</option>';
+            if (offenses.length > 0) {
+                const grouped = {};
+                offenses.forEach(o => {
+                    const t = o.type || 'Other';
+                    if (!grouped[t]) grouped[t] = [];
+                    grouped[t].push(o);
+                });
+                Object.keys(grouped).sort().forEach(type => {
+                    html += `<optgroup label="${type}">`;
+                    grouped[type].forEach(o => {
+                        const val = `${o.code} - ${o.description}`;
+                        html += `<option value="${val}" data-type="${o.type}">${o.code} — ${o.description}</option>`;
+                    });
+                    html += '</optgroup>';
+                });
+            }
+            html += '<option value="__custom__">✏️ Type custom offense...</option>';
+            sel.innerHTML = html;
+
+            // Pre-select current value if it matches
+            const cur = currentCase.primaryOffense || '';
+            if (cur) {
+                let matched = false;
+                for (const opt of sel.options) {
+                    if (opt.value === cur) { opt.selected = true; matched = true; break; }
+                }
+                if (!matched) {
+                    // Current value is custom text
+                    sel.value = '__custom__';
+                    input.classList.remove('hidden');
+                } else {
+                    input.value = cur;
+                    input.classList.add('hidden');
+                }
+            }
+        }
+
+        function onPrimaryOffenseSelect(sel) {
+            const input = document.getElementById('editPrimaryOffense');
+            const typeSelect = document.getElementById('editOffenseType');
+            if (sel.value === '__custom__') {
+                input.classList.remove('hidden');
+                input.value = '';
+                input.focus();
+            } else if (sel.value === '') {
+                input.classList.add('hidden');
+                input.value = '';
+            } else {
+                input.value = sel.value;
+                input.classList.add('hidden');
+                // Auto-fill offense type from selection
+                const opt = sel.options[sel.selectedIndex];
+                const dataType = opt?.dataset?.type;
+                if (dataType && typeSelect) {
+                    for (const o of typeSelect.options) {
+                        if (o.value === dataType) { typeSelect.value = dataType; break; }
+                    }
+                }
+            }
         }
 
         function saveOverviewEdit() {
@@ -21129,6 +21300,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         function buildStatusOptions(currentStatus) {
             const builtins = [
                 { value: 'active', label: 'Active' },
+                { value: 'inactive', label: 'Inactive' },
                 { value: 'closed', label: 'Closed' },
                 { value: 'closed-arrest', label: 'Closed with Arrest' },
                 { value: 'transferred', label: 'Transferred' }
@@ -21437,6 +21609,120 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             saveTimelineEvents();
             selectedTimelineEvent = null;
             renderTabContent('overview');
+        }
+
+        // ═══ Custom Metrics (Case Overview Card) ═══
+        function getCustomMetricDefs() {
+            if (localStorage.getItem('viperCustomMetricsEnabled') !== 'true') return [];
+            try { return JSON.parse(localStorage.getItem('viperCustomMetrics') || '[]'); } catch { return []; }
+        }
+        function getCaseMetrics(caseId) {
+            try { return JSON.parse(localStorage.getItem('caseMetrics_' + caseId) || '{}'); } catch { return {}; }
+        }
+        function saveCaseMetricVal(metricId, value) {
+            if (!currentCase) return;
+            const data = getCaseMetrics(currentCase.id);
+            data[metricId] = value;
+            localStorage.setItem('caseMetrics_' + currentCase.id, JSON.stringify(data));
+        }
+        function toggleCaseMetricCheckbox(metricId) {
+            if (!currentCase) return;
+            const data = getCaseMetrics(currentCase.id);
+            data[metricId] = !data[metricId];
+            localStorage.setItem('caseMetrics_' + currentCase.id, JSON.stringify(data));
+            // Re-render just the checkbox visual
+            const el = document.getElementById('cm-cb-' + metricId);
+            if (el) {
+                el.dataset.checked = data[metricId] ? '1' : '0';
+                el.innerHTML = data[metricId]
+                    ? '<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>'
+                    : '';
+                const row = el.closest('.cm-metric-row');
+                if (row) {
+                    row.classList.toggle('cm-active', !!data[metricId]);
+                }
+            }
+        }
+        function adjustCaseMetricCounter(metricId, delta) {
+            if (!currentCase) return;
+            const data = getCaseMetrics(currentCase.id);
+            const cur = parseInt(data[metricId]) || 0;
+            data[metricId] = Math.max(0, cur + delta);
+            localStorage.setItem('caseMetrics_' + currentCase.id, JSON.stringify(data));
+            const el = document.getElementById('cm-val-' + metricId);
+            if (el) el.textContent = data[metricId];
+        }
+        function updateCaseMetricInput(metricId, value) {
+            saveCaseMetricVal(metricId, value);
+        }
+        const cmColorMap = {
+            cyan: { bg: 'bg-viper-cyan/10', text: 'text-viper-cyan', border: 'border-viper-cyan/30', activeBg: 'bg-viper-cyan/20', dot: 'bg-viper-cyan' },
+            purple: { bg: 'bg-viper-purple/10', text: 'text-viper-purple', border: 'border-viper-purple/30', activeBg: 'bg-viper-purple/20', dot: 'bg-viper-purple' },
+            green: { bg: 'bg-viper-green/10', text: 'text-viper-green', border: 'border-viper-green/30', activeBg: 'bg-viper-green/20', dot: 'bg-viper-green' },
+            orange: { bg: 'bg-viper-orange/10', text: 'text-viper-orange', border: 'border-viper-orange/30', activeBg: 'bg-viper-orange/20', dot: 'bg-viper-orange' },
+            red: { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/30', activeBg: 'bg-red-500/20', dot: 'bg-red-500' },
+            amber: { bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/30', activeBg: 'bg-amber-500/20', dot: 'bg-amber-500' },
+        };
+        function renderCustomMetricsCard() {
+            const defs = getCustomMetricDefs();
+            if (defs.length === 0) return '';
+            if (!currentCase) return '';
+            const vals = getCaseMetrics(currentCase.id);
+
+            const rows = defs.map(m => {
+                const c = cmColorMap[m.color] || cmColorMap.cyan;
+                const v = vals[m.id];
+                if (m.type === 'checkbox') {
+                    const checked = !!v;
+                    return `
+                    <div class="cm-metric-row flex items-center gap-3 px-3 py-2 rounded-lg border ${c.border} ${checked ? c.activeBg : 'bg-viper-dark/30'} cursor-pointer transition-colors hover:${c.activeBg} ${checked ? 'cm-active' : ''}"
+                         onclick="toggleCaseMetricCheckbox('${m.id}')">
+                        <div id="cm-cb-${m.id}" data-checked="${checked ? '1' : '0'}"
+                             class="w-5 h-5 rounded border-2 ${checked ? c.border + ' ' + c.text : 'border-gray-600 text-transparent'} flex items-center justify-center flex-shrink-0 transition-colors">
+                            ${checked ? '<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>' : ''}
+                        </div>
+                        <span class="text-sm font-medium ${checked ? c.text : 'text-gray-400'}">${m.icon ? m.icon + ' ' : ''}${m.name}</span>
+                    </div>`;
+                } else if (m.type === 'counter') {
+                    const count = parseInt(v) || 0;
+                    return `
+                    <div class="flex items-center justify-between px-3 py-2 rounded-lg border ${c.border} bg-viper-dark/30">
+                        <span class="text-sm font-medium ${c.text}">${m.icon ? m.icon + ' ' : ''}${m.name}</span>
+                        <div class="flex items-center gap-2">
+                            <button onclick="event.stopPropagation();adjustCaseMetricCounter('${m.id}',-1)" class="w-6 h-6 rounded ${c.bg} ${c.text} text-xs font-bold hover:opacity-80 transition flex items-center justify-center">−</button>
+                            <span id="cm-val-${m.id}" class="text-sm font-bold text-white min-w-[24px] text-center">${count}</span>
+                            <button onclick="event.stopPropagation();adjustCaseMetricCounter('${m.id}',1)" class="w-6 h-6 rounded ${c.bg} ${c.text} text-xs font-bold hover:opacity-80 transition flex items-center justify-center">+</button>
+                        </div>
+                    </div>`;
+                } else if (m.type === 'date') {
+                    return `
+                    <div class="flex items-center justify-between px-3 py-2 rounded-lg border ${c.border} bg-viper-dark/30">
+                        <span class="text-sm font-medium ${c.text}">${m.icon ? m.icon + ' ' : ''}${m.name}</span>
+                        <input type="date" value="${v || ''}" onchange="updateCaseMetricInput('${m.id}',this.value)"
+                            class="px-2 py-1 bg-viper-dark border border-gray-600 rounded text-xs text-white focus:border-viper-cyan outline-none">
+                    </div>`;
+                } else { // text
+                    return `
+                    <div class="flex items-center justify-between px-3 py-2 rounded-lg border ${c.border} bg-viper-dark/30 gap-3">
+                        <span class="text-sm font-medium ${c.text} flex-shrink-0">${m.icon ? m.icon + ' ' : ''}${m.name}</span>
+                        <input type="text" value="${(v || '').replace(/"/g, '&quot;')}" onblur="updateCaseMetricInput('${m.id}',this.value)" placeholder="—"
+                            class="flex-1 px-2 py-1 bg-viper-dark border border-gray-600 rounded text-xs text-white focus:border-viper-cyan outline-none text-right">
+                    </div>`;
+                }
+            }).join('');
+
+            return `
+            <div class="glass-card rounded-xl p-6">
+                <h3 class="text-xl font-bold mb-4 flex items-center">
+                    <svg class="w-5 h-5 mr-2 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"/>
+                    </svg>
+                    Custom Metrics
+                </h3>
+                <div class="space-y-2">
+                    ${rows}
+                </div>
+            </div>`;
         }
 
         // ---- Swimlane Renderer ----

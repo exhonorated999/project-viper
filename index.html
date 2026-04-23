@@ -1491,6 +1491,10 @@
                         <input type="checkbox" value="tasks" checked class="report-section w-4 h-4 rounded border-gray-600 text-viper-purple focus:ring-viper-purple">
                         <span class="text-sm">✓ Tasks Summary</span>
                     </label>
+                    <label id="reportCustomMetricsLabel" class="flex items-center space-x-3 p-3 rounded-lg cursor-pointer hover:bg-viper-card/30 transition-colors border border-gray-700" style="display:none">
+                        <input type="checkbox" value="customMetrics" checked class="report-section w-4 h-4 rounded border-gray-600 text-viper-purple focus:ring-viper-purple">
+                        <span class="text-sm">🏷️ Custom Metrics</span>
+                    </label>
                 </div>
             </div>
             
@@ -2292,6 +2296,11 @@
             const thirtyDaysAgo = new Date();
             thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
             document.getElementById('reportStartDate').value = thirtyDaysAgo.toISOString().split('T')[0];
+            // Show/hide Custom Metrics checkbox
+            const cmLabel = document.getElementById('reportCustomMetricsLabel');
+            if (cmLabel) {
+                cmLabel.style.display = getCustomMetricDefs().length > 0 ? '' : 'none';
+            }
         }
         
         function closeGenerateReportModal() {
@@ -2655,6 +2664,71 @@
                         styles: { fontSize: 8 },
                         margin: { left: 15, right: 15 }
                     });
+                }
+            }
+
+            // Custom Metrics Section
+            if (selectedSections.includes('customMetrics')) {
+                const cmDefs = getCustomMetricDefs();
+                if (cmDefs.length > 0) {
+                    if (yPos > 230) { doc.addPage(); yPos = 20; }
+                    yPos = addSectionHeader(doc, 'Custom Metrics Summary', yPos);
+
+                    const allCases = JSON.parse(localStorage.getItem('viperCases') || '[]');
+                    // Filter by period if custom date range selected
+                    let reportCases = allCases;
+                    if (periodType === 'range') {
+                        const sDate = document.getElementById('reportStartDate').value;
+                        const eDate = document.getElementById('reportEndDate').value;
+                        if (sDate && eDate) {
+                            const start = new Date(sDate + 'T00:00:00');
+                            const end = new Date(eDate + 'T23:59:59');
+                            reportCases = allCases.filter(c => {
+                                const d = new Date(c.createdAt);
+                                return d >= start && d <= end;
+                            });
+                        }
+                    }
+
+                    const metricsTableData = cmDefs.map(m => {
+                        let activeCount = 0;
+                        let total = 0;
+                        let values = [];
+                        reportCases.forEach(c => {
+                            const mVals = getCaseMetricsData(c.id);
+                            const v = mVals[m.id];
+                            if (m.type === 'checkbox') {
+                                if (v) activeCount++;
+                            } else if (m.type === 'counter') {
+                                const n = parseInt(v) || 0;
+                                if (n > 0) { activeCount++; total += n; }
+                                values.push(n);
+                            } else if (m.type === 'date') {
+                                if (v) { activeCount++; values.push(v); }
+                            } else if (m.type === 'text') {
+                                if (v) activeCount++;
+                            }
+                        });
+                        const pct = reportCases.length > 0 ? Math.round(activeCount / reportCases.length * 100) : 0;
+                        let detail = `${activeCount} / ${reportCases.length} (${pct}%)`;
+                        if (m.type === 'counter' && total > 0) {
+                            detail += `  |  Total: ${total}`;
+                        }
+                        const typeLabel = { checkbox: 'Checkbox', counter: 'Counter', date: 'Date', text: 'Text' }[m.type] || m.type;
+                        return [(m.icon ? m.icon + ' ' : '') + m.name, typeLabel, detail];
+                    });
+
+                    doc.autoTable({
+                        startY: yPos,
+                        head: [['Metric', 'Type', 'Cases']],
+                        body: metricsTableData,
+                        theme: 'grid',
+                        headStyles: { fillColor: [157, 78, 221], textColor: [255, 255, 255], fontStyle: 'bold' },
+                        alternateRowStyles: { fillColor: [240, 240, 240] },
+                        margin: { left: 15, right: 15 },
+                        styles: { fontSize: 9 }
+                    });
+                    yPos = doc.lastAutoTable.finalY + 10;
                 }
             }
             
@@ -3257,6 +3331,7 @@
 
             let html = `
                 <button onclick="setInvestigationsFilter('active')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-viper-cyan/10 transition-colors text-viper-cyan" data-filter="active">Active</button>
+                <button onclick="setInvestigationsFilter('inactive')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-yellow-400/10 transition-colors text-yellow-400" data-filter="inactive">Inactive</button>
                 <button onclick="setInvestigationsFilter('closed')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-gray-400/10 transition-colors text-gray-400" data-filter="closed">Closed</button>
                 <button onclick="setInvestigationsFilter('closed-arrest')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-viper-green/10 transition-colors text-green-400" data-filter="closed-arrest">Closed with Arrest</button>
                 <button onclick="setInvestigationsFilter('transferred')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-viper-orange/10 transition-colors text-viper-orange" data-filter="transferred">Transferred</button>`;
@@ -3395,6 +3470,7 @@
         function getStatusBadge(status) {
             const builtinMap = {
                 active:         { label: 'Active',             bg: 'bg-viper-cyan/20',   text: 'text-viper-cyan',   border: 'border-viper-cyan/30' },
+                inactive:       { label: 'Inactive',           bg: 'bg-yellow-500/20',   text: 'text-yellow-400',   border: 'border-yellow-500/30' },
                 closed:         { label: 'Closed',             bg: 'bg-gray-500/20',     text: 'text-gray-400',     border: 'border-gray-500/30' },
                 'closed-arrest':{ label: 'Closed w/ Arrest',   bg: 'bg-green-500/20',    text: 'text-green-400',    border: 'border-green-500/30' },
                 transferred:    { label: 'Transferred',        bg: 'bg-viper-orange/20', text: 'text-viper-orange', border: 'border-viper-orange/30' },
@@ -4124,6 +4200,7 @@
             { key: 'offenseType',    label: 'Offense Type',    default: false, sortType: 'text' },
             { key: 'dateAssigned',   label: 'Date Assigned',   default: false, sortType: 'date' },
             { key: 'dateClosed',     label: 'Date Closed',     default: false, sortType: 'date' },
+            { key: 'flags',          label: 'Flags',           default: false, sortType: 'number' },
         ];
         let allCasesSortKey = 'created';
         let allCasesSortDir = 'desc';
@@ -4137,6 +4214,42 @@
         }
         function setACVisibleCols(cols) {
             localStorage.setItem('viperAllCasesColumns', JSON.stringify(cols));
+        }
+
+        // ═══ Custom Metrics Helpers (for All Cases table) ═══
+        function getCustomMetricDefs() {
+            if (localStorage.getItem('viperCustomMetricsEnabled') !== 'true') return [];
+            try { return JSON.parse(localStorage.getItem('viperCustomMetrics') || '[]'); } catch { return []; }
+        }
+        function getCaseMetricsData(caseId) {
+            try { return JSON.parse(localStorage.getItem('caseMetrics_' + caseId) || '{}'); } catch { return {}; }
+        }
+        const cmColorMapIdx = {
+            cyan: '#00d9ff', purple: '#9d4edd', green: '#00ff88',
+            orange: '#ffa726', red: '#ef4444', amber: '#f59e0b'
+        };
+        function getCaseFlagCount(c) {
+            const defs = getCustomMetricDefs();
+            if (defs.length === 0) return 0;
+            const vals = getCaseMetricsData(c.id);
+            return defs.filter(m => m.type === 'checkbox' && !!vals[m.id]).length;
+        }
+        function renderFlagsCell(c) {
+            const defs = getCustomMetricDefs();
+            if (defs.length === 0) return '';
+            const vals = getCaseMetricsData(c.id);
+            const activeDefs = defs.filter(m => {
+                if (m.type === 'checkbox') return !!vals[m.id];
+                if (m.type === 'counter') return (parseInt(vals[m.id]) || 0) > 0;
+                if (m.type === 'date' || m.type === 'text') return !!vals[m.id];
+                return false;
+            });
+            if (activeDefs.length === 0) return '<span class="text-gray-600">—</span>';
+            return activeDefs.map(m => {
+                const color = cmColorMapIdx[m.color] || cmColorMapIdx.cyan;
+                const label = (m.icon ? m.icon + ' ' : '') + m.name;
+                return `<span class="inline-block w-3 h-3 rounded-full mr-1 cursor-default" style="background:${color}" title="${label}"></span>`;
+            }).join('');
         }
 
         function getCaseExtras(c) {
@@ -4160,6 +4273,7 @@
                 case 'offenseType':    return c.offenseType || '';
                 case 'dateAssigned':   return c.dateAssigned || '';
                 case 'dateClosed':     return c.dateClosed || '';
+                case 'flags':          return getCaseFlagCount(c);
                 default: return '';
             }
         }
@@ -4212,8 +4326,13 @@
                                 <select id="caseStatusFilter" onchange="filterCases()" class="px-4 py-3 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
                                     <option value="all">All Statuses</option>
                                     <option value="active">Active</option>
+                                    <option value="inactive">Inactive</option>
                                     <option value="closed">Closed</option>
+                                    <option value="closed-arrest">Closed with Arrest</option>
                                     <option value="transferred">Transferred</option>
+                                </select>
+                                <select id="caseMetricFilter" onchange="filterCases()" class="px-4 py-3 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-purple focus:outline-none" style="display:none">
+                                    <option value="all">All Metrics</option>
                                 </select>
                                 <button onclick="openACColumnPicker()" class="p-3 bg-viper-dark border border-gray-600 rounded-lg text-gray-400 hover:text-viper-cyan hover:border-viper-cyan transition" title="Customize columns">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4276,12 +4395,46 @@
                     `}
                 </div>
             `;
+
+            // Dynamically add custom statuses to the filter dropdown
+            setTimeout(() => {
+                const filterEl = document.getElementById('caseStatusFilter');
+                if (!filterEl) return;
+                const customEnabled = localStorage.getItem('viperCustomStatusesEnabled') === 'true';
+                const customs = customEnabled ? JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]') : [];
+                if (customs.length > 0) {
+                    const divider = document.createElement('option');
+                    divider.disabled = true;
+                    divider.textContent = '───────────';
+                    filterEl.appendChild(divider);
+                    customs.forEach(s => {
+                        const opt = document.createElement('option');
+                        opt.value = s.id;
+                        opt.textContent = s.label;
+                        filterEl.appendChild(opt);
+                    });
+                }
+                // Populate metric filter dropdown
+                const mFilterEl = document.getElementById('caseMetricFilter');
+                if (!mFilterEl) return;
+                const metricDefs = getCustomMetricDefs();
+                if (metricDefs.length > 0) {
+                    mFilterEl.style.display = '';
+                    metricDefs.forEach(m => {
+                        const opt = document.createElement('option');
+                        opt.value = m.id;
+                        opt.textContent = (m.icon ? m.icon + ' ' : '') + m.name;
+                        mFilterEl.appendChild(opt);
+                    });
+                }
+            }, 0);
         }
 
         function renderCasesTableRows() {
             let filtered = [...cases];
             const searchTerm = document.getElementById('caseSearch')?.value?.toLowerCase() || '';
             const statusFilter = document.getElementById('caseStatusFilter')?.value || 'all';
+            const metricFilter = document.getElementById('caseMetricFilter')?.value || 'all';
             const visCols = getACVisibleCols();
 
             // Build extras cache
@@ -4300,18 +4453,26 @@
             }
 
             if (statusFilter !== 'all') {
-                const inactiveStatuses = ['closed','closed-arrest','transferred'];
-                const customStatuses = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
-                customStatuses.forEach(s => inactiveStatuses.push(s.id));
                 if (statusFilter === 'active') {
-                    filtered = filtered.filter(c => !inactiveStatuses.includes(c.status));
+                    filtered = filtered.filter(c => c.status === 'active');
+                } else if (statusFilter === 'inactive') {
+                    filtered = filtered.filter(c => c.status === 'inactive');
                 } else if (statusFilter === 'closed') {
-                    filtered = filtered.filter(c => inactiveStatuses.includes(c.status));
-                } else if (statusFilter === 'transferred') {
-                    filtered = filtered.filter(c => c.status === 'transferred');
+                    filtered = filtered.filter(c => c.status === 'closed' || c.status === 'closed-arrest');
                 } else {
                     filtered = filtered.filter(c => c.status === statusFilter);
                 }
+            }
+
+            // Filter by metric
+            if (metricFilter !== 'all') {
+                filtered = filtered.filter(c => {
+                    const mVals = getCaseMetricsData(c.id);
+                    const v = mVals[metricFilter];
+                    if (typeof v === 'boolean') return v;
+                    if (typeof v === 'number') return v > 0;
+                    return !!v;
+                });
             }
 
             // Sort
@@ -4351,6 +4512,7 @@
                         case 'status': {
                             let sc = 'gray-400';
                             if (c.status === 'active') sc = 'viper-green';
+                            else if (c.status === 'inactive') sc = 'yellow-400';
                             else if (c.status === 'closed' || c.status === 'closed-arrest') sc = 'blue-400';
                             else if (c.status === 'transferred') sc = 'purple-400';
                             const label = c.status.replace(/-/g,' ').replace(/\b\w/g,l=>l.toUpperCase());
@@ -4374,6 +4536,8 @@
                             return '<td class="px-5 py-4 text-sm text-gray-400 whitespace-nowrap">' + (c.dateAssigned ? new Date(c.dateAssigned + 'T00:00').toLocaleDateString() : '<span class="text-gray-600">—</span>') + '</td>';
                         case 'dateClosed':
                             return '<td class="px-5 py-4 text-sm text-gray-400 whitespace-nowrap">' + (c.dateClosed ? new Date(c.dateClosed + 'T00:00').toLocaleDateString() : '<span class="text-gray-600">—</span>') + '</td>';
+                        case 'flags':
+                            return '<td class="px-5 py-4 text-sm whitespace-nowrap">' + renderFlagsCell(c) + '</td>';
                         default: return '<td></td>';
                     }
                 }).join('');
@@ -4402,6 +4566,16 @@
             const existing = document.getElementById('acColumnPickerModal');
             if (existing) existing.remove();
             const visCols = getACVisibleCols();
+            // Build ordered list: visible cols in order, then hidden cols
+            const orderedCols = [];
+            visCols.forEach(key => {
+                const col = ALL_CASES_COLUMNS.find(c => c.key === key);
+                if (col) orderedCols.push({ ...col, visible: true });
+            });
+            ALL_CASES_COLUMNS.forEach(col => {
+                if (!visCols.includes(col.key)) orderedCols.push({ ...col, visible: false });
+            });
+
             const modal = document.createElement('div');
             modal.id = 'acColumnPickerModal';
             modal.className = 'fixed inset-0 bg-black/60 flex items-center justify-center z-50';
@@ -4409,15 +4583,17 @@
             modal.innerHTML = `
                 <div class="bg-viper-card border border-gray-700 rounded-xl w-full max-w-sm mx-4 overflow-hidden shadow-2xl">
                     <div class="border-b border-gray-700 px-6 py-4 flex items-center justify-between">
-                        <h3 class="text-lg font-bold text-white">Visible Columns</h3>
+                        <h3 class="text-lg font-bold text-white">Columns & Order</h3>
                         <button onclick="document.getElementById('acColumnPickerModal').remove()" class="text-gray-400 hover:text-white">✕</button>
                     </div>
-                    <div class="p-6 space-y-2 max-h-80 overflow-y-auto">
-                        ${ALL_CASES_COLUMNS.map(col => `
-                            <label class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer">
-                                <input type="checkbox" value="${col.key}" ${visCols.includes(col.key)?'checked':''} ${col.key==='caseNumber'?'disabled checked':''} class="ac-col-cb accent-cyan-400 w-4 h-4">
-                                <span class="text-sm text-gray-200">${col.label}</span>
-                            </label>
+                    <p class="px-6 pt-3 text-xs text-gray-500">Drag to reorder. Toggle visibility.</p>
+                    <div id="acColList" class="p-4 space-y-1 max-h-80 overflow-y-auto">
+                        ${orderedCols.map(col => `
+                            <div class="ac-col-item flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-grab" draggable="true" data-key="${col.key}">
+                                <span class="text-gray-600 cursor-grab">☰</span>
+                                <input type="checkbox" ${col.visible?'checked':''} ${col.key==='caseNumber'?'disabled checked':''} class="ac-col-cb accent-cyan-400 w-4 h-4" data-key="${col.key}">
+                                <span class="text-sm text-gray-200 flex-1">${col.label}</span>
+                            </div>
                         `).join('')}
                     </div>
                     <div class="border-t border-gray-700 px-6 py-4 flex justify-end">
@@ -4426,11 +4602,45 @@
                 </div>
             `;
             document.body.appendChild(modal);
+
+            // Setup drag-and-drop reordering
+            const list = document.getElementById('acColList');
+            let dragItem = null;
+            list.querySelectorAll('.ac-col-item').forEach(item => {
+                item.addEventListener('dragstart', (e) => {
+                    dragItem = item;
+                    item.style.opacity = '0.4';
+                    e.dataTransfer.effectAllowed = 'move';
+                });
+                item.addEventListener('dragend', () => {
+                    item.style.opacity = '1';
+                    dragItem = null;
+                    list.querySelectorAll('.ac-col-item').forEach(i => i.classList.remove('border-t-2', 'border-viper-cyan'));
+                });
+                item.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    list.querySelectorAll('.ac-col-item').forEach(i => i.classList.remove('border-t-2', 'border-viper-cyan'));
+                    item.classList.add('border-t-2', 'border-viper-cyan');
+                });
+                item.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    if (dragItem && dragItem !== item) {
+                        list.insertBefore(dragItem, item);
+                    }
+                    list.querySelectorAll('.ac-col-item').forEach(i => i.classList.remove('border-t-2', 'border-viper-cyan'));
+                });
+            });
         }
 
         function applyACColumns() {
-            const checks = document.querySelectorAll('.ac-col-cb:checked');
-            const cols = Array.from(checks).map(cb => cb.value);
+            const items = document.querySelectorAll('#acColList .ac-col-item');
+            const cols = [];
+            items.forEach(item => {
+                const key = item.dataset.key;
+                const checked = item.querySelector('.ac-col-cb').checked;
+                if (checked) cols.push(key);
+            });
             if (!cols.includes('caseNumber')) cols.unshift('caseNumber');
             setACVisibleCols(cols);
             document.getElementById('acColumnPickerModal')?.remove();
@@ -5127,6 +5337,8 @@
                                     <option value="Felony">Felony</option>
                                     <option value="Misdemeanor">Misdemeanor</option>
                                     <option value="Wobbler">Wobbler</option>
+                                    <option value="Infraction">Infraction</option>
+                                    <option value="Non-Criminal">Non-Criminal</option>
                                 </select>
                             </div>
                             <div>
@@ -5199,6 +5411,8 @@
                                     <option value="Felony" ${offense.type === 'Felony' ? 'selected' : ''}>Felony</option>
                                     <option value="Misdemeanor" ${offense.type === 'Misdemeanor' ? 'selected' : ''}>Misdemeanor</option>
                                     <option value="Wobbler" ${offense.type === 'Wobbler' ? 'selected' : ''}>Wobbler</option>
+                                    <option value="Infraction" ${offense.type === 'Infraction' ? 'selected' : ''}>Infraction</option>
+                                    <option value="Non-Criminal" ${offense.type === 'Non-Criminal' ? 'selected' : ''}>Non-Criminal</option>
                                 </select>
                             </div>
                             <div>

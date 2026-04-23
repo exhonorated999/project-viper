@@ -762,17 +762,7 @@
                                 </button>
                             </div>
                         </div>
-                        <div class="grid grid-cols-3 gap-4">
-                            <!-- Active Alerts -->
-                            <div class="rounded-lg p-4" style="background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.15);">
-                                <div class="flex items-center justify-between mb-3">
-                                    <h4 class="text-sm font-semibold text-emerald-300">Active Alerts</h4>
-                                    <span id="glAlertCount" class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold">0</span>
-                                </div>
-                                <div id="glAlertsList" class="space-y-2 max-h-32 overflow-y-auto text-xs">
-                                    <p class="text-gray-500 italic">No active alerts</p>
-                                </div>
-                            </div>
+                        <div class="grid grid-cols-2 gap-4">
                             <!-- Recent Activity -->
                             <div class="rounded-lg p-4" style="background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.15);">
                                 <div class="flex items-center justify-between mb-3">
@@ -789,12 +779,12 @@
                                 </div>
                                 <div class="space-y-3">
                                     <div class="flex items-center justify-between">
-                                        <span class="text-gray-400">Carriers Vetted</span>
+                                        <span class="text-gray-400">Carriers Looked Up</span>
                                         <span id="glStatVetted" class="text-emerald-300 font-bold">0</span>
                                     </div>
                                     <div class="flex items-center justify-between">
-                                        <span class="text-gray-400">Alerts Created</span>
-                                        <span id="glStatAlerts" class="text-emerald-300 font-bold">0</span>
+                                        <span class="text-gray-400">Lane Searches</span>
+                                        <span id="glStatLanes" class="text-emerald-300 font-bold">0</span>
                                     </div>
                                     <div class="flex items-center justify-between">
                                         <span class="text-gray-400">Lookups Today</span>
@@ -3560,7 +3550,6 @@
             }
             document.getElementById('glDashboardPanel').classList.remove('hidden');
             glUpdateConnectionStatus();
-            glRenderAlerts();
             glRenderActivityFeed();
             glRenderStats();
         }
@@ -3569,37 +3558,16 @@
             const el = document.getElementById('glConnectionStatus');
             try {
                 const status = GenLogs.connectionStatus();
-                if (status.authenticated) {
-                    el.innerHTML = '<span class="text-emerald-400">● Connected</span>';
+                if (status.status === 'connected') {
+                    el.innerHTML = `<span style="color:${status.color}">● ${status.label}</span>`;
+                } else if (status.status === 'expired') {
+                    el.innerHTML = `<span style="color:${status.color}">● ${status.label}</span>`;
                 } else {
                     el.innerHTML = '<span class="text-yellow-400">● Not authenticated — configure in Settings</span>';
                 }
             } catch(e) {
                 el.innerHTML = '<span class="text-red-400">● Error</span>';
             }
-        }
-
-        function glRenderAlerts() {
-            const alerts = JSON.parse(localStorage.getItem('genlogsAlerts') || '[]');
-            const listEl = document.getElementById('glAlertsList');
-            const countEl = document.getElementById('glAlertCount');
-            countEl.textContent = alerts.length;
-            if (alerts.length === 0) {
-                listEl.innerHTML = '<p class="text-gray-500 italic">No active alerts</p>';
-                return;
-            }
-            listEl.innerHTML = alerts.slice(0, 5).map(a => {
-                const typeIcon = a.hot ? '🔴' : '🔵';
-                const label = a.usdot ? `DOT ${a.usdot}` : (a.plate || a.trailer || 'Alert');
-                const time = a.createdAt ? new Date(a.createdAt).toLocaleDateString() : '';
-                return `<div class="flex items-center justify-between p-1.5 rounded bg-emerald-500/5 border border-emerald-500/10">
-                    <div class="flex items-center gap-1.5">
-                        <span>${typeIcon}</span>
-                        <span class="text-gray-300 font-medium">${label}</span>
-                    </div>
-                    <span class="text-gray-500">${time}</span>
-                </div>`;
-            }).join('');
         }
 
         function glRenderActivityFeed() {
@@ -3610,13 +3578,14 @@
                 return;
             }
             el.innerHTML = log.slice(0, 6).map(entry => {
-                const icons = { carrier_lookup: '🚛', vet: '✅', alert: '🔔', facility: '🏭', contacts: '📞', auth: '🔑' };
+                const icons = { carrier_lookup: '🚛', lane_search: '🛣️', auth: '🔑' };
                 const icon = icons[entry.type] || '📋';
                 const time = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                const label = entry.summary || entry.target || entry.type;
                 return `<div class="flex items-center justify-between p-1.5 rounded bg-emerald-500/5 border border-emerald-500/10">
                     <div class="flex items-center gap-1.5 truncate">
                         <span>${icon}</span>
-                        <span class="text-gray-300 truncate">${entry.description || entry.type}</span>
+                        <span class="text-gray-300 truncate">${label}</span>
                     </div>
                     <span class="text-gray-500 whitespace-nowrap ml-2">${time}</span>
                 </div>`;
@@ -3625,25 +3594,19 @@
 
         function glRenderStats() {
             const log = JSON.parse(localStorage.getItem('genlogsActivityLog') || '[]');
-            const alerts = JSON.parse(localStorage.getItem('genlogsAlerts') || '[]');
             const today = new Date().toDateString();
-            const vettedCount = log.filter(e => e.type === 'vet' || e.type === 'carrier_lookup').length;
+            const lookupCount = log.filter(e => e.type === 'carrier_lookup').length;
+            const laneCount = log.filter(e => e.type === 'lane_search').length;
             const lookupsToday = log.filter(e => e.timestamp && new Date(e.timestamp).toDateString() === today).length;
-            document.getElementById('glStatVetted').textContent = vettedCount;
-            document.getElementById('glStatAlerts').textContent = alerts.length;
+            document.getElementById('glStatVetted').textContent = lookupCount;
+            const laneEl = document.getElementById('glStatLanes');
+            if (laneEl) laneEl.textContent = laneCount;
             document.getElementById('glStatLookups').textContent = lookupsToday;
         }
 
         async function glDashRefresh() {
             const btn = event.currentTarget;
             btn.classList.add('animate-spin');
-            // If authenticated, try to run any stored alerts
-            try {
-                if (GenLogs.connectionStatus().authenticated) {
-                    await GenLogs.runAlerts();
-                }
-            } catch(e) { /* silent */ }
-            glRenderAlerts();
             glRenderActivityFeed();
             glRenderStats();
             glUpdateConnectionStatus();
@@ -3674,27 +3637,28 @@
             btn.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Looking up…';
             try {
                 await GenLogs.ensureToken();
-                const intel = await GenLogs.fullCarrierIntel(dot);
-                const p = intel.profile || {};
-                const v = intel.vetting || {};
-                const riskColor = v.overallScore >= 80 ? 'text-emerald-400' : v.overallScore >= 50 ? 'text-yellow-400' : 'text-red-400';
-                const riskLabel = v.overallScore >= 80 ? 'LOW RISK' : v.overallScore >= 50 ? 'REVIEW' : 'HIGH RISK';
+                const data = await GenLogs.carrierProfile(dot);
+                const profile = data[dot];
+                const pd = profile?.fmcsa_detail || {};
+                const sightingCount = profile?.sightings?.length || 0;
+                const eqCount = (profile?.equipment_pairings?.genlogs?.length || 0) + (profile?.equipment_pairings?.fmcsa?.length || 0);
+                const statusColor = pd.carrier_status === 'Active' ? 'text-emerald-400' : pd.carrier_status === 'Not Authorized' ? 'text-red-400' : 'text-yellow-400';
                 resultEl.classList.remove('hidden');
                 resultEl.innerHTML = `
                     <div class="space-y-2">
                         <div class="flex items-center justify-between">
-                            <span class="text-white font-bold">${p.legalName || p.dbaName || 'Unknown'}</span>
-                            <span class="${riskColor} font-bold text-xs px-2 py-0.5 rounded-full" style="background: rgba(0,0,0,0.3);">${v.overallScore != null ? v.overallScore + '% — ' + riskLabel : 'N/A'}</span>
+                            <span class="text-white font-bold">${pd.legal_name || pd.dba_name || 'Unknown'}</span>
+                            <span class="${statusColor} font-bold text-xs px-2 py-0.5 rounded-full" style="background: rgba(0,0,0,0.3);">${pd.carrier_status || 'N/A'}</span>
                         </div>
                         <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-300">
-                            <div>DOT: <span class="text-white">${p.usdot || dot}</span></div>
-                            <div>MC#: <span class="text-white">${p.mcNumber || 'N/A'}</span></div>
-                            <div>Status: <span class="text-white">${p.operatingStatus || 'N/A'}</span></div>
-                            <div>Auth: <span class="text-white">${p.operatingAuthority || 'N/A'}</span></div>
-                            <div>Equipment: <span class="text-white">${(p.equipmentPairings || []).length} pairings</span></div>
-                            <div>Sightings: <span class="text-white">${(p.sightings || []).length}</span></div>
+                            <div>DOT: <span class="text-white">${pd.usdot_number || dot}</span></div>
+                            <div>MC#: <span class="text-white">${pd.docket_number || 'N/A'}</span></div>
+                            <div>Power Units: <span class="text-white">${pd.carrier_total_power_units || 'N/A'}</span></div>
+                            <div>Drivers: <span class="text-white">${pd.carrier_total_drivers || 'N/A'}</span></div>
+                            <div>Equipment: <span class="text-white">${eqCount} pairings</span></div>
+                            <div>Sightings: <span class="text-white">${sightingCount}</span></div>
                         </div>
-                        ${(intel.contacts || []).length > 0 ? `<div class="pt-2 border-t border-emerald-500/20 text-xs"><span class="text-emerald-400">${intel.contacts.length} contacts available</span></div>` : ''}
+                        ${pd.carried_cargo ? `<div class="pt-2 border-t border-emerald-500/20 text-xs text-gray-400">Cargo: ${pd.carried_cargo}</div>` : ''}
                     </div>`;
             } catch(e) {
                 resultEl.classList.remove('hidden');
@@ -3706,12 +3670,10 @@
             glRenderStats();
         }
 
-        // Update notification badge to include GenLogs alerts
+        // Update notification badge
         function updateNotificationBadge() {
             const overdueCount = checkOverdueWarrants();
-            const glAlerts = (typeof GenLogs !== 'undefined' && GenLogs.isEnabled()) 
-                ? JSON.parse(localStorage.getItem('genlogsAlerts') || '[]').length : 0;
-            const total = overdueCount + glAlerts;
+            const total = overdueCount;
             const badge = document.querySelector('.notification-badge');
             if (badge) {
                 if (total > 0) {
@@ -4077,9 +4039,8 @@
                 });
             });
 
-            // GenLogs alerts
-            const glEnabled = typeof GenLogs !== 'undefined' && GenLogs.isEnabled();
-            const glAlerts = glEnabled ? JSON.parse(localStorage.getItem('genlogsAlerts') || '[]') : [];
+            // GenLogs alerts (disabled — need upgraded plan)
+            const glAlerts = [];
             
             if (overdueWarrants.length === 0 && glAlerts.length === 0) {
                 viperToast('No notifications', 'info');
@@ -4093,16 +4054,6 @@
                     const daysOverdue = Math.ceil((new Date() - new Date(item.warrant.dueDate)) / (1000 * 60 * 60 * 24));
                     return `⚠️ Case ${item.caseNumber}: ${item.warrant.type.toUpperCase()} ${item.warrant.issuedTo ? 'to ' + item.warrant.issuedTo : ''}\n   ${daysOverdue} days overdue`;
                 }).join('\n\n');
-            }
-            if (glAlerts.length > 0) {
-                if (message) message += '\n\n─────────────────\n\n';
-                message += `GENLOGS ALERTS (${glAlerts.length}):\n\n`;
-                message += glAlerts.slice(0, 5).map(a => {
-                    const typeLabel = a.hot ? '🔴 HOT' : '🔵 DAILY';
-                    const target = a.usdot ? `DOT ${a.usdot}` : (a.plate || a.trailer || 'Unknown');
-                    return `${typeLabel}: ${target}`;
-                }).join('\n');
-                if (glAlerts.length > 5) message += `\n... and ${glAlerts.length - 5} more`;
             }
             
             if (overdueWarrants.length > 0) {

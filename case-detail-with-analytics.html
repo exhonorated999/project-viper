@@ -9835,13 +9835,9 @@
                             <div class="flex flex-wrap gap-2">
                                 ${item.mcNumber ? `<button onclick="event.stopPropagation(); openGenlogsVetPanel(${index}, 'mc')" class="gl-action-btn">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-                                    Vet Carrier
+                                    Carrier Intel
                                 </button>` : ''}
-                                ${item.trailerPlate || item.trailerNumber ? `<button onclick="event.stopPropagation(); openGenlogsAlertModal(${index})" class="gl-action-btn gl-alert-btn">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
-                                    Create Alert
-                                </button>` : ''}
-                                ${!item.mcNumber && !item.trailerPlate && !item.trailerNumber ? `<span class="text-gray-500 text-xs italic">Enter MC#, trailer plate, or trailer# to unlock GenLogs actions</span>` : ''}
+                                ${!item.mcNumber ? `<span class="text-gray-500 text-xs italic">Enter MC# to unlock GenLogs carrier lookup</span>` : ''}
                             </div>
                         </div>` : ''}
                         ${(typeof TraceSearch !== 'undefined' && TraceSearch.isEnabled() && TraceSearch.isRegistered()) ? `
@@ -28938,10 +28934,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
         // Show loading skeletons
         document.getElementById('glPanelContent').innerHTML = `
-            <div class="gl-card"><div class="gl-card-title">Carrier Profile</div>${'<div class="gl-skeleton" style="width:PERC%"></div>'.replace('PERC','85').repeat(1)}${'<div class="gl-skeleton" style="width:PERC%"></div>'.replace('PERC','60').repeat(1)}${'<div class="gl-skeleton" style="width:PERC%"></div>'.replace('PERC','70').repeat(1)}<div class="gl-skeleton" style="width:45%"></div></div>
-            <div class="gl-card"><div class="gl-card-title">Risk Assessment</div><div class="gl-skeleton" style="width:50%"></div><div class="gl-skeleton" style="width:80%"></div></div>
-            <div class="gl-card"><div class="gl-card-title">Sighting History</div><div class="gl-skeleton" style="width:90%"></div><div class="gl-skeleton" style="width:65%"></div></div>
-            <div class="gl-card"><div class="gl-card-title">Contacts</div><div class="gl-skeleton" style="width:75%"></div><div class="gl-skeleton" style="width:55%"></div></div>`;
+            <div class="gl-card"><div class="gl-card-title">Carrier Profile</div><div class="gl-skeleton" style="width:85%"></div><div class="gl-skeleton" style="width:60%"></div><div class="gl-skeleton" style="width:70%"></div><div class="gl-skeleton" style="width:45%"></div></div>
+            <div class="gl-card"><div class="gl-card-title">Sighting History</div><div class="gl-skeleton" style="width:90%"></div><div class="gl-skeleton" style="width:65%"></div></div>`;
 
         try {
             const intel = await GenLogs.fullCarrierIntel(usdot);
@@ -28959,6 +28953,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         const pd = intel.profile[usdot]?.fmcsa_detail || intel.profile?.error;
         if (pd && !intel.profile.error) {
             const statusColor = pd.carrier_status === 'Active' ? '#4ade80' : pd.carrier_status === 'Not Authorized' ? '#ef4444' : '#fbbf24';
+            const physAddr = [pd.phy_street, pd.phy_city, pd.phy_state, pd.phy_zip].filter(Boolean).join(', ');
             html += `<div class="gl-card">
                 <div class="gl-card-title">Carrier Profile</div>
                 <div class="flex items-start justify-between mb-3">
@@ -28970,16 +28965,16 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 </div>
                 <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                     <div class="text-gray-500">USDOT <span class="text-gray-300 font-mono">${pd.usdot_number || usdot}</span></div>
-                    <div class="text-gray-500">MC# <span class="text-gray-300 font-mono">${pd.mc_mx_ff_number || 'N/A'}</span></div>
+                    <div class="text-gray-500">MC# <span class="text-gray-300 font-mono">${pd.docket_number || 'N/A'}</span></div>
                     <div class="text-gray-500">Entity <span class="text-gray-300">${pd.entity_type || 'N/A'}</span></div>
                     <div class="text-gray-500">Operation <span class="text-gray-300">${pd.carrier_operation || 'N/A'}</span></div>
-                    <div class="text-gray-500">Power Units <span class="text-gray-300 font-bold">${pd.power_units || 'N/A'}</span></div>
-                    <div class="text-gray-500">Drivers <span class="text-gray-300 font-bold">${pd.drivers || 'N/A'}</span></div>
+                    <div class="text-gray-500">Power Units <span class="text-gray-300 font-bold">${pd.carrier_total_power_units || 'N/A'}</span></div>
+                    <div class="text-gray-500">Drivers <span class="text-gray-300 font-bold">${pd.carrier_total_drivers || 'N/A'}</span></div>
                     <div class="text-gray-500">Phone <span class="text-gray-300">${pd.telephone || 'N/A'}</span></div>
-                    <div class="text-gray-500">Email <span class="text-gray-300 break-all">${pd.email || 'N/A'}</span></div>
+                    <div class="text-gray-500">Email <span class="text-gray-300 break-all">${pd.email_address || 'N/A'}</span></div>
                 </div>
-                ${pd.physical_address ? `<div class="mt-2 text-xs text-gray-500">📍 ${pd.physical_address}</div>` : ''}
-                ${pd.cargo_carried ? `<div class="mt-2 flex flex-wrap gap-1">${pd.cargo_carried.split(',').map(c => `<span class="text-[10px] px-2 py-0.5 rounded-full bg-viper-purple/15 text-viper-purple border border-viper-purple/25">${c.trim()}</span>`).join('')}</div>` : ''}
+                ${physAddr ? `<div class="mt-2 text-xs text-gray-500">📍 ${physAddr}</div>` : ''}
+                ${pd.carried_cargo ? `<div class="mt-2 flex flex-wrap gap-1">${pd.carried_cargo.split(',').map(c => `<span class="text-[10px] px-2 py-0.5 rounded-full bg-viper-purple/15 text-viper-purple border border-viper-purple/25">${c.trim()}</span>`).join('')}</div>` : ''}
             </div>`;
 
             // Equipment pairings
@@ -28999,42 +28994,6 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
         } else {
             html += `<div class="gl-card"><div class="gl-card-title">Carrier Profile</div><p class="text-gray-500 text-sm">${intel.profile.error || 'No profile data available'}</p></div>`;
-        }
-
-        // ── Risk Assessment Card ─────────────────────────────────────
-        const vd = intel.vetting;
-        if (vd && !vd.error) {
-            const rs = vd.rule_status || {};
-            const passN = rs.pass?.total || 0;
-            const reviewN = rs.review?.total || 0;
-            const failN = rs.fail?.total || 0;
-            const total = passN + reviewN + failN;
-            const overallClass = failN > 0 ? 'gl-badge-fail' : reviewN > 0 ? 'gl-badge-review' : passN > 0 ? 'gl-badge-pass' : 'gl-badge-unknown';
-            const overallLabel = failN > 0 ? '🔴 FAIL' : reviewN > 0 ? '⚠️ REVIEW' : passN > 0 ? '✅ PASS' : '? UNKNOWN';
-
-            html += `<div class="gl-card">
-                <div class="gl-card-title">Risk Assessment</div>
-                <div class="flex items-center gap-3 mb-3">
-                    <span class="${overallClass}">${overallLabel}</span>
-                    <div class="flex gap-3 text-xs">
-                        <span class="text-green-400">${passN} pass</span>
-                        <span class="text-yellow-400">${reviewN} review</span>
-                        <span class="text-red-400">${failN} fail</span>
-                    </div>
-                </div>
-                ${total > 0 ? `<div class="h-2 rounded-full overflow-hidden flex bg-gray-800 mb-3">
-                    ${passN ? `<div class="h-full bg-green-500" style="width:${(passN/total*100).toFixed(1)}%"></div>` : ''}
-                    ${reviewN ? `<div class="h-full bg-yellow-500" style="width:${(reviewN/total*100).toFixed(1)}%"></div>` : ''}
-                    ${failN ? `<div class="h-full bg-red-500" style="width:${(failN/total*100).toFixed(1)}%"></div>` : ''}
-                </div>` : ''}
-                ${(vd.rules || []).map(r => {
-                    const icon = r.status === 'pass' ? '✅' : r.status === 'fail' ? '🔴' : r.status === 'review' ? '⚠️' : '❓';
-                    const color = r.status === 'pass' ? '#4ade80' : r.status === 'fail' ? '#ef4444' : '#fbbf24';
-                    return `<div class="gl-rule-row"><span class="gl-rule-icon" style="background:${color}20; color:${color}">${icon}</span><span class="text-gray-300 flex-1">${r.rule_result_description || r.category || 'Rule'}</span><span class="text-xs" style="color:${color}">${r.status}</span></div>`;
-                }).join('')}
-            </div>`;
-        } else {
-            html += `<div class="gl-card"><div class="gl-card-title">Risk Assessment</div><p class="text-gray-500 text-sm">${vd?.error || 'Vetting data unavailable'}</p></div>`;
         }
 
         // ── Sighting History Card ────────────────────────────────────
@@ -29060,54 +29019,6 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             html += `<p class="text-gray-500 text-sm">No sightings found for this carrier</p>`;
         }
         html += `</div>`;
-
-        // ── Contacts Card ────────────────────────────────────────────
-        const cd = intel.contacts?.data?.[usdot] || intel.contacts?.data;
-        if (cd && !intel.contacts.error) {
-            html += `<div class="gl-card"><div class="gl-card-title">Contacts</div>`;
-            const renderContact = (c, badge) => {
-                const name = c.name || '';
-                const phone = c.phone || '';
-                const email = c.email || '';
-                if (!name && !phone && !email) return '';
-                return `<div class="gl-contact-row">
-                    <div class="flex-1 min-w-0">
-                        ${name ? `<div class="text-white text-sm font-medium truncate">${name}</div>` : ''}
-                        <div class="flex gap-3 text-xs text-gray-400 mt-0.5">
-                            ${phone ? `<span>📞 ${phone}</span>` : ''}
-                            ${email ? `<span class="truncate">✉️ ${email}</span>` : ''}
-                        </div>
-                    </div>
-                    <div class="flex gap-1 flex-shrink-0">
-                        ${phone ? `<button class="gl-copy-btn" onclick="navigator.clipboard.writeText('${phone.replace(/'/g,'')}')">📋</button>` : ''}
-                        ${badge}
-                    </div>
-                </div>`;
-            };
-            if (cd.dispatch_contact?.length) {
-                html += `<div class="text-[10px] text-emerald-400 uppercase tracking-wider mb-1 font-bold">✓ Verified Dispatch</div>`;
-                cd.dispatch_contact.forEach(c => { html += renderContact(c, '<span class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">Verified</span>'); });
-            }
-            if (cd.fmcsa_contact) {
-                html += `<div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1 mt-2">FMCSA</div>`;
-                const fc = Array.isArray(cd.fmcsa_contact) ? cd.fmcsa_contact : [cd.fmcsa_contact];
-                fc.forEach(c => { html += renderContact(c, '<span class="text-[9px] px-1.5 py-0.5 rounded bg-gray-700 text-gray-400">FMCSA</span>'); });
-            }
-            if (cd.onboarded_contacts?.length) {
-                html += `<div class="text-[10px] text-viper-cyan uppercase tracking-wider mb-1 mt-2">Onboarded</div>`;
-                cd.onboarded_contacts.forEach(c => { html += renderContact(c, '<span class="text-[9px] px-1.5 py-0.5 rounded bg-viper-cyan/15 text-viper-cyan border border-viper-cyan/25">Onboarded</span>'); });
-            }
-            html += `</div>`;
-        } else {
-            html += `<div class="gl-card"><div class="gl-card-title">Contacts</div><p class="text-gray-500 text-sm">${intel.contacts?.error || 'No contacts available'}</p></div>`;
-        }
-
-        // Quick actions footer
-        html += `<div class="gl-card" style="background:rgba(16,185,129,0.05); border-color:rgba(16,185,129,0.15);">
-            <div class="flex gap-2">
-                <button onclick="openGenlogsAlertFromPanel('${usdot}')" class="gl-alert-btn flex-1 justify-center" style="padding:8px;">🚨 Create Alert for this Carrier</button>
-            </div>
-        </div>`;
 
         content.innerHTML = html;
 

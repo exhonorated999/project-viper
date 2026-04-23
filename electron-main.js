@@ -718,23 +718,72 @@ ipcMain.handle('update-check', async () => {
 ipcMain.handle('update-download', async () => {
   if (!autoUpdater) return { success: false, error: 'Auto-updater not available.' };
   try {
+    const path = require('path');
+    const fs = require('fs');
     // Clear stale cached installer before downloading to prevent
     // electron-updater from running an old cached installer.exe
-    const cachePath = require('path').join(app.getPath('userData'), '..', 'viper-electron-updater');
-    const cachedInstaller = require('path').join(cachePath, 'installer.exe');
-    try { require('fs').unlinkSync(cachedInstaller); } catch (_) { /* no cached file, fine */ }
+    const cachePath = path.join(app.getPath('userData'), '..', '..', 'Local', 'viper-electron-updater');
+    try {
+      const files = fs.readdirSync(cachePath);
+      files.filter(f => f.endsWith('.exe')).forEach(f => {
+        try { fs.unlinkSync(path.join(cachePath, f)); } catch (_) {}
+      });
+    } catch (_) { /* cache dir may not exist yet */ }
     await autoUpdater.downloadUpdate();
+    // Log what's in the cache after download
+    try {
+      const files = fs.readdirSync(cachePath);
+      console.log('Updater cache after download:', files);
+    } catch (_) {}
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
   }
 });
 
-ipcMain.handle('update-install', () => {
+ipcMain.handle('update-install', async () => {
   if (!autoUpdater) return;
-  // quitAndInstall runs the NSIS installer which uses installer.nsh
-  // to backup userdata/ and cases/ before replacing files, then restores them.
-  autoUpdater.quitAndInstall(false, true); // isSilent=false, isForceRunAfter=true
+  const path = require('path');
+  const fs = require('fs');
+  const { spawn } = require('child_process');
+
+  // Find the downloaded installer in the updater cache
+  const cachePath = path.join(app.getPath('userData'), '..', '..', 'Local', 'viper-electron-updater');
+  let installerPath = null;
+
+  try {
+    const files = fs.readdirSync(cachePath);
+    const exe = files.find(f => f.endsWith('.exe') && f.toLowerCase().includes('v.i.p.e.r'));
+    if (exe) installerPath = path.join(cachePath, exe);
+  } catch (e) {
+    console.error('Could not read updater cache:', e.message);
+  }
+
+  if (installerPath && fs.existsSync(installerPath)) {
+    // Manually spawn the NSIS installer as a detached process so it survives app exit
+    console.log('Spawning installer manually:', installerPath);
+    try {
+      const child = spawn(installerPath, ['/S', '--updated'], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false
+      });
+      child.unref();
+      // Give the installer process time to fully start before quitting
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    } catch (e) {
+      console.error('Manual spawn failed, falling back to quitAndInstall:', e.message);
+      autoUpdater.quitAndInstall(false, true);
+      return;
+    }
+    app.quit();
+  } else {
+    // Fallback to standard quitAndInstall with a safety delay
+    console.log('No installer found in cache, using standard quitAndInstall');
+    autoUpdater.quitAndInstall(false, true);
+    // Safety delay — give the OS time to spawn the installer before Node exits
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
 });
 
 // --- Backup & Restore ---
@@ -3185,4 +3234,49 @@ ipcMain.handle('accurint-reset', async () => {
   const ses = accurintBrowserView.webContents.session;
   await ses.clearStorageData();
   accurintBrowserView.webContents.loadURL('https://secure.accurint.com/app/bps/main');
+});
+
+// --- GenLogs API Proxy (avoids CORS in renderer) ---
+ipcMain.handle('genlogs-request', async (_event, { method, url, headers, body }) => {
+  const https = require('https');
+  const { URL } = require('url');
+
+  return new Promise((resolve) => {
+    try {
+      const parsed = new URL(url);
+      const options = {
+        hostname: parsed.hostname,
+        port: parsed.port || 443,
+        path: parsed.pathname + parsed.search,
+        method: method || 'GET',
+        headers: headers || {}
+      };
+
+      const req = https.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => data += chunk);
+        res.on('end', () => {
+          try {
+            resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, body: JSON.parse(data) });
+          } catch (e) {
+            resolve({ ok: false, status: res.statusCode, body: { detail: 'Failed to parse response' } });
+          }
+        });
+      });
+
+      req.on('error', (e) => {
+        resolve({ ok: false, status: 0, body: { detail: e.message } });
+      });
+
+      req.setTimeout(30000, () => {
+        req.destroy();
+        resolve({ ok: false, status: 0, body: { detail: 'Request timed out' } });
+      });
+
+      if (body) req.write(typeof body === 'string' ? body : JSON.stringify(body));
+      req.end();
+    } catch (e) {
+      resolve({ ok: false, status: 0, body: { detail: e.message } });
+    }
+  });
 });

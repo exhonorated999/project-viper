@@ -1252,6 +1252,66 @@
                     </div>
                 </div>
 
+                <!-- ═══ Custom Metrics Section ═══ -->
+                <div class="glass-card rounded-xl p-6">
+                    <h3 class="text-xl font-bold mb-2 flex items-center gap-2">
+                        <svg class="w-6 h-6 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"/>
+                        </svg>
+                        Custom Metrics
+                    </h3>
+                    <p class="text-gray-400 text-sm mb-5">Define per-case tracking fields (checkboxes, counters, dates, text). These appear on the Case Overview and can be included in generated reports.</p>
+
+                    <!-- Custom Metrics Toggle -->
+                    <div class="mb-6 p-4 bg-viper-dark/50 rounded-lg border border-gray-700/50">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h4 class="text-white font-semibold text-sm">Enable Custom Metrics</h4>
+                                <p class="text-xs text-gray-400 mt-1">Show a Custom Metrics card on every case overview. If disabled, nothing appears.</p>
+                            </div>
+                            <button id="metricsToggleBtn" onclick="toggleCustomMetricsEnabled()"
+                                class="relative inline-flex items-center h-6 rounded-full w-11 transition-colors focus:outline-none bg-gray-700"
+                                aria-label="Toggle custom metrics">
+                                <span id="metricsToggleIndicator" class="inline-block w-4 h-4 transform transition-transform bg-white rounded-full translate-x-1"></span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Metrics List + Add Form (hidden when disabled) -->
+                    <div id="customMetricsBody" class="hidden">
+                        <!-- Existing metrics -->
+                        <div class="mb-4">
+                            <span class="text-[10px] text-gray-500 uppercase tracking-wider">Your Metrics</span>
+                            <div id="customMetricsList" class="mt-2 space-y-2"></div>
+                            <div id="noMetricsPlaceholder" class="mt-2 text-sm text-gray-500 italic">No custom metrics defined yet. Add one below.</div>
+                        </div>
+
+                        <!-- Add new metric -->
+                        <div class="p-4 bg-viper-dark/50 rounded-lg border border-gray-700/50">
+                            <span class="text-[10px] text-gray-500 uppercase tracking-wider block mb-3">Add New Metric</span>
+                            <div class="flex gap-2 flex-wrap">
+                                <input type="text" id="newMetricName" placeholder="e.g. Forensic Interview" class="flex-1 min-w-[180px] px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-xs text-white placeholder-gray-500 focus:border-viper-purple outline-none">
+                                <select id="newMetricType" class="px-2 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-xs text-gray-300 focus:border-viper-purple outline-none">
+                                    <option value="checkbox">☑ Checkbox</option>
+                                    <option value="counter"># Counter</option>
+                                    <option value="date">📅 Date</option>
+                                    <option value="text">📝 Text</option>
+                                </select>
+                                <select id="newMetricColor" class="px-2 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-xs text-gray-300 focus:border-viper-purple outline-none">
+                                    <option value="cyan">🔵 Cyan</option>
+                                    <option value="purple">🟣 Purple</option>
+                                    <option value="green">🟢 Green</option>
+                                    <option value="orange">🟠 Orange</option>
+                                    <option value="red">🔴 Red</option>
+                                    <option value="amber">🟡 Amber</option>
+                                </select>
+                                <input type="text" id="newMetricIcon" placeholder="emoji (opt)" maxlength="4" class="w-20 px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-xs text-white placeholder-gray-500 focus:border-viper-purple outline-none text-center">
+                                <button onclick="addCustomMetric()" class="px-4 py-1.5 bg-viper-purple/20 text-viper-purple border border-viper-purple/30 rounded-lg text-xs font-medium hover:bg-viper-purple/30 transition">Add</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- ═══ Field Security Section ═══ -->
                 <div class="glass-card rounded-xl p-6" id="securitySection">
                     <h3 class="text-xl font-bold mb-2 flex items-center gap-2">
@@ -3279,10 +3339,115 @@
         renderCustomStatusList();
     }
 
+    // ═══ Custom Metrics ═══
+    function getCustomMetrics() {
+        try { return JSON.parse(localStorage.getItem('viperCustomMetrics') || '[]'); } catch { return []; }
+    }
+    function saveCustomMetrics(list) {
+        localStorage.setItem('viperCustomMetrics', JSON.stringify(list));
+    }
+    function isCustomMetricsEnabled() {
+        return localStorage.getItem('viperCustomMetricsEnabled') === 'true';
+    }
+    function toggleCustomMetricsEnabled() {
+        const enabled = !isCustomMetricsEnabled();
+        localStorage.setItem('viperCustomMetricsEnabled', enabled ? 'true' : 'false');
+        refreshCustomMetricsUI();
+    }
+    function refreshCustomMetricsUI() {
+        const enabled = isCustomMetricsEnabled();
+        const btn = document.getElementById('metricsToggleBtn');
+        const ind = document.getElementById('metricsToggleIndicator');
+        const body = document.getElementById('customMetricsBody');
+        if (enabled) {
+            btn.classList.remove('bg-gray-700'); btn.classList.add('bg-viper-purple');
+            ind.classList.remove('translate-x-1'); ind.classList.add('translate-x-6');
+            body.classList.remove('hidden');
+        } else {
+            btn.classList.add('bg-gray-700'); btn.classList.remove('bg-viper-purple');
+            ind.classList.add('translate-x-1'); ind.classList.remove('translate-x-6');
+            body.classList.add('hidden');
+        }
+        renderCustomMetricsList();
+    }
+    const metricColorMap = {
+        cyan: { bg: 'bg-viper-cyan/10', text: 'text-viper-cyan', border: 'border-viper-cyan/30', dot: 'bg-viper-cyan' },
+        purple: { bg: 'bg-viper-purple/10', text: 'text-viper-purple', border: 'border-viper-purple/30', dot: 'bg-viper-purple' },
+        green: { bg: 'bg-viper-green/10', text: 'text-viper-green', border: 'border-viper-green/30', dot: 'bg-viper-green' },
+        orange: { bg: 'bg-viper-orange/10', text: 'text-viper-orange', border: 'border-viper-orange/30', dot: 'bg-viper-orange' },
+        red: { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/30', dot: 'bg-red-500' },
+        amber: { bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/30', dot: 'bg-amber-500' },
+    };
+    const metricTypeLabels = { checkbox: '☑ Checkbox', counter: '# Counter', date: '📅 Date', text: '📝 Text' };
+
+    function renderCustomMetricsList() {
+        const container = document.getElementById('customMetricsList');
+        const placeholder = document.getElementById('noMetricsPlaceholder');
+        if (!container) return;
+        const list = getCustomMetrics();
+        if (list.length === 0) {
+            container.innerHTML = '';
+            if (placeholder) placeholder.classList.remove('hidden');
+            return;
+        }
+        if (placeholder) placeholder.classList.add('hidden');
+        container.innerHTML = list.map((m, i) => {
+            const c = metricColorMap[m.color] || metricColorMap.cyan;
+            return `
+            <div class="flex items-center justify-between px-3 py-2 rounded-lg border ${c.border} ${c.bg}">
+                <div class="flex items-center gap-2">
+                    <span class="w-3 h-3 rounded-full ${c.dot} flex-shrink-0"></span>
+                    <span class="text-sm font-medium ${c.text}">${m.icon ? m.icon + ' ' : ''}${m.name}</span>
+                    <span class="text-[10px] text-gray-500 bg-gray-800/50 px-1.5 py-0.5 rounded">${metricTypeLabels[m.type] || m.type}</span>
+                </div>
+                <button onclick="deleteCustomMetric('${m.id}')" class="text-gray-500 hover:text-red-400 transition text-xs ml-2" title="Delete metric">✕</button>
+            </div>`;
+        }).join('');
+    }
+
+    function addCustomMetric() {
+        const nameEl = document.getElementById('newMetricName');
+        const typeEl = document.getElementById('newMetricType');
+        const colorEl = document.getElementById('newMetricColor');
+        const iconEl = document.getElementById('newMetricIcon');
+        const name = nameEl.value.trim();
+        if (!name) { viperToast('Enter a metric name', 'warning'); return; }
+        const list = getCustomMetrics();
+        if (list.some(m => m.name.toLowerCase() === name.toLowerCase())) {
+            viperToast('A metric with that name already exists', 'warning'); return;
+        }
+        const id = 'm_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        list.push({
+            id,
+            name,
+            type: typeEl.value,
+            color: colorEl.value,
+            icon: iconEl.value.trim() || '',
+            createdAt: new Date().toISOString()
+        });
+        saveCustomMetrics(list);
+        nameEl.value = '';
+        iconEl.value = '';
+        renderCustomMetricsList();
+        viperToast('Metric added: ' + name, 'success');
+    }
+
+    function deleteCustomMetric(id) {
+        const list = getCustomMetrics();
+        const metric = list.find(m => m.id === id);
+        if (!metric) return;
+        if (!confirm(`Delete metric "${metric.name}"?\n\nThis will remove the definition. Per-case data for this metric will no longer be visible.`)) return;
+        const filtered = list.filter(m => m.id !== id);
+        saveCustomMetrics(filtered);
+        renderCustomMetricsList();
+        viperToast('Metric deleted', 'success');
+    }
+
     // Init on load
     document.addEventListener('DOMContentLoaded', () => {
         refreshPriorityUI();
         refreshCustomStatusUI();
+        refreshCustomMetricsUI();
     });
     </script>
 

@@ -3280,3 +3280,74 @@ ipcMain.handle('genlogs-request', async (_event, { method, url, headers, body })
     }
   });
 });
+
+// ─── Google Warrant Parser IPC ──────────────────────────────────────────
+
+const GoogleWarrantParser = require('./modules/google-warrant/google-warrant-parser');
+const gwParser = new GoogleWarrantParser();
+
+ipcMain.handle('google-warrant-scan', async (event, { caseNumber }) => {
+  try {
+    const dirsToScan = [
+      path.join(casesDir, caseNumber, 'Evidence'),
+      path.join(casesDir, caseNumber, 'Warrants', 'Production')
+    ];
+
+    const files = [];
+    for (const dir of dirsToScan) {
+      if (!fs.existsSync(dir)) continue;
+      const scanDir = (d) => {
+        const entries = fs.readdirSync(d, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(d, entry.name);
+          if (entry.isDirectory()) {
+            scanDir(fullPath);
+          } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')) {
+            try {
+              const buf = fs.readFileSync(fullPath);
+              if (GoogleWarrantParser.isGoogleWarrantZip(buf)) {
+                files.push({
+                  name: entry.name,
+                  path: fullPath,
+                  size: fs.statSync(fullPath).size
+                });
+              }
+            } catch (e) { /* not a valid zip, skip */ }
+          }
+        }
+      };
+      scanDir(dir);
+    }
+
+    return { success: true, files };
+  } catch (error) {
+    console.error('Google warrant scan error:', error);
+    return { success: false, error: error.message, files: [] };
+  }
+});
+
+ipcMain.handle('google-warrant-import', async (event, { filePath }) => {
+  try {
+    let buf = fs.readFileSync(filePath);
+    // Decrypt if Field Security is active
+    if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
+      buf = security.decryptBuffer(buf);
+    }
+    const data = await gwParser.parseOuterZip(buf);
+    return { success: true, data };
+  } catch (error) {
+    console.error('Google warrant import error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('google-warrant-pick-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Google Warrant Return ZIP',
+    properties: ['openFile'],
+    filters: [{ name: 'ZIP Archives', extensions: ['zip'] }]
+  });
+  restoreFocus();
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
+});

@@ -1,0 +1,667 @@
+/* Google Warrant Parser — Styles */
+
+/* Layout */
+.gwp-layout {
+    display: flex;
+    height: calc(100vh - 220px);
+    gap: 0;
+}
+
+.gwp-sidebar {
+    width: 220px;
+    min-width: 220px;
+    background: rgba(15, 16, 20, 0.8);
+    border-right: 1px solid rgba(0, 217, 255, 0.15);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+.gwp-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0;
+}
+
+.gwp-section-scroll {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* Import Header */
+.gwp-import-header {
+    padding: 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.gwp-import-account {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.gwp-import-email {
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gwp-import-meta {
+    font-size: 11px;
+    color: rgba(255,255,255,0.4);
+    font-family: monospace;
+}
+
+.gwp-google-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #4285F4, #34A853, #FBBC05, #EA4335);
+    color: white;
+    font-weight: 700;
+    font-size: 16px;
+    flex-shrink: 0;
+}
+
+.gwp-google-icon-sm {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    background: linear-gradient(135deg, #4285F4, #34A853);
+    color: white;
+    font-weight: 700;
+    font-size: 10px;
+    flex-shrink: 0;
+}
+
+/* Import Tabs (multi-import) */
+.gwp-import-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.gwp-import-tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.6);
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.gwp-import-tab:hover { border-color: rgba(0, 217, 255, 0.3); }
+.gwp-import-tab.active { background: rgba(0, 217, 255, 0.1); border-color: rgba(0, 217, 255, 0.4); color: #00d9ff; }
+
+.gwp-add-tab {
+    font-size: 16px;
+    font-weight: 700;
+    padding: 4px 10px;
+}
+
+.gwp-tab-email {
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Navigation */
+.gwp-nav {
+    flex: 1;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.gwp-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    font-size: 13px;
+    color: rgba(255,255,255,0.6);
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: left;
+    width: 100%;
+}
+
+.gwp-nav-item:hover { background: rgba(255,255,255,0.05); color: #fff; }
+.gwp-nav-item.active { background: rgba(0, 217, 255, 0.1); color: #00d9ff; }
+.gwp-nav-icon { font-size: 16px; flex-shrink: 0; width: 20px; text-align: center; }
+.gwp-nav-label { flex: 1; }
+.gwp-nav-badge {
+    font-size: 10px;
+    background: rgba(0, 217, 255, 0.2);
+    color: #00d9ff;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-weight: 600;
+}
+
+.gwp-nav-footer {
+    padding: 12px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* Cards */
+.gwp-card {
+    background: rgba(25, 27, 35, 0.7);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
+    padding: 16px;
+}
+
+.gwp-card-highlight {
+    border-color: rgba(0, 217, 255, 0.2);
+    background: rgba(0, 217, 255, 0.03);
+}
+
+.gwp-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+}
+
+.gwp-card-header h3 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #fff;
+}
+
+.gwp-card-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.9);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+/* Fields */
+.gwp-field {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    gap: 12px;
+}
+
+.gwp-field label {
+    font-size: 12px;
+    color: rgba(255,255,255,0.4);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+    min-width: 100px;
+}
+
+.gwp-field span {
+    font-size: 13px;
+    color: rgba(255,255,255,0.85);
+    text-align: right;
+    word-break: break-word;
+}
+
+.gwp-field-sm {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 3px 0;
+    gap: 8px;
+}
+
+.gwp-field-sm label {
+    font-size: 11px;
+    color: rgba(255,255,255,0.35);
+    flex-shrink: 0;
+}
+
+.gwp-field-sm span {
+    font-size: 12px;
+    color: rgba(255,255,255,0.75);
+    text-align: right;
+}
+
+/* Profile Grid */
+.gwp-profile-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+@media (max-width: 900px) {
+    .gwp-profile-grid { grid-template-columns: 1fr; }
+}
+
+.gwp-grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+/* Table */
+.gwp-table-wrap {
+    overflow-x: auto;
+}
+
+.gwp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.gwp-table th {
+    text-align: left;
+    padding: 8px 10px;
+    background: rgba(0, 217, 255, 0.05);
+    color: rgba(0, 217, 255, 0.8);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 10px;
+    border-bottom: 1px solid rgba(0, 217, 255, 0.15);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.gwp-table td {
+    padding: 6px 10px;
+    color: rgba(255,255,255,0.75);
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+
+.gwp-table tr:hover td {
+    background: rgba(255,255,255,0.02);
+}
+
+/* Badges & Tags */
+.gwp-badge {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-weight: 600;
+}
+
+.gwp-badge-green { background: rgba(52, 168, 83, 0.15); color: #34A853; border: 1px solid rgba(52, 168, 83, 0.3); }
+.gwp-badge-red { background: rgba(234, 67, 53, 0.15); color: #EA4335; border: 1px solid rgba(234, 67, 53, 0.3); }
+
+.gwp-badge-change {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(251, 188, 5, 0.12);
+    color: #FBBC05;
+    font-weight: 500;
+}
+
+.gwp-tag {
+    display: inline-block;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    margin: 2px;
+}
+
+.gwp-tag-green { background: rgba(52, 168, 83, 0.12); color: #6fcf97; }
+.gwp-tag-gray { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.35); }
+
+.gwp-tag-sm {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.5);
+    margin: 1px;
+}
+
+.gwp-categories label {
+    font-size: 12px;
+    color: rgba(255,255,255,0.4);
+    display: block;
+    margin-bottom: 6px;
+}
+
+.gwp-category-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+}
+
+/* Utility */
+.gwp-mono { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 11px; }
+.gwp-nowrap { white-space: nowrap; }
+.gwp-truncate { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gwp-more { text-align: center; padding: 10px; color: rgba(255,255,255,0.3); font-style: italic; font-size: 12px; }
+.gwp-pre { font-family: monospace; font-size: 11px; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 6px; overflow-x: auto; color: rgba(255,255,255,0.7); white-space: pre-wrap; word-break: break-all; }
+
+/* Buttons */
+.gwp-btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background: linear-gradient(135deg, rgba(0, 217, 255, 0.2), rgba(0, 217, 255, 0.1));
+    color: #00d9ff;
+    border: 1px solid rgba(0, 217, 255, 0.4);
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.gwp-btn-primary:hover { background: rgba(0, 217, 255, 0.25); border-color: rgba(0, 217, 255, 0.6); }
+
+.gwp-btn-outline {
+    padding: 6px 12px;
+    background: transparent;
+    color: rgba(255,255,255,0.6);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.gwp-btn-outline:hover { border-color: rgba(0, 217, 255, 0.3); color: #00d9ff; }
+
+.gwp-btn-sm {
+    padding: 4px 10px;
+    background: rgba(0, 217, 255, 0.1);
+    color: #00d9ff;
+    border: 1px solid rgba(0, 217, 255, 0.3);
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.gwp-btn-sm:hover { background: rgba(0, 217, 255, 0.2); }
+
+.gwp-btn-danger-sm {
+    padding: 6px 12px;
+    background: transparent;
+    color: rgba(234, 67, 53, 0.6);
+    border: 1px solid rgba(234, 67, 53, 0.2);
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.gwp-btn-danger-sm:hover { background: rgba(234, 67, 53, 0.1); color: #EA4335; }
+
+.gwp-btn-full { width: 100%; text-align: center; }
+
+/* Empty State */
+.gwp-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 400px;
+    text-align: center;
+    padding: 40px;
+}
+
+.gwp-empty-icon { font-size: 48px; margin-bottom: 16px; }
+.gwp-empty h3 { font-size: 20px; font-weight: 600; color: #fff; margin-bottom: 8px; }
+.gwp-empty p { font-size: 14px; color: rgba(255,255,255,0.5); max-width: 400px; margin-bottom: 20px; }
+.gwp-empty-actions { margin-bottom: 16px; }
+.gwp-empty-hint { font-size: 12px; color: rgba(255,255,255,0.3); margin-bottom: 20px; }
+.gwp-empty-section { display: flex; align-items: center; justify-content: center; min-height: 200px; color: rgba(255,255,255,0.3); font-size: 14px; }
+
+/* Loading */
+.gwp-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 400px;
+    text-align: center;
+}
+.gwp-loading p { color: #00d9ff; font-size: 14px; font-weight: 500; margin-top: 16px; }
+.gwp-loading-sub { color: rgba(255,255,255,0.3) !important; font-size: 12px !important; margin-top: 4px !important; }
+
+.gwp-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(0, 217, 255, 0.15);
+    border-top: 3px solid #00d9ff;
+    border-radius: 50%;
+    animation: gwp-spin 0.8s linear infinite;
+}
+@keyframes gwp-spin { to { transform: rotate(360deg); } }
+
+/* Email */
+.gwp-email-list { display: flex; flex-direction: column; gap: 8px; }
+
+.gwp-email-item {
+    background: rgba(25, 27, 35, 0.7);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px;
+    padding: 12px 16px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.gwp-email-item:hover { border-color: rgba(0, 217, 255, 0.2); }
+
+.gwp-email-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.gwp-email-from { font-size: 13px; font-weight: 600; color: #fff; }
+.gwp-email-date { font-size: 11px; color: rgba(255,255,255,0.35); font-family: monospace; }
+.gwp-email-subject { font-size: 14px; color: rgba(255,255,255,0.8); margin-bottom: 2px; }
+.gwp-email-to { font-size: 11px; color: rgba(255,255,255,0.35); }
+.gwp-email-labels { margin-top: 6px; }
+.gwp-email-headers { padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 12px; }
+
+.gwp-email-body { margin-top: 8px; }
+.gwp-email-iframe { width: 100%; min-height: 300px; border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; background: #fff; }
+.gwp-email-text { font-size: 12px; line-height: 1.6; color: rgba(255,255,255,0.7); white-space: pre-wrap; }
+
+/* Map */
+.gwp-map {
+    height: 400px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(0,0,0,0.4);
+}
+
+/* Devices */
+.gwp-device-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+}
+
+.gwp-device-card {
+    display: flex;
+    gap: 12px;
+    padding: 14px;
+    background: rgba(0,0,0,0.2);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 10px;
+}
+
+.gwp-device-icon { font-size: 24px; flex-shrink: 0; }
+.gwp-device-info { flex: 1; min-width: 0; }
+.gwp-device-model { font-size: 14px; font-weight: 600; color: #fff; margin-bottom: 4px; }
+.gwp-device-detail { font-size: 12px; color: rgba(255,255,255,0.45); margin-bottom: 2px; }
+.gwp-device-fp { font-size: 10px; color: rgba(255,255,255,0.25); margin-top: 4px; word-break: break-all; }
+
+/* Filter */
+.gwp-filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.gwp-search-input {
+    flex: 1;
+    padding: 6px 12px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    color: #fff;
+    font-size: 12px;
+    outline: none;
+}
+.gwp-search-input:focus { border-color: rgba(0, 217, 255, 0.4); }
+
+.gwp-select {
+    padding: 6px 12px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    color: #fff;
+    font-size: 12px;
+    outline: none;
+}
+
+.gwp-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: rgba(255,255,255,0.5);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+/* Activity List */
+.gwp-activity-list {
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.gwp-activity-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+
+.gwp-activity-action { font-size: 12px; color: rgba(255,255,255,0.7); flex: 1; }
+.gwp-activity-time { font-size: 11px; color: rgba(255,255,255,0.3); font-family: monospace; white-space: nowrap; margin-left: 12px; }
+
+/* Timeline */
+.gwp-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding-left: 20px;
+    border-left: 2px solid rgba(0, 217, 255, 0.15);
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+.gwp-timeline-item {
+    display: flex;
+    gap: 12px;
+    padding: 8px 0;
+    position: relative;
+}
+
+.gwp-timeline-dot {
+    position: absolute;
+    left: -30px;
+    width: 20px;
+    text-align: center;
+    font-size: 12px;
+}
+
+.gwp-timeline-content { flex: 1; padding-left: 8px; }
+.gwp-timeline-time { font-size: 11px; color: rgba(0, 217, 255, 0.6); font-family: monospace; }
+.gwp-timeline-title { font-size: 13px; color: rgba(255,255,255,0.85); }
+.gwp-timeline-detail { font-size: 11px; color: rgba(255,255,255,0.35); margin-top: 2px; }
+
+/* Section Header */
+.gwp-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.gwp-section-header h3 { font-size: 18px; font-weight: 600; color: #fff; }
+.gwp-section-count { font-size: 12px; color: rgba(255,255,255,0.35); }
+
+/* Evidence Bar */
+.gwp-evidence-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: rgba(0, 217, 255, 0.04);
+    border: 1px solid rgba(0, 217, 255, 0.1);
+    border-radius: 8px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+}
+
+.gwp-evidence-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: rgba(0, 217, 255, 0.7);
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.gwp-evidence-file {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: rgba(0,0,0,0.2);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-size: 12px;
+    color: rgba(255,255,255,0.7);
+}
+.gwp-evidence-file:hover { border-color: rgba(0, 217, 255, 0.3); }
+.gwp-evidence-file.imported { border-color: rgba(52, 168, 83, 0.3); }
+.gwp-evidence-icon { font-size: 14px; }
+.gwp-evidence-name { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gwp-evidence-size { font-size: 10px; color: rgba(255,255,255,0.3); }
+
+/* Import Actions */
+.gwp-import-actions { display: flex; gap: 4px; }

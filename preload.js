@@ -52,6 +52,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // GenLogs API Proxy
   genlogsRequest: (opts) => ipcRenderer.invoke('genlogs-request', opts),
 
+  // Google Warrant Parser
+  googleWarrantScan: (data) => ipcRenderer.invoke('google-warrant-scan', data),
+  googleWarrantImport: (data) => ipcRenderer.invoke('google-warrant-import', data),
+  googleWarrantPickFile: () => ipcRenderer.invoke('google-warrant-pick-file'),
+
   // Field Security
   securityCheck: () => ipcRenderer.invoke('security-check'),
   securitySetup: (data) => ipcRenderer.invoke('security-setup', data),

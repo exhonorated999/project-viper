@@ -700,6 +700,11 @@
     <link rel="stylesheet" href="modules/aperture/aperture-styles.css">
     <script src="modules/aperture/aperture-module.js"></script>
     <script src="modules/aperture/aperture-ui.js"></script>
+
+    <!-- Google Warrant Parser Module -->
+    <link rel="stylesheet" href="modules/google-warrant/google-warrant-styles.css">
+    <script src="modules/google-warrant/google-warrant-module.js"></script>
+    <script src="modules/google-warrant/google-warrant-ui.js"></script>
 </head>
 <body class="text-white">
     <div class="flex h-screen overflow-hidden hex-pattern">
@@ -1561,7 +1566,8 @@
                 traceImport: { label: 'Trace Import', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12' },
                 rmsImport: { label: 'RMS Import', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
                 oversightImport: { label: 'Oversight', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
-                cyberTips: { label: 'Cyber Tips', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' }
+                cyberTips: { label: 'Cyber Tips', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' },
+                googleWarrant: { label: 'Google Warrant', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' }
             };
             
             // Initialize tabOrder if it doesn't exist
@@ -1700,6 +1706,7 @@
             allModules.aperture = { label: 'Aperture', icon: '🔍' };
             allModules.oversightImport = { label: 'Oversight', icon: '🛡️' };
             allModules.cyberTips = { label: 'Cyber Tips', icon: '🌐' };
+            allModules.googleWarrant = { label: 'Google Warrant', icon: '📋' };
 
             const availableModules = Object.keys(allModules).filter(
                 module => !currentCase.modules.includes(module)
@@ -1782,7 +1789,8 @@
                 money:'Money Seized', missingpersons:'Missing Persons', areacanvas:'Area Canvas',
                 opsplan:'OPS Plan', analytics:'CDR', aperture:'Aperture',
                 networkIntelligence:'Network Intel', traceImport:'Trace Import', rmsImport:'RMS Import',
-                oversightImport:'Oversight', cyberTips:'Cyber Tips', consentSearch:'Consent Search'
+                oversightImport:'Oversight', cyberTips:'Cyber Tips', consentSearch:'Consent Search',
+                googleWarrant:'Google Warrant'
             };
             const label = moduleConfig[moduleId] || moduleId;
             if (!await viperConfirm(`Remove "${label}" from this case?\n\nNote: Any data in this module will remain in storage and can be recovered by re-adding the module.`, {danger:true, okText:'Delete'})) return;
@@ -1833,6 +1841,7 @@
                 rmsImport: { label: 'RMS Import', icon: '📄', type: 'data' },
                 oversightImport: { label: 'Oversight', icon: '🛡️', type: 'data' },
                 cyberTips: { label: 'Cyber Tips', icon: '🌐', type: 'data' },
+                googleWarrant: { label: 'Google Warrant', icon: '📋', type: 'data' },
                 consentSearch: { label: 'Consent Search', icon: '✅', type: 'data' }
             };
 
@@ -1925,7 +1934,8 @@
                 'witnesses', 'involvedPersons', 'recoveredVehicles', 'missingpersons',
                 'areacanvas', 'prosecution', 'narcotics', 'firearms',
                 'money', 'opsplan', 'rmsImports', 'oversightImport',
-                'canvasForms', 'cyberTips', 'timelineEvents', 'consentSearches'
+                'canvasForms', 'cyberTips', 'timelineEvents', 'consentSearches',
+                'googleWarrant'
             ];
             const moduleData = {};
             moduleKeys.forEach(k => {
@@ -2029,6 +2039,10 @@
                 case 'consentSearch': {
                     const csItems = JSON.parse(localStorage.getItem(`consentSearches_${currentCase.id}`) || '[]');
                     return csItems.length;
+                }
+                case 'googleWarrant': {
+                    const gwData = JSON.parse(localStorage.getItem(`googleWarrant_${currentCase.id}`) || '{"imports":[]}');
+                    return (gwData.imports || []).length;
                 }
                 default: return 0;
             }
@@ -3266,6 +3280,9 @@
                 contentDiv.innerHTML = renderOversightImportTab();
             } else if (tabId === 'cyberTips') {
                 contentDiv.innerHTML = renderCyberTipTab();
+            } else if (tabId === 'googleWarrant') {
+                contentDiv.innerHTML = renderGoogleWarrantTab();
+                initializeGoogleWarrant();
             } else {
                 contentDiv.innerHTML = renderPlaceholderTab(tabId);
             }
@@ -20875,6 +20892,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 { id: 'rmsImport', label: 'RMS Import', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', desc: 'Import PDF reports from agency Record Management Systems' },
                 { id: 'oversightImport', label: 'Oversight Import', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z', desc: 'Import sex offender intelligence from Project Oversight' },
                 { id: 'cyberTips', label: 'Cyber Tips (NCMEC)', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z', desc: 'Import & parse NCMEC CyberTipline report PDFs' },
+                { id: 'googleWarrant', label: 'Google Warrant Parser', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z', desc: 'Parse Google warrant returns — account, email, location, devices, apps' },
             ];
 
             const allModules = [...caseManagement, ...investigativeTools];
@@ -28235,6 +28253,38 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             </svg>
                             <p class="text-lg font-semibold mb-2">Aperture Module Not Loaded</p>
                             <p class="text-sm text-gray-400">Please check that all Aperture files are properly installed.</p>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        // Google Warrant Parser Integration Functions
+        function renderGoogleWarrantTab() {
+            return `
+                <div id="google-warrant-tab-container" style="height: calc(100vh - 220px);"></div>
+            `;
+        }
+
+        function initializeGoogleWarrant() {
+            if (window.GoogleWarrantModule) {
+                window.googleWarrantModule = new GoogleWarrantModule(
+                    String(currentCase.id),
+                    String(currentCase.caseNumber || currentCase.id),
+                    currentCase.title || currentCase.name || currentCase.caseNumber
+                );
+                window.googleWarrantModule.init('google-warrant-tab-container').then(() => {
+                    window.googleWarrantUI = window.googleWarrantModule.ui;
+                }).catch(err => {
+                    console.error('Google Warrant init error:', err);
+                });
+            } else {
+                console.error('Google Warrant module not loaded');
+                document.getElementById('google-warrant-tab-container').innerHTML = `
+                    <div class="glass-card p-6 rounded-xl">
+                        <div class="text-center text-red-400">
+                            <p class="text-lg font-semibold mb-2">Google Warrant Parser Not Loaded</p>
+                            <p class="text-sm text-gray-400">Please check that all module files are properly installed.</p>
                         </div>
                     </div>
                 `;

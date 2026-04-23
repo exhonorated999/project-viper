@@ -2,6 +2,9 @@
  * GenLogs Cargo Intelligence API Service
  * Handles authentication, token lifecycle, and all endpoint calls.
  * All methods check genlogsEnabled before executing.
+ *
+ * Working endpoints (current account): /auth/token, /carrier/profile, /carrier/recommendations
+ * 403 endpoints (need upgraded plan): /compliance-rules, /carrier/contacts, /facilities, /alerts
  */
 const GenLogs = (() => {
     const BASE = 'https://api.genlogs.io';
@@ -47,6 +50,23 @@ const GenLogs = (() => {
         } catch (e) { /* ignore */ }
     }
 
+    // ── IPC Proxy (avoids CORS — calls go through Electron main process) ─
+    async function proxyFetch(url, opts = {}) {
+        // Use Electron IPC if available, fall back to fetch for non-Electron envs
+        if (window.electronAPI?.genlogsRequest) {
+            return window.electronAPI.genlogsRequest({
+                method: opts.method || 'GET',
+                url,
+                headers: opts.headers || {},
+                body: opts.body || null
+            });
+        }
+        // Fallback for browser testing (won't work due to CORS, but keeps module portable)
+        const res = await fetch(url, opts);
+        const body = await res.json().catch(() => ({}));
+        return { ok: res.ok, status: res.status, body };
+    }
+
     // ── Authentication ───────────────────────────────────────────────────
     async function authenticate(creds) {
         const { apiKey, email, password } = creds || getCredentials();
@@ -54,7 +74,7 @@ const GenLogs = (() => {
             throw new Error('GenLogs credentials not configured. Go to Settings → GenLogs.');
         }
         const url = `${BASE}/auth/token?email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`;
-        const res = await fetch(url, {
+        const res = await proxyFetch(url, {
             method: 'POST',
             headers: {
                 'accept': 'application/json',
@@ -62,11 +82,11 @@ const GenLogs = (() => {
             }
         });
         if (!res.ok) {
-            const body = await res.json().catch(() => ({}));
+            const body = res.body || {};
             if (res.status === 401) throw new Error('Invalid GenLogs credentials');
             throw new Error(body.detail?.message || `GenLogs auth failed (${res.status})`);
         }
-        const data = await res.json();
+        const data = res.body;
         saveToken(data);
         return data;
     }
@@ -102,144 +122,101 @@ const GenLogs = (() => {
             if (qs) url += `?${qs}`;
         }
 
-        const opts = { method, headers: authHeaders(token, apiKey) };
-        if (body) {
-            opts.headers['Content-Type'] = 'application/json';
-            opts.body = JSON.stringify(body);
-        }
+        const headers = authHeaders(token, apiKey);
+        if (body) headers['Content-Type'] = 'application/json';
 
-        let res = await fetch(url, opts);
+        let res = await proxyFetch(url, {
+            method,
+            headers,
+            body: body ? JSON.stringify(body) : null
+        });
 
         // Auto-refresh on 401
         if (res.status === 401 && retry) {
             await authenticate();
             const newToken = getToken();
-            opts.headers['Access-Token'] = newToken;
-            res = await fetch(url, opts);
+            headers['Access-Token'] = newToken;
+            res = await proxyFetch(url, { method, headers, body: body ? JSON.stringify(body) : null });
         }
 
         if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
+            const err = res.body || {};
             const msg = err.detail?.message || err.detail || `GenLogs API error (${res.status})`;
             throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
         }
-        return res.json();
+        return res.body;
     }
 
-    // ── Carrier Endpoints ────────────────────────────────────────────────
+    // ── Carrier Endpoints (WORKING) ──────────────────────────────────────
 
     /**
      * Get carrier profile: FMCSA details, equipment pairings, sighting history
-     * @param {string} usdotNumber - USDOT number
-     * @param {object} opts - { start_date, end_date } for sighting filters
+     * Response: { "USDOT": { fmcsa_detail: {...}, equipment_pairings: {fmcsa:[], genlogs:[]}, sightings: [] } }
+     *
+     * Key FMCSA fields: legal_name, dba_name, usdot_number, docket_number (MC#),
+     *   carrier_status, entity_type, carrier_operation, carrier_total_power_units,
+     *   carrier_total_drivers, telephone, email_address, phy_street, phy_city,
+     *   phy_state, phy_zip, carried_cargo
      */
     async function carrierProfile(usdotNumber, opts = {}) {
         const data = await request('GET', '/carrier/profile', {
             query: { usdot_number: usdotNumber, ...opts }
         });
-        logActivity('Carrier Profile', `USDOT ${usdotNumber}`, data[usdotNumber]?.fmcsa_detail?.legal_name || 'Found');
-        return data;
-    }
-
-    /**
-     * Vet a carrier against compliance rules
-     * @param {string} usdotNumber - single USDOT or comma-separated list
-     */
-    async function vetCarrier(usdotNumber) {
-        const isBatch = usdotNumber.includes(',');
-        const query = isBatch
-            ? { usdot_numbers: usdotNumber }
-            : { usdot_number: usdotNumber };
-        const data = await request('GET', '/compliance-rules', { query });
-        const status = data.rule_status
-            ? `Pass:${data.rule_status.pass?.total||0} Review:${data.rule_status.review?.total||0} Fail:${data.rule_status.fail?.total||0}`
-            : 'Assessed';
-        logActivity('Carrier Vetting', `USDOT ${usdotNumber}`, status);
-        return data;
-    }
-
-    /**
-     * Get carrier contacts (dispatch, FMCSA, onboarded)
-     * @param {string} usdotNumber - USDOT number(s), comma-separated
-     */
-    async function carrierContacts(usdotNumber) {
-        const data = await request('POST', '/carrier/contacts', {
-            body: { usdot_numbers: usdotNumber }
-        });
-        logActivity('Carrier Contacts', `USDOT ${usdotNumber}`, 'Retrieved');
+        logActivity('carrier_lookup', `USDOT ${usdotNumber}`, data[usdotNumber]?.fmcsa_detail?.legal_name || 'Found');
         return data;
     }
 
     /**
      * Get carrier recommendations for a lane
+     * Required: origin_city, origin_state, destination_city, destination_state
+     * Optional: equipment_types, max_results
+     * Response: { real_time_locs: {}, recommendations: [...] }
      */
     async function carrierRecommendations(opts) {
         const data = await request('GET', '/carrier/recommendations', { query: opts });
-        logActivity('Lane Search', `${opts.origin_city},${opts.origin_state} → ${opts.destination_city},${opts.destination_state}`,
+        logActivity('lane_search', `${opts.origin_city},${opts.origin_state} → ${opts.destination_city},${opts.destination_state}`,
             `${data.recommendations?.length || 0} carriers`);
         return data;
     }
 
-    // ── Shipper / Facility Endpoints ─────────────────────────────────────
+    // ── Disabled Endpoints (403 — need upgraded plan) ────────────────────
+    // These stubs provide clear errors instead of cryptic 403s.
 
-    /**
-     * Lookup facilities by name and/or location
-     */
+    async function vetCarrier(usdotNumber) {
+        throw new Error('Carrier vetting requires an upgraded GenLogs plan (compliance-rules endpoint).');
+    }
+
+    async function carrierContacts(usdotNumber) {
+        throw new Error('Carrier contacts require an upgraded GenLogs plan (carrier/contacts endpoint).');
+    }
+
     async function facilityLookup(opts) {
-        const data = await request('GET', '/facilities', { query: opts });
-        logActivity('Facility Lookup', opts.name || opts.address || `${opts.city}, ${opts.state}`,
-            `${data.facilities?.length || 0} found`);
-        return data;
+        throw new Error('Facility lookup requires an upgraded GenLogs plan (facilities endpoint).');
     }
 
-    // ── Alert Endpoints ──────────────────────────────────────────────────
-
-    /**
-     * Create a new alert (hot = 15min, normal = daily)
-     * @param {object} alertData - { email, alert_type, alert_name, license_plate, vin, trailer_number, usdot_number, ... }
-     */
-    async function createAlert(alertData) {
-        const data = await request('POST', '/alerts', { body: alertData });
-        // Cache locally
-        const alerts = JSON.parse(localStorage.getItem('genlogsAlerts') || '[]');
-        alerts.unshift({ ...data, created: new Date().toISOString() });
-        localStorage.setItem('genlogsAlerts', JSON.stringify(alerts));
-        logActivity('Alert Created', alertData.alert_name,
-            `${alertData.alert_type === 'hot' ? '🔴 Hot (15min)' : '📋 Daily'}`);
-        return data;
+    async function createAlert(data) {
+        throw new Error('Alert creation requires an upgraded GenLogs plan (alerts endpoint).');
     }
 
-    /**
-     * Trigger all configured alerts
-     */
     async function runAlerts() {
-        const data = await request('POST', '/alerts/run');
-        logActivity('Alerts Run', 'All', data.message || 'Triggered');
-        return data;
+        throw new Error('Alert monitoring requires an upgraded GenLogs plan (alerts/run endpoint).');
     }
 
-    /**
-     * Get vetting rules configured for this account
-     */
     async function getVettingRules() {
-        return request('GET', '/customer-compliance-rules');
+        throw new Error('Vetting rules require an upgraded GenLogs plan.');
     }
 
     // ── Utility ──────────────────────────────────────────────────────────
 
     /**
-     * Full carrier intel: profile + vetting + contacts in parallel
+     * Full carrier intel: profile only (vet + contacts need upgraded plan)
      */
     async function fullCarrierIntel(usdotNumber) {
-        const [profile, vetting, contacts] = await Promise.allSettled([
-            carrierProfile(usdotNumber),
-            vetCarrier(usdotNumber),
-            carrierContacts(usdotNumber)
-        ]);
+        const profileData = await carrierProfile(usdotNumber);
         return {
-            profile: profile.status === 'fulfilled' ? profile.value : { error: profile.reason?.message },
-            vetting: vetting.status === 'fulfilled' ? vetting.value : { error: vetting.reason?.message },
-            contacts: contacts.status === 'fulfilled' ? contacts.value : { error: contacts.reason?.message }
+            profile: profileData,
+            vetting: { error: 'Requires upgraded plan' },
+            contacts: { error: 'Requires upgraded plan' }
         };
     }
 
@@ -248,7 +225,8 @@ const GenLogs = (() => {
     }
 
     function getCachedAlerts() {
-        return JSON.parse(localStorage.getItem('genlogsAlerts') || '[]');
+        // Alerts disabled — always empty
+        return [];
     }
 
     function clearCredentials() {
@@ -263,19 +241,19 @@ const GenLogs = (() => {
         return { status: 'connected', label: 'Connected', color: '#4ade80' };
     }
 
-    // ── Public API ───────────────────────────────────────────────────────
+    // ── Public API ───────────────────────────────────────────────────
     return {
         isEnabled,
         authenticate,
         ensureToken,
         carrierProfile,
-        vetCarrier,
-        carrierContacts,
+        vetCarrier,           // stub — throws
+        carrierContacts,      // stub — throws
         carrierRecommendations,
-        facilityLookup,
-        createAlert,
-        runAlerts,
-        getVettingRules,
+        facilityLookup,       // stub — throws
+        createAlert,          // stub — throws
+        runAlerts,            // stub — throws
+        getVettingRules,      // stub — throws
         fullCarrierIntel,
         getActivityLog,
         getCachedAlerts,

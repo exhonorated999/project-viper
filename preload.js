@@ -49,6 +49,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // FMCSA Carrier Lookup
   fmcsaLookup: (params) => ipcRenderer.invoke('fmcsa-lookup', params),
 
+  // GenLogs API Proxy
+  genlogsRequest: (opts) => ipcRenderer.invoke('genlogs-request', opts),
+
   // Field Security
   securityCheck: () => ipcRenderer.invoke('security-check'),
   securitySetup: (data) => ipcRenderer.invoke('security-setup', data),

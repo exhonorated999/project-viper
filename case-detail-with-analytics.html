@@ -21673,38 +21673,38 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 if (m.type === 'checkbox') {
                     const checked = !!v;
                     return `
-                    <div class="cm-metric-row flex items-center gap-2.5 px-3 py-2 rounded-lg border ${c.border} ${checked ? c.activeBg : 'bg-viper-dark/30'} cursor-pointer transition-colors hover:opacity-90 ${checked ? 'cm-active' : ''}"
+                    <div class="cm-metric-row flex items-center gap-2 px-3 py-1.5 rounded-lg border ${c.border} ${checked ? c.activeBg : 'bg-viper-dark/30'} cursor-pointer transition-colors hover:opacity-90 ${checked ? 'cm-active' : ''}"
                          onclick="toggleCaseMetricCheckbox('${m.id}')">
                         <div id="cm-cb-${m.id}" data-checked="${checked ? '1' : '0'}"
-                             class="w-5 h-5 rounded border-2 ${checked ? c.border + ' ' + c.text : 'border-gray-600 text-transparent'} flex items-center justify-center flex-shrink-0 transition-colors">
-                            ${checked ? '<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>' : ''}
+                             class="w-4 h-4 rounded border-2 ${checked ? c.border + ' ' + c.text : 'border-gray-600 text-transparent'} flex items-center justify-center flex-shrink-0 transition-colors">
+                            ${checked ? '<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>' : ''}
                         </div>
-                        <span class="text-sm font-medium ${checked ? c.text : 'text-gray-400'}">${m.icon ? m.icon + ' ' : ''}${m.name}</span>
+                        <span class="text-xs font-medium ${checked ? c.text : 'text-gray-400'} whitespace-nowrap">${m.icon ? m.icon + ' ' : ''}${m.name}</span>
                     </div>`;
                 } else if (m.type === 'counter') {
                     const count = parseInt(v) || 0;
                     return `
-                    <div class="flex items-center justify-between px-3 py-2 rounded-lg border ${c.border} bg-viper-dark/30">
-                        <span class="text-sm font-medium ${c.text}">${m.icon ? m.icon + ' ' : ''}${m.name}</span>
-                        <div class="flex items-center gap-2">
-                            <button onclick="event.stopPropagation();adjustCaseMetricCounter('${m.id}',-1)" class="w-6 h-6 rounded ${c.bg} ${c.text} text-xs font-bold hover:opacity-80 transition flex items-center justify-center">−</button>
-                            <span id="cm-val-${m.id}" class="text-sm font-bold text-white min-w-[24px] text-center">${count}</span>
-                            <button onclick="event.stopPropagation();adjustCaseMetricCounter('${m.id}',1)" class="w-6 h-6 rounded ${c.bg} ${c.text} text-xs font-bold hover:opacity-80 transition flex items-center justify-center">+</button>
+                    <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border ${c.border} bg-viper-dark/30">
+                        <span class="text-xs font-medium ${c.text} whitespace-nowrap">${m.icon ? m.icon + ' ' : ''}${m.name}</span>
+                        <div class="flex items-center gap-1.5">
+                            <button onclick="event.stopPropagation();adjustCaseMetricCounter('${m.id}',-1)" class="w-5 h-5 rounded ${c.bg} ${c.text} text-xs font-bold hover:opacity-80 transition flex items-center justify-center">−</button>
+                            <span id="cm-val-${m.id}" class="text-xs font-bold text-white min-w-[20px] text-center">${count}</span>
+                            <button onclick="event.stopPropagation();adjustCaseMetricCounter('${m.id}',1)" class="w-5 h-5 rounded ${c.bg} ${c.text} text-xs font-bold hover:opacity-80 transition flex items-center justify-center">+</button>
                         </div>
                     </div>`;
                 } else if (m.type === 'date') {
                     return `
-                    <div class="flex items-center justify-between px-3 py-2 rounded-lg border ${c.border} bg-viper-dark/30">
-                        <span class="text-sm font-medium ${c.text}">${m.icon ? m.icon + ' ' : ''}${m.name}</span>
+                    <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border ${c.border} bg-viper-dark/30">
+                        <span class="text-xs font-medium ${c.text} whitespace-nowrap">${m.icon ? m.icon + ' ' : ''}${m.name}</span>
                         <input type="date" value="${v || ''}" onchange="updateCaseMetricInput('${m.id}',this.value)"
-                            class="px-2 py-1 bg-viper-dark border border-gray-600 rounded text-xs text-white focus:border-viper-cyan outline-none">
+                            class="px-1.5 py-0.5 bg-viper-dark border border-gray-600 rounded text-xs text-white focus:border-viper-cyan outline-none">
                     </div>`;
                 } else {
                     return `
-                    <div class="flex items-center justify-between px-3 py-2 rounded-lg border ${c.border} bg-viper-dark/30 gap-3">
-                        <span class="text-sm font-medium ${c.text} flex-shrink-0">${m.icon ? m.icon + ' ' : ''}${m.name}</span>
+                    <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border ${c.border} bg-viper-dark/30">
+                        <span class="text-xs font-medium ${c.text} flex-shrink-0 whitespace-nowrap">${m.icon ? m.icon + ' ' : ''}${m.name}</span>
                         <input type="text" value="${(v || '').replace(/"/g, '&quot;')}" onblur="updateCaseMetricInput('${m.id}',this.value)" placeholder="—"
-                            class="flex-1 px-2 py-1 bg-viper-dark border border-gray-600 rounded text-xs text-white focus:border-viper-cyan outline-none text-right">
+                            class="w-28 px-1.5 py-0.5 bg-viper-dark border border-gray-600 rounded text-xs text-white focus:border-viper-cyan outline-none">
                     </div>`;
                 }
             }).join('');
@@ -21717,7 +21717,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         </svg>
                         Custom Metrics
                     </label>
-                    <div class="grid grid-cols-2 gap-2">
+                    <div class="flex flex-wrap gap-2">
                         ${items}
                     </div>
                 </div>`;

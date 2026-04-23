@@ -315,12 +315,44 @@ class GoogleWarrantParser {
             // Drive
             case 'Drive.Files':
             case 'Drive.DriveMetadata':
+            case 'Drive.FileContentAndMetadata':
+            case 'Drive.DriveFileContent':
                 for (const e of innerEntries) {
-                    if (e.entryName.endsWith('.json') && !e.entryName.includes('ExportSummary')) {
+                    if (e.isDirectory) continue;
+                    const name = e.entryName.split('/').pop();
+                    if (!name) continue;
+                    const lower = name.toLowerCase();
+
+                    if (lower.endsWith('.json') && !lower.includes('exportsummary')) {
                         try { result.driveFiles.push(JSON.parse(e.getData().toString('utf-8'))); }
                         catch (err) { /* skip */ }
-                    } else if (e.entryName.toLowerCase().endsWith('.csv')) {
+                    } else if (lower.endsWith('.csv')) {
                         result.driveFiles.push(...this.csvToObjects(e.getData().toString('utf-8')));
+                    } else {
+                        // Binary file (image, video, PDF, doc, etc.)
+                        const ext = lower.substring(lower.lastIndexOf('.'));
+                        const mimeMap = {
+                            '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+                            '.gif': 'image/gif', '.bmp': 'image/bmp', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+                            '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.avi': 'video/x-msvideo',
+                            '.mkv': 'video/x-matroska', '.webm': 'video/webm', '.3gp': 'video/3gpp',
+                            '.pdf': 'application/pdf',
+                            '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                            '.xls': 'application/vnd.ms-excel', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                            '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                            '.txt': 'text/plain', '.html': 'text/html', '.htm': 'text/html',
+                            '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4',
+                        };
+                        const mimeType = mimeMap[ext] || 'application/octet-stream';
+                        const buf = e.getData();
+                        result.driveFiles.push({
+                            _isFile: true,
+                            name: name,
+                            path: e.entryName,
+                            mimeType: mimeType,
+                            size: buf.length,
+                            data: buf.toString('base64')
+                        });
                     }
                 }
                 break;

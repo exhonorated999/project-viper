@@ -333,10 +333,14 @@ class GoogleWarrantUI {
                                 </tr>
                             </thead>
                             <tbody>
-                                ${imp.ipActivity.map(ip => `
+                                ${imp.ipActivity.map((ip, idx) => `
                                     <tr>
                                         <td class="gwp-mono gwp-nowrap">${ip.timestamp}</td>
-                                        <td class="gwp-mono">${ip.ip}</td>
+                                        <td class="gwp-mono">
+                                            ${ip.ip}
+                                            <button class="gwp-arin-btn" onclick="gwpArinLookup(this, '${ip.ip}')" title="ARIN WHOIS Lookup">🌐</button>
+                                            <span class="gwp-arin-result" id="gwp-arin-${imp.id}-${idx}"></span>
+                                        </td>
                                         <td>${ip.activityType}</td>
                                         <td class="gwp-mono gwp-truncate" title="${ip.androidId || ''}">${ip.androidId || '—'}</td>
                                         <td class="gwp-truncate" title="${ip.userAgent || ''}">${ip.userAgent || '—'}</td>
@@ -358,10 +362,10 @@ class GoogleWarrantUI {
                                 <tr><th>Timestamp</th><th>IP</th><th>Change Type</th><th>Old Value</th><th>New Value</th></tr>
                             </thead>
                             <tbody>
-                                ${imp.changeHistory.map(ch => `
+                                ${imp.changeHistory.map((ch, idx) => `
                                     <tr>
                                         <td class="gwp-mono gwp-nowrap">${ch.timestamp}</td>
-                                        <td class="gwp-mono">${ch.ip || '—'}</td>
+                                        <td class="gwp-mono">${ch.ip ? `${ch.ip} <button class="gwp-arin-btn" onclick="gwpArinLookup(this, '${ch.ip}')" title="ARIN WHOIS Lookup">🌐</button>` : '—'}</td>
                                         <td><span class="gwp-badge-change">${ch.changeType}</span></td>
                                         <td>${ch.oldValue || '—'}</td>
                                         <td>${ch.newValue || '—'}</td>
@@ -803,18 +807,152 @@ class GoogleWarrantUI {
         const files = imp.driveFiles || [];
         if (files.length === 0) return '<div class="gwp-empty-section">No Drive file data in this warrant return</div>';
 
-        return `
-            <div class="gwp-section-scroll">
-                <div class="gwp-section-header">
-                    <h3>📁 Google Drive Files (${files.length})</h3>
-                </div>
-                <div class="gwp-card">
-                    ${files.map(f => `
-                        <pre class="gwp-pre">${this._escHtml(JSON.stringify(f, null, 2))}</pre>
+        // Separate media files from metadata
+        const mediaFiles = files.filter(f => f._isFile);
+        const metadataItems = files.filter(f => !f._isFile);
+
+        const images = mediaFiles.filter(f => f.mimeType?.startsWith('image/'));
+        const videos = mediaFiles.filter(f => f.mimeType?.startsWith('video/'));
+        const pdfs = mediaFiles.filter(f => f.mimeType === 'application/pdf');
+        const audio = mediaFiles.filter(f => f.mimeType?.startsWith('audio/'));
+        const otherFiles = mediaFiles.filter(f => !f.mimeType?.startsWith('image/') && !f.mimeType?.startsWith('video/') && !f.mimeType?.startsWith('audio/') && f.mimeType !== 'application/pdf');
+
+        const formatSize = (s) => {
+            if (!s) return '—';
+            if (s < 1024) return s + ' B';
+            if (s < 1048576) return (s / 1024).toFixed(1) + ' KB';
+            return (s / 1048576).toFixed(1) + ' MB';
+        };
+
+        let html = `<div class="gwp-section-scroll">
+            <div class="gwp-section-header">
+                <h3>📁 Google Drive Contents (${files.length} items)</h3>
+            </div>
+            <div class="gwp-drive-stats">
+                ${images.length ? `<span class="gwp-tag">🖼️ ${images.length} photos</span>` : ''}
+                ${videos.length ? `<span class="gwp-tag">🎬 ${videos.length} videos</span>` : ''}
+                ${pdfs.length ? `<span class="gwp-tag">📕 ${pdfs.length} PDFs</span>` : ''}
+                ${audio.length ? `<span class="gwp-tag">🎵 ${audio.length} audio</span>` : ''}
+                ${otherFiles.length ? `<span class="gwp-tag">📄 ${otherFiles.length} other</span>` : ''}
+                ${metadataItems.length ? `<span class="gwp-tag">📋 ${metadataItems.length} metadata</span>` : ''}
+            </div>`;
+
+        // ── Photo Gallery ──
+        if (images.length > 0) {
+            html += `
+            <div class="gwp-card">
+                <h4 class="gwp-card-title">🖼️ Photos (${images.length})</h4>
+                <div class="gwp-gallery">
+                    ${images.map((f, i) => `
+                        <div class="gwp-gallery-item" onclick="gwpShowLightbox('${f.mimeType}', '${f.data.substring(0, 50)}...', ${i}, 'img')">
+                            <img src="data:${f.mimeType};base64,${f.data}" alt="${this._escAttr(f.name)}" loading="lazy">
+                            <div class="gwp-gallery-label">${this._escHtml(f.name)}<br><span>${formatSize(f.size)}</span></div>
+                        </div>
                     `).join('')}
                 </div>
-            </div>
-        `;
+            </div>`;
+        }
+
+        // ── Videos ──
+        if (videos.length > 0) {
+            html += `
+            <div class="gwp-card">
+                <h4 class="gwp-card-title">🎬 Videos (${videos.length})</h4>
+                <div class="gwp-media-list">
+                    ${videos.map(f => `
+                        <div class="gwp-media-item">
+                            <video controls preload="metadata" class="gwp-video-player">
+                                <source src="data:${f.mimeType};base64,${f.data}" type="${f.mimeType}">
+                            </video>
+                            <div class="gwp-media-label">${this._escHtml(f.name)} <span class="gwp-mono">(${formatSize(f.size)})</span></div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>`;
+        }
+
+        // ── PDFs ──
+        if (pdfs.length > 0) {
+            html += `
+            <div class="gwp-card">
+                <h4 class="gwp-card-title">📕 PDF Documents (${pdfs.length})</h4>
+                <div class="gwp-file-list">
+                    ${pdfs.map((f, i) => `
+                        <div class="gwp-file-item">
+                            <div class="gwp-file-info">
+                                <span class="gwp-file-icon">📕</span>
+                                <span class="gwp-file-name">${this._escHtml(f.name)}</span>
+                                <span class="gwp-mono gwp-file-size">${formatSize(f.size)}</span>
+                            </div>
+                            <div class="gwp-file-actions">
+                                <button class="gwp-btn-sm" onclick="gwpViewPdf(${i})">View</button>
+                                <button class="gwp-btn-sm gwp-btn-outline" onclick="gwpDownloadFile('${this._escAttr(f.name)}', '${f.mimeType}', ${i}, 'pdf')">Download</button>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+                <div id="gwp-pdf-viewer" class="gwp-pdf-viewer hidden"></div>
+            </div>`;
+        }
+
+        // ── Audio ──
+        if (audio.length > 0) {
+            html += `
+            <div class="gwp-card">
+                <h4 class="gwp-card-title">🎵 Audio (${audio.length})</h4>
+                <div class="gwp-media-list">
+                    ${audio.map(f => `
+                        <div class="gwp-media-item gwp-audio-item">
+                            <span class="gwp-file-name">${this._escHtml(f.name)} <span class="gwp-mono">(${formatSize(f.size)})</span></span>
+                            <audio controls preload="metadata">
+                                <source src="data:${f.mimeType};base64,${f.data}" type="${f.mimeType}">
+                            </audio>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>`;
+        }
+
+        // ── Other files ──
+        if (otherFiles.length > 0) {
+            html += `
+            <div class="gwp-card">
+                <h4 class="gwp-card-title">📄 Other Files (${otherFiles.length})</h4>
+                <div class="gwp-file-list">
+                    ${otherFiles.map((f, i) => `
+                        <div class="gwp-file-item">
+                            <div class="gwp-file-info">
+                                <span class="gwp-file-icon">📄</span>
+                                <span class="gwp-file-name">${this._escHtml(f.name)}</span>
+                                <span class="gwp-tag">${f.mimeType?.split('/').pop() || '?'}</span>
+                                <span class="gwp-mono gwp-file-size">${formatSize(f.size)}</span>
+                            </div>
+                            <div class="gwp-file-actions">
+                                <button class="gwp-btn-sm gwp-btn-outline" onclick="gwpDownloadFile('${this._escAttr(f.name)}', '${f.mimeType}', ${i}, 'other')">Download</button>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>`;
+        }
+
+        // ── Metadata entries ──
+        if (metadataItems.length > 0) {
+            const getFileName = (f) => f.name || f.title || f.fileName || f.originalFilename || 'Metadata';
+            html += `
+            <div class="gwp-card">
+                <h4 class="gwp-card-title">📋 Drive Metadata (${metadataItems.length})</h4>
+                ${metadataItems.map(f => `
+                    <details class="gwp-drive-raw">
+                        <summary class="gwp-drive-raw-summary">${this._escHtml(getFileName(f))}</summary>
+                        <pre class="gwp-pre">${this._escHtml(JSON.stringify(f, null, 2))}</pre>
+                    </details>
+                `).join('')}
+            </div>`;
+        }
+
+        html += '</div>';
+        return html;
     }
 
     // ─── Timeline ───────────────────────────────────────────────────────
@@ -939,3 +1077,111 @@ class GoogleWarrantUI {
         }
     }
 }
+
+// Expose on window so initializeGoogleWarrant() can find it
+window.GoogleWarrantUI = GoogleWarrantUI;
+
+// Global ARIN lookup for Google Warrant IP addresses
+async function gwpArinLookup(btn, ip) {
+    if (!ip || !window.electronAPI?.arinLookup) return;
+    btn.disabled = true;
+    btn.textContent = '⏳';
+    try {
+        const result = await window.electronAPI.arinLookup(ip);
+        if (result.success) {
+            const info = [result.provider || result.organization];
+            if (result.network) info.push(result.network);
+            if (result.netRange) info.push(result.netRange);
+            // Insert result next to button
+            const span = btn.nextElementSibling || document.createElement('span');
+            span.className = 'gwp-arin-result gwp-arin-success';
+            span.textContent = info.join(' · ');
+            span.title = info.join('\n');
+            if (!btn.nextElementSibling) btn.parentNode.appendChild(span);
+            btn.textContent = '✓';
+            btn.classList.add('gwp-arin-done');
+        } else {
+            btn.textContent = '✗';
+            btn.title = result.error || 'Lookup failed';
+            btn.classList.add('gwp-arin-fail');
+        }
+    } catch (e) {
+        btn.textContent = '✗';
+        btn.title = e.message;
+        btn.classList.add('gwp-arin-fail');
+    }
+    btn.disabled = false;
+}
+window.gwpArinLookup = gwpArinLookup;
+
+// ── Drive file helpers (lightbox, PDF viewer, download) ──
+
+// Store reference to current import's driveFiles for global helpers
+window._gwpDriveFiles = null;
+
+function gwpShowLightbox(mimeType, dataPreview, idx, category) {
+    const imp = window.googleWarrantModule?.imports?.[0];
+    if (!imp) return;
+    const files = (imp.driveFiles || []).filter(f => f._isFile);
+    const images = files.filter(f => f.mimeType?.startsWith('image/'));
+    const file = images[idx];
+    if (!file) return;
+
+    // Remove existing lightbox
+    document.getElementById('gwp-lightbox')?.remove();
+
+    const lb = document.createElement('div');
+    lb.id = 'gwp-lightbox';
+    lb.className = 'gwp-lightbox';
+    lb.onclick = (e) => { if (e.target === lb) lb.remove(); };
+    lb.innerHTML = `
+        <div class="gwp-lightbox-content">
+            <button class="gwp-lightbox-close" onclick="document.getElementById('gwp-lightbox').remove()">✕</button>
+            <img src="data:${file.mimeType};base64,${file.data}" alt="${file.name}">
+            <div class="gwp-lightbox-caption">${file.name}</div>
+            <div class="gwp-lightbox-nav">
+                ${idx > 0 ? `<button onclick="event.stopPropagation(); document.getElementById('gwp-lightbox').remove(); gwpShowLightbox('','',${idx - 1},'img')">◀ Prev</button>` : '<span></span>'}
+                <span>${idx + 1} / ${images.length}</span>
+                ${idx < images.length - 1 ? `<button onclick="event.stopPropagation(); document.getElementById('gwp-lightbox').remove(); gwpShowLightbox('','',${idx + 1},'img')">Next ▶</button>` : '<span></span>'}
+            </div>
+        </div>
+    `;
+    document.body.appendChild(lb);
+}
+window.gwpShowLightbox = gwpShowLightbox;
+
+function gwpViewPdf(idx) {
+    const imp = window.googleWarrantModule?.imports?.[0];
+    if (!imp) return;
+    const pdfs = (imp.driveFiles || []).filter(f => f._isFile && f.mimeType === 'application/pdf');
+    const file = pdfs[idx];
+    if (!file) return;
+
+    const viewer = document.getElementById('gwp-pdf-viewer');
+    if (!viewer) return;
+    viewer.classList.remove('hidden');
+    viewer.innerHTML = `
+        <div class="gwp-pdf-header">
+            <span>${file.name}</span>
+            <button class="gwp-close-btn" onclick="document.getElementById('gwp-pdf-viewer').classList.add('hidden')">✕</button>
+        </div>
+        <iframe src="data:application/pdf;base64,${file.data}" class="gwp-pdf-iframe"></iframe>
+    `;
+}
+window.gwpViewPdf = gwpViewPdf;
+
+function gwpDownloadFile(name, mimeType, idx, category) {
+    const imp = window.googleWarrantModule?.imports?.[0];
+    if (!imp) return;
+    let pool;
+    if (category === 'pdf') pool = (imp.driveFiles || []).filter(f => f._isFile && f.mimeType === 'application/pdf');
+    else pool = (imp.driveFiles || []).filter(f => f._isFile && !f.mimeType?.startsWith('image/') && !f.mimeType?.startsWith('video/') && !f.mimeType?.startsWith('audio/') && f.mimeType !== 'application/pdf');
+    const file = pool[idx];
+    if (!file) return;
+
+    const a = document.createElement('a');
+    a.href = `data:${file.mimeType};base64,${file.data}`;
+    a.download = file.name;
+    a.click();
+}
+window.gwpDownloadFile = gwpDownloadFile;

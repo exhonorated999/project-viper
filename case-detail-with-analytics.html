@@ -703,8 +703,11 @@
 
     <!-- Google Warrant Parser Module -->
     <link rel="stylesheet" href="modules/google-warrant/google-warrant-styles.css">
+    <link rel="stylesheet" href="modules/meta-warrant/meta-warrant-styles.css">
     <script src="modules/google-warrant/google-warrant-module.js"></script>
     <script src="modules/google-warrant/google-warrant-ui.js"></script>
+    <script src="modules/meta-warrant/meta-warrant-module.js"></script>
+    <script src="modules/meta-warrant/meta-warrant-ui.js"></script>
 </head>
 <body class="text-white">
     <div class="flex h-screen overflow-hidden hex-pattern">
@@ -1575,7 +1578,8 @@
                 rmsImport: { label: 'RMS Import', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
                 oversightImport: { label: 'Oversight', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
                 cyberTips: { label: 'Cyber Tips', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' },
-                googleWarrant: { label: 'Google Warrant', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' }
+                googleWarrant: { label: 'Google Warrant', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' },
+                metaWarrant: { label: 'META Warrant', icon: 'M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z' }
             };
             
             // Initialize tabOrder if it doesn't exist
@@ -1715,6 +1719,7 @@
             allModules.oversightImport = { label: 'Oversight', icon: '🛡️' };
             allModules.cyberTips = { label: 'Cyber Tips', icon: '🌐' };
             allModules.googleWarrant = { label: 'Google Warrant', icon: '📋' };
+            allModules.metaWarrant = { label: 'META Warrant', icon: '📘' };
 
             const availableModules = Object.keys(allModules).filter(
                 module => !currentCase.modules.includes(module)
@@ -1798,7 +1803,7 @@
                 opsplan:'OPS Plan', analytics:'CDR', aperture:'Aperture',
                 networkIntelligence:'Network Intel', traceImport:'Trace Import', rmsImport:'RMS Import',
                 oversightImport:'Oversight', cyberTips:'Cyber Tips', consentSearch:'Consent Search',
-                googleWarrant:'Google Warrant'
+                googleWarrant:'Google Warrant', metaWarrant:'META Warrant'
             };
             const label = moduleConfig[moduleId] || moduleId;
             if (!await viperConfirm(`Remove "${label}" from this case?\n\nNote: Any data in this module will remain in storage and can be recovered by re-adding the module.`, {danger:true, okText:'Delete'})) return;
@@ -1850,6 +1855,7 @@
                 oversightImport: { label: 'Oversight', icon: '🛡️', type: 'data' },
                 cyberTips: { label: 'Cyber Tips', icon: '🌐', type: 'data' },
                 googleWarrant: { label: 'Google Warrant', icon: '📋', type: 'data' },
+                metaWarrant: { label: 'META Warrant', icon: '📘', type: 'data' },
                 consentSearch: { label: 'Consent Search', icon: '✅', type: 'data' }
             };
 
@@ -1943,7 +1949,7 @@
                 'areacanvas', 'prosecution', 'narcotics', 'firearms',
                 'money', 'opsplan', 'rmsImports', 'oversightImport',
                 'canvasForms', 'cyberTips', 'timelineEvents', 'consentSearches',
-                'googleWarrant', 'caseMetrics'
+                'googleWarrant', 'metaWarrant', 'caseMetrics'
             ];
             const moduleData = {};
             moduleKeys.forEach(k => {
@@ -2051,6 +2057,10 @@
                 case 'googleWarrant': {
                     const gwData = JSON.parse(localStorage.getItem(`googleWarrant_${currentCase.id}`) || '{"imports":[]}');
                     return (gwData.imports || []).length;
+                }
+                case 'metaWarrant': {
+                    const mwData = JSON.parse(localStorage.getItem(`metaWarrant_${currentCase.id}`) || '{"imports":[]}');
+                    return (mwData.imports || []).length;
                 }
                 default: return 0;
             }
@@ -3291,6 +3301,9 @@
             } else if (tabId === 'googleWarrant') {
                 contentDiv.innerHTML = renderGoogleWarrantTab();
                 initializeGoogleWarrant();
+            } else if (tabId === 'metaWarrant') {
+                contentDiv.innerHTML = renderMetaWarrantTab();
+                initializeMetaWarrant();
             } else {
                 contentDiv.innerHTML = renderPlaceholderTab(tabId);
             }
@@ -20993,6 +21006,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 { id: 'oversightImport', label: 'Oversight Import', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z', desc: 'Import sex offender intelligence from Project Oversight' },
                 { id: 'cyberTips', label: 'Cyber Tips (NCMEC)', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z', desc: 'Import & parse NCMEC CyberTipline report PDFs' },
                 { id: 'googleWarrant', label: 'Google Warrant Parser', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z', desc: 'Parse Google warrant returns — account, email, location, devices, apps' },
+                { id: 'metaWarrant', label: 'META Warrant Parser', icon: 'M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z', desc: 'Parse META (Facebook/Instagram) warrant returns — account, messages, photos, IP activity' },
             ];
 
             const allModules = [...caseManagement, ...investigativeTools];
@@ -28626,6 +28640,39 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     <div class="glass-card p-6 rounded-xl">
                         <div class="text-center text-red-400">
                             <p class="text-lg font-semibold mb-2">Google Warrant Parser Not Loaded</p>
+                            <p class="text-sm text-gray-400">Please check that all module files are properly installed.</p>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function renderMetaWarrantTab() {
+            return `
+                <div id="meta-warrant-tab-container" style="height: calc(100vh - 220px);"></div>
+            `;
+        }
+
+        function initializeMetaWarrant() {
+            if (window.MetaWarrantModule) {
+                window.metaWarrantModule = new MetaWarrantModule(
+                    String(currentCase.id),
+                    String(currentCase.caseNumber || currentCase.id),
+                    currentCase.title || currentCase.name || currentCase.caseNumber
+                );
+                window.metaWarrantModule.init('meta-warrant-tab-container').then(() => {
+                    window.metaWarrantUI = window.metaWarrantModule.ui;
+                    // Load lazy images after render
+                    if (window.metaWarrantUI) window.metaWarrantUI._loadLazyImages();
+                }).catch(err => {
+                    console.error('META Warrant init error:', err);
+                });
+            } else {
+                console.error('META Warrant module not loaded');
+                document.getElementById('meta-warrant-tab-container').innerHTML = `
+                    <div class="glass-card p-6 rounded-xl">
+                        <div class="text-center text-red-400">
+                            <p class="text-lg font-semibold mb-2">META Warrant Parser Not Loaded</p>
                             <p class="text-sm text-gray-400">Please check that all module files are properly installed.</p>
                         </div>
                     </div>

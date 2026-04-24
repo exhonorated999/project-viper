@@ -3475,3 +3475,119 @@ ipcMain.handle('google-warrant-pick-file', async () => {
   if (result.canceled || !result.filePaths.length) return null;
   return result.filePaths[0];
 });
+
+// ─── META Warrant Parser IPC ────────────────────────────────────────────
+
+const MetaWarrantParser = require('./modules/meta-warrant/meta-warrant-parser');
+const mwParser = new MetaWarrantParser();
+
+ipcMain.handle('meta-warrant-scan', async (event, { caseNumber }) => {
+  try {
+    const dirsToScan = [
+      path.join(casesDir, caseNumber, 'Evidence'),
+      path.join(casesDir, caseNumber, 'Warrants', 'Production')
+    ];
+
+    const files = [];
+
+    for (const dir of dirsToScan) {
+      if (!fs.existsSync(dir)) continue;
+      const scanDir = (d) => {
+        const entries = fs.readdirSync(d, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(d, entry.name);
+          if (entry.isDirectory()) {
+            scanDir(fullPath);
+          } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')) {
+            try {
+              let buf = fs.readFileSync(fullPath);
+              if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
+                buf = security.decryptBuffer(buf);
+              }
+              if (MetaWarrantParser.isMetaWarrantZip(buf)) {
+                files.push({
+                  name: entry.name,
+                  path: fullPath,
+                  size: fs.statSync(fullPath).size
+                });
+              }
+            } catch (e) { /* not a valid zip or encrypted, skip */ }
+          }
+        }
+      };
+      scanDir(dir);
+    }
+
+    return { success: true, files };
+  } catch (error) {
+    console.error('META warrant scan error:', error);
+    return { success: false, error: error.message, files: [] };
+  }
+});
+
+ipcMain.handle('meta-warrant-import', async (event, { filePath, caseNumber }) => {
+  try {
+    let buf = fs.readFileSync(filePath);
+    if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
+      buf = security.decryptBuffer(buf);
+    }
+    const data = await mwParser.parseZip(buf);
+
+    // Save large media files to disk instead of keeping in localStorage
+    if (caseNumber && data.mediaFiles) {
+      const mediaDir = path.join(casesDir, caseNumber, 'Evidence', 'MetaWarrant', 'linked_media');
+      if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
+
+      for (const [fileName, info] of Object.entries(data.mediaFiles)) {
+        const fileDest = path.join(mediaDir, fileName);
+        const fileBuf = Buffer.from(info.data, 'base64');
+        if (security && security.isUnlocked()) {
+          fs.writeFileSync(fileDest, security.encryptBuffer(fileBuf));
+        } else {
+          fs.writeFileSync(fileDest, fileBuf);
+        }
+        // Replace base64 with disk path reference
+        info.diskPath = fileDest;
+        info.data = null; // clear base64 to save memory
+      }
+    }
+
+    return { success: true, data };
+  } catch (error) {
+    console.error('META warrant import error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('meta-warrant-pick-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select META Warrant Return ZIP',
+    properties: ['openFile'],
+    filters: [{ name: 'ZIP Archives', extensions: ['zip'] }]
+  });
+  restoreFocus();
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle('meta-warrant-read-media', async (event, { filePath }) => {
+  try {
+    if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' };
+    let buf = fs.readFileSync(filePath);
+    if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
+      buf = security.decryptBuffer(buf);
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeMap = {
+      '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+      '.gif': 'image/gif', '.mp4': 'video/mp4', '.webm': 'video/webm'
+    };
+    return {
+      success: true,
+      data: buf.toString('base64'),
+      mimeType: mimeMap[ext] || 'application/octet-stream'
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});

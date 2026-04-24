@@ -25,6 +25,12 @@
         }
     </script>
     <style>
+        /* Font size accessibility — set via Settings > Display */
+        :root { --viper-font-size: 15px; }
+        body { font-size: var(--viper-font-size); }
+        .text-xs  { font-size: calc(var(--viper-font-size) * 0.8); }
+        .text-sm  { font-size: calc(var(--viper-font-size) * 0.93); }
+        .text-base { font-size: var(--viper-font-size); }
         * {
             box-sizing: border-box;
         }
@@ -2431,6 +2437,10 @@
             applyViperFontSize(size);
         }
         function applyViperFontSize(size) {
+            // Apply CSS variable globally
+            const sizes = { small: '13px', medium: '15px', large: '17px', 'x-large': '20px' };
+            document.documentElement.style.setProperty('--viper-font-size', sizes[size] || '15px');
+
             document.querySelectorAll('#fontSizeSmall,#fontSizeMedium,#fontSizeLarge,#fontSizeXlarge').forEach(b => {
                 b.classList.remove('border-viper-purple', 'text-viper-purple', 'bg-viper-purple/10');
                 b.classList.add('border-gray-600', 'text-gray-400');

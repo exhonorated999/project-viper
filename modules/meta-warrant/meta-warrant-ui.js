@@ -56,6 +56,9 @@ class MetaWarrantUI {
             </div>
             <div id="mwp-evidence-bar"></div>
         `;
+
+        // Trigger lazy image loading for any disk-path images
+        this._loadLazyImages();
     }
 
     renderEvidenceBar(files) {
@@ -116,7 +119,10 @@ class MetaWarrantUI {
     switchSection(section) {
         this.activeSection = section;
         const content = document.getElementById('mwp-content-area');
-        if (content) content.innerHTML = this._renderSection();
+        if (content) {
+            content.innerHTML = this._renderSection();
+            this._loadLazyImages(content);
+        }
         document.querySelectorAll('.mwp-nav-item').forEach(el => {
             el.classList.toggle('active', el.dataset.section === section);
         });
@@ -331,7 +337,9 @@ class MetaWarrantUI {
                     <h3 class="mwp-card-title">Unique IPs (${Object.keys(ipMap).length})</h3>
                     <div class="mwp-ip-chips">
                         ${Object.entries(ipMap).map(([ip, times]) => `
-                            <span class="mwp-ip-chip">${this._esc(ip)} <span class="mwp-ip-count">×${times.length}</span></span>
+                            <span class="mwp-ip-chip">${this._esc(ip)} <span class="mwp-ip-count">×${times.length}</span>
+                                <button class="mwp-arin-btn" onclick="mwpArinLookup(this, '${this._esc(ip)}')" title="ARIN WHOIS Lookup">🌐</button>
+                            </span>
                         `).join('')}
                     </div>
                 </div>
@@ -339,11 +347,12 @@ class MetaWarrantUI {
                 <div class="mwp-card">
                     <h3 class="mwp-card-title">Activity Log</h3>
                     <table class="mwp-table">
-                        <thead><tr><th>IP Address</th><th>Timestamp</th></tr></thead>
+                        <thead><tr><th>IP Address</th><th>ARIN</th><th>Timestamp</th></tr></thead>
                         <tbody>
                             ${ips.map(entry => `
                                 <tr>
                                     <td class="mwp-mono">${this._esc(entry.ip || '—')}</td>
+                                    <td>${entry.ip ? `<button class="mwp-arin-btn" onclick="mwpArinLookup(this, '${this._esc(entry.ip)}')" title="ARIN WHOIS Lookup">🌐</button>` : '—'}</td>
                                     <td>${this._esc(entry.time || '—')}</td>
                                 </tr>
                             `).join('')}
@@ -747,3 +756,37 @@ class MetaWarrantUI {
         }
     }
 }
+
+// Global ARIN lookup for META Warrant IP addresses
+async function mwpArinLookup(btn, ip) {
+    if (!ip || !window.electronAPI?.arinLookup) return;
+    btn.disabled = true;
+    btn.textContent = '⏳';
+    try {
+        const result = await window.electronAPI.arinLookup(ip);
+        if (result.success) {
+            const info = [result.provider || result.organization];
+            if (result.network) info.push(result.network);
+            if (result.netRange) info.push(result.netRange);
+            const span = btn.nextElementSibling?.classList?.contains('mwp-arin-result')
+                ? btn.nextElementSibling
+                : document.createElement('span');
+            span.className = 'mwp-arin-result mwp-arin-success';
+            span.textContent = info.join(' · ');
+            span.title = info.join('\n');
+            if (!btn.nextElementSibling?.classList?.contains('mwp-arin-result')) btn.parentNode.appendChild(span);
+            btn.textContent = '✓';
+            btn.classList.add('mwp-arin-done');
+        } else {
+            btn.textContent = '✗';
+            btn.title = result.error || 'Lookup failed';
+            btn.classList.add('mwp-arin-fail');
+        }
+    } catch (e) {
+        btn.textContent = '✗';
+        btn.title = e.message;
+        btn.classList.add('mwp-arin-fail');
+    }
+    btn.disabled = false;
+}
+window.mwpArinLookup = mwpArinLookup;

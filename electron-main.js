@@ -748,8 +748,6 @@ ipcMain.handle('update-install', async () => {
   if (!autoUpdater) return;
   const path = require('path');
   const fs = require('fs');
-  const { shell } = require('electron');
-
   // 1) Use the path captured from the update-downloaded event
   let installerPath = autoUpdater._downloadedInstallerPath || null;
   console.log('update-install: downloadedInstallerPath =', installerPath);
@@ -778,17 +776,31 @@ ipcMain.handle('update-install', async () => {
   }
 
   if (installerPath && fs.existsSync(installerPath)) {
-    // Use shell.openPath — this triggers UAC elevation properly
-    console.log('Launching installer via shell.openPath:', installerPath);
-    const err = await shell.openPath(installerPath);
-    if (err) {
-      console.error('shell.openPath failed:', err, '— falling back to quitAndInstall');
+    // Determine current install directory so NSIS installs to the same location
+    const installDir = path.dirname(process.execPath).replace(/[\\/]+$/, '');
+    console.log('Launching installer silently (elevated):', installerPath, '→', installDir);
+
+    try {
+      // PowerShell Start-Process with -Verb RunAs triggers UAC elevation
+      // NSIS flags: /S = silent, /D= = install directory (must be last, unquoted)
+      const { spawn } = require('child_process');
+      const escapedPath = installerPath.replace(/'/g, "''");
+      const psCmd = `Start-Process -FilePath '${escapedPath}' -ArgumentList '/S /D=${installDir}' -Verb RunAs`;
+      const child = spawn('powershell.exe', ['-NoProfile', '-Command', psCmd], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true
+      });
+      child.unref();
+    } catch (err) {
+      console.error('Elevated install failed:', err, '— falling back to quitAndInstall');
       autoUpdater.quitAndInstall(false, true);
       await new Promise(resolve => setTimeout(resolve, 2000));
       return;
     }
+
     // Give the installer time to start before quitting
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, 3000));
     app.quit();
   } else {
     console.log('No installer found in any cache, using standard quitAndInstall');

@@ -14,6 +14,12 @@
     <script src="libs/jspdf.umd.min.js"></script>
     <script src="libs/jspdf.plugin.autotable.min.js"></script>
     <style>
+        /* Font size accessibility — set via Settings > Display */
+        :root { --viper-font-size: 15px; }
+        body { font-size: var(--viper-font-size); }
+        .text-xs  { font-size: calc(var(--viper-font-size) * 0.8); }
+        .text-sm  { font-size: calc(var(--viper-font-size) * 0.93); }
+        .text-base { font-size: var(--viper-font-size); }
         /* Responsive fixes for different screen sizes */
         * {
             box-sizing: border-box;
@@ -1567,6 +1573,13 @@
     </div>
     
     <script>
+        // Apply font size preference from Settings
+        (function() {
+            const sizes = { small: '13px', medium: '15px', large: '17px', 'x-large': '20px' };
+            const pref = localStorage.getItem('viperFontSize') || 'medium';
+            document.documentElement.style.setProperty('--viper-font-size', sizes[pref] || '15px');
+        })();
+
         // Load saved preferences from localStorage
         let cardPreferences = JSON.parse(localStorage.getItem('cardPreferences')) || {
             1: 'new_cases_assigned',

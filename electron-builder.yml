@@ -10,6 +10,7 @@ files:
   - "!tasks/**"
   - "!test/**"
   - "!cases/**"
+  - "!sample-data/**"
   - "!viper-source/**"
   - "!*.md"
   - "!*.txt"

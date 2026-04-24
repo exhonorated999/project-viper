@@ -3627,3 +3627,117 @@ ipcMain.handle('meta-warrant-read-media', async (event, { filePath }) => {
     return { success: false, error: error.message };
   }
 });
+
+// ─── KIK Warrant Parser IPC ────────────────────────────────────────────
+
+const KikWarrantParser = require('./modules/kik-warrant/kik-warrant-parser');
+const kkParser = new KikWarrantParser();
+
+ipcMain.handle('kik-warrant-scan', async (event, { caseNumber }) => {
+  try {
+    const dirsToScan = [
+      path.join(casesDir, caseNumber, 'Evidence'),
+      path.join(casesDir, caseNumber, 'Warrants', 'Production')
+    ];
+
+    const files = [];
+
+    for (const dir of dirsToScan) {
+      if (!fs.existsSync(dir)) continue;
+      const scanDir = (d) => {
+        const entries = fs.readdirSync(d, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(d, entry.name);
+          if (entry.isDirectory()) {
+            scanDir(fullPath);
+          } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')) {
+            try {
+              let buf = fs.readFileSync(fullPath);
+              if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
+                buf = security.decryptBuffer(buf);
+              }
+              if (KikWarrantParser.isKikWarrantZip(buf)) {
+                files.push({
+                  name: entry.name,
+                  path: fullPath,
+                  size: fs.statSync(fullPath).size
+                });
+              }
+            } catch (e) { /* not a valid zip or encrypted, skip */ }
+          }
+        }
+      };
+      scanDir(dir);
+    }
+
+    return { success: true, files };
+  } catch (error) {
+    console.error('KIK warrant scan error:', error);
+    return { success: false, error: error.message, files: [] };
+  }
+});
+
+ipcMain.handle('kik-warrant-import', async (event, { filePath, caseNumber }) => {
+  try {
+    let buf = fs.readFileSync(filePath);
+    if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
+      buf = security.decryptBuffer(buf);
+    }
+    const data = await kkParser.parseZip(buf);
+
+    // Extract content (media) files to disk
+    if (caseNumber && data.contentFiles && Object.keys(data.contentFiles).length > 0) {
+      const mediaDir = path.join(casesDir, caseNumber, 'Evidence', 'KikWarrant', 'content');
+      const extracted = kkParser.extractContentFiles(buf, mediaDir, security);
+      console.log(`KIK warrant: extracted ${extracted.extracted} media files to ${mediaDir}`);
+
+      // Replace contentFiles with disk paths
+      for (const [fileName, info] of Object.entries(data.contentFiles)) {
+        if (extracted.files[fileName]) {
+          info.diskPath = extracted.files[fileName];
+        }
+      }
+    }
+
+    return { success: true, data };
+  } catch (error) {
+    console.error('KIK warrant import error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('kik-warrant-pick-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select KIK Warrant Return ZIP',
+    properties: ['openFile'],
+    filters: [{ name: 'ZIP Archives', extensions: ['zip'] }]
+  });
+  restoreFocus();
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle('kik-warrant-read-media', async (event, { filePath }) => {
+  try {
+    if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' };
+    let buf = fs.readFileSync(filePath);
+    if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
+      buf = security.decryptBuffer(buf);
+    }
+    // Detect mime from magic bytes
+    let mimeType = 'application/octet-stream';
+    if (buf[0] === 0xFF && buf[1] === 0xD8) mimeType = 'image/jpeg';
+    else if (buf[0] === 0x89 && buf[1] === 0x50) mimeType = 'image/png';
+    else if (buf.length > 7 && buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70) mimeType = 'video/mp4';
+    else {
+      const ext = path.extname(filePath).toLowerCase();
+      if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
+      else if (ext === '.png') mimeType = 'image/png';
+      else if (ext === '.mp4') mimeType = 'video/mp4';
+      else if (ext === '.gif') mimeType = 'image/gif';
+    }
+    return { success: true, data: buf.toString('base64'), mimeType };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});

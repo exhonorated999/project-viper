@@ -1296,6 +1296,15 @@
                                     <div><span class="text-sm font-medium text-white">META Warrant</span><div class="text-xs text-gray-500">Parse META (Facebook/Instagram) Warrant Returns</div></div>
                                 </div>
                             </label>
+                            <label class="flex items-center space-x-3 p-3 rounded-lg cursor-pointer hover:bg-viper-card/30 transition-colors border border-gray-700 hover:border-viper-green/50">
+                                <input type="checkbox" value="kikWarrant" class="case-module w-4 h-4 rounded border-gray-600 text-viper-green focus:ring-viper-green">
+                                <div class="flex items-center space-x-2">
+                                    <svg class="w-5 h-5 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/>
+                                    </svg>
+                                    <div><span class="text-sm font-medium text-white">KIK Warrant</span><div class="text-xs text-gray-500">Parse KIK Messenger Warrant Returns</div></div>
+                                </div>
+                            </label>
                         </div>
                     </div>
                 </div>
@@ -1938,7 +1947,7 @@
                     'areacanvas', 'prosecution', 'narcotics', 'firearms',
                     'money', 'opsplan', 'rmsImports', 'oversightImport',
                     'canvasForms', 'cyberTips', 'timelineEvents', 'consentSearches',
-                    'googleWarrant', 'metaWarrant'
+                    'googleWarrant', 'metaWarrant', 'kikWarrant'
                 ];
                 pattern2Keys.forEach(k => {
                     const val = backupData[`${k}_${oldId}`];
@@ -4829,7 +4838,7 @@
                     // 3. Clean localStorage — Pattern 2 (per-case keys by case.id)
                     const p2Prefixes = ['suspects_','victims_','victimBusinesses_','cargo_','witnesses_',
                         'involvedPersons_','recoveredVehicles_','missingpersons_','areacanvas_','prosecution_','narcotics_',
-                        'firearms_','money_','opsplan_','rmsImports_','oversightImport_','canvasForms_','cyberTips_','timelineEvents_','consentSearches_','googleWarrant_','metaWarrant_'];
+                        'firearms_','money_','opsplan_','rmsImports_','oversightImport_','canvasForms_','cyberTips_','timelineEvents_','consentSearches_','googleWarrant_','metaWarrant_','kikWarrant_'];
                     for (const prefix of p2Prefixes) {
                         localStorage.removeItem(prefix + c.id);
                     }

@@ -704,10 +704,13 @@
     <!-- Google Warrant Parser Module -->
     <link rel="stylesheet" href="modules/google-warrant/google-warrant-styles.css">
     <link rel="stylesheet" href="modules/meta-warrant/meta-warrant-styles.css">
+    <link rel="stylesheet" href="modules/kik-warrant/kik-warrant-styles.css">
     <script src="modules/google-warrant/google-warrant-module.js"></script>
     <script src="modules/google-warrant/google-warrant-ui.js"></script>
     <script src="modules/meta-warrant/meta-warrant-module.js"></script>
     <script src="modules/meta-warrant/meta-warrant-ui.js"></script>
+    <script src="modules/kik-warrant/kik-warrant-module.js"></script>
+    <script src="modules/kik-warrant/kik-warrant-ui.js"></script>
 </head>
 <body class="text-white">
     <div class="flex h-screen overflow-hidden hex-pattern">
@@ -1597,7 +1600,8 @@
                 oversightImport: { label: 'Oversight', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
                 cyberTips: { label: 'Cyber Tips', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' },
                 googleWarrant: { label: 'Google Warrant', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' },
-                metaWarrant: { label: 'META Warrant', icon: 'M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z' }
+                metaWarrant: { label: 'META Warrant', icon: 'M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z' },
+                kikWarrant: { label: 'KIK Warrant', icon: 'M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z' }
             };
             
             // Initialize tabOrder if it doesn't exist
@@ -1738,6 +1742,7 @@
             allModules.cyberTips = { label: 'Cyber Tips', icon: '🌐' };
             allModules.googleWarrant = { label: 'Google Warrant', icon: '📋' };
             allModules.metaWarrant = { label: 'META Warrant', icon: '📘' };
+            allModules.kikWarrant = { label: 'KIK Warrant', icon: '💬' };
 
             const availableModules = Object.keys(allModules).filter(
                 module => !currentCase.modules.includes(module)
@@ -1821,7 +1826,7 @@
                 opsplan:'OPS Plan', analytics:'CDR', aperture:'Aperture',
                 networkIntelligence:'Network Intel', traceImport:'Trace Import', rmsImport:'RMS Import',
                 oversightImport:'Oversight', cyberTips:'Cyber Tips', consentSearch:'Consent Search',
-                googleWarrant:'Google Warrant', metaWarrant:'META Warrant'
+                googleWarrant:'Google Warrant', metaWarrant:'META Warrant', kikWarrant:'KIK Warrant'
             };
             const label = moduleConfig[moduleId] || moduleId;
             if (!await viperConfirm(`Remove "${label}" from this case?\n\nNote: Any data in this module will remain in storage and can be recovered by re-adding the module.`, {danger:true, okText:'Delete'})) return;
@@ -1874,6 +1879,7 @@
                 cyberTips: { label: 'Cyber Tips', icon: '🌐', type: 'data' },
                 googleWarrant: { label: 'Google Warrant', icon: '📋', type: 'data' },
                 metaWarrant: { label: 'META Warrant', icon: '📘', type: 'data' },
+                kikWarrant: { label: 'KIK Warrant', icon: '💬', type: 'data' },
                 consentSearch: { label: 'Consent Search', icon: '✅', type: 'data' }
             };
 
@@ -1967,7 +1973,7 @@
                 'areacanvas', 'prosecution', 'narcotics', 'firearms',
                 'money', 'opsplan', 'rmsImports', 'oversightImport',
                 'canvasForms', 'cyberTips', 'timelineEvents', 'consentSearches',
-                'googleWarrant', 'metaWarrant', 'caseMetrics'
+                'googleWarrant', 'metaWarrant', 'kikWarrant', 'caseMetrics'
             ];
             const moduleData = {};
             moduleKeys.forEach(k => {
@@ -2079,6 +2085,10 @@
                 case 'metaWarrant': {
                     const mwData = JSON.parse(localStorage.getItem(`metaWarrant_${currentCase.id}`) || '{"imports":[]}');
                     return (mwData.imports || []).length;
+                }
+                case 'kikWarrant': {
+                    const kkData = JSON.parse(localStorage.getItem(`kikWarrant_${currentCase.id}`) || '{"imports":[]}');
+                    return (kkData.imports || []).length;
                 }
                 default: return 0;
             }
@@ -3322,6 +3332,9 @@
             } else if (tabId === 'metaWarrant') {
                 contentDiv.innerHTML = renderMetaWarrantTab();
                 initializeMetaWarrant();
+            } else if (tabId === 'kikWarrant') {
+                contentDiv.innerHTML = renderKikWarrantTab();
+                initializeKikWarrant();
             } else {
                 contentDiv.innerHTML = renderPlaceholderTab(tabId);
             }
@@ -21084,6 +21097,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 { id: 'cyberTips', label: 'Cyber Tips (NCMEC)', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z', desc: 'Import & parse NCMEC CyberTipline report PDFs' },
                 { id: 'googleWarrant', label: 'Google Warrant Parser', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z', desc: 'Parse Google warrant returns — account, email, location, devices, apps' },
                 { id: 'metaWarrant', label: 'META Warrant Parser', icon: 'M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z', desc: 'Parse META (Facebook/Instagram) warrant returns — account, messages, photos, IP activity' },
+                { id: 'kikWarrant', label: 'KIK Warrant Parser', icon: 'M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z', desc: 'Parse KIK Messenger warrant returns — messages, contacts, sessions, groups' },
             ];
 
             const allModules = [...caseManagement, ...investigativeTools];
@@ -28784,6 +28798,37 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     <div class="glass-card p-6 rounded-xl">
                         <div class="text-center text-red-400">
                             <p class="text-lg font-semibold mb-2">META Warrant Parser Not Loaded</p>
+                            <p class="text-sm text-gray-400">Please check that all module files are properly installed.</p>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function renderKikWarrantTab() {
+            return `
+                <div id="kik-warrant-tab-container" style="height: calc(100vh - 220px);"></div>
+            `;
+        }
+
+        function initializeKikWarrant() {
+            if (window.KikWarrantModule) {
+                window.kikWarrantModule = new KikWarrantModule(
+                    String(currentCase.id),
+                    String(currentCase.caseNumber || currentCase.id),
+                    currentCase.title || currentCase.name || currentCase.caseNumber
+                );
+                window.kikWarrantModule.init('kik-warrant-tab-container').then(() => {
+                    window.kikWarrantUI = window.kikWarrantModule.ui;
+                }).catch(err => {
+                    console.error('KIK Warrant init error:', err);
+                });
+            } else {
+                console.error('KIK Warrant module not loaded');
+                document.getElementById('kik-warrant-tab-container').innerHTML = `
+                    <div class="glass-card p-6 rounded-xl">
+                        <div class="text-center text-red-400">
+                            <p class="text-lg font-semibold mb-2">KIK Warrant Parser Not Loaded</p>
                             <p class="text-sm text-gray-400">Please check that all module files are properly installed.</p>
                         </div>
                     </div>

@@ -63,6 +63,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   metaWarrantPickFile: () => ipcRenderer.invoke('meta-warrant-pick-file'),
   metaWarrantReadMedia: (data) => ipcRenderer.invoke('meta-warrant-read-media', data),
 
+  // KIK Warrant Parser
+  kikWarrantScan: (data) => ipcRenderer.invoke('kik-warrant-scan', data),
+  kikWarrantImport: (data) => ipcRenderer.invoke('kik-warrant-import', data),
+  kikWarrantPickFile: () => ipcRenderer.invoke('kik-warrant-pick-file'),
+  kikWarrantReadMedia: (data) => ipcRenderer.invoke('kik-warrant-read-media', data),
+
   // Field Security
   securityCheck: () => ipcRenderer.invoke('security-check'),
   securitySetup: (data) => ipcRenderer.invoke('security-setup', data),

@@ -2089,11 +2089,19 @@
                 if (/Suspect\(s\)\s*-\s*\d+\s*Involved/i.test(text)) detected.suspects = true;
                 if (/Victim\(s\)\s*-\s*\d+\s*Involved/i.test(text)) detected.victims = true;
                 if (/Other Person\(s\)\s*-\s*\d+\s*Involved/i.test(text)) {
-                    // Check Involvement Type field in person data to route correctly
-                    if (/Involvement\s*Type\s*\n\s*(?:Suspect|Arrested)/i.test(text)) detected.suspects = true;
-                    else if (/Involvement\s*Type\s*\n\s*Victim/i.test(text)) detected.victims = true;
-                    else if (/Involvement\s*Type\s*\n\s*Witness/i.test(text)) detected.witnesses = true;
-                    else detected.involvedPersons = true; // default: Other Person → involvedPersons
+                    // Check ALL Involvement Type values (not if/else — multiple roles may exist)
+                    const otherBlock = (text.match(/Other Person\(s\)[\s\S]*?(?=Event Information|Report Narrative|Reporting Employee|$)/i) || [''])[0];
+                    const invTypes = [...otherBlock.matchAll(/Involvement\s*Type\s*\n\s*([^\n]+)/gi)].map(m => m[1].trim());
+                    if (invTypes.length > 0) {
+                        for (const inv of invTypes) {
+                            if (/Suspect|Arrested/i.test(inv)) detected.suspects = true;
+                            else if (/Victim/i.test(inv) && !/Victim's|Parent|Guardian/i.test(inv)) detected.victims = true;
+                            else if (/Witness/i.test(inv)) detected.witnesses = true;
+                            else detected.involvedPersons = true; // Parent/Guardian, Otherwise Involved, etc.
+                        }
+                    } else {
+                        detected.involvedPersons = true; // default when no Involvement Type found
+                    }
                 }
 
                 if (hasSection(['Vehicle\\(s\\)', 'Vehicles'])) {

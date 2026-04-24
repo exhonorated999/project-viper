@@ -1,0 +1,70 @@
+isMetaWarrantZip: true
+
+=== MEDIA FILES ===
+  photos_29202235738804.jpg: image/jpeg (40.7 KB)
+  photos_29202235737680.jpg: image/jpeg (102.3 KB)
+  unified_message_26402242218405.jpg: image/jpeg (906.9 KB)
+  unified_message_50402235629777.jpg: image/jpeg (92.5 KB)
+
+=== RECORDS (2) ===
+
+Source: preservation-1 | Service: Facebook
+Target: 59767010122078 | Account: 59767010122078
+Date Range: 2024-01-08 00:00:00 UTC to 2024-01-09 23:59:00 UTC
+Generated: 2024-01-09 19:25:33 UTC
+NCMEC Reports: 0
+Registration IP: null
+IP Addresses: 0
+About Me: null
+Wallposts: 0
+Status Updates: 4
+  [2024-01-09 19:19:37 UTC] this is a photo upload by Test User (59767010122078)
+  [2024-01-09 19:18:31 UTC] this is a status update by Test User (59767010122078)
+  [2024-01-09 18:43:01 UTC] undefined by Test User (59767010122078)
+  [2024-01-09 18:43:01 UTC] undefined by null
+Shares: 0
+Photos: 4
+  [Photos] null — linked_media/photos_29202235738804.jpg
+  [Photos] this is a photo upload — linked_media/photos_29202235738804.jpg
+  [Photos] null — linked_media/photos_29202235737680.jpg
+  [Photos] this is a profile picture — linked_media/photos_29202235737680.jpg
+Message Threads: 1
+  Thread 29202235737044: ETest UserTwo (Facebook: 59791010034992), Test User (Facebook: 59767010122078)
+    Messages: 2
+      [2024-01-09 19:08:22 UTC] ETest UserTwo (Facebook: 59791010034992): You are now connected on Messenger
+      [2024-01-09 19:25:07 UTC] ETest UserTwo (Facebook: 59791010034992): ETest sent a photo.
+Posts To Other Walls: 0
+Bio: this is a test account
+
+Source: records | Service: Facebook
+Target: 59767010122078 | Account: 59767010122078
+Date Range: 2024-01-08 00:00:00 UTC to 2024-01-09 23:59:00 UTC
+Generated: 2024-01-09 23:39:40 UTC
+NCMEC Reports: 0
+Registration IP: null
+IP Addresses: 3
+  57.132.133.127 @ 2024-01-09 22:38:28 UTC
+  57.132.133.127 @ 2024-01-09 22:37:42 UTC
+  57.132.133.127 @ 2024-01-09 22:37:24 UTC
+About Me: null
+Wallposts: 0
+Status Updates: 4
+  [2024-01-09 19:19:37 UTC] this is a photo upload by Test User (59767010122078)
+  [2024-01-09 19:18:31 UTC] this is a status update by Test User (59767010122078)
+  [2024-01-09 18:43:01 UTC] undefined by Test User (59767010122078)
+  [2024-01-09 18:43:01 UTC] undefined by null
+Shares: 0
+Photos: 4
+  [Photos] null — linked_media/photos_29202235738804.jpg
+  [Photos] this is a photo upload — linked_media/photos_29202235738804.jpg
+  [Photos] null — linked_media/photos_29202235737680.jpg
+  [Photos] this is a profile picture — linked_media/photos_29202235737680.jpg
+Message Threads: 1
+  Thread 29202235737044: ETest UserTwo (Facebook: 59791010034992), Test User (Facebook: 59767010122078)
+    Messages: 3
+      [2024-01-09 19:08:22 UTC] ETest UserTwo (Facebook: 59791010034992): You are now connected on Messenger
+      [2024-01-09 19:25:07 UTC] ETest UserTwo (Facebook: 59791010034992): ETest sent a photo.
+      [2024-01-09 22:38:28 UTC] Test User (Facebook: 59767010122078): You sent a photo.
+Posts To Other Walls: 1
+  [2024-01-09 19:26:50 UTC] this is a wall post → ETest UserTwo (31602241123651)
+Bio: this is a test account

@@ -1,0 +1,111 @@
+==========================================
+  META RECORDS.HTML - DETAILED ANALYSIS
+==========================================
+
+
+== REQUEST_PARAMETERS ==
+  [✓ DATA] Service (12 chars, 0 imgs, 0 nested)
+    Preview: Facebook
+  [✓ DATA] Target (18 chars, 0 imgs, 0 nested)
+    Preview: 59767010122078
+  [✓ DATA] Account Identifier (18 chars, 0 imgs, 0 nested)
+    Preview: 59767010122078
+  [✗ empty] Account Type (8 chars, 0 imgs, 0 nested)
+  [✓ DATA] Generated (27 chars, 0 imgs, 0 nested)
+    Preview: 2024-01-09 23:39:40 UTC
+  [✓ DATA] Date Range (54 chars, 0 imgs, 0 nested)
+    Preview: 2024-01-08 00:00:00 UTC to 2024-01-09 23:59:00 UTC
+
+== NCMEC_REPORTS ==
+  [✓ DATA] Ncmec Reports Definition (322 chars, 0 imgs, 0 nested)
+    Preview: NCMEC Cybertips: NCMEC cybertip reports associated to the account of the sender. CyberTip ID: Unique identifier associated with the cybertip. Time: Da
+  [✗ empty] NCMEC CyberTip Numbers (37 chars, 0 imgs, 0 nested)
+
+== REGISTRATION_IP ==
+  [✓ DATA] Registration Ip Definition (48 chars, 0 imgs, 0 nested)
+    Preview: IP address associated with account creation.
+  [✗ empty] Registration Ip (37 chars, 0 imgs, 0 nested)
+
+== IP_ADDRESSES ==
+  [✓ DATA] Ip Addresses Definition (59 chars, 0 imgs, 0 nested)
+    Preview: IP Addresses: IP addresses associated with the account.
+  [✓ DATA] Ip Addresses (1809 chars, 0 imgs, 12 nested)
+    Preview: IP Address57.132.133.127 Time2024-01-09 22:38:28 UTC  IP Address57.132.133.127 Time2024-01-09 22:37:42 UTC  IP Address57.132.133.127 Time2024-01-09 22
+
+== ABOUT_ME ==
+  [✓ DATA] About Me Definition (138 chars, 0 imgs, 0 nested)
+    Preview: About Me: Displays what the account holder has written about themselves, if anything, in the 'About Me' section on Facebook.
+  [✗ empty] About Me (37 chars, 0 imgs, 0 nested)
+
+== WALLPOSTS ==
+  [✓ DATA] Wallposts Definition (476 chars, 0 imgs, 0 nested)
+    Preview: Wallposts: Posts made to the account by other accounts. To: Account holder receiving post. From: Account holder making post. Id: Unique identifier ass
+  [✗ empty] Wallposts (37 chars, 0 imgs, 0 nested)
+
+== STATUS_UPDATES ==
+  [✓ DATA] Status Updates Definition (270 chars, 0 imgs, 0 nested)
+    Preview: Status Updates: Posts made to the account by the account holder. Posted: Date and time of post. Status: Content of the post. Display Date: Custom date
+  [✓ DATA] Status Updates (7112 chars, 0 imgs, 48 nested)
+    Preview: Posted2024-01-09 19:19:37 UTC Statusthis is a photo upload Mobilefalse Id29202235738819 AuthorTest User (59767010122078)  Posted2024-01-09 19:18:31 UT
+
+== SHARES ==
+  [✓ DATA] Shares Definition (487 chars, 0 imgs, 0 nested)
+    Preview: Shares: Information about content the account has shared. The account can share information by clicking the share button or posting a link to the cont
+  [✗ empty] Shared Content (37 chars, 0 imgs, 0 nested)
+
+== PHOTOS ==
+  [✓ DATA] Photos Definition (1102 chars, 0 imgs, 0 nested)
+    Preview: Photos: Information about the photos uploaded to the account. Album: Name of album containing the photo. Image: Displays the image.   Id: Unique ident
+  [✓ DATA] Photos (6211 chars, 2 imgs, 40 nested)
+    Preview: Album: Timeline photosImage  Linked Media File:linked_media/photos_29202235738804.jpg Id29202235738804 Titlethis is a photo upload Linkhttps://www.fac
+
+== UNIFIED_MESSAGES ==
+  [✓ DATA] Unified Messages Definition (1711 chars, 0 imgs, 0 nested)
+    Preview: Unified Messages: Private communication between account holders. Thread: Unique identifier associated with conversation thread. Current Participants: 
+  [✓ DATA] Unified Messages (7877 chars, 2 imgs, 46 nested)
+    Preview: Thread (29202235737044) Current Participants2024-01-09 23:39:58 UTC ETest UserTwo (Facebook: 59791010034992) Test User (Facebook: 59767010122078)   Au
+  [✓ DATA] Facebook retains the author, but NOT the recipient(s), of individual messages fo (864 chars, 0 imgs, 0 nested)
+    Preview: Facebook retains the author, but NOT the recipient(s), of individual messages for Messenger threads. Facebook also retains the following information f
+
+== POSTS_TO_OTHER_WALLS ==
+  [✓ DATA] Posts To Other Walls Definition (250 chars, 0 imgs, 0 nested)
+    Preview: Posts To Other Walls: Posts that the user made on other walls. ID: Unique identifier of the post. Timeline Owner: Account holder who received the post
+  [✓ DATA] Posts To Other Walls (1210 chars, 0 imgs, 8 nested)
+    Preview: Id31602241123651 Postthis is a wall post Time2024-01-09 19:26:50 UTC Timeline OwnerETest UserTwo (31602241123651)
+
+== BIO ==
+  [✓ DATA] Bio Definition (93 chars, 0 imgs, 0 nested)
+    Preview: Text: The text contained in the bio. Creation Time: Date and time the bio was created.
+  [✓ DATA] Bio (614 chars, 0 imgs, 4 nested)
+    Preview: Textthis is a test account Creation Time2024-01-09 19:20:24 UTC
+
+
+==========================================
+  META PRESERVATION-1.HTML - DETAILED ANALYSIS
+==========================================
+
+Categories:
+  - request_parameters : Request Parameters
+  - ncmec_reports : Ncmec Reports
+  - registration_ip : Registration Ip
+  - ip_addresses : Ip Addresses
+  - about_me : About Me
+  - wallposts : Wallposts
+  - status_updates : Status Updates
+  - shares : Shares
+  - photos : Photos
+  - unified_messages : Unified Messages
+  - posts_to_other_walls : Posts To Other Walls
+  - bio : Bio
+  [property-request_parameters] HAS DATA (1819 chars)
+  [property-ncmec_reports] HAS DATA (961 chars)
+  [property-registration_ip] HAS DATA (682 chars)
+  [property-ip_addresses] HAS DATA (687 chars)
+  [property-about_me] HAS DATA (758 chars)
+  [property-wallposts] HAS DATA (1098 chars)
+  [property-status_updates] HAS DATA (7977 chars)
+  [property-shares] HAS DATA (1111 chars)
+  [property-photos] HAS DATA (7892 chars)
+  [property-unified_messages] HAS DATA (8199 chars)
+  [property-posts_to_other_walls] HAS DATA (894 chars)
+  [property-bio] HAS DATA (1280 chars)

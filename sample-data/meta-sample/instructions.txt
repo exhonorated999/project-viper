@@ -1,0 +1,35 @@
+Contents of this file
+----------------------
+How to use these files
+FAQs
+----------------------
+
+# How to use these files
+
+1. Double click on generation.html to open the HTML file. This should open up in your default browser. We recommend using Google Chrome.
+2. The generation.html file is split into two parts:
+    1. The menu, which is pinned to the left side of your screen.
+    2. The records, which will be central in your screen.
+3. The menu contains hyperlinks to each category in the record. Clicking on them will automatically scroll to where they are in the document.
+4. The menu also contains various print options. The "All" box will print all the content of the record. If you just want to print a certain category or categories, you can select the associated box(es). We also support printing by page number, either a range or specific number.
+5. Links to additional records, for example if a preservation was attached, are available under the "Links to Records" section.
+
+# FAQs
+
+* How can we use this?
+You can use archive format records in the same way you would use PDF records. In some cases, records in the archive format may be more easily parseable by machine algorithms used by some agencies.
+
+* What is the "linked_media" file?
+We discourage interacting with the "linked_media" folder directly to avoid confusion, and encourage you to view all aspects of the record, including media, via the generation.html file. The "linked_media" file stores all the non text parts of the record. The HTML file loads in the attachments in the "linked_media" folder.
+
+* What are hashes?
+A hash is a unique alphanumeric combination assigned to each set of records produced by Meta. By comparing the hash associated with your records to the matching hash in our internal systems, Meta can authenticate that the records were indeed produced by us.
+
+* I would prefer to work with the record in PDF format. How can I do that?
+If you prefer to work with a PDF, you can convert the record by using your browser print options.
+
+1. In the print menu, check the "All" box.
+2. Click Print.
+3. In the new window, use the browsers built in print tool to save the file to a PDF.
+
+If you need assistance downloading or working with zip files, please contact your technical assistance unit.

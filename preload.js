@@ -84,6 +84,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Warrant file storage
   saveWarrantFile: (data) => ipcRenderer.invoke('save-warrant-file', data),
   readWarrantFile: (filePath) => ipcRenderer.invoke('read-warrant-file', filePath),
+  selectProductionZip: (data) => ipcRenderer.invoke('select-production-zip', data),
 
   // External app launch
   launchAperture: (caseData) => ipcRenderer.invoke('launch-aperture', caseData),

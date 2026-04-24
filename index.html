@@ -4029,7 +4029,10 @@
             loadTheme();
 
             // Handle hash navigation (e.g. from case-detail sidebar link)
-            if (window.location.hash === '#offense-reference') {
+            if (window.location.hash === '#all-cases') {
+                setTimeout(() => showAllCases(), 100);
+                history.replaceState(null, '', window.location.pathname + window.location.search);
+            } else if (window.location.hash === '#offense-reference') {
                 setTimeout(() => showOffenseReference(), 100);
                 history.replaceState(null, '', window.location.pathname + window.location.search);
             }
@@ -4202,8 +4205,8 @@
             { key: 'dateClosed',     label: 'Date Closed',     default: false, sortType: 'date' },
             { key: 'flags',          label: 'Flags',           default: false, sortType: 'number' },
         ];
-        let allCasesSortKey = 'created';
-        let allCasesSortDir = 'desc';
+        let allCasesSortKey = localStorage.getItem('viperAllCasesSortKey') || 'created';
+        let allCasesSortDir = localStorage.getItem('viperAllCasesSortDir') || 'desc';
 
         function getACVisibleCols() {
             const saved = localStorage.getItem('viperAllCasesColumns');
@@ -4552,6 +4555,8 @@
                 allCasesSortKey = key;
                 allCasesSortDir = 'asc';
             }
+            localStorage.setItem('viperAllCasesSortKey', allCasesSortKey);
+            localStorage.setItem('viperAllCasesSortDir', allCasesSortDir);
             renderAllCasesView();
         }
 

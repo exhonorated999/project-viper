@@ -1884,6 +1884,42 @@ ipcMain.handle('read-warrant-file', async (event, filePath) => {
   }
 });
 
+// --- Select ZIP archive for warrant production uploads ---
+ipcMain.handle('select-production-zip', async (event, { caseNumber }) => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Production ZIP Archive(s)',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: 'ZIP Archives', extensions: ['zip'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  });
+  restoreFocus();
+  if (result.canceled || !result.filePaths.length) return { files: [] };
+
+  const warrantDir = path.join(casesDir, caseNumber, 'Warrants', 'Production');
+  fs.mkdirSync(warrantDir, { recursive: true });
+
+  const files = [];
+  for (const srcPath of result.filePaths) {
+    const fileName = path.basename(srcPath);
+    const destPath = path.join(warrantDir, fileName);
+    let buffer = fs.readFileSync(srcPath);
+    const fileSize = buffer.length;
+
+    if (security && security.isEnabled() && security.isUnlocked()) {
+      fs.writeFileSync(destPath, security.encryptBuffer(buffer));
+    } else {
+      fs.writeFileSync(destPath, buffer);
+    }
+
+    files.push({ name: fileName, path: destPath, size: fileSize, type: 'application/zip' });
+    console.log(`Production ZIP saved: ${destPath} (${fileSize} bytes)`);
+  }
+
+  return { files };
+});
+
 ipcMain.handle('resolve-warrant-path', async (event, { caseNumber, subfolder, fileName }) => {
   const warrantDir = path.join(casesDir, caseNumber, 'Warrants', subfolder);
   // Try exact filename first

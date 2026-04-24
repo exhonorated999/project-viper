@@ -1201,6 +1201,15 @@
                     return;
                 }
 
+                console.log('[RMS Import] Parsed report:', fileName,
+                    '| persons:', report.personsInvolved?.length || 0,
+                    '| offenses:', report.offenses?.length || 0,
+                    '| vehicles:', report.vehicles?.length || 0);
+                if (report.personsInvolved) {
+                    report.personsInvolved.forEach((p, i) =>
+                        console.log(`[RMS Import]   Person ${i}: ${p.involvement} — ${p.name}`));
+                }
+
                 let populated = [];
 
                 // 1. Save to RMS Imports tab (full report, same as normal import)
@@ -1247,9 +1256,9 @@
                         populated.push(`Suspects (${suspectPersons.length})`);
                     }
 
-                    // 3. Route victims
+                    // 3. Route victims (exclude "Victim's Parent/Guardian" — those go to Involved Persons)
                     const victimPersons = report.personsInvolved.filter(p =>
-                        /VICTIM/i.test(p.involvement || ''));
+                        /VICTIM/i.test(p.involvement || '') && !/VICTIM'S|PARENT|GUARDIAN/i.test(p.involvement || ''));
                     if (victimPersons.length > 0) {
                         const existing = JSON.parse(localStorage.getItem(`victims_${currentCase.id}`) || '[]');
                         for (const p of victimPersons) {
@@ -1317,10 +1326,19 @@
                         populated.push(`Witnesses (${witnessPersons.length})`);
                     }
 
-                    // 4b. Route unmatched persons + Reporting Party/Informant → involvedPersons
-                    const matchedRoles = /SUSPECT|ARRESTED|DEFENDANT|VICTIM|WITNESS/i;
-                    const involvedRouted = report.personsInvolved.filter(p =>
-                        /REPORTING\s*PARTY|INFORMANT/i.test(p.involvement || '') || !matchedRoles.test(p.involvement || ''));
+                    // 4b. Route unmatched persons + Reporting Party/Informant/Parent/Guardian → involvedPersons
+                    const matchedRoles = /SUSPECT|ARRESTED|DEFENDANT|WITNESS/i;
+                    const involvedRouted = report.personsInvolved.filter(p => {
+                        const inv = p.involvement || '';
+                        // Explicit roles → involvedPersons
+                        if (/REPORTING\s*PARTY|INFORMANT|PARENT|GUARDIAN/i.test(inv)) return true;
+                        // VICTIM without Parent/Guardian qualifier → already routed to victims
+                        if (/VICTIM/i.test(inv) && !/PARENT|GUARDIAN/i.test(inv)) return false;
+                        // Matched suspect/witness roles → already routed
+                        if (matchedRoles.test(inv)) return false;
+                        // Everything else → involvedPersons
+                        return true;
+                    });
                     if (involvedRouted.length > 0) {
                         const existing = JSON.parse(localStorage.getItem(`involvedPersons_${currentCase.id}`) || '[]');
                         for (const p of involvedRouted) {
@@ -5904,6 +5922,15 @@
                                 <div class="text-xs text-gray-500">Upload an entire production folder</div>
                             </div>
                         </button>
+                        <button id="prodUploadZip" class="w-full flex items-center gap-3 px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg hover:border-viper-purple transition text-left">
+                            <svg class="w-5 h-5 text-viper-purple flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/>
+                            </svg>
+                            <div>
+                                <div class="text-white text-sm font-medium">Select ZIP Archive</div>
+                                <div class="text-xs text-gray-500">Upload a zipped production file (.zip)</div>
+                            </div>
+                        </button>
                         <button id="prodUploadFiles" class="w-full flex items-center gap-3 px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg hover:border-viper-cyan transition text-left">
                             <svg class="w-5 h-5 text-viper-cyan flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
@@ -5993,11 +6020,61 @@
                 input.click();
             };
 
+            document.getElementById('prodUploadZip').onclick = async () => {
+                modal.remove();
+                // Use Electron native dialog for ZIP files (HTML file input can be unreliable for .zip)
+                if (window.electronAPI?.selectProductionZip) {
+                    const result = await window.electronAPI.selectProductionZip({ caseNumber: currentCase.caseNumber });
+                    if (result && result.files && result.files.length > 0) {
+                        const warrant = caseWarrants.find(w => w.id === warrantId);
+                        if (!warrant) return;
+                        warrant.hasProduction = true;
+                        warrant.productionFileCount = result.files.length;
+                        warrant.productionFiles = result.files;
+                        saveWarrantsToStorage();
+                        renderTabContent('warrants');
+                        showToast(`Uploaded ${result.files.length} production file(s)`, 'success');
+                        // Mirror to evidence tab
+                        try {
+                            const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
+                            const caseEv = allEvidence[currentCase.caseNumber] || [];
+                            const tag = `Warrant Production - ${warrant.issuedTo || 'Warrant #' + warrantId}`;
+                            const existingIdx = caseEv.findIndex(e => e.warrantId === warrantId && e.type === 'document');
+                            const evidenceEntry = {
+                                id: existingIdx >= 0 ? caseEv[existingIdx].id : Date.now(),
+                                warrantId: warrantId,
+                                type: 'document',
+                                tag: tag,
+                                description: `Production files for warrant: ${warrant.issuedTo || ''} (${warrant.type || ''})`.trim(),
+                                fileCount: result.files.length,
+                                totalSize: result.files.reduce((sum, f) => sum + f.size, 0),
+                                files: result.files,
+                                createdAt: new Date().toISOString()
+                            };
+                            if (existingIdx >= 0) caseEv[existingIdx] = evidenceEntry;
+                            else caseEv.push(evidenceEntry);
+                            allEvidence[currentCase.caseNumber] = caseEv;
+                            localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
+                            if (typeof caseEvidence !== 'undefined') caseEvidence = caseEv;
+                        } catch (evErr) { console.error('Failed to mirror production to evidence tab:', evErr); }
+                    }
+                } else {
+                    // Fallback: HTML file input
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.multiple = true;
+                    input.accept = '.zip';
+                    input.onchange = (e) => handleFiles(Array.from(e.target.files));
+                    input.click();
+                }
+            };
+
             document.getElementById('prodUploadFiles').onclick = () => {
                 modal.remove();
                 const input = document.createElement('input');
                 input.type = 'file';
                 input.multiple = true;
+                input.accept = '*/*,.zip,.pdf,.html,.htm,.txt,.csv,.json,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.bmp,.tiff,.mp4,.mov,.avi,.mp3,.wav';
                 input.onchange = (e) => handleFiles(Array.from(e.target.files));
                 input.click();
             };
@@ -25083,9 +25160,10 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 }
                 if (/Summary of\s*$/i.test(l)) { if (/Officer Report/i.test(rawLines[i + 1] || '')) i++; continue; }
                 if (/^Officer Report Contents$/i.test(l)) continue;
+                if (/^Department Disclaimer$/i.test(l)) continue;
                 cleaned.push(l);
             }
-            const lines = cleaned;
+            const lines = cleaned.filter(l => l !== '');
 
             const report = {
                 id: 'rms_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
@@ -25115,10 +25193,20 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const offenseSecIdx = lines.findIndex(l => /^Offense\(s\)$/i.test(l));
             const suspectSecIdx = lines.findIndex(l => /Suspect\(s\)\s*-\s*\d+\s*Involved/i.test(l));
             const victimSecIdx = lines.findIndex(l => /Victim\(s\)\s*-\s*\d+\s*Involved/i.test(l));
+            const orgSecIdx = lines.findIndex(l => /Organization\(s\)\s*-\s*\d+\s*Involved/i.test(l));
             const otherSecIdx = lines.findIndex(l => /Other Person\(s\)\s*-\s*\d+\s*Involved/i.test(l));
             const eventSecIdx = lines.findIndex(l => /^Event Information$/i.test(l));
             const narrSecIdx = lines.findIndex(l => /Report Narrative By/i.test(l));
             const empSecIdx = lines.findIndex(l => /^Reporting Employee\(?s?\)?$/i.test(l));
+
+            console.log('[parseIncidentSummary] cleaned lines:', lines.length,
+                '| sections: offense=', offenseSecIdx, 'suspect=', suspectSecIdx,
+                'victim=', victimSecIdx, 'org=', orgSecIdx, 'other=', otherSecIdx,
+                'event=', eventSecIdx, 'narr=', narrSecIdx, 'emp=', empSecIdx);
+            // Log lines around each detected section
+            if (suspectSecIdx >= 0) console.log('[parseIncidentSummary] suspect line:', JSON.stringify(lines[suspectSecIdx]), 'next:', JSON.stringify(lines[suspectSecIdx+1]), JSON.stringify(lines[suspectSecIdx+2]));
+            if (victimSecIdx >= 0) console.log('[parseIncidentSummary] victim line:', JSON.stringify(lines[victimSecIdx]), 'next:', JSON.stringify(lines[victimSecIdx+1]), JSON.stringify(lines[victimSecIdx+2]));
+            if (otherSecIdx >= 0) console.log('[parseIncidentSummary] other line:', JSON.stringify(lines[otherSecIdx]), 'next:', JSON.stringify(lines[otherSecIdx+1]), JSON.stringify(lines[otherSecIdx+2]));
 
             // Generic person parser for this format
             function parsePersonBlock(startIdx, endIdx, defaultRole) {
@@ -25164,13 +25252,16 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         if (nv) cur.comments = (cur.comments ? cur.comments + '; ' : '') + l + ' ' + nv;
                         j++;
                     }
+                    // Handle concatenated empty headers (e.g. "HeightWeightHair ColorEye Color")
+                    else if (/^Height\s*Weight/i.test(l)) { /* skip concatenated empty fields */ }
+                    else if (/^Employer\s*Phone/i.test(l)) { /* skip */ }
                 }
                 if (cur) persons.push(cur);
                 return persons;
             }
 
             // Parse person sections
-            const secBounds = [offenseSecIdx, suspectSecIdx, victimSecIdx, otherSecIdx, eventSecIdx, narrSecIdx, empSecIdx, lines.length]
+            const secBounds = [offenseSecIdx, suspectSecIdx, victimSecIdx, orgSecIdx, otherSecIdx, eventSecIdx, narrSecIdx, empSecIdx, lines.length]
                 .filter(x => x >= 0).sort((a, b) => a - b);
             function nextBound(after) { return secBounds.find(b => b > after) || lines.length; }
 
@@ -25188,6 +25279,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     const onv = lines[j + 1] || '';
                     if (lines[j] === 'Statute/Ordinance Number and Description') { off.description = onv; j++; }
                     else if (lines[j] === 'Attempted or Completed') { off.status = onv; j++; }
+                    else if (lines[j] === 'Charged as Domestic Violence') { if (onv === 'Yes') off.dv = true; j++; }
                     else if (lines[j] === 'Felony/Misdemeanor') { off.severity = onv; j++; }
                     else if (lines[j] === 'Degree') {
                         if (onv && off.severity) off.severity += ' (' + onv + ')';
@@ -25198,14 +25290,21 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
 
             if (suspectSecIdx >= 0) {
-                report.personsInvolved.push(...parsePersonBlock(suspectSecIdx + 1, nextBound(suspectSecIdx), 'SUSPECT'));
+                const sp = parsePersonBlock(suspectSecIdx + 1, nextBound(suspectSecIdx), 'SUSPECT');
+                console.log('[parseIncidentSummary] suspects parsed:', sp.length, sp.map(p => p.name));
+                report.personsInvolved.push(...sp);
             }
             if (victimSecIdx >= 0) {
-                report.personsInvolved.push(...parsePersonBlock(victimSecIdx + 1, nextBound(victimSecIdx), 'VICTIM'));
+                const vp = parsePersonBlock(victimSecIdx + 1, nextBound(victimSecIdx), 'VICTIM');
+                console.log('[parseIncidentSummary] victims parsed:', vp.length, vp.map(p => p.name));
+                report.personsInvolved.push(...vp);
             }
             if (otherSecIdx >= 0) {
-                report.personsInvolved.push(...parsePersonBlock(otherSecIdx + 1, nextBound(otherSecIdx), 'WITNESS'));
+                const op = parsePersonBlock(otherSecIdx + 1, nextBound(otherSecIdx), 'WITNESS');
+                console.log('[parseIncidentSummary] others parsed:', op.length, op.map(p => p.name + ' (' + p.involvement + ')'));
+                report.personsInvolved.push(...op);
             }
+            console.log('[parseIncidentSummary] TOTAL personsInvolved:', report.personsInvolved.length);
 
             // ---- Event Information ----
             if (eventSecIdx >= 0) {
@@ -26157,21 +26256,28 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
         /* ---------- RMS PDF Text Parser ---------- */
         function parseRmsReport(text, fileName) {
+            console.log('[RMS Parser] parseRmsReport called for:', fileName, '| text length:', text.length);
+            console.log('[RMS Parser] First 300 chars:', text.substring(0, 300));
             // --- Format detection ---
             if (/Defendant Information/i.test(text) && /Case Filing Information/i.test(text)) {
+                console.log('[RMS Parser] → parseProsecutionReport');
                 return parseProsecutionReport(text, fileName);
             }
             if (/Summary of\s*\n?\s*Officer Report Contents/i.test(text) || /Suspect\(s\)\s*-\s*\d+\s*Involved/i.test(text) || /Other Person\(s\)\s*-\s*\d+\s*Involved/i.test(text) || /Victim\(s\)\s*-\s*\d+\s*Involved/i.test(text) || /^\s*(Initial Incident Report|Supplemental Report)\s*$/m.test(text)) {
+                console.log('[RMS Parser] → parseIncidentSummary');
                 return parseIncidentSummary(text, fileName);
             }
             // Virginia / NIBRS-style field incident reports
             if (/INCIDENT PAGE \d+/i.test(text) && /Incident No\.\s*\n/i.test(text)) {
+                console.log('[RMS Parser] → parseFieldIncidentReport');
                 return parseFieldIncidentReport(text, fileName);
             }
             // Crime Report format (San Bruno PD style — form-based cover + narrative pages)
             if (/CRIME REPORT/i.test(text) && /CONTROLLED DOCUMENT/i.test(text)) {
+                console.log('[RMS Parser] → parseCrimeReport');
                 return parseCrimeReport(text, fileName);
             }
+            console.log('[RMS Parser] → original INFORM parser (fallback)');
 
             // --- Original INFORM RMS parser continues below ---
             const rawLines = text.split('\n').map(l => l.trim());
@@ -26597,9 +26703,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 populated.push(`Suspects (${suspectPersons.length})`);
             }
 
-            // Victims
+            // Victims (exclude "Victim's Parent/Guardian" — those go to Involved Persons)
             const victimPersons = report.personsInvolved.filter(p =>
-                /VICTIM/i.test(p.involvement || ''));
+                /VICTIM/i.test(p.involvement || '') && !/VICTIM'S|PARENT|GUARDIAN/i.test(p.involvement || ''));
             if (victimPersons.length > 0) {
                 const existing = JSON.parse(localStorage.getItem(`victims_${caseId}`) || '[]');
                 for (const p of victimPersons) {
@@ -26643,10 +26749,15 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 populated.push(`Witnesses (${witnessPersons.length})`);
             }
 
-            // Reporting Party / Informant / unmatched → Involved Persons
-            const matchedRoles = /SUSPECT|ARRESTED|DEFENDANT|VICTIM|WITNESS/i;
-            const involvedRouted = report.personsInvolved.filter(p =>
-                /REPORTING\s*PARTY|INFORMANT/i.test(p.involvement || '') || !matchedRoles.test(p.involvement || ''));
+            // Reporting Party / Informant / Parent/Guardian / unmatched → Involved Persons
+            const matchedRoles = /SUSPECT|ARRESTED|DEFENDANT|WITNESS/i;
+            const involvedRouted = report.personsInvolved.filter(p => {
+                const inv = p.involvement || '';
+                if (/REPORTING\s*PARTY|INFORMANT|PARENT|GUARDIAN/i.test(inv)) return true;
+                if (/VICTIM/i.test(inv) && !/PARENT|GUARDIAN/i.test(inv)) return false;
+                if (matchedRoles.test(inv)) return false;
+                return true;
+            });
             if (involvedRouted.length > 0) {
                 const existing = JSON.parse(localStorage.getItem(`involvedPersons_${caseId}`) || '[]');
                 for (const p of involvedRouted) {

@@ -3683,20 +3683,24 @@ ipcMain.handle('kik-warrant-import', async (event, { filePath, caseNumber }) => 
     if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
       buf = security.decryptBuffer(buf);
     }
-    const data = await kkParser.parseZip(buf);
 
-    // Extract content (media) files to disk
-    if (caseNumber && data.contentFiles && Object.keys(data.contentFiles).length > 0) {
-      const mediaDir = path.join(casesDir, caseNumber, 'Evidence', 'KikWarrant', 'content');
-      const extracted = kkParser.extractContentFiles(buf, mediaDir, security);
-      console.log(`KIK warrant: extracted ${extracted.extracted} media files to ${mediaDir}`);
+    // Single-pass: parse + extract content to disk simultaneously
+    const extractDir = caseNumber
+      ? path.join(casesDir, caseNumber, 'Evidence', 'KikWarrant', 'content')
+      : null;
+    const data = await kkParser.parseZip(buf, {
+      extractDir,
+      security: security && security.isUnlocked() ? security : null
+    });
 
-      // Replace contentFiles with disk paths
-      for (const [fileName, info] of Object.entries(data.contentFiles)) {
-        if (extracted.files[fileName]) {
-          info.diskPath = extracted.files[fileName];
-        }
-      }
+    // Free buffer immediately
+    buf = null;
+
+    const extractedCount = extractDir
+      ? Object.values(data.contentFiles).filter(f => f.diskPath).length
+      : 0;
+    if (extractedCount > 0) {
+      console.log(`KIK warrant: extracted ${extractedCount} media files to ${extractDir}`);
     }
 
     return { success: true, data };

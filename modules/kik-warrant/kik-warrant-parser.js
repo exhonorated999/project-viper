@@ -83,12 +83,15 @@ class KikWarrantParser {
      * Parse a KIK warrant ZIP file.
      * Handles nested ZIP-of-ZIP structure.
      * @param {Buffer} zipBuffer
+     * @param {Object} opts — optional { extractDir, security } to extract
+     *   content files to disk in the same pass (avoids re-reading ZIP)
      * @returns {Object} parsed data
      */
-    async parseZip(zipBuffer) {
+    async parseZip(zipBuffer, opts = {}) {
+        const fs = require('fs');
         const zip = new AdmZip(zipBuffer);
         let entries = zip.getEntries();
-        let innerZipEntries = null; // for fallback content search
+        let contentSourceEntries = null; // entries that contain content/ files
 
         // Check if we need to unwrap an inner ZIP
         let logsPrefix = this._findLogsPrefix(entries);
@@ -100,18 +103,28 @@ class KikWarrantParser {
                 const innerBuf = innerZipEntry.getData();
                 const innerZip = new AdmZip(innerBuf);
                 entries = innerZip.getEntries();
+                contentSourceEntries = entries; // content is in inner ZIP
                 logsPrefix = this._findLogsPrefix(entries);
             }
         } else {
-            // Logs found directly — but content/ may only be in inner ZIP
-            // Save inner ZIP entries for fallback content search
-            const innerZipEntry = this._findInnerZip(zip.getEntries());
-            if (innerZipEntry) {
-                try {
-                    const innerBuf = innerZipEntry.getData();
-                    const innerZip = new AdmZip(innerBuf);
-                    innerZipEntries = innerZip.getEntries();
-                } catch (e) { /* ignore */ }
+            // Logs found directly — check if content/ exists at sibling path
+            const testContentPrefix = logsPrefix.replace(/logs\/$/, 'content/');
+            const hasDirectContent = entries.some(e =>
+                !e.isDirectory && !e.entryName.startsWith('__MACOSX') &&
+                e.entryName.startsWith(testContentPrefix));
+
+            if (hasDirectContent) {
+                contentSourceEntries = entries;
+            } else {
+                // Content only in inner ZIP — open it now (single read)
+                const innerZipEntry = this._findInnerZip(zip.getEntries());
+                if (innerZipEntry) {
+                    try {
+                        const innerBuf = innerZipEntry.getData();
+                        const innerZip = new AdmZip(innerBuf);
+                        contentSourceEntries = innerZip.getEntries();
+                    } catch (e) { /* ignore */ }
+                }
             }
         }
 
@@ -120,12 +133,11 @@ class KikWarrantParser {
         }
 
         // Extract account username from path
-        // Pattern: {username}/logs/ or {something}/{username}/logs/
         const pathParts = logsPrefix.replace(/\/$/, '').split('/');
         const logsIdx = pathParts.lastIndexOf('logs');
         const accountUsername = logsIdx > 0 ? pathParts[logsIdx - 1] : 'unknown';
 
-        // Extract case number from ZIP entry names or username pattern
+        // Extract case number from ZIP entry names
         let caseNumber = null;
         for (const entry of entries) {
             const match = entry.entryName.match(/_case(\d+)/i);
@@ -144,78 +156,55 @@ class KikWarrantParser {
             }
         }
 
-        // Find content/ directory (media files) — sibling to logs/
-        // Path: {something}/{username}/content/
-        const contentPrefix = logsPrefix.replace(/logs\/$/, 'content/');
+        // Find content/ directory (media files)
+        // Determine the correct content prefix from the content source entries
         const contentFiles = {};
-        for (const entry of entries) {
-            if (entry.isDirectory) continue;
-            if (entry.entryName.startsWith('__MACOSX')) continue;
-            if (entry.entryName.startsWith(contentPrefix)) {
+        if (contentSourceEntries) {
+            const csLogsPrefix = this._findLogsPrefix(contentSourceEntries) || logsPrefix;
+            const contentPrefix = csLogsPrefix.replace(/logs\/$/, 'content/');
+
+            // Set up extraction directory if requested
+            let extractDir = null;
+            if (opts.extractDir) {
+                extractDir = opts.extractDir;
+                if (!fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
+            }
+
+            for (const entry of contentSourceEntries) {
+                if (entry.isDirectory) continue;
+                if (entry.entryName.startsWith('__MACOSX')) continue;
+                if (!entry.entryName.startsWith(contentPrefix)) continue;
+
                 const fileName = entry.entryName.substring(contentPrefix.length);
-                if (fileName && !fileName.includes('/')) {
-                    // Detect mime type from extension first, then magic bytes
-                    let mimeType = 'application/octet-stream';
-                    const ext = path.extname(fileName).toLowerCase();
-                    if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
-                    else if (ext === '.png') mimeType = 'image/png';
-                    else if (ext === '.gif') mimeType = 'image/gif';
-                    else if (ext === '.mp4') mimeType = 'video/mp4';
-                    else {
-                        // No extension — peek magic bytes
-                        try {
-                            const header = entry.getData().slice(0, 8);
-                            if (header[0] === 0xFF && header[1] === 0xD8) mimeType = 'image/jpeg';
-                            else if (header[0] === 0x89 && header[1] === 0x50) mimeType = 'image/png';
-                            else if (header.length > 7 && header[4] === 0x66 && header[5] === 0x74 && header[6] === 0x79 && header[7] === 0x70) mimeType = 'video/mp4';
-                        } catch (e) { /* keep default */ }
-                    }
+                if (!fileName || fileName.includes('/')) continue;
 
-                    contentFiles[fileName] = {
-                        size: entry.header.size,
-                        mimeType
-                    };
-                }
-            }
-        }
+                // Detect mime type
+                let mimeType = this._detectMimeType(fileName, entry);
 
-        // Fallback: if no content found and inner ZIP exists, search there
-        if (Object.keys(contentFiles).length === 0 && innerZipEntries) {
-            const innerLogsPrefix = this._findLogsPrefix(innerZipEntries);
-            if (innerLogsPrefix) {
-                const innerContentPrefix = innerLogsPrefix.replace(/logs\/$/, 'content/');
-                for (const entry of innerZipEntries) {
-                    if (entry.isDirectory) continue;
-                    if (entry.entryName.startsWith('__MACOSX')) continue;
-                    if (entry.entryName.startsWith(innerContentPrefix)) {
-                        const fileName = entry.entryName.substring(innerContentPrefix.length);
-                        if (fileName && !fileName.includes('/')) {
-                            let mimeType = 'application/octet-stream';
-                            const ext = path.extname(fileName).toLowerCase();
-                            if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
-                            else if (ext === '.png') mimeType = 'image/png';
-                            else if (ext === '.gif') mimeType = 'image/gif';
-                            else if (ext === '.mp4') mimeType = 'video/mp4';
-                            else {
-                                try {
-                                    const header = entry.getData().slice(0, 8);
-                                    if (header[0] === 0xFF && header[1] === 0xD8) mimeType = 'image/jpeg';
-                                    else if (header[0] === 0x89 && header[1] === 0x50) mimeType = 'image/png';
-                                    else if (header.length > 7 && header[4] === 0x66 && header[5] === 0x74 && header[6] === 0x79 && header[7] === 0x70) mimeType = 'video/mp4';
-                                } catch (e) { /* keep default */ }
-                            }
-                            contentFiles[fileName] = {
-                                size: entry.header.size,
-                                mimeType,
-                                _fromInnerZip: true
-                            };
+                const info = { size: entry.header.size, mimeType };
+
+                // Extract to disk in the same pass if extractDir provided
+                if (extractDir) {
+                    try {
+                        let buf = entry.getData();
+                        const destPath = path.join(extractDir, fileName);
+                        if (opts.security && opts.security.isUnlocked()) {
+                            fs.writeFileSync(destPath, opts.security.encryptBuffer(buf));
+                        } else {
+                            fs.writeFileSync(destPath, buf);
                         }
+                        info.diskPath = destPath;
+                        buf = null; // help GC
+                    } catch (e) {
+                        console.error(`Failed to extract content file ${fileName}:`, e.message);
                     }
                 }
+
+                contentFiles[fileName] = info;
             }
         }
 
-        // Parse each file
+        // Parse each log file
         const readText = (name) => {
             const entry = fileMap[name];
             if (!entry) return '';
@@ -225,7 +214,7 @@ class KikWarrantParser {
         const result = {
             accountUsername,
             caseNumber,
-            contentFiles,  // { filename: { entryName, size, mimeType } }
+            contentFiles,
             binds: this._parseBind(readText('bind.txt')),
             friends: this._parseFriendAdded(readText('friend_added.txt')),
             blockedUsers: this._parseBlockUser(readText('block_user.txt')),
@@ -239,90 +228,38 @@ class KikWarrantParser {
             groupReceiveMsgPlatform: this._parseGroupReceiveMsgPlatform(readText('group_receive_msg_platform.txt')),
         };
 
-        // Compute summary stats
         result.stats = this._computeStats(result);
-
         return result;
     }
 
     /**
+     * Detect MIME type from filename extension or magic bytes.
+     */
+    _detectMimeType(fileName, entry) {
+        const ext = path.extname(fileName).toLowerCase();
+        if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+        if (ext === '.png') return 'image/png';
+        if (ext === '.gif') return 'image/gif';
+        if (ext === '.mp4') return 'video/mp4';
+        // No extension — peek magic bytes
+        try {
+            const header = entry.getData().slice(0, 8);
+            if (header[0] === 0xFF && header[1] === 0xD8) return 'image/jpeg';
+            if (header[0] === 0x89 && header[1] === 0x50) return 'image/png';
+            if (header.length > 7 && header[4] === 0x66 && header[5] === 0x74 &&
+                header[6] === 0x79 && header[7] === 0x70) return 'video/mp4';
+        } catch (e) { /* keep default */ }
+        return 'application/octet-stream';
+    }
+
+    /**
      * Extract content (media) files from KIK ZIP to a destination directory.
-     * Call after parseZip() to save media to disk.
-     * @param {Buffer} zipBuffer
-     * @param {string} destDir — directory to save files into
-     * @param {Object} security — optional security module for encryption
-     * @returns {Object} { extracted: number, files: { filename: diskPath } }
+     * DEPRECATED: Use parseZip(buf, { extractDir, security }) instead.
+     * Kept for backward compatibility only.
      */
     extractContentFiles(zipBuffer, destDir, security) {
-        const zip = new AdmZip(zipBuffer);
-        let entries = zip.getEntries();
-
-        let logsPrefix = this._findLogsPrefix(entries);
-        let contentEntries = entries;
-
-        if (!logsPrefix) {
-            const innerZipEntry = this._findInnerZip(entries);
-            if (innerZipEntry) {
-                const innerBuf = innerZipEntry.getData();
-                const innerZip = new AdmZip(innerBuf);
-                contentEntries = innerZip.getEntries();
-                logsPrefix = this._findLogsPrefix(contentEntries);
-            }
-        } else {
-            // Logs found directly — check if content/ exists at sibling path
-            const contentPrefix = logsPrefix.replace(/logs\/$/, 'content/');
-            const hasContent = entries.some(e => !e.isDirectory && !e.entryName.startsWith('__MACOSX') && e.entryName.startsWith(contentPrefix));
-            if (!hasContent) {
-                // Content only in inner ZIP
-                const innerZipEntry = this._findInnerZip(zip.getEntries());
-                if (innerZipEntry) {
-                    try {
-                        const innerBuf = innerZipEntry.getData();
-                        const innerZip = new AdmZip(innerBuf);
-                        contentEntries = innerZip.getEntries();
-                        logsPrefix = this._findLogsPrefix(contentEntries) || logsPrefix;
-                    } catch (e) { /* fallback to original entries */ }
-                }
-            }
-        }
-
-        if (!logsPrefix) return { extracted: 0, files: {} };
-
-        const contentPrefix = logsPrefix.replace(/logs\/$/, 'content/');
-        const fs = require('fs');
-        const pathMod = require('path');
-
-        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-
-        const fileMap = {};
-        let extracted = 0;
-
-        for (const entry of contentEntries) {
-            if (entry.isDirectory) continue;
-            if (entry.entryName.startsWith('__MACOSX')) continue;
-            if (!entry.entryName.startsWith(contentPrefix)) continue;
-
-            const fileName = entry.entryName.substring(contentPrefix.length);
-            if (!fileName || fileName.includes('/')) continue;
-
-            try {
-                let buf = entry.getData();
-                const destPath = pathMod.join(destDir, fileName);
-
-                if (security && security.isUnlocked()) {
-                    fs.writeFileSync(destPath, security.encryptBuffer(buf));
-                } else {
-                    fs.writeFileSync(destPath, buf);
-                }
-
-                fileMap[fileName] = destPath;
-                extracted++;
-            } catch (e) {
-                console.error(`Failed to extract ${fileName}:`, e.message);
-            }
-        }
-
-        return { extracted, files: fileMap };
+        console.warn('KikWarrantParser.extractContentFiles is deprecated — use parseZip opts.extractDir');
+        return { extracted: 0, files: {} };
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────

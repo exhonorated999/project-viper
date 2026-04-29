@@ -869,7 +869,17 @@
                                     <input type="text" id="investigationsSearch" oninput="filterInvestigations()" placeholder="Search cases..." class="pl-8 pr-3 py-1.5 w-44 bg-viper-card/50 border border-gray-600 rounded-lg text-xs text-white placeholder-gray-500 focus:border-viper-cyan outline-none">
                                 </div>
                                 <div class="relative">
-                                    <button onclick="toggleInvestigationsFilter()" class="p-2 rounded-lg hover:bg-viper-card/50 transition-colors">
+                                    <button onclick="openInvColumnPicker()" class="p-2 rounded-lg hover:bg-viper-card/50 transition-colors" title="Customize columns">
+                                        <svg class="w-5 h-5 text-gray-400 hover:text-viper-cyan transition" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h18M3 12h18M3 20h18"/>
+                                            <circle cx="8" cy="4" r="1.5" fill="currentColor"/>
+                                            <circle cx="16" cy="12" r="1.5" fill="currentColor"/>
+                                            <circle cx="6" cy="20" r="1.5" fill="currentColor"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div class="relative">
+                                    <button onclick="toggleInvestigationsFilter()" class="p-2 rounded-lg hover:bg-viper-card/50 transition-colors" title="Filter">
                                         <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
                                         </svg>
@@ -888,18 +898,11 @@
                         <div class="overflow-y-auto" style="max-height: 320px;">
                             <table class="w-full">
                                 <thead class="bg-gradient-to-r from-viper-cyan/20 to-viper-purple/20 border-b border-viper-cyan/30 sticky top-0">
-                                    <tr class="text-left text-xs text-viper-cyan">
-                                        <th class="px-4 py-3 font-medium cursor-pointer hover:text-white transition select-none" onclick="setInvestigationsSort('caseNumber')"><span id="sortHead_caseNumber">Case ID ↕</span></th>
-                                        <th class="px-4 py-3 font-medium cursor-pointer hover:text-white transition select-none" onclick="setInvestigationsSort('synopsis')"><span id="sortHead_synopsis">Category ↕</span></th>
-                                        <th class="px-4 py-3 font-medium cursor-pointer hover:text-white transition select-none" onclick="setInvestigationsSort('createdBy')"><span id="sortHead_createdBy">Investigator ↕</span></th>
-                                        <th class="px-4 py-3 font-medium" id="priorityColHead" style="display:none;"><span class="cursor-pointer hover:text-white transition select-none" onclick="setInvestigationsSort('priority')"><span id="sortHead_priority">Priority ↕</span></span></th>
-                                        <th class="px-4 py-3 font-medium">Status</th>
-                                        <th class="px-4 py-3 font-medium">Actions</th>
-                                    </tr>
+                                    <tr id="investigationsTableHead" class="text-left text-xs text-viper-cyan"></tr>
                                 </thead>
                                 <tbody id="investigationsTableBody" class="text-sm">
                                     <tr>
-                                        <td colspan="5" class="py-8 text-center text-gray-400">
+                                        <td class="py-8 text-center text-gray-400">
                                             No active investigations. Create a case to get started.
                                         </td>
                                     </tr>
@@ -3470,20 +3473,133 @@
             } else {
                 investigationsSort = { key, dir: 'asc' };
             }
-            // Update header indicators
-            ['caseNumber', 'synopsis', 'createdBy', 'priority'].forEach(k => {
-                const el = document.getElementById('sortHead_' + k);
-                if (!el) return;
-                const baseLabel = { caseNumber: 'Case ID', synopsis: 'Category', createdBy: 'Investigator', priority: 'Priority' }[k];
-                if (k === investigationsSort.key) {
-                    el.textContent = baseLabel + (investigationsSort.dir === 'asc' ? ' ↑' : ' ↓');
-                    el.classList.add('text-white');
-                } else {
-                    el.textContent = baseLabel + ' ↕';
-                    el.classList.remove('text-white');
-                }
+            // Re-render with current filter — header rebuilds itself with arrow indicators.
+            filterInvestigations();
+        }
+
+        // ═══ Active Investigations — column customization ═══
+        // Columns reuse ALL_CASES_COLUMNS but show different default labels (e.g. "Case ID" / "Category"
+        // instead of "Case Number" / "Synopsis") to match the tighter dashboard styling.
+        const INV_COL_LABELS = {
+            caseNumber: 'Case ID',
+            synopsis:   'Category',
+            createdBy:  'Investigator',
+            priority:   'Priority',
+            status:     'Status',
+            created:    'Created',
+            primaryOffense: 'Primary Offense',
+            offenseType: 'Offense Type',
+            dateAssigned: 'Date Assigned',
+            dateClosed:   'Date Closed',
+            suspects:   'Suspect(s)',
+            victims:    'Victim(s)',
+            flags:      'Flags',
+        };
+        const INV_DEFAULT_COLS = ['caseNumber', 'synopsis', 'createdBy', 'priority', 'status'];
+        function getInvVisibleCols() {
+            try {
+                const saved = JSON.parse(localStorage.getItem('viperInvestigationsCols') || 'null');
+                if (Array.isArray(saved) && saved.length > 0) return saved;
+            } catch {}
+            return [...INV_DEFAULT_COLS];
+        }
+        function setInvVisibleCols(cols) {
+            // Always pin the case number column on the left so rows have an identifier.
+            const next = cols.includes('caseNumber') ? cols : ['caseNumber', ...cols];
+            localStorage.setItem('viperInvestigationsCols', JSON.stringify(next));
+        }
+
+        function openInvColumnPicker() {
+            const existing = document.getElementById('invColumnPickerModal');
+            if (existing) existing.remove();
+            const visible = getInvVisibleCols();
+            // Build ordered list: visible (in their saved order) then hidden (in canonical order).
+            const ordered = [];
+            visible.forEach(k => {
+                const c = ALL_CASES_COLUMNS.find(x => x.key === k);
+                if (c) ordered.push({ ...c, visible: true });
             });
-            // Re-render with current filter
+            ALL_CASES_COLUMNS.forEach(c => {
+                if (!visible.includes(c.key)) ordered.push({ ...c, visible: false });
+            });
+
+            const modal = document.createElement('div');
+            modal.id = 'invColumnPickerModal';
+            modal.className = 'fixed inset-0 bg-black/60 flex items-center justify-center z-50';
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+            modal.innerHTML = `
+                <div class="bg-viper-card border border-gray-700 rounded-xl w-full max-w-md mx-4 overflow-hidden shadow-2xl">
+                    <div class="border-b border-gray-700 px-6 py-4 flex items-center justify-between">
+                        <h3 class="text-lg font-bold text-white">Active Investigations Columns</h3>
+                        <button onclick="document.getElementById('invColumnPickerModal').remove()" class="text-gray-400 hover:text-white">✕</button>
+                    </div>
+                    <p class="px-6 pt-3 text-xs text-gray-500">Drag to reorder. Toggle to show/hide columns. Case ID is always shown.</p>
+                    <div id="invColList" class="px-6 py-4 space-y-2 max-h-[60vh] overflow-y-auto">
+                        ${ordered.map(c => `
+                            <div class="inv-col-item flex items-center gap-3 p-3 rounded-lg border border-gray-700 bg-viper-dark/50 ${c.key === 'caseNumber' ? '' : 'cursor-move'}" draggable="${c.key === 'caseNumber' ? 'false' : 'true'}" data-key="${c.key}">
+                                <svg class="w-4 h-4 text-gray-500 ${c.key === 'caseNumber' ? 'opacity-30' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+                                <input type="checkbox" class="inv-col-cb w-4 h-4 accent-viper-cyan" ${c.visible ? 'checked' : ''} ${c.key === 'caseNumber' ? 'disabled' : ''}/>
+                                <span class="text-sm text-white flex-1">${INV_COL_LABELS[c.key] || c.label}</span>
+                                ${c.key === 'caseNumber' ? '<span class="text-[10px] text-gray-500 uppercase">Locked</span>' : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                    <div class="border-t border-gray-700 px-6 py-4 flex items-center justify-between gap-3">
+                        <button onclick="resetInvCols()" class="text-xs text-gray-400 hover:text-white transition">Reset to defaults</button>
+                        <div class="flex items-center gap-3">
+                            <button onclick="document.getElementById('invColumnPickerModal').remove()" class="px-4 py-2 text-sm text-gray-300 hover:text-white transition">Cancel</button>
+                            <button onclick="applyInvCols()" class="px-4 py-2 rounded-lg bg-viper-cyan/20 border border-viper-cyan/40 text-viper-cyan hover:bg-viper-cyan/30 text-sm font-medium transition">Apply</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+
+            // Drag-and-drop reordering (skip caseNumber row)
+            const list = document.getElementById('invColList');
+            let dragItem = null;
+            list.querySelectorAll('.inv-col-item').forEach(item => {
+                if (item.dataset.key === 'caseNumber') return;
+                item.addEventListener('dragstart', (e) => {
+                    dragItem = item;
+                    item.classList.add('opacity-50');
+                    e.dataTransfer.effectAllowed = 'move';
+                });
+                item.addEventListener('dragend', () => {
+                    if (dragItem) dragItem.classList.remove('opacity-50');
+                    dragItem = null;
+                });
+                item.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    list.querySelectorAll('.inv-col-item').forEach(i => i.classList.remove('border-t-2', 'border-viper-cyan'));
+                    item.classList.add('border-t-2', 'border-viper-cyan');
+                });
+                item.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    if (dragItem && dragItem !== item) {
+                        list.insertBefore(dragItem, item);
+                    }
+                    list.querySelectorAll('.inv-col-item').forEach(i => i.classList.remove('border-t-2', 'border-viper-cyan'));
+                });
+            });
+        }
+        function applyInvCols() {
+            const items = document.querySelectorAll('#invColList .inv-col-item');
+            const cols = [];
+            items.forEach(item => {
+                const key = item.dataset.key;
+                const cb = item.querySelector('.inv-col-cb');
+                if (cb && cb.checked) cols.push(key);
+            });
+            if (!cols.includes('caseNumber')) cols.unshift('caseNumber');
+            setInvVisibleCols(cols);
+            document.getElementById('invColumnPickerModal')?.remove();
+            filterInvestigations();
+        }
+        function resetInvCols() {
+            localStorage.removeItem('viperInvestigationsCols');
+            document.getElementById('invColumnPickerModal')?.remove();
             filterInvestigations();
         }
 
@@ -3570,15 +3686,33 @@
 
         function updateActiveInvestigationsTable(filteredCases, status) {
             const tbody = document.getElementById('investigationsTableBody');
+            const thead = document.getElementById('investigationsTableHead');
             if (!tbody) return;
             const priorityEnabled = localStorage.getItem('viperCasePriorityEnabled') === 'true';
 
-            // Show/hide priority column header
-            const prHead = document.getElementById('priorityColHead');
-            if (prHead) prHead.style.display = priorityEnabled ? '' : 'none';
-            
-            const colSpan = priorityEnabled ? 6 : 5;
-            
+            // Resolve visible columns. Drop "priority" if Case Priority feature is disabled.
+            let visCols = getInvVisibleCols();
+            if (!priorityEnabled) visCols = visCols.filter(k => k !== 'priority');
+            // Render header from visible columns + a fixed Actions column.
+            if (thead) {
+                const sortable = new Set(['caseNumber', 'synopsis', 'createdBy', 'priority']);
+                thead.innerHTML = visCols.map(key => {
+                    const col = ALL_CASES_COLUMNS.find(c => c.key === key);
+                    if (!col) return '';
+                    const label = INV_COL_LABELS[key] || col.label;
+                    const arrow = (investigationsSort.key === key)
+                        ? (investigationsSort.dir === 'asc' ? ' ↑' : ' ↓')
+                        : (sortable.has(key) ? ' ↕' : '');
+                    if (sortable.has(key)) {
+                        return '<th class="px-4 py-3 font-medium cursor-pointer hover:text-white transition select-none" onclick="setInvestigationsSort(\'' + key + '\')">'
+                            + '<span id="sortHead_' + key + '">' + label + arrow + '</span></th>';
+                    }
+                    return '<th class="px-4 py-3 font-medium">' + label + '</th>';
+                }).join('') + '<th class="px-4 py-3 font-medium">Actions</th>';
+            }
+
+            const colSpan = visCols.length + 1;
+
             if (filteredCases.length === 0) {
                 const builtinLabels = { active: 'active investigations', closed: 'closed cases', 'closed-arrest': 'cases closed with arrest', transferred: 'transferred cases', all: 'cases' };
                 tbody.innerHTML = `
@@ -3588,33 +3722,61 @@
                         </td>
                     </tr>
                 `;
-            } else {
-                tbody.innerHTML = filteredCases.map(caseItem => `
-                    <tr class="border-b border-gray-800 hover:bg-viper-card/30 transition-colors cursor-pointer" onclick="openCaseDetail(${caseItem.id})">
-                        <td class="py-4 px-4">
-                            <div class="flex items-center gap-2">
-                                ${priorityEnabled && caseItem.priority ? `<span class="w-2.5 h-2.5 rounded-full flex-shrink-0 ${({1:'bg-red-500',2:'bg-orange-500',3:'bg-yellow-500',4:'bg-green-500'})[caseItem.priority] || ''}" title="${({1:'Critical',2:'High',3:'Medium',4:'Low'})[caseItem.priority] || ''}"></span>` : ''}
-                                <span class="font-medium text-viper-cyan">${caseItem.caseNumber}</span>
-                            </div>
-                        </td>
-                        <td class="py-4 px-4">
-                            <div class="text-sm text-gray-300">${caseItem.synopsis || 'No synopsis'}</div>
-                        </td>
-                        <td class="py-4 px-4">
-                            <div class="text-sm text-gray-300">${caseItem.createdBy || 'Unknown'}</div>
-                        </td>
-                        ${priorityEnabled ? `<td class="py-4 px-4">${getCasePriorityBadge(caseItem.priority)}</td>` : ''}
-                        <td class="py-4 px-4">
-                            ${getStatusBadge(caseItem.status)}
-                        </td>
-                        <td class="py-4 px-4">
-                            <button onclick="event.stopPropagation(); openCaseDetail(${caseItem.id})" class="text-viper-cyan hover:text-viper-cyan/70 text-sm">
-                                View →
-                            </button>
-                        </td>
-                    </tr>
-                `).join('');
+                return;
             }
+
+            // Build row HTML driven by visible columns.
+            const priorityDotMap = {1:'bg-red-500',2:'bg-orange-500',3:'bg-yellow-500',4:'bg-green-500'};
+            const priorityNameMap = {1:'Critical',2:'High',3:'Medium',4:'Low'};
+
+            tbody.innerHTML = filteredCases.map(caseItem => {
+                const cells = visCols.map(key => {
+                    switch (key) {
+                        case 'caseNumber':
+                            return '<td class="py-4 px-4">'
+                                + '<div class="flex items-center gap-2">'
+                                + (priorityEnabled && caseItem.priority
+                                    ? '<span class="w-2.5 h-2.5 rounded-full flex-shrink-0 ' + (priorityDotMap[caseItem.priority] || '') + '" title="' + (priorityNameMap[caseItem.priority] || '') + '"></span>'
+                                    : '')
+                                + '<span class="font-medium text-viper-cyan">' + (caseItem.caseNumber || '') + '</span>'
+                                + '</div></td>';
+                        case 'synopsis':
+                            return '<td class="py-4 px-4"><div class="text-sm text-gray-300">' + (caseItem.synopsis || 'No synopsis') + '</div></td>';
+                        case 'createdBy':
+                            return '<td class="py-4 px-4"><div class="text-sm text-gray-300">' + (caseItem.createdBy || 'Unknown') + '</div></td>';
+                        case 'priority':
+                            return '<td class="py-4 px-4">' + getCasePriorityBadge(caseItem.priority) + '</td>';
+                        case 'status':
+                            return '<td class="py-4 px-4">' + getStatusBadge(caseItem.status) + '</td>';
+                        case 'created':
+                            return '<td class="py-4 px-4 text-sm text-gray-400 whitespace-nowrap">' + (caseItem.createdAt ? new Date(caseItem.createdAt).toLocaleDateString() : '—') + '</td>';
+                        case 'primaryOffense':
+                            return '<td class="py-4 px-4 text-sm text-gray-300">' + (caseItem.primaryOffense || '<span class="text-gray-600">—</span>') + '</td>';
+                        case 'offenseType':
+                            return '<td class="py-4 px-4 text-sm text-gray-300 whitespace-nowrap">' + (caseItem.offenseType || '<span class="text-gray-600">—</span>') + '</td>';
+                        case 'dateAssigned':
+                            return '<td class="py-4 px-4 text-sm text-gray-400 whitespace-nowrap">' + (caseItem.dateAssigned ? new Date(caseItem.dateAssigned + 'T00:00').toLocaleDateString() : '<span class="text-gray-600">—</span>') + '</td>';
+                        case 'dateClosed':
+                            return '<td class="py-4 px-4 text-sm text-gray-400 whitespace-nowrap">' + (caseItem.dateClosed ? new Date(caseItem.dateClosed + 'T00:00').toLocaleDateString() : '<span class="text-gray-600">—</span>') + '</td>';
+                        case 'suspects': {
+                            const ex = getCaseExtras(caseItem);
+                            return '<td class="py-4 px-4 text-sm text-gray-300 max-w-[200px] truncate">' + (ex.suspectNames || '<span class="text-gray-600">—</span>') + '</td>';
+                        }
+                        case 'victims': {
+                            const ex = getCaseExtras(caseItem);
+                            return '<td class="py-4 px-4 text-sm text-gray-300 max-w-[200px] truncate">' + (ex.victimNames || '<span class="text-gray-600">—</span>') + '</td>';
+                        }
+                        case 'flags':
+                            return '<td class="py-4 px-4 text-sm whitespace-nowrap">' + renderFlagsCell(caseItem) + '</td>';
+                        default:
+                            return '<td class="py-4 px-4 text-gray-600">—</td>';
+                    }
+                }).join('');
+                return '<tr class="border-b border-gray-800 hover:bg-viper-card/30 transition-colors cursor-pointer" onclick="openCaseDetail(' + caseItem.id + ')">'
+                    + cells
+                    + '<td class="py-4 px-4"><button onclick="event.stopPropagation(); openCaseDetail(' + caseItem.id + ')" class="text-viper-cyan hover:text-viper-cyan/70 text-sm">View →</button></td>'
+                    + '</tr>';
+            }).join('');
         }
         
         function updateWarrantAlerts() {
@@ -4278,6 +4440,7 @@
             { key: 'synopsis',       label: 'Synopsis',        default: true,  sortType: 'text' },
             { key: 'status',         label: 'Status',          default: true,  sortType: 'text' },
             { key: 'created',        label: 'Created',         default: true,  sortType: 'date' },
+            { key: 'createdBy',      label: 'Investigator',    default: false, sortType: 'text' },
             { key: 'priority',       label: 'Priority',        default: false, sortType: 'number' },
             { key: 'suspects',       label: 'Suspect(s)',      default: false, sortType: 'text' },
             { key: 'victims',        label: 'Victim(s)',       default: false, sortType: 'text' },
@@ -4531,6 +4694,7 @@
                 case 'synopsis':       return c.synopsis || '';
                 case 'status':         return c.status || '';
                 case 'created':        return c.createdAt || '';
+                case 'createdBy':      return c.createdBy || '';
                 case 'priority':       return c.priority || 0;
                 case 'suspects':       return extras.suspectNames || '';
                 case 'victims':        return extras.victimNames || '';
@@ -4610,11 +4774,11 @@
                         </div>
 
                         <!-- Stats (customizable) -->
-                        <div class="flex items-center justify-between mb-2 px-1">
-                            <span class="text-[10px] uppercase tracking-wider text-gray-600">Quick Stats</span>
-                            <button onclick="openACStatsPicker()" class="text-[11px] text-gray-500 hover:text-viper-cyan transition flex items-center gap-1" title="Customize stat boxes">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
-                                Customize
+                        <div class="flex items-center justify-between mb-3 px-1">
+                            <span class="text-[10px] uppercase tracking-wider text-gray-500">Quick Stats</span>
+                            <button onclick="openACStatsPicker()" class="px-3 py-1.5 rounded-lg bg-viper-cyan/15 border border-viper-cyan/40 text-viper-cyan hover:bg-viper-cyan/25 hover:border-viper-cyan transition flex items-center gap-1.5 text-xs font-medium" title="Customize stat boxes shown above All Cases">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                                Customize Stats
                             </button>
                         </div>
                         <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
@@ -4788,6 +4952,8 @@
                         }
                         case 'created':
                             return '<td class="px-5 py-4 text-sm text-gray-400 whitespace-nowrap">' + (c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '') + '</td>';
+                        case 'createdBy':
+                            return '<td class="px-5 py-4 text-sm text-white max-w-[160px] truncate">' + (c.createdBy || '<span class="text-gray-600">—</span>') + '</td>';
                         case 'priority': {
                             if (!c.priority) return '<td class="px-5 py-4 text-sm text-gray-600">—</td>';
                             return '<td class="px-5 py-4 text-sm whitespace-nowrap"><span class="inline-block w-2.5 h-2.5 rounded-full ' + (priorityColors[c.priority]||'') + ' mr-1.5"></span>' + (priorityLabels[c.priority]||'') + '</td>';

@@ -33,6 +33,9 @@ let lastTloBounds = null;
 let accurintBrowserView = null;
 let accurintViewVisible = false;
 let lastAccurintBounds = null;
+let vigilantBrowserView = null;
+let vigilantViewVisible = false;
+let lastVigilantBounds = null;
 
 // Icon path: use unpacked asar path in production, normal path in dev
 const iconPath = app.isPackaged
@@ -398,6 +401,9 @@ app.whenReady().then(async () => {
       if (accurintViewVisible && lastAccurintBounds) {
         accurintBrowserView.setBounds(lastAccurintBounds);
       }
+      if (vigilantViewVisible && lastVigilantBounds) {
+        vigilantBrowserView.setBounds(lastVigilantBounds);
+      }
     });
 
     // Create persistent BrowserView for TLO (TransUnion) — people search / skip tracing
@@ -506,11 +512,63 @@ app.whenReady().then(async () => {
       }
     });
 
+    // Create persistent BrowserView for Vigilant Solutions / Motorola VehicleManager LPR
+    vigilantBrowserView = new BrowserView({
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        partition: 'persist:vigilant',
+      },
+    });
+    // Don't add to window yet — will be attached on first vigilant-set-visible(true)
+    vigilantBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    vigilantBrowserView.setAutoResize({ width: false, height: false });
+
+    vigilantBrowserView.webContents.on('did-finish-load', () => {
+      if (!vigilantViewVisible) mainWindow.webContents.focus();
+      vigilantBrowserView.webContents.insertCSS(`
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0d1117; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+      `).catch(() => {});
+
+      const url = vigilantBrowserView.webContents.getURL();
+      // VehicleManager login page — autofill credentials
+      if (url.includes('motorolasolutions.com') && (url.includes('Login') || url.includes('login') || url.includes('VM8_Auth'))) {
+        mainWindow.webContents.executeJavaScript(
+          `JSON.stringify({ username: localStorage.getItem('vigilantUsername') || '', password: localStorage.getItem('vigilantPassword') || '' })`
+        ).then(json => {
+          const creds = JSON.parse(json);
+          if (creds.username || creds.password) {
+            vigilantBrowserView.webContents.executeJavaScript(`
+              (function() {
+                function fill() {
+                  const userInput = document.querySelector('input[name*="ser" i], input[id*="ser" i], input[name="UserName"], input[id*="UserName" i], input[name="username"], input[type="text"]');
+                  const passInput = document.querySelector('input[name*="assword" i], input[id*="assword" i], input[type="password"]');
+                  function setVal(el, val) {
+                    if (!el || !val) return;
+                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                    nativeSetter.call(el, val);
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                  }
+                  setVal(userInput, ${JSON.stringify(creds.username)});
+                  setVal(passInput, ${JSON.stringify(creds.password)});
+                }
+                setTimeout(fill, 500);
+                setTimeout(fill, 1500);
+              })();
+            `).catch(() => {});
+          }
+        }).catch(() => {});
+      }
+    });
+
     // On page navigation, detach resource-hub BrowserViews so they can't steal clicks
     // on the next page. Media player is handled by its own show/hide via reportBounds().
     mainWindow.webContents.on('did-start-navigation', (_event, _url, isInPlace) => {
       if (isInPlace) return; // ignore hash/pushState navigations
-      const pageViews = [flockBrowserView, tloBrowserView, accurintBrowserView];
+      const pageViews = [flockBrowserView, tloBrowserView, accurintBrowserView, vigilantBrowserView];
       for (const bv of pageViews) {
         if (!bv) continue;
         try { mainWindow.removeBrowserView(bv); } catch (_) {}
@@ -519,6 +577,7 @@ app.whenReady().then(async () => {
       flockViewVisible = false;
       tloViewVisible = false;
       accurintViewVisible = false;
+      vigilantViewVisible = false;
     });
 
     // When the renderer page finishes loading, ask it to report media bounds
@@ -3362,6 +3421,81 @@ ipcMain.handle('accurint-reset', async () => {
   const ses = accurintBrowserView.webContents.session;
   await ses.clearStorageData();
   accurintBrowserView.webContents.loadURL('https://secure.accurint.com/app/bps/main');
+});
+
+// ── Vigilant Solutions / Motorola VehicleManager IPC ────────────────
+const VIGILANT_LOGIN_URL = 'https://vm.motorolasolutions.com/VM8_Auth/Login/VehicleManager_web';
+
+ipcMain.on('vigilant-set-bounds', (_event, bounds) => {
+  if (!vigilantBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  const b = {
+    x: Math.round(bounds.x),
+    y: Math.round(bounds.y),
+    width: Math.round(bounds.width),
+    height: Math.round(bounds.height),
+  };
+  lastVigilantBounds = b;
+  if (vigilantViewVisible) {
+    vigilantBrowserView.setBounds(b);
+  }
+});
+
+ipcMain.on('vigilant-set-visible', (_event, visible) => {
+  if (!vigilantBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  vigilantViewVisible = visible;
+  if (visible && lastVigilantBounds) {
+    const currentUrl = vigilantBrowserView.webContents.getURL();
+    if (!currentUrl || currentUrl === '' || currentUrl === 'about:blank') {
+      vigilantBrowserView.webContents.loadURL(VIGILANT_LOGIN_URL);
+    }
+    try { mainWindow.addBrowserView(vigilantBrowserView); } catch (_) {}
+    vigilantBrowserView.setBounds(lastVigilantBounds);
+  } else if (!visible) {
+    vigilantBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    try { mainWindow.removeBrowserView(vigilantBrowserView); } catch (_) {}
+  }
+});
+
+ipcMain.handle('vigilant-search-plate', async (_event, { plate, state }) => {
+  if (!vigilantBrowserView) return { success: false, error: 'Vigilant not initialized' };
+  try {
+    const currentUrl = vigilantBrowserView.webContents.getURL();
+    if (!currentUrl.includes('motorolasolutions.com') || currentUrl.includes('Login') || currentUrl.includes('VM8_Auth')) {
+      vigilantBrowserView.webContents.loadURL(VIGILANT_LOGIN_URL);
+      await new Promise(resolve => {
+        vigilantBrowserView.webContents.once('did-finish-load', resolve);
+        setTimeout(resolve, 8000);
+      });
+    }
+    if (plate) {
+      await new Promise(r => setTimeout(r, 1500));
+      await vigilantBrowserView.webContents.executeJavaScript(`
+        (function() {
+          function setVal(el, val) {
+            if (!el || !val) return;
+            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            nativeSetter.call(el, val);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          const plateInput = document.querySelector('input[name*="late" i], input[id*="late" i], input[placeholder*="Plate" i], input[placeholder*="plate" i]');
+          const stateInput = document.querySelector('select[name*="tate" i], select[id*="tate" i]');
+          setVal(plateInput, ${JSON.stringify(plate)});
+          ${state ? `if (stateInput) { stateInput.value = ${JSON.stringify(state)}; stateInput.dispatchEvent(new Event('change', { bubbles: true })); }` : ''}
+        })();
+      `);
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('vigilant-reset', async () => {
+  if (!vigilantBrowserView) return;
+  const ses = vigilantBrowserView.webContents.session;
+  await ses.clearStorageData();
+  vigilantBrowserView.webContents.loadURL(VIGILANT_LOGIN_URL);
 });
 
 // --- GenLogs API Proxy (avoids CORS in renderer) ---

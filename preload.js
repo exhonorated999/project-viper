@@ -176,4 +176,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   accurintSetVisible: (visible) => ipcRenderer.send('accurint-set-visible', visible),
   accurintSearchPerson: (params) => ipcRenderer.invoke('accurint-search-person', params),
   accurintReset: () => ipcRenderer.invoke('accurint-reset'),
+
+  // Vigilant Solutions / Motorola VehicleManager LPR (persistent BrowserView)
+  vigilantSetBounds: (bounds) => ipcRenderer.send('vigilant-set-bounds', bounds),
+  vigilantSetVisible: (visible) => ipcRenderer.send('vigilant-set-visible', visible),
+  vigilantSearchPlate: (params) => ipcRenderer.invoke('vigilant-search-plate', params),
+  vigilantReset: () => ipcRenderer.invoke('vigilant-reset'),
 });

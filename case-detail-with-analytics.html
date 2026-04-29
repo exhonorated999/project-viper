@@ -1562,8 +1562,26 @@
                 // Check custom statuses
                 const customs = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
                 const cs = customs.find(s => s.id === currentCase.status);
+                const customColor = (cs && cs.color) || null;
+                if (customColor) {
+                    // Apply custom hex color via inline style
+                    const h = customColor.replace('#','');
+                    const r = parseInt(h.substring(0,2),16), g = parseInt(h.substring(2,4),16), b = parseInt(h.substring(4,6),16);
+                    if (![r,g,b].some(n => isNaN(n))) {
+                        const bg = `rgba(${r},${g},${b},0.12)`;
+                        const border = `rgba(${r},${g},${b},0.4)`;
+                        statusBadge.className = 'px-4 py-2 rounded-lg border';
+                        statusBadge.style.background = bg;
+                        statusBadge.style.borderColor = border;
+                        statusBadge.innerHTML = `<span class="font-medium" style="color:${customColor}">● ${cs.label}</span>`;
+                        return;
+                    }
+                }
                 config = { color: 'purple-400', text: cs ? cs.label : currentCase.status, icon: '●' };
             }
+            // Built-in statuses (or fallback) — clear inline styles in case we set them previously
+            statusBadge.style.background = '';
+            statusBadge.style.borderColor = '';
             statusBadge.className = `px-4 py-2 rounded-lg border border-${config.color}/30 bg-${config.color}/10`;
             statusBadge.innerHTML = `<span class="font-medium text-${config.color}">${config.icon} ${config.text}</span>`;
         }

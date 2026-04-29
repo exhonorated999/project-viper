@@ -1244,14 +1244,15 @@
                                 <div id="customStatusList" class="mt-1.5 space-y-1.5"></div>
                             </div>
                             <!-- Add new -->
-                            <div class="flex gap-2">
+                            <div class="flex gap-2 flex-wrap">
                                 <select id="newStatusCategory" class="px-2 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-xs text-gray-300 focus:border-viper-cyan outline-none">
                                     <option value="closed">Closed —</option>
                                     <option value="cleared-arrest">Cleared by Arrest —</option>
                                     <option value="exceptionally-cleared">Exceptionally Cleared —</option>
                                     <option value="other">Other —</option>
                                 </select>
-                                <input type="text" id="newStatusLabel" placeholder="e.g. DA Declined" class="flex-1 px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-xs text-white placeholder-gray-500 focus:border-viper-cyan outline-none">
+                                <input type="text" id="newStatusLabel" placeholder="e.g. DA Declined" class="flex-1 min-w-[140px] px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-xs text-white placeholder-gray-500 focus:border-viper-cyan outline-none">
+                                <input type="color" id="newStatusColor" value="#a78bfa" title="Pick badge color" class="h-[30px] w-[42px] bg-viper-dark border border-gray-600 rounded-lg cursor-pointer p-0.5">
                                 <button onclick="addCustomStatus()" class="px-3 py-1.5 bg-viper-green/20 text-viper-green border border-viper-green/30 rounded-lg text-xs font-medium hover:bg-viper-green/30 transition">Add</button>
                             </div>
                         </div>
@@ -3318,26 +3319,58 @@
             container.innerHTML = '<p class="text-xs text-gray-500 italic">No custom statuses added yet.</p>';
             return;
         }
-        container.innerHTML = list.map((s, i) => `
+        container.innerHTML = list.map((s, i) => {
+            const color = s.color || '#a78bfa';
+            const bg = hexToRgba(color, 0.12);
+            const border = hexToRgba(color, 0.4);
+            return `
             <div class="flex items-center justify-between px-2.5 py-1.5 bg-viper-card/30 rounded-lg border border-gray-700/50">
-                <span class="text-xs text-gray-300"><span class="text-gray-500">${s.category.replace(/-/g,' ')} —</span> ${s.label}</span>
-                <button onclick="removeCustomStatus(${i})" class="text-gray-500 hover:text-red-400 transition text-xs ml-2">✕</button>
-            </div>
-        `).join('');
+                <div class="flex items-center gap-2 flex-1 min-w-0">
+                    <span class="px-2 py-0.5 rounded-full text-[11px] font-medium border whitespace-nowrap" style="color:${color};background:${bg};border-color:${border}">● ${s.label}</span>
+                    <span class="text-[11px] text-gray-500 truncate">${s.category.replace(/-/g,' ')}</span>
+                </div>
+                <div class="flex items-center gap-1 flex-shrink-0">
+                    <input type="color" value="${color}" onchange="updateCustomStatusColor(${i}, this.value)" title="Change color" class="h-6 w-7 bg-transparent border border-gray-600 rounded cursor-pointer p-0.5">
+                    <button onclick="removeCustomStatus(${i})" class="text-gray-500 hover:text-red-400 transition text-xs ml-1 px-1.5">✕</button>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    // Hex (#RRGGBB) → rgba(r,g,b,a)
+    function hexToRgba(hex, a) {
+        const h = (hex || '').replace('#', '').trim();
+        if (h.length !== 6) return `rgba(167,139,250,${a})`;
+        const r = parseInt(h.substring(0, 2), 16);
+        const g = parseInt(h.substring(2, 4), 16);
+        const b = parseInt(h.substring(4, 6), 16);
+        if ([r, g, b].some(n => isNaN(n))) return `rgba(167,139,250,${a})`;
+        return `rgba(${r},${g},${b},${a})`;
+    }
+
+    function updateCustomStatusColor(index, color) {
+        const list = getCustomStatuses();
+        if (!list[index]) return;
+        list[index].color = color;
+        saveCustomStatuses(list);
+        renderCustomStatusList();
     }
 
     function addCustomStatus() {
         const category = document.getElementById('newStatusCategory').value;
         const label = document.getElementById('newStatusLabel').value.trim();
+        const color = document.getElementById('newStatusColor').value || '#a78bfa';
         if (!label) return;
         const list = getCustomStatuses();
         const id = (category + '-' + label).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '');
         if (list.some(s => s.id === id) || DEFAULT_STATUSES.some(s => s.id === id)) {
             viperToast('Status already exists', 'warning'); return;
         }
-        list.push({ id, label, category });
+        list.push({ id, label, category, color });
         saveCustomStatuses(list);
         document.getElementById('newStatusLabel').value = '';
+        // Reset color picker to default for next add
+        document.getElementById('newStatusColor').value = '#a78bfa';
         renderCustomStatusList();
         viperToast('Status added', 'success');
     }

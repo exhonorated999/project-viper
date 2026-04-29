@@ -4319,6 +4319,52 @@
             renderAllCasesView();
         }
 
+        // ═══ Case status — unified label + color resolver ═══
+        // Looks up a status id (built-in or custom) and returns { label, color, isCustom, category }.
+        // Custom statuses come from localStorage.viperCustomStatuses, set in Settings → Case Configuration.
+        const _BUILTIN_STATUS_INFO = {
+            'active':         { label: 'Active',              color: '#10b981', tw: { bg: 'bg-viper-green/20',  text: 'text-viper-green' } },
+            'closed':         { label: 'Closed',              color: '#60a5fa', tw: { bg: 'bg-blue-400/20',     text: 'text-blue-400' } },
+            'closed-arrest':  { label: 'Closed with Arrest',  color: '#60a5fa', tw: { bg: 'bg-blue-400/20',     text: 'text-blue-400' } },
+            'transferred':    { label: 'Transferred',         color: '#a78bfa', tw: { bg: 'bg-purple-400/20',   text: 'text-purple-400' } },
+            'inactive':       { label: 'Inactive',            color: '#facc15', tw: { bg: 'bg-yellow-400/20',   text: 'text-yellow-400' } }
+        };
+        function getCaseStatusInfo(statusId) {
+            const builtin = _BUILTIN_STATUS_INFO[statusId];
+            if (builtin) return { ...builtin, isCustom: false, category: 'builtin' };
+            try {
+                const custom = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]')
+                    .find(s => s.id === statusId);
+                if (custom) {
+                    return {
+                        label: custom.label || statusId,
+                        color: custom.color || '#9ca3af',
+                        category: custom.category || 'other',
+                        isCustom: true
+                    };
+                }
+            } catch {}
+            // Fallback: title-case the id and use neutral gray.
+            const fallback = String(statusId || '')
+                .replace(/-/g, ' ')
+                .replace(/\b\w/g, l => l.toUpperCase()) || 'Unknown';
+            return { label: fallback, color: '#9ca3af', isCustom: false, category: 'other' };
+        }
+        function renderCaseStatusBadge(statusId) {
+            const info = getCaseStatusInfo(statusId);
+            if (info.isCustom) {
+                // Build a tinted background from the hex color (alpha suffix).
+                const hex = info.color;
+                return '<span class="px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap" '
+                    + 'style="background-color: ' + hex + '22; color: ' + hex + '; '
+                    + 'border: 1px solid ' + hex + '55;">'
+                    + info.label + '</span>';
+            }
+            const tw = info.tw || { bg: 'bg-gray-400/20', text: 'text-gray-400' };
+            return '<span class="px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap '
+                + tw.bg + ' ' + tw.text + '">' + info.label + '</span>';
+        }
+
         // ═══ All Cases — customizable stat boxes ═══
         // Each stat is computed dynamically from the case list + custom statuses.
         // Built-in stats are always available; custom statuses become per-status stats.
@@ -4738,13 +4784,7 @@
                             const syn = (c.synopsis||'').length > 70 ? c.synopsis.substring(0,70)+'…' : (c.synopsis||'');
                             return '<td class="px-5 py-4 text-sm text-white max-w-xs truncate">' + syn + '</td>';
                         case 'status': {
-                            let sc = 'gray-400';
-                            if (c.status === 'active') sc = 'viper-green';
-                            else if (c.status === 'inactive') sc = 'yellow-400';
-                            else if (c.status === 'closed' || c.status === 'closed-arrest') sc = 'blue-400';
-                            else if (c.status === 'transferred') sc = 'purple-400';
-                            const label = c.status.replace(/-/g,' ').replace(/\b\w/g,l=>l.toUpperCase());
-                            return '<td class="px-5 py-4 text-sm"><span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-' + sc + '/20 text-' + sc + '">' + label + '</span></td>';
+                            return '<td class="px-5 py-4 text-sm">' + renderCaseStatusBadge(c.status) + '</td>';
                         }
                         case 'created':
                             return '<td class="px-5 py-4 text-sm text-gray-400 whitespace-nowrap">' + (c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '') + '</td>';

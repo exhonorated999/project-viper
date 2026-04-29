@@ -46,6 +46,19 @@ nsis:
   uninstallerIcon: build/icon.ico
   perMachine: true
   runAfterFinish: true
+  # ─────────────────────────────────────────────────────────────────────
+  # DATA PRESERVATION POLICY — DO NOT CHANGE TO true.
+  #
+  # `deleteAppDataOnUninstall: false` ensures electron-builder's generated
+  # uninstaller never removes %APPDATA%\<productName>\ (which is where
+  # Chromium localStorage, license activation, custom metric flags, and
+  # case data live for standard installs).
+  #
+  # User data may ONLY be deleted from inside the running app via explicit
+  # user action. The installer/uninstaller is read-only with respect to
+  # user data. See build/installer.nsh for the matching $INSTDIR-side
+  # protections covering portable installs.
+  # ─────────────────────────────────────────────────────────────────────
   deleteAppDataOnUninstall: false
   artifactName: ${productName}-${version}-Setup.${ext}
 portable:

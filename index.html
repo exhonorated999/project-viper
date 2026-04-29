@@ -3518,11 +3518,20 @@
                 const s = builtinMap[status];
                 return `<span class="px-3 py-1 rounded-full text-xs font-medium ${s.bg} ${s.text} border ${s.border}">${s.label}</span>`;
             }
-            // Check custom statuses
+            // Check custom statuses — use their assigned color if present
             const customs = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
             const cs = customs.find(s => s.id === status);
             const label = cs ? cs.label : status;
-            return `<span class="px-3 py-1 rounded-full text-xs font-medium bg-purple-500/20 text-purple-300 border border-purple-500/30">${label}</span>`;
+            const color = (cs && cs.color) || '#a78bfa';
+            const h = color.replace('#','');
+            const r = parseInt(h.substring(0,2),16), g = parseInt(h.substring(2,4),16), b = parseInt(h.substring(4,6),16);
+            const hasRgb = ![r,g,b].some(n => isNaN(n));
+            if (!hasRgb) {
+                return `<span class="px-3 py-1 rounded-full text-xs font-medium bg-purple-500/20 text-purple-300 border border-purple-500/30">${label}</span>`;
+            }
+            const bg = `rgba(${r},${g},${b},0.18)`;
+            const border = `rgba(${r},${g},${b},0.4)`;
+            return `<span class="px-3 py-1 rounded-full text-xs font-medium border" style="background:${bg};color:${color};border-color:${border}">${label}</span>`;
         }
 
         function updateActiveInvestigationsTable(filteredCases, status) {

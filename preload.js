@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
@@ -6,6 +6,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // App info
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
+
+  // Resolve a real filesystem path from a dropped File (Electron 32+ safe).
+  // In Electron <32, File.path also still works in the renderer.
+  getPathForFile: (file) => {
+    try { return webUtils && webUtils.getPathForFile ? webUtils.getPathForFile(file) : (file && file.path) || ''; }
+    catch (_) { return (file && file.path) || ''; }
+  },
 
   // Storage paths
   getStoragePaths: () => ipcRenderer.invoke('get-storage-paths'),

@@ -16,17 +16,38 @@
 (function () {
 
     /* ─────────────────── Font Size ─────────────────── */
+    // Two-pronged scaling so that BOTH rem-based Tailwind classes
+    // (text-xs, text-sm, p-4) AND arbitrary pixel sizes
+    // (text-[10px], inline style="font-size:11px") scale together:
+    //   • html font-size  → covers all rem/em units
+    //   • body zoom       → covers everything else (px, layout, padding)
+    //
+    // We pick a small zoom delta so the two scales compound only modestly,
+    // giving a clearly readable bump at "large" / "x-large" without
+    // breaking layouts.
     const FONT_SIZES = {
-        small:    '13px',
-        medium:   '15px',
-        large:    '17px',
-        'x-large':'20px'
+        small:    { px: '14px', zoom: '0.92' },
+        medium:   { px: '15px', zoom: '1'    },
+        large:    { px: '16px', zoom: '1.10' },
+        'x-large':{ px: '18px', zoom: '1.22' },
     };
     function applyFontSize(size) {
-        const px = FONT_SIZES[size] || FONT_SIZES.medium;
+        const cfg = FONT_SIZES[size] || FONT_SIZES.medium;
         // Setting font-size on <html> rescales every rem-based Tailwind class.
-        document.documentElement.style.fontSize = px;
-        document.documentElement.style.setProperty('--viper-font-size', px);
+        document.documentElement.style.fontSize = cfg.px;
+        document.documentElement.style.setProperty('--viper-font-size', cfg.px);
+        // Zoom scales hardcoded px text (text-[10px], text-[11px], inline
+        // font-size:Npx) plus all layout dimensions, so the whole page
+        // grows together. Apply on body so position:fixed widgets that
+        // anchor to <html> (toast, modals) aren't double-scaled.
+        if (document.body) {
+            document.body.style.zoom = cfg.zoom;
+        } else {
+            // body not parsed yet — attach when ready.
+            document.addEventListener('DOMContentLoaded', () => {
+                document.body.style.zoom = cfg.zoom;
+            }, { once: true });
+        }
     }
     // Apply immediately, before Tailwind has even painted the page.
     applyFontSize(localStorage.getItem('viperFontSize') || 'medium');

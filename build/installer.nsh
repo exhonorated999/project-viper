@@ -94,9 +94,9 @@
   ; "RMDir /r $INSTDIR" cannot reach it. The user (or the next install)
   ; can recover it from there.
   ;
-  ; Destination: <parent of INSTDIR>\VIPER-Data-Preserved\
-  ;   e.g. C:\Program Files\V.I.P.E.R\userdata\  →  C:\Program Files\VIPER-Data-Preserved\userdata\
-  ;        I:\VIPER\userdata\                     →  I:\VIPER-Data-Preserved\userdata\
+  ; Destination: <parent of INSTDIR> + VIPER-Data-Preserved
+  ;   e.g.  C:/Program Files/V.I.P.E.R/userdata   ->  C:/Program Files/VIPER-Data-Preserved/userdata
+  ;         I:/VIPER/userdata                     ->  I:/VIPER-Data-Preserved/userdata
   IfFileExists "$INSTDIR\userdata\*.*" 0 +3
     CreateDirectory "$INSTDIR\..\VIPER-Data-Preserved"
     CopyFiles /SILENT "$INSTDIR\userdata" "$INSTDIR\..\VIPER-Data-Preserved"
@@ -114,10 +114,10 @@
   ; INTENTIONALLY INERT. See policy at top of file.
   ;
   ; Do NOT add code here that deletes:
-  ;   - $INSTDIR\userdata\
-  ;   - $INSTDIR\cases\
-  ;   - %APPDATA%\viper-electron\
-  ;   - $INSTDIR\..\VIPER-Data-Preserved\
+  ;   - $INSTDIR/userdata
+  ;   - $INSTDIR/cases
+  ;   - %APPDATA%/viper-electron
+  ;   - $INSTDIR/../VIPER-Data-Preserved
   ;
   ; If a user wants to remove their data, they do it from inside the app
   ; or by manually deleting the folders themselves. The installer must

@@ -1256,11 +1256,13 @@
                             <!-- User-added statuses -->
                             <div class="mb-3">
                                 <span class="text-[10px] text-gray-500 uppercase tracking-wider">Your custom statuses</span>
+                                <p class="text-[11px] text-gray-500 mt-0.5 mb-1.5"><span class="text-viper-cyan">Active —</span> categories keep cases counted as active on the dashboard. All other categories count as closed/inactive.</p>
                                 <div id="customStatusList" class="mt-1.5 space-y-1.5"></div>
                             </div>
                             <!-- Add new -->
                             <div class="flex gap-2 flex-wrap">
                                 <select id="newStatusCategory" class="px-2 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-xs text-gray-300 focus:border-viper-cyan outline-none">
+                                    <option value="active">Active —</option>
                                     <option value="closed">Closed —</option>
                                     <option value="cleared-arrest">Cleared by Arrest —</option>
                                     <option value="exceptionally-cleared">Exceptionally Cleared —</option>
@@ -3326,6 +3328,17 @@
         renderCustomStatusList();
     }
 
+    // Index of custom status currently being edited inline (null when none).
+    let _editingStatusIdx = null;
+
+    const STATUS_CATEGORIES = [
+        ['active', 'Active —'],
+        ['closed', 'Closed —'],
+        ['cleared-arrest', 'Cleared by Arrest —'],
+        ['exceptionally-cleared', 'Exceptionally Cleared —'],
+        ['other', 'Other —']
+    ];
+
     function renderCustomStatusList() {
         const container = document.getElementById('customStatusList');
         if (!container) return;
@@ -3334,22 +3347,94 @@
             container.innerHTML = '<p class="text-xs text-gray-500 italic">No custom statuses added yet.</p>';
             return;
         }
+        const escAttr = s => (s == null ? '' : String(s).replace(/"/g, '&quot;'));
         container.innerHTML = list.map((s, i) => {
             const color = s.color || '#a78bfa';
+            const isActive = s.category === 'active';
+
+            if (_editingStatusIdx === i) {
+                // Inline edit row.
+                const catOpts = STATUS_CATEGORIES.map(([v, label]) =>
+                    `<option value="${v}"${s.category === v ? ' selected' : ''}>${label}</option>`
+                ).join('');
+                return `
+                <div class="p-2.5 rounded-lg border border-viper-cyan/40 bg-viper-cyan/5">
+                    <div class="text-[10px] text-viper-cyan uppercase tracking-wider mb-2">Editing</div>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <select id="editStatusCategory_${i}" class="px-2 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-xs text-gray-300 focus:border-viper-cyan outline-none">${catOpts}</select>
+                        <input type="text" id="editStatusLabel_${i}" value="${escAttr(s.label)}" class="flex-1 min-w-[140px] px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-xs text-white focus:border-viper-cyan outline-none">
+                        <input type="color" id="editStatusColor_${i}" value="${color}" title="Pick badge color" class="h-[30px] w-[42px] bg-viper-dark border border-gray-600 rounded-lg cursor-pointer p-0.5">
+                        <button onclick="saveCustomStatusEdit(${i})" class="px-3 py-1.5 bg-viper-green/20 text-viper-green border border-viper-green/30 rounded-lg text-xs font-medium hover:bg-viper-green/30 transition">Save</button>
+                        <button onclick="cancelCustomStatusEdit()" class="px-3 py-1.5 bg-gray-700/40 text-gray-300 border border-gray-600 rounded-lg text-xs font-medium hover:bg-gray-700/60 transition">Cancel</button>
+                    </div>
+                </div>`;
+            }
+
             const bg = hexToRgba(color, 0.12);
             const border = hexToRgba(color, 0.4);
+            const categoryLabel = (STATUS_CATEGORIES.find(c => c[0] === s.category)?.[1] || s.category.replace(/-/g,' ')).replace(/ —$/, '');
+            const activeBadge = isActive
+                ? '<span class="text-[9px] px-1.5 py-0.5 rounded bg-viper-cyan/15 text-viper-cyan border border-viper-cyan/30 uppercase tracking-wider">Active</span>'
+                : '';
             return `
             <div class="flex items-center justify-between px-2.5 py-1.5 bg-viper-card/30 rounded-lg border border-gray-700/50">
                 <div class="flex items-center gap-2 flex-1 min-w-0">
                     <span class="px-2 py-0.5 rounded-full text-[11px] font-medium border whitespace-nowrap" style="color:${color};background:${bg};border-color:${border}">● ${s.label}</span>
-                    <span class="text-[11px] text-gray-500 truncate">${s.category.replace(/-/g,' ')}</span>
+                    <span class="text-[11px] text-gray-500 truncate">${categoryLabel}</span>
+                    ${activeBadge}
                 </div>
                 <div class="flex items-center gap-1 flex-shrink-0">
                     <input type="color" value="${color}" onchange="updateCustomStatusColor(${i}, this.value)" title="Change color" class="h-6 w-7 bg-transparent border border-gray-600 rounded cursor-pointer p-0.5">
-                    <button onclick="removeCustomStatus(${i})" class="text-gray-500 hover:text-red-400 transition text-xs ml-1 px-1.5">✕</button>
+                    <button onclick="editCustomStatus(${i})" class="text-gray-500 hover:text-viper-cyan transition text-xs ml-1 px-1.5" title="Edit status">✏️</button>
+                    <button onclick="removeCustomStatus(${i})" class="text-gray-500 hover:text-red-400 transition text-xs px-1.5" title="Delete status">✕</button>
                 </div>
             </div>`;
         }).join('');
+    }
+
+    function editCustomStatus(index) {
+        _editingStatusIdx = index;
+        renderCustomStatusList();
+        setTimeout(() => {
+            const el = document.getElementById('editStatusLabel_' + index);
+            if (el) { el.focus(); el.select(); }
+        }, 30);
+    }
+
+    function cancelCustomStatusEdit() {
+        _editingStatusIdx = null;
+        renderCustomStatusList();
+    }
+
+    function saveCustomStatusEdit(index) {
+        const list = getCustomStatuses();
+        if (!list[index]) { _editingStatusIdx = null; renderCustomStatusList(); return; }
+
+        const labelEl = document.getElementById('editStatusLabel_' + index);
+        const catEl = document.getElementById('editStatusCategory_' + index);
+        const colorEl = document.getElementById('editStatusColor_' + index);
+        if (!labelEl || !catEl || !colorEl) return;
+
+        const newLabel = labelEl.value.trim();
+        if (!newLabel) { viperToast('Status label cannot be empty', 'warning'); return; }
+
+        const newCategory = catEl.value;
+        const newColor = colorEl.value || '#a78bfa';
+
+        // Recompute the id from category+label so it stays consistent with addCustomStatus.
+        // BUT: changing the id would orphan cases already saved with the old id.
+        // So we keep the original id and only update label/category/color.
+        // (If you want a fresh id, delete and re-add.)
+        list[index] = {
+            ...list[index],
+            label: newLabel,
+            category: newCategory,
+            color: newColor
+        };
+        saveCustomStatuses(list);
+        _editingStatusIdx = null;
+        renderCustomStatusList();
+        viperToast('Status updated', 'success');
     }
 
     // Hex (#RRGGBB) → rgba(r,g,b,a)

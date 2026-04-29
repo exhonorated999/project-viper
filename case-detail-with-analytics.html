@@ -21568,10 +21568,11 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const editPriEl = document.getElementById('editCasePriority');
             if (editPriEl) currentCase.priority = parseInt(editPriEl.value) || 0;
 
-            // Auto-set dateClosed when status changes to closed/inactive
+            // Auto-set dateClosed when status changes to closed/inactive.
+            // Custom statuses with category 'active' are NOT inactive.
             const inactiveStatuses = ['closed', 'closed-arrest', 'transferred'];
             const customStatuses = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
-            customStatuses.forEach(s => inactiveStatuses.push(s.id));
+            customStatuses.forEach(s => { if (s.category !== 'active') inactiveStatuses.push(s.id); });
             if (inactiveStatuses.includes(newStatus) && !inactiveStatuses.includes(oldStatus)) {
                 currentCase.dateClosed = new Date().toISOString();
             } else if (!inactiveStatuses.includes(newStatus)) {
@@ -21596,10 +21597,11 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             currentCase.status = newStatus;
             currentCase.lastModified = new Date().toISOString();
 
-            // Auto-set dateClosed when moving to inactive status
+            // Auto-set dateClosed when moving to inactive status.
+            // Custom statuses with category 'active' are NOT inactive.
             const inactiveStatuses = ['closed', 'closed-arrest', 'transferred'];
             const customStatuses = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
-            customStatuses.forEach(s => inactiveStatuses.push(s.id));
+            customStatuses.forEach(s => { if (s.category !== 'active') inactiveStatuses.push(s.id); });
             if (inactiveStatuses.includes(newStatus) && !inactiveStatuses.includes(oldStatus)) {
                 currentCase.dateClosed = new Date().toISOString();
             } else if (!inactiveStatuses.includes(newStatus)) {

@@ -2469,7 +2469,8 @@
                 // Get real case data
                 const allCases = JSON.parse(localStorage.getItem('viperCases')) || [];
                 const customStAll = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
-                const customSt = customStAll.map(s => s.id);
+                // Custom statuses with category 'active' should still be counted as active.
+                const customSt = customStAll.filter(s => s.category !== 'active').map(s => s.id);
                 const inactiveSt = ['closed', 'closed-arrest', 'transferred', ...customSt];
                 const openCases = allCases.filter(c => !inactiveSt.includes(c.status)).length;
                 const closedCases = allCases.filter(c => c.status === 'closed' || customSt.includes(c.status)).length;
@@ -2601,7 +2602,8 @@
                 
                 // Get real case data
                 const allCases = JSON.parse(localStorage.getItem('viperCases')) || [];
-                const customSt2 = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]').map(s => s.id);
+                const customSt2 = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]')
+                    .filter(s => s.category !== 'active').map(s => s.id);
                 const inactiveSt2 = ['closed', 'closed-arrest', 'transferred', 'Closed', 'Closed with Arrest', 'Transferred', ...customSt2];
                 const activeCases = allCases.filter(c => !inactiveSt2.includes(c.status));
                 
@@ -3309,17 +3311,18 @@
         function updateDashboardCaseData() {
             const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
             
-            // Update metrics — custom statuses are always inactive (closure types)
+            // Update metrics — custom statuses are inactive (closure types) UNLESS
+            // their category is 'active', in which case they count as active.
             const inactiveStatuses = ['closed', 'closed-arrest', 'transferred'];
             const customStatuses = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
-            customStatuses.forEach(s => inactiveStatuses.push(s.id));
+            customStatuses.forEach(s => { if (s.category !== 'active') inactiveStatuses.push(s.id); });
             const activeCases = cases.filter(c => !inactiveStatuses.includes(c.status));
             const closedCases = cases.filter(c => c.status === 'closed');
             const closedWithArrestCases = cases.filter(c => c.status === 'closed-arrest');
             
-            // All custom statuses are closure types — count them all towards "Cases Closed"
-            const allCustomIds = customStatuses.map(s => s.id);
-            const customClosedCount = cases.filter(c => allCustomIds.includes(c.status)).length;
+            // All non-active custom statuses are closure types — count toward "Cases Closed"
+            const closureCustomIds = customStatuses.filter(s => s.category !== 'active').map(s => s.id);
+            const customClosedCount = cases.filter(c => closureCustomIds.includes(c.status)).length;
             
             dashboardMetrics['open_cases'].value = activeCases.length;
             dashboardMetrics['cases_closed'].value = closedCases.length + closedWithArrestCases.length + customClosedCount;
@@ -4334,7 +4337,8 @@
             const visCols = getACVisibleCols();
             const inactiveStatuses = ['closed','closed-arrest','transferred'];
             const customStatuses = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
-            customStatuses.forEach(s => inactiveStatuses.push(s.id));
+            // Custom statuses with category 'active' remain active.
+            customStatuses.forEach(s => { if (s.category !== 'active') inactiveStatuses.push(s.id); });
             const activeCases = cases.filter(c => !inactiveStatuses.includes(c.status));
             const closedCases = cases.filter(c => inactiveStatuses.includes(c.status));
             
@@ -4505,7 +4509,11 @@
 
             if (statusFilter !== 'all') {
                 if (statusFilter === 'active') {
-                    filtered = filtered.filter(c => c.status === 'active');
+                    // Include custom statuses whose category is 'active'.
+                    const customActive = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]')
+                        .filter(s => s.category === 'active').map(s => s.id);
+                    const activeIds = new Set(['active', ...customActive]);
+                    filtered = filtered.filter(c => activeIds.has(c.status));
                 } else if (statusFilter === 'inactive') {
                     filtered = filtered.filter(c => c.status === 'inactive');
                 } else if (statusFilter === 'closed') {

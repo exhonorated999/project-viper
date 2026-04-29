@@ -517,6 +517,21 @@
                                 <span class="text-xs text-gray-500" id="fontSizePreview">Current: Medium</span>
                             </div>
                         </div>
+
+                        <!-- Sidebar Auto-Hide -->
+                        <div class="pt-4 border-t border-gray-700/50">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300">Sidebar Auto-Hide on Small Screens</label>
+                                    <p class="text-xs text-gray-500 mt-1">When the window is narrow (≤1024px), tuck the sidebar away and show a menu button to slide it in as a drawer. Useful for laptops with smaller displays.</p>
+                                </div>
+                                <button onclick="toggleSidebarAutoHide()"
+                                    class="relative inline-flex items-center h-6 rounded-full w-11 transition-colors focus:outline-none bg-gray-700 flex-shrink-0 ml-4"
+                                    id="sidebarAutoHideToggleBtn" aria-label="Toggle sidebar auto-hide">
+                                    <span id="sidebarAutoHideToggleIndicator" class="inline-block w-4 h-4 transform transition-transform bg-white rounded-full translate-x-1"></span>
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -3487,10 +3502,37 @@
     }
 
     // Init on load
+    // ═══ Sidebar Auto-Hide ═══
+    function isSidebarAutoHideEnabled() {
+        return localStorage.getItem('viperSidebarAutoHide') === 'true';
+    }
+    function toggleSidebarAutoHide() {
+        const enabled = !isSidebarAutoHideEnabled();
+        localStorage.setItem('viperSidebarAutoHide', enabled ? 'true' : 'false');
+        refreshSidebarAutoHideUI();
+        if (typeof window.viperSidebarAutoHideRefresh === 'function') {
+            window.viperSidebarAutoHideRefresh();
+        }
+    }
+    function refreshSidebarAutoHideUI() {
+        const enabled = isSidebarAutoHideEnabled();
+        const btn = document.getElementById('sidebarAutoHideToggleBtn');
+        const ind = document.getElementById('sidebarAutoHideToggleIndicator');
+        if (!btn || !ind) return;
+        if (enabled) {
+            btn.classList.remove('bg-gray-700'); btn.classList.add('bg-viper-cyan');
+            ind.classList.remove('translate-x-1'); ind.classList.add('translate-x-6');
+        } else {
+            btn.classList.add('bg-gray-700'); btn.classList.remove('bg-viper-cyan');
+            ind.classList.add('translate-x-1'); ind.classList.remove('translate-x-6');
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         refreshPriorityUI();
         refreshCustomStatusUI();
         refreshCustomMetricsUI();
+        refreshSidebarAutoHideUI();
     });
     </script>
 
@@ -3613,5 +3655,6 @@
         }
     }
     </script>
+    <script src="viper-sidebar-autohide.js" defer></script>
 </body>
 </html>

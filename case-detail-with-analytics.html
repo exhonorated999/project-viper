@@ -7038,9 +7038,9 @@
             return result;
         }
 
-        async function importDmvPrintout(existingSuspectIndex) {
+        async function importDmvPrintout(existingSuspectIndex, presetPath) {
             try {
-                const filePath = await window.electronAPI.selectDmvFile();
+                const filePath = presetPath || await window.electronAPI.selectDmvFile();
                 if (!filePath) return;
 
                 showToast('Extracting text from PDF…', 'info');
@@ -7170,9 +7170,9 @@
         }
         
         // ---- DMV Import for Victims ----
-        async function importDmvVictim(existingIndex) {
+        async function importDmvVictim(existingIndex, presetPath) {
             try {
-                const filePath = await window.electronAPI.selectDmvFile();
+                const filePath = presetPath || await window.electronAPI.selectDmvFile();
                 if (!filePath) return;
 
                 showToast('Extracting text from PDF…', 'info');
@@ -7252,9 +7252,9 @@
         }
 
         // ---- DMV Import for Witnesses ----
-        async function importDmvWitness(existingIndex) {
+        async function importDmvWitness(existingIndex, presetPath) {
             try {
-                const filePath = await window.electronAPI.selectDmvFile();
+                const filePath = presetPath || await window.electronAPI.selectDmvFile();
                 if (!filePath) return;
 
                 showToast('Extracting text from PDF…', 'info');
@@ -7332,9 +7332,9 @@
             }
         }
 
-        async function importDmvInvolvedPerson(existingIndex) {
+        async function importDmvInvolvedPerson(existingIndex, presetPath) {
             try {
-                const filePath = await window.electronAPI.selectDmvFile();
+                const filePath = presetPath || await window.electronAPI.selectDmvFile();
                 if (!filePath) return;
 
                 showToast('Extracting text from PDF…', 'info');
@@ -22783,6 +22783,75 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             loadTheme();
             updateUserDisplay();
             loadCase();
+
+            // ── Global PDF drop zone for DMV imports ─────────────
+            // Routes a dropped PDF to the right importer based on the active tab.
+            (function wireDmvDropZone() {
+                const TAB_ROUTERS = {
+                    suspects: (p) => importDmvPrintout(undefined, p),
+                    victims: (p) => importDmvVictim(undefined, p),
+                    witnesses: (p) => importDmvWitness(undefined, p),
+                    involvedPersons: (p) => importDmvInvolvedPerson(undefined, p),
+                };
+                const getTarget = () => TAB_ROUTERS[currentTab];
+
+                const overlay = document.createElement('div');
+                overlay.id = 'dmvDropOverlay';
+                overlay.style.cssText = 'position:fixed;inset:0;z-index:9997;display:none;pointer-events:none;background:rgba(245,158,11,0.08);border:3px dashed rgba(245,158,11,0.7);box-sizing:border-box;';
+                overlay.innerHTML = `
+                  <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);padding:18px 28px;border-radius:14px;background:rgba(15,23,42,0.92);border:1px solid rgba(245,158,11,0.5);color:#fbbf24;font-weight:600;font-size:15px;letter-spacing:.02em;box-shadow:0 8px 32px rgba(0,0,0,.5);">
+                    📄 Drop DMV PDF to import
+                  </div>`;
+                document.body.appendChild(overlay);
+
+                let depth = 0;
+                const isPdfDrag = (e) => {
+                    if (!e.dataTransfer) return false;
+                    // dataTransfer.items doesn't expose names during dragover, but type === '' for files
+                    return Array.from(e.dataTransfer.items || []).some(it => it.kind === 'file');
+                };
+                const showOverlay = () => {
+                    if (!getTarget()) return;
+                    overlay.style.display = 'block';
+                };
+                const hideOverlay = () => { overlay.style.display = 'none'; };
+
+                window.addEventListener('dragenter', (e) => {
+                    if (!isPdfDrag(e)) return;
+                    if (!getTarget()) return;
+                    depth++;
+                    showOverlay();
+                });
+                window.addEventListener('dragover', (e) => {
+                    if (!getTarget()) return;
+                    if (!isPdfDrag(e)) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'copy';
+                });
+                window.addEventListener('dragleave', () => {
+                    depth = Math.max(0, depth - 1);
+                    if (depth === 0) hideOverlay();
+                });
+                window.addEventListener('drop', (e) => {
+                    const router = getTarget();
+                    depth = 0;
+                    hideOverlay();
+                    if (!router) return;
+                    e.preventDefault();
+                    const files = Array.from(e.dataTransfer.files || []);
+                    const pdf = files.find(f => /\.pdf$/i.test(f.name));
+                    if (!pdf) {
+                        if (typeof showToast === 'function') showToast('Drop a PDF file to import DMV data', 'warning');
+                        return;
+                    }
+                    const filePath = pdf.path || (window.electronAPI && window.electronAPI.getPathForFile && window.electronAPI.getPathForFile(pdf));
+                    if (!filePath) {
+                        if (typeof showToast === 'function') showToast('Could not resolve dropped file path', 'error');
+                        return;
+                    }
+                    router(filePath);
+                });
+            })();
 
             // Cellebrite copy progress listener
             if (window.electronAPI && window.electronAPI.onCellebriteCopyProgress) {

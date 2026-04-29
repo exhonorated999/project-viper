@@ -1041,7 +1041,7 @@
                             </div>
                             <div>
                                 <p class="text-sm font-medium text-gray-200">Import from RMS PDF</p>
-                                <p class="text-xs text-gray-500">Auto-populate case data from an agency incident report</p>
+                                <p class="text-xs text-gray-500">Auto-populate case data from an agency incident report — or drop a PDF here</p>
                             </div>
                         </div>
                         <button type="button" id="rmsImportBtn" onclick="importRmsForNewCase()" class="px-4 py-2 rounded-lg bg-viper-purple/10 border border-viper-purple/30 text-viper-purple text-sm font-medium hover:bg-viper-purple/20 transition-colors">
@@ -2028,7 +2028,7 @@
         // --- RMS Import for New Case ---
         let pendingRmsData = null; // holds {text, fileName, detected} until case is created
 
-        async function importRmsForNewCase() {
+        async function importRmsForNewCase(presetPath) {
             const btn = document.getElementById('rmsImportBtn');
             const statusDiv = document.getElementById('rmsImportStatus');
             const statusText = document.getElementById('rmsImportStatusText');
@@ -2036,17 +2036,21 @@
 
             try {
                 btn.disabled = true;
-                btn.textContent = 'Selecting...';
+                btn.textContent = presetPath ? 'Loading…' : 'Selecting...';
 
-                const filePaths = await window.electronAPI.selectRmsFiles();
-                if (!filePaths || filePaths.length === 0) {
-                    btn.disabled = false;
-                    btn.textContent = 'Select PDF';
-                    return;
+                let chosenPath = presetPath || null;
+                if (!chosenPath) {
+                    const filePaths = await window.electronAPI.selectRmsFiles();
+                    if (!filePaths || filePaths.length === 0) {
+                        btn.disabled = false;
+                        btn.textContent = 'Select PDF';
+                        return;
+                    }
+                    chosenPath = filePaths[0];
                 }
 
                 btn.textContent = 'Parsing...';
-                const result = await window.electronAPI.extractPdfText(filePaths[0]);
+                const result = await window.electronAPI.extractPdfText(chosenPath);
                 if (!result || !result.text) {
                     viperToast('Could not extract text from PDF', 'error');
                     btn.disabled = false;
@@ -2286,6 +2290,51 @@
         }
         
         document.addEventListener('DOMContentLoaded', function() {
+            // ── RMS PDF drop zone ────────────────────────────────────
+            (function wireRmsDropZone() {
+                const zone = document.getElementById('rmsImportSection');
+                if (!zone) return;
+                let depth = 0;
+                const setActive = (on) => {
+                    if (on) {
+                        zone.classList.add('border-viper-purple');
+                        zone.style.background = 'rgba(168,85,247,0.06)';
+                    } else {
+                        zone.classList.remove('border-viper-purple');
+                        zone.style.background = '';
+                    }
+                };
+                zone.addEventListener('dragenter', (e) => {
+                    e.preventDefault(); e.stopPropagation();
+                    depth++; setActive(true);
+                });
+                zone.addEventListener('dragover', (e) => {
+                    e.preventDefault(); e.stopPropagation();
+                    e.dataTransfer.dropEffect = 'copy';
+                });
+                zone.addEventListener('dragleave', (e) => {
+                    e.preventDefault(); e.stopPropagation();
+                    depth = Math.max(0, depth - 1);
+                    if (depth === 0) setActive(false);
+                });
+                zone.addEventListener('drop', (e) => {
+                    e.preventDefault(); e.stopPropagation();
+                    depth = 0; setActive(false);
+                    const files = Array.from(e.dataTransfer.files || []);
+                    const pdf = files.find(f => /\.pdf$/i.test(f.name));
+                    if (!pdf) {
+                        viperToast('Drop a PDF file to auto-import RMS data', 'warning');
+                        return;
+                    }
+                    const filePath = pdf.path || (window.electronAPI.getPathForFile && window.electronAPI.getPathForFile(pdf));
+                    if (!filePath) {
+                        viperToast('Could not resolve dropped file path', 'error');
+                        return;
+                    }
+                    importRmsForNewCase(filePath);
+                });
+            })();
+
             document.getElementById('createCaseForm').addEventListener('submit', function(e) {
                 e.preventDefault();
                 

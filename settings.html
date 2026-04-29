@@ -6,6 +6,7 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://api.wigle.net https://api.genlogs.io https://trace-broker-production.up.railway.app; font-src 'self' data:; frame-src https: http:;">
     <title>V.I.P.E.R. - Settings</title>
     <script src="modules/viper-ui.js"></script>
+    <script src="modules/viper-prefs.js"></script>
     <script src="modules/licensing.js"></script>
     <script src="libs/tailwindcss.js"></script>
     <script>
@@ -2455,15 +2456,21 @@
             applyViperFontSize(size);
         }
         function applyViperFontSize(size) {
-            // Apply CSS variable globally
-            const sizes = { small: '13px', medium: '15px', large: '17px', 'x-large': '20px' };
-            document.documentElement.style.setProperty('--viper-font-size', sizes[size] || '15px');
+            // Delegate the real work to the shared module so the change scales
+            // every rem-based class via the <html> element. Keeps the CSS var
+            // in sync too.
+            if (typeof window.viperApplyFontSize === 'function') {
+                window.viperApplyFontSize(size);
+            } else {
+                const sizes = { small: '13px', medium: '15px', large: '17px', 'x-large': '20px' };
+                document.documentElement.style.fontSize = sizes[size] || '15px';
+                document.documentElement.style.setProperty('--viper-font-size', sizes[size] || '15px');
+            }
 
             document.querySelectorAll('#fontSizeSmall,#fontSizeMedium,#fontSizeLarge,#fontSizeXlarge').forEach(b => {
                 b.classList.remove('border-viper-purple', 'text-viper-purple', 'bg-viper-purple/10');
                 b.classList.add('border-gray-600', 'text-gray-400');
             });
-            const active = document.getElementById('fontSize' + size.charAt(0).toUpperCase() + size.slice(1).replace('-l', 'L').replace('arge', 'arge'));
             const btnId = { small: 'fontSizeSmall', medium: 'fontSizeMedium', large: 'fontSizeLarge', 'x-large': 'fontSizeXlarge' }[size];
             const btn = document.getElementById(btnId);
             if (btn) {

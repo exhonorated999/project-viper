@@ -1,6 +1,8 @@
 node_modules/
 dist/
 build/
+!build/installer.nsh
+!build/icon.ico
 *.exe
 .env
 viper-source/

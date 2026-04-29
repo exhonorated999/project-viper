@@ -804,68 +804,122 @@ ipcMain.handle('update-download', async () => {
 });
 
 ipcMain.handle('update-install', async () => {
-  if (!autoUpdater) return;
+  if (!autoUpdater) return { success: false, error: 'Auto-updater not available.' };
   const path = require('path');
   const fs = require('fs');
-  // 1) Use the path captured from the update-downloaded event
+
+  // ── 1. Locate the downloaded installer ─────────────────────────────
+  // Primary: the path captured from the update-downloaded event.
+  // Fallback: scan electron-updater's known cache locations, INCLUDING
+  // the `pending/` subdirectory where it actually stores downloads.
   let installerPath = autoUpdater._downloadedInstallerPath || null;
-  console.log('update-install: downloadedInstallerPath =', installerPath);
+  console.log('update-install: _downloadedInstallerPath =', installerPath);
 
-  // 2) Fallback: search multiple possible cache locations
   if (!installerPath || !fs.existsSync(installerPath)) {
-    const localAppData = process.env.LOCALAPPDATA;
-    const possibleCaches = [];
-    if (localAppData) {
-      possibleCaches.push(path.join(localAppData, 'viper-electron-updater'));
+    const cacheDirs = [];
+    if (process.env.LOCALAPPDATA) {
+      cacheDirs.push(path.join(process.env.LOCALAPPDATA, 'viper-electron-updater', 'pending'));
+      cacheDirs.push(path.join(process.env.LOCALAPPDATA, 'viper-electron-updater'));
     }
-    try { possibleCaches.push(path.join(app.getPath('userData'), '..', '..', 'Local', 'viper-electron-updater')); } catch (_) {}
-    try { possibleCaches.push(path.join(app.getPath('temp'), 'viper-electron-updater')); } catch (_) {}
+    try { cacheDirs.push(path.join(app.getPath('userData'), '..', '..', 'Local', 'viper-electron-updater', 'pending')); } catch (_) {}
+    try { cacheDirs.push(path.join(app.getPath('userData'), '..', '..', 'Local', 'viper-electron-updater')); } catch (_) {}
+    try { cacheDirs.push(path.join(app.getPath('temp'), 'viper-electron-updater', 'pending')); } catch (_) {}
+    try { cacheDirs.push(path.join(app.getPath('temp'), 'viper-electron-updater')); } catch (_) {}
 
-    for (const cachePath of possibleCaches) {
+    for (const dir of cacheDirs) {
       try {
-        const files = fs.readdirSync(cachePath);
-        console.log('update-install: scanning', cachePath, '→', files);
-        const exe = files.find(f => f.endsWith('.exe') && f.toLowerCase().includes('v.i.p.e.r'));
+        const files = fs.readdirSync(dir);
+        console.log('update-install: scanning', dir, '→', files);
+        const exe = files.find(f => /\.exe$/i.test(f) && /v\.?i\.?p\.?e\.?r/i.test(f));
         if (exe) {
-          installerPath = path.join(cachePath, exe);
+          installerPath = path.join(dir, exe);
           break;
         }
       } catch (_) {}
     }
   }
 
-  if (installerPath && fs.existsSync(installerPath)) {
-    // Determine current install directory so NSIS installs to the same location
-    const installDir = path.dirname(process.execPath).replace(/[\\/]+$/, '');
-    console.log('Launching installer silently (elevated):', installerPath, '→', installDir);
-
-    try {
-      // PowerShell Start-Process with -Verb RunAs triggers UAC elevation
-      // NSIS flags: /S = silent, /D= = install directory (must be last, unquoted)
-      const { spawn } = require('child_process');
-      const escapedPath = installerPath.replace(/'/g, "''");
-      const psCmd = `Start-Process -FilePath '${escapedPath}' -ArgumentList '/S /D=${installDir}' -Verb RunAs`;
-      const child = spawn('powershell.exe', ['-NoProfile', '-Command', psCmd], {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: true
-      });
-      child.unref();
-    } catch (err) {
-      console.error('Elevated install failed:', err, '— falling back to quitAndInstall');
-      autoUpdater.quitAndInstall(false, true);
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      return;
-    }
-
-    // Give the installer time to start before quitting
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    app.quit();
-  } else {
-    console.log('No installer found in any cache, using standard quitAndInstall');
-    autoUpdater.quitAndInstall(false, true);
-    await new Promise(resolve => setTimeout(resolve, 2000));
+  if (!installerPath || !fs.existsSync(installerPath)) {
+    console.error('update-install: installer file not found in any known cache location');
+    sendUpdateStatus('update-status', {
+      status: 'error',
+      message: 'Update installer was not found on disk. Try clicking Download Update again, or download the installer manually from project-viper.com.'
+    });
+    return { success: false, error: 'installer-not-found' };
   }
+
+  console.log('update-install: launching', installerPath);
+
+  // ── 2. Write a self-deleting launcher batch file ───────────────────
+  // Why a batch file (not direct spawn):
+  //  - Runs OUTSIDE this Electron process tree, so it survives app.quit().
+  //    A direct child spawn (even with detached:true + unref()) can be
+  //    killed by Windows' job object when the parent dies.
+  //  - Lets us add a timeout so the installer launches AFTER VIPER has
+  //    fully exited and released its file locks.
+  //  - Lets the installer pop its own UAC dialog naturally (NSIS handles
+  //    elevation itself when targeting Program Files). No PowerShell
+  //    -Verb RunAs gymnastics, no /D= quoting issues.
+  //  - We deliberately DO NOT pass /S (silent) or /D= (install dir):
+  //      * oneClick:false NSIS shows an assisted wizard either way; let
+  //        the user click Next so they can SEE the install succeed.
+  //      * NSIS reads the previous install path from its registry key
+  //        and upgrades in-place — far more reliable than passing /D=
+  //        with a space-containing path through cmd/PowerShell quoting.
+  //
+  // installer.nsh's customInit/customInstall handle the data-preservation
+  // backup/restore regardless.
+  const batPath = path.join(app.getPath('temp'), `viper_update_${Date.now()}.bat`);
+  const batLines = [
+    '@echo off',
+    'rem VIPER auto-update launcher (auto-generated, self-deleting)',
+    'rem Wait for VIPER to fully exit and release file locks',
+    'timeout /t 4 /nobreak >nul 2>&1',
+    `start "" "${installerPath}"`,
+    'rem Self-delete after launch',
+    '(goto) 2>nul & del "%~f0"'
+  ];
+  const batContent = batLines.join('\r\n') + '\r\n';
+
+  try {
+    fs.writeFileSync(batPath, batContent, 'utf-8');
+  } catch (err) {
+    console.error('update-install: failed to write launcher batch:', err);
+    sendUpdateStatus('update-status', {
+      status: 'error',
+      message: 'Failed to prepare installer launcher: ' + err.message
+    });
+    return { success: false, error: err.message };
+  }
+
+  // ── 3. Spawn the batch via `cmd /c start` to fully detach ──────────
+  // `start ""` opens the batch in a NEW window/session, escaping the
+  // Electron process tree's job object so the launcher survives
+  // app.quit().  windowsHide keeps the launcher invisible until the
+  // installer's own UI appears.
+  try {
+    const { spawn } = require('child_process');
+    const child = spawn('cmd.exe', ['/c', 'start', '""', '/min', batPath], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true
+    });
+    child.unref();
+    console.log('update-install: launcher batch dispatched:', batPath);
+  } catch (err) {
+    console.error('update-install: failed to spawn launcher:', err);
+    sendUpdateStatus('update-status', {
+      status: 'error',
+      message: 'Failed to launch installer: ' + err.message
+    });
+    return { success: false, error: err.message };
+  }
+
+  // ── 4. Quit so the new installer can replace the running exe ───────
+  // Brief delay lets the cmd.exe spawn fully detach before we exit.
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  app.quit();
+  return { success: true };
 });
 
 // --- Backup & Restore ---

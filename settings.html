@@ -2410,9 +2410,32 @@
             }
         }
 
-        function doInstallUpdate() {
-            // NSIS installer.nsh handles userdata/ and cases/ backup+restore
-            window.electronAPI.updateInstall();
+        async function doInstallUpdate() {
+            // NSIS installer.nsh handles userdata/ and cases/ backup+restore.
+            // The main process update-install handler returns {success, error}
+            // — surface errors here so the user isn't left staring at a closed app.
+            const installBtn = document.getElementById('updateInstallBtn');
+            if (installBtn) {
+                installBtn.disabled = true;
+                installBtn.textContent = 'Launching installer…';
+            }
+            try {
+                const result = await window.electronAPI.updateInstall();
+                if (result && result.success === false) {
+                    showUpdateError(result.error || 'Failed to launch installer.');
+                    if (installBtn) {
+                        installBtn.disabled = false;
+                        installBtn.innerHTML = 'Install &amp; Restart';
+                    }
+                }
+                // On success the app is about to quit — no further UI needed.
+            } catch (err) {
+                showUpdateError('Update install error: ' + (err && err.message ? err.message : err));
+                if (installBtn) {
+                    installBtn.disabled = false;
+                    installBtn.innerHTML = 'Install &amp; Restart';
+                }
+            }
         }
 
         function hideUpdateUI() {
@@ -2496,8 +2519,12 @@
                         text.textContent = data.message || 'Update check failed.';
                         text.style.color = '#fca5a5';
                         checkBtn.disabled = false; checkBtn.textContent = 'Check for Updates';
-                        downloadBtn.style.display = 'none';
-                        progressWrap.style.display = 'none';
+                        // Re-enable install button if it was disabled by doInstallUpdate()
+                        if (installBtn) {
+                            installBtn.disabled = false;
+                            installBtn.innerHTML = 'Install &amp; Restart';
+                        }
+                        // Don't hide download/progress automatically — user may want to retry
                         break;
                 }
             });

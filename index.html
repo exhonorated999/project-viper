@@ -10,6 +10,7 @@
     <script src="modules/licensing.js"></script>
     <script src="modules/genlogs-api.js"></script>
     <script src="modules/trace-search-api.js"></script>
+    <script src="case-snapshot.js"></script>
     <script src="libs/tailwindcss.js"></script>
     <script src="libs/chart.min.js"></script>
     <script src="libs/jspdf.umd.min.js"></script>
@@ -2912,14 +2913,60 @@
         // Case Management
         let cases = JSON.parse(localStorage.getItem('viperCases')) || [];
 
-        // Ensure all existing cases have folders on disk (one-time migration)
-        (async function migrateCaseFolders() {
-            if (!window.electronAPI || !window.electronAPI.createCaseFolder) return;
-            for (const c of cases) {
-                if (c.caseNumber) {
-                    try { await window.electronAPI.createCaseFolder(c.caseNumber); } catch(e) {}
+        // Ensure all existing cases have folders on disk + auto-recover from disk snapshots
+        // (one-time migration + data-loss recovery, runs once at dashboard load)
+        (async function migrateAndRecover() {
+            if (!window.electronAPI) return;
+
+            // STEP 1: Recover any cases/modules whose data exists on disk but is missing
+            // from localStorage. This handles catastrophic localStorage wipes (renderer
+            // crashes, profile corruption, OS reset) without requiring the user to
+            // manually restore from a backup. Recovery is strictly additive — never
+            // overwrites live values.
+            try {
+                if (window.viperSnapshot && window.viperSnapshot.recover) {
+                    const r = await window.viperSnapshot.recover({ silent: true });
+                    if (r && (r.restoredCases > 0 || r.restoredModules > 0)) {
+                        // Re-read cases after recovery so the dashboard sees them
+                        cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+                        console.log(`[snapshot] Auto-recovered ${r.restoredCases} case(s), ${r.restoredModules} module set(s) from disk`);
+                        // Notify the user — but only if something was actually recovered
+                        try {
+                            const msg = r.restoredCases > 0
+                                ? `Recovered ${r.restoredCases} case${r.restoredCases === 1 ? '' : 's'} from disk after a previous interrupted session.`
+                                : `Restored ${r.restoredModules} module${r.restoredModules === 1 ? '' : 's'} of case data from disk.`;
+                            if (typeof viperToast === 'function') {
+                                setTimeout(() => viperToast(msg, 'info'), 1500);
+                            }
+                        } catch (_) { /* swallow */ }
+                        // Re-render dashboard if the function is available now
+                        try {
+                            if (typeof updateDashboardCaseData === 'function') updateDashboardCaseData();
+                            if (typeof renderAllCasesView === 'function') renderAllCasesView();
+                        } catch (_) { /* may not be defined yet — DOMContentLoaded path will rerun */ }
+                    }
+                }
+            } catch (e) {
+                console.warn('[snapshot] recovery failed:', e);
+            }
+
+            // STEP 2: Folder migration (existing behavior)
+            if (window.electronAPI.createCaseFolder) {
+                for (const c of cases) {
+                    if (c.caseNumber) {
+                        try { await window.electronAPI.createCaseFolder(c.caseNumber); } catch(e) {}
+                    }
                 }
             }
+
+            // STEP 3: Take an immediate snapshot of every case so the disk copy is
+            // current even if the user does nothing. This way a crash in the next
+            // few minutes still leaves recoverable data on disk.
+            try {
+                if (window.viperSnapshot && window.viperSnapshot.snapshotAllNow) {
+                    window.viperSnapshot.snapshotAllNow();
+                }
+            } catch (_) { /* swallow */ }
         })();
         
         function openAddTaskModal() {

@@ -22,6 +22,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveCaseTextFile: (data) => ipcRenderer.invoke('save-case-text-file', data),
   deleteCaseEvidence: (caseNumber) => ipcRenderer.invoke('delete-case-evidence', caseNumber),
 
+  // Per-case auto-snapshot (data-loss recovery, v2.8.4+)
+  saveCaseSnapshot: (data) => ipcRenderer.invoke('save-case-snapshot', data),
+  loadCaseSnapshot: (caseNumber) => ipcRenderer.invoke('load-case-snapshot', caseNumber),
+  listCaseSnapshots: () => ipcRenderer.invoke('list-case-snapshots'),
+  deleteCaseSnapshot: (caseNumber) => ipcRenderer.invoke('delete-case-snapshot', caseNumber),
+
   // Backup & Restore
   selectBackupDirectory: () => ipcRenderer.invoke('select-backup-directory'),
   createBackup: (data) => ipcRenderer.invoke('create-backup', data),

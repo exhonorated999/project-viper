@@ -21571,7 +21571,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
             // Auto-set dateClosed when status changes to closed/inactive.
             // Custom statuses with category 'active' are NOT inactive.
-            const inactiveStatuses = ['closed', 'closed-arrest', 'transferred'];
+            const inactiveStatuses = ['closed', 'closed-arrest', 'transferred', 'inactive'];
             const customStatuses = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
             customStatuses.forEach(s => { if (s.category !== 'active') inactiveStatuses.push(s.id); });
             if (inactiveStatuses.includes(newStatus) && !inactiveStatuses.includes(oldStatus)) {
@@ -21600,7 +21600,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
             // Auto-set dateClosed when moving to inactive status.
             // Custom statuses with category 'active' are NOT inactive.
-            const inactiveStatuses = ['closed', 'closed-arrest', 'transferred'];
+            const inactiveStatuses = ['closed', 'closed-arrest', 'transferred', 'inactive'];
             const customStatuses = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
             customStatuses.forEach(s => { if (s.category !== 'active') inactiveStatuses.push(s.id); });
             if (inactiveStatuses.includes(newStatus) && !inactiveStatuses.includes(oldStatus)) {

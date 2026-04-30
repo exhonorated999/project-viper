@@ -692,6 +692,102 @@ ipcMain.handle('delete-case-evidence', async (_e, caseNumber) => {
   }
 });
 
+// ── Per-case auto-snapshot to disk (data-loss recovery, v2.8.4+) ────
+// Writes cases/{caseNumber}/.case-snapshot.json on every module change.
+// The renderer-side case-snapshot.js builds the JSON in the same shape
+// as a .vcase export and calls these handlers debounced ~800ms after
+// any tracked localStorage write. Encryption follows the same Field
+// Security pattern as warrants/evidence — encrypted iff security is on.
+const SNAPSHOT_FILENAME = '.case-snapshot.json';
+
+function _safeCaseNumber(s) {
+  // Disallow path traversal — case numbers are user-typed strings
+  if (!s || typeof s !== 'string') return null;
+  if (s.indexOf('..') !== -1 || s.indexOf('/') !== -1 || s.indexOf('\\') !== -1) return null;
+  return s;
+}
+
+ipcMain.handle('save-case-snapshot', async (_e, payload) => {
+  try {
+    const data = payload && payload.data;
+    const caseNumber = _safeCaseNumber(payload && payload.caseNumber);
+    if (!caseNumber || typeof data !== 'string') {
+      return { success: false, error: 'Invalid params' };
+    }
+    const caseDir = path.join(casesDir, caseNumber);
+    fs.mkdirSync(caseDir, { recursive: true });
+    const filePath = path.join(caseDir, SNAPSHOT_FILENAME);
+
+    const buf = Buffer.from(data, 'utf8');
+    if (security && security.isEnabled() && security.isUnlocked()) {
+      fs.writeFileSync(filePath, security.encryptBuffer(buf));
+    } else {
+      fs.writeFileSync(filePath, buf);
+    }
+    return { success: true, path: filePath, size: buf.length };
+  } catch (err) {
+    console.error('save-case-snapshot failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('load-case-snapshot', async (_e, caseNumber) => {
+  try {
+    const safe = _safeCaseNumber(caseNumber);
+    if (!safe) return null;
+    const filePath = path.join(casesDir, safe, SNAPSHOT_FILENAME);
+    if (!fs.existsSync(filePath)) return null;
+    const raw = fs.readFileSync(filePath);
+    let buf = raw;
+    if (security && security.isUnlocked() && security.isEncryptedBuffer && security.isEncryptedBuffer(raw)) {
+      buf = security.decryptBuffer(raw);
+    }
+    return buf.toString('utf8');
+  } catch (err) {
+    console.error('load-case-snapshot failed:', err);
+    return null;
+  }
+});
+
+ipcMain.handle('list-case-snapshots', async () => {
+  try {
+    if (!fs.existsSync(casesDir)) return [];
+    const entries = fs.readdirSync(casesDir, { withFileTypes: true });
+    const result = [];
+    for (const ent of entries) {
+      if (!ent.isDirectory()) continue;
+      const snapPath = path.join(casesDir, ent.name, SNAPSHOT_FILENAME);
+      if (!fs.existsSync(snapPath)) continue;
+      try {
+        const stat = fs.statSync(snapPath);
+        result.push({
+          caseNumber: ent.name,
+          mtime: stat.mtimeMs,
+          size: stat.size
+        });
+      } catch (e) { /* skip unreadable */ }
+    }
+    result.sort((a, b) => b.mtime - a.mtime); // newest first
+    return result;
+  } catch (err) {
+    console.error('list-case-snapshots failed:', err);
+    return [];
+  }
+});
+
+ipcMain.handle('delete-case-snapshot', async (_e, caseNumber) => {
+  try {
+    const safe = _safeCaseNumber(caseNumber);
+    if (!safe) return { success: false, error: 'Invalid case number' };
+    const filePath = path.join(casesDir, safe, SNAPSHOT_FILENAME);
+    if (!fs.existsSync(filePath)) return { success: true, alreadyGone: true };
+    fs.unlinkSync(filePath);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 // --- Open external URL in system browser ---
 ipcMain.handle('open-external-url', async (_e, url) => {
   if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {

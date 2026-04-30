@@ -8,6 +8,7 @@
     <script src="modules/viper-ui.js"></script>
     <script src="modules/viper-prefs.js"></script>
     <script src="modules/licensing.js"></script>
+    <script src="case-snapshot.js"></script>
     <script src="libs/tailwindcss.js"></script>
     <script>
         tailwind.config = {
@@ -1637,6 +1638,33 @@
                             <span id="lastBackupDate" class="text-gray-300">Never</span>
                         </div>
                     </div>
+
+                    <!-- Disk Snapshot Recovery (v2.8.4+) -->
+                    <div class="mt-6 pt-6 border-t border-gray-700/50">
+                        <div class="flex items-start gap-3 mb-3">
+                            <svg class="w-5 h-5 text-viper-green flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                            </svg>
+                            <div class="flex-1">
+                                <h4 class="text-sm font-semibold text-gray-200 mb-1">Automatic Disk Snapshots</h4>
+                                <p class="text-xs text-gray-400 leading-relaxed">
+                                    VIPER automatically saves a copy of every case's module data to disk after every change.
+                                    If your local browser storage is ever cleared (crash, profile reset, OS migration), case data is
+                                    automatically recovered from disk on next launch. Use the button below to manually trigger recovery.
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            onclick="restoreCasesFromDisk()"
+                            id="restoreFromDiskBtn"
+                            class="w-full px-6 py-3 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green transition flex items-center justify-center gap-2 font-medium">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                            </svg>
+                            Restore Cases from Disk
+                        </button>
+                        <div id="restoreFromDiskStatus" class="mt-2 text-xs text-gray-400 text-center"></div>
+                    </div>
                 </div>
 
                 <!-- Storage Info Section -->
@@ -2190,6 +2218,48 @@
             } catch (error) {
                 console.error('Error restoring backup:', error);
                 showNotification('Failed to restore backup: ' + error, 'error');
+            }
+        }
+
+        // Manual disk-snapshot recovery (v2.8.4+) — escape hatch for catastrophic
+        // localStorage loss. Reads every cases/{caseNumber}/.case-snapshot.json on
+        // disk and back-fills missing module data into localStorage. Strictly
+        // additive — never overwrites live values.
+        async function restoreCasesFromDisk() {
+            const btn = document.getElementById('restoreFromDiskBtn');
+            const statusEl = document.getElementById('restoreFromDiskStatus');
+            if (!window.viperSnapshot || !window.viperSnapshot.recover) {
+                showNotification('Snapshot system not available.', 'error');
+                return;
+            }
+            if (!await viperConfirm('Scan the cases folder on disk and restore any missing case data?\n\nThis is safe — your existing data is never overwritten, only missing items are filled in.')) {
+                return;
+            }
+            try {
+                if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+                if (statusEl) statusEl.textContent = 'Scanning disk...';
+                const r = await window.viperSnapshot.recover({ silent: false });
+                if (r.error) {
+                    showNotification('Recovery error: ' + r.error, 'error');
+                    if (statusEl) statusEl.textContent = '';
+                    return;
+                }
+                if (statusEl) {
+                    statusEl.textContent = `Scanned ${r.scanned} snapshot${r.scanned === 1 ? '' : 's'}.`;
+                }
+                if (r.restoredCases === 0 && r.restoredModules === 0) {
+                    showNotification('No missing data found — all cases already in sync.', 'info');
+                } else {
+                    const parts = [];
+                    if (r.restoredCases) parts.push(`${r.restoredCases} case${r.restoredCases === 1 ? '' : 's'}`);
+                    if (r.restoredModules) parts.push(`${r.restoredModules} module set${r.restoredModules === 1 ? '' : 's'}`);
+                    showNotification('Recovered ' + parts.join(' + ') + ' from disk. Reload the dashboard to see them.', 'success');
+                }
+            } catch (err) {
+                console.error('Restore from disk failed:', err);
+                showNotification('Restore failed: ' + (err.message || err), 'error');
+            } finally {
+                if (btn) { btn.disabled = false; btn.style.opacity = ''; }
             }
         }
 

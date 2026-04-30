@@ -11,6 +11,7 @@
     <script src="modules/genlogs-api.js"></script>
     <script src="modules/trace-search-api.js"></script>
     <script src="modules/resource-hub.js"></script>
+    <script src="case-snapshot.js"></script>
 
     <script src="libs/tailwindcss.js"></script>
     <link rel="stylesheet" href="libs/leaflet.css" />
@@ -1106,6 +1107,15 @@
                 window.location.href = 'index.html';
                 return;
             }
+
+            // Snapshot to disk on case open. Belt-and-suspenders: even if no module
+            // edits happen this session, the disk copy stays current. The autosave
+            // hook below also re-snapshots on every module write.
+            try {
+                if (window.viperSnapshot && window.viperSnapshot.snapshotCase) {
+                    window.viperSnapshot.snapshotCase(currentCase);
+                }
+            } catch (_) { /* swallow */ }
             
             // Load tasks for this case
             const allTasks = JSON.parse(localStorage.getItem('viperTasks')) || [];

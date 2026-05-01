@@ -2939,10 +2939,17 @@
                                 setTimeout(() => viperToast(msg, 'info'), 1500);
                             }
                         } catch (_) { /* swallow */ }
-                        // Re-render dashboard if the function is available now
+                        // Re-render dashboard if the function is available now.
+                        // Only re-render All Cases if that view is *currently* showing —
+                        // otherwise renderAllCasesView() would overwrite the Dashboard
+                        // markup and trap the user on All Cases on every page load.
                         try {
                             if (typeof updateDashboardCaseData === 'function') updateDashboardCaseData();
-                            if (typeof renderAllCasesView === 'function') renderAllCasesView();
+                            const allCasesNav = document.getElementById('allCasesNav');
+                            const onAllCases = allCasesNav && allCasesNav.classList.contains('active');
+                            if (onAllCases && typeof renderAllCasesView === 'function') {
+                                renderAllCasesView();
+                            }
                         } catch (_) { /* may not be defined yet — DOMContentLoaded path will rerun */ }
                     }
                 }

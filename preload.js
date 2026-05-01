@@ -195,4 +195,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   vigilantSetVisible: (visible) => ipcRenderer.send('vigilant-set-visible', visible),
   vigilantSearchPlate: (params) => ipcRenderer.invoke('vigilant-search-plate', params),
   vigilantReset: () => ipcRenderer.invoke('vigilant-reset'),
+
+  // Resource Hub generic per-BV zoom factor (0.5 .. 2.0)
+  rhSetZoom: (resId, factor) => ipcRenderer.send('rh-set-zoom', { resId, factor }),
 });

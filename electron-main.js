@@ -3606,6 +3606,27 @@ ipcMain.on('vigilant-set-visible', (_event, visible) => {
   }
 });
 
+// Generic zoom factor control for the four Resource Hub BrowserViews.
+// Renderer sends a resource id ('flock' | 'tlo' | 'accurint' | 'vigilant')
+// and a zoom factor (0.5 .. 2.0). Persists across visibility toggles
+// because we apply directly to the BV's webContents.
+ipcMain.on('rh-set-zoom', (_event, payload) => {
+  try {
+    const { resId, factor } = payload || {};
+    const f = Math.max(0.5, Math.min(2.0, parseFloat(factor) || 1));
+    let bv = null;
+    if (resId === 'flock') bv = flockBrowserView;
+    else if (resId === 'tlo') bv = tloBrowserView;
+    else if (resId === 'accurint') bv = accurintBrowserView;
+    else if (resId === 'vigilant') bv = vigilantBrowserView;
+    if (bv && bv.webContents && !bv.webContents.isDestroyed()) {
+      bv.webContents.setZoomFactor(f);
+    }
+  } catch (e) {
+    console.warn('rh-set-zoom failed:', e);
+  }
+});
+
 ipcMain.handle('vigilant-search-plate', async (_event, { plate, state }) => {
   if (!vigilantBrowserView) return { success: false, error: 'Vigilant not initialized' };
   try {

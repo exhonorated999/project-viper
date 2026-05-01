@@ -91,6 +91,14 @@
             <h3 class="text-sm font-bold text-white tracking-wide">INVESTIGATIVE RESOURCES</h3>
           </div>
           <div class="flex items-center gap-1">
+            <button id="rhZoomOut" class="p-2 rounded-lg hover:bg-white/5 text-gray-500 hover:text-white transition" title="Zoom out" onclick="window._rhZoomStep(-1)">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 8v0M7 11h8a4 4 0 100-8 4 4 0 000 8z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h6"/></svg>
+            </button>
+            <span id="rhZoomLabel" class="text-[10px] font-mono text-gray-400 min-w-[34px] text-center select-none" title="Click to reset" onclick="window._rhZoomReset()" style="cursor:pointer;">100%</span>
+            <button id="rhZoomIn" class="p-2 rounded-lg hover:bg-white/5 text-gray-500 hover:text-white transition" title="Zoom in" onclick="window._rhZoomStep(1)">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 8v0M7 11h8a4 4 0 100-8 4 4 0 000 8z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5v6M8 8h6"/></svg>
+            </button>
+            <div class="w-px h-5 bg-white/10 mx-1"></div>
             <button id="rhExpandBtn" class="p-2 rounded-lg hover:bg-white/5 text-gray-500 hover:text-white transition" title="Expand" onclick="window._rhToggleExpand()">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
             </button>
@@ -233,12 +241,33 @@
     const el = document.getElementById('rhBV_' + resId);
     if (!el || !window.electronAPI) return;
     const r = el.getBoundingClientRect();
-    const b = { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) };
+    // viper-prefs.js applies CSS `zoom` on <body> for font scaling.
+    // In Chromium, getBoundingClientRect for elements inside a zoomed
+    // ancestor returns layout-pixel (pre-zoom) coordinates, while
+    // BrowserView.setBounds expects the window's CSS pixels (the
+    // post-zoom space the user sees). Multiply by the live body zoom
+    // so the BV lines up with the drawer at any font scale.
+    let z = 1;
+    try {
+      const cz = parseFloat(getComputedStyle(document.body).zoom);
+      if (cz && !Number.isNaN(cz) && cz > 0) z = cz;
+    } catch (_) { /* ignore */ }
+    const b = {
+      x: Math.round(r.x * z),
+      y: Math.round(r.y * z),
+      width: Math.round(r.width * z),
+      height: Math.round(r.height * z)
+    };
     if (b.width < 10 || b.height < 10) return;
     if (resId === 'flock') { window.electronAPI.flockSetBounds(b); window.electronAPI.flockSetVisible(true); }
     if (resId === 'tlo')   { window.electronAPI.tloSetBounds(b);   window.electronAPI.tloSetVisible(true); }
     if (resId === 'accurint') { window.electronAPI.accurintSetBounds(b); window.electronAPI.accurintSetVisible(true); }
     if (resId === 'vigilant') { window.electronAPI.vigilantSetBounds(b); window.electronAPI.vigilantSetVisible(true); }
+    // Re-assert the persisted per-BV zoom every time a BV is shown so it
+    // survives reloads, lazy-init, and tab switches.
+    if (window.electronAPI && window.electronAPI.rhSetZoom) {
+      try { window.electronAPI.rhSetZoom(resId, getZoomFactor(resId)); } catch (_) {}
+    }
   }
 
   function hideBV(resId) {
@@ -272,6 +301,7 @@
     } else {
       showPanel(rhActiveTab);
     }
+    updateZoomLabel();
   }
 
   function close() {
@@ -296,6 +326,66 @@
     showPanel(resId);
     const res = RESOURCES.find(r => r.id === resId);
     if (res && res.isBV && rhOpen) setTimeout(() => positionBV(resId), 50);
+    updateZoomLabel();
+  }
+
+  /* ── Per-BV zoom controls ─────────────────────────────────── */
+  // Persisted zoom factor per resource id, e.g. { flock: 1.1, tlo: 0.9 }
+  const RH_ZOOM_KEY = 'viperRhZoomFactors';
+  function loadZoomMap() {
+    try { return JSON.parse(localStorage.getItem(RH_ZOOM_KEY)) || {}; }
+    catch (_) { return {}; }
+  }
+  function saveZoomMap(m) {
+    try { localStorage.setItem(RH_ZOOM_KEY, JSON.stringify(m)); } catch (_) {}
+  }
+  function getZoomFactor(resId) {
+    const m = loadZoomMap();
+    const v = parseFloat(m[resId]);
+    return (v && !Number.isNaN(v)) ? v : 1.0;
+  }
+  function setZoomFactor(resId, f) {
+    const clamped = Math.max(0.5, Math.min(2.0, f));
+    const m = loadZoomMap();
+    m[resId] = clamped;
+    saveZoomMap(m);
+    if (window.electronAPI && window.electronAPI.rhSetZoom) {
+      window.electronAPI.rhSetZoom(resId, clamped);
+    }
+    updateZoomLabel();
+  }
+  function applyZoomToActive() {
+    const res = RESOURCES.find(r => r.id === rhActiveTab);
+    if (!res || !res.isBV) return;
+    const f = getZoomFactor(rhActiveTab);
+    if (window.electronAPI && window.electronAPI.rhSetZoom) {
+      window.electronAPI.rhSetZoom(rhActiveTab, f);
+    }
+  }
+  function updateZoomLabel() {
+    const lbl = document.getElementById('rhZoomLabel');
+    const out = document.getElementById('rhZoomOut');
+    const inn = document.getElementById('rhZoomIn');
+    if (!lbl) return;
+    const res = RESOURCES.find(r => r.id === rhActiveTab);
+    const isBV = !!(res && res.isBV);
+    // Zoom controls only meaningful for BV-backed tabs
+    [lbl, out, inn].forEach(el => { if (el) el.style.display = isBV ? '' : 'none'; });
+    if (isBV) {
+      const f = getZoomFactor(rhActiveTab);
+      lbl.textContent = Math.round(f * 100) + '%';
+    }
+  }
+  function zoomStep(delta) {
+    const res = RESOURCES.find(r => r.id === rhActiveTab);
+    if (!res || !res.isBV) return;
+    const cur = getZoomFactor(rhActiveTab);
+    setZoomFactor(rhActiveTab, cur + (delta * 0.1));
+  }
+  function zoomReset() {
+    const res = RESOURCES.find(r => r.id === rhActiveTab);
+    if (!res || !res.isBV) return;
+    setZoomFactor(rhActiveTab, 1.0);
   }
 
   /* ── Trace Network Search ─────────────────────────────────── */
@@ -428,6 +518,8 @@
   window._rhTraceSearch      = traceSearch;
   window._rhFmcsaSearch      = fmcsaSearch;
   window._rhFmcsaDot         = fmcsaLookupByDot;
+  window._rhZoomStep         = zoomStep;
+  window._rhZoomReset        = zoomReset;
 
   /* ── Init ─────────────────────────────────────────────────── */
   function init() {

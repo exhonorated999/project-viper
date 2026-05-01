@@ -124,13 +124,15 @@
             }
             #viperSidebarToggle svg { width: 18px; height: 18px; }
 
-            /* When the sidebar is open, push the toggle to just past its
-               right edge so it doesn't sit on top of the sidebar items. */
+            /* When the sidebar is open, anchor the toggle so it visually
+               sits ON the line separating sidebar from main content.
+               Sidebar is .w-64 = 256px; button is 36px wide → center it
+               on the seam by setting left = 256 - 18 = 238. */
             body:not(.viper-sidebar-collapsed) #viperSidebarToggle {
-                left: 268px;
+                left: 238px;
             }
             @media (max-width: 1024px) {
-                body:not(.viper-sidebar-collapsed) #viperSidebarToggle { left: 268px; }
+                body:not(.viper-sidebar-collapsed) #viperSidebarToggle { left: 238px; }
             }
         `;
         document.head.appendChild(css);

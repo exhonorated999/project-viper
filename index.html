@@ -2913,51 +2913,17 @@
         // Case Management
         let cases = JSON.parse(localStorage.getItem('viperCases')) || [];
 
-        // Ensure all existing cases have folders on disk + auto-recover from disk snapshots
-        // (one-time migration + data-loss recovery, runs once at dashboard load)
-        (async function migrateAndRecover() {
+        // Ensure all existing cases have folders on disk
+        // (one-time migration runs at dashboard load).
+        // NOTE: Snapshot RECOVERY is intentionally NOT run here. Auto-snapshot
+        // continues silently on every localStorage write (see case-snapshot.js),
+        // but restore from disk is an explicit user action — they trigger it
+        // from Settings → "Restore Cases from Disk". This avoids surprise
+        // toast notifications and accidental overwrites on every page load.
+        (async function migrateFolders() {
             if (!window.electronAPI) return;
 
-            // STEP 1: Recover any cases/modules whose data exists on disk but is missing
-            // from localStorage. This handles catastrophic localStorage wipes (renderer
-            // crashes, profile corruption, OS reset) without requiring the user to
-            // manually restore from a backup. Recovery is strictly additive — never
-            // overwrites live values.
-            try {
-                if (window.viperSnapshot && window.viperSnapshot.recover) {
-                    const r = await window.viperSnapshot.recover({ silent: true });
-                    if (r && (r.restoredCases > 0 || r.restoredModules > 0)) {
-                        // Re-read cases after recovery so the dashboard sees them
-                        cases = JSON.parse(localStorage.getItem('viperCases')) || [];
-                        console.log(`[snapshot] Auto-recovered ${r.restoredCases} case(s), ${r.restoredModules} module set(s) from disk`);
-                        // Notify the user — but only if something was actually recovered
-                        try {
-                            const msg = r.restoredCases > 0
-                                ? `Recovered ${r.restoredCases} case${r.restoredCases === 1 ? '' : 's'} from disk after a previous interrupted session.`
-                                : `Restored ${r.restoredModules} module${r.restoredModules === 1 ? '' : 's'} of case data from disk.`;
-                            if (typeof viperToast === 'function') {
-                                setTimeout(() => viperToast(msg, 'info'), 1500);
-                            }
-                        } catch (_) { /* swallow */ }
-                        // Re-render dashboard if the function is available now.
-                        // Only re-render All Cases if that view is *currently* showing —
-                        // otherwise renderAllCasesView() would overwrite the Dashboard
-                        // markup and trap the user on All Cases on every page load.
-                        try {
-                            if (typeof updateDashboardCaseData === 'function') updateDashboardCaseData();
-                            const allCasesNav = document.getElementById('allCasesNav');
-                            const onAllCases = allCasesNav && allCasesNav.classList.contains('active');
-                            if (onAllCases && typeof renderAllCasesView === 'function') {
-                                renderAllCasesView();
-                            }
-                        } catch (_) { /* may not be defined yet — DOMContentLoaded path will rerun */ }
-                    }
-                }
-            } catch (e) {
-                console.warn('[snapshot] recovery failed:', e);
-            }
-
-            // STEP 2: Folder migration (existing behavior)
+            // Folder migration (existing behavior)
             if (window.electronAPI.createCaseFolder) {
                 for (const c of cases) {
                     if (c.caseNumber) {
@@ -2966,9 +2932,9 @@
                 }
             }
 
-            // STEP 3: Take an immediate snapshot of every case so the disk copy is
+            // Take an immediate snapshot of every case so the disk copy is
             // current even if the user does nothing. This way a crash in the next
-            // few minutes still leaves recoverable data on disk.
+            // few minutes still leaves recoverable data on disk. (Silent — no toast.)
             try {
                 if (window.viperSnapshot && window.viperSnapshot.snapshotAllNow) {
                     window.viperSnapshot.snapshotAllNow();

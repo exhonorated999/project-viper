@@ -82,6 +82,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   kikWarrantPickFile: () => ipcRenderer.invoke('kik-warrant-pick-file'),
   kikWarrantReadMedia: (data) => ipcRenderer.invoke('kik-warrant-read-media', data),
 
+  // Datapilot mobile-forensic CSV export parser
+  datapilotScan: (data) => ipcRenderer.invoke('datapilot-scan', data),
+  datapilotPickFolder: () => ipcRenderer.invoke('datapilot-pick-folder'),
+  datapilotImport: (data) => ipcRenderer.invoke('datapilot-import', data),
+  datapilotReadMedia: (data) => ipcRenderer.invoke('datapilot-read-media', data),
+  datapilotGetMediaUrl: (data) => ipcRenderer.invoke('datapilot-get-media-url', data),
+  datapilotExportFlagsBundle: (data) => ipcRenderer.invoke('datapilot-export-flags-bundle', data),
+  datapilotReadBundleFile: (data) => ipcRenderer.invoke('datapilot-read-bundle-file', data),
+  datapilotBundleMediaUrl: (data) => ipcRenderer.invoke('datapilot-bundle-media-url', data),
+  datapilotFolderSize: (data) => ipcRenderer.invoke('datapilot-folder-size', data),
+  datapilotFolderExists: (data) => ipcRenderer.invoke('datapilot-folder-exists', data),
+  datapilotCopyToEvidence: (data) => ipcRenderer.invoke('datapilot-copy-to-evidence', data),
+  datapilotOnCopyProgress: (cb) => {
+    const listener = (_e, payload) => { try { cb(payload); } catch (_) {} };
+    ipcRenderer.on('datapilot-copy-progress', listener);
+    return () => ipcRenderer.removeListener('datapilot-copy-progress', listener);
+  },
+
   // Field Security
   securityCheck: () => ipcRenderer.invoke('security-check'),
   securitySetup: (data) => ipcRenderer.invoke('security-setup', data),

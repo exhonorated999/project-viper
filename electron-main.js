@@ -1,11 +1,46 @@
-const { app, BrowserWindow, BrowserView, ipcMain, shell, dialog, globalShortcut, session } = require('electron');
+const { app, BrowserWindow, BrowserView, ipcMain, shell, dialog, globalShortcut, session, protocol, net } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
 const url = require('url');
 const { spawn } = require('child_process');
 const os = require('os');
+const crypto = require('crypto');
 const SecurityManager = require('./modules/security');
+
+// ── Datapilot custom media protocol ──────────────────────────────────
+// The renderer is loaded over http://localhost, which blocks `file:///` URLs
+// for local resources (e.g. videos). We register a custom `viper-media://`
+// scheme as privileged so the renderer can stream local files via tokens
+// without exposing absolute paths in the URL or running afoul of CSP.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'viper-media',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+      bypassCSP: true,
+      corsEnabled: true
+    }
+  }
+]);
+
+// token → { absPath, expiresAt }. Tokens are short-lived (1 hour) and only
+// resolved by the protocol handler. The renderer never sees the absolute path.
+const datapilotMediaTokens = new Map();
+function _datapilotIssueMediaToken(absPath) {
+  // Reuse token if same path already issued and unexpired
+  const now = Date.now();
+  for (const [tok, entry] of datapilotMediaTokens) {
+    if (entry.expiresAt < now) datapilotMediaTokens.delete(tok);
+    else if (entry.absPath === absPath) return tok;
+  }
+  const tok = crypto.randomBytes(16).toString('hex');
+  datapilotMediaTokens.set(tok, { absPath, expiresAt: now + 60 * 60 * 1000 });
+  return tok;
+}
 
 // electron-updater: lazy-load to avoid crashing in dev mode
 let autoUpdater = null;
@@ -280,6 +315,32 @@ function _setCasesHidden(hidden) {
 
 app.whenReady().then(async () => {
   try {
+    // Register viper-media:// protocol handler — serves local files for
+    // Datapilot media streaming (videos, audio) without exposing paths.
+    protocol.handle('viper-media', async (request) => {
+      try {
+        const reqUrl = new URL(request.url);
+        // viper-media://m/<token>
+        const token = reqUrl.pathname.replace(/^\/+/, '').replace(/\/.*$/, '');
+        const entry = datapilotMediaTokens.get(token);
+        if (!entry) return new Response('Not Found', { status: 404 });
+        if (entry.expiresAt < Date.now()) {
+          datapilotMediaTokens.delete(token);
+          return new Response('Expired', { status: 410 });
+        }
+        if (!fs.existsSync(entry.absPath)) {
+          return new Response('Missing', { status: 404 });
+        }
+        // Delegate streaming (incl. byte-range requests for video scrubbing)
+        // to net.fetch on a file:// URL — this is the magic that lets
+        // <video> seek without loading the entire file into memory.
+        return net.fetch('file:///' + entry.absPath.replace(/\\/g, '/'));
+      } catch (err) {
+        console.error('viper-media protocol error:', err);
+        return new Response('Error: ' + err.message, { status: 500 });
+      }
+    });
+
     // Initialize security manager (uses userData for config + vault)
     const secDir = app.getPath('userData');
     if (!fs.existsSync(secDir)) fs.mkdirSync(secDir, { recursive: true });
@@ -2068,12 +2129,26 @@ ipcMain.handle('read-evidence-file', async (event, filePath) => {
 // --- Save warrant file to disk ---
 ipcMain.handle('save-warrant-file', async (event, data) => {
   try {
-    const { caseNumber, subfolder, fileName, fileData } = data;
+    const { caseNumber, subfolder, fileName, fileData, warrantId } = data;
     // subfolder: 'Signed', 'Production', or 'CourtReturn'
     const warrantDir = path.join(casesDir, caseNumber, 'Warrants', subfolder);
     fs.mkdirSync(warrantDir, { recursive: true });
 
-    const filePath = path.join(warrantDir, fileName);
+    // BUG FIX: When two warrants upload files with the same source filename
+    // (e.g. both saved as "Search Warrant.pdf"), the second write used to
+    // overwrite the first on disk — every warrant record still pointed at
+    // the same path, so viewing any of them showed the LATEST uploaded PDF.
+    // To users this looked like "all warrants change to the last one".
+    // Prefix the on-disk filename with the warrant id so each warrant gets
+    // its own unique file. The user-facing filename (warrantFileName /
+    // file.name in productionFiles) is stored separately on the record, so
+    // the UI continues to show the original name.
+    const sanitize = (s) => String(s).replace(/[<>:"|?*\x00-\x1F]/g, '_');
+    const safeName = warrantId
+      ? `${warrantId}__${sanitize(fileName)}`
+      : sanitize(fileName);
+
+    const filePath = path.join(warrantDir, safeName);
     const buffer = Buffer.from(fileData);
 
     if (security && security.isEnabled() && security.isUnlocked()) {
@@ -2106,7 +2181,7 @@ ipcMain.handle('read-warrant-file', async (event, filePath) => {
 });
 
 // --- Select ZIP archive for warrant production uploads ---
-ipcMain.handle('select-production-zip', async (event, { caseNumber }) => {
+ipcMain.handle('select-production-zip', async (event, { caseNumber, warrantId }) => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Select Production ZIP Archive(s)',
     properties: ['openFile', 'multiSelections'],
@@ -2121,10 +2196,14 @@ ipcMain.handle('select-production-zip', async (event, { caseNumber }) => {
   const warrantDir = path.join(casesDir, caseNumber, 'Warrants', 'Production');
   fs.mkdirSync(warrantDir, { recursive: true });
 
+  const sanitize = (s) => String(s).replace(/[<>:"|?*\x00-\x1F]/g, '_');
+
   const files = [];
   for (const srcPath of result.filePaths) {
     const fileName = path.basename(srcPath);
-    const destPath = path.join(warrantDir, fileName);
+    // Prefix on-disk filename with warrant id to prevent cross-warrant overwrites.
+    const safeName = warrantId ? `${warrantId}__${sanitize(fileName)}` : sanitize(fileName);
+    const destPath = path.join(warrantDir, safeName);
     let buffer = fs.readFileSync(srcPath);
     const fileSize = buffer.length;
 
@@ -2141,20 +2220,30 @@ ipcMain.handle('select-production-zip', async (event, { caseNumber }) => {
   return { files };
 });
 
-ipcMain.handle('resolve-warrant-path', async (event, { caseNumber, subfolder, fileName }) => {
+ipcMain.handle('resolve-warrant-path', async (event, { caseNumber, subfolder, fileName, warrantId }) => {
   const warrantDir = path.join(casesDir, caseNumber, 'Warrants', subfolder);
-  // Try exact filename first
+  const sanitize = (s) => String(s || '').replace(/[<>:"|?*\x00-\x1F]/g, '_');
+
+  // Try id-prefixed filename first (current scheme)
+  if (warrantId && fileName) {
+    const prefixed = path.join(warrantDir, `${warrantId}__${sanitize(fileName)}`);
+    if (fs.existsSync(prefixed)) return prefixed;
+  }
+  // Try exact filename (legacy non-prefixed scheme)
   if (fileName) {
     const filePath = path.join(warrantDir, fileName);
     if (fs.existsSync(filePath)) return filePath;
   }
-  // Fallback: scan directory for any file (handles missing/mismatched fileName)
+  // Fallback: scan directory — but ONLY return a file that's clearly tied
+  // to THIS warrant id (prefix match). Returning a random sibling file is
+  // what caused the "all warrants change to last upload" bug.
   try {
-    if (fs.existsSync(warrantDir)) {
+    if (fs.existsSync(warrantDir) && warrantId) {
       const files = fs.readdirSync(warrantDir).filter(f => !f.startsWith('.'));
-      if (files.length > 0) {
-        console.log('resolve-warrant-path: found', files[0], 'in', warrantDir);
-        return path.join(warrantDir, files[0]);
+      const owned = files.find(f => f.startsWith(`${warrantId}__`));
+      if (owned) {
+        console.log('resolve-warrant-path: matched by warrantId prefix:', owned, 'in', warrantDir);
+        return path.join(warrantDir, owned);
       }
     }
   } catch (err) {
@@ -4062,3 +4151,860 @@ ipcMain.handle('kik-warrant-read-media', async (event, { filePath }) => {
     return { success: false, error: error.message };
   }
 });
+
+// ─── Datapilot Parser IPC ────────────────────────────────────────────
+
+const DatapilotParser = require('./modules/datapilot/datapilot-parser');
+const dpParser = new DatapilotParser();
+
+/**
+ * Scan the case Evidence tree for Datapilot folders (CSV or DPX).
+ * Returns folders with their detected format for UI labeling.
+ */
+ipcMain.handle('datapilot-scan', async (event, { caseNumber }) => {
+  try {
+    const dirsToScan = [
+      path.join(casesDir, caseNumber, 'Evidence'),
+      path.join(casesDir, caseNumber, 'Datapilot'),
+      path.join(casesDir, caseNumber)
+    ];
+    const seen = new Set();
+    const folders = [];
+    for (const dir of dirsToScan) {
+      if (!fs.existsSync(dir)) continue;
+      const found = DatapilotParser.scanForDatapilotFolders(dir, 6);
+      for (const entry of found) {
+        // Backward compat: scan may return string or {folderPath, format}
+        const fPath = typeof entry === 'string' ? entry : entry.folderPath;
+        const fmt   = typeof entry === 'string' ? (DatapilotParser.detectFormat ? DatapilotParser.detectFormat(fPath) : 'csv') : entry.format;
+        if (seen.has(fPath)) continue;
+        seen.add(fPath);
+        folders.push({
+          name: path.basename(fPath),
+          path: fPath,
+          parent: path.dirname(fPath),
+          format: fmt || 'csv'
+        });
+      }
+    }
+    return { success: true, folders };
+  } catch (error) {
+    console.error('Datapilot scan error:', error);
+    return { success: false, error: error.message, folders: [] };
+  }
+});
+
+/**
+ * Open a folder picker so the user can manually point to a Datapilot folder.
+ * Accepts either a Datapilot folder directly OR any ancestor folder — in the
+ * latter case we recursively scan for Datapilot exports beneath it and return
+ * all candidates for the renderer to disambiguate.
+ */
+ipcMain.handle('datapilot-pick-folder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Datapilot Export Folder (CSV or DPX)',
+    properties: ['openDirectory']
+  });
+  restoreFocus();
+  if (result.canceled || !result.filePaths.length) return null;
+  const picked = result.filePaths[0];
+
+  // Direct hit: the picked folder itself is a Datapilot export.
+  if (DatapilotParser.isDatapilotFolder(picked)) {
+    const fmt = DatapilotParser.detectFormat ? DatapilotParser.detectFormat(picked) : 'csv';
+    return {
+      success: true,
+      path: picked,
+      name: path.basename(picked),
+      format: fmt || 'csv',
+      candidates: [{ path: picked, name: path.basename(picked), parent: path.dirname(picked), format: fmt || 'csv' }]
+    };
+  }
+
+  // Indirect hit: scan beneath the picked folder for any Datapilot exports.
+  let scanned = [];
+  try {
+    scanned = DatapilotParser.scanForDatapilotFolders(picked, 6) || [];
+  } catch (e) {
+    console.error('datapilot-pick-folder scan error:', e);
+  }
+  const candidates = scanned.map(entry => {
+    const fPath = typeof entry === 'string' ? entry : entry.folderPath;
+    const fmt   = typeof entry === 'string' ? (DatapilotParser.detectFormat ? DatapilotParser.detectFormat(fPath) : 'csv') : entry.format;
+    return {
+      path: fPath,
+      name: path.basename(fPath),
+      parent: path.dirname(fPath),
+      format: fmt || 'csv'
+    };
+  });
+
+  if (candidates.length === 0) {
+    return {
+      success: false,
+      error: 'No Datapilot export found at or beneath the selected folder. Looking for either Summary_CaseAndAcquisitionInformation.csv (CSV format) or dptData.db (DPX format).'
+    };
+  }
+
+  // Single candidate → behave like a direct pick.
+  if (candidates.length === 1) {
+    return {
+      success: true,
+      path: candidates[0].path,
+      name: candidates[0].name,
+      format: candidates[0].format,
+      candidates
+    };
+  }
+
+  // Multiple candidates → renderer presents a picker.
+  return {
+    success: true,
+    multipleFound: true,
+    candidates
+  };
+});
+
+/**
+ * Parse a Datapilot folder (CSV or DPX). Returns the structured data for the renderer.
+ */
+ipcMain.handle('datapilot-import', async (event, { folderPath }) => {
+  try {
+    if (!folderPath) return { success: false, error: 'No folder path provided' };
+    if (!DatapilotParser.isDatapilotFolder(folderPath)) {
+      return { success: false, error: 'Not a Datapilot folder (no Summary CSV or dptData.db found)' };
+    }
+    const data = await dpParser.parseFolder(folderPath);
+    return { success: true, data };
+  } catch (error) {
+    console.error('Datapilot import error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Lightweight check — does a folder path exist + look like a Datapilot folder?
+ * Used by the Datapilot tab's auto-scan to flag unreachable references without
+ * walking the entire tree (which is what `datapilot-folder-size` does).
+ */
+ipcMain.handle('datapilot-folder-exists', async (event, { folderPath }) => {
+  try {
+    if (!folderPath) return { success: false, exists: false, isDatapilot: false };
+    let exists = false;
+    try { exists = fs.existsSync(folderPath); } catch (_) { exists = false; }
+    let isDatapilot = false;
+    if (exists) {
+      try { isDatapilot = DatapilotParser.isDatapilotFolder(folderPath); } catch (_) {}
+    }
+    return { success: true, exists, isDatapilot };
+  } catch (error) {
+    return { success: false, error: error.message, exists: false, isDatapilot: false };
+  }
+});
+
+/**
+ * Measure total size + file count of a folder tree (synchronously walks).
+ * Returns { totalBytes, fileCount }. Used to warn the user before copy.
+ */
+ipcMain.handle('datapilot-folder-size', async (event, { folderPath }) => {
+  try {
+    if (!folderPath || !fs.existsSync(folderPath)) {
+      return { success: false, error: 'Folder not found' };
+    }
+    let totalBytes = 0;
+    let fileCount = 0;
+    const walk = (dir) => {
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const ent of entries) {
+        const full = path.join(dir, ent.name);
+        try {
+          if (ent.isDirectory()) walk(full);
+          else if (ent.isFile()) {
+            const st = fs.statSync(full);
+            totalBytes += st.size;
+            fileCount++;
+          }
+        } catch (_) { /* skip unreadable */ }
+      }
+    };
+    walk(folderPath);
+    return { success: true, totalBytes, fileCount };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Copy an entire Datapilot extraction folder into the case Evidence directory
+ * so it travels with DA exports. Honors Field Security encryption.
+ *
+ * Reports progress via 'datapilot-copy-progress' on the sender's webContents.
+ *   { phase: 'copy', filesDone, fileCount, bytesDone, totalBytes, currentFile }
+ *
+ * Returns { success, destPath, fileCount, totalBytes }
+ */
+ipcMain.handle('datapilot-copy-to-evidence', async (event, { caseNumber, evidenceTag, sourcePath }) => {
+  try {
+    if (!caseNumber || !evidenceTag || !sourcePath) {
+      return { success: false, error: 'Missing caseNumber, evidenceTag, or sourcePath' };
+    }
+    if (!fs.existsSync(sourcePath)) {
+      return { success: false, error: 'Source folder no longer exists: ' + sourcePath };
+    }
+
+    // Sanitize tag for filesystem use
+    const safeTag = String(evidenceTag).replace(/[<>:"|?*\x00-\x1F]/g, '_').replace(/[\\/]/g, '_').trim() || `datapilot_${Date.now()}`;
+    const destRoot = path.join(casesDir, caseNumber, 'Evidence', safeTag);
+    fs.mkdirSync(destRoot, { recursive: true });
+
+    // Two-pass: count first so progress UI knows the total.
+    const allFiles = [];
+    let totalBytes = 0;
+    const collect = (dir, relBase) => {
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const ent of entries) {
+        const full = path.join(dir, ent.name);
+        const rel  = relBase ? path.join(relBase, ent.name) : ent.name;
+        try {
+          if (ent.isDirectory()) collect(full, rel);
+          else if (ent.isFile()) {
+            const st = fs.statSync(full);
+            allFiles.push({ src: full, rel, size: st.size });
+            totalBytes += st.size;
+          }
+        } catch (_) { /* skip */ }
+      }
+    };
+    collect(sourcePath, '');
+
+    const sender = event.sender;
+    const send = (payload) => {
+      try { if (sender && !sender.isDestroyed()) sender.send('datapilot-copy-progress', payload); } catch (_) {}
+    };
+
+    send({ phase: 'start', filesDone: 0, fileCount: allFiles.length, bytesDone: 0, totalBytes });
+
+    let bytesDone = 0;
+    let lastEmit = 0;
+    const encryptOn = security && security.isEnabled() && security.isUnlocked();
+
+    for (let i = 0; i < allFiles.length; i++) {
+      const f = allFiles[i];
+      const dest = path.join(destRoot, f.rel);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+
+      if (encryptOn) {
+        // Field Security: read+encrypt+write (small files only safe in memory; cap at 256MB)
+        if (f.size > 256 * 1024 * 1024) {
+          // Too large to encrypt in-memory — copy raw and warn
+          fs.copyFileSync(f.src, dest);
+        } else {
+          const buf = fs.readFileSync(f.src);
+          fs.writeFileSync(dest, security.encryptBuffer(buf));
+        }
+      } else {
+        fs.copyFileSync(f.src, dest);
+      }
+      bytesDone += f.size;
+
+      // Throttle progress events to ~10/s
+      const now = Date.now();
+      if (now - lastEmit > 100 || i === allFiles.length - 1) {
+        send({
+          phase: 'copy',
+          filesDone: i + 1,
+          fileCount: allFiles.length,
+          bytesDone,
+          totalBytes,
+          currentFile: f.rel
+        });
+        lastEmit = now;
+      }
+    }
+
+    send({ phase: 'done', filesDone: allFiles.length, fileCount: allFiles.length, bytesDone, totalBytes });
+
+    return {
+      success: true,
+      destPath: destRoot,
+      fileCount: allFiles.length,
+      totalBytes
+    };
+  } catch (error) {
+    console.error('Datapilot copy-to-evidence error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Read a media file from inside a Datapilot folder (FileSystem/, HtmlPreview/).
+ * Supports Field Security decryption transparently.
+ */
+ipcMain.handle('datapilot-read-media', async (event, { folderPath, relativePath }) => {
+  try {
+    if (!folderPath || !relativePath) {
+      return { success: false, error: 'Missing folderPath or relativePath' };
+    }
+    // Normalize and prevent path traversal
+    const normRel = path.normalize(relativePath).replace(/^[\\/]+/, '');
+    if (normRel.startsWith('..')) {
+      return { success: false, error: 'Invalid relative path' };
+    }
+    const fullPath = path.join(folderPath, normRel);
+    const resolvedRoot = path.resolve(folderPath);
+    if (!path.resolve(fullPath).startsWith(resolvedRoot)) {
+      return { success: false, error: 'Path traversal blocked' };
+    }
+    if (!fs.existsSync(fullPath)) {
+      return { success: false, error: 'File not found: ' + relativePath };
+    }
+    let buf = fs.readFileSync(fullPath);
+    if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
+      buf = security.decryptBuffer(buf);
+    }
+    // Detect mime from magic bytes
+    let mimeType = 'application/octet-stream';
+    if (buf.length > 1 && buf[0] === 0xFF && buf[1] === 0xD8) mimeType = 'image/jpeg';
+    else if (buf.length > 1 && buf[0] === 0x89 && buf[1] === 0x50) mimeType = 'image/png';
+    else if (buf.length > 7 && buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70) mimeType = 'video/mp4';
+    else if (buf.length > 5 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) mimeType = 'image/gif';
+    else if (buf.length > 11 && buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) mimeType = 'image/webp';
+    else {
+      const ext = path.extname(fullPath).toLowerCase();
+      const map = {
+        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+        '.gif': 'image/gif', '.webp': 'image/webp', '.heic': 'image/heic',
+        '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm',
+        '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4',
+        '.pdf': 'application/pdf', '.txt': 'text/plain', '.csv': 'text/csv'
+      };
+      if (map[ext]) mimeType = map[ext];
+    }
+    return {
+      success: true,
+      data: buf.toString('base64'),
+      mimeType,
+      size: buf.length,
+      fileName: path.basename(fullPath)
+    };
+  } catch (error) {
+    console.error('Datapilot read-media error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Return a streamable file:// URL for a Datapilot media file. Use this for
+ * videos / audio / very large files instead of `datapilot-read-media`, which
+ * base64-encodes the entire file (fine for thumbnails, terrible for a 285MB
+ * video). For Field-Security-encrypted files, decrypts to a temp location
+ * first and returns the temp path's file URL.
+ */
+ipcMain.handle('datapilot-get-media-url', async (event, { folderPath, relativePath }) => {
+  try {
+    if (!folderPath || !relativePath) {
+      return { success: false, error: 'Missing folderPath or relativePath' };
+    }
+    const normRel = path.normalize(relativePath).replace(/^[\\/]+/, '');
+    if (normRel.startsWith('..')) return { success: false, error: 'Invalid relative path' };
+    const fullPath = path.join(folderPath, normRel);
+    const resolvedRoot = path.resolve(folderPath);
+    if (!path.resolve(fullPath).startsWith(resolvedRoot)) {
+      return { success: false, error: 'Path traversal blocked' };
+    }
+    if (!fs.existsSync(fullPath)) return { success: false, error: 'File not found' };
+
+    let servePath = fullPath;
+    let isTemp = false;
+    if (security && security.isUnlocked()) {
+      // Sniff the first 32 bytes to detect encryption (avoid reading the whole file).
+      const fd = fs.openSync(fullPath, 'r');
+      const head = Buffer.alloc(64);
+      try { fs.readSync(fd, head, 0, 64, 0); } finally { fs.closeSync(fd); }
+      if (security.isEncryptedBuffer(head)) {
+        // Encrypted — must decrypt to a temp file. Read full buffer here
+        // (unavoidable if encrypted), then write decrypted bytes to temp.
+        const buf = fs.readFileSync(fullPath);
+        const decrypted = security.decryptBuffer(buf);
+        const tempDir = path.join(app.getPath('temp'), 'viper-view-datapilot');
+        fs.mkdirSync(tempDir, { recursive: true });
+        const tempName = `${Date.now()}_${path.basename(fullPath)}`;
+        servePath = path.join(tempDir, tempName);
+        fs.writeFileSync(servePath, decrypted);
+        isTemp = true;
+      }
+    }
+    const stat = fs.statSync(servePath);
+    // Issue a token-backed viper-media URL — bypasses the file:// block
+    // that http://localhost renderer pages enforce, and supports byte-range
+    // requests so <video> can seek without loading the whole file.
+    const token = _datapilotIssueMediaToken(servePath);
+    const fileUrl = `viper-media://m/${token}`;
+    return { success: true, fileUrl, sizeBytes: stat.size, isTemp, fileName: path.basename(fullPath) };
+  } catch (error) {
+    console.error('Datapilot get-media-url error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+
+/**
+ * ─── Datapilot: Export flagged items to a self-contained case bundle ──
+ *
+ * Writes:
+ *   cases/<caseNumber>/Evidence/Datapilot/<bundleId>/
+ *     ├── media/<sha>__<safeName>.<ext>   (full originals, encrypted if Field Security active)
+ *     ├── thumbs/<sha>.jpg                (renderer-generated previews, encrypted likewise)
+ *     ├── report.json                     (structured flag data — for in-VIPER viewer)
+ *     └── report.html                     (self-contained DA-ready report w/ embedded thumbnails)
+ *
+ * The DA-facing HTML is produced here in main so the renderer doesn't have
+ * to assemble large strings. Thumbnails are inlined as base64 so a single
+ * file is enough for any browser to display the report.
+ *
+ * Inputs:
+ *   {
+ *     caseNumber:   string,
+ *     bundleId:     string,         // e.g., 'dp_1730655813004'
+ *     dpLabel:      string,         // e.g., 'DP-001'
+ *     folderPath:   string,         // original Datapilot import folder
+ *     fileName:     string,         // imp.fileName
+ *     deviceInfo:   { make, model, phoneNumber, carrier, imei, serial, osVersion },
+ *     summary:      { acquisitionDate, examiner, caseRef, ... },
+ *     resolved:     { messages[], calls[], contacts[], media[] },
+ *     thumbsByKey:  { [sha]: 'data:image/jpeg;base64,…' },
+ *     generatedAt:  ISO string
+ *   }
+ *
+ * Returns:
+ *   {
+ *     success: true,
+ *     bundlePath: <abs>,
+ *     reportJsonPath, reportHtmlPath,
+ *     mediaFiles: [{ name, path, size, type, sha }],
+ *     totalSize: number
+ *   }
+ */
+ipcMain.handle('datapilot-export-flags-bundle', async (event, payload) => {
+  try {
+    const {
+      caseNumber, bundleId, dpLabel,
+      folderPath, fileName,
+      deviceInfo = {}, summary = {},
+      resolved = {}, thumbsByKey = {},
+      generatedAt
+    } = payload || {};
+
+    if (!caseNumber || !bundleId || !folderPath) {
+      return { success: false, error: 'Missing caseNumber/bundleId/folderPath' };
+    }
+
+    const bundlePath  = path.join(casesDir, caseNumber, 'Evidence', 'Datapilot', bundleId);
+    const mediaDir    = path.join(bundlePath, 'media');
+    const thumbsDir   = path.join(bundlePath, 'thumbs');
+    fs.mkdirSync(mediaDir, { recursive: true });
+    fs.mkdirSync(thumbsDir, { recursive: true });
+
+    const useEnc = security && security.isEnabled() && security.isUnlocked();
+    const writeFileMaybeEncrypted = (dest, buf) => {
+      fs.writeFileSync(dest, useEnc ? security.encryptBuffer(buf) : buf);
+    };
+    const safeName = (s) => String(s || 'file').replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').slice(0, 80);
+
+    // ── 1. Copy flagged media originals + write thumbnails ─────────────
+    const mediaList   = Array.isArray(resolved.media) ? resolved.media : [];
+    const mediaFiles  = [];
+    let   totalSize   = 0;
+
+    for (const m of mediaList) {
+      const sha = (m.sha || m.sha256 || m.sha3 || '').toLowerCase();
+      if (!sha || !m.relativePath) continue;
+      // Re-use the same path-traversal protection as datapilot-read-media
+      const normRel = path.normalize(m.relativePath).replace(/^[\\/]+/, '');
+      if (normRel.startsWith('..')) continue;
+      const srcPath = path.join(folderPath, normRel);
+      const resolvedRoot = path.resolve(folderPath);
+      if (!path.resolve(srcPath).startsWith(resolvedRoot)) continue;
+      if (!fs.existsSync(srcPath)) continue;
+
+      let buf = fs.readFileSync(srcPath);
+      // The source folder may itself hold encrypted files when Field
+      // Security has been used on the import staging area.
+      if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
+        buf = security.decryptBuffer(buf);
+      }
+
+      const ext  = path.extname(m.fileName || normRel) || '';
+      const base = `${sha}__${safeName(path.basename(m.fileName || normRel, ext))}${ext}`;
+      const destPath = path.join(mediaDir, base);
+      writeFileMaybeEncrypted(destPath, buf);
+      const size = buf.length;
+      totalSize += size;
+
+      // MIME by extension (good enough for the evidence card)
+      const extLow = ext.toLowerCase();
+      const mimeMap = {
+        '.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.gif':'image/gif',
+        '.webp':'image/webp','.heic':'image/heic','.heif':'image/heif',
+        '.mp4':'video/mp4','.mov':'video/quicktime','.webm':'video/webm','.m4v':'video/x-m4v',
+        '.mp3':'audio/mpeg','.wav':'audio/wav','.m4a':'audio/mp4','.aac':'audio/aac'
+      };
+      const mime = mimeMap[extLow] || 'application/octet-stream';
+
+      mediaFiles.push({
+        name: base,
+        path: destPath,
+        size,
+        type: mime,
+        sha
+      });
+
+      // Write thumbnail if renderer supplied one
+      const thumbDataUrl = thumbsByKey[sha];
+      if (thumbDataUrl && typeof thumbDataUrl === 'string') {
+        const m64 = thumbDataUrl.match(/^data:([^;]+);base64,(.*)$/);
+        if (m64) {
+          try {
+            const tBuf = Buffer.from(m64[2], 'base64');
+            writeFileMaybeEncrypted(path.join(thumbsDir, `${sha}.jpg`), tBuf);
+          } catch (_) { /* non-fatal */ }
+        }
+      }
+    }
+
+    // ── 2. Write report.json ───────────────────────────────────────────
+    const report = {
+      bundleId,
+      dpLabel,
+      generatedAt: generatedAt || new Date().toISOString(),
+      source: { fileName, folderPath },
+      device: deviceInfo,
+      summary,
+      counts: {
+        messages: (resolved.messages || []).length,
+        calls:    (resolved.calls    || []).length,
+        contacts: (resolved.contacts || []).length,
+        media:    mediaFiles.length
+      },
+      messages: resolved.messages || [],
+      calls:    resolved.calls    || [],
+      contacts: resolved.contacts || [],
+      media:    mediaList.map(m => {
+        const sha = (m.sha || m.sha256 || m.sha3 || '').toLowerCase();
+        const copied = mediaFiles.find(f => f.sha === sha);
+        return {
+          sha,
+          fileName: m.fileName,
+          mediaType: m.mediaType,
+          lastModified: m.lastModified || '',
+          sizeBytes: m.sizeBytes || (copied && copied.size) || 0,
+          lat: m.lat || null, lng: m.lng || null,
+          mediaRel: copied ? `media/${copied.name}` : null,
+          thumbRel: thumbsByKey[sha] ? `thumbs/${sha}.jpg` : null,
+          mime: copied ? copied.type : ''
+        };
+      })
+    };
+    const reportJsonPath = path.join(bundlePath, 'report.json');
+    writeFileMaybeEncrypted(reportJsonPath, Buffer.from(JSON.stringify(report, null, 2), 'utf-8'));
+
+    // ── 3. Generate self-contained report.html (DA-facing) ─────────────
+    const html = _buildDatapilotReportHtml(report, thumbsByKey);
+    const reportHtmlPath = path.join(bundlePath, 'report.html');
+    writeFileMaybeEncrypted(reportHtmlPath, Buffer.from(html, 'utf-8'));
+
+    return {
+      success: true,
+      bundlePath,
+      reportJsonPath, reportHtmlPath,
+      mediaFiles,
+      totalSize
+    };
+  } catch (error) {
+    console.error('datapilot-export-flags-bundle error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Read a file from inside a Datapilot evidence bundle, decrypting if needed.
+ * Used by the in-VIPER Datapilot evidence viewer to fetch report.json and
+ * to load thumbnails and full-size media on demand.
+ *
+ * Inputs: { bundlePath, relPath }
+ * Returns: { success, mimeType, dataBase64, size } | { success:false, error }
+ */
+ipcMain.handle('datapilot-read-bundle-file', async (event, { bundlePath, relPath }) => {
+  try {
+    if (!bundlePath || !relPath) return { success: false, error: 'Missing bundlePath/relPath' };
+    const normRel = path.normalize(relPath).replace(/^[\\/]+/, '');
+    if (normRel.startsWith('..')) return { success: false, error: 'Invalid relPath' };
+    const fullPath = path.join(bundlePath, normRel);
+    const resolvedRoot = path.resolve(bundlePath);
+    if (!path.resolve(fullPath).startsWith(resolvedRoot)) {
+      return { success: false, error: 'Path traversal blocked' };
+    }
+    if (!fs.existsSync(fullPath)) return { success: false, error: 'Not found: ' + relPath };
+    let buf = fs.readFileSync(fullPath);
+    if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
+      buf = security.decryptBuffer(buf);
+    }
+    const extLow = path.extname(fullPath).toLowerCase();
+    const mimeMap = {
+      '.json':'application/json','.html':'text/html','.txt':'text/plain',
+      '.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.gif':'image/gif',
+      '.webp':'image/webp','.heic':'image/heic','.heif':'image/heif',
+      '.mp4':'video/mp4','.mov':'video/quicktime','.webm':'video/webm',
+      '.mp3':'audio/mpeg','.wav':'audio/wav','.m4a':'audio/mp4'
+    };
+    const mimeType = mimeMap[extLow] || 'application/octet-stream';
+    return { success: true, mimeType, dataBase64: buf.toString('base64'), size: buf.length };
+  } catch (error) {
+    console.error('datapilot-read-bundle-file error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Same as datapilot-read-bundle-file but returns a streamable viper-media://
+ * URL — for full-size video/audio playback inside the in-VIPER viewer.
+ */
+ipcMain.handle('datapilot-bundle-media-url', async (event, { bundlePath, relPath }) => {
+  try {
+    if (!bundlePath || !relPath) return { success: false, error: 'Missing args' };
+    const normRel = path.normalize(relPath).replace(/^[\\/]+/, '');
+    if (normRel.startsWith('..')) return { success: false, error: 'Invalid relPath' };
+    const fullPath = path.join(bundlePath, normRel);
+    const resolvedRoot = path.resolve(bundlePath);
+    if (!path.resolve(fullPath).startsWith(resolvedRoot)) {
+      return { success: false, error: 'Path traversal blocked' };
+    }
+    if (!fs.existsSync(fullPath)) return { success: false, error: 'Not found' };
+
+    let servePath = fullPath;
+    if (security && security.isUnlocked()) {
+      const fd = fs.openSync(fullPath, 'r');
+      const head = Buffer.alloc(64);
+      try { fs.readSync(fd, head, 0, 64, 0); } finally { fs.closeSync(fd); }
+      if (security.isEncryptedBuffer(head)) {
+        const buf = fs.readFileSync(fullPath);
+        const decrypted = security.decryptBuffer(buf);
+        const tempDir = path.join(app.getPath('temp'), 'viper-view-datapilot-bundle');
+        fs.mkdirSync(tempDir, { recursive: true });
+        servePath = path.join(tempDir, `${Date.now()}_${path.basename(fullPath)}`);
+        fs.writeFileSync(servePath, decrypted);
+      }
+    }
+    const stat = fs.statSync(servePath);
+    const token = _datapilotIssueMediaToken(servePath);
+    return { success: true, fileUrl: `viper-media://m/${token}`, sizeBytes: stat.size };
+  } catch (error) {
+    console.error('datapilot-bundle-media-url error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Build a self-contained HTML report from the structured bundle data.
+ * Embeds all thumbnails as base64 so the file works offline without the
+ * media/ folder. Full-size links point at the relative media/ paths so
+ * a DA opening the file from inside the exported ZIP can click through.
+ */
+function _buildDatapilotReportHtml(report, thumbsByKey) {
+  const esc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const fmtDate = (s) => {
+    if (!s) return '';
+    try { const d = new Date(s); if (!isNaN(d)) return d.toLocaleString(); } catch(_){}
+    return s;
+  };
+  const fmtBytes = (n) => {
+    if (!n || n < 0) return '';
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+    return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+  };
+
+  const dev = report.device || {};
+  const counts = report.counts || {};
+
+  const messagesHtml = (report.messages || []).map(m => {
+    const dirLabel = m.direction === 'outgoing' ? 'SENT' : (m.direction === 'incoming' ? 'RECEIVED' : 'UNKNOWN');
+    const dirCls = m.direction === 'outgoing' ? 'msg-out' : (m.direction === 'incoming' ? 'msg-in' : 'msg-unk');
+    return `
+      <div class="msg ${dirCls}">
+        <div class="msg-head">
+          <span class="msg-dir">${esc(dirLabel)}</span>
+          <span class="msg-addr">${esc(m.contactName ? `${m.contactName} (${m.address || ''})` : (m.address || ''))}</span>
+          <span class="msg-time">${esc(fmtDate(m.timestampIso || m.timestamp))}</span>
+        </div>
+        <div class="msg-text">${esc(m.text || '(empty)')}</div>
+        ${m.type ? `<div class="msg-meta">${esc(m.type)}</div>` : ''}
+      </div>
+    `;
+  }).join('');
+
+  const callsHtml = (report.calls || []).map(c => `
+    <tr>
+      <td>${esc(c.direction || 'unknown')}</td>
+      <td>${esc(c.contactName || '')}</td>
+      <td class="mono">${esc(c.address || c.number || '')}</td>
+      <td>${esc(fmtDate(c.timestampIso || c.timestamp))}</td>
+      <td>${esc(c.duration ? `${c.duration}s` : '')}</td>
+      <td>${esc(c.summary || c.deletedData || '')}</td>
+    </tr>
+  `).join('');
+
+  const contactsHtml = (report.contacts || []).map(c => `
+    <div class="contact-card">
+      <div class="contact-name">${esc(c.name || '(unknown)')}</div>
+      ${(c.phones || []).map(p => `<div class="contact-row mono">${esc(p)}</div>`).join('')}
+      ${(c.emails || []).map(e => `<div class="contact-row">${esc(e)}</div>`).join('')}
+      ${c.notes ? `<div class="contact-notes">${esc(c.notes)}</div>` : ''}
+    </div>
+  `).join('');
+
+  const mediaHtml = (report.media || []).map(m => {
+    const sha = (m.sha || '').toLowerCase();
+    const thumb = thumbsByKey[sha];  // base64 dataURL
+    const fullLink = m.mediaRel ? `<a class="media-open" href="${esc(m.mediaRel)}" target="_blank">Open original</a>` : '';
+    const meta = [
+      m.mediaType,
+      fmtDate(m.lastModified),
+      fmtBytes(m.sizeBytes),
+      (m.lat != null && m.lng != null) ? `${m.lat.toFixed(5)}, ${m.lng.toFixed(5)}` : ''
+    ].filter(Boolean).map(esc).join(' · ');
+    return `
+      <div class="media-card">
+        <div class="media-thumb">
+          ${thumb ? `<img src="${esc(thumb)}" alt="${esc(m.fileName)}"/>` : `<div class="no-thumb">${esc((m.mediaType || 'file').toUpperCase())}</div>`}
+        </div>
+        <div class="media-meta">
+          <div class="media-name">${esc(m.fileName || sha)}</div>
+          <div class="media-sub">${meta}</div>
+          ${fullLink}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  return `<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<title>Datapilot Evidence Report — ${esc(report.source && report.source.fileName || report.bundleId || '')}</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    margin: 0; padding: 28px 36px; background: #f7f8fa; color: #111827;
+    line-height: 1.45;
+  }
+  h1 { font-size: 22px; margin: 0 0 6px; color: #0e7490; }
+  h2 { font-size: 16px; margin: 28px 0 10px; padding-bottom: 6px; border-bottom: 2px solid #d1d5db; color: #111827; }
+  .sub { color: #6b7280; font-size: 13px; margin-bottom: 18px; }
+  .device-card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 14px 18px; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px 24px; font-size: 13px;
+  }
+  .device-card .label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; }
+  .device-card .value { font-weight: 500; }
+  .stats { display: flex; gap: 18px; margin: 12px 0 22px; }
+  .stat-pill { background: #0e7490; color: #fff; padding: 6px 14px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+
+  .msg { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 14px; margin: 8px 0; }
+  .msg-out { border-left: 4px solid #0e7490; }
+  .msg-in  { border-left: 4px solid #f59e0b; }
+  .msg-unk { border-left: 4px solid #9ca3af; }
+  .msg-head { display: flex; gap: 10px; align-items: baseline; font-size: 11px; flex-wrap: wrap; margin-bottom: 4px; }
+  .msg-dir { font-weight: 700; color: #0e7490; letter-spacing: 0.05em; }
+  .msg-in .msg-dir { color: #b45309; }
+  .msg-unk .msg-dir { color: #6b7280; }
+  .msg-addr { font-family: ui-monospace, "Menlo", monospace; color: #374151; }
+  .msg-time { margin-left: auto; color: #6b7280; }
+  .msg-text { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+  .msg-meta { font-size: 10px; color: #9ca3af; margin-top: 4px; text-transform: uppercase; }
+
+  table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #e5e7eb; font-size: 13px; vertical-align: top; }
+  th { background: #f3f4f6; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; }
+  tr:last-child td { border-bottom: none; }
+  .mono { font-family: ui-monospace, "Menlo", monospace; font-size: 12px; }
+
+  .contact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+  .contact-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 12px; }
+  .contact-name { font-weight: 600; margin-bottom: 4px; }
+  .contact-row { font-size: 12px; color: #374151; }
+  .contact-notes { margin-top: 6px; font-size: 12px; color: #6b7280; font-style: italic; }
+
+  .media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+  .media-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }
+  .media-thumb { background: #111827; display: flex; align-items: center; justify-content: center; height: 160px; }
+  .media-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .no-thumb { color: #9ca3af; font-size: 11px; letter-spacing: 0.1em; }
+  .media-meta { padding: 8px 10px; font-size: 12px; }
+  .media-name { font-weight: 600; word-break: break-all; margin-bottom: 4px; }
+  .media-sub { color: #6b7280; font-size: 11px; margin-bottom: 6px; }
+  .media-open { color: #0e7490; text-decoration: none; font-size: 12px; font-weight: 600; }
+  .media-open:hover { text-decoration: underline; }
+
+  .empty { color: #9ca3af; font-size: 13px; padding: 12px; background: #fff; border: 1px dashed #d1d5db; border-radius: 8px; text-align: center; }
+  @media print {
+    body { background: #fff; padding: 0.5in; }
+    .media-card, .msg, table, .device-card, .contact-card { break-inside: avoid; }
+  }
+</style>
+</head><body>
+
+<h1>Datapilot Evidence Report</h1>
+<div class="sub">
+  ${esc(report.dpLabel || '')} ·
+  Source: ${esc(report.source && report.source.fileName || '')} ·
+  Generated: ${esc(fmtDate(report.generatedAt))}
+</div>
+
+<h2>Device & Owner</h2>
+<div class="device-card">
+  ${[
+    ['Make', dev.make], ['Model', dev.model],
+    ['Phone Number', dev.phoneNumber], ['Carrier', dev.carrier],
+    ['IMEI', dev.imei], ['Serial', dev.serial],
+    ['OS', dev.osVersion],
+    ['Acquisition', report.summary && (report.summary.acquisitionDate || report.summary.created)],
+    ['Examiner', report.summary && report.summary.examiner],
+    ['Case Ref', report.summary && report.summary.caseRef]
+  ].map(([l,v]) => `
+    <div>
+      <div class="label">${esc(l)}</div>
+      <div class="value">${esc(v || '—')}</div>
+    </div>
+  `).join('')}
+</div>
+
+<div class="stats">
+  <span class="stat-pill">${counts.messages || 0} messages</span>
+  <span class="stat-pill">${counts.calls || 0} calls</span>
+  <span class="stat-pill">${counts.media || 0} media</span>
+  <span class="stat-pill">${counts.contacts || 0} contacts</span>
+</div>
+
+<h2>Flagged Messages (${counts.messages || 0})</h2>
+${messagesHtml || '<div class="empty">No messages flagged.</div>'}
+
+<h2>Flagged Calls (${counts.calls || 0})</h2>
+${callsHtml ? `<table><thead><tr>
+  <th>Direction</th><th>Contact</th><th>Number</th><th>Timestamp</th><th>Duration</th><th>Summary</th>
+</tr></thead><tbody>${callsHtml}</tbody></table>` : '<div class="empty">No calls flagged.</div>'}
+
+<h2>Flagged Media (${counts.media || 0})</h2>
+${mediaHtml ? `<div class="media-grid">${mediaHtml}</div>` : '<div class="empty">No media flagged.</div>'}
+
+<h2>Flagged Contacts (${counts.contacts || 0})</h2>
+${contactsHtml ? `<div class="contact-grid">${contactsHtml}</div>` : '<div class="empty">No contacts flagged.</div>'}
+
+</body></html>`;
+}

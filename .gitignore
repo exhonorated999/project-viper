@@ -13,3 +13,5 @@ cases/
 _parse_pdfs*.py
 *.traineddata
 test_pdf_output.txt
+sample-data/kik-sample/
+plans/2026-05-03_cellebrite-module/

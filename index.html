@@ -1346,6 +1346,15 @@
                                     <div><span class="text-sm font-medium text-white">KIK Warrant</span><div class="text-xs text-gray-500">Parse KIK Messenger Warrant Returns</div></div>
                                 </div>
                             </label>
+                            <label class="flex items-center space-x-3 p-3 rounded-lg cursor-pointer hover:bg-viper-card/30 transition-colors border border-gray-700 hover:border-viper-green/50">
+                                <input type="checkbox" value="datapilot" class="case-module w-4 h-4 rounded border-gray-600 text-viper-green focus:ring-viper-green">
+                                <div class="flex items-center space-x-2">
+                                    <svg class="w-5 h-5 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17a4 4 0 01-2-7.5l1-3a4 4 0 017 0l1 3A4 4 0 0115 17H9zM12 12v9"/>
+                                    </svg>
+                                    <div><span class="text-sm font-medium text-white">Datapilot</span><div class="text-xs text-gray-500">Mobile Forensic CSV Parser + AI Insights</div></div>
+                                </div>
+                            </label>
                         </div>
                     </div>
                 </div>
@@ -1988,7 +1997,7 @@
                     'areacanvas', 'prosecution', 'narcotics', 'firearms',
                     'money', 'opsplan', 'rmsImports', 'oversightImport',
                     'canvasForms', 'cyberTips', 'timelineEvents', 'consentSearches',
-                    'googleWarrant', 'metaWarrant', 'kikWarrant'
+                    'googleWarrant', 'metaWarrant', 'kikWarrant', 'datapilot'
                 ];
                 pattern2Keys.forEach(k => {
                     const val = backupData[`${k}_${oldId}`];
@@ -5477,7 +5486,7 @@
                     // 3. Clean localStorage — Pattern 2 (per-case keys by case.id)
                     const p2Prefixes = ['suspects_','victims_','victimBusinesses_','cargo_','witnesses_',
                         'involvedPersons_','recoveredVehicles_','missingpersons_','areacanvas_','prosecution_','narcotics_',
-                        'firearms_','money_','opsplan_','rmsImports_','oversightImport_','canvasForms_','cyberTips_','timelineEvents_','consentSearches_','googleWarrant_','metaWarrant_','kikWarrant_'];
+                        'firearms_','money_','opsplan_','rmsImports_','oversightImport_','canvasForms_','cyberTips_','timelineEvents_','consentSearches_','googleWarrant_','metaWarrant_','kikWarrant_','datapilot_'];
                     for (const prefix of p2Prefixes) {
                         localStorage.removeItem(prefix + c.id);
                     }

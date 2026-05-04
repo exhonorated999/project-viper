@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: https:; media-src 'self' blob: file:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.genlogs.io https://trace-broker-production.up.railway.app https://router.project-osrm.org; font-src 'self' data:; frame-src 'self' blob: file: https: http:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: viper-media: https:; media-src 'self' blob: file: viper-media:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.genlogs.io https://trace-broker-production.up.railway.app https://router.project-osrm.org; font-src 'self' data:; frame-src 'self' blob: file: viper-media: https: http:;">
     <title>V.I.P.E.R. - Case Detail</title>
     <script src="modules/viper-ui.js"></script>
     <script src="modules/viper-prefs.js"></script>
@@ -707,12 +707,17 @@
     <link rel="stylesheet" href="modules/google-warrant/google-warrant-styles.css">
     <link rel="stylesheet" href="modules/meta-warrant/meta-warrant-styles.css">
     <link rel="stylesheet" href="modules/kik-warrant/kik-warrant-styles.css">
+    <link rel="stylesheet" href="modules/datapilot/datapilot-styles.css">
     <script src="modules/google-warrant/google-warrant-module.js"></script>
     <script src="modules/google-warrant/google-warrant-ui.js"></script>
     <script src="modules/meta-warrant/meta-warrant-module.js"></script>
     <script src="modules/meta-warrant/meta-warrant-ui.js"></script>
     <script src="modules/kik-warrant/kik-warrant-module.js"></script>
     <script src="modules/kik-warrant/kik-warrant-ui.js"></script>
+    <script src="modules/datapilot/datapilot-analytics.js"></script>
+    <script src="modules/datapilot/datapilot-report.js"></script>
+    <script src="modules/datapilot/datapilot-ui.js"></script>
+    <script src="modules/datapilot/datapilot-module.js"></script>
 </head>
 <body class="text-white">
     <div class="flex h-screen overflow-hidden hex-pattern">
@@ -1134,6 +1139,21 @@
             // Load evidence for this case
             const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
             caseEvidence = allEvidence[currentCase.caseNumber] || [];
+
+            // Expose a refresh helper so external modules (e.g. Datapilot) can
+            // sync the in-memory caseEvidence after they push new items via
+            // localStorage.  Without this, pushed evidence is invisible until
+            // the page is reloaded because `caseEvidence` is `let`-scoped.
+            window.refreshCaseEvidenceFromStorage = function() {
+                try {
+                    const ae = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
+                    caseEvidence = ae[currentCase.caseNumber] || [];
+                    if (typeof currentTab !== 'undefined' && currentTab === 'evidence' && typeof renderTabContent === 'function') {
+                        renderTabContent('evidence');
+                    }
+                    return caseEvidence.length;
+                } catch (e) { return -1; }
+            };
             
             // Load warrants for this case
             const allWarrants = JSON.parse(localStorage.getItem('viperCaseWarrants')) || {};
@@ -1630,7 +1650,8 @@
                 cyberTips: { label: 'Cyber Tips', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' },
                 googleWarrant: { label: 'Google Warrant', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' },
                 metaWarrant: { label: 'META Warrant', icon: 'M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z' },
-                kikWarrant: { label: 'KIK Warrant', icon: 'M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z' }
+                kikWarrant: { label: 'KIK Warrant', icon: 'M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z' },
+                datapilot: { label: 'Datapilot', icon: 'M9 17a4 4 0 01-2-7.5l1-3a4 4 0 017 0l1 3A4 4 0 0115 17H9zM12 12v9' }
             };
             
             // Initialize tabOrder if it doesn't exist
@@ -1772,6 +1793,7 @@
             allModules.googleWarrant = { label: 'Google Warrant', icon: '📋' };
             allModules.metaWarrant = { label: 'META Warrant', icon: '📘' };
             allModules.kikWarrant = { label: 'KIK Warrant', icon: '💬' };
+            allModules.datapilot = { label: 'Datapilot', icon: '📱' };
 
             const availableModules = Object.keys(allModules).filter(
                 module => !currentCase.modules.includes(module)
@@ -1855,7 +1877,8 @@
                 opsplan:'OPS Plan', analytics:'CDR', aperture:'Aperture',
                 networkIntelligence:'Network Intel', traceImport:'Trace Import', rmsImport:'RMS Import',
                 oversightImport:'Oversight', cyberTips:'Cyber Tips', consentSearch:'Consent Search',
-                googleWarrant:'Google Warrant', metaWarrant:'META Warrant', kikWarrant:'KIK Warrant'
+                googleWarrant:'Google Warrant', metaWarrant:'META Warrant', kikWarrant:'KIK Warrant',
+                datapilot:'Datapilot'
             };
             const label = moduleConfig[moduleId] || moduleId;
             if (!await viperConfirm(`Remove "${label}" from this case?\n\nNote: Any data in this module will remain in storage and can be recovered by re-adding the module.`, {danger:true, okText:'Delete'})) return;
@@ -1909,6 +1932,7 @@
                 googleWarrant: { label: 'Google Warrant', icon: '📋', type: 'data' },
                 metaWarrant: { label: 'META Warrant', icon: '📘', type: 'data' },
                 kikWarrant: { label: 'KIK Warrant', icon: '💬', type: 'data' },
+                datapilot: { label: 'Datapilot', icon: '📱', type: 'data' },
                 consentSearch: { label: 'Consent Search', icon: '✅', type: 'data' }
             };
 
@@ -2002,7 +2026,7 @@
                 'areacanvas', 'prosecution', 'narcotics', 'firearms',
                 'money', 'opsplan', 'rmsImports', 'oversightImport',
                 'canvasForms', 'cyberTips', 'timelineEvents', 'consentSearches',
-                'googleWarrant', 'metaWarrant', 'kikWarrant', 'caseMetrics'
+                'googleWarrant', 'metaWarrant', 'kikWarrant', 'datapilot', 'caseMetrics'
             ];
             const moduleData = {};
             moduleKeys.forEach(k => {
@@ -2118,6 +2142,10 @@
                 case 'kikWarrant': {
                     const kkData = JSON.parse(localStorage.getItem(`kikWarrant_${currentCase.id}`) || '{"imports":[]}');
                     return (kkData.imports || []).length;
+                }
+                case 'datapilot': {
+                    const dpData = JSON.parse(localStorage.getItem(`datapilot_${currentCase.id}`) || '{"imports":[]}');
+                    return (dpData.imports || []).length;
                 }
                 default: return 0;
             }
@@ -3364,6 +3392,9 @@
             } else if (tabId === 'kikWarrant') {
                 contentDiv.innerHTML = renderKikWarrantTab();
                 initializeKikWarrant();
+            } else if (tabId === 'datapilot') {
+                contentDiv.innerHTML = renderDatapilotTab();
+                initializeDatapilot();
             } else {
                 contentDiv.innerHTML = renderPlaceholderTab(tabId);
             }
@@ -4406,6 +4437,7 @@
                                             <option value="toxicology">Toxicology Report</option>
                                             <option value="phone">Cell Phone Extraction</option>
                                             <option value="cellebrite">Cellebrite Report</option>
+                                            <option value="datapilot">Datapilot Extraction</option>
                                             <option value="other">Other</option>
                                         </select>
                                     </div>
@@ -4442,6 +4474,48 @@
                                             <span class="font-medium">Select Cellebrite Folder</span>
                                         </button>
                                         <p class="text-xs text-viper-orange/70 mt-2">📱 Select the folder containing CellebriteReader.exe and the .ufdr report file</p>
+                                    </div>
+                                    <!-- Datapilot folder picker (shown when Datapilot Extraction selected) -->
+                                    <div id="datapilotUploadUI" class="hidden">
+                                        <button type="button" onclick="selectDatapilotFolder()" class="w-full px-4 py-4 bg-viper-card/50 border-2 border-dashed border-viper-cyan/40 rounded-lg hover:border-viper-cyan transition-colors flex items-center justify-center space-x-3 text-gray-400 hover:text-viper-cyan">
+                                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                                            </svg>
+                                            <span class="font-medium">Select Datapilot Folder</span>
+                                        </button>
+                                        <p class="text-xs text-viper-cyan/70 mt-2">📲 Point at the extraction folder (CSV: <code>Summary_*.csv</code>) or the Datapilot 10 export root (DPX: <code>dptData.db</code>) — any parent folder works, we'll scan it.</p>
+
+                                        <!-- Storage mode toggle (shown after a folder is parsed) -->
+                                        <div id="datapilotStorageModeBlock" class="hidden mt-4">
+                                            <label class="block text-xs font-semibold text-gray-300 mb-2">Storage Mode <span id="datapilotFolderSizeLabel" class="font-normal text-viper-cyan/80 ml-1"></span></label>
+                                            <div class="space-y-2">
+                                                <label class="flex items-start gap-2 p-3 bg-viper-card/50 border border-viper-cyan/30 rounded-lg cursor-pointer hover:border-viper-cyan transition-colors">
+                                                    <input type="radio" name="datapilotStorageMode" value="copy" checked onchange="onDatapilotStorageModeChange('copy')" class="mt-0.5 accent-viper-cyan">
+                                                    <div class="flex-1">
+                                                        <div class="text-sm font-medium text-viper-cyan">📦 Copy into Evidence folder <span class="text-xs font-normal text-viper-green ml-1">(recommended)</span></div>
+                                                        <div class="text-xs text-gray-400 mt-1">Files copied into <code>cases/{caseNumber}/Evidence/{tag}/</code>. Included in DA exports. Honors Field Security encryption.</div>
+                                                    </div>
+                                                </label>
+                                                <label class="flex items-start gap-2 p-3 bg-viper-card/50 border border-gray-600 rounded-lg cursor-pointer hover:border-yellow-400/60 transition-colors">
+                                                    <input type="radio" name="datapilotStorageMode" value="reference" onchange="onDatapilotStorageModeChange('reference')" class="mt-0.5 accent-yellow-400">
+                                                    <div class="flex-1">
+                                                        <div class="text-sm font-medium text-gray-200">🔗 Reference only — do not copy</div>
+                                                        <div class="text-xs text-gray-400 mt-1">VIPER stores only the path. Saves time/disk space, but you are responsible for preserving the source folder.</div>
+                                                    </div>
+                                                </label>
+                                            </div>
+                                            <div id="datapilotReferenceWarning" class="hidden mt-3 p-3 bg-yellow-500/10 border border-yellow-500/40 rounded-lg">
+                                                <div class="flex items-start gap-2">
+                                                    <svg class="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0L3.16 16.25A2 2 0 005 19z"/>
+                                                    </svg>
+                                                    <div class="text-xs text-yellow-200">
+                                                        <strong class="text-yellow-300">Reference-only mode — VIPER will NOT store these files.</strong><br>
+                                                        The extraction stays at <code id="datapilotReferenceWarningPath" class="break-all"></code>. If that folder is moved, deleted, or unplugged (USB), Datapilot data and DA exports will fail. Preserve the source yourself, and back it up alongside this case.
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                     <div id="evidenceFilesInfo" class="hidden mt-3 p-4 bg-viper-cyan/10 border border-viper-cyan/30 rounded-lg">
                                         <div class="flex items-start justify-between mb-2">
@@ -4595,11 +4669,21 @@
                 toxicology: '🧪',
                 phone: '📱',
                 cellebrite: '📱',
+                datapilot: '📲',
                 other: '📎'
             };
             
-            return caseEvidence.map(item => `
-                <div class="glass-card rounded-lg p-3 hover:border-viper-cyan/50 transition-all cursor-pointer" onclick="viewEvidenceInline(${item.id})">
+            return caseEvidence.map(item => {
+                // IDs may be numeric (legacy) or string (Datapilot bundle pushes).
+                // We must produce a JS literal that is safe inside a
+                // double-quoted HTML attribute — JSON.stringify emits double
+                // quotes which collide with onclick="..." and break parsing,
+                // so use a single-quoted JS string for non-numeric IDs.
+                const idLit = (typeof item.id === 'number' && Number.isFinite(item.id))
+                    ? String(item.id)
+                    : "'" + String(item.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
+                return `
+                <div class="glass-card rounded-lg p-3 hover:border-viper-cyan/50 transition-all cursor-pointer" onclick="viewEvidenceInline(${idLit})">
                     <div class="flex items-center justify-between mb-2">
                         <div class="flex items-center space-x-2 flex-1">
                             <span class="text-xl">${typeIcons[item.type] || '📎'}</span>
@@ -4609,12 +4693,12 @@
                             </div>
                         </div>
                         <div class="flex items-center space-x-1">
-                            <button onclick="event.stopPropagation(); editEvidence(${item.id})" class="p-1 rounded text-gray-400 hover:text-viper-cyan hover:bg-viper-cyan/10 transition-colors">
+                            <button onclick="event.stopPropagation(); editEvidence(${idLit})" class="p-1 rounded text-gray-400 hover:text-viper-cyan hover:bg-viper-cyan/10 transition-colors">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
                                 </svg>
                             </button>
-                            <button onclick="event.stopPropagation(); deleteEvidence(${item.id})" class="p-1 rounded text-gray-400 hover:text-red-400 hover:bg-red-400/10 transition-colors">
+                            <button onclick="event.stopPropagation(); deleteEvidence(${idLit})" class="p-1 rounded text-gray-400 hover:text-red-400 hover:bg-red-400/10 transition-colors">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                                 </svg>
@@ -4626,14 +4710,22 @@
                             📁 ${item.fileCount} file${item.fileCount !== 1 ? 's' : ''} ${item.totalSize ? `• ${formatFileSize(item.totalSize)}` : ''}
                         </div>
                     ` : ''}
+                    ${item.type === 'datapilot' && item.datapilot && item.datapilot.referenceOnly ? `
+                        <div class="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-yellow-500/15 text-yellow-300 border border-yellow-500/40" title="VIPER does not store these files — source folder must be preserved by the user. NOT included in DA exports.">
+                            ⚠️ Reference only — files not in VIPER
+                        </div>
+                    ` : ''}
                 </div>
-            `).join('');
+            `;
+            }).join('');
         }
         
         function openAddEvidenceForm() {
             editingEvidenceId = null;
             cellebriteFolderPath = null;
             cellebriteScanResult = null;
+            datapilotFolderPath = null;
+            datapilotScanResult = null;
             document.getElementById('evidenceFormTitle').textContent = 'Add New Evidence';
             document.getElementById('evidenceType').value = '';
             document.getElementById('evidenceTag').value = '';
@@ -4648,18 +4740,30 @@
         let cellebriteFolderPath = null;
         let cellebriteScanResult = null;
 
+        // ====== Datapilot Upload Integration ======
+        let datapilotFolderPath = null;
+        let datapilotScanResult = null;
+
         function onEvidenceTypeChange(val) {
             const stdUI = document.getElementById('standardUploadUI');
             const celUI = document.getElementById('cellebriteUploadUI');
+            const dpUI  = document.getElementById('datapilotUploadUI');
             const hint = document.getElementById('standardUploadHint');
+            const hideStd = () => { stdUI.classList.add('hidden'); if (hint) hint.classList.add('hidden'); };
+            const showStd = () => { stdUI.classList.remove('hidden'); if (hint) hint.classList.remove('hidden'); };
+
             if (val === 'cellebrite') {
-                stdUI.classList.add('hidden');
+                hideStd();
                 celUI.classList.remove('hidden');
-                if (hint) hint.classList.add('hidden');
-            } else {
-                stdUI.classList.remove('hidden');
+                if (dpUI) dpUI.classList.add('hidden');
+            } else if (val === 'datapilot') {
+                hideStd();
                 celUI.classList.add('hidden');
-                if (hint) hint.classList.remove('hidden');
+                if (dpUI) dpUI.classList.remove('hidden');
+            } else {
+                showStd();
+                celUI.classList.add('hidden');
+                if (dpUI) dpUI.classList.add('hidden');
             }
         }
 
@@ -4715,6 +4819,197 @@
             viperToast(`✓ Found Cellebrite Reader — ${deviceLabel}`, 'success');
         }
         // ====== End Cellebrite Upload ======
+
+        // ====== Datapilot Upload Integration ======
+        function onDatapilotStorageModeChange(mode) {
+            const warn = document.getElementById('datapilotReferenceWarning');
+            if (!warn) return;
+            if (mode === 'reference') warn.classList.remove('hidden');
+            else warn.classList.add('hidden');
+        }
+
+        async function selectDatapilotFolder() {
+            if (!window.electronAPI || !window.electronAPI.datapilotPickFolder) {
+                viperToast('Datapilot import requires the desktop app', 'error');
+                return;
+            }
+
+            viperToast('Scanning for Datapilot extraction…', 'info');
+            let res;
+            try {
+                res = await window.electronAPI.datapilotPickFolder();
+            } catch (e) {
+                viperToast('Folder picker failed: ' + e.message, 'error');
+                return;
+            }
+            if (!res) return; // canceled
+            if (!res.success) {
+                viperToast(res.error || 'Could not select folder', 'error');
+                return;
+            }
+
+            // Multiple candidates → prompt user to choose one
+            let chosen;
+            if (res.multipleFound && Array.isArray(res.candidates) && res.candidates.length) {
+                chosen = await promptDatapilotEvidenceCandidate(res.candidates);
+                if (!chosen) return; // canceled
+            } else {
+                chosen = { path: res.path, name: res.name, format: res.format || 'csv' };
+            }
+
+            // Parse the folder so we can show device info + capture metadata.
+            // We do NOT copy the (potentially huge) extraction; we store a reference.
+            viperToast('Parsing Datapilot extraction…', 'info');
+            let parseRes;
+            try {
+                parseRes = await window.electronAPI.datapilotImport({ folderPath: chosen.path });
+            } catch (e) {
+                viperToast('Datapilot parse failed: ' + e.message, 'error');
+                return;
+            }
+            if (!parseRes || !parseRes.success) {
+                viperToast((parseRes && parseRes.error) || 'Datapilot parse failed', 'error');
+                return;
+            }
+
+            const data = parseRes.data || {};
+            const dev  = data.deviceInfo || {};
+            const stats = data.stats || {};
+
+            datapilotFolderPath = chosen.path;
+            datapilotScanResult = {
+                folderPath: chosen.path,
+                folderName: chosen.name,
+                format: data.format || chosen.format || 'csv',
+                deviceInfo: dev,
+                summary: data.summary || {},
+                stats,
+                dpxPaths: data.dpxPaths || null,
+                parsedAt: data.parsedAt || new Date().toISOString()
+            };
+
+            // Show storage-mode block + measure folder size in background.
+            const storageBlock = document.getElementById('datapilotStorageModeBlock');
+            if (storageBlock) {
+                storageBlock.classList.remove('hidden');
+                // Default to "copy" — reset radios and warning visibility.
+                const copyRadio = document.querySelector('input[name="datapilotStorageMode"][value="copy"]');
+                if (copyRadio) copyRadio.checked = true;
+                onDatapilotStorageModeChange('copy');
+                document.getElementById('datapilotReferenceWarningPath').textContent = chosen.path;
+            }
+            const sizeLbl = document.getElementById('datapilotFolderSizeLabel');
+            if (sizeLbl) sizeLbl.textContent = '— measuring size…';
+            if (window.electronAPI && window.electronAPI.datapilotFolderSize) {
+                window.electronAPI.datapilotFolderSize({ folderPath: chosen.path })
+                    .then(sizeRes => {
+                        if (!sizeRes || !sizeRes.success) {
+                            if (sizeLbl) sizeLbl.textContent = '';
+                            return;
+                        }
+                        datapilotScanResult.totalBytes = sizeRes.totalBytes;
+                        datapilotScanResult.fileCount  = sizeRes.fileCount;
+                        const sizeStr = formatFileSize(sizeRes.totalBytes);
+                        if (sizeLbl) sizeLbl.textContent = `— ${sizeRes.fileCount.toLocaleString()} files, ${sizeStr}`;
+                        // If huge (>10 GB), nudge user toward reference mode.
+                        if (sizeRes.totalBytes > 10 * 1024 * 1024 * 1024) {
+                            const refRadio = document.querySelector('input[name="datapilotStorageMode"][value="reference"]');
+                            if (refRadio) {
+                                refRadio.checked = true;
+                                onDatapilotStorageModeChange('reference');
+                            }
+                            viperToast(`Extraction is ${sizeStr} — reference mode preselected. Toggle to Copy if disk space allows.`, 'warning');
+                        }
+                    })
+                    .catch(() => { if (sizeLbl) sizeLbl.textContent = ''; });
+            }
+
+            // Reuse the Cellebrite info panel for visual consistency.
+            const infoDiv = document.getElementById('evidenceFilesInfo');
+            const countEl = document.getElementById('evidenceFileCount');
+            const listEl = document.getElementById('evidenceFilesList');
+
+            const fmtLabel = (datapilotScanResult.format || 'csv').toUpperCase();
+            const deviceLabel = dev.model || dev.make || chosen.name || 'Datapilot Extraction';
+            countEl.textContent = `📲 ${deviceLabel} — Datapilot ${fmtLabel}`;
+            countEl.className = 'text-sm font-medium text-viper-cyan';
+
+            const details = [
+                `✓ Format: Datapilot ${fmtLabel}`,
+                dev.make || dev.model ? `✓ Device: ${[dev.make, dev.model].filter(Boolean).join(' ')}` : null,
+                dev.phoneNumber ? `✓ Phone: ${dev.phoneNumber}` : null,
+                dev.carrier ? `✓ Carrier: ${dev.carrier}` : null,
+                dev.serial ? `✓ Serial: ${dev.serial}` : null,
+                dev.firmware ? `✓ Firmware: ${dev.firmware}` : null,
+                `✓ Stats: ${stats.contacts || 0} contacts, ${stats.messages || 0} messages, ${(stats.photos || 0) + (stats.videos || 0)} media, ${stats.calls || 0} calls`,
+                `✓ Folder: ${chosen.path}`
+            ].filter(Boolean);
+            listEl.innerHTML = details.map(d => `<div class="text-viper-cyan/80">${d}</div>`).join('');
+
+            infoDiv.classList.remove('hidden');
+            infoDiv.className = 'mt-3 p-4 bg-viper-cyan/10 border border-viper-cyan/30 rounded-lg';
+
+            // Auto-fill tag if empty
+            const tagEl = document.getElementById('evidenceTag');
+            if (!tagEl.value) tagEl.value = `${deviceLabel} — Datapilot ${fmtLabel}`;
+
+            // Auto-fill description if empty
+            const descEl = document.getElementById('evidenceDescription');
+            if (!descEl.value) {
+                const parts = [`Datapilot ${fmtLabel} extraction — ${deviceLabel}`];
+                if (dev.serial) parts.push(`Serial: ${dev.serial}`);
+                if (dev.firmware) parts.push(`Firmware: ${dev.firmware}`);
+                if (dev.timeZone) parts.push(`TZ: ${dev.timeZone}`);
+                parts.push(`${stats.contacts || 0} contacts • ${stats.messages || 0} messages • ${(stats.photos || 0) + (stats.videos || 0)} media • ${stats.calls || 0} calls`);
+                descEl.value = parts.join('. ');
+            }
+
+            viperToast(`✓ Parsed Datapilot ${fmtLabel} — ${deviceLabel}`, 'success');
+        }
+
+        function promptDatapilotEvidenceCandidate(candidates) {
+            return new Promise(resolve => {
+                const escHtml = (s) => String(s == null ? '' : s)
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+                const overlay = document.createElement('div');
+                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:99999;display:flex;align-items:center;justify-content:center;';
+                const fmtBadge = (f) => {
+                    const v = (f === 'dpx') ? 'DPX' : 'CSV';
+                    const bg = (f === 'dpx') ? 'rgba(0,229,255,0.15)' : 'rgba(160,160,160,0.18)';
+                    const fg = (f === 'dpx') ? '#00e5ff' : '#bbb';
+                    return `<span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:${bg};color:${fg};margin-left:8px;letter-spacing:0.5px;">${v}</span>`;
+                };
+                const rows = candidates.map((c, i) => `
+                    <div data-idx="${i}" style="padding:12px;border:1px solid rgba(255,255,255,0.08);border-radius:6px;margin-bottom:8px;cursor:pointer;background:rgba(255,255,255,0.02);" onmouseover="this.style.background='rgba(0,229,255,0.06)'" onmouseout="this.style.background='rgba(255,255,255,0.02)'">
+                        <div style="font-weight:600;color:#fff;">${escHtml(c.name)}${fmtBadge(c.format)}</div>
+                        <div style="font-size:11px;color:#888;margin-top:4px;font-family:monospace;word-break:break-all;">${escHtml(c.parent || '')}</div>
+                    </div>
+                `).join('');
+                overlay.innerHTML = `
+                    <div style="max-width:640px;width:90%;background:#1B1C20;border:1px solid rgba(0,229,255,0.2);border-radius:8px;">
+                        <div style="padding:16px;border-bottom:1px solid rgba(255,255,255,0.08);">
+                            <h3 style="margin:0;color:#00e5ff;font-size:16px;font-weight:600;">Multiple Datapilot Exports Found</h3>
+                        </div>
+                        <div style="padding:16px;max-height:60vh;overflow-y:auto;">
+                            <p style="color:#aaa;margin:0 0 12px 0;font-size:13px;">Select which export to attach:</p>
+                            ${rows}
+                        </div>
+                        <div style="padding:12px 16px;border-top:1px solid rgba(255,255,255,0.08);text-align:right;">
+                            <button data-cancel style="padding:8px 16px;background:transparent;border:1px solid rgba(255,255,255,0.2);color:#ccc;border-radius:4px;cursor:pointer;">Cancel</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(overlay);
+                const close = (val) => { try { overlay.remove(); } catch (_) {} resolve(val); };
+                overlay.querySelectorAll('[data-idx]').forEach(el => {
+                    el.addEventListener('click', () => close(candidates[parseInt(el.dataset.idx, 10)]));
+                });
+                overlay.querySelector('[data-cancel]').addEventListener('click', () => close(null));
+                overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+            });
+        }
+        // ====== End Datapilot Upload ======
         
         function editEvidence(evidenceId) {
             const evidence = caseEvidence.find(e => e.id === evidenceId);
@@ -4783,10 +5078,20 @@
             nativeEvidenceFiles = null;
             cellebriteFolderPath = null;
             cellebriteScanResult = null;
+            datapilotFolderPath = null;
+            datapilotScanResult = null;
             document.getElementById('evidenceFilesInfo').classList.add('hidden');
             // Reset info styling
             const infoDiv = document.getElementById('evidenceFilesInfo');
             infoDiv.className = 'hidden mt-3 p-4 bg-viper-cyan/10 border border-viper-cyan/30 rounded-lg';
+            // Hide datapilot storage-mode block + reset to default
+            const storageBlock = document.getElementById('datapilotStorageModeBlock');
+            if (storageBlock) storageBlock.classList.add('hidden');
+            const copyRadio = document.querySelector('input[name="datapilotStorageMode"][value="copy"]');
+            if (copyRadio) copyRadio.checked = true;
+            onDatapilotStorageModeChange('copy');
+            const sizeLbl = document.getElementById('datapilotFolderSizeLabel');
+            if (sizeLbl) sizeLbl.textContent = '';
         }
 
         // ====== Cellebrite Report Helpers ======
@@ -4991,6 +5296,115 @@
                         console.error('Cellebrite copy failed:', error);
                         progressModal.classList.remove('show');
                         viperToast('Failed to copy Cellebrite files: ' + error.message, 'error');
+                    }
+                    return;
+                }
+
+                // ===== Datapilot Extraction: copy into Evidence (default) or store reference =====
+                if (type === 'datapilot' && datapilotFolderPath && datapilotScanResult) {
+                    try {
+                        const dr = datapilotScanResult;
+                        const stats = dr.stats || {};
+
+                        // Determine selected storage mode
+                        const modeInput = document.querySelector('input[name="datapilotStorageMode"]:checked');
+                        const storageMode = (modeInput && modeInput.value) || 'copy';
+
+                        let finalFolderPath = dr.folderPath;
+                        let copiedFileCount = 0;
+                        let copiedTotalBytes = 0;
+
+                        if (storageMode === 'copy') {
+                            // Copy entire folder into cases/{caseNumber}/Evidence/{tag}/
+                            const safeTag = (tag || `datapilot_${Date.now()}`).trim();
+                            const progressModal = document.getElementById('uploadProgressModal');
+                            if (progressModal) {
+                                progressModal.classList.add('show');
+                                document.getElementById('uploadStatusText').textContent = 'Copying Datapilot extraction…';
+                                document.getElementById('uploadProgressBar').style.width = '0%';
+                                document.getElementById('uploadProgressPercent').textContent = '0%';
+                            }
+
+                            // Subscribe to progress events
+                            let unsubscribe = null;
+                            if (window.electronAPI && window.electronAPI.datapilotOnCopyProgress) {
+                                unsubscribe = window.electronAPI.datapilotOnCopyProgress((p) => {
+                                    if (!progressModal) return;
+                                    const pct = p.totalBytes > 0 ? Math.round((p.bytesDone / p.totalBytes) * 100) : 0;
+                                    document.getElementById('uploadProgressBar').style.width = pct + '%';
+                                    document.getElementById('uploadProgressPercent').textContent = pct + '%';
+                                    const status = p.phase === 'done'
+                                        ? `✓ Copied ${p.fileCount.toLocaleString()} files`
+                                        : `Copying ${p.filesDone}/${p.fileCount}: ${p.currentFile || ''}`;
+                                    document.getElementById('uploadStatusText').textContent = status;
+                                });
+                            }
+
+                            const copyRes = await window.electronAPI.datapilotCopyToEvidence({
+                                caseNumber: currentCase.caseNumber,
+                                evidenceTag: safeTag,
+                                sourcePath: dr.folderPath
+                            });
+
+                            if (typeof unsubscribe === 'function') unsubscribe();
+                            if (progressModal) progressModal.classList.remove('show');
+
+                            if (!copyRes || !copyRes.success) {
+                                viperToast('Copy failed: ' + ((copyRes && copyRes.error) || 'unknown error'), 'error');
+                                return;
+                            }
+                            finalFolderPath = copyRes.destPath;
+                            copiedFileCount = copyRes.fileCount || 0;
+                            copiedTotalBytes = copyRes.totalBytes || 0;
+                        }
+
+                        const newEvidence = {
+                            id: Date.now(),
+                            type: 'datapilot',
+                            tag: tag,
+                            description: description,
+                            // For copy mode use real file count from the copy result; for ref mode fall back to stats.
+                            fileCount: storageMode === 'copy'
+                                ? copiedFileCount
+                                : ((stats.photos || 0) + (stats.videos || 0) + (stats.audio || 0) + (stats.files || 0)),
+                            totalSize: storageMode === 'copy' ? copiedTotalBytes : (dr.totalBytes || 0),
+                            files: [],
+                            datapilot: {
+                                folderPath: finalFolderPath,
+                                folderName: dr.folderName || (dr.folderPath || '').split(/[\\/]/).pop(),
+                                format: dr.format || 'csv',
+                                deviceInfo: dr.deviceInfo || {},
+                                summary: dr.summary || {},
+                                stats: stats,
+                                dpxPaths: dr.dpxPaths || null,
+                                parsedAt: dr.parsedAt,
+                                storageMode: storageMode,            // 'copy' | 'reference'
+                                referenceOnly: storageMode === 'reference',
+                                originalSourcePath: dr.folderPath    // always remember where it came from
+                            },
+                            createdAt: new Date().toISOString()
+                        };
+
+                        caseEvidence.push(newEvidence);
+                        const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
+                        allEvidence[currentCase.caseNumber] = caseEvidence;
+                        localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
+
+                        const fmtUpper = (dr.format || 'csv').toUpperCase();
+                        if (storageMode === 'copy') {
+                            viperToast(`✓ Datapilot ${fmtUpper} copied — ${copiedFileCount.toLocaleString()} files (${formatFileSize(copiedTotalBytes)})`, 'success');
+                        } else {
+                            viperToast(`✓ Datapilot ${fmtUpper} added as reference — files NOT stored in VIPER`, 'warning');
+                        }
+                        datapilotFolderPath = null;
+                        datapilotScanResult = null;
+                        evidenceFiles = [];
+                        cancelEvidenceForm();
+                    } catch (error) {
+                        console.error('Datapilot evidence save failed:', error);
+                        const progressModal = document.getElementById('uploadProgressModal');
+                        if (progressModal) progressModal.classList.remove('show');
+                        viperToast('Failed to save Datapilot evidence: ' + error.message, 'error');
                     }
                     return;
                 }
@@ -5224,7 +5638,21 @@
         async function viewEvidenceInline(evidenceId) {
             const evidence = caseEvidence.find(e => e.id === evidenceId);
             if (!evidence) return;
-            
+
+            // Datapilot bundle entries get a dedicated tabbed viewer
+            // (Messages / Media / Calls / Contacts) instead of the
+            // generic file-list panel. Legacy entries (pre-bundle, only
+            // a text description) fall through to the regular viewer.
+            if (evidence.metadata && evidence.metadata.kind === 'datapilot' && evidence.metadata.bundlePath) {
+                return renderDatapilotEvidenceViewer(evidence);
+            }
+
+            // Datapilot Extraction evidence (added via Add New Evidence form):
+            // jump to the Datapilot tab and load the referenced extraction.
+            if (evidence.type === 'datapilot' && evidence.datapilot && evidence.datapilot.folderPath) {
+                return openDatapilotEvidenceInTab(evidence);
+            }
+
             // Show loading overlay
             const loadingOverlay = document.getElementById('evidenceLoadingOverlay');
             loadingOverlay.classList.remove('hidden');
@@ -5233,14 +5661,24 @@
             const viewerContent = document.getElementById('viewerContent');
             
             if (!evidence.files || evidence.files.length === 0) {
+                // If the description is multi-line (e.g., Datapilot flag summary),
+                // render with preserved whitespace so the report is readable.
+                const desc = evidence.description || '';
+                const isMultiline = /\n/.test(desc);
+                const isDatapilot = evidence.metadata && evidence.metadata.kind === 'datapilot';
+                const bodyHtml = isMultiline
+                    ? `<pre class="text-left text-xs whitespace-pre-wrap font-mono text-gray-300 bg-black/30 rounded p-4 max-h-[60vh] overflow-auto">${desc.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>`
+                    : `<p class="text-sm mt-2">${desc}</p>`;
                 viewerContent.innerHTML = `
-                    <div class="flex items-center justify-center h-full">
-                        <div class="text-center text-gray-500">
+                    <div class="flex items-${isMultiline ? 'start' : 'center'} justify-center h-full p-6 ${isMultiline ? 'overflow-auto' : ''}">
+                        <div class="text-center text-gray-400 max-w-3xl w-full">
+                            ${isMultiline ? '' : `
                             <svg class="w-20 h-20 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                             </svg>
-                            <p class="text-lg">No files attached</p>
-                            <p class="text-sm mt-2">${evidence.description}</p>
+                            <p class="text-lg">No files attached</p>`}
+                            ${isDatapilot ? `<p class="text-base font-bold text-viper-cyan mb-3">📱 ${evidence.tag || 'Datapilot Report'}</p>` : ''}
+                            ${bodyHtml}
                         </div>
                     </div>
                 `;
@@ -5294,7 +5732,482 @@
             // Hide loading overlay after content is rendered
             loadingOverlay.classList.add('hidden');
         }
-        
+
+        // ──────────────────────────────────────────────────────────────────
+        // Datapilot Evidence → Tab handoff
+        //   Click a "Datapilot Extraction" evidence card → switch to the
+        //   Datapilot tab, ensure the module is initialized, then either
+        //   activate the matching import (if already loaded) or import the
+        //   referenced folder fresh.
+        // ──────────────────────────────────────────────────────────────────
+        async function openDatapilotEvidenceInTab(evidence) {
+            const folderPath = evidence.datapilot && evidence.datapilot.folderPath;
+            const folderName = (evidence.datapilot && evidence.datapilot.folderName)
+                || (folderPath ? folderPath.split(/[\\/]/).pop() : 'Datapilot');
+
+            if (!folderPath) {
+                viperToast('No Datapilot folder path stored on this evidence', 'error');
+                return;
+            }
+
+            // Make sure the Datapilot tab is in the case's module list.
+            if (!Array.isArray(currentCase.modules)) currentCase.modules = [];
+            if (!currentCase.modules.includes('datapilot')) {
+                currentCase.modules.push('datapilot');
+                try {
+                    const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+                    const idx = cases.findIndex(c => c.id === currentCase.id);
+                    if (idx !== -1) {
+                        cases[idx].modules = currentCase.modules;
+                        localStorage.setItem('viperCases', JSON.stringify(cases));
+                    }
+                } catch (_) {}
+                if (typeof renderTabs === 'function') renderTabs();
+            }
+
+            // Switch to the Datapilot tab — this calls initializeDatapilot()
+            // which constructs `window.datapilotModule` asynchronously.
+            renderTabContent('datapilot');
+
+            // Wait for module init to finish (init() is async).
+            const waitFor = (predicate, timeoutMs = 8000, intervalMs = 75) => new Promise((resolve, reject) => {
+                const t0 = Date.now();
+                const tick = () => {
+                    try {
+                        if (predicate()) return resolve(true);
+                    } catch (_) {}
+                    if (Date.now() - t0 > timeoutMs) return reject(new Error('Datapilot module did not initialize in time'));
+                    setTimeout(tick, intervalMs);
+                };
+                tick();
+            });
+
+            try {
+                await waitFor(() => window.datapilotModule
+                    && window.datapilotModule.data
+                    && Array.isArray(window.datapilotModule.data.imports));
+            } catch (e) {
+                viperToast('Datapilot tab failed to initialize: ' + e.message, 'error');
+                return;
+            }
+
+            const mod = window.datapilotModule;
+            // Normalize for path comparison (Windows backslashes / case).
+            const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+            const target = norm(folderPath);
+            const existing = mod.data.imports.find(imp => norm(imp.folderPath) === target);
+
+            if (existing) {
+                // Already imported — just activate it.
+                mod.activeImportId = existing.id;
+                mod.activeTab = 'overview';
+                if (typeof mod.saveData === 'function') mod.saveData();
+                if (typeof mod.render === 'function') mod.render();
+                viperToast(`✓ Loaded existing Datapilot import — ${existing.fileName}`, 'success');
+                return;
+            }
+
+            // Not imported yet — kick off import.
+            try {
+                viperToast(`Importing Datapilot extraction from evidence — ${folderName}…`, 'info');
+                await mod.importFolder(folderPath, folderName);
+            } catch (e) {
+                viperToast('Datapilot import failed: ' + e.message, 'error');
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────────
+        // Datapilot Evidence Viewer
+        //   Tabbed UI for "Datapilot Report" entries: Messages / Media /
+        //   Calls / Contacts. Reads the bundle's report.json from disk via
+        //   IPC and lazy-loads thumbnails / full-size media.
+        // ──────────────────────────────────────────────────────────────────
+        const _datapilotViewerState = { evidence: null, report: null, tab: 'messages', search: '' };
+
+        async function renderDatapilotEvidenceViewer(evidence) {
+            const loadingOverlay = document.getElementById('evidenceLoadingOverlay');
+            const viewerContent = document.getElementById('viewerContent');
+            document.getElementById('viewerTitle').textContent = evidence.tag || 'Datapilot Report';
+            loadingOverlay.classList.remove('hidden');
+
+            const meta = evidence.metadata || {};
+            const bundlePath = meta.bundlePath;
+
+            if (!bundlePath || !window.electronAPI || !window.electronAPI.datapilotReadBundleFile) {
+                viewerContent.innerHTML = `
+                    <div class="p-6 text-center text-gray-400">
+                        <p class="text-lg">Datapilot bundle not available</p>
+                        <p class="text-sm mt-2">${bundlePath ? 'Desktop API missing' : 'No bundlePath stored on this entry'}.</p>
+                    </div>`;
+                loadingOverlay.classList.add('hidden');
+                return;
+            }
+
+            try {
+                // Load report.json from disk (decrypts transparently if Field Security on)
+                const res = await window.electronAPI.datapilotReadBundleFile({ bundlePath, relPath: 'report.json' });
+                if (!res || !res.success) throw new Error(res && res.error ? res.error : 'failed to read report.json');
+                const text = atob(res.dataBase64);
+                const report = JSON.parse(text);
+
+                _datapilotViewerState.evidence = evidence;
+                _datapilotViewerState.report = report;
+                _datapilotViewerState.tab = 'messages';
+                _datapilotViewerState.search = '';
+
+                _renderDatapilotViewerInto(viewerContent);
+            } catch (e) {
+                console.error('Failed to load Datapilot bundle:', e);
+                viewerContent.innerHTML = `
+                    <div class="p-6 text-center text-red-400">
+                        <p class="text-lg">Failed to load Datapilot bundle</p>
+                        <p class="text-sm mt-2">${(e && e.message) || e}</p>
+                    </div>`;
+            } finally {
+                loadingOverlay.classList.add('hidden');
+            }
+        }
+
+        function _renderDatapilotViewerInto(container) {
+            const { evidence, report, tab, search } = _datapilotViewerState;
+            if (!report) return;
+            const counts = report.counts || {};
+            const dev = report.device || {};
+            const meta = evidence.metadata || {};
+
+            const escHtml = (s) => String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+            const fmtDate = (s) => {
+                if (!s) return '';
+                try { const d = new Date(s); if (!isNaN(d)) return d.toLocaleString(); } catch (_) {}
+                return s;
+            };
+
+            const tabBtn = (id, label, count) => `
+                <button data-dp-evtab="${id}" class="px-4 py-2 text-sm font-semibold transition-colors border-b-2
+                    ${tab === id ? 'text-viper-cyan border-viper-cyan' : 'text-gray-400 border-transparent hover:text-gray-200'}">
+                    ${label} <span class="text-xs opacity-70">(${count})</span>
+                </button>
+            `;
+
+            container.innerHTML = `
+                <div class="flex flex-col h-full">
+                    <!-- Header: device + counts + actions -->
+                    <div class="px-4 py-3 border-b border-white/10 bg-black/30">
+                        <div class="flex items-start justify-between gap-3 flex-wrap">
+                            <div class="flex-1 min-w-0">
+                                <div class="text-base font-bold text-viper-cyan truncate">📱 ${escHtml(evidence.tag || 'Datapilot Report')}</div>
+                                <div class="text-xs text-gray-400 mt-1">
+                                    ${escHtml(dev.make || '')} ${escHtml(dev.model || '')}
+                                    ${dev.phoneNumber ? ` · ${escHtml(dev.phoneNumber)}` : ''}
+                                    ${dev.imei ? ` · IMEI ${escHtml(dev.imei)}` : ''}
+                                    ${report.generatedAt ? ` · Generated ${escHtml(fmtDate(report.generatedAt))}` : ''}
+                                </div>
+                            </div>
+                            <div class="flex gap-2 items-center flex-wrap">
+                                <button id="dp-ev-open-report" class="px-3 py-1.5 text-xs font-semibold rounded border border-viper-cyan/40 text-viper-cyan hover:bg-viper-cyan/10">
+                                    📄 Open DA-ready HTML report
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tabs -->
+                    <div class="flex border-b border-white/10 bg-black/20">
+                        ${tabBtn('messages', '💬 Messages', counts.messages || 0)}
+                        ${tabBtn('media',    '📷 Media',    counts.media    || 0)}
+                        ${tabBtn('calls',    '📞 Calls',    counts.calls    || 0)}
+                        ${tabBtn('contacts', '👤 Contacts', counts.contacts || 0)}
+                    </div>
+
+                    <!-- Body -->
+                    <div id="dp-ev-tab-body" class="flex-1 overflow-auto p-4 bg-black/10"></div>
+                </div>
+            `;
+
+            // Wire tabs
+            container.querySelectorAll('[data-dp-evtab]').forEach(b => {
+                b.onclick = () => {
+                    _datapilotViewerState.tab = b.dataset.dpEvtab;
+                    _datapilotViewerState.search = '';
+                    _renderDatapilotViewerInto(container);
+                };
+            });
+
+            // Wire "Open report" — pulls report.html via IPC, opens as blob
+            const openBtn = container.querySelector('#dp-ev-open-report');
+            if (openBtn) {
+                openBtn.onclick = async () => {
+                    try {
+                        const r = await window.electronAPI.datapilotReadBundleFile({
+                            bundlePath: meta.bundlePath, relPath: 'report.html'
+                        });
+                        if (!r || !r.success) throw new Error(r && r.error || 'read failed');
+                        // Decode + open in new window. The HTML uses relative
+                        // "media/foo.mp4" links — those won't resolve from a
+                        // blob: URL. The DA gets working links from the
+                        // exported ZIP; in-VIPER preview is for verification.
+                        const bin = atob(r.dataBase64);
+                        const arr = new Uint8Array(bin.length);
+                        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+                        const blob = new Blob([arr], { type: 'text/html' });
+                        window.open(URL.createObjectURL(blob), '_blank');
+                    } catch (e) {
+                        if (typeof showToast === 'function') showToast('Failed to open report: ' + e.message, 'error');
+                    }
+                };
+            }
+
+            // Render active tab body
+            const body = container.querySelector('#dp-ev-tab-body');
+            if (tab === 'messages')      _renderDpEvMessages(body, report);
+            else if (tab === 'media')    _renderDpEvMedia(body, report, meta.bundlePath);
+            else if (tab === 'calls')    _renderDpEvCalls(body, report);
+            else if (tab === 'contacts') _renderDpEvContacts(body, report);
+        }
+
+        function _dpEsc(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+        function _dpFmtDate(s) {
+            if (!s) return '';
+            try { const d = new Date(s); if (!isNaN(d)) return d.toLocaleString(); } catch (_) {}
+            return s;
+        }
+        function _dpFmtBytes(n) {
+            if (!n || n < 0) return '';
+            if (n < 1024) return n + ' B';
+            if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+            if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+            return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+        }
+
+        function _renderDpEvMessages(body, report) {
+            const msgs = report.messages || [];
+            if (!msgs.length) {
+                body.innerHTML = `<div class="text-center text-gray-500 py-12">No messages flagged.</div>`;
+                return;
+            }
+            // Group by date for readability
+            const groups = [];
+            let cur = null;
+            for (const m of msgs) {
+                const dKey = (m.timestampIso || '').split('T')[0] || 'Unknown';
+                if (!cur || cur.date !== dKey) { cur = { date: dKey, items: [] }; groups.push(cur); }
+                cur.items.push(m);
+            }
+            body.innerHTML = groups.map(g => `
+                <div class="text-center text-[10px] uppercase tracking-wider text-gray-500 my-3">
+                    ${_dpEsc(g.date)}
+                </div>
+                ${g.items.map(m => {
+                    const out = m.direction === 'outgoing';
+                    const inc = m.direction === 'incoming';
+                    const dirCls = out ? 'ml-auto bg-cyan-900/30 border-cyan-500/40' :
+                                   inc ? 'mr-auto bg-amber-900/20 border-amber-500/30' :
+                                         'mr-auto bg-gray-700/30 border-gray-500/30';
+                    const dirLabel = out ? 'SENT' : inc ? 'RECEIVED' : '';
+                    return `
+                        <div class="max-w-[80%] my-1.5 ${dirCls} border rounded-lg p-2.5">
+                            <div class="flex items-baseline gap-2 text-[10px] opacity-70 mb-1 flex-wrap">
+                                <span class="font-bold ${out ? 'text-cyan-300' : inc ? 'text-amber-300' : 'text-gray-400'}">${dirLabel}</span>
+                                <span class="font-mono">${_dpEsc(m.contactName ? `${m.contactName} (${m.address})` : m.address || '')}</span>
+                                <span class="ml-auto">${_dpEsc(_dpFmtDate(m.timestampIso || m.timestamp))}</span>
+                            </div>
+                            <div class="text-sm whitespace-pre-wrap break-words">${_dpEsc(m.text || '(empty)')}</div>
+                        </div>
+                    `;
+                }).join('')}
+            `).join('');
+        }
+
+        function _renderDpEvCalls(body, report) {
+            const calls = report.calls || [];
+            if (!calls.length) {
+                body.innerHTML = `<div class="text-center text-gray-500 py-12">No calls flagged.</div>`;
+                return;
+            }
+            body.innerHTML = `
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-[10px] uppercase tracking-wider text-gray-500 border-b border-white/10">
+                            <th class="text-left p-2">Direction</th>
+                            <th class="text-left p-2">Contact</th>
+                            <th class="text-left p-2">Number</th>
+                            <th class="text-left p-2">Timestamp</th>
+                            <th class="text-left p-2">Duration</th>
+                            <th class="text-left p-2">Summary</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${calls.map(c => `
+                            <tr class="border-b border-white/5 hover:bg-white/5">
+                                <td class="p-2">${_dpEsc(c.direction || '')}</td>
+                                <td class="p-2">${_dpEsc(c.contactName || '')}</td>
+                                <td class="p-2 font-mono text-xs">${_dpEsc(c.address || '')}</td>
+                                <td class="p-2 text-xs text-gray-400">${_dpEsc(_dpFmtDate(c.timestampIso || c.timestamp))}</td>
+                                <td class="p-2 text-xs">${_dpEsc(c.duration ? c.duration + 's' : '')}</td>
+                                <td class="p-2 text-xs text-gray-400">${_dpEsc(c.summary || '')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function _renderDpEvContacts(body, report) {
+            const contacts = report.contacts || [];
+            if (!contacts.length) {
+                body.innerHTML = `<div class="text-center text-gray-500 py-12">No contacts flagged.</div>`;
+                return;
+            }
+            body.innerHTML = `
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    ${contacts.map(c => `
+                        <div class="bg-black/30 border border-white/10 rounded p-3">
+                            <div class="font-bold text-cyan-200 mb-1">${_dpEsc(c.name || '(unknown)')}</div>
+                            ${(c.phones || []).map(p => `<div class="font-mono text-xs text-gray-300">${_dpEsc(p)}</div>`).join('')}
+                            ${(c.emails || []).map(e => `<div class="text-xs text-gray-400">${_dpEsc(e)}</div>`).join('')}
+                            ${c.organizations ? `<div class="text-xs text-gray-500 mt-1">${_dpEsc(c.organizations)}</div>` : ''}
+                            ${c.notes ? `<div class="text-xs text-gray-500 mt-1 italic">${_dpEsc(c.notes)}</div>` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function _renderDpEvMedia(body, report, bundlePath) {
+            const media = report.media || [];
+            if (!media.length) {
+                body.innerHTML = `<div class="text-center text-gray-500 py-12">No media flagged.</div>`;
+                return;
+            }
+            body.innerHTML = `
+                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3" id="dp-ev-media-grid">
+                    ${media.map((m, i) => {
+                        const meta = [
+                            m.mediaType,
+                            _dpFmtDate(m.lastModified),
+                            _dpFmtBytes(m.sizeBytes),
+                            (m.lat != null && m.lng != null) ? `${m.lat.toFixed(5)}, ${m.lng.toFixed(5)}` : ''
+                        ].filter(Boolean).join(' · ');
+                        return `
+                            <div class="bg-black/40 border border-white/10 rounded overflow-hidden flex flex-col cursor-pointer hover:border-viper-cyan/40 transition-colors"
+                                 data-dp-ev-media-idx="${i}">
+                                <div class="aspect-square bg-black flex items-center justify-center relative" data-dp-ev-thumb-rel="${_dpEsc(m.thumbRel || '')}">
+                                    <div class="dp-ev-thumb-loading text-gray-600 text-xs">Loading…</div>
+                                    ${m.mediaType === 'video' ? `<div class="absolute bottom-1 right-1 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded pointer-events-none">▶ VIDEO</div>` : ''}
+                                </div>
+                                <div class="p-2">
+                                    <div class="text-xs font-semibold text-gray-200 truncate" title="${_dpEsc(m.fileName)}">${_dpEsc(m.fileName)}</div>
+                                    <div class="text-[10px] text-gray-500 truncate" title="${_dpEsc(meta)}">${_dpEsc(meta)}</div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            `;
+
+            // Hydrate thumbnails (lazy)
+            const thumbCells = body.querySelectorAll('[data-dp-ev-thumb-rel]');
+            const replaceLoading = (cell, replacement) => {
+                const ph = cell.querySelector('.dp-ev-thumb-loading');
+                if (ph) ph.remove();
+                // Insert at the start so the absolute video badge (if any)
+                // stays on top as a sibling.
+                cell.insertBefore(replacement, cell.firstChild);
+            };
+            const io = new IntersectionObserver((entries) => {
+                for (const e of entries) {
+                    if (!e.isIntersecting) continue;
+                    const cell = e.target;
+                    io.unobserve(cell);
+                    const rel = cell.dataset.dpEvThumbRel;
+                    if (!rel) {
+                        const d = document.createElement('div');
+                        d.className = 'text-gray-600 text-xs';
+                        d.textContent = 'No preview';
+                        replaceLoading(cell, d);
+                        continue;
+                    }
+                    window.electronAPI.datapilotReadBundleFile({ bundlePath, relPath: rel })
+                        .then(r => {
+                            if (r && r.success) {
+                                const img = document.createElement('img');
+                                img.src = `data:${r.mimeType};base64,${r.dataBase64}`;
+                                img.className = 'w-full h-full object-cover';
+                                replaceLoading(cell, img);
+                            } else {
+                                const d = document.createElement('div');
+                                d.className = 'text-gray-600 text-xs';
+                                d.textContent = 'No preview';
+                                replaceLoading(cell, d);
+                            }
+                        })
+                        .catch(() => {
+                            const d = document.createElement('div');
+                            d.className = 'text-gray-600 text-xs';
+                            d.textContent = 'No preview';
+                            replaceLoading(cell, d);
+                        });
+                }
+            }, { rootMargin: '200px 0px' });
+            thumbCells.forEach(c => io.observe(c));
+
+            // Click → lightbox with full-size media
+            body.querySelectorAll('[data-dp-ev-media-idx]').forEach(el => {
+                el.onclick = () => {
+                    const idx = parseInt(el.dataset.dpEvMediaIdx, 10);
+                    _openDpEvMediaLightbox(media[idx], bundlePath);
+                };
+            });
+        }
+
+        async function _openDpEvMediaLightbox(item, bundlePath) {
+            if (!item || !item.mediaRel) return;
+            const overlay = document.createElement('div');
+            overlay.className = 'fixed inset-0 bg-black/90 z-[10000] flex items-center justify-center p-4';
+            overlay.innerHTML = `
+                <button class="absolute top-3 right-3 text-white text-3xl hover:text-viper-cyan">×</button>
+                <div class="max-w-[90vw] max-h-[90vh] flex flex-col items-center" id="dp-lb-inner">
+                    <div class="text-gray-400 text-sm">Loading…</div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            const close = () => { try { document.body.removeChild(overlay); } catch (_) {} };
+            overlay.querySelector('button').onclick = close;
+            overlay.onclick = (e) => { if (e.target === overlay) close(); };
+            const inner = overlay.querySelector('#dp-lb-inner');
+
+            try {
+                if (item.mediaType === 'video' || item.mediaType === 'audio') {
+                    // Use streaming URL for video — full-size base64 would be huge
+                    const r = await window.electronAPI.datapilotBundleMediaUrl({ bundlePath, relPath: item.mediaRel });
+                    if (!r || !r.success) throw new Error(r && r.error || 'failed');
+                    inner.innerHTML = item.mediaType === 'video'
+                        ? `<video src="${r.fileUrl}" controls autoplay class="max-w-[90vw] max-h-[80vh]"></video>
+                           <div class="text-gray-300 text-sm mt-2 font-mono">${_dpEsc(item.fileName)}</div>`
+                        : `<audio src="${r.fileUrl}" controls autoplay class="w-[60vw]"></audio>
+                           <div class="text-gray-300 text-sm mt-2 font-mono">${_dpEsc(item.fileName)}</div>`;
+                } else {
+                    // Image — base64 is fine
+                    const r = await window.electronAPI.datapilotReadBundleFile({ bundlePath, relPath: item.mediaRel });
+                    if (!r || !r.success) throw new Error(r && r.error || 'failed');
+                    inner.innerHTML = `
+                        <img src="data:${r.mimeType};base64,${r.dataBase64}" class="max-w-[90vw] max-h-[80vh] object-contain"/>
+                        <div class="text-gray-300 text-sm mt-2 font-mono">${_dpEsc(item.fileName)}</div>
+                    `;
+                }
+            } catch (e) {
+                inner.innerHTML = `<div class="text-red-400">Failed to load: ${_dpEsc(e.message)}</div>`;
+            }
+        }
+
+
         function renderEvidenceFiles(evidence) {
             if (!evidence.files || evidence.files.length === 0) {
                 return `
@@ -5864,6 +6777,14 @@
             const dueDate = document.getElementById('warrantDueDate').value;
             const judge = document.getElementById('warrantJudge').value;
             const courtReturnDate = document.getElementById('warrantCourtReturnDate').value;
+
+            // Generate the warrant id NOW so we can pass it to the file-save IPC.
+            // The IPC prefixes the on-disk filename with this id to prevent
+            // cross-warrant file overwrites when two warrants share a source
+            // filename (e.g. both "Search Warrant.pdf").  Existing warrants
+            // (edit path) reuse their existing id.  Existing on-disk paths
+            // remain readable because we store the absolute path on the record.
+            const targetWarrantId = editingWarrantId || Date.now();
             
             // Save warrant PDF to disk if a new file was selected
             let savedFilePath = null;
@@ -5875,7 +6796,8 @@
                         caseNumber: currentCase.caseNumber,
                         subfolder: 'Signed',
                         fileName: warrantFile.name,
-                        fileData: Array.from(new Uint8Array(arrayBuffer))
+                        fileData: Array.from(new Uint8Array(arrayBuffer)),
+                        warrantId: targetWarrantId
                     });
                     savedFileName = warrantFile.name;
                 } catch (err) {
@@ -5905,7 +6827,7 @@
                 }
             } else {
                 const newWarrant = {
-                    id: Date.now(),
+                    id: targetWarrantId,
                     type: type,
                     issuedTo: issuedTo,
                     description: description,
@@ -6003,7 +6925,8 @@
                         caseNumber: currentCase.caseNumber,
                         subfolder: 'Production',
                         fileName: file.name,
-                        fileData: Array.from(new Uint8Array(arrayBuffer))
+                        fileData: Array.from(new Uint8Array(arrayBuffer)),
+                        warrantId: warrantId
                     });
                     results.push({
                         name: file.name,
@@ -6066,7 +6989,7 @@
                 modal.remove();
                 // Use Electron native dialog for ZIP files (HTML file input can be unreliable for .zip)
                 if (window.electronAPI?.selectProductionZip) {
-                    const result = await window.electronAPI.selectProductionZip({ caseNumber: currentCase.caseNumber });
+                    const result = await window.electronAPI.selectProductionZip({ caseNumber: currentCase.caseNumber, warrantId: warrantId });
                     if (result && result.files && result.files.length > 0) {
                         const warrant = caseWarrants.find(w => w.id === warrantId);
                         if (!warrant) return;
@@ -6145,7 +7068,8 @@
                     caseNumber: currentCase.caseNumber,
                     subfolder: 'CourtReturn',
                     fileName: file.name,
-                    fileData: Array.from(new Uint8Array(arrayBuffer))
+                    fileData: Array.from(new Uint8Array(arrayBuffer)),
+                    warrantId: warrantId
                 });
                 warrant.courtReturnFile = {
                     name: file.name,
@@ -6174,7 +7098,8 @@
                     filePath = await window.electronAPI.resolveWarrantPath({
                         caseNumber: currentCase.caseNumber,
                         subfolder: 'Signed',
-                        fileName: fileName || ''
+                        fileName: fileName || '',
+                        warrantId: warrantId
                     });
                     if (filePath) {
                         warrant.warrantFilePath = filePath;
@@ -6192,7 +7117,8 @@
                     filePath = await window.electronAPI.resolveWarrantPath({
                         caseNumber: currentCase.caseNumber,
                         subfolder: 'CourtReturn',
-                        fileName: fileName || ''
+                        fileName: fileName || '',
+                        warrantId: warrantId
                     });
                     if (filePath && warrant.courtReturnFile) {
                         warrant.courtReturnFile.path = filePath;
@@ -21323,6 +22249,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 { id: 'googleWarrant', label: 'Google Warrant Parser', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z', desc: 'Parse Google warrant returns — account, email, location, devices, apps' },
                 { id: 'metaWarrant', label: 'META Warrant Parser', icon: 'M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z', desc: 'Parse META (Facebook/Instagram) warrant returns — account, messages, photos, IP activity' },
                 { id: 'kikWarrant', label: 'KIK Warrant Parser', icon: 'M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z', desc: 'Parse KIK Messenger warrant returns — messages, contacts, sessions, groups' },
+                { id: 'datapilot', label: 'Datapilot (Mobile Forensics)', icon: 'M9 17a4 4 0 01-2-7.5l1-3a4 4 0 017 0l1 3A4 4 0 0115 17H9zM12 12v9', desc: 'Parse mobile forensic CSV exports — calls, messages, contacts, GPS, apps, files + AI insights' },
             ];
 
             const allModules = [...caseManagement, ...investigativeTools];
@@ -29125,6 +30052,37 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     <div class="glass-card p-6 rounded-xl">
                         <div class="text-center text-red-400">
                             <p class="text-lg font-semibold mb-2">KIK Warrant Parser Not Loaded</p>
+                            <p class="text-sm text-gray-400">Please check that all module files are properly installed.</p>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function renderDatapilotTab() {
+            return `
+                <div id="datapilot-tab-container" style="height: calc(100vh - 220px);"></div>
+            `;
+        }
+
+        function initializeDatapilot() {
+            if (window.DatapilotModule) {
+                window.datapilotModule = new DatapilotModule(
+                    String(currentCase.id),
+                    String(currentCase.caseNumber || currentCase.id),
+                    currentCase.title || currentCase.name || currentCase.caseNumber
+                );
+                window.datapilotModule.init('datapilot-tab-container').then(() => {
+                    window.datapilotUI = window.datapilotModule.ui;
+                }).catch(err => {
+                    console.error('Datapilot init error:', err);
+                });
+            } else {
+                console.error('Datapilot module not loaded');
+                document.getElementById('datapilot-tab-container').innerHTML = `
+                    <div class="glass-card p-6 rounded-xl">
+                        <div class="text-center text-red-400">
+                            <p class="text-lg font-semibold mb-2">Datapilot Module Not Loaded</p>
                             <p class="text-sm text-gray-400">Please check that all module files are properly installed.</p>
                         </div>
                     </div>

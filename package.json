@@ -1,12 +1,13 @@
 {
   "name": "viper-electron",
-  "version": "2.8.4",
+  "version": "2.9.0",
   "description": "VIPER with Network Intelligence - Electron Desktop App",
   "main": "electron-main.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "package": "electron-builder --win"
+    "package": "electron-builder --win",
+    "postinstall": "electron-rebuild -f -w better-sqlite3 || electron-builder install-app-deps"
   },
   "keywords": [
     "viper",
@@ -17,12 +18,14 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
     "electron": "^28.0.0",
     "electron-builder": "^26.8.1"
   },
   "dependencies": {
     "adm-zip": "^0.5.17",
     "archiver": "^7.0.1",
+    "better-sqlite3": "^12.9.0",
     "electron-updater": "^6.8.3",
     "koffi": "^2.15.6",
     "mailparser": "^3.9.4",

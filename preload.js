@@ -82,6 +82,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   kikWarrantPickFile: () => ipcRenderer.invoke('kik-warrant-pick-file'),
   kikWarrantReadMedia: (data) => ipcRenderer.invoke('kik-warrant-read-media', data),
 
+  // Snapchat Warrant Parser
+  snapchatWarrantScan: (data) => ipcRenderer.invoke('snapchat-warrant-scan', data),
+  snapchatWarrantImport: (data) => ipcRenderer.invoke('snapchat-warrant-import', data),
+  snapchatWarrantPickFile: () => ipcRenderer.invoke('snapchat-warrant-pick-file'),
+  snapchatWarrantReadMedia: (data) => ipcRenderer.invoke('snapchat-warrant-read-media', data),
+
   // Datapilot mobile-forensic CSV export parser
   datapilotScan: (data) => ipcRenderer.invoke('datapilot-scan', data),
   datapilotPickFolder: () => ipcRenderer.invoke('datapilot-pick-folder'),
@@ -122,6 +128,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveWarrantFile: (data) => ipcRenderer.invoke('save-warrant-file', data),
   readWarrantFile: (filePath) => ipcRenderer.invoke('read-warrant-file', filePath),
   selectProductionZip: (data) => ipcRenderer.invoke('select-production-zip', data),
+
+  // Ops Plan file storage (photos/documents — bypass localStorage quota)
+  saveOpsPlanFile: (data) => ipcRenderer.invoke('save-opsplan-file', data),
+  readOpsPlanFile: (filePath) => ipcRenderer.invoke('read-opsplan-file', filePath),
+  deleteOpsPlanFile: (filePath) => ipcRenderer.invoke('delete-opsplan-file', filePath),
+
+  // CDR dumps (per-case JSON on disk — bypass localStorage quota)
+  saveCdrDumps: (data) => ipcRenderer.invoke('save-cdr-dumps', data),
+  readCdrDumps: (data) => ipcRenderer.invoke('read-cdr-dumps', data),
+
+  // Department badge (single agency-wide image under userData/branding/)
+  saveDeptBadge: (data) => ipcRenderer.invoke('save-dept-badge', data),
+  readDeptBadge: () => ipcRenderer.invoke('read-dept-badge'),
+
+  // HTML → PDF (no print dialog) for reports
+  saveHtmlAsPdf: (data) => ipcRenderer.invoke('save-html-as-pdf', data),
 
   // External app launch
   launchAperture: (caseData) => ipcRenderer.invoke('launch-aperture', caseData),

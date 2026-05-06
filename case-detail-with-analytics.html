@@ -89,6 +89,10 @@
             max-height: calc(100vh - 200px);
             overflow-y: auto;
             overflow-x: hidden;
+            /* Extra bottom padding so the last row of buttons/cards
+               (e.g. Ops Plan "Add Photos") isn't clipped at the viewport
+               edge. p-8 alone wasn't enough on shorter screens. */
+            padding-bottom: 160px !important;
         }
         
         /* Custom scrollbar styling */
@@ -707,6 +711,7 @@
     <link rel="stylesheet" href="modules/google-warrant/google-warrant-styles.css">
     <link rel="stylesheet" href="modules/meta-warrant/meta-warrant-styles.css">
     <link rel="stylesheet" href="modules/kik-warrant/kik-warrant-styles.css">
+    <link rel="stylesheet" href="modules/snapchat-warrant/snapchat-warrant-styles.css">
     <link rel="stylesheet" href="modules/datapilot/datapilot-styles.css">
     <script src="modules/google-warrant/google-warrant-module.js"></script>
     <script src="modules/google-warrant/google-warrant-ui.js"></script>
@@ -714,6 +719,8 @@
     <script src="modules/meta-warrant/meta-warrant-ui.js"></script>
     <script src="modules/kik-warrant/kik-warrant-module.js"></script>
     <script src="modules/kik-warrant/kik-warrant-ui.js"></script>
+    <script src="modules/snapchat-warrant/snapchat-warrant-module.js"></script>
+    <script src="modules/snapchat-warrant/snapchat-warrant-ui.js"></script>
     <script src="modules/datapilot/datapilot-analytics.js"></script>
     <script src="modules/datapilot/datapilot-report.js"></script>
     <script src="modules/datapilot/datapilot-ui.js"></script>
@@ -743,7 +750,7 @@
                     <span class="font-medium text-gray-400">Dashboard</span>
                 </div>
                 
-                <div class="sidebar-item px-4 py-3 rounded-lg cursor-pointer flex items-center space-x-3" onclick="window.location.href='index.html#all-cases'">
+                <div class="sidebar-item px-4 py-3 rounded-lg cursor-pointer flex items-center space-x-3" onclick="sessionStorage.setItem('viperNavTarget','all-cases'); window.location.href='index.html'">
                     <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
                     </svg>
@@ -757,7 +764,7 @@
                     <span class="font-medium">Case Detail</span>
                 </div>
 
-                <div class="sidebar-item px-4 py-3 rounded-lg cursor-pointer flex items-center space-x-3" onclick="window.location.href='index.html#offense-reference'">
+                <div class="sidebar-item px-4 py-3 rounded-lg cursor-pointer flex items-center space-x-3" onclick="sessionStorage.setItem('viperNavTarget','offense-reference'); window.location.href='index.html'">
                     <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
                     </svg>
@@ -1271,6 +1278,8 @@
                                 scarsMarksTattoos: '',
                                 address: p.address || '',
                                 addressCityStateZip: '',
+                                phone: p.phone || '',
+                                phone2: '',
                                 photo: '',
                                 residencePhoto: '',
                                 employerName: '',
@@ -1651,6 +1660,7 @@
                 googleWarrant: { label: 'Google Warrant', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' },
                 metaWarrant: { label: 'META Warrant', icon: 'M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z' },
                 kikWarrant: { label: 'KIK Warrant', icon: 'M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z' },
+                snapchatWarrant: { label: 'Snapchat Warrant', icon: 'M12 2C8.5 2 6 4.5 6 8c0 1.5.3 3 .8 4.2-.5.3-1.3.5-2 .5-.4 0-.8.3-.8.7 0 .5.5.9 1.2 1.2.7.3 1.6.5 2.3.6-.1.5-.5 1-1.2 1.5-.7.4-1.6.7-2.3.9-.5.1-.8.4-.8.8 0 .8 1.7 1.4 3.5 1.7.1.4.3.8.6 1 .3.2.7.2 1.1.1.5-.1 1-.1 1.6 0 .6.1 1.2.4 1.9.9.7.5 1.4.7 2.1.7s1.4-.2 2.1-.7c.7-.5 1.3-.8 1.9-.9.6-.1 1.1-.1 1.6 0 .4.1.8.1 1.1-.1.3-.2.5-.6.6-1 1.8-.3 3.5-.9 3.5-1.7 0-.4-.3-.7-.8-.8-.7-.2-1.6-.5-2.3-.9-.7-.5-1.1-1-1.2-1.5.7-.1 1.6-.3 2.3-.6.7-.3 1.2-.7 1.2-1.2 0-.4-.4-.7-.8-.7-.7 0-1.5-.2-2-.5.5-1.2.8-2.7.8-4.2 0-3.5-2.5-6-6-6z' },
                 datapilot: { label: 'Datapilot', icon: 'M9 17a4 4 0 01-2-7.5l1-3a4 4 0 017 0l1 3A4 4 0 0115 17H9zM12 12v9' }
             };
             
@@ -1793,6 +1803,7 @@
             allModules.googleWarrant = { label: 'Google Warrant', icon: '📋' };
             allModules.metaWarrant = { label: 'META Warrant', icon: '📘' };
             allModules.kikWarrant = { label: 'KIK Warrant', icon: '💬' };
+            allModules.snapchatWarrant = { label: 'Snapchat Warrant', icon: '👻' };
             allModules.datapilot = { label: 'Datapilot', icon: '📱' };
 
             const availableModules = Object.keys(allModules).filter(
@@ -1878,6 +1889,7 @@
                 networkIntelligence:'Network Intel', traceImport:'Trace Import', rmsImport:'RMS Import',
                 oversightImport:'Oversight', cyberTips:'Cyber Tips', consentSearch:'Consent Search',
                 googleWarrant:'Google Warrant', metaWarrant:'META Warrant', kikWarrant:'KIK Warrant',
+                snapchatWarrant:'Snapchat Warrant',
                 datapilot:'Datapilot'
             };
             const label = moduleConfig[moduleId] || moduleId;
@@ -1932,6 +1944,7 @@
                 googleWarrant: { label: 'Google Warrant', icon: '📋', type: 'data' },
                 metaWarrant: { label: 'META Warrant', icon: '📘', type: 'data' },
                 kikWarrant: { label: 'KIK Warrant', icon: '💬', type: 'data' },
+                snapchatWarrant: { label: 'Snapchat Warrant', icon: '👻', type: 'data' },
                 datapilot: { label: 'Datapilot', icon: '📱', type: 'data' },
                 consentSearch: { label: 'Consent Search', icon: '✅', type: 'data' }
             };
@@ -2026,7 +2039,7 @@
                 'areacanvas', 'prosecution', 'narcotics', 'firearms',
                 'money', 'opsplan', 'rmsImports', 'oversightImport',
                 'canvasForms', 'cyberTips', 'timelineEvents', 'consentSearches',
-                'googleWarrant', 'metaWarrant', 'kikWarrant', 'datapilot', 'caseMetrics'
+                'googleWarrant', 'metaWarrant', 'kikWarrant', 'snapchatWarrant', 'datapilot', 'caseMetrics'
             ];
             const moduleData = {};
             moduleKeys.forEach(k => {
@@ -2142,6 +2155,10 @@
                 case 'kikWarrant': {
                     const kkData = JSON.parse(localStorage.getItem(`kikWarrant_${currentCase.id}`) || '{"imports":[]}');
                     return (kkData.imports || []).length;
+                }
+                case 'snapchatWarrant': {
+                    const swData = JSON.parse(localStorage.getItem(`snapchatWarrant_${currentCase.id}`) || '{"imports":[]}');
+                    return (swData.imports || []).length;
                 }
                 case 'datapilot': {
                     const dpData = JSON.parse(localStorage.getItem(`datapilot_${currentCase.id}`) || '{"imports":[]}');
@@ -3364,6 +3381,8 @@
                 contentDiv.innerHTML = renderMoneySeizedTab();
             } else if (tabId === 'opsplan') {
                 contentDiv.innerHTML = renderOpsPlanTab();
+                // Hydrate disk-backed Ops Plan photos.
+                try { _opsHydrateImages(contentDiv); } catch (_) {}
             } else if (tabId === 'consentSearch') {
                 contentDiv.innerHTML = renderConsentSearchTab();
             } else if (tabId === 'analytics') {
@@ -3392,6 +3411,9 @@
             } else if (tabId === 'kikWarrant') {
                 contentDiv.innerHTML = renderKikWarrantTab();
                 initializeKikWarrant();
+            } else if (tabId === 'snapchatWarrant') {
+                contentDiv.innerHTML = renderSnapchatWarrantTab();
+                initializeSnapchatWarrant();
             } else if (tabId === 'datapilot') {
                 contentDiv.innerHTML = renderDatapilotTab();
                 initializeDatapilot();
@@ -3463,7 +3485,7 @@
                                 </div>
                                 <div>
                                     <label class="text-sm text-gray-400">Date Closed</label>
-                                    <p class="text-white mt-1">${currentCase.dateClosed ? new Date(currentCase.dateClosed + 'T00:00').toLocaleDateString() : '<span class="text-gray-500 italic">—</span>'}</p>
+                                    <p class="text-white mt-1">${currentCase.dateClosed ? new Date(String(currentCase.dateClosed).slice(0, 10) + 'T00:00').toLocaleDateString() : '<span class="text-gray-500 italic">—</span>'}</p>
                                 </div>
                                 <div>
                                     <label class="text-sm text-gray-400">Primary Offense</label>
@@ -7550,11 +7572,6 @@
                                     </svg>
                                     Import DMV
                                 </button>
-                                ${isTloEnabled() && suspect.name ? `
-                                <button onclick="event.stopPropagation(); openTloPanel('${(suspect.name.split(' ')[0]||'').replace(/'/g,"\\'")}', '${(suspect.name.split(' ').slice(1).join(' ')||'').replace(/'/g,"\\'")}', '')" class="px-4 py-2 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500 rounded-lg text-indigo-400 transition flex items-center gap-2">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                                    Search TLO
-                                </button>` : ''}
                                 ${isAccurintEnabled() && suspect.name ? `
                                 <button onclick="event.stopPropagation(); openAccurintPanel('${(suspect.name.split(' ')[0]||'').replace(/'/g,"\\'")}', '${(suspect.name.split(' ').slice(1).join(' ')||'').replace(/'/g,"\\'")}', '')" class="px-4 py-2 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500 rounded-lg text-blue-400 transition flex items-center gap-2">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
@@ -19848,10 +19865,491 @@
             const data = opsPlanData || { _version: 2 };
             data._version = 2;
             data.uploadedFiles = opsPlans;
-            localStorage.setItem(`opsplan_${currentCase.id}`, JSON.stringify(data));
+            try {
+                localStorage.setItem(`opsplan_${currentCase.id}`, JSON.stringify(data));
+            } catch (err) {
+                if (err && (err.name === 'QuotaExceededError' || /quota/i.test(err.message))) {
+                    const sizeMb = (() => {
+                        try { return (JSON.stringify(data).length / 1048576).toFixed(1); }
+                        catch (_) { return '?'; }
+                    })();
+                    console.warn(`[OpsPlan] Storage quota exceeded — current size ~${sizeMb}MB`);
+                    if (typeof viperToast === 'function') {
+                        viperToast(
+                            `Storage full (~${sizeMb}MB). Click "Compact Photos" on the Ops Plan tab to free space, or remove large photos/uploads.`,
+                            'error',
+                            8000
+                        );
+                    }
+                    // Re-throw so callers can choose to react; but most callers ignore.
+                }
+                throw err;
+            }
         }
 
         function saveOpsPlans() { saveOpsPlanData(); }
+
+        // ── Image downscaling helpers (used by Ops Plan uploads to keep
+        //    localStorage footprint small — see opsplan_* quota fixes). ──
+        async function _opsDownscaleDataUrl(dataUrl, maxEdge = 1600, quality = 0.75) {
+            return new Promise((resolve) => {
+                try {
+                    const img = new Image();
+                    img.onload = () => {
+                        try {
+                            let { width, height } = img;
+                            if (!width || !height) return resolve(dataUrl);
+                            const longest = Math.max(width, height);
+                            const scale = longest > maxEdge ? maxEdge / longest : 1;
+                            const w = Math.max(1, Math.round(width * scale));
+                            const h = Math.max(1, Math.round(height * scale));
+                            const canvas = document.createElement('canvas');
+                            canvas.width = w;
+                            canvas.height = h;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0, w, h);
+                            // JPEG keeps file size predictable; ops plan photos
+                            // don't need transparency.
+                            const out = canvas.toDataURL('image/jpeg', quality);
+                            // If somehow the recompressed version is bigger than
+                            // the original (rare, e.g. tiny PNGs), keep original.
+                            resolve(out.length < dataUrl.length ? out : dataUrl);
+                        } catch (_) {
+                            resolve(dataUrl);
+                        }
+                    };
+                    img.onerror = () => resolve(dataUrl);
+                    img.src = dataUrl;
+                } catch (_) {
+                    resolve(dataUrl);
+                }
+            });
+        }
+
+        async function _opsDownscaleFile(file, maxEdge = 1600, quality = 0.75) {
+            const raw = await new Promise((resolve) => {
+                const r = new FileReader();
+                r.onload = (e) => resolve(e.target.result);
+                r.onerror = () => resolve(null);
+                r.readAsDataURL(file);
+            });
+            if (!raw) return null;
+            return _opsDownscaleDataUrl(raw, maxEdge, quality);
+        }
+
+        // ── Disk-backed Ops Plan storage ────────────────────────────────
+        // The localStorage quota is per-origin (~10MB) across ALL keys, so
+        // even small additions to opsplan_* fail once the origin is full.
+        // Photos go to disk under cases/{caseNumber}/OpsPlan/{subfolder}/
+        // and we only store the resulting file path in localStorage.
+
+        // Convert a data URL (e.g. from canvas.toDataURL) → byte array
+        // suitable for IPC transfer to main process.
+        function _dataUrlToBytes(dataUrl) {
+            const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || '');
+            if (!m) return null;
+            const bin = atob(m[2]);
+            const out = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+            return { mime: m[1], bytes: Array.from(out) };
+        }
+
+        // Save a downscaled image dataURL to disk; returns { path, mime } or null.
+        async function _opsSaveImageToDisk(dataUrl, fileName, subfolder = 'Photos') {
+            try {
+                if (!window.electronAPI || !window.electronAPI.saveOpsPlanFile) return null;
+                if (!currentCase || !currentCase.caseNumber) return null;
+                const conv = _dataUrlToBytes(dataUrl);
+                if (!conv) return null;
+                const ext = (conv.mime.split('/')[1] || 'jpg').toLowerCase();
+                const safe = (fileName || `photo-${Date.now()}`).replace(/\.[^.]+$/, '') + '.' + ext;
+                const filePath = await window.electronAPI.saveOpsPlanFile({
+                    caseNumber: currentCase.caseNumber,
+                    subfolder,
+                    fileName: safe,
+                    fileData: conv.bytes
+                });
+                return { path: filePath, mime: conv.mime };
+            } catch (e) {
+                console.error('[OpsPlan] saveOpsPlanFile failed:', e);
+                return null;
+            }
+        }
+
+        // Save raw file bytes (e.g. PDF/DOC) to disk; returns filePath or null.
+        async function _opsSaveBytesToDisk(file, subfolder = 'Documents') {
+            try {
+                if (!window.electronAPI || !window.electronAPI.saveOpsPlanFile) return null;
+                if (!currentCase || !currentCase.caseNumber) return null;
+                const buf = await file.arrayBuffer();
+                const filePath = await window.electronAPI.saveOpsPlanFile({
+                    caseNumber: currentCase.caseNumber,
+                    subfolder,
+                    fileName: file.name,
+                    fileData: Array.from(new Uint8Array(buf))
+                });
+                return filePath;
+            } catch (e) {
+                console.error('[OpsPlan] saveOpsPlanFile (bytes) failed:', e);
+                return null;
+            }
+        }
+
+        // Read a file path back into a data URL for inline display.
+        // Cache the result on a `data:` field so the UI keeps showing
+        // the image without re-reading from disk on every render.
+        const _opsReadCache = new Map();
+        async function _opsReadFileAsDataUrl(filePath, mimeHint) {
+            if (!filePath) return null;
+            if (_opsReadCache.has(filePath)) return _opsReadCache.get(filePath);
+            try {
+                if (!window.electronAPI || !window.electronAPI.readOpsPlanFile) return null;
+                const bytes = await window.electronAPI.readOpsPlanFile(filePath);
+                const u8 = new Uint8Array(bytes);
+                let bin = '';
+                for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
+                const mime = mimeHint || (filePath.match(/\.(jpe?g|png|gif|webp)$/i) ? `image/${filePath.split('.').pop().toLowerCase().replace('jpg','jpeg')}` : 'application/octet-stream');
+                const dataUrl = `data:${mime};base64,${btoa(bin)}`;
+                _opsReadCache.set(filePath, dataUrl);
+                return dataUrl;
+            } catch (e) {
+                console.error('[OpsPlan] readOpsPlanFile failed:', e);
+                return null;
+            }
+        }
+
+        // Best-effort: return a usable image source for an Ops Plan photo
+        // record that may have either a legacy inline `data:` URL or a
+        // disk-backed `path` field. Used by render functions.
+        async function _opsResolvePhotoSrc(photoLike) {
+            if (!photoLike) return '';
+            // Legacy/inline base64
+            if (typeof photoLike === 'string' && photoLike.startsWith('data:')) return photoLike;
+            if (photoLike.data && photoLike.data.startsWith && photoLike.data.startsWith('data:')) return photoLike.data;
+            // Disk-backed
+            if (photoLike.path) return await _opsReadFileAsDataUrl(photoLike.path, photoLike.mime) || '';
+            if (typeof photoLike === 'string') return photoLike; // unknown — let browser try
+            return '';
+        }
+        window._opsResolvePhotoSrc = _opsResolvePhotoSrc;
+
+        // ── Department badge (single agency-wide image) ─────────────────────
+        // Stored as a file under userData/branding/dept-badge.{ext} via IPC,
+        // not in localStorage. Cached for the session as a data URL for fast
+        // reuse across reports.
+        let _deptBadgeCache = null; // null=uninit, ''=missing, 'data:...'=loaded
+        async function _readDeptBadgeDataUrl() {
+            if (_deptBadgeCache !== null) return _deptBadgeCache;
+            try {
+                if (window.electronAPI && window.electronAPI.readDeptBadge) {
+                    const res = await window.electronAPI.readDeptBadge();
+                    _deptBadgeCache = (res && res.success && res.found && res.dataUrl) ? res.dataUrl : '';
+                    return _deptBadgeCache;
+                }
+            } catch (e) {
+                console.warn('readDeptBadge failed:', e);
+            }
+            _deptBadgeCache = '';
+            return _deptBadgeCache;
+        }
+        function _invalidateDeptBadgeCache() { _deptBadgeCache = null; }
+        window._readDeptBadgeDataUrl = _readDeptBadgeDataUrl;
+        window._invalidateDeptBadgeCache = _invalidateDeptBadgeCache;
+
+        // One-time cleanup: legacy viperDeptBadge (~2.5MB) lived in localStorage.
+        // It's now stored on disk under userData/branding/. If the legacy key
+        // exists, migrate it once then delete.
+        (async () => {
+            try {
+                const legacy = localStorage.getItem('viperDeptBadge');
+                if (!legacy) return;
+                if (!window.electronAPI || !window.electronAPI.saveDeptBadge) return;
+                // Migrate the data URL onto disk so existing badge isn't lost.
+                const m = /^data:([^;,]+)(?:;[^,]*)?,(.*)$/.exec(legacy);
+                if (m) {
+                    const mime = m[1] || 'image/png';
+                    const isB64 = /;base64/i.test(legacy);
+                    let bytes;
+                    if (isB64) {
+                        const bin = atob(m[2]);
+                        bytes = new Uint8Array(bin.length);
+                        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                    } else {
+                        bytes = new TextEncoder().encode(decodeURIComponent(m[2]));
+                    }
+                    await window.electronAPI.saveDeptBadge({ fileData: Array.from(bytes), mime });
+                    _invalidateDeptBadgeCache();
+                    console.log('[VIPER] Migrated viperDeptBadge → userData/branding/');
+                }
+                localStorage.removeItem('viperDeptBadge');
+            } catch (e) {
+                console.warn('viperDeptBadge migration skipped:', e);
+            }
+        })();
+
+        // 40×40 SVG placeholder shown while a disk-backed photo loads.
+        const _OPS_IMG_PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80">' +
+            '<rect width="80" height="80" fill="#0f1721"/>' +
+            '<text x="50%" y="50%" fill="#3a8" font-size="9" text-anchor="middle" dy=".3em">Loading…</text>' +
+            '</svg>');
+
+        // Build the {src, attrs} used by render functions for a photo record.
+        // Returns inline data URL where possible (legacy or cached) so the
+        // image shows immediately, plus data-ops-path so the hydrator can
+        // upgrade later if needed.
+        function _opsImgRender(photoLike) {
+            const escape = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+            if (!photoLike) return { src: '', attrs: '' };
+            if (typeof photoLike === 'string') {
+                if (photoLike.startsWith('data:')) return { src: photoLike, attrs: '' };
+                const cached = _opsReadCache.get(photoLike);
+                return {
+                    src: cached || _OPS_IMG_PLACEHOLDER,
+                    attrs: 'data-ops-path="' + escape(photoLike) + '"'
+                };
+            }
+            if (photoLike.data && typeof photoLike.data === 'string' && photoLike.data.startsWith('data:')) {
+                return { src: photoLike.data, attrs: '' };
+            }
+            if (photoLike.path) {
+                const cached = _opsReadCache.get(photoLike.path);
+                const attrs = 'data-ops-path="' + escape(photoLike.path) + '"' +
+                              (photoLike.mime ? ' data-ops-mime="' + escape(photoLike.mime) + '"' : '');
+                return { src: cached || _OPS_IMG_PLACEHOLDER, attrs };
+            }
+            return { src: '', attrs: '' };
+        }
+        window._opsImgRender = _opsImgRender;
+
+        // After a render, walk the DOM and fill in src on disk-backed images.
+        async function _opsHydrateImages(root) {
+            const scope = root || document;
+            const imgs = scope.querySelectorAll('img[data-ops-path]:not([data-ops-resolved])');
+            for (const img of imgs) {
+                img.setAttribute('data-ops-resolved', '1');
+                const p = img.getAttribute('data-ops-path');
+                const m = img.getAttribute('data-ops-mime') || undefined;
+                const src = await _opsReadFileAsDataUrl(p, m);
+                if (src) img.src = src;
+            }
+        }
+        window._opsHydrateImages = _opsHydrateImages;
+
+        // Re-downscale every existing photo in opsPlanData. Used by the
+        // "Compact Photos" recovery path when storage hits quota.
+        // For legacy inline base64 photos, this re-encodes them at smaller
+        // size; for disk-backed photos (path-only records), it migrates
+        // them out of localStorage if any inline `data` field still exists.
+        async function compactOpsPlanPhotos() {
+            if (!opsPlanData) {
+                if (typeof viperToast === 'function') viperToast('No Ops Plan data to compact', 'info');
+                return;
+            }
+            const before = JSON.stringify(opsPlanData).length;
+            const passes = [
+                { arr: opsPlanData.locationPhotos,  field: 'data',  sub: 'LocationPhotos',  maxEdge: 1280, q: 0.7 },
+                { arr: opsPlanData.rallyPointPhotos,field: 'data',  sub: 'RallyPointPhotos',maxEdge: 1280, q: 0.7 },
+                { arr: opsPlanData.otherResidents,  field: 'photo', sub: 'ResidentPhotos',  maxEdge: 800,  q: 0.75 },
+                { arr: opsPlanData.vehicles,        field: 'photo', sub: 'VehiclePhotos',   maxEdge: 1024, q: 0.75 },
+            ];
+            for (const p of passes) {
+                if (!Array.isArray(p.arr)) continue;
+                for (const item of p.arr) {
+                    if (!item) continue;
+                    let dataUrl = null;
+                    // Resident/vehicle: photo is either a string (legacy) or {path,mime}.
+                    // Location/rally point: legacy has .data string; disk-backed has .path.
+                    if (typeof item[p.field] === 'string' && item[p.field].startsWith('data:image')) {
+                        dataUrl = item[p.field];
+                    } else if (item.data && typeof item.data === 'string' && item.data.startsWith('data:image')) {
+                        dataUrl = item.data;
+                    }
+                    if (!dataUrl) continue;
+                    // Re-encode at smaller size, then push to disk to free localStorage.
+                    const smaller = await _opsDownscaleDataUrl(dataUrl, p.maxEdge, p.q);
+                    const fname = (item.fileName || `photo-${Date.now()}.jpg`);
+                    const saved = await _opsSaveImageToDisk(smaller, fname, p.sub);
+                    if (saved) {
+                        // Strip inline data, store path instead.
+                        if (p.field === 'photo') {
+                            // resident/vehicle layout
+                            item.photo = { path: saved.path, mime: saved.mime };
+                        } else {
+                            // location/rally layout
+                            delete item.data;
+                            item.path = saved.path;
+                            item.mime = saved.mime;
+                        }
+                        try { _opsReadCache.set(saved.path, smaller); } catch (_) {}
+                    } else {
+                        // Disk save failed — keep smaller inline at least.
+                        if (p.field === 'photo') item.photo = smaller;
+                        else item.data = smaller;
+                    }
+                }
+            }
+            // Also evict legacy inline PDF/DOC plan documents from localStorage:
+            // copy them to disk and replace fileData with filePath.
+            if (Array.isArray(opsPlans)) {
+                for (const plan of opsPlans) {
+                    if (!plan || plan.filePath) continue;
+                    if (typeof plan.fileData !== 'string' || !plan.fileData.startsWith('data:')) continue;
+                    try {
+                        const conv = _dataUrlToBytes(plan.fileData);
+                        if (!conv) continue;
+                        const filePath = await window.electronAPI.saveOpsPlanFile({
+                            caseNumber: currentCase.caseNumber,
+                            subfolder: 'Documents',
+                            fileName: plan.fileName || `plan-${plan.id}`,
+                            fileData: conv.bytes
+                        });
+                        if (filePath) {
+                            plan.filePath = filePath;
+                            delete plan.fileData;
+                        }
+                    } catch (e) {
+                        console.warn('[OpsPlan] Could not migrate plan doc to disk:', e);
+                    }
+                }
+            }
+            const after = JSON.stringify(opsPlanData).length;
+            const savedMb = ((before - after) / 1048576).toFixed(2);
+            try {
+                saveOpsPlanData();
+                if (typeof viperToast === 'function') {
+                    viperToast(`Compacted Ops Plan — freed ${savedMb}MB from localStorage (photos moved to disk)`, 'success');
+                }
+                if (typeof renderTabContent === 'function') renderTabContent('opsplan');
+            } catch (e) {
+                console.error('[OpsPlan] Compact saved failed:', e);
+            }
+        }
+        window.compactOpsPlanPhotos = compactOpsPlanPhotos;
+
+        // ── Global storage diagnostic ───────────────────────────────────
+        // Run from DevTools console: viperStorageReport()
+        // Lists every localStorage key with its size (largest first) so we
+        // can see what's pinning the per-origin quota.
+        window.viperStorageReport = function () {
+            try {
+                const keys = Object.keys(localStorage);
+                const items = keys.map((k) => {
+                    let bytes = 0;
+                    try { bytes = (localStorage.getItem(k) || '').length; } catch (_) { bytes = -1; }
+                    return { key: k, bytes };
+                });
+                items.sort((a, b) => b.bytes - a.bytes);
+                let total = 0;
+                items.forEach((x) => { if (x.bytes > 0) total += x.bytes; });
+                const top = items.slice(0, 30).map((x) => ({
+                    key: x.key,
+                    MB: (x.bytes / 1048576).toFixed(2),
+                    KB: (x.bytes / 1024).toFixed(1),
+                    bytes: x.bytes
+                }));
+                console.log(`%c[VIPER Storage] Total: ${(total / 1048576).toFixed(2)}MB across ${items.length} keys`,
+                            'color:#0ff;font-weight:bold;font-size:13px');
+                console.table(top);
+                console.log('Full list of keys (size descending):');
+                items.forEach((x) => console.log(`  ${(x.bytes / 1024).toFixed(1).padStart(8)} KB  ${x.key}`));
+                return { total, items };
+            } catch (e) {
+                console.error('viperStorageReport failed:', e);
+                return null;
+            }
+        };
+
+        // ── Global photo-to-disk migrator ───────────────────────────────
+        // Scans every Pattern-2 per-case key whose value contains inline
+        // base64 photos and moves them to disk under
+        //   cases/{caseNumber}/{Module}/Photos/
+        // Run from DevTools console: viperMigrateAllPhotosToDisk()
+        // SAFE to re-run; idempotent. Does NOT touch evidence/warrant/
+        // snapshot keys (those already use disk paths or are managed
+        // elsewhere).
+        window.viperMigrateAllPhotosToDisk = async function () {
+            if (!window.electronAPI || !window.electronAPI.saveOpsPlanFile) {
+                console.error('IPC not available — must run inside the Electron app.');
+                return;
+            }
+            const allCases = JSON.parse(localStorage.getItem('viperCases') || '[]');
+            // Map case.id -> case.caseNumber for save paths.
+            const idToCaseNumber = {};
+            for (const c of allCases) idToCaseNumber[c.id] = c.caseNumber || String(c.id);
+
+            // Per-case-id keys that likely contain photo arrays.
+            // Each entry: { keyPrefix, photoField, sub }
+            const photoConfigs = [
+                { prefix: 'suspects_',         field: 'photo',  sub: 'SuspectPhotos' },
+                { prefix: 'victims_',          field: 'photo',  sub: 'VictimPhotos' },
+                { prefix: 'witnesses_',        field: 'photo',  sub: 'WitnessPhotos' },
+                { prefix: 'missingpersons_',   field: 'photo',  sub: 'MissingPersonPhotos' },
+                { prefix: 'recoveredVehicles_',field: 'photo',  sub: 'VehiclePhotos' },
+                { prefix: 'firearms_',         field: 'photo',  sub: 'FirearmPhotos' },
+                { prefix: 'narcotics_',        field: 'photo',  sub: 'NarcoticsPhotos' },
+                { prefix: 'money_',            field: 'photo',  sub: 'MoneyPhotos' },
+            ];
+
+            const before = {}; const after = {};
+            const allKeys = Object.keys(localStorage);
+            for (const cfg of photoConfigs) {
+                for (const key of allKeys) {
+                    if (!key.startsWith(cfg.prefix)) continue;
+                    const caseId = key.slice(cfg.prefix.length);
+                    const caseNumber = idToCaseNumber[caseId];
+                    if (!caseNumber) continue;
+                    let arr;
+                    try { arr = JSON.parse(localStorage.getItem(key) || '[]'); }
+                    catch (_) { continue; }
+                    if (!Array.isArray(arr) || !arr.length) continue;
+                    before[key] = (localStorage.getItem(key) || '').length;
+                    let migrated = 0;
+                    for (const item of arr) {
+                        if (!item || typeof item[cfg.field] !== 'string') continue;
+                        const val = item[cfg.field];
+                        if (!val.startsWith('data:image')) continue;
+                        try {
+                            const m = /^data:([^;]+);base64,(.*)$/.exec(val);
+                            if (!m) continue;
+                            const bin = atob(m[2]);
+                            const u8 = new Uint8Array(bin.length);
+                            for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+                            const ext = (m[1].split('/')[1] || 'jpg').toLowerCase();
+                            const fname = `${cfg.field}-${item.id || migrated}-${Date.now()}.${ext}`;
+                            const filePath = await window.electronAPI.saveOpsPlanFile({
+                                caseNumber,
+                                subfolder: cfg.sub,
+                                fileName: fname,
+                                fileData: Array.from(u8)
+                            });
+                            if (filePath) {
+                                item[cfg.field] = { path: filePath, mime: m[1] };
+                                migrated++;
+                            }
+                        } catch (e) {
+                            console.warn(`Migrate failed for ${key}:`, e);
+                        }
+                    }
+                    if (migrated > 0) {
+                        try {
+                            localStorage.setItem(key, JSON.stringify(arr));
+                            after[key] = (localStorage.getItem(key) || '').length;
+                            console.log(`✓ ${key}: migrated ${migrated} photo(s) — ${(before[key]/1024).toFixed(0)}KB → ${(after[key]/1024).toFixed(0)}KB`);
+                        } catch (e) {
+                            console.error(`Failed to write back ${key}:`, e);
+                        }
+                    }
+                }
+            }
+            const totalBefore = Object.values(before).reduce((a, b) => a + b, 0);
+            const totalAfter = Object.values(after).reduce((a, b) => a + b, 0);
+            console.log(`%c[VIPER Migrate] Done — freed ${((totalBefore - totalAfter) / 1048576).toFixed(2)}MB across ${Object.keys(before).length} keys`,
+                        'color:#0f0;font-weight:bold;font-size:13px');
+            if (typeof viperToast === 'function') {
+                viperToast(`Photo migration complete — freed ${((totalBefore - totalAfter) / 1048576).toFixed(2)}MB. Reload the page.`, 'success', 8000);
+            }
+        };
 
         function getOpsTemplates() {
             return JSON.parse(localStorage.getItem('viperOpsTemplates') || '{}');
@@ -19933,8 +20431,9 @@
         }
 
         function renderOpsResidentCard(r, i) {
+            const imgInfo = _opsImgRender(r.photo);
             const photoHtml = r.photo
-                ? '<img ' + _S + '="' + r.photo + '" class="w-20 h-20 rounded-lg object-cover border border-gray-600" onclick="viewOpsResidentPhoto(' + i + ')">'
+                ? '<img ' + _S + '="' + imgInfo.src + '" ' + imgInfo.attrs + ' class="w-20 h-20 rounded-lg object-cover border border-gray-600" onclick="viewOpsResidentPhoto(' + i + ')">'
                 : '<div class="w-20 h-20 rounded-lg bg-viper-dark border border-gray-600 flex items-center justify-center text-gray-500 text-xs">No Photo</div>';
             return '<div class="flex gap-4 items-start p-3 bg-viper-dark/50 rounded-lg border border-gray-700 mb-2" id="opsResident_' + i + '">'
                 + '<div class="shrink-0 flex flex-col items-center gap-1">'
@@ -20002,6 +20501,7 @@
             } else {
                 container.innerHTML = res.map((r, i) => renderOpsResidentCard(r, i)).join('');
             }
+            try { _opsHydrateImages(container); } catch (_) {}
         }
 
         function toggleOpsResidentField(idx, field) {
@@ -20014,20 +20514,25 @@
             const input = document.createElement('input');
             input.type = 'file';
             input.accept = 'image/*';
-            input.onchange = (e) => {
+            input.onchange = async (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (ev) => {
-                    // Collect current form state first
-                    if (opsPlanData && opsPlanData.otherResidents) {
-                        opsPlanData.otherResidents = collectOpsResidents();
-                        opsPlanData.otherResidents[idx].photo = ev.target.result;
-                        saveOpsPlanData();
-                        refreshOpsResidentsUI();
-                    }
-                };
-                reader.readAsDataURL(file);
+                const data = await _opsDownscaleFile(file, 800, 0.75);
+                if (!data) return;
+                if (!opsPlanData || !opsPlanData.otherResidents) return;
+                opsPlanData.otherResidents = collectOpsResidents();
+                if (!opsPlanData.otherResidents[idx]) return;
+                // Write to disk (no localStorage bloat). Falls back to
+                // inline base64 only if disk save fails (e.g. running in
+                // browser without IPC).
+                const saved = await _opsSaveImageToDisk(data, `resident-${idx}-${file.name}`, 'ResidentPhotos');
+                if (saved) {
+                    opsPlanData.otherResidents[idx].photo = { path: saved.path, mime: saved.mime };
+                } else {
+                    opsPlanData.otherResidents[idx].photo = data;
+                }
+                try { saveOpsPlanData(); } catch (_) { return; }
+                refreshOpsResidentsUI();
             };
             input.click();
         }
@@ -20035,8 +20540,11 @@
         function viewOpsResidentPhoto(idx) {
             const r = opsPlanData?.otherResidents?.[idx];
             if (!r || !r.photo) return;
-            const w = window.open('', '_blank', 'width=600,height=600');
-            w.document.write('<html><head><title>Resident Photo</title><style>body{margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh}img{max-width:100%;max-height:100%}</style></head><body><img ' + _S + '="' + r.photo + '"></body></html>');
+            (async () => {
+                const src = await _opsResolvePhotoSrc(r.photo);
+                const w = window.open('', '_blank', 'width=600,height=600');
+                if (w) w.document.write('<html><head><title>Resident Photo</title><style>body{margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh}img{max-width:100%;max-height:100%}</style></head><body><img ' + _S + '="' + src + '"></body></html>');
+            })();
         }
 
         function addEntryTeamRowInPlan() {
@@ -20376,6 +20884,9 @@
                             <button onclick="addOpsPlan()" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition text-sm flex items-center gap-2">
                                 📎 Upload Signed Plan
                             </button>
+                            <button onclick="compactOpsPlanPhotos()" title="Re-compress all photos in this Ops Plan to free up storage space" class="px-4 py-2 bg-viper-amber/20 hover:bg-viper-amber/30 border border-viper-amber rounded-lg text-viper-amber transition text-sm flex items-center gap-2">
+                                🗜️ Compact Photos
+                            </button>
                         </div>
                     </div>
 
@@ -20476,16 +20987,18 @@
                                 <button type="button" onclick="addOpsRallyPointPhoto()" class="px-3 py-1 bg-viper-orange/20 hover:bg-viper-orange/30 border border-viper-orange rounded text-viper-orange text-xs transition">+ Add Photo</button>
                             </div>
                             <div id="ops_rallyPointPhotos" class="grid grid-cols-3 gap-3">
-                                ${(d.rallyPointPhotos && d.rallyPointPhotos.length > 0) ? d.rallyPointPhotos.map((photo, pi) => `
+                                ${(d.rallyPointPhotos && d.rallyPointPhotos.length > 0) ? d.rallyPointPhotos.map((photo, pi) => {
+                                    const _i = _opsImgRender(photo);
+                                    return `
                                     <div class="relative group rounded-lg overflow-hidden bg-viper-dark border border-gray-700 h-32">
-                                        <img ${_S}="${photo.data}" alt="${photo.caption || 'Rally Point'}" class="w-full h-full object-cover">
+                                        <img ${_S}="${_i.src}" ${_i.attrs} alt="${photo.caption || 'Rally Point'}" class="w-full h-full object-cover">
                                         <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center gap-2">
                                             <button onclick="viewOpsRallyPointPhoto(${pi})" class="px-3 py-1 bg-viper-green/30 rounded text-viper-green text-xs">View</button>
                                             <button onclick="removeOpsRallyPointPhoto(${pi})" class="px-3 py-1 bg-red-500/30 rounded text-red-400 text-xs">Remove</button>
                                         </div>
                                         ${photo.caption ? '<p class="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-xs px-2 py-1 truncate">' + photo.caption + '</p>' : ''}
                                     </div>
-                                `).join('') : '<p class="text-gray-500 text-xs col-span-3">No rally point photos added</p>'}
+                                `;}).join('') : '<p class="text-gray-500 text-xs col-span-3">No rally point photos added</p>'}
                             </div>
                         </div>
 
@@ -20610,16 +21123,18 @@
                                     <button type="button" onclick="addOpsLocationPhoto()" class="px-3 py-1 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded text-viper-purple text-xs transition">+ Add Photos</button>
                                 </div>
                                 <div id="ops_locationPhotos" class="grid grid-cols-4 gap-3">
-                                    ${(d.locationPhotos && d.locationPhotos.length > 0) ? d.locationPhotos.map((photo, pi) => `
+                                    ${(d.locationPhotos && d.locationPhotos.length > 0) ? d.locationPhotos.map((photo, pi) => {
+                                        const _i = _opsImgRender(photo);
+                                        return `
                                         <div class="relative group rounded-lg overflow-hidden bg-viper-dark border border-gray-700 h-40">
-                                            <img ${_S}="${photo.data}" alt="${photo.caption || 'Location'}" class="w-full h-full object-cover">
+                                            <img ${_S}="${_i.src}" ${_i.attrs} alt="${photo.caption || 'Location'}" class="w-full h-full object-cover">
                                             <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center gap-2">
                                                 <button onclick="viewOpsLocationPhoto(${pi})" class="px-3 py-1 bg-viper-green/30 rounded text-viper-green text-xs">View</button>
                                                 <button onclick="removeOpsLocationPhoto(${pi})" class="px-3 py-1 bg-red-500/30 rounded text-red-400 text-xs">Remove</button>
                                             </div>
                                             ${photo.caption ? '<p class="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-xs px-2 py-1 truncate">' + photo.caption + '</p>' : ''}
                                         </div>
-                                    `).join('') : '<p class="text-gray-500 text-xs col-span-4">No location photos added</p>'}
+                                    `;}).join('') : '<p class="text-gray-500 text-xs col-span-4">No location photos added</p>'}
                                 </div>
                             </div>
                         </div>
@@ -20919,28 +21434,108 @@
             document.body.insertAdjacentHTML('beforeend', html);
         }
 
-        function generateOpsPlanReport() {
+        async function generateOpsPlanReport() {
             const includeSuspects = document.getElementById('genOps_includeSuspectPDF')?.checked;
             const includePhotos = document.getElementById('genOps_includePhotos')?.checked;
             const includeMaps = document.getElementById('genOps_includeMaps')?.checked;
             document.getElementById('genOpsPlanModal')?.remove();
 
             const d = opsPlanData || {};
+
+            // Pre-resolve all disk-backed photos so the printable template
+            // can keep using the existing synchronous `p.data` /
+            // `r.photo` / `v.photo` shape. We attach a `_inlineData`
+            // field used below.
+            if (includePhotos) {
+                if (Array.isArray(d.locationPhotos)) {
+                    for (const p of d.locationPhotos) {
+                        if (p && !p.data && p.path) p._inlineData = await _opsResolvePhotoSrc(p);
+                    }
+                }
+                if (Array.isArray(d.rallyPointPhotos)) {
+                    for (const p of d.rallyPointPhotos) {
+                        if (p && !p.data && p.path) p._inlineData = await _opsResolvePhotoSrc(p);
+                    }
+                }
+            }
+            if (Array.isArray(d.otherResidents)) {
+                for (const r of d.otherResidents) {
+                    if (r && r.photo && typeof r.photo === 'object' && r.photo.path) {
+                        r._photoInline = await _opsResolvePhotoSrc(r.photo);
+                    }
+                }
+            }
+            if (Array.isArray(d.vehicles)) {
+                for (const v of d.vehicles) {
+                    if (v && v.photo && typeof v.photo === 'object' && v.photo.path) {
+                        v._photoInline = await _opsResolvePhotoSrc(v.photo);
+                    }
+                }
+            }
+
             const suspects = includeSuspects ? getSuspectSummary() : [];
             const userName = localStorage.getItem('viper_customer_name') || 'Unknown';
             const userInfo = JSON.parse(localStorage.getItem('viperUserInfo')) || {};
             const badge = userInfo.badgeNumber || '';
             const agency = localStorage.getItem('viper_agency') || userInfo.agencyName || '';
-            const deptBadge = localStorage.getItem('viperDeptBadge') || '';
+            const deptBadge = await _readDeptBadgeDataUrl();
             const opTypes = d.operationType ? Object.entries(d.operationType).filter(([k,v]) => v).map(([k]) => k) : [];
 
-            // Capture map images if available
+            // Capture map images if available.
+            // Leaflet renders into tile DIVs (not a canvas), so we use
+            // html2canvas to rasterize the map container. Calling
+            // map.invalidateSize() first ensures tiles are laid out for the
+            // current container dimensions; we wait briefly for tile loads.
             let map1Img = '', map2Img = '';
             if (includeMaps) {
-                const canvas1 = document.querySelector('#ops_routeMap1 canvas');
-                const canvas2 = document.querySelector('#ops_routeMap2 canvas');
-                if (canvas1) try { map1Img = canvas1.toDataURL(); } catch(e) {}
-                if (canvas2) try { map2Img = canvas2.toDataURL(); } catch(e) {}
+                const captureLeafletMap = async (containerId, leafletInstance) => {
+                    const el = document.getElementById(containerId);
+                    if (!el) return '';
+                    try {
+                        if (leafletInstance && typeof leafletInstance.invalidateSize === 'function') {
+                            leafletInstance.invalidateSize();
+                        }
+                        // Allow tiles to load before snapshot
+                        await new Promise(r => setTimeout(r, 600));
+                        if (typeof html2canvas !== 'function') {
+                            console.warn('html2canvas not available — skipping map capture');
+                            return '';
+                        }
+                        // Hard 8-second timeout — if html2canvas hangs (CORS,
+                        // unloaded tiles, etc.) we skip rather than freeze the
+                        // whole app while the user waits for a PDF.
+                        const captureP = html2canvas(el, {
+                            useCORS: true,
+                            allowTaint: true,
+                            backgroundColor: '#0a0e14',
+                            scale: 2,
+                            logging: false
+                        }).then(c => c.toDataURL('image/png'));
+                        const timeoutP = new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error('capture timeout')), 8000));
+                        return await Promise.race([captureP, timeoutP]);
+                    } catch (e) {
+                        console.warn(`Map capture failed for ${containerId}:`, e && e.message);
+                        return '';
+                    }
+                };
+                // Inline canvas fallback (in case any future map renderer DOES use a canvas)
+                const inlineCanvas1 = document.querySelector('#ops_routeMap1 canvas');
+                const inlineCanvas2 = document.querySelector('#ops_routeMap2 canvas');
+                if (inlineCanvas1) {
+                    try { map1Img = inlineCanvas1.toDataURL(); } catch (_) {}
+                }
+                if (inlineCanvas2) {
+                    try { map2Img = inlineCanvas2.toDataURL(); } catch (_) {}
+                }
+                if (!map1Img) map1Img = await captureLeafletMap('ops_routeMap1', _opsMap1);
+                if (!map2Img) map2Img = await captureLeafletMap('ops_routeMap2', _opsMap2);
+                // Final guard: only allow real data: URLs into the HTML.
+                // Anything else (empty string, undefined, accidental literal)
+                // becomes empty so the ${map1Img ? ... : ''} ternary skips
+                // the <img> tag entirely.
+                if (typeof map1Img !== 'string' || !map1Img.startsWith('data:')) map1Img = '';
+                if (typeof map2Img !== 'string' || !map2Img.startsWith('data:')) map2Img = '';
             }
 
             // Build TOC entries
@@ -20962,10 +21557,13 @@
             if (includePhotos && d.locationPhotos && d.locationPhotos.length > 0) tocEntries.push({ id: 'ops-photos', label: 'Location Photos' });
             if (includeSuspects && suspects.length > 0) tocEntries.push({ id: 'ops-suspectprofiles', label: 'Detailed Suspect Profiles' });
 
-            const pdfWindow = window.open('', '_blank');
-            if (!pdfWindow) { viperToast('Pop-up blocked — allow pop-ups and try again', 'error'); return; }
-
-            pdfWindow.document.write(`<!DOCTYPE html>
+            // Build the report HTML as a string. We no longer open a popup
+            // window with a print button — the popup + window.print() flow
+            // froze the app while Electron's print dialog waited on still-
+            // rendering Leaflet maps. Instead we hand the HTML to the main
+            // process which renders it in a hidden BrowserWindow and writes
+            // a real PDF via webContents.printToPDF (no print dialog).
+            const reportHtml = `<!DOCTYPE html>
 <html>
 <head>
 <title>Operations Plan - Case ${currentCase.caseNumber}</title>
@@ -21033,7 +21631,6 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 </style>
 </head>
 <body>
-<button class="no-print print-btn" onclick="window.print()">🖨️ Print / Save as PDF</button>
 
 <div class="page">
     <!-- COVER PAGE -->
@@ -21115,7 +21712,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
     ` : ''}
     ${(includePhotos && d.rallyPointPhotos && d.rallyPointPhotos.length > 0) ? `
     <div class="photo-grid" style="margin-top:8px">
-        ${d.rallyPointPhotos.map(p => '<div class="photo-card"><img ' + _S + '="' + p.data + '"><p>' + (p.caption || 'Rally Point') + '</p></div>').join('')}
+        ${d.rallyPointPhotos.map(p => '<div class="photo-card"><img ' + _S + '="' + (p.data || p._inlineData || '') + '"><p>' + (p.caption || 'Rally Point') + '</p></div>').join('')}
     </div>
     ` : ''}
 
@@ -21126,9 +21723,11 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
     <!-- Other Residents -->
     ${d.otherResidents && d.otherResidents.length > 0 ? `
         <div id="ops-residents" class="section-header"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-residents') + 1}</span> Other Residents at Location</div>
-        ${d.otherResidents.map((r, ri) => `
+        ${d.otherResidents.map((r, ri) => {
+            const rPhoto = (r.photo && typeof r.photo === 'string') ? r.photo : (r._photoInline || '');
+            return `
             <div style="display:flex;gap:16px;align-items:flex-start;padding:14px;margin:10px 0;border:1px solid #ddd;border-radius:8px;background:#fafafa">
-                ${r.photo ? '<img ' + _S + '="' + r.photo + '" style="width:80px;height:80px;border-radius:8px;object-fit:cover;border:1px solid #ccc">' : '<div style="width:80px;height:80px;border-radius:8px;background:#eee;display:flex;align-items:center;justify-content:center;color:#999;font-size:11px;border:1px solid #ccc">No Photo</div>'}
+                ${rPhoto ? '<img ' + _S + '="' + rPhoto + '" style="width:80px;height:80px;border-radius:8px;object-fit:cover;border:1px solid #ccc">' : '<div style="width:80px;height:80px;border-radius:8px;background:#eee;display:flex;align-items:center;justify-content:center;color:#999;font-size:11px;border:1px solid #ccc">No Photo</div>'}
                 <div style="flex:1">
                     <div style="font-weight:700;font-size:15px;margin-bottom:4px">${r.name || 'Unknown'}</div>
                     ${r.dob ? '<div style="font-size:13px;color:#555">DOB: ' + r.dob + '</div>' : ''}
@@ -21136,15 +21735,17 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     ${r.hasCrimHistory ? '<div style="margin-top:4px"><span style="font-weight:600;font-size:13px;color:#e65100">Criminal History:</span> <span style="font-size:13px">' + (r.crimHistory || 'Yes (details not specified)').replace(/</g,'&lt;') + '</span></div>' : ''}
                 </div>
             </div>
-        `).join('')}
+        `;}).join('')}
     ` : ''}
 
     <!-- Vehicles at Location -->
     ${d.vehicles && d.vehicles.length > 0 ? `
         <div id="ops-vehicles" class="section-header"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-vehicles') + 1}</span> Vehicles at Location</div>
-        ${d.vehicles.map((v, vi) => `
+        ${d.vehicles.map((v, vi) => {
+            const vPhoto = (v.photo && typeof v.photo === 'string') ? v.photo : (v._photoInline || '');
+            return `
             <div style="display:flex;gap:16px;align-items:flex-start;padding:14px;margin:10px 0;border:1px solid #ddd;border-radius:8px;background:#fafafa;page-break-inside:avoid">
-                ${v.photo ? '<img ' + _S + '="' + v.photo + '" style="width:120px;height:80px;border-radius:8px;object-fit:cover;border:1px solid #ccc">' : '<div style="width:120px;height:80px;border-radius:8px;background:#eee;display:flex;align-items:center;justify-content:center;color:#999;font-size:11px;border:1px solid #ccc">No Photo</div>'}
+                ${vPhoto ? '<img ' + _S + '="' + vPhoto + '" style="width:120px;height:80px;border-radius:8px;object-fit:cover;border:1px solid #ccc">' : '<div style="width:120px;height:80px;border-radius:8px;background:#eee;display:flex;align-items:center;justify-content:center;color:#999;font-size:11px;border:1px solid #ccc">No Photo</div>'}
                 <div style="flex:1">
                     <div style="font-weight:700;font-size:14px;margin-bottom:4px">${v.description || 'Vehicle ' + (vi + 1)}</div>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;font-size:12px">
@@ -21154,7 +21755,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     ${v.notes ? '<div style="margin-top:4px;font-size:12px;color:#555">' + v.notes.replace(/</g,'&lt;') + '</div>' : ''}
                 </div>
             </div>
-        `).join('')}
+        `;}).join('')}
     ` : ''}
 
     <!-- Entry Team -->
@@ -21199,6 +21800,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 <p style="font-size:12px;color:#333;margin:0 0 2px 0"><strong>From:</strong> ${(d.briefingLocation || '—').replace(/</g,'&lt;')}</p>
                 <p style="font-size:12px;color:#333;margin:0 0 6px 0"><strong>To:</strong> ${(d.location || '—').replace(/</g,'&lt;')}</p>
                 <p style="font-size:12px;color:#555;margin:0">${d.savedRoutes.route1.distanceText} · ${d.savedRoutes.route1.durationText}</p>
+                ${map1Img ? ('<div style="margin-top:10px;border:1px solid #b6e3ff;border-radius:6px;overflow:hidden"><img src="' + map1Img + '" style="width:100%;display:block" alt="Briefing to Operation route map"></div>') : ''}
             </div>
         ` : ''}
         ${(d.savedRoutes && d.savedRoutes.route2) ? `
@@ -21207,6 +21809,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 <p style="font-size:12px;color:#333;margin:0 0 2px 0"><strong>From:</strong> ${(d.location || '—').replace(/</g,'&lt;')}</p>
                 <p style="font-size:12px;color:#333;margin:0 0 6px 0"><strong>To:</strong> ${(d.hospital || '—').replace(/</g,'&lt;')}</p>
                 <p style="font-size:12px;color:#555;margin:0">${d.savedRoutes.route2.distanceText} · ${d.savedRoutes.route2.durationText}</p>
+                ${map2Img ? ('<div style="margin-top:10px;border:1px solid #ffd6a0;border-radius:6px;overflow:hidden"><img src="' + map2Img + '" style="width:100%;display:block" alt="Operation to Hospital route map"></div>') : ''}
             </div>
         ` : ''}
         ${d.directions ? '<div class="text-block" style="white-space:pre-wrap">' + d.directions.replace(/</g,'&lt;') + '</div>' : ''}
@@ -21216,7 +21819,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
     ${(includePhotos && d.locationPhotos && d.locationPhotos.length > 0) ? `
         <div id="ops-photos" class="section-header" style="page-break-before:always"><span class="num">${tocEntries.findIndex(t => t.id === 'ops-photos') + 1}</span> Location Photos</div>
         <div class="photo-grid">
-            ${d.locationPhotos.map(p => '<div class="photo-card"><img ' + _S + '="' + p.data + '" alt="' + (p.caption || '') + '"><p>' + (p.caption || p.fileName || '') + '</p></div>').join('')}
+            ${d.locationPhotos.map(p => '<div class="photo-card"><img ' + _S + '="' + (p.data || p._inlineData || '') + '" alt="' + (p.caption || '') + '"><p>' + (p.caption || p.fileName || '') + '</p></div>').join('')}
         </div>
     ` : ''}
 
@@ -21322,9 +21925,37 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
     </div>
 </div>
 </body>
-</html>`);
-            pdfWindow.document.close();
-            viperToast('OPS Plan report generated', 'success');
+</html>`;
+
+            // Hand the report HTML to the main process. It renders the HTML
+            // in a hidden BrowserWindow, waits for assets to settle, then
+            // writes a PDF via webContents.printToPDF — no print dialog,
+            // no popup, no freeze.
+            try {
+                if (!(window.electronAPI && window.electronAPI.saveHtmlAsPdf)) {
+                    viperToast('PDF export unavailable — restart the app to load updated bindings', 'error');
+                    return;
+                }
+                const safeCase = (currentCase.caseNumber || 'case').replace(/[^A-Za-z0-9_-]+/g, '_');
+                const stamp = new Date().toISOString().slice(0, 10);
+                const defaultFileName = `OpsPlan_${safeCase}_${stamp}.pdf`;
+                viperToast('Generating PDF…', 'info');
+                const res = await window.electronAPI.saveHtmlAsPdf({
+                    html: reportHtml,
+                    defaultFileName,
+                    options: { pageSize: 'Letter', settleMs: 1800 }
+                });
+                if (res && res.success) {
+                    viperToast('OPS Plan PDF saved', 'success');
+                } else if (res && res.canceled) {
+                    // User dismissed save dialog — silent
+                } else {
+                    viperToast('PDF export failed: ' + (res && res.error ? res.error : 'unknown error'), 'error');
+                }
+            } catch (e) {
+                console.error('OPS Plan PDF export error:', e);
+                viperToast('PDF export failed: ' + (e.message || e), 'error');
+            }
         }
 
         // ── OPS Plan Location Photos ──
@@ -21341,13 +21972,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 if (!opsPlanData.locationPhotos) opsPlanData.locationPhotos = [];
 
                 for (const file of files) {
-                    const data = await new Promise((resolve) => {
-                        const reader = new FileReader();
-                        reader.onload = (ev) => resolve(ev.target.result);
-                        reader.readAsDataURL(file);
-                    });
-
-                    // Prompt for caption
+                    const data = await _opsDownscaleFile(file, 1280, 0.7);
+                    if (!data) continue;
                     const caption = await new Promise((resolve) => {
                         const html = `
                             <div id="captionModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id==='captionModal'){document.getElementById('captionModal').remove();window._captionResolve('')}">
@@ -21368,14 +21994,24 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         setTimeout(() => document.getElementById('captionInput')?.focus(), 100);
                     });
 
-                    opsPlanData.locationPhotos.push({
-                        data,
+                    // Persist downsized photo to disk; only the path lives in localStorage.
+                    const saved = await _opsSaveImageToDisk(data, file.name, 'LocationPhotos');
+                    const record = {
                         fileName: file.name,
                         caption: caption || '',
                         addedAt: new Date().toISOString()
-                    });
+                    };
+                    if (saved) {
+                        record.path = saved.path;
+                        record.mime = saved.mime;
+                        // Cache so the immediate render doesn't have to round-trip.
+                        try { _opsReadCache.set(saved.path, data); } catch (_) {}
+                    } else {
+                        record.data = data;
+                    }
+                    opsPlanData.locationPhotos.push(record);
                 }
-                saveOpsPlanData();
+                try { saveOpsPlanData(); } catch (_) { return; }
                 renderTabContent('opsplan');
                 viperToast(`${files.length} photo(s) added`, 'success');
             };
@@ -21385,10 +22021,13 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         function viewOpsLocationPhoto(index) {
             if (!opsPlanData || !opsPlanData.locationPhotos || !opsPlanData.locationPhotos[index]) return;
             const photo = opsPlanData.locationPhotos[index];
-            const w = window.open('', '_blank');
-            if (w) {
-                w.document.write('<html><head><title>' + (photo.caption || photo.fileName) + '</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img ' + _S + '="' + photo.data + '"></body></html>');
-            }
+            (async () => {
+                const src = await _opsResolvePhotoSrc(photo);
+                const w = window.open('', '_blank');
+                if (w) {
+                    w.document.write('<html><head><title>' + (photo.caption || photo.fileName) + '</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img ' + _S + '="' + src + '"></body></html>');
+                }
+            })();
         }
 
         // ── Rally Point Photos ──
@@ -21403,11 +22042,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 if (!opsPlanData) opsPlanData = { _version: 2 };
                 if (!opsPlanData.rallyPointPhotos) opsPlanData.rallyPointPhotos = [];
                 for (const file of files) {
-                    const data = await new Promise((resolve) => {
-                        const reader = new FileReader();
-                        reader.onload = (ev) => resolve(ev.target.result);
-                        reader.readAsDataURL(file);
-                    });
+                    const data = await _opsDownscaleFile(file, 1280, 0.7);
+                    if (!data) continue;
                     const caption = await new Promise((resolve) => {
                         const html = `<div id="captionModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id==='captionModal'){document.getElementById('captionModal').remove();window._captionResolve('')}">
                             <div class="glass-card rounded-xl p-5 max-w-md w-full">
@@ -21425,9 +22061,22 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         document.body.insertAdjacentHTML('beforeend', html);
                         setTimeout(() => document.getElementById('captionInput')?.focus(), 100);
                     });
-                    opsPlanData.rallyPointPhotos.push({ data, fileName: file.name, caption: caption || '', addedAt: new Date().toISOString() });
+                    const saved = await _opsSaveImageToDisk(data, file.name, 'RallyPointPhotos');
+                    const record = {
+                        fileName: file.name,
+                        caption: caption || '',
+                        addedAt: new Date().toISOString()
+                    };
+                    if (saved) {
+                        record.path = saved.path;
+                        record.mime = saved.mime;
+                        try { _opsReadCache.set(saved.path, data); } catch (_) {}
+                    } else {
+                        record.data = data;
+                    }
+                    opsPlanData.rallyPointPhotos.push(record);
                 }
-                saveOpsPlanData();
+                try { saveOpsPlanData(); } catch (_) { return; }
                 renderTabContent('opsplan');
                 viperToast(`${files.length} rally point photo(s) added`, 'success');
             };
@@ -21437,13 +22086,20 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         function viewOpsRallyPointPhoto(index) {
             if (!opsPlanData?.rallyPointPhotos?.[index]) return;
             const photo = opsPlanData.rallyPointPhotos[index];
-            const w = window.open('', '_blank');
-            if (w) w.document.write('<html><head><title>' + (photo.caption || photo.fileName) + '</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img ' + _S + '="' + photo.data + '"></body></html>');
+            (async () => {
+                const src = await _opsResolvePhotoSrc(photo);
+                const w = window.open('', '_blank');
+                if (w) w.document.write('<html><head><title>' + (photo.caption || photo.fileName) + '</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img ' + _S + '="' + src + '"></body></html>');
+            })();
         }
 
         async function removeOpsRallyPointPhoto(index) {
             if (!opsPlanData?.rallyPointPhotos) return;
             if (await viperConfirm('Remove this rally point photo?', { danger: true, okText: 'Remove' })) {
+                const photo = opsPlanData.rallyPointPhotos[index];
+                if (photo && photo.path && window.electronAPI && window.electronAPI.deleteOpsPlanFile) {
+                    try { await window.electronAPI.deleteOpsPlanFile(photo.path); } catch (_) {}
+                }
                 opsPlanData.rallyPointPhotos.splice(index, 1);
                 saveOpsPlanData();
                 renderTabContent('opsplan');
@@ -21452,8 +22108,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
         // ── Vehicles at Location ──
         function renderOpsVehicleCard(v, i) {
+            const imgInfo = _opsImgRender(v.photo);
             const photoHtml = v.photo
-                ? '<img ' + _S + '="' + v.photo + '" class="w-24 h-20 rounded-lg object-cover border border-gray-600" onclick="viewOpsVehiclePhoto(' + i + ')">'
+                ? '<img ' + _S + '="' + imgInfo.src + '" ' + imgInfo.attrs + ' class="w-24 h-20 rounded-lg object-cover border border-gray-600" onclick="viewOpsVehiclePhoto(' + i + ')">'
                 : '<div class="w-24 h-20 rounded-lg bg-viper-dark border border-gray-600 flex items-center justify-center text-gray-500 text-xs cursor-pointer" onclick="uploadOpsVehiclePhoto(' + i + ')">+ Photo</div>';
             return '<div class="flex gap-4 items-start p-3 bg-viper-dark/50 rounded-lg border border-gray-700 mb-2" id="opsVehicle_' + i + '">'
                 + '<div class="shrink-0 flex flex-col items-center gap-1">'
@@ -21503,36 +22160,44 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             container.innerHTML = vehs.length === 0
                 ? '<p class="text-gray-500 text-xs">No vehicles added</p>'
                 : vehs.map((v, i) => renderOpsVehicleCard(v, i)).join('');
+            try { _opsHydrateImages(container); } catch (_) {}
         }
 
         function uploadOpsVehiclePhoto(idx) {
             const input = document.createElement('input');
             input.type = 'file';
             input.accept = 'image/*';
-            input.onchange = (e) => {
+            input.onchange = async (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (ev) => {
-                    if (!opsPlanData?.vehicles?.[idx]) return;
-                    opsPlanData.vehicles[idx] = { ...opsPlanData.vehicles[idx], ...collectOpsVehicles()[idx], photo: ev.target.result };
-                    saveOpsPlanData();
-                    refreshOpsVehiclesUI();
-                };
-                reader.readAsDataURL(file);
+                const data = await _opsDownscaleFile(file, 1024, 0.75);
+                if (!data) return;
+                if (!opsPlanData?.vehicles?.[idx]) return;
+                const saved = await _opsSaveImageToDisk(data, `vehicle-${idx}-${file.name}`, 'VehiclePhotos');
+                const photo = saved ? { path: saved.path, mime: saved.mime } : data;
+                opsPlanData.vehicles[idx] = { ...opsPlanData.vehicles[idx], ...collectOpsVehicles()[idx], photo };
+                try { saveOpsPlanData(); } catch (_) { return; }
+                refreshOpsVehiclesUI();
             };
             input.click();
         }
 
         function viewOpsVehiclePhoto(idx) {
             if (!opsPlanData?.vehicles?.[idx]?.photo) return;
-            const w = window.open('', '_blank');
-            if (w) w.document.write('<html><head><title>Vehicle Photo</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img ' + _S + '="' + opsPlanData.vehicles[idx].photo + '"></body></html>');
+            (async () => {
+                const src = await _opsResolvePhotoSrc(opsPlanData.vehicles[idx].photo);
+                const w = window.open('', '_blank');
+                if (w) w.document.write('<html><head><title>Vehicle Photo</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img ' + _S + '="' + src + '"></body></html>');
+            })();
         }
 
         async function removeOpsLocationPhoto(index) {
             if (!opsPlanData || !opsPlanData.locationPhotos) return;
             if (await viperConfirm('Remove this photo?', { danger: true, okText: 'Remove' })) {
+                const photo = opsPlanData.locationPhotos[index];
+                if (photo && photo.path && window.electronAPI && window.electronAPI.deleteOpsPlanFile) {
+                    try { await window.electronAPI.deleteOpsPlanFile(photo.path); } catch (_) {}
+                }
                 opsPlanData.locationPhotos.splice(index, 1);
                 saveOpsPlanData();
                 renderTabContent('opsplan');
@@ -21588,46 +22253,83 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 return;
             }
 
-            // Convert file to base64
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const newPlan = {
-                    id: Date.now(),
-                    fileName: file.name,
-                    fileSize: file.size,
-                    fileType: file.type,
-                    fileData: e.target.result,
-                    notes: document.getElementById('ops_notes').value.trim(),
-                    uploadedDate: new Date().toISOString(),
-                    uploadedBy: 'Current User' // Could be dynamic
-                };
-
-                opsPlans.push(newPlan);
-                saveOpsPlans();
-                closeOpsPlanModal();
-                renderTabContent('opsplan');
+            // Save the document to disk under cases/{caseNumber}/OpsPlan/Documents/
+            // and store ONLY the file path + metadata in localStorage.
+            const filePath = await _opsSaveBytesToDisk(file, 'Documents');
+            const newPlan = {
+                id: Date.now(),
+                fileName: file.name,
+                fileSize: file.size,
+                fileType: file.type,
+                notes: document.getElementById('ops_notes').value.trim(),
+                uploadedDate: new Date().toISOString(),
+                uploadedBy: 'Current User'
             };
 
-            reader.readAsDataURL(file);
+            if (filePath) {
+                newPlan.filePath = filePath;
+            } else {
+                // IPC unavailable (e.g. browser context) — fall back to inline base64
+                // but apply a hard size guard to avoid quota errors.
+                const MAX_BYTES = 3 * 1024 * 1024;
+                if (file.size > MAX_BYTES) {
+                    viperToast(
+                        `File too large (${(file.size / 1048576).toFixed(1)}MB). Disk save unavailable; under 3MB only without IPC.`,
+                        'error',
+                        8000
+                    );
+                    return;
+                }
+                const reader = new FileReader();
+                newPlan.fileData = await new Promise((resolve) => {
+                    reader.onload = (e) => resolve(e.target.result);
+                    reader.readAsDataURL(file);
+                });
+            }
+
+            opsPlans.push(newPlan);
+            try {
+                saveOpsPlans();
+            } catch (err) {
+                opsPlans.pop();
+                return;
+            }
+            closeOpsPlanModal();
+            renderTabContent('opsplan');
+            viperToast('Operations Plan uploaded', 'success');
         }
 
-        function viewOpsPlan(index) {
+        async function viewOpsPlan(index) {
             const plan = opsPlans[index];
-            if (!plan || !plan.fileData) {
+            if (!plan) {
+                viperToast('Plan not found', 'error');
+                return;
+            }
+
+            // Prefer disk-backed plans; fall back to legacy inline base64.
+            let dataUrl = plan.fileData;
+            if (!dataUrl && plan.filePath) {
+                try {
+                    const mime = plan.fileType
+                        || (plan.fileName && /\.pdf$/i.test(plan.fileName) ? 'application/pdf' : 'application/octet-stream');
+                    dataUrl = await _opsReadFileAsDataUrl(plan.filePath, mime);
+                } catch (_) {}
+            }
+            if (!dataUrl) {
                 viperToast('File data not available', 'error');
                 return;
             }
-            
+
             // Open the file in a new window
             const newWindow = window.open('', '_blank');
             if (newWindow) {
                 if (plan.fileType && plan.fileType.includes('pdf')) {
-                    newWindow.document.write('<html><head><title>' + plan.fileName + '</title><style>body{margin:0;padding:0}iframe{width:100%;height:100vh;border:none}</style></head><body><iframe ' + _S + '="' + plan.fileData + '"></iframe></body></html>');
+                    newWindow.document.write('<html><head><title>' + plan.fileName + '</title><style>body{margin:0;padding:0}iframe{width:100%;height:100vh;border:none}</style></head><body><iframe ' + _S + '="' + dataUrl + '"></iframe></body></html>');
                 } else if (plan.fileType && plan.fileType.includes('image')) {
-                    newWindow.document.write('<html><head><title>' + plan.fileName + '</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img ' + _S + '="' + plan.fileData + '" alt="' + plan.fileName + '"></body></html>');
+                    newWindow.document.write('<html><head><title>' + plan.fileName + '</title><style>body{margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100%;height:auto}</style></head><body><img ' + _S + '="' + dataUrl + '" alt="' + plan.fileName + '"></body></html>');
                 } else {
                     const link = document.createElement('a');
-                    link.href = plan.fileData;
+                    link.href = dataUrl;
                     link.download = plan.fileName;
                     link.click();
                     newWindow.close();
@@ -22249,6 +22951,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 { id: 'googleWarrant', label: 'Google Warrant Parser', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z', desc: 'Parse Google warrant returns — account, email, location, devices, apps' },
                 { id: 'metaWarrant', label: 'META Warrant Parser', icon: 'M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z', desc: 'Parse META (Facebook/Instagram) warrant returns — account, messages, photos, IP activity' },
                 { id: 'kikWarrant', label: 'KIK Warrant Parser', icon: 'M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z', desc: 'Parse KIK Messenger warrant returns — messages, contacts, sessions, groups' },
+                { id: 'snapchatWarrant', label: 'Snapchat Warrant Parser', icon: 'M12 2C8.5 2 6 4.5 6 8c0 1.5.3 3 .8 4.2-.5.3-1.3.5-2 .5-.4 0-.8.3-.8.7 0 .5.5.9 1.2 1.2.7.3 1.6.5 2.3.6-.1.5-.5 1-1.2 1.5-.7.4-1.6.7-2.3.9-.5.1-.8.4-.8.8 0 .8 1.7 1.4 3.5 1.7.1.4.3.8.6 1 .3.2.7.2 1.1.1.5-.1 1-.1 1.6 0 .6.1 1.2.4 1.9.9.7.5 1.4.7 2.1.7s1.4-.2 2.1-.7c.7-.5 1.3-.8 1.9-.9.6-.1 1.1-.1 1.6 0 .4.1.8.1 1.1-.1.3-.2.5-.6.6-1 1.8-.3 3.5-.9 3.5-1.7 0-.4-.3-.7-.8-.8-.7-.2-1.6-.5-2.3-.9-.7-.5-1.1-1-1.2-1.5.7-.1 1.6-.3 2.3-.6.7-.3 1.2-.7 1.2-1.2 0-.4-.4-.7-.8-.7-.7 0-1.5-.2-2-.5.5-1.2.8-2.7.8-4.2 0-3.5-2.5-6-6-6z', desc: 'Parse Snapchat warrant returns — conversations, geo, memories, devices, media' },
                 { id: 'datapilot', label: 'Datapilot (Mobile Forensics)', icon: 'M9 17a4 4 0 01-2-7.5l1-3a4 4 0 017 0l1 3A4 4 0 0115 17H9zM12 12v9', desc: 'Parse mobile forensic CSV exports — calls, messages, contacts, GPS, apps, files + AI insights' },
             ];
 
@@ -22508,11 +23211,13 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
             // Auto-set dateClosed when status changes to closed/inactive.
             // Custom statuses with category 'active' are NOT inactive.
+            // Stored as YYYY-MM-DD so the dashboard/All Cases renderers
+            // (which append 'T00:00' before parsing) can read it.
             const inactiveStatuses = ['closed', 'closed-arrest', 'transferred', 'inactive'];
             const customStatuses = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
             customStatuses.forEach(s => { if (s.category !== 'active') inactiveStatuses.push(s.id); });
             if (inactiveStatuses.includes(newStatus) && !inactiveStatuses.includes(oldStatus)) {
-                currentCase.dateClosed = new Date().toISOString();
+                currentCase.dateClosed = new Date().toISOString().split('T')[0];
             } else if (!inactiveStatuses.includes(newStatus)) {
                 currentCase.dateClosed = null;
             }
@@ -22537,11 +23242,12 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
             // Auto-set dateClosed when moving to inactive status.
             // Custom statuses with category 'active' are NOT inactive.
+            // Stored as YYYY-MM-DD (see note above).
             const inactiveStatuses = ['closed', 'closed-arrest', 'transferred', 'inactive'];
             const customStatuses = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
             customStatuses.forEach(s => { if (s.category !== 'active') inactiveStatuses.push(s.id); });
             if (inactiveStatuses.includes(newStatus) && !inactiveStatuses.includes(oldStatus)) {
-                currentCase.dateClosed = new Date().toISOString();
+                currentCase.dateClosed = new Date().toISOString().split('T')[0];
             } else if (!inactiveStatuses.includes(newStatus)) {
                 currentCase.dateClosed = null;
             }
@@ -24452,54 +25158,50 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         }
 
         function getCDRDumpsForCase() {
-            const storageKey = 'viperCaseCDRDumps';
-            const allDumps = JSON.parse(localStorage.getItem(storageKey) || '{}');
-            return allDumps[currentCase.caseNumber] || [];
+            // Sync read from in-memory cache. Cache is hydrated from disk by
+            // ensureCdrDumpsLoaded() — kicked off whenever the Analytics tab
+            // renders. CDR data is parsed-cache, not canonical: source files
+            // live in Evidence/ or Warrants/Production/ and can be re-imported.
+            if (!currentCase) return [];
+            if (_cdrDumpsCache.caseNumber === currentCase.caseNumber) {
+                return _cdrDumpsCache.dumps || [];
+            }
+            return [];
         }
 
-        function saveCDRDumps(dumps) {
-            const storageKey = 'viperCaseCDRDumps';
-            const allDumps = JSON.parse(localStorage.getItem(storageKey) || '{}');
-            allDumps[currentCase.caseNumber] = dumps;
-            
+        async function saveCDRDumps(dumps) {
+            // Write per-case dumps.json to disk (cases/{caseNumber}/CDR/dumps.json).
+            // Encrypted when Field Security is on. Updates the in-memory cache.
+            if (!currentCase || !currentCase.caseNumber) {
+                console.warn('saveCDRDumps: no currentCase');
+                return false;
+            }
+            const safeDumps = Array.isArray(dumps) ? dumps : [];
             try {
-                localStorage.setItem(storageKey, JSON.stringify(allDumps));
-            } catch (e) {
-                if (e.name === 'QuotaExceededError') {
-                    // Storage quota exceeded - try to save without raw data
-                    console.warn('LocalStorage quota exceeded, saving without raw data');
-                    
-                    const compactDumps = dumps.map(dump => ({
-                        ...dump,
-                        records: dump.records.map(r => ({
-                            id: r.id,
-                            phoneA: r.phoneA,
-                            phoneB: r.phoneB,
-                            timestamp: r.timestamp,
-                            callType: r.callType,
-                            duration: r.duration,
-                            imei: r.imei,
-                            imsi: r.imsi,
-                            towerA: r.towerA,
-                            towerB: r.towerB
-                            // Remove 'raw' field to save space
-                        }))
-                    }));
-                    
-                    allDumps[currentCase.caseNumber] = compactDumps;
-                    
-                    try {
-                        localStorage.setItem(storageKey, JSON.stringify(allDumps));
-                        showToast('Large dataset saved (some data compressed)', 'success');
-                    } catch (e2) {
-                        // Still too large - show error
-                        hideLoadingIndicator();
-                        showQuotaExceededModal(dumps[0].stats.totalRecords);
+                if (window.electronAPI && window.electronAPI.saveCdrDumps) {
+                    const res = await window.electronAPI.saveCdrDumps({
+                        caseNumber: currentCase.caseNumber,
+                        dumps: safeDumps
+                    });
+                    if (!res || !res.success) {
+                        console.error('saveCDRDumps IPC failure:', res);
+                        showToast('Failed to save CDR dumps to disk', 'error');
                         return false;
                     }
+                } else {
+                    console.warn('saveCDRDumps: electronAPI.saveCdrDumps not available');
+                    return false;
                 }
+                _cdrDumpsCache = {
+                    caseNumber: currentCase.caseNumber,
+                    dumps: safeDumps
+                };
+                return true;
+            } catch (e) {
+                console.error('saveCDRDumps error:', e);
+                showToast('Failed to save CDR dumps: ' + (e.message || e), 'error');
+                return false;
             }
-            return true;
         }
         
         function showQuotaExceededModal(recordCount) {
@@ -24564,9 +25266,54 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }, 100);
         }
 
+        // Per-session in-memory cache for CDR dumps. Disk is canonical.
+        // { caseNumber: string|null, dumps: Array, loading: boolean }
+        let _cdrDumpsCache = { caseNumber: null, dumps: [], loading: false };
+
         function loadCDRDumps() {
-            // Placeholder - will load from localStorage
+            // Kept for backwards-compat with callers — fire async hydrator.
+            ensureCdrDumpsLoaded();
         }
+
+        async function ensureCdrDumpsLoaded() {
+            if (!currentCase || !currentCase.caseNumber) return;
+            const cn = currentCase.caseNumber;
+            if (_cdrDumpsCache.caseNumber === cn && !_cdrDumpsCache.loading) return;
+            if (_cdrDumpsCache.loading) return;
+            _cdrDumpsCache = { caseNumber: cn, dumps: [], loading: true };
+            try {
+                if (window.electronAPI && window.electronAPI.readCdrDumps) {
+                    const res = await window.electronAPI.readCdrDumps({ caseNumber: cn });
+                    if (res && res.success && Array.isArray(res.dumps)) {
+                        _cdrDumpsCache = { caseNumber: cn, dumps: res.dumps, loading: false };
+                    } else {
+                        _cdrDumpsCache = { caseNumber: cn, dumps: [], loading: false };
+                    }
+                } else {
+                    _cdrDumpsCache.loading = false;
+                }
+                // Re-render Analytics tab if it's currently open so the loaded
+                // dumps appear (initial render saw an empty cache).
+                if (typeof currentTab !== 'undefined' && currentTab === 'analytics') {
+                    renderTabContent('analytics');
+                }
+            } catch (e) {
+                console.error('ensureCdrDumpsLoaded error:', e);
+                _cdrDumpsCache.loading = false;
+            }
+        }
+
+        // One-time cleanup: evict legacy localStorage CDR blob (could be 30MB+).
+        // CDR data has been migrated to per-case files on disk
+        // (cases/{caseNumber}/CDR/dumps.json). Sources still live in
+        // Evidence/Warrants/Production and can be re-imported if needed.
+        try {
+            if (localStorage.getItem('viperCaseCDRDumps') !== null) {
+                const sz = (localStorage.getItem('viperCaseCDRDumps') || '').length;
+                localStorage.removeItem('viperCaseCDRDumps');
+                console.warn(`[VIPER] Evicted legacy viperCaseCDRDumps (~${(sz/1048576).toFixed(2)}MB) — re-import CDR sources from Evidence/Warrants if needed.`);
+            }
+        } catch (_) {}
 
         function initializeAnalytics() {
             if (currentCDRDump) {
@@ -24777,7 +25524,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             if (modal) modal.remove();
         }
 
-        function submitColumnMapping(event, fileName, formatType) {
+        async function submitColumnMapping(event, fileName, formatType) {
             event.preventDefault();
             const formData = new FormData(event.target);
             const mapping = Object.fromEntries(formData.entries());
@@ -24836,7 +25583,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             reader.readAsText(file);
         }
 
-        function processCDRData(fileName, mapping, rawData, formatType) {
+        async function processCDRData(fileName, mapping, rawData, formatType) {
             // Normalize and index the data
             const normalized = rawData.map((row, index) => {
                 // Parse duration - AT&T uses minutes (decimal), others use seconds
@@ -24888,10 +25635,10 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 refLon: window._cdrRefLon || null
             };
             
-            // Save to localStorage (may fail for large datasets)
+            // Save to per-case dumps.json on disk (no localStorage quota)
             const dumps = getCDRDumpsForCase();
             dumps.push(dump);
-            const saved = saveCDRDumps(dumps);
+            const saved = await saveCDRDumps(dumps);
             
             // Set current dump for analysis (works even if save failed)
             currentCDRDump = dump;
@@ -27794,26 +28541,141 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
 
             // ---- Suspects Extended ----
+            // INFORM RMS uses some quirky labels here:
+            //   - "ToWeight", "ToHair Color", "ToJuvenile" — leading "To" is a column-header artifact
+            //   - "P.O. BoxCell Phone", "Home PhoneOther Phone" — concatenated labels (one column has no value)
+            //   - Height values like "511" mean 5'11" and need formatting
+            //   - Ethnicity may split across two lines: "NON-" / "HISPANIC"
             const suspExtLines = getSectionLines(['Suspect(s) Extended', 'Suspects Extended']);
             if (suspExtLines.length > 0) {
+                const fmtHeight = (v) => {
+                    const s = String(v || '').trim();
+                    if (/^\d{3}$/.test(s)) return s[0] + "'" + s.slice(1) + '"';
+                    if (/^\d{1}\d{2}$/.test(s)) return s[0] + "'" + s.slice(1) + '"';
+                    return s;
+                };
+                const fmtPhone = (v) => String(v || '').trim();
+                const fmtRow = (v) => {
+                    const s = String(v || '').trim();
+                    return s && s !== '-' ? s : '';
+                };
+                const isPhoneLike = (v) => /^[\(\d]/.test(String(v || '').trim()) && /\d{3}/.test(String(v || ''));
+                const isHeightLike = (v) => /^\d{2,3}$/.test(String(v || '').trim()) || /^\d['\u2019]\d{1,2}["\u201D]?$/.test(String(v || '').trim());
+                const isWeightLike = (v) => /^\d{2,3}$/.test(String(v || '').trim());
+                const ethnicMerge = (acc, cur) => {
+                    if (!acc) return cur;
+                    if (acc.endsWith('-') || acc.endsWith('/')) return acc + cur;
+                    return acc + ' ' + cur;
+                };
+                const extendedEntries = [];
                 let se = null;
                 for (let j = 0; j < suspExtLines.length; j++) {
                     const sl = suspExtLines[j];
-                    if (sl === 'Involvement' && suspExtLines[j + 1]) {
-                        if (se) report.personsInvolved.push(se);
-                        se = { involvement: suspExtLines[j + 1], name: '', dob: '', age: '', sex: '', race: '',
+                    const nv = suspExtLines[j + 1] || '';
+                    if (sl === 'Involvement' && nv) {
+                        if (se) extendedEntries.push(se);
+                        se = { involvement: nv, name: '', dob: '', age: '', sex: '', race: '',
                             ethnicity: '', address: '', phone: '', height: '', weight: '', hair: '', eyes: '',
-                            comments: '', guardian: '', detail: 'Extended' };
+                            build: '', comments: '', guardian: '', detail: 'Extended' };
                         j++;
-                    } else if (se) {
-                        if (sl === 'Name' && suspExtLines[j + 1]) { se.name = suspExtLines[j + 1]; j++; }
-                        else if (sl === 'DOB' && suspExtLines[j + 1]) { se.dob = suspExtLines[j + 1]; j++; }
-                        else if (sl === 'Age' && suspExtLines[j + 1]) { se.age = suspExtLines[j + 1]; j++; }
-                        else if (sl === 'Sex' && suspExtLines[j + 1]) { se.sex = suspExtLines[j + 1]; j++; }
-                        else if (sl === 'Race' && suspExtLines[j + 1]) { se.race = suspExtLines[j + 1]; j++; }
+                        continue;
+                    }
+                    if (!se) continue;
+                    // Skip noise lines
+                    if (/^Invl No$/.test(sl)) { j++; continue; }
+                    if (sl === 'Name' && nv) { se.name = nv; j++; }
+                    else if (sl === 'DOB' && nv && /\d/.test(nv)) { se.dob = nv; j++; }
+                    else if (sl === 'Age' && nv && /^\d+$/.test(nv)) { se.age = nv; j++; }
+                    else if (/^ToJuvenile$/i.test(sl)) { j++; /* skip flag */ }
+                    else if (/^Arrested$/i.test(sl)) { j++; /* skip flag */ }
+                    else if (sl === 'Sex' && nv && nv.length <= 2) { se.sex = nv; j++; }
+                    else if (sl === 'Race' && nv && nv.length <= 3) { se.race = nv; j++; }
+                    else if (sl === 'Ethnicity' && nv) {
+                        // Ethnicity may span 2 lines: "NON-" / "HISPANIC"
+                        let eth = nv;
+                        if (/-$/.test(eth) && suspExtLines[j + 2]) {
+                            eth = ethnicMerge(eth, suspExtLines[j + 2]);
+                            j++;
+                        }
+                        se.ethnicity = eth; j++;
+                    }
+                    else if (sl === 'Height' && nv && isHeightLike(nv)) { se.height = fmtHeight(nv); j++; }
+                    else if (/^ToWeight$/i.test(sl) || sl === 'Weight') {
+                        if (nv && isWeightLike(nv)) { se.weight = fmtRow(nv); j++; }
+                    }
+                    else if (/^ToHair Color$/i.test(sl) || sl === 'Hair Color' || sl === 'Hair') {
+                        if (nv) { se.hair = fmtRow(nv); j++; }
+                    }
+                    else if (sl === 'Eye Color' || sl === 'Eyes') {
+                        if (nv) { se.eyes = fmtRow(nv); j++; }
+                    }
+                    else if (sl === 'Build') {
+                        if (nv) { se.build = fmtRow(nv); j++; }
+                    }
+                    else if (sl === 'Home Address' || sl === 'Address') {
+                        if (nv) { se.address = fmtRow(nv); j++; }
+                    }
+                    // Concatenated phone labels: pick the value if it's phone-shaped
+                    else if (/^(P\.O\. Box)?Cell Phone$/i.test(sl) || /^Cell Phone$/i.test(sl)) {
+                        if (nv && isPhoneLike(nv)) {
+                            const pv = fmtPhone(nv);
+                            se.phone = se.phone ? se.phone + '; ' + pv : pv;
+                            j++;
+                        }
+                    }
+                    else if (/^Home Phone(Other Phone)?$/i.test(sl) || /^Home Phone$/i.test(sl)) {
+                        if (nv && isPhoneLike(nv)) {
+                            const pv = fmtPhone(nv);
+                            se.phone = se.phone ? se.phone + '; ' + pv : pv;
+                            j++;
+                        }
+                    }
+                    else if (/^Other Phone$/i.test(sl)) {
+                        if (nv && isPhoneLike(nv)) {
+                            const pv = fmtPhone(nv);
+                            se.phone = se.phone ? se.phone + '; ' + pv : pv;
+                            j++;
+                        }
+                    }
+                    // Concatenated row label "P.O. BoxCell Phone" with phone value following
+                    else if (/^P\.O\. Box/i.test(sl) && /Cell Phone/i.test(sl)) {
+                        if (nv && isPhoneLike(nv)) {
+                            const pv = fmtPhone(nv);
+                            se.phone = se.phone ? se.phone + '; ' + pv : pv;
+                            j++;
+                        }
                     }
                 }
-                if (se) report.personsInvolved.push(se);
+                if (se) extendedEntries.push(se);
+
+                // Merge Extended entries into matching Persons Involved instead of adding duplicates
+                for (const ext of extendedEntries) {
+                    if (!ext.name && !ext.involvement) continue;
+                    const matchKey = (ext.name || '').toUpperCase().split(',')[0].trim();
+                    const target = report.personsInvolved.find(p => {
+                        if (!p.name || p.detail === 'Extended') return false;
+                        const pk = p.name.toUpperCase().split(',')[0].trim();
+                        return matchKey && pk === matchKey;
+                    });
+                    if (target) {
+                        if (ext.dob && !target.dob) target.dob = ext.dob;
+                        if (ext.age && !target.age) target.age = ext.age;
+                        if (ext.sex && !target.sex) target.sex = ext.sex;
+                        if (ext.race && !target.race) target.race = ext.race;
+                        if (ext.ethnicity && !target.ethnicity) target.ethnicity = ext.ethnicity;
+                        if (ext.height) target.height = ext.height;
+                        if (ext.weight) target.weight = ext.weight;
+                        if (ext.hair) target.hair = ext.hair;
+                        if (ext.eyes) target.eyes = ext.eyes;
+                        if (ext.address) target.address = ext.address;
+                        if (ext.phone) target.phone = target.phone ? target.phone + '; ' + ext.phone : ext.phone;
+                        if (ext.build) {
+                            target.comments = (target.comments ? target.comments + '; ' : '') + 'Build: ' + ext.build;
+                        }
+                    } else {
+                        report.personsInvolved.push(ext);
+                    }
+                }
             }
 
             // ---- Orphan narrative text (continuation after page breaks) ----
@@ -27929,6 +28791,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         sex: p.sex || '', height: p.height || '', weight: p.weight || '',
                         hairColor: p.hair || '', eyeColor: p.eyes || '', scarsMarksTattoos: '',
                         address: p.address || '', addressCityStateZip: '',
+                        phone: p.phone || '', phone2: '',
                         photo: '', residencePhoto: '',
                         employerName: '', occupation: '', employerAddress: '', employerPhone: '',
                         firearms: [], vehicles: [], identifiers: [], criminalHistory: [],
@@ -30052,6 +30915,37 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     <div class="glass-card p-6 rounded-xl">
                         <div class="text-center text-red-400">
                             <p class="text-lg font-semibold mb-2">KIK Warrant Parser Not Loaded</p>
+                            <p class="text-sm text-gray-400">Please check that all module files are properly installed.</p>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function renderSnapchatWarrantTab() {
+            return `
+                <div id="snapchat-warrant-tab-container" style="height: calc(100vh - 220px);"></div>
+            `;
+        }
+
+        function initializeSnapchatWarrant() {
+            if (window.SnapchatWarrantModule) {
+                window.snapchatWarrantModule = new SnapchatWarrantModule(
+                    String(currentCase.id),
+                    String(currentCase.caseNumber || currentCase.id),
+                    currentCase.title || currentCase.name || currentCase.caseNumber
+                );
+                window.snapchatWarrantModule.init('snapchat-warrant-tab-container').then(() => {
+                    window.snapchatWarrantUI = window.snapchatWarrantModule.ui;
+                }).catch(err => {
+                    console.error('Snapchat Warrant init error:', err);
+                });
+            } else {
+                console.error('Snapchat Warrant module not loaded');
+                document.getElementById('snapchat-warrant-tab-container').innerHTML = `
+                    <div class="glass-card p-6 rounded-xl">
+                        <div class="text-center text-red-400">
+                            <p class="text-lg font-semibold mb-2">Snapchat Warrant Parser Not Loaded</p>
                             <p class="text-sm text-gray-400">Please check that all module files are properly installed.</p>
                         </div>
                     </div>

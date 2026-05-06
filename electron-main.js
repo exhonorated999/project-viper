@@ -238,11 +238,12 @@ function createWindow() {
   // Force focus back after native dialogs (file pickers, save dialogs)
   // NOTE: restoreFocus is defined at module scope (see below createWindow)
 
-  // Gate on security — show login page or main app
+  // Gate on security — show login page or main app.
+  // Always land on the Dashboard (index.html), not a case detail page.
   if (security && security.isEnabled()) {
     mainWindow.loadURL('http://localhost:8000/security-login.html');
   } else {
-    mainWindow.loadURL('http://localhost:8000/case-detail-with-analytics.html');
+    mainWindow.loadURL('http://localhost:8000/index.html');
   }
 
   // Open DevTools in development mode
@@ -1984,10 +1985,23 @@ ipcMain.handle('security-disable', async () => {
   }
 });
 
+// Pre-lock URL stash — survives lock→unlock within a single app session,
+// but is intentionally NOT persisted (in-memory only). On a full app
+// quit/relaunch this resets to null, so the next launch lands on Dashboard.
+let preLockUrl = null;
+
 ipcMain.handle('security-navigate-app', async () => {
-  // Called after successful unlock/setup to navigate to main app
+  // Called after successful unlock/setup to navigate to main app.
+  // If we stashed a pre-lock URL, restore that exact screen; otherwise
+  // (fresh launch, no prior lock this session) land on the Dashboard.
   if (mainWindow) {
-    mainWindow.loadURL('http://localhost:8000/case-detail-with-analytics.html');
+    let target = 'http://localhost:8000/index.html';
+    if (preLockUrl && /^http:\/\/localhost:8000\//.test(preLockUrl)
+        && !/security-login\.html/.test(preLockUrl)) {
+      target = preLockUrl;
+    }
+    preLockUrl = null; // single-use; clear after consuming
+    mainWindow.loadURL(target);
   }
   return { success: true };
 });
@@ -2003,7 +2017,17 @@ ipcMain.handle('security-save-vault', async (event, data) => {
 });
 
 ipcMain.handle('security-lock', async () => {
-  // Lock master key and navigate back to login page
+  // Lock master key and navigate back to login page.
+  // Capture the current URL FIRST so we can restore it on unlock.
+  try {
+    if (mainWindow && mainWindow.webContents) {
+      const cur = mainWindow.webContents.getURL();
+      if (cur && /^http:\/\/localhost:8000\//.test(cur)
+          && !/security-login\.html/.test(cur)) {
+        preLockUrl = cur;
+      }
+    }
+  } catch (_) { /* ignore */ }
   if (security) security.lock();
   if (mainWindow) {
     mainWindow.loadURL('http://localhost:8000/security-login.html');
@@ -2177,6 +2201,216 @@ ipcMain.handle('read-warrant-file', async (event, filePath) => {
   } catch (error) {
     console.error('Failed to read warrant file:', error);
     throw error;
+  }
+});
+
+// --- Save Ops Plan file (photo or document) to disk ---
+// Storing Ops Plan photos inline as base64 in localStorage hits the 10MB
+// per-origin Chromium quota. Save them under
+//   cases/{caseNumber}/OpsPlan/{subfolder}/{fileName}
+// and store ONLY the resulting filePath in opsplan_* localStorage.
+ipcMain.handle('save-opsplan-file', async (event, data) => {
+  try {
+    const { caseNumber, subfolder, fileName, fileData } = data;
+    const sub = (subfolder || 'Photos').replace(/[<>:"|?*\x00-\x1F\\/]/g, '_');
+    const opsDir = path.join(casesDir, caseNumber, 'OpsPlan', sub);
+    fs.mkdirSync(opsDir, { recursive: true });
+
+    const sanitize = (s) => String(s || 'file').replace(/[<>:"|?*\x00-\x1F\\/]/g, '_');
+    // Prefix with timestamp so two uploads with the same source name don't collide.
+    const safeName = `${Date.now()}__${sanitize(fileName)}`;
+    const filePath = path.join(opsDir, safeName);
+    const buffer = Buffer.from(fileData);
+
+    if (security && security.isEnabled() && security.isUnlocked()) {
+      fs.writeFileSync(filePath, security.encryptBuffer(buffer));
+    } else {
+      fs.writeFileSync(filePath, buffer);
+    }
+
+    console.log(`OpsPlan file saved: ${filePath} (${buffer.length} bytes)`);
+    return filePath;
+  } catch (error) {
+    console.error('Failed to save Ops Plan file:', error);
+    throw error;
+  }
+});
+
+// --- Read Ops Plan file (for inline preview) ---
+ipcMain.handle('read-opsplan-file', async (event, filePath) => {
+  try {
+    const raw = fs.readFileSync(filePath);
+    if (security && security.isUnlocked() && security.isEncryptedBuffer(raw)) {
+      const decrypted = security.decryptBuffer(raw);
+      return Array.from(new Uint8Array(decrypted));
+    }
+    return Array.from(new Uint8Array(raw));
+  } catch (error) {
+    console.error('Failed to read Ops Plan file:', error);
+    throw error;
+  }
+});
+
+// --- Delete Ops Plan file (when user removes a photo) ---
+ipcMain.handle('delete-opsplan-file', async (event, filePath) => {
+  try {
+    if (filePath && fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      return { success: true };
+    }
+    return { success: false, reason: 'not_found' };
+  } catch (error) {
+    console.error('Failed to delete Ops Plan file:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// --- CDR Dumps: per-case JSON storage on disk ---
+// Bypasses localStorage origin quota. Source CDR files are already in
+// Evidence/ or Warrants/Production/, so dumps.json is a parsed cache, not
+// canonical data. Encrypted when Field Security is on.
+ipcMain.handle('save-cdr-dumps', async (event, { caseNumber, dumps }) => {
+  try {
+    if (!caseNumber) throw new Error('caseNumber required');
+    const cdrDir = path.join(casesDir, caseNumber, 'CDR');
+    fs.mkdirSync(cdrDir, { recursive: true });
+    const filePath = path.join(cdrDir, 'dumps.json');
+    const json = JSON.stringify(dumps || []);
+    const buffer = Buffer.from(json, 'utf8');
+    if (security && security.isEnabled() && security.isUnlocked()) {
+      fs.writeFileSync(filePath, security.encryptBuffer(buffer));
+    } else {
+      fs.writeFileSync(filePath, buffer);
+    }
+    return { success: true, path: filePath, bytes: buffer.length };
+  } catch (error) {
+    console.error('Failed to save CDR dumps:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('read-cdr-dumps', async (event, { caseNumber }) => {
+  try {
+    if (!caseNumber) throw new Error('caseNumber required');
+    const filePath = path.join(casesDir, caseNumber, 'CDR', 'dumps.json');
+    if (!fs.existsSync(filePath)) return { success: true, dumps: [] };
+    let buffer = fs.readFileSync(filePath);
+    if (security && security.isEnabled() && security.isUnlocked()
+        && security.isEncryptedBuffer && security.isEncryptedBuffer(buffer)) {
+      buffer = security.decryptBuffer(buffer);
+    }
+    const text = buffer.toString('utf8');
+    const dumps = text ? JSON.parse(text) : [];
+    return { success: true, dumps };
+  } catch (error) {
+    console.error('Failed to read CDR dumps:', error);
+    return { success: false, error: error.message, dumps: [] };
+  }
+});
+
+// --- Department Badge: single agency-wide image stored under userData ---
+// Eliminates the 2.5MB base64 string from localStorage.
+ipcMain.handle('save-dept-badge', async (event, { fileData, mime }) => {
+  try {
+    const ext = (mime && /image\/(png|jpe?g|gif|webp|svg\+xml)/.exec(mime))
+      ? mime.split('/')[1].replace('jpeg', 'jpg').replace('svg+xml', 'svg')
+      : 'png';
+    const badgeDir = path.join(app.getPath('userData'), 'branding');
+    fs.mkdirSync(badgeDir, { recursive: true });
+    // Wipe any prior badge files (different extension) so we don't accumulate.
+    try {
+      for (const f of fs.readdirSync(badgeDir)) {
+        if (/^dept-badge\./i.test(f)) fs.unlinkSync(path.join(badgeDir, f));
+      }
+    } catch (_) {}
+    const filePath = path.join(badgeDir, `dept-badge.${ext}`);
+    const buffer = Buffer.from(fileData);
+    fs.writeFileSync(filePath, buffer);
+    return { success: true, path: filePath, mime: mime || `image/${ext}` };
+  } catch (error) {
+    console.error('Failed to save dept badge:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('read-dept-badge', async () => {
+  try {
+    const badgeDir = path.join(app.getPath('userData'), 'branding');
+    if (!fs.existsSync(badgeDir)) return { success: true, found: false };
+    const files = fs.readdirSync(badgeDir).filter(f => /^dept-badge\./i.test(f));
+    if (!files.length) return { success: true, found: false };
+    const filePath = path.join(badgeDir, files[0]);
+    const buffer = fs.readFileSync(filePath);
+    const ext = (path.extname(filePath).slice(1) || 'png').toLowerCase();
+    const mimeMap = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml' };
+    const mime = mimeMap[ext] || 'image/png';
+    const dataUrl = `data:${mime};base64,${buffer.toString('base64')}`;
+    return { success: true, found: true, dataUrl, path: filePath, mime };
+  } catch (error) {
+    console.error('Failed to read dept badge:', error);
+    return { success: false, error: error.message, found: false };
+  }
+});
+
+// --- HTML → PDF (no print dialog) ---
+// Used by report generators (e.g. Ops Plan). Spawns a hidden BrowserWindow,
+// renders the supplied HTML, waits for assets to settle, calls printToPDF(),
+// shows a Save dialog, and writes the file. Avoids the freeze caused by
+// invoking window.print() inside a renderer popup that's still rendering
+// html2canvas-captured Leaflet maps.
+ipcMain.handle('save-html-as-pdf', async (event, { html, defaultFileName, options }) => {
+  let pdfWin = null;
+  try {
+    const fileName = (defaultFileName || 'report.pdf').replace(/[<>:"|?*\x00-\x1F\\/]/g, '_');
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save Report as PDF',
+      defaultPath: fileName,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }]
+    });
+    restoreFocus && restoreFocus();
+    if (result.canceled || !result.filePath) return { success: false, canceled: true };
+
+    pdfWin = new BrowserWindow({
+      show: false,
+      width: 1100,
+      height: 1400,
+      webPreferences: {
+        offscreen: false,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        webSecurity: false   // tile images from OSM etc. for offline-rendered report
+      }
+    });
+
+    // Wait for both did-finish-load AND a settle delay so Leaflet tiles +
+    // images embedded as data URLs are fully painted.
+    const ready = new Promise((resolve) => {
+      pdfWin.webContents.once('did-finish-load', resolve);
+    });
+
+    const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+    await pdfWin.loadURL(dataUrl);
+    await ready;
+    // Settle delay for in-page async work (Leaflet, fonts, image decode)
+    await new Promise(r => setTimeout(r, (options && options.settleMs) || 1500));
+
+    const pdfBuffer = await pdfWin.webContents.printToPDF({
+      printBackground: true,
+      pageSize: (options && options.pageSize) || 'Letter',
+      margins: { marginType: 'default' },
+      landscape: !!(options && options.landscape)
+    });
+
+    fs.writeFileSync(result.filePath, pdfBuffer);
+    return { success: true, path: result.filePath };
+  } catch (error) {
+    console.error('save-html-as-pdf failed:', error);
+    return { success: false, error: error.message };
+  } finally {
+    if (pdfWin && !pdfWin.isDestroyed()) {
+      try { pdfWin.destroy(); } catch (_) {}
+    }
   }
 });
 
@@ -4145,6 +4379,182 @@ ipcMain.handle('kik-warrant-read-media', async (event, { filePath }) => {
       else if (ext === '.png') mimeType = 'image/png';
       else if (ext === '.mp4') mimeType = 'video/mp4';
       else if (ext === '.gif') mimeType = 'image/gif';
+    }
+    return { success: true, data: buf.toString('base64'), mimeType };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// ─── Snapchat Warrant Parser IPC ────────────────────────────────────────
+
+const SnapchatWarrantParser = require('./modules/snapchat-warrant/snapchat-warrant-parser');
+const swParser = new SnapchatWarrantParser();
+
+/**
+ * Scan Evidence/ and Warrants/Production/ for Snapchat warrant data.
+ * Detects BOTH unzipped folders AND .zip archives containing Snapchat
+ * production part-folders (those with conversations.csv + Snapchat preamble).
+ */
+ipcMain.handle('snapchat-warrant-scan', async (event, { caseNumber }) => {
+  try {
+    const dirsToScan = [
+      path.join(casesDir, caseNumber, 'Evidence'),
+      path.join(casesDir, caseNumber, 'Warrants', 'Production')
+    ];
+
+    // Helper: detect Field Security encryption via 6-byte magic header (no full read)
+    const isFileEncrypted = (filePath) => {
+      try {
+        const fd = fs.openSync(filePath, 'r');
+        const head = Buffer.alloc(6);
+        fs.readSync(fd, head, 0, 6, 0);
+        fs.closeSync(fd);
+        return head.equals(Buffer.from('VIPENC'));
+      } catch (e) { return false; }
+    };
+
+    const files = [];
+    const seen = new Set();
+
+    for (const dir of dirsToScan) {
+      if (!fs.existsSync(dir)) continue;
+
+      const scanDir = (d, depth) => {
+        if (depth > 5) return; // safety cap (deeper for nested Evidence groups)
+        let entries;
+        try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { return; }
+        for (const entry of entries) {
+          const fullPath = path.join(d, entry.name);
+          if (seen.has(fullPath)) continue;
+
+          if (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')) {
+            try {
+              let detected = false;
+              if (isFileEncrypted(fullPath)) {
+                if (security && security.isUnlocked()) {
+                  const buf = security.decryptBuffer(fs.readFileSync(fullPath));
+                  detected = SnapchatWarrantParser.isSnapchatWarrantZip(buf);
+                }
+              } else {
+                // Fast path: AdmZip reads only central directory from disk
+                detected = SnapchatWarrantParser.isSnapchatWarrantZip(fullPath);
+              }
+              if (detected) {
+                seen.add(fullPath);
+                files.push({
+                  name: entry.name,
+                  path: fullPath,
+                  size: fs.statSync(fullPath).size,
+                  isFolder: false
+                });
+              }
+            } catch (e) { /* skip */ }
+          } else if (entry.isDirectory()) {
+            // Check if THIS directory is itself a Snapchat production
+            if (SnapchatWarrantParser.isSnapchatWarrantFolder(fullPath)) {
+              seen.add(fullPath);
+              files.push({
+                name: entry.name,
+                path: fullPath,
+                size: 0,
+                isFolder: true
+              });
+              // Don't descend further into a confirmed production folder
+              continue;
+            }
+            scanDir(fullPath, depth + 1);
+          }
+        }
+      };
+      scanDir(dir, 0);
+    }
+
+    return { success: true, files };
+  } catch (error) {
+    console.error('Snapchat warrant scan error:', error);
+    return { success: false, error: error.message, files: [] };
+  }
+});
+
+ipcMain.handle('snapchat-warrant-import', async (event, { filePath, caseNumber, isFolder }) => {
+  try {
+    const extractDir = caseNumber
+      ? path.join(casesDir, caseNumber, 'Evidence', 'SnapchatWarrant')
+      : null;
+    if (extractDir && !fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
+
+    // Detect Field Security encryption via 6-byte magic header (no full read)
+    const isFileEncrypted = (fp) => {
+      try {
+        const fd = fs.openSync(fp, 'r');
+        const head = Buffer.alloc(6);
+        fs.readSync(fd, head, 0, 6, 0);
+        fs.closeSync(fd);
+        return head.equals(Buffer.from('VIPENC'));
+      } catch (e) { return false; }
+    };
+
+    let data;
+    if (isFolder) {
+      data = await swParser.parseFolder(filePath, { extractDir, security });
+    } else if (isFileEncrypted(filePath)) {
+      // Encrypted ZIP — must load + decrypt fully into memory
+      if (!security || !security.isUnlocked()) {
+        return { success: false, error: 'File is Field Security encrypted but security is locked' };
+      }
+      const buf = security.decryptBuffer(fs.readFileSync(filePath));
+      data = await swParser.parseZip(buf, { extractDir, security });
+    } else {
+      // Unencrypted: pass path directly so AdmZip streams from disk (no full buffer in RAM)
+      data = await swParser.parseZip(filePath, { extractDir, security });
+    }
+
+    return { success: true, data };
+  } catch (error) {
+    console.error('Snapchat warrant import error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('snapchat-warrant-pick-file', async () => {
+  // Allow user to pick either a ZIP file OR a folder
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Snapchat Warrant Production (ZIP or Folder)',
+    properties: ['openFile', 'openDirectory'],
+    filters: [{ name: 'Snapchat Warrant Production', extensions: ['zip'] }]
+  });
+  restoreFocus();
+  if (result.canceled || !result.filePaths.length) return null;
+  const picked = result.filePaths[0];
+  let isFolder = false;
+  try {
+    isFolder = fs.statSync(picked).isDirectory();
+  } catch (e) { /* leave false */ }
+  return { path: picked, isFolder };
+});
+
+ipcMain.handle('snapchat-warrant-read-media', async (event, { filePath }) => {
+  try {
+    if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' };
+    let buf = fs.readFileSync(filePath);
+    if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
+      buf = security.decryptBuffer(buf);
+    }
+    let mimeType = 'application/octet-stream';
+    if (buf[0] === 0xFF && buf[1] === 0xD8) mimeType = 'image/jpeg';
+    else if (buf[0] === 0x89 && buf[1] === 0x50) mimeType = 'image/png';
+    else if (buf.length > 7 && buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70) mimeType = 'video/mp4';
+    else if (buf.length > 12 && buf.slice(0, 4).toString() === 'RIFF' && buf.slice(8, 12).toString() === 'WEBP') mimeType = 'image/webp';
+    else {
+      const ext = path.extname(filePath).toLowerCase();
+      if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
+      else if (ext === '.png') mimeType = 'image/png';
+      else if (ext === '.mp4') mimeType = 'video/mp4';
+      else if (ext === '.gif') mimeType = 'image/gif';
+      else if (ext === '.webp') mimeType = 'image/webp';
+      else if (ext === '.webm') mimeType = 'video/webm';
+      else if (ext === '.mov') mimeType = 'video/quicktime';
     }
     return { success: true, data: buf.toString('base64'), mimeType };
   } catch (error) {

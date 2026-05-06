@@ -88,6 +88,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   snapchatWarrantPickFile: () => ipcRenderer.invoke('snapchat-warrant-pick-file'),
   snapchatWarrantReadMedia: (data) => ipcRenderer.invoke('snapchat-warrant-read-media', data),
 
+  // Discord Warrant Parser
+  discordWarrantScan: (data) => ipcRenderer.invoke('discord-warrant-scan', data),
+  discordWarrantImport: (data) => ipcRenderer.invoke('discord-warrant-import', data),
+  discordWarrantPickFile: () => ipcRenderer.invoke('discord-warrant-pick-file'),
+  discordWarrantReadMedia: (data) => ipcRenderer.invoke('discord-warrant-read-media', data),
+
   // Datapilot mobile-forensic CSV export parser
   datapilotScan: (data) => ipcRenderer.invoke('datapilot-scan', data),
   datapilotPickFolder: () => ipcRenderer.invoke('datapilot-pick-folder'),
@@ -116,7 +122,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   securityDisable: () => ipcRenderer.invoke('security-disable'),
   securityNavigateApp: () => ipcRenderer.invoke('security-navigate-app'),
   securitySaveVault: (data) => ipcRenderer.invoke('security-save-vault', data),
-  securityLock: () => ipcRenderer.invoke('security-lock'),
+  securityLock: (opts) => ipcRenderer.invoke('security-lock', opts),
+
+  // Audit log
+  auditLogRead: (opts) => ipcRenderer.invoke('audit-log-read', opts),
+  auditLogExport: () => ipcRenderer.invoke('audit-log-export'),
+  auditLogVerify: () => ipcRenderer.invoke('audit-log-verify'),
+  auditLogSetEventForwarding: (enabled) => ipcRenderer.invoke('audit-log-set-event-forwarding', enabled),
+  auditLogWrite: (payload) => ipcRenderer.invoke('audit-log-write', payload),
 
   // Evidence file storage
   selectEvidenceFiles: (data) => ipcRenderer.invoke('select-evidence-files', data),

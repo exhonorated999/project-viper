@@ -7,6 +7,8 @@ const { spawn } = require('child_process');
 const os = require('os');
 const crypto = require('crypto');
 const SecurityManager = require('./modules/security');
+const AuditLogger = require('./modules/audit-log');
+const AUDIT_EVENTS = AuditLogger.EVENT_TYPES;
 
 // ── Datapilot custom media protocol ──────────────────────────────────
 // The renderer is loaded over http://localhost, which blocks `file:///` URLs
@@ -54,6 +56,7 @@ let mainWindow;
 let server;
 let apertureProcess = null;
 let security = null;
+let audit = null;
 let isQuitting = false;
 let mediaPlayerWindow = null;
 let mediaBrowserView = null;
@@ -347,6 +350,37 @@ app.whenReady().then(async () => {
     if (!fs.existsSync(secDir)) fs.mkdirSync(secDir, { recursive: true });
     security = new SecurityManager(secDir);
     console.log('Security:', security.isEnabled() ? 'ENABLED (locked)' : 'disabled');
+
+    // Initialize audit logger (writes to userData/audit.log)
+    // - When SecurityManager is later unlocked, entries are encrypted under
+    //   the same master key.  Until then, entries are written in plaintext
+    //   (unavoidable: we can't encrypt before the user provides the key).
+    // - The chain is hash-linked, so even plaintext entries are tamper-evident.
+    try {
+      audit = new AuditLogger(secDir, {
+        security,
+        appVersion: app.getVersion()
+      });
+      // Restore Windows Event Log forwarding preference (off by default)
+      try {
+        const prefPath = path.join(secDir, 'audit-prefs.json');
+        if (fs.existsSync(prefPath)) {
+          const prefs = JSON.parse(fs.readFileSync(prefPath, 'utf-8'));
+          if (prefs.eventLogEnabled) audit.setEventLogForwarding(true);
+        }
+      } catch (_) { /* ignore */ }
+
+      audit.write(AUDIT_EVENTS.APP_LAUNCH, {
+        platform: process.platform,
+        electron: process.versions.electron,
+        node: process.versions.node,
+        portable: !!isPortable,
+        security_enabled: security.isEnabled(),
+      });
+    } catch (e) {
+      console.error('AuditLogger init failed:', e.message);
+      audit = null;
+    }
 
     // Wire security into aperture data for case file encryption
     if (typeof apertureData !== 'undefined') {
@@ -671,6 +705,16 @@ app.on('window-all-closed', function () {
 });
 
 app.on('will-quit', () => {
+  // Final audit entry — uptime + reason. Synchronous append, so it lands
+  // before the process exits.
+  try {
+    if (audit) {
+      audit.write(AUDIT_EVENTS.APP_EXIT, {
+        uptime_sec: Math.round(process.uptime())
+      });
+    }
+  } catch (_) { /* ignore — never block quit on logging */ }
+
   if (server) {
     server.close();
   }
@@ -877,6 +921,7 @@ if (autoUpdater) {
   autoUpdater.allowDowngrade = false;
 
   autoUpdater.on('checking-for-update', () => {
+    try { audit && audit.write(AUDIT_EVENTS.UPDATE_CHECKED, { current_version: app.getVersion() }); } catch (_) {}
     sendUpdateStatus('update-status', { status: 'checking' });
   });
 
@@ -910,6 +955,13 @@ if (autoUpdater) {
     // Store the actual downloaded file path for the install handler
     autoUpdater._downloadedInstallerPath = info.downloadedFile || null;
     console.log('Update downloaded. File path:', info.downloadedFile);
+    try {
+      audit && audit.write(AUDIT_EVENTS.UPDATE_DOWNLOADED, {
+        from_version: app.getVersion(),
+        to_version: info.version,
+        file: info.downloadedFile ? path.basename(info.downloadedFile) : null,
+      });
+    } catch (_) {}
     sendUpdateStatus('update-status', {
       status: 'downloaded',
       version: info.version
@@ -1064,6 +1116,12 @@ ipcMain.handle('update-install', async () => {
     });
     child.unref();
     console.log('update-install: launcher batch dispatched:', batPath);
+    try {
+      audit && audit.write(AUDIT_EVENTS.UPDATE_APPLIED, {
+        from_version: app.getVersion(),
+        installer: path.basename(installerPath),
+      });
+    } catch (_) {}
   } catch (err) {
     console.error('update-install: failed to spawn launcher:', err);
     sendUpdateStatus('update-status', {
@@ -1932,29 +1990,38 @@ ipcMain.handle('security-setup', async (event, { password }) => {
   const recoveryKey = security.setup(password);
   // Hide the cases folder on disk
   _setCasesHidden(true);
+  try { audit && audit.write(AUDIT_EVENTS.SECURITY_ENABLED, {}); } catch (_) {}
   return { success: true, recoveryKey };
 });
 
 ipcMain.handle('security-unlock', async (event, { password }) => {
   const success = security.unlock(password);
-  if (!success) return { success: false, vaultData: null };
+  if (!success) {
+    try { audit && audit.write(AUDIT_EVENTS.SECURITY_UNLOCK_FAIL, { method: 'password' }); } catch (_) {}
+    return { success: false, vaultData: null };
+  }
   // Decrypt vault and return localStorage snapshot
   let vaultData = null;
   try {
     const raw = security.decryptVault();
     if (raw) vaultData = JSON.parse(raw);
   } catch (e) { console.error('Vault decrypt:', e.message); }
+  try { audit && audit.write(AUDIT_EVENTS.SECURITY_UNLOCK, { method: 'password' }); } catch (_) {}
   return { success: true, vaultData };
 });
 
 ipcMain.handle('security-recover', async (event, { recoveryKey }) => {
   const success = security.recover(recoveryKey);
-  if (!success) return { success: false, vaultData: null };
+  if (!success) {
+    try { audit && audit.write(AUDIT_EVENTS.SECURITY_UNLOCK_FAIL, { method: 'recovery_key' }); } catch (_) {}
+    return { success: false, vaultData: null };
+  }
   let vaultData = null;
   try {
     const raw = security.decryptVault();
     if (raw) vaultData = JSON.parse(raw);
   } catch (e) { console.error('Vault decrypt:', e.message); }
+  try { audit && audit.write(AUDIT_EVENTS.SECURITY_RECOVERY, {}); } catch (_) {}
   return { success: true, vaultData };
 });
 
@@ -1979,6 +2046,7 @@ ipcMain.handle('security-new-recovery-key', async () => {
 ipcMain.handle('security-disable', async () => {
   try {
     security.disable();
+    try { audit && audit.write(AUDIT_EVENTS.SECURITY_DISABLED, {}); } catch (_) {}
     return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
@@ -2016,7 +2084,8 @@ ipcMain.handle('security-save-vault', async (event, data) => {
   }
 });
 
-ipcMain.handle('security-lock', async () => {
+ipcMain.handle('security-lock', async (event, opts) => {
+  const reason = (opts && opts.reason) || 'manual';
   // Lock master key and navigate back to login page.
   // Capture the current URL FIRST so we can restore it on unlock.
   try {
@@ -2029,12 +2098,115 @@ ipcMain.handle('security-lock', async () => {
     }
   } catch (_) { /* ignore */ }
   if (security) security.lock();
+  try {
+    const evt = reason === 'idle' ? AUDIT_EVENTS.SECURITY_IDLE_LOCK : AUDIT_EVENTS.SECURITY_LOCK;
+    audit && audit.write(evt, { reason });
+  } catch (_) {}
   if (mainWindow) {
     mainWindow.loadURL('http://localhost:8000/security-login.html');
   }
   return { success: true };
 });
 
+// ─── Audit Log IPC ──────────────────────────────────────────────────
+// Read recent entries (decrypted in-place when security is unlocked).
+ipcMain.handle('audit-log-read', async (event, opts) => {
+  if (!audit) return { success: false, error: 'Audit logger not initialized' };
+  try {
+    const limit = (opts && Number.isInteger(opts.limit)) ? opts.limit : 200;
+    const entries = await audit.readTail(limit);
+    return { success: true, entries };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Export the full audit chain (across rotated files) to a user-chosen file.
+// Writes plaintext JSONL — exporter is responsible for safe handling.
+ipcMain.handle('audit-log-export', async () => {
+  if (!audit) return { success: false, error: 'Audit logger not initialized' };
+  try {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export Audit Log',
+      defaultPath: `VIPER_audit_${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`,
+      filters: [
+        { name: 'JSON Lines', extensions: ['jsonl'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    });
+    restoreFocus();
+    if (result.canceled || !result.filePath) return { success: false, canceled: true };
+
+    const entries = await audit.exportAll();
+    const lines = entries.map(e => JSON.stringify(e)).join('\n') + '\n';
+    fs.writeFileSync(result.filePath, lines, 'utf-8');
+    try {
+      audit.write(AUDIT_EVENTS.AUDIT_LOG_EXPORTED, {
+        path: result.filePath,
+        entries: entries.length,
+      });
+    } catch (_) {}
+    return { success: true, path: result.filePath, entries: entries.length };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Verify the SHA-256 hash chain across all rotated files.
+ipcMain.handle('audit-log-verify', async () => {
+  if (!audit) return { success: false, error: 'Audit logger not initialized' };
+  try {
+    const result = await audit.verifyChain();
+    try {
+      audit.write(AUDIT_EVENTS.AUDIT_LOG_VERIFIED, {
+        ok: result.ok,
+        total: result.totalEntries,
+        broken_at: result.brokenAt || null,
+        reason: result.reason || null,
+      });
+    } catch (_) {}
+    return { success: true, result };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Toggle Windows Event Log forwarding. Persists to audit-prefs.json next
+// to the audit log so it survives restarts.
+ipcMain.handle('audit-log-set-event-forwarding', async (event, enabled) => {
+  if (!audit) return { success: false, error: 'Audit logger not initialized' };
+  try {
+    audit.setEventLogForwarding(!!enabled);
+    try {
+      const prefPath = path.join(app.getPath('userData'), 'audit-prefs.json');
+      fs.writeFileSync(prefPath, JSON.stringify({ eventLogEnabled: !!enabled }, null, 2), 'utf-8');
+    } catch (_) {}
+    try {
+      audit.write(AUDIT_EVENTS.SETTINGS_CHANGED, {
+        setting: 'audit_event_log_forwarding',
+        value: !!enabled,
+      });
+    } catch (_) {}
+    return { success: true, enabled: !!enabled };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Renderer-side write hook. Intentionally narrow: only events from the
+// frozen vocabulary are accepted — write() rejects anything else.
+ipcMain.handle('audit-log-write', async (event, payload) => {
+  if (!audit) return { success: false, error: 'Audit logger not initialized' };
+  try {
+    const eventType = payload && payload.event;
+    const data = (payload && payload.data) || {};
+    if (!eventType) return { success: false, error: 'Missing event type' };
+    audit.write(eventType, data);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
 // --- Select evidence files or folder via native dialog ---
 ipcMain.handle('select-evidence-files', async (event, { mode }) => {
   // mode: 'files' or 'folder'
@@ -4555,6 +4727,212 @@ ipcMain.handle('snapchat-warrant-read-media', async (event, { filePath }) => {
       else if (ext === '.webp') mimeType = 'image/webp';
       else if (ext === '.webm') mimeType = 'video/webm';
       else if (ext === '.mov') mimeType = 'video/quicktime';
+    }
+    return { success: true, data: buf.toString('base64'), mimeType };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// ─── Discord Warrant Parser IPC ─────────────────────────────────────
+
+const DiscordWarrantParser = require('./modules/discord-warrant/discord-warrant-parser');
+const dwParser = new DiscordWarrantParser();
+
+/**
+ * Scan Evidence/ and Warrants/Production/ for Discord Data Package warrant returns.
+ * Detects both unzipped folders and .zip archives.
+ */
+ipcMain.handle('discord-warrant-scan', async (event, { caseNumber }) => {
+  try {
+    const dirsToScan = [
+      path.join(casesDir, caseNumber, 'Evidence'),
+      path.join(casesDir, caseNumber, 'Warrants', 'Production')
+    ];
+
+    const isFileEncrypted = (filePath) => {
+      try {
+        const fd = fs.openSync(filePath, 'r');
+        const head = Buffer.alloc(6);
+        fs.readSync(fd, head, 0, 6, 0);
+        fs.closeSync(fd);
+        return head.equals(Buffer.from('VIPENC'));
+      } catch (e) { return false; }
+    };
+
+    // Filename / folder name hints (used when we can't open the ZIP — e.g. encrypted + locked)
+    const looksLikeDiscord = (name) => /discord|^package(?:\.zip)?$/i.test(name || '');
+
+    const files = [];
+    const seen = new Set();
+    const debug = {
+      casesDir,
+      caseNumber,
+      scannedDirs: [],
+      candidates: [],   // every .zip we considered, with reason
+      securityState: {
+        present: !!security,
+        enabled: !!(security && security.isEnabled && security.isEnabled()),
+        unlocked: !!(security && security.isUnlocked && security.isUnlocked())
+      }
+    };
+
+    for (const dir of dirsToScan) {
+      const exists = fs.existsSync(dir);
+      debug.scannedDirs.push({ dir, exists });
+      if (!exists) continue;
+      const scanDir = (d, depth) => {
+        if (depth > 5) return;
+        let entries;
+        try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { return; }
+        for (const entry of entries) {
+          const fullPath = path.join(d, entry.name);
+          if (seen.has(fullPath)) continue;
+
+          if (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')) {
+            const parentDir = path.basename(path.dirname(fullPath));
+            const cand = { path: fullPath, parent: parentDir, encrypted: false, detected: false, reason: '' };
+            try {
+              const enc = isFileEncrypted(fullPath);
+              cand.encrypted = enc;
+              if (enc) {
+                if (security && security.isUnlocked && security.isUnlocked()) {
+                  try {
+                    const buf = security.decryptBuffer(fs.readFileSync(fullPath));
+                    cand.detected = DiscordWarrantParser.isDiscordWarrantZip(buf);
+                    cand.reason = cand.detected ? 'decrypted+matched' : 'decrypted+nomatch';
+                  } catch (e) {
+                    cand.reason = 'decrypt-error:' + e.message;
+                  }
+                } else {
+                  // Can't open — fall back to filename / parent-folder hint
+                  if (looksLikeDiscord(parentDir) || looksLikeDiscord(entry.name)) {
+                    cand.detected = true;
+                    cand.reason = 'encrypted-locked, hint:' + parentDir + '/' + entry.name;
+                  } else {
+                    cand.reason = 'encrypted-locked, no hint';
+                  }
+                }
+              } else {
+                cand.detected = DiscordWarrantParser.isDiscordWarrantZip(fullPath);
+                cand.reason = cand.detected ? 'matched' : 'nomatch';
+                // Fall back to hint even for unencrypted files (e.g. partial productions)
+                if (!cand.detected && (looksLikeDiscord(parentDir) || looksLikeDiscord(entry.name))) {
+                  cand.detected = true;
+                  cand.reason = 'fallback hint:' + parentDir + '/' + entry.name;
+                }
+              }
+              debug.candidates.push(cand);
+              if (cand.detected) {
+                seen.add(fullPath);
+                files.push({
+                  name: entry.name,
+                  path: fullPath,
+                  size: fs.statSync(fullPath).size,
+                  isFolder: false,
+                  encryptedLocked: enc && !(security && security.isUnlocked && security.isUnlocked())
+                });
+              }
+            } catch (e) {
+              cand.reason = 'error:' + e.message;
+              debug.candidates.push(cand);
+            }
+          } else if (entry.isDirectory()) {
+            if (DiscordWarrantParser.isDiscordWarrantFolder(fullPath)) {
+              seen.add(fullPath);
+              files.push({
+                name: entry.name,
+                path: fullPath,
+                size: 0,
+                isFolder: true
+              });
+              continue;
+            }
+            scanDir(fullPath, depth + 1);
+          }
+        }
+      };
+      scanDir(dir, 0);
+    }
+
+    console.log('[discord-warrant-scan]', JSON.stringify(debug, null, 2));
+    return { success: true, files, debug };
+  } catch (error) {
+    console.error('Discord warrant scan error:', error);
+    return { success: false, error: error.message, files: [] };
+  }
+});
+
+ipcMain.handle('discord-warrant-import', async (event, { filePath, caseNumber, isFolder }) => {
+  try {
+    const extractDir = caseNumber
+      ? path.join(casesDir, caseNumber, 'Evidence', 'DiscordWarrant')
+      : null;
+    if (extractDir && !fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
+
+    const isFileEncrypted = (fp) => {
+      try {
+        const fd = fs.openSync(fp, 'r');
+        const head = Buffer.alloc(6);
+        fs.readSync(fd, head, 0, 6, 0);
+        fs.closeSync(fd);
+        return head.equals(Buffer.from('VIPENC'));
+      } catch (e) { return false; }
+    };
+
+    let data;
+    if (isFolder) {
+      data = await dwParser.parseFolder(filePath, { extractDir, security });
+    } else if (isFileEncrypted(filePath)) {
+      if (!security || !security.isUnlocked()) {
+        return { success: false, error: 'File is Field Security encrypted but security is locked' };
+      }
+      const buf = security.decryptBuffer(fs.readFileSync(filePath));
+      data = await dwParser.parseZip(buf, { extractDir, security });
+    } else {
+      data = await dwParser.parseZip(filePath, { extractDir, security });
+    }
+
+    return { success: true, data };
+  } catch (error) {
+    console.error('Discord warrant import error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('discord-warrant-pick-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Discord Warrant Return (ZIP or Folder)',
+    properties: ['openFile', 'openDirectory'],
+    filters: [{ name: 'Discord Data Package', extensions: ['zip'] }]
+  });
+  restoreFocus();
+  if (result.canceled || !result.filePaths.length) return null;
+  const picked = result.filePaths[0];
+  let isFolder = false;
+  try { isFolder = fs.statSync(picked).isDirectory(); } catch (e) { /* leave false */ }
+  return { path: picked, isFolder };
+});
+
+ipcMain.handle('discord-warrant-read-media', async (event, { filePath }) => {
+  try {
+    if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' };
+    let buf = fs.readFileSync(filePath);
+    if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
+      buf = security.decryptBuffer(buf);
+    }
+    let mimeType = 'application/octet-stream';
+    if (buf[0] === 0xFF && buf[1] === 0xD8) mimeType = 'image/jpeg';
+    else if (buf[0] === 0x89 && buf[1] === 0x50) mimeType = 'image/png';
+    else if (buf.length > 7 && buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70) mimeType = 'video/mp4';
+    else if (buf.length > 12 && buf.slice(0, 4).toString() === 'RIFF' && buf.slice(8, 12).toString() === 'WEBP') mimeType = 'image/webp';
+    else {
+      const ext = path.extname(filePath).toLowerCase();
+      if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
+      else if (ext === '.png') mimeType = 'image/png';
+      else if (ext === '.gif') mimeType = 'image/gif';
+      else if (ext === '.webp') mimeType = 'image/webp';
+      else if (ext === '.mp4') mimeType = 'video/mp4';
     }
     return { success: true, data: buf.toString('base64'), mimeType };
   } catch (error) {

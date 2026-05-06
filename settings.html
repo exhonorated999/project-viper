@@ -2141,7 +2141,7 @@
                     'areacanvas_', 'prosecution_', 'narcotics_', 'firearms_',
                     'money_', 'opsplan_', 'rmsImports_', 'oversightImport_',
                     'canvasForms_', 'cyberTips_', 'timelineEvents_', 'consentSearches_',
-                    'googleWarrant_', 'metaWarrant_', 'kikWarrant_', 'caseMetrics_'
+                    'googleWarrant_', 'metaWarrant_', 'kikWarrant_', 'snapchatWarrant_', 'caseMetrics_'
                 ];
                 for (let i = 0; i < localStorage.length; i++) {
                     const key = localStorage.key(i);
@@ -3344,12 +3344,28 @@
     }
 
     // ── Department Badge / Logo ──
-    function loadDeptBadge() {
-        const badge = localStorage.getItem('viperDeptBadge');
+    // Stored as a file under userData/branding/dept-badge.{ext} via IPC.
+    // Eliminates the 2.5MB+ base64 string from per-origin localStorage quota.
+    async function loadDeptBadge() {
         const preview = document.getElementById('deptBadgePreview');
-        if (badge && preview) {
-            preview.innerHTML = `<img src="${badge}" class="w-full h-full object-contain">`;
-            preview.classList.remove('border-dashed');
+        if (!preview) return;
+        try {
+            if (window.electronAPI && window.electronAPI.readDeptBadge) {
+                const res = await window.electronAPI.readDeptBadge();
+                if (res && res.success && res.found && res.dataUrl) {
+                    preview.innerHTML = `<img src="${res.dataUrl}" class="w-full h-full object-contain">`;
+                    preview.classList.remove('border-dashed');
+                    return;
+                }
+            }
+            // Fallback: legacy localStorage value (only if migration hasn't run yet).
+            const legacy = localStorage.getItem('viperDeptBadge');
+            if (legacy) {
+                preview.innerHTML = `<img src="${legacy}" class="w-full h-full object-contain">`;
+                preview.classList.remove('border-dashed');
+            }
+        } catch (e) {
+            console.warn('loadDeptBadge failed:', e);
         }
     }
 
@@ -3361,11 +3377,29 @@
             const file = e.target.files[0];
             if (!file) return;
             const reader = new FileReader();
-            reader.onload = (ev) => {
-                localStorage.setItem('viperDeptBadge', ev.target.result);
-                loadDeptBadge();
+            reader.onload = async (ev) => {
+                try {
+                    if (window.electronAPI && window.electronAPI.saveDeptBadge) {
+                        const buf = ev.target.result; // ArrayBuffer
+                        const bytes = new Uint8Array(buf);
+                        const mime = file.type || 'image/png';
+                        const res = await window.electronAPI.saveDeptBadge({
+                            fileData: Array.from(bytes),
+                            mime
+                        });
+                        if (res && res.success) {
+                            // Drop legacy localStorage copy if present
+                            try { localStorage.removeItem('viperDeptBadge'); } catch (_) {}
+                            await loadDeptBadge();
+                            return;
+                        }
+                        console.error('saveDeptBadge failed:', res);
+                    }
+                } catch (err) {
+                    console.error('uploadDeptBadge error:', err);
+                }
             };
-            reader.readAsDataURL(file);
+            reader.readAsArrayBuffer(file);
         };
         input.click();
     }

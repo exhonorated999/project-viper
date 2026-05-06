@@ -114,27 +114,23 @@
             }
         }
         
-        // Get warrants written this month count
+        // Get warrants written this month count (counts all warrant types)
         function getWarrantsWrittenThisMonth() {
             const allWarrants = JSON.parse(localStorage.getItem('viperCaseWarrants')) || {};
             const now = new Date();
             const currentMonth = now.getMonth();
             const currentYear = now.getFullYear();
-            // Only count actual warrants — exclude process/administrative items
-            const warrantTypes = ['search', 'arrest'];
-            
+
             let count = 0;
             Object.values(allWarrants).forEach(caseWarrants => {
                 caseWarrants.forEach(warrant => {
-                    // Only count search & arrest warrants (not preservation, subpoena, court-order, other)
-                    if (warrant.type && !warrantTypes.includes(warrant.type)) return;
                     const createdDate = new Date(warrant.createdAt);
                     if (createdDate.getMonth() === currentMonth && createdDate.getFullYear() === currentYear) {
                         count++;
                     }
                 });
             });
-            
+
             return count;
         }
         
@@ -1347,6 +1343,15 @@
                                 </div>
                             </label>
                             <label class="flex items-center space-x-3 p-3 rounded-lg cursor-pointer hover:bg-viper-card/30 transition-colors border border-gray-700 hover:border-viper-green/50">
+                                <input type="checkbox" value="snapchatWarrant" class="case-module w-4 h-4 rounded border-gray-600 text-viper-green focus:ring-viper-green">
+                                <div class="flex items-center space-x-2">
+                                    <svg class="w-5 h-5 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2C8.5 2 6 4.5 6 8c0 1.5.3 3 .8 4.2-.5.3-1.3.5-2 .5-.4 0-.8.3-.8.7 0 .5.5.9 1.2 1.2.7.3 1.6.5 2.3.6-.1.5-.5 1-1.2 1.5-.7.4-1.6.7-2.3.9-.5.1-.8.4-.8.8 0 .8 1.7 1.4 3.5 1.7.1.4.3.8.6 1 .3.2.7.2 1.1.1.5-.1 1-.1 1.6 0 .6.1 1.2.4 1.9.9.7.5 1.4.7 2.1.7s1.4-.2 2.1-.7c.7-.5 1.3-.8 1.9-.9.6-.1 1.1-.1 1.6 0 .4.1.8.1 1.1-.1.3-.2.5-.6.6-1 1.8-.3 3.5-.9 3.5-1.7 0-.4-.3-.7-.8-.8-.7-.2-1.6-.5-2.3-.9-.7-.5-1.1-1-1.2-1.5.7-.1 1.6-.3 2.3-.6.7-.3 1.2-.7 1.2-1.2 0-.4-.4-.7-.8-.7-.7 0-1.5-.2-2-.5.5-1.2.8-2.7.8-4.2 0-3.5-2.5-6-6-6z"/>
+                                    </svg>
+                                    <div><span class="text-sm font-medium text-white">Snapchat Warrant</span><div class="text-xs text-gray-500">Parse Snapchat Warrant Returns</div></div>
+                                </div>
+                            </label>
+                            <label class="flex items-center space-x-3 p-3 rounded-lg cursor-pointer hover:bg-viper-card/30 transition-colors border border-gray-700 hover:border-viper-green/50">
                                 <input type="checkbox" value="datapilot" class="case-module w-4 h-4 rounded border-gray-600 text-viper-green focus:ring-viper-green">
                                 <div class="flex items-center space-x-2">
                                     <svg class="w-5 h-5 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1997,7 +2002,7 @@
                     'areacanvas', 'prosecution', 'narcotics', 'firearms',
                     'money', 'opsplan', 'rmsImports', 'oversightImport',
                     'canvasForms', 'cyberTips', 'timelineEvents', 'consentSearches',
-                    'googleWarrant', 'metaWarrant', 'kikWarrant', 'datapilot'
+                    'googleWarrant', 'metaWarrant', 'kikWarrant', 'snapchatWarrant', 'datapilot'
                 ];
                 pattern2Keys.forEach(k => {
                     const val = backupData[`${k}_${oldId}`];
@@ -3873,7 +3878,7 @@
                         case 'dateAssigned':
                             return '<td class="py-4 px-4 text-sm text-gray-400 whitespace-nowrap">' + (caseItem.dateAssigned ? new Date(caseItem.dateAssigned + 'T00:00').toLocaleDateString() : '<span class="text-gray-600">—</span>') + '</td>';
                         case 'dateClosed':
-                            return '<td class="py-4 px-4 text-sm text-gray-400 whitespace-nowrap">' + (caseItem.dateClosed ? new Date(caseItem.dateClosed + 'T00:00').toLocaleDateString() : '<span class="text-gray-600">—</span>') + '</td>';
+                            return '<td class="py-4 px-4 text-sm text-gray-400 whitespace-nowrap">' + (caseItem.dateClosed ? new Date(String(caseItem.dateClosed).slice(0, 10) + 'T00:00').toLocaleDateString() : '<span class="text-gray-600">—</span>') + '</td>';
                         case 'suspects': {
                             const ex = getCaseExtras(caseItem);
                             return '<td class="py-4 px-4 text-sm text-gray-300 max-w-[200px] truncate">' + (ex.suspectNames || '<span class="text-gray-600">—</span>') + '</td>';
@@ -4388,12 +4393,23 @@
             updateUserDisplay();
             loadTheme();
 
-            // Handle hash navigation (e.g. from case-detail sidebar link)
-            if (window.location.hash === '#all-cases') {
-                setTimeout(() => showAllCases(), 100);
-                history.replaceState(null, '', window.location.pathname + window.location.search);
-            } else if (window.location.hash === '#offense-reference') {
-                setTimeout(() => showOffenseReference(), 100);
+            // Handle cross-page navigation intent (e.g. from case-detail sidebar link).
+            // Uses sessionStorage rather than URL hash so the intent only fires
+            // once — sessionStorage is cleared on app quit, hash was leaking into
+            // launches and auto-flipping the dashboard to All Cases.
+            try {
+                const navTarget = sessionStorage.getItem('viperNavTarget');
+                if (navTarget) {
+                    sessionStorage.removeItem('viperNavTarget');
+                    if (navTarget === 'all-cases') {
+                        setTimeout(() => showAllCases(), 100);
+                    } else if (navTarget === 'offense-reference') {
+                        setTimeout(() => showOffenseReference(), 100);
+                    }
+                }
+            } catch (_) { /* swallow */ }
+            // Always strip any leftover hash so reload/relaunch lands on Dashboard.
+            if (window.location.hash) {
                 history.replaceState(null, '', window.location.pathname + window.location.search);
             }
 
@@ -5098,7 +5114,7 @@
                         case 'dateAssigned':
                             return '<td class="px-5 py-4 text-sm text-gray-400 whitespace-nowrap">' + (c.dateAssigned ? new Date(c.dateAssigned + 'T00:00').toLocaleDateString() : '<span class="text-gray-600">—</span>') + '</td>';
                         case 'dateClosed':
-                            return '<td class="px-5 py-4 text-sm text-gray-400 whitespace-nowrap">' + (c.dateClosed ? new Date(c.dateClosed + 'T00:00').toLocaleDateString() : '<span class="text-gray-600">—</span>') + '</td>';
+                            return '<td class="px-5 py-4 text-sm text-gray-400 whitespace-nowrap">' + (c.dateClosed ? new Date(String(c.dateClosed).slice(0, 10) + 'T00:00').toLocaleDateString() : '<span class="text-gray-600">—</span>') + '</td>';
                         case 'flags':
                             return '<td class="px-5 py-4 text-sm whitespace-nowrap">' + renderFlagsCell(c) + '</td>';
                         default: return '<td></td>';
@@ -5486,7 +5502,7 @@
                     // 3. Clean localStorage — Pattern 2 (per-case keys by case.id)
                     const p2Prefixes = ['suspects_','victims_','victimBusinesses_','cargo_','witnesses_',
                         'involvedPersons_','recoveredVehicles_','missingpersons_','areacanvas_','prosecution_','narcotics_',
-                        'firearms_','money_','opsplan_','rmsImports_','oversightImport_','canvasForms_','cyberTips_','timelineEvents_','consentSearches_','googleWarrant_','metaWarrant_','kikWarrant_','datapilot_'];
+                        'firearms_','money_','opsplan_','rmsImports_','oversightImport_','canvasForms_','cyberTips_','timelineEvents_','consentSearches_','googleWarrant_','metaWarrant_','kikWarrant_','snapchatWarrant_','datapilot_'];
                     for (const prefix of p2Prefixes) {
                         localStorage.removeItem(prefix + c.id);
                     }

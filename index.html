@@ -1352,6 +1352,15 @@
                                 </div>
                             </label>
                             <label class="flex items-center space-x-3 p-3 rounded-lg cursor-pointer hover:bg-viper-card/30 transition-colors border border-gray-700 hover:border-viper-green/50">
+                                <input type="checkbox" value="discordWarrant" class="case-module w-4 h-4 rounded border-gray-600 text-viper-green focus:ring-viper-green">
+                                <div class="flex items-center space-x-2">
+                                    <svg class="w-5 h-5 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.27 5.33C17.94 4.71 16.5 4.26 15 4a.09.09 0 00-.07.03c-.18.33-.39.76-.53 1.09a16.09 16.09 0 00-4.8 0c-.14-.34-.35-.76-.54-1.09-.01-.02-.04-.03-.07-.03-1.5.26-2.93.71-4.27 1.33-.01 0-.02.01-.03.02-2.72 4.07-3.47 8.03-3.1 11.95 0 .02.01.04.03.05 1.8 1.32 3.53 2.12 5.24 2.65.03.01.06 0 .07-.02.4-.55.76-1.13 1.07-1.74.02-.04 0-.08-.04-.09-.57-.22-1.11-.48-1.64-.78-.04-.02-.04-.08-.01-.11.11-.08.22-.17.33-.25.02-.02.05-.02.07-.01 3.44 1.57 7.15 1.57 10.55 0 .02-.01.05-.01.07.01.11.09.22.17.33.26.04.03.04.09-.01.11-.52.31-1.07.56-1.64.78-.04.01-.05.06-.04.09.32.61.68 1.19 1.07 1.74.03.01.06.02.09.01 1.72-.53 3.45-1.33 5.25-2.65.02-.01.03-.03.03-.05.44-4.53-.73-8.46-3.1-11.95-.01-.01-.02-.02-.04-.02zM8.52 14.91c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.84 2.12-1.89 2.12zm6.97 0c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.83 2.12-1.89 2.12z"/>
+                                    </svg>
+                                    <div><span class="text-sm font-medium text-white">Discord Warrant</span><div class="text-xs text-gray-500">Parse Discord Data Package Warrant Returns</div></div>
+                                </div>
+                            </label>
+                            <label class="flex items-center space-x-3 p-3 rounded-lg cursor-pointer hover:bg-viper-card/30 transition-colors border border-gray-700 hover:border-viper-green/50">
                                 <input type="checkbox" value="datapilot" class="case-module w-4 h-4 rounded border-gray-600 text-viper-green focus:ring-viper-green">
                                 <div class="flex items-center space-x-2">
                                     <svg class="w-5 h-5 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1883,6 +1892,17 @@
             setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity .3s'; setTimeout(() => toast.remove(), 300); }, 4000);
         }
 
+        /* ========== Audit Log (renderer-side fire-and-forget) ========== */
+        // Narrow wrapper around window.electronAPI.auditLogWrite. Fail-silent —
+        // never let an audit hiccup break a user action.
+        function audit(event, data) {
+            try {
+                if (window.electronAPI && window.electronAPI.auditLogWrite) {
+                    window.electronAPI.auditLogWrite({ event, data: data || {} });
+                }
+            } catch (_) { /* swallow — audit must never break UX */ }
+        }
+
         /* ========== Import Case Package (.vcase) ========== */
         async function importCasePackage() {
             try {
@@ -1930,6 +1950,11 @@
             const importedCase = { ...meta, id: newId, lastModified: new Date().toISOString() };
             cases.push(importedCase);
             localStorage.setItem('viperCases', JSON.stringify(cases));
+            audit('case_imported', {
+                case_number: meta.caseNumber,
+                case_id: newId,
+                format: 'vcase',
+            });
 
             // Ensure case folder exists on disk
             if (window.electronAPI && window.electronAPI.createCaseFolder) {
@@ -1989,7 +2014,11 @@
                 backupCase.id = newId;
                 backupCase.lastModified = new Date().toISOString();
                 cases.push(backupCase);
-
+                audit('case_imported', {
+                    case_number: backupCase.caseNumber,
+                    case_id: newId,
+                    format: 'backup',
+                });
                 // Ensure case folder exists on disk
                 if (window.electronAPI && window.electronAPI.createCaseFolder) {
                     window.electronAPI.createCaseFolder(backupCase.caseNumber).catch(e => console.error('Folder create:', e));
@@ -2002,7 +2031,7 @@
                     'areacanvas', 'prosecution', 'narcotics', 'firearms',
                     'money', 'opsplan', 'rmsImports', 'oversightImport',
                     'canvasForms', 'cyberTips', 'timelineEvents', 'consentSearches',
-                    'googleWarrant', 'metaWarrant', 'kikWarrant', 'snapchatWarrant', 'datapilot'
+                    'googleWarrant', 'metaWarrant', 'kikWarrant', 'snapchatWarrant', 'discordWarrant', 'datapilot'
                 ];
                 pattern2Keys.forEach(k => {
                     const val = backupData[`${k}_${oldId}`];
@@ -2384,6 +2413,13 @@
                 
                 cases.push(newCase);
                 localStorage.setItem('viperCases', JSON.stringify(cases));
+
+                audit('case_created', {
+                    case_number: caseNumber,
+                    case_id: newCase.id,
+                    modules: selectedModules,
+                    priority: newCase.priority,
+                });
                 
                 // Store pending RMS data for case-detail to pick up
                 if (pendingRmsData) {
@@ -2425,6 +2461,10 @@
         function openCaseDetail(caseId) {
             // Store the current case ID for the detail view
             localStorage.setItem('currentCaseId', caseId);
+            try {
+                const c = (cases || []).find(x => x.id == caseId);
+                audit('case_opened', { case_id: caseId, case_number: c ? c.caseNumber : null });
+            } catch (_) {}
             // Navigate to case detail page
             window.location.href = 'case-detail-with-analytics.html';
         }
@@ -3935,7 +3975,7 @@
                             <span class="text-sm font-medium text-viper-orange">Case ${item.caseNumber}</span>
                             <span class="text-xs text-viper-orange">${item.daysOverdue}d overdue</span>
                         </div>
-                        <div class="text-xs text-gray-300">${item.warrant.warrantType || 'Warrant'} - ${item.warrant.location || 'No location'}</div>
+                        <div class="text-xs text-gray-300">${item.warrant.type || 'Warrant'}${item.warrant.issuedTo ? ' → ' + item.warrant.issuedTo : ''}</div>
                         <div class="text-xs text-gray-400 mt-1">Due: ${new Date(item.warrant.dueDate).toLocaleDateString()}</div>
                     </div>
                 `).join('');
@@ -5502,7 +5542,7 @@
                     // 3. Clean localStorage — Pattern 2 (per-case keys by case.id)
                     const p2Prefixes = ['suspects_','victims_','victimBusinesses_','cargo_','witnesses_',
                         'involvedPersons_','recoveredVehicles_','missingpersons_','areacanvas_','prosecution_','narcotics_',
-                        'firearms_','money_','opsplan_','rmsImports_','oversightImport_','canvasForms_','cyberTips_','timelineEvents_','consentSearches_','googleWarrant_','metaWarrant_','kikWarrant_','snapchatWarrant_','datapilot_'];
+                        'firearms_','money_','opsplan_','rmsImports_','oversightImport_','canvasForms_','cyberTips_','timelineEvents_','consentSearches_','googleWarrant_','metaWarrant_','kikWarrant_','snapchatWarrant_','discordWarrant_','datapilot_'];
                     for (const prefix of p2Prefixes) {
                         localStorage.removeItem(prefix + c.id);
                     }
@@ -5522,6 +5562,11 @@
                     }
 
                     viperToast('Case ' + c.caseNumber + ' deleted permanently', 'success');
+                    audit('case_deleted', {
+                        case_number: c.caseNumber,
+                        case_id: c.id,
+                        scope: 'entire',
+                    });
 
                 } else {
                     // Evidence only — delete Evidence folder on disk
@@ -5529,6 +5574,11 @@
                         const result = await window.electronAPI.deleteCaseEvidence(c.caseNumber);
                         if (result.success) {
                             viperToast('Evidence files deleted for case ' + c.caseNumber, 'success');
+                            audit('evidence_deleted', {
+                                case_number: c.caseNumber,
+                                case_id: c.id,
+                                scope: 'all_files',
+                            });
                         } else {
                             viperToast('Error: ' + (result.error || 'Unknown'), 'error');
                         }

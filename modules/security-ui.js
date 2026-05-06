@@ -9,7 +9,7 @@
   let securityActive = false;
 
   // ─── Lock action ────────────────────────────────────────────────
-  async function lockApp() {
+  async function lockApp(reason) {
     try {
       // Snapshot localStorage
       const data = JSON.stringify(Object.fromEntries(
@@ -24,7 +24,7 @@
         .filter(k => k.startsWith('viper') || k.startsWith('Viper'))
         .forEach(k => localStorage.removeItem(k));
       // Lock and navigate to login
-      await window.electronAPI.securityLock();
+      await window.electronAPI.securityLock({ reason: reason || 'manual' });
     } catch (e) {
       console.error('Lock failed:', e);
     }
@@ -36,7 +36,7 @@
     clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
       console.log('VIPER: Idle lockout triggered');
-      lockApp();
+      lockApp('idle');
     }, IDLE_TIMEOUT_MS);
   }
 

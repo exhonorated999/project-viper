@@ -126,6 +126,21 @@ async function activateLicense(licenseKey) {
   _set("license_key", licenseKey);
   _set("license_type", json.license_type || "standard");
   if (json.expires_at) _set("expires_at", json.expires_at);
+  // Audit: license activation. Fire-and-forget; failures here must
+  // never break activation. window.electronAPI may not exist in a
+  // test/jsdom environment.
+  try {
+    if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.auditLogWrite) {
+      window.electronAPI.auditLogWrite({
+        event: 'license_activated',
+        data: {
+          license_type: json.license_type || 'standard',
+          expires_at: json.expires_at || null,
+          product_slug: PRODUCT_SLUG,
+        }
+      });
+    }
+  } catch (_) {}
   return json;
 }
 

@@ -1532,6 +1532,71 @@
                     </div>
                 </div>
 
+                <!-- ═══ Audit Log Section ═══ -->
+                <!-- Tamper-evident chained log of security/license/case events.
+                     Visible in plaintext only when Field Security is unlocked
+                     (or disabled). Encrypted-at-rest entries show as locked
+                     placeholders for officers who don't have the key. -->
+                <div class="glass-card rounded-xl p-6" id="auditLogSection">
+                    <h3 class="text-xl font-bold mb-2 flex items-center gap-2">
+                        <svg class="w-6 h-6 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        Audit Log
+                    </h3>
+                    <p class="text-gray-400 text-sm mb-5">
+                        Tamper-evident record of security, license, case, evidence, warrant, and update events.
+                        Every entry is hash-chained (SHA-256) so any modification or deletion is detectable.
+                        When Field Security is enabled, entries are AES-256-GCM encrypted at rest.
+                    </p>
+
+                    <!-- Action buttons -->
+                    <div class="flex flex-wrap gap-2 mb-4">
+                        <button onclick="auditLogRefresh()"
+                            class="px-4 py-2 bg-viper-cyan/10 border border-viper-cyan/30 text-viper-cyan rounded-lg text-xs font-medium hover:bg-viper-cyan/20 transition">
+                            ↻ Refresh
+                        </button>
+                        <button onclick="auditLogVerify()"
+                            class="px-4 py-2 bg-amber-400/10 border border-amber-400/30 text-amber-400 rounded-lg text-xs font-medium hover:bg-amber-400/20 transition">
+                            ✓ Verify Chain Integrity
+                        </button>
+                        <button onclick="auditLogExport()"
+                            class="px-4 py-2 bg-viper-green/10 border border-viper-green/30 text-viper-green rounded-lg text-xs font-medium hover:bg-viper-green/20 transition">
+                            ⬇ Export Full Log (JSONL)
+                        </button>
+                    </div>
+
+                    <!-- Verify result banner -->
+                    <div id="auditLogVerifyResult" class="hidden mb-4 p-3 rounded-lg text-xs"></div>
+
+                    <!-- Windows Event Log forwarding toggle -->
+                    <div class="mb-4 p-4 bg-viper-dark/50 rounded-lg border border-gray-700/50">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h4 class="text-white font-semibold text-sm">Forward to Windows Event Log</h4>
+                                <p class="text-xs text-gray-400 mt-1">
+                                    Mirror each entry to the Windows Application event log under source <code class="text-gray-300">VIPER</code>.
+                                    Lets enterprise SIEM/log forwarders pick up VIPER activity. First write requires admin (one-time source registration).
+                                </p>
+                            </div>
+                            <button id="auditEventLogToggleBtn" onclick="toggleAuditEventLog()"
+                                class="relative inline-flex items-center h-6 rounded-full w-11 transition-colors focus:outline-none bg-gray-700"
+                                aria-label="Toggle Windows Event Log forwarding">
+                                <span id="auditEventLogToggleIndicator" class="inline-block w-4 h-4 transform transition-transform bg-white rounded-full translate-x-1"></span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Recent entries viewer -->
+                    <div class="mb-2 flex items-center justify-between">
+                        <span class="text-[10px] text-gray-500 uppercase tracking-wider">Recent Entries</span>
+                        <span id="auditLogEntryCount" class="text-[10px] text-gray-500"></span>
+                    </div>
+                    <div id="auditLogList" class="bg-viper-dark/50 rounded-lg border border-gray-700/50 max-h-96 overflow-y-auto">
+                        <div class="p-4 text-gray-500 text-xs text-center">Loading…</div>
+                    </div>
+                </div>
+
                 <!-- Media Player Toggle -->
                 <div class="glass-card rounded-xl p-6">
                     <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
@@ -3972,7 +4037,180 @@
         refreshCustomStatusUI();
         refreshCustomMetricsUI();
         refreshSidebarAutoHideUI();
+        // Audit log panel — load entries + restore Event Log toggle state
+        try { initAuditLogPanel(); } catch (e) { console.warn('Audit panel init failed:', e); }
     });
+
+    // ─── Audit Log Panel ────────────────────────────────────────────
+    // The viewer renders the most recent 200 entries. Encrypted entries
+    // (Field Security locked, no key) show as locked placeholders.
+    const AUDIT_EVENT_LABELS = {
+        app_launch:'🚀 App Launch', app_exit:'⏹ App Exit', app_crash:'💥 App Crash',
+        security_enabled:'🔒 Field Security Enabled', security_disabled:'🔓 Field Security Disabled',
+        security_unlock:'🔓 Unlock', security_unlock_fail:'⚠ Unlock Failed',
+        security_lock:'🔒 Lock', security_idle_lock:'⏰ Idle Lock', security_recovery:'🆘 Recovery Key Used',
+        license_activated:'🎫 License Activated', license_revoked:'❌ License Revoked',
+        license_validated:'✓ License Validated', license_validate_fail:'⚠ License Validation Failed',
+        case_created:'📁 Case Created', case_opened:'📂 Case Opened', case_closed:'📁 Case Closed',
+        case_deleted:'🗑 Case Deleted', case_exported:'⬆ Case Exported', case_imported:'⬇ Case Imported',
+        evidence_added:'➕ Evidence Added', evidence_deleted:'🗑 Evidence Deleted',
+        evidence_viewed:'👁 Evidence Viewed', evidence_exported:'⬆ Evidence Exported',
+        warrant_added:'➕ Warrant Added', warrant_deleted:'🗑 Warrant Deleted',
+        warrant_return_imported:'⬇ Warrant Return Imported',
+        update_checked:'🔍 Update Checked', update_downloaded:'⬇ Update Downloaded', update_applied:'🔄 Update Applied',
+        settings_changed:'⚙ Settings Changed',
+        audit_log_exported:'⬆ Audit Log Exported', audit_log_verified:'✓ Audit Log Verified', audit_log_rotated:'🔄 Audit Log Rotated',
+    };
+
+    function escapeHtml(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    function fmtTs(iso) {
+        try { return new Date(iso).toLocaleString(); } catch (_) { return iso; }
+    }
+
+    function renderAuditEntry(e) {
+        // Encrypted placeholder (Field Security on, no key in this session)
+        if (e && e.__encrypted) {
+            return `<div class="px-3 py-2 border-b border-gray-700/30 flex items-center gap-2">
+                <span class="text-amber-400 text-sm">🔒</span>
+                <span class="text-gray-500 text-xs italic">Encrypted entry — unlock Field Security to view</span>
+            </div>`;
+        }
+        const label = AUDIT_EVENT_LABELS[e.event] || e.event;
+        const failed = /fail|crash|deleted|revoked/.test(e.event || '');
+        const data = e.data ? Object.entries(e.data)
+            .filter(([k]) => k !== 'case_id')
+            .map(([k,v]) => `<span class="text-gray-500">${escapeHtml(k)}=</span><span class="text-gray-300">${escapeHtml(typeof v === 'object' ? JSON.stringify(v) : v)}</span>`)
+            .join(' &nbsp;') : '';
+        return `<div class="px-3 py-2 border-b border-gray-700/30 hover:bg-viper-cyan/5">
+            <div class="flex items-baseline justify-between gap-2">
+                <div class="flex items-center gap-2 min-w-0">
+                    <span class="text-[10px] text-gray-500 font-mono">#${e.seq}</span>
+                    <span class="text-xs font-medium ${failed ? 'text-red-400' : 'text-viper-cyan'}">${escapeHtml(label)}</span>
+                </div>
+                <span class="text-[10px] text-gray-500 flex-shrink-0">${escapeHtml(fmtTs(e.ts))}</span>
+            </div>
+            ${data ? `<div class="text-[11px] mt-1 ml-8 break-words">${data}</div>` : ''}
+            <div class="text-[10px] text-gray-600 mt-0.5 ml-8 font-mono">user=${escapeHtml(e.user)} host=${escapeHtml(e.host)} v${escapeHtml(e.app_version || '')}</div>
+        </div>`;
+    }
+
+    async function auditLogRefresh() {
+        const list = document.getElementById('auditLogList');
+        const count = document.getElementById('auditLogEntryCount');
+        if (!list) return;
+        list.innerHTML = '<div class="p-4 text-gray-500 text-xs text-center">Loading…</div>';
+        if (!window.electronAPI || !window.electronAPI.auditLogRead) {
+            list.innerHTML = '<div class="p-4 text-gray-500 text-xs text-center">Audit log not available (web/dev mode).</div>';
+            return;
+        }
+        const result = await window.electronAPI.auditLogRead({ limit: 200 });
+        if (!result || !result.success) {
+            list.innerHTML = `<div class="p-4 text-red-400 text-xs text-center">Failed to load: ${escapeHtml(result && result.error || 'unknown')}</div>`;
+            return;
+        }
+        const entries = result.entries || [];
+        if (entries.length === 0) {
+            list.innerHTML = '<div class="p-4 text-gray-500 text-xs text-center">No audit entries yet.</div>';
+        } else {
+            // Newest first
+            list.innerHTML = entries.slice().reverse().map(renderAuditEntry).join('');
+        }
+        if (count) count.textContent = `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} (most recent first)`;
+    }
+
+    async function auditLogVerify() {
+        const banner = document.getElementById('auditLogVerifyResult');
+        if (!banner) return;
+        banner.classList.remove('hidden');
+        banner.className = 'mb-4 p-3 rounded-lg text-xs bg-gray-700/30 border border-gray-600 text-gray-300';
+        banner.textContent = 'Verifying chain…';
+        if (!window.electronAPI || !window.electronAPI.auditLogVerify) {
+            banner.className = 'mb-4 p-3 rounded-lg text-xs bg-red-500/10 border border-red-500/30 text-red-400';
+            banner.textContent = 'Audit log API not available.';
+            return;
+        }
+        const r = await window.electronAPI.auditLogVerify();
+        if (!r || !r.success) {
+            banner.className = 'mb-4 p-3 rounded-lg text-xs bg-red-500/10 border border-red-500/30 text-red-400';
+            banner.textContent = 'Verification failed: ' + (r && r.error || 'unknown');
+            return;
+        }
+        const v = r.result || {};
+        if (v.ok) {
+            banner.className = 'mb-4 p-3 rounded-lg text-xs bg-viper-green/10 border border-viper-green/30 text-viper-green';
+            banner.innerHTML = `✓ Chain intact. <span class="text-gray-400">${v.totalEntries} entries verified.</span>`;
+        } else if (v.reason === 'encrypted_entries_not_decryptable') {
+            banner.className = 'mb-4 p-3 rounded-lg text-xs bg-amber-400/10 border border-amber-400/30 text-amber-400';
+            banner.innerHTML = `⚠ Cannot fully verify — encrypted entries present. Unlock Field Security and verify again.`;
+        } else {
+            banner.className = 'mb-4 p-3 rounded-lg text-xs bg-red-500/10 border border-red-500/30 text-red-400';
+            banner.innerHTML = `✗ Chain BROKEN at entry #${v.brokenAt}. Reason: <code>${escapeHtml(v.reason || 'unknown')}</code>. The log has been tampered with or corrupted.`;
+        }
+        // Refresh the viewer to surface AUDIT_LOG_VERIFIED entry
+        setTimeout(auditLogRefresh, 500);
+    }
+
+    async function auditLogExport() {
+        if (!window.electronAPI || !window.electronAPI.auditLogExport) {
+            viperToast('Audit log API not available.', 'error');
+            return;
+        }
+        const r = await window.electronAPI.auditLogExport();
+        if (r && r.canceled) return;
+        if (!r || !r.success) {
+            viperToast('Export failed: ' + (r && r.error || 'unknown'), 'error');
+            return;
+        }
+        viperToast(`Exported ${r.entries} entr${r.entries === 1 ? 'y' : 'ies'}`, 'success');
+        setTimeout(auditLogRefresh, 500);
+    }
+
+    function setAuditEventLogToggleUI(enabled) {
+        const btn = document.getElementById('auditEventLogToggleBtn');
+        const ind = document.getElementById('auditEventLogToggleIndicator');
+        if (!btn || !ind) return;
+        if (enabled) {
+            btn.classList.add('bg-viper-cyan'); btn.classList.remove('bg-gray-700');
+            ind.classList.add('translate-x-6'); ind.classList.remove('translate-x-1');
+        } else {
+            btn.classList.add('bg-gray-700'); btn.classList.remove('bg-viper-cyan');
+            ind.classList.add('translate-x-1'); ind.classList.remove('translate-x-6');
+        }
+        btn.dataset.enabled = enabled ? 'true' : 'false';
+    }
+
+    async function toggleAuditEventLog() {
+        const btn = document.getElementById('auditEventLogToggleBtn');
+        if (!btn) return;
+        const next = btn.dataset.enabled !== 'true';
+        if (!window.electronAPI || !window.electronAPI.auditLogSetEventForwarding) return;
+        const r = await window.electronAPI.auditLogSetEventForwarding(next);
+        if (r && r.success) {
+            setAuditEventLogToggleUI(!!r.enabled);
+            viperToast(r.enabled ? 'Windows Event Log forwarding enabled' : 'Windows Event Log forwarding disabled', 'success');
+        } else {
+            viperToast('Toggle failed: ' + (r && r.error || 'unknown'), 'error');
+        }
+    }
+
+    function initAuditLogPanel() {
+        // Restore toggle state from localStorage cache (we don't have a
+        // direct getter for the pref file — the toggle persists locally
+        // and re-syncs to disk on click).
+        const cached = localStorage.getItem('viperAuditEventLogEnabled');
+        setAuditEventLogToggleUI(cached === 'true');
+        // Wrap toggle to also persist locally
+        const _origToggle = toggleAuditEventLog;
+        window.toggleAuditEventLog = async function () {
+            await _origToggle();
+            const btn = document.getElementById('auditEventLogToggleBtn');
+            if (btn) localStorage.setItem('viperAuditEventLogEnabled', btn.dataset.enabled || 'false');
+        };
+        auditLogRefresh();
+    }
     </script>
 
     <!-- Bug Report Modal -->

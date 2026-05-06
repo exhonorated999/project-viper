@@ -712,6 +712,7 @@
     <link rel="stylesheet" href="modules/meta-warrant/meta-warrant-styles.css">
     <link rel="stylesheet" href="modules/kik-warrant/kik-warrant-styles.css">
     <link rel="stylesheet" href="modules/snapchat-warrant/snapchat-warrant-styles.css">
+    <link rel="stylesheet" href="modules/discord-warrant/discord-warrant-styles.css">
     <link rel="stylesheet" href="modules/datapilot/datapilot-styles.css">
     <script src="modules/google-warrant/google-warrant-module.js"></script>
     <script src="modules/google-warrant/google-warrant-ui.js"></script>
@@ -721,6 +722,8 @@
     <script src="modules/kik-warrant/kik-warrant-ui.js"></script>
     <script src="modules/snapchat-warrant/snapchat-warrant-module.js"></script>
     <script src="modules/snapchat-warrant/snapchat-warrant-ui.js"></script>
+    <script src="modules/discord-warrant/discord-warrant-module.js"></script>
+    <script src="modules/discord-warrant/discord-warrant-ui.js"></script>
     <script src="modules/datapilot/datapilot-analytics.js"></script>
     <script src="modules/datapilot/datapilot-report.js"></script>
     <script src="modules/datapilot/datapilot-ui.js"></script>
@@ -900,6 +903,16 @@
 
         let currentCase = null;
         let currentTab = 'overview';
+
+        // Audit log fire-and-forget helper. Never throws, never awaits.
+        function audit(event, data) {
+            try {
+                if (window.electronAPI && window.electronAPI.auditLogWrite) {
+                    window.electronAPI.auditLogWrite({ event, data: data || {} });
+                }
+            } catch (_) { /* swallow — audit must never break UX */ }
+        }
+
         let caseTasks = [];
         let caseNotes = [];
         let editingNoteId = null;
@@ -1661,6 +1674,7 @@
                 metaWarrant: { label: 'META Warrant', icon: 'M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z' },
                 kikWarrant: { label: 'KIK Warrant', icon: 'M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z' },
                 snapchatWarrant: { label: 'Snapchat Warrant', icon: 'M12 2C8.5 2 6 4.5 6 8c0 1.5.3 3 .8 4.2-.5.3-1.3.5-2 .5-.4 0-.8.3-.8.7 0 .5.5.9 1.2 1.2.7.3 1.6.5 2.3.6-.1.5-.5 1-1.2 1.5-.7.4-1.6.7-2.3.9-.5.1-.8.4-.8.8 0 .8 1.7 1.4 3.5 1.7.1.4.3.8.6 1 .3.2.7.2 1.1.1.5-.1 1-.1 1.6 0 .6.1 1.2.4 1.9.9.7.5 1.4.7 2.1.7s1.4-.2 2.1-.7c.7-.5 1.3-.8 1.9-.9.6-.1 1.1-.1 1.6 0 .4.1.8.1 1.1-.1.3-.2.5-.6.6-1 1.8-.3 3.5-.9 3.5-1.7 0-.4-.3-.7-.8-.8-.7-.2-1.6-.5-2.3-.9-.7-.5-1.1-1-1.2-1.5.7-.1 1.6-.3 2.3-.6.7-.3 1.2-.7 1.2-1.2 0-.4-.4-.7-.8-.7-.7 0-1.5-.2-2-.5.5-1.2.8-2.7.8-4.2 0-3.5-2.5-6-6-6z' },
+                discordWarrant: { label: 'Discord Warrant', icon: 'M19.27 5.33C17.94 4.71 16.5 4.26 15 4a.09.09 0 00-.07.03c-.18.33-.39.76-.53 1.09a16.09 16.09 0 00-4.8 0c-.14-.34-.35-.76-.54-1.09-.01-.02-.04-.03-.07-.03-1.5.26-2.93.71-4.27 1.33-.01 0-.02.01-.03.02-2.72 4.07-3.47 8.03-3.1 11.95 0 .02.01.04.03.05 1.8 1.32 3.53 2.12 5.24 2.65.03.01.06 0 .07-.02.4-.55.76-1.13 1.07-1.74.02-.04 0-.08-.04-.09-.57-.22-1.11-.48-1.64-.78-.04-.02-.04-.08-.01-.11.11-.08.22-.17.33-.25.02-.02.05-.02.07-.01 3.44 1.57 7.15 1.57 10.55 0 .02-.01.05-.01.07.01.11.09.22.17.33.26.04.03.04.09-.01.11-.52.31-1.07.56-1.64.78-.04.01-.05.06-.04.09.32.61.68 1.19 1.07 1.74.03.01.06.02.09.01 1.72-.53 3.45-1.33 5.25-2.65.02-.01.03-.03.03-.05.44-4.53-.73-8.46-3.1-11.95-.01-.01-.02-.02-.04-.02zM8.52 14.91c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.84 2.12-1.89 2.12zm6.97 0c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.83 2.12-1.89 2.12z' },
                 datapilot: { label: 'Datapilot', icon: 'M9 17a4 4 0 01-2-7.5l1-3a4 4 0 017 0l1 3A4 4 0 0115 17H9zM12 12v9' }
             };
             
@@ -1804,6 +1818,7 @@
             allModules.metaWarrant = { label: 'META Warrant', icon: '📘' };
             allModules.kikWarrant = { label: 'KIK Warrant', icon: '💬' };
             allModules.snapchatWarrant = { label: 'Snapchat Warrant', icon: '👻' };
+            allModules.discordWarrant = { label: 'Discord Warrant', icon: '💜' };
             allModules.datapilot = { label: 'Datapilot', icon: '📱' };
 
             const availableModules = Object.keys(allModules).filter(
@@ -1890,6 +1905,7 @@
                 oversightImport:'Oversight', cyberTips:'Cyber Tips', consentSearch:'Consent Search',
                 googleWarrant:'Google Warrant', metaWarrant:'META Warrant', kikWarrant:'KIK Warrant',
                 snapchatWarrant:'Snapchat Warrant',
+                discordWarrant:'Discord Warrant',
                 datapilot:'Datapilot'
             };
             const label = moduleConfig[moduleId] || moduleId;
@@ -1945,6 +1961,7 @@
                 metaWarrant: { label: 'META Warrant', icon: '📘', type: 'data' },
                 kikWarrant: { label: 'KIK Warrant', icon: '💬', type: 'data' },
                 snapchatWarrant: { label: 'Snapchat Warrant', icon: '👻', type: 'data' },
+                discordWarrant: { label: 'Discord Warrant', icon: '💜', type: 'data' },
                 datapilot: { label: 'Datapilot', icon: '📱', type: 'data' },
                 consentSearch: { label: 'Consent Search', icon: '✅', type: 'data' }
             };
@@ -2039,7 +2056,7 @@
                 'areacanvas', 'prosecution', 'narcotics', 'firearms',
                 'money', 'opsplan', 'rmsImports', 'oversightImport',
                 'canvasForms', 'cyberTips', 'timelineEvents', 'consentSearches',
-                'googleWarrant', 'metaWarrant', 'kikWarrant', 'snapchatWarrant', 'datapilot', 'caseMetrics'
+                'googleWarrant', 'metaWarrant', 'kikWarrant', 'snapchatWarrant', 'discordWarrant', 'datapilot', 'caseMetrics'
             ];
             const moduleData = {};
             moduleKeys.forEach(k => {
@@ -2084,6 +2101,12 @@
                 });
                 if (savedPath) {
                     showToast(`Case exported to ${savedPath.split('\\').pop()}`, 'success');
+                    audit('case_exported', {
+                        case_number: caseNum,
+                        case_id: caseId,
+                        path: savedPath,
+                        modules: Object.keys(moduleData),
+                    });
                 }
             } catch (err) {
                 console.error('Case export failed:', err);
@@ -2159,6 +2182,10 @@
                 case 'snapchatWarrant': {
                     const swData = JSON.parse(localStorage.getItem(`snapchatWarrant_${currentCase.id}`) || '{"imports":[]}');
                     return (swData.imports || []).length;
+                }
+                case 'discordWarrant': {
+                    const dwData = JSON.parse(localStorage.getItem(`discordWarrant_${currentCase.id}`) || '{"imports":[]}');
+                    return (dwData.imports || []).length;
                 }
                 case 'datapilot': {
                     const dpData = JSON.parse(localStorage.getItem(`datapilot_${currentCase.id}`) || '{"imports":[]}');
@@ -3414,6 +3441,9 @@
             } else if (tabId === 'snapchatWarrant') {
                 contentDiv.innerHTML = renderSnapchatWarrantTab();
                 initializeSnapchatWarrant();
+            } else if (tabId === 'discordWarrant') {
+                contentDiv.innerHTML = renderDiscordWarrantTab();
+                initializeDiscordWarrant();
             } else if (tabId === 'datapilot') {
                 contentDiv.innerHTML = renderDatapilotTab();
                 initializeDatapilot();
@@ -5304,6 +5334,14 @@
                         const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
                         allEvidence[currentCase.caseNumber] = caseEvidence;
                         localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
+                        audit('evidence_added', {
+                            case_number: currentCase.caseNumber,
+                            case_id: currentCase.id,
+                            evidence_id: newEvidence.id,
+                            type: 'cellebrite',
+                            tag: tag,
+                            file_count: result.fileCount,
+                        });
 
                         progressModal.classList.remove('show');
                         document.getElementById('uploadSuccessModal').classList.add('show');
@@ -5411,6 +5449,14 @@
                         const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
                         allEvidence[currentCase.caseNumber] = caseEvidence;
                         localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
+                        audit('evidence_added', {
+                            case_number: currentCase.caseNumber,
+                            case_id: currentCase.id,
+                            evidence_id: newEvidence.id,
+                            type: 'datapilot',
+                            tag: tag,
+                            storage_mode: storageMode,
+                        });
 
                         const fmtUpper = (dr.format || 'csv').toUpperCase();
                         if (storageMode === 'copy') {
@@ -5478,6 +5524,15 @@
                         const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
                         allEvidence[currentCase.caseNumber] = caseEvidence;
                         localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
+                        audit('evidence_added', {
+                            case_number: currentCase.caseNumber,
+                            case_id: currentCase.id,
+                            evidence_id: newEvidence.id,
+                            type: type,
+                            tag: tag,
+                            file_count: files.length,
+                            source: 'native_copy',
+                        });
 
                         document.getElementById('uploadProgressModal').classList.remove('show');
                         document.getElementById('uploadSuccessModal').classList.add('show');
@@ -5576,7 +5631,16 @@
                 };
                 
                 caseEvidence.push(newEvidence);
-                
+                audit('evidence_added', {
+                    case_number: currentCase.caseNumber,
+                    case_id: currentCase.id,
+                    evidence_id: newEvidence.id,
+                    type: type,
+                    tag: tag,
+                    file_count: files.length,
+                    source: 'browser_upload',
+                });
+
                 // Save to localStorage with error handling
                 try {
                     console.log('Saving to localStorage...');
@@ -5647,13 +5711,22 @@
             if (!await viperConfirm('Are you sure you want to delete this evidence? This action cannot be undone.', {danger:true, okText:'Delete'})) {
                 return;
             }
-            
+
+            const ev = caseEvidence.find(e => e.id === evidenceId);
             caseEvidence = caseEvidence.filter(e => e.id !== evidenceId);
-            
+
             const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
             allEvidence[currentCase.caseNumber] = caseEvidence;
             localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
-            
+            audit('evidence_deleted', {
+                case_number: currentCase ? currentCase.caseNumber : null,
+                case_id: currentCase ? currentCase.id : null,
+                evidence_id: evidenceId,
+                type: ev ? ev.type : null,
+                tag: ev ? ev.tag : null,
+                file_count: ev ? (ev.fileCount || (ev.files ? ev.files.length : 0)) : 0,
+            });
+
             renderTabContent('evidence');
         }
         
@@ -6872,6 +6945,14 @@
                 };
                 
                 caseWarrants.push(newWarrant);
+                audit('warrant_added', {
+                    case_number: currentCase ? currentCase.caseNumber : null,
+                    case_id: currentCase ? currentCase.id : null,
+                    warrant_id: newWarrant.id,
+                    type: type,
+                    issued_to: issuedTo,
+                    judge: judge,
+                });
             }
             
             saveWarrantsToStorage();
@@ -6961,6 +7042,13 @@
                 saveWarrantsToStorage();
                 renderTabContent('warrants');
                 showToast(`Uploaded ${files.length} production file(s)`, 'success');
+                audit('warrant_return_imported', {
+                    case_number: currentCase ? currentCase.caseNumber : null,
+                    case_id: currentCase ? currentCase.id : null,
+                    warrant_id: warrantId,
+                    file_count: results.length,
+                    source: 'folder',
+                });
 
                 // Also add to Evidence tab so files are browsable there
                 try {
@@ -7021,6 +7109,13 @@
                         saveWarrantsToStorage();
                         renderTabContent('warrants');
                         showToast(`Uploaded ${result.files.length} production file(s)`, 'success');
+                        audit('warrant_return_imported', {
+                            case_number: currentCase ? currentCase.caseNumber : null,
+                            case_id: currentCase ? currentCase.id : null,
+                            warrant_id: warrantId,
+                            file_count: result.files.length,
+                            source: 'zip',
+                        });
                         // Mirror to evidence tab
                         try {
                             const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
@@ -7256,9 +7351,17 @@
             if (!await viperConfirm('Are you sure you want to delete this warrant? This action cannot be undone.', {danger:true, okText:'Delete'})) {
                 return;
             }
-            
+
+            const w = caseWarrants.find(x => x.id === warrantId);
             caseWarrants = caseWarrants.filter(w => w.id !== warrantId);
             saveWarrantsToStorage();
+            audit('warrant_deleted', {
+                case_number: currentCase ? currentCase.caseNumber : null,
+                case_id: currentCase ? currentCase.id : null,
+                warrant_id: warrantId,
+                type: w ? w.type : null,
+                issued_to: w ? w.issuedTo : null,
+            });
             renderTabContent('warrants');
         }
         
@@ -22952,6 +23055,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 { id: 'metaWarrant', label: 'META Warrant Parser', icon: 'M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z', desc: 'Parse META (Facebook/Instagram) warrant returns — account, messages, photos, IP activity' },
                 { id: 'kikWarrant', label: 'KIK Warrant Parser', icon: 'M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z', desc: 'Parse KIK Messenger warrant returns — messages, contacts, sessions, groups' },
                 { id: 'snapchatWarrant', label: 'Snapchat Warrant Parser', icon: 'M12 2C8.5 2 6 4.5 6 8c0 1.5.3 3 .8 4.2-.5.3-1.3.5-2 .5-.4 0-.8.3-.8.7 0 .5.5.9 1.2 1.2.7.3 1.6.5 2.3.6-.1.5-.5 1-1.2 1.5-.7.4-1.6.7-2.3.9-.5.1-.8.4-.8.8 0 .8 1.7 1.4 3.5 1.7.1.4.3.8.6 1 .3.2.7.2 1.1.1.5-.1 1-.1 1.6 0 .6.1 1.2.4 1.9.9.7.5 1.4.7 2.1.7s1.4-.2 2.1-.7c.7-.5 1.3-.8 1.9-.9.6-.1 1.1-.1 1.6 0 .4.1.8.1 1.1-.1.3-.2.5-.6.6-1 1.8-.3 3.5-.9 3.5-1.7 0-.4-.3-.7-.8-.8-.7-.2-1.6-.5-2.3-.9-.7-.5-1.1-1-1.2-1.5.7-.1 1.6-.3 2.3-.6.7-.3 1.2-.7 1.2-1.2 0-.4-.4-.7-.8-.7-.7 0-1.5-.2-2-.5.5-1.2.8-2.7.8-4.2 0-3.5-2.5-6-6-6z', desc: 'Parse Snapchat warrant returns — conversations, geo, memories, devices, media' },
+                { id: 'discordWarrant', label: 'Discord Warrant Parser', icon: 'M19.27 5.33C17.94 4.71 16.5 4.26 15 4a.09.09 0 00-.07.03c-.18.33-.39.76-.53 1.09a16.09 16.09 0 00-4.8 0c-.14-.34-.35-.76-.54-1.09-.01-.02-.04-.03-.07-.03-1.5.26-2.93.71-4.27 1.33-.01 0-.02.01-.03.02-2.72 4.07-3.47 8.03-3.1 11.95 0 .02.01.04.03.05 1.8 1.32 3.53 2.12 5.24 2.65.03.01.06 0 .07-.02.4-.55.76-1.13 1.07-1.74.02-.04 0-.08-.04-.09-.57-.22-1.11-.48-1.64-.78-.04-.02-.04-.08-.01-.11.11-.08.22-.17.33-.25.02-.02.05-.02.07-.01 3.44 1.57 7.15 1.57 10.55 0 .02-.01.05-.01.07.01.11.09.22.17.33.26.04.03.04.09-.01.11-.52.31-1.07.56-1.64.78-.04.01-.05.06-.04.09.32.61.68 1.19 1.07 1.74.03.01.06.02.09.01 1.72-.53 3.45-1.33 5.25-2.65.02-.01.03-.03.03-.05.44-4.53-.73-8.46-3.1-11.95-.01-.01-.02-.02-.04-.02zM8.52 14.91c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.84 2.12-1.89 2.12zm6.97 0c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.83 2.12-1.89 2.12z', desc: 'Parse Discord Data Package warrant returns — messages, sessions, IPs, devices, billing' },
                 { id: 'datapilot', label: 'Datapilot (Mobile Forensics)', icon: 'M9 17a4 4 0 01-2-7.5l1-3a4 4 0 017 0l1 3A4 4 0 0115 17H9zM12 12v9', desc: 'Parse mobile forensic CSV exports — calls, messages, contacts, GPS, apps, files + AI insights' },
             ];
 
@@ -30946,6 +31050,37 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     <div class="glass-card p-6 rounded-xl">
                         <div class="text-center text-red-400">
                             <p class="text-lg font-semibold mb-2">Snapchat Warrant Parser Not Loaded</p>
+                            <p class="text-sm text-gray-400">Please check that all module files are properly installed.</p>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function renderDiscordWarrantTab() {
+            return `
+                <div id="discord-warrant-tab-container" style="height: calc(100vh - 220px);"></div>
+            `;
+        }
+
+        function initializeDiscordWarrant() {
+            if (window.DiscordWarrantModule) {
+                window.discordWarrantModule = new DiscordWarrantModule(
+                    String(currentCase.id),
+                    String(currentCase.caseNumber || currentCase.id),
+                    currentCase.title || currentCase.name || currentCase.caseNumber
+                );
+                window.discordWarrantModule.init('discord-warrant-tab-container').then(() => {
+                    window.discordWarrantUI = window.discordWarrantModule.ui;
+                }).catch(err => {
+                    console.error('Discord Warrant init error:', err);
+                });
+            } else {
+                console.error('Discord Warrant module not loaded');
+                document.getElementById('discord-warrant-tab-container').innerHTML = `
+                    <div class="glass-card p-6 rounded-xl">
+                        <div class="text-center text-red-400">
+                            <p class="text-lg font-semibold mb-2">Discord Warrant Parser Not Loaded</p>
                             <p class="text-sm text-gray-400">Please check that all module files are properly installed.</p>
                         </div>
                     </div>

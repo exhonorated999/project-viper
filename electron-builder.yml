@@ -27,24 +27,68 @@ files:
 asarUnpack:
   - "build/**"
 win:
+  # ─── Build targets (multi-modal deployment for LE / agency IT) ───
+  #
+  # nsis     — interactive per-user installer (default, no UAC required)
+  # portable — extract-and-run ZIP, no install at all (USB, locked-down hosts)
+  # msi      — silent enterprise deployment via SCCM / Intune / PDQ / GPO
+  #
+  # All three artifacts are produced from the same build and signed under
+  # the same Authenticode certificate. electron-updater consumes the NSIS
+  # artifact via latest.yml; MSI deployments are managed by IT and should
+  # set VIPER_DISABLE_AUTOUPDATE=1 to defer to the agency's patch cycle.
   target:
     - target: nsis
       arch:
         - x64
+    - target: portable
+      arch:
+        - x64
+    - target: msi
+      arch:
+        - x64
   icon: build/icon.ico
-  verifyUpdateCodeSignature: false
+  # ─────────────────────────────────────────────────────────────────────
+  # UPDATE INTEGRITY POLICY
+  #
+  # verifyUpdateCodeSignature: true  — electron-updater verifies the
+  # Authenticode publisher chain on the downloaded installer matches the
+  # currently-running app's publisher BEFORE applying the update. Combined
+  # with the SHA-512 hash check from latest.yml, this prevents a spoofed
+  # update server from pushing any installer not signed by Intellect LE.
+  #
+  # Required certificate Common Name: "Intellect LE, LLC" (or the matching
+  # subject of the active code-signing cert). Update this if the cert ever
+  # changes.
+  # ─────────────────────────────────────────────────────────────────────
+  verifyUpdateCodeSignature: true
   legalTrademarks: Copyright © 2026 Intellect LE, LLC
 nsis:
   oneClick: false
   include: build/installer.nsh
   allowToChangeInstallationDirectory: true
-  allowElevation: true
+  # ─────────────────────────────────────────────────────────────────────
+  # ADMIN RIGHTS POLICY (v3.1.0+)
+  #
+  # perMachine: false     — installs to %LOCALAPPDATA%\Programs\V.I.P.E.R\
+  # allowElevation: false — never prompts UAC; install runs as the user
+  #
+  # This matches the deployment model used by Chrome, Slack, Discord,
+  # Teams, VS Code, and Zoom: officers can install and self-update
+  # without admin rights. Agency IT departments that require centrally-
+  # managed deployment use the MSI artifact instead (silent install via
+  # SCCM / Intune / PDQ / GPO).
+  #
+  # The installer.nsh data-preservation logic works identically for
+  # per-user and per-machine installs — it operates relative to $INSTDIR.
+  # ─────────────────────────────────────────────────────────────────────
+  perMachine: false
+  allowElevation: false
   createDesktopShortcut: always
   createStartMenuShortcut: true
   shortcutName: V.I.P.E.R.
   installerIcon: build/icon.ico
   uninstallerIcon: build/icon.ico
-  perMachine: true
   runAfterFinish: true
   # ─────────────────────────────────────────────────────────────────────
   # DATA PRESERVATION POLICY — DO NOT CHANGE TO true.
@@ -63,6 +107,19 @@ nsis:
   artifactName: ${productName}-${version}-Setup.${ext}
 portable:
   artifactName: ${productName}-${version}-Portable.${ext}
+msi:
+  # ─── MSI for IT-managed deployment (SCCM / Intune / PDQ / GPO) ───
+  # Per-machine install (admin required ONCE at deploy time, performed by
+  # IT — officers never see UAC). Silent install: msiexec /i VIPER.msi /qn
+  # Custom install dir:           msiexec /i VIPER.msi INSTALLDIR="..." /qn
+  # Silent uninstall:             msiexec /x VIPER.msi /qn
+  perMachine: true
+  oneClick: true
+  runAfterFinish: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: V.I.P.E.R.
+  artifactName: ${productName}-${version}.${ext}
 publish:
   provider: github
   owner: exhonorated999

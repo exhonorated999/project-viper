@@ -20136,6 +20136,39 @@
         }
         window._opsResolvePhotoSrc = _opsResolvePhotoSrc;
 
+        // PDF-export-only photo resolver. Disk-backed photos are emitted as
+        // file:// URLs so the printable HTML stays small. This is the
+        // critical scaling fix: a 20-photo Ops Plan with this resolver
+        // produces a ~50KB HTML payload. The same plan resolved via base64
+        // produces ~30MB+ which (a) crashes data: URL loaders, (b) inflates
+        // IPC + temp-file + Chromium decode memory ~5x. The hidden PDF
+        // BrowserWindow has webSecurity:false (see save-html-as-pdf in
+        // electron-main.js), so cross-origin file:// loads are permitted.
+        function _opsFileUrl(absPath) {
+            if (!absPath) return '';
+            // Normalize to forward slashes; encode each path segment so spaces
+            // and unicode survive the URL parser.
+            const norm = String(absPath).replace(/\\/g, '/');
+            const parts = norm.split('/').map((seg, i) => {
+                // Preserve drive letter "C:" on Windows
+                if (i === 0 && /^[A-Za-z]:$/.test(seg)) return seg;
+                return encodeURIComponent(seg);
+            });
+            const joined = parts.join('/');
+            return joined.startsWith('/') ? `file://${joined}` : `file:///${joined}`;
+        }
+        async function _opsResolvePhotoSrcForExport(photoLike) {
+            if (!photoLike) return '';
+            // Legacy inline base64 — pass through (no disk path available)
+            if (typeof photoLike === 'string' && photoLike.startsWith('data:')) return photoLike;
+            if (photoLike.data && photoLike.data.startsWith && photoLike.data.startsWith('data:')) return photoLike.data;
+            // Disk-backed — emit as file:// (no base64 round-trip)
+            if (photoLike.path) return _opsFileUrl(photoLike.path);
+            if (typeof photoLike === 'string') return photoLike;
+            return '';
+        }
+        window._opsResolvePhotoSrcForExport = _opsResolvePhotoSrcForExport;
+
         // ── Department badge (single agency-wide image) ─────────────────────
         // Stored as a file under userData/branding/dept-badge.{ext} via IPC,
         // not in localStorage. Cached for the session as a data URL for fast
@@ -21549,29 +21582,33 @@
             // can keep using the existing synchronous `p.data` /
             // `r.photo` / `v.photo` shape. We attach a `_inlineData`
             // field used below.
+            //
+            // SCALING: disk-backed photos are emitted as file:// URLs (not
+            // base64). This keeps the report HTML small regardless of how
+            // many photos a case has. See _opsResolvePhotoSrcForExport.
             if (includePhotos) {
                 if (Array.isArray(d.locationPhotos)) {
                     for (const p of d.locationPhotos) {
-                        if (p && !p.data && p.path) p._inlineData = await _opsResolvePhotoSrc(p);
+                        if (p && !p.data && p.path) p._inlineData = await _opsResolvePhotoSrcForExport(p);
                     }
                 }
                 if (Array.isArray(d.rallyPointPhotos)) {
                     for (const p of d.rallyPointPhotos) {
-                        if (p && !p.data && p.path) p._inlineData = await _opsResolvePhotoSrc(p);
+                        if (p && !p.data && p.path) p._inlineData = await _opsResolvePhotoSrcForExport(p);
                     }
                 }
             }
             if (Array.isArray(d.otherResidents)) {
                 for (const r of d.otherResidents) {
                     if (r && r.photo && typeof r.photo === 'object' && r.photo.path) {
-                        r._photoInline = await _opsResolvePhotoSrc(r.photo);
+                        r._photoInline = await _opsResolvePhotoSrcForExport(r.photo);
                     }
                 }
             }
             if (Array.isArray(d.vehicles)) {
                 for (const v of d.vehicles) {
                     if (v && v.photo && typeof v.photo === 'object' && v.photo.path) {
-                        v._photoInline = await _opsResolvePhotoSrc(v.photo);
+                        v._photoInline = await _opsResolvePhotoSrcForExport(v.photo);
                     }
                 }
             }

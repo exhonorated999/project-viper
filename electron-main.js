@@ -2578,7 +2578,7 @@ ipcMain.handle('save-html-as-pdf', async (event, payload) => {
   return run;
 });
 
-async function _doSaveHtmlAsPdf({ html, defaultFileName, options }) {
+async function _doSaveHtmlAsPdf({ html, defaultFileName, options, attachments }) {
   let pdfWin = null;
   let tempHtmlPath = null;
   let printTimer = null;
@@ -2665,8 +2665,56 @@ async function _doSaveHtmlAsPdf({ html, defaultFileName, options }) {
     const pdfBuffer = await Promise.race([printPromise, timeoutPromise]);
     if (printTimer) { clearTimeout(printTimer); printTimer = null; }
 
-    fs.writeFileSync(result.filePath, pdfBuffer);
-    return { success: true, path: result.filePath, bytesIn: htmlBytes, bytesOut: pdfBuffer.length };
+    // ── Merge attached PDFs (rap sheets, firearms docs) into the output ──
+    // We deliberately do NOT inline these as <a href="data:application/pdf
+    // ;base64,..."> in the report HTML because Adobe Acrobat hard-blocks
+    // every data: URL embedded in a PDF link annotation with its
+    // "Security Block — does not allow connection to data:..." dialog.
+    // Instead we render the report on its own and append the attached
+    // PDFs as additional pages via pdf-lib so the detective gets one
+    // self-contained document with no external links.
+    let finalPdfBuffer = pdfBuffer;
+    let mergedCount = 0;
+    let mergeWarnings = [];
+    if (Array.isArray(attachments) && attachments.length > 0) {
+      try {
+        const { PDFDocument } = require('pdf-lib');
+        const outDoc = await PDFDocument.load(pdfBuffer);
+        for (const att of attachments) {
+          if (!att || !att.base64) continue;
+          try {
+            const attBytes = Buffer.from(att.base64, 'base64');
+            // ignoreEncryption tolerates secured PDFs (e.g. CCH-stamped
+            // criminal histories). They'll either copy or fail gracefully.
+            const attDoc = await PDFDocument.load(attBytes, { ignoreEncryption: true });
+            const pageIndices = attDoc.getPageIndices();
+            const copied = await outDoc.copyPages(attDoc, pageIndices);
+            for (const p of copied) outDoc.addPage(p);
+            mergedCount += pageIndices.length;
+          } catch (perAttErr) {
+            console.warn(`[save-html-as-pdf] failed to merge attachment "${att.filename}":`, perAttErr.message);
+            mergeWarnings.push(`${att.filename}: ${perAttErr.message}`);
+          }
+        }
+        const mergedBytes = await outDoc.save({ useObjectStreams: true });
+        finalPdfBuffer = Buffer.from(mergedBytes);
+      } catch (mergeErr) {
+        console.error('[save-html-as-pdf] PDF merge failed, falling back to report-only PDF:', mergeErr);
+        mergeWarnings.push('Merge failed: ' + mergeErr.message);
+        finalPdfBuffer = pdfBuffer;
+      }
+    }
+
+    fs.writeFileSync(result.filePath, finalPdfBuffer);
+    return {
+      success: true,
+      path: result.filePath,
+      bytesIn: htmlBytes,
+      bytesOut: finalPdfBuffer.length,
+      attachmentsMerged: mergedCount,
+      attachmentsRequested: Array.isArray(attachments) ? attachments.length : 0,
+      mergeWarnings: mergeWarnings.length ? mergeWarnings : undefined
+    };
   } catch (error) {
     console.error('save-html-as-pdf failed:', error);
     return { success: false, error: error.message || String(error) };

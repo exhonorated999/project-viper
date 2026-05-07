@@ -22050,14 +22050,18 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     if (s.firearmsDoc.fileType && s.firearmsDoc.fileType.includes('image')) {
                         html += '<div style="margin:15px 0;page-break-inside:avoid"><p style="font-weight:700;font-size:13px;margin:0 0 8px 0">Firearms Document — ' + (s.name || 'Suspect ' + (si+1)) + '</p><img ' + _S + '="' + s.firearmsDoc.fileData + '" style="max-width:100%;border:1px solid #ddd;border-radius:6px"></div>';
                     } else {
-                        html += '<div style="margin:15px 0"><p style="font-weight:700;font-size:13px">Firearms Document — ' + (s.name || 'Suspect ' + (si+1)) + ': <a hr' + 'ef="' + s.firearmsDoc.fileData + '" target="_blank">' + s.firearmsDoc.fileName + '</a></p></div>';
+                        // PDF/doc: do NOT embed as data: anchor — Adobe Acrobat blocks
+                        // any link to a data: URL inside a PDF (Security Block dialog).
+                        // The actual PDF is merged into the output by the main process
+                        // via pdf-lib (see _opsCollectPdfAttachments below).
+                        html += '<div style="margin:15px 0;padding:12px;background:#fff8e1;border-left:4px solid #ffa726;border-radius:4px"><p style="font-weight:700;font-size:13px;margin:0">📄 Firearms Document — ' + (s.name || 'Suspect ' + (si+1)) + '</p><p style="margin:4px 0 0 0;font-size:12px;color:#555">' + s.firearmsDoc.fileName + ' &nbsp;<em style="color:#888">(merged on subsequent pages)</em></p></div>';
                     }
                 }
                 if (s.rapSheet && s.rapSheet.fileData) {
                     if (s.rapSheet.fileType && s.rapSheet.fileType.includes('image')) {
                         html += '<div style="margin:15px 0;page-break-inside:avoid"><p style="font-weight:700;font-size:13px;margin:0 0 8px 0">Criminal History / Rap Sheet — ' + (s.name || 'Suspect ' + (si+1)) + '</p><img ' + _S + '="' + s.rapSheet.fileData + '" style="max-width:100%;border:1px solid #ddd;border-radius:6px"></div>';
                     } else {
-                        html += '<div style="margin:15px 0"><p style="font-weight:700;font-size:13px">Criminal History / Rap Sheet — ' + (s.name || 'Suspect ' + (si+1)) + ': <a hr' + 'ef="' + s.rapSheet.fileData + '" target="_blank">' + s.rapSheet.fileName + '</a></p></div>';
+                        html += '<div style="margin:15px 0;padding:12px;background:#ffebee;border-left:4px solid #cc0000;border-radius:4px"><p style="font-weight:700;font-size:13px;margin:0">📄 Criminal History / Rap Sheet — ' + (s.name || 'Suspect ' + (si+1)) + '</p><p style="margin:4px 0 0 0;font-size:12px;color:#555">' + s.rapSheet.fileName + ' &nbsp;<em style="color:#888">(merged on subsequent pages)</em></p></div>';
                     }
                 }
                 return html;
@@ -22078,22 +22082,65 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             // in a hidden BrowserWindow, waits for assets to settle, then
             // writes a PDF via webContents.printToPDF — no print dialog,
             // no popup, no freeze.
+            //
+            // PDF attachments (rap sheets, firearms documents) are passed
+            // separately and MERGED into the output by the main process via
+            // pdf-lib. Embedding them inline as <a href="data:application/
+            // pdf;base64,..."> triggered Adobe Acrobat's Security Block
+            // dialog ("does not allow connection to data:application/pdf...")
+            // because Adobe blocks all data: URLs inside PDF link annotations.
             try {
                 if (!(window.electronAPI && window.electronAPI.saveHtmlAsPdf)) {
                     viperToast('PDF export unavailable — restart the app to load updated bindings', 'error');
                     return;
                 }
+                // Collect attached PDFs from suspect rap sheets / firearms docs
+                // (image attachments are already inline-embedded above).
+                const pdfAttachments = [];
+                (suspects || []).forEach((s, si) => {
+                    const docs = [
+                        { rec: s.firearmsDoc, label: 'Firearms Document', sname: s.name || ('Suspect ' + (si+1)) },
+                        { rec: s.rapSheet,    label: 'Criminal History', sname: s.name || ('Suspect ' + (si+1)) }
+                    ];
+                    docs.forEach(d => {
+                        if (!d.rec || !d.rec.fileData) return;
+                        const ft = (d.rec.fileType || '').toLowerCase();
+                        const fn = d.rec.fileName || '';
+                        const isImage = ft.includes('image');
+                        const isPdf = ft.includes('pdf') || /\.pdf$/i.test(fn);
+                        if (isImage || !isPdf) return; // only PDFs need server-side merge
+                        // fileData is a data URL; strip prefix to get base64
+                        let b64 = d.rec.fileData;
+                        const comma = b64.indexOf(',');
+                        if (comma >= 0) b64 = b64.slice(comma + 1);
+                        pdfAttachments.push({
+                            filename: fn,
+                            label: d.label + ' — ' + d.sname,
+                            base64: b64
+                        });
+                    });
+                });
                 const safeCase = (currentCase.caseNumber || 'case').replace(/[^A-Za-z0-9_-]+/g, '_');
                 const stamp = new Date().toISOString().slice(0, 10);
                 const defaultFileName = `OpsPlan_${safeCase}_${stamp}.pdf`;
-                viperToast('Generating PDF…', 'info');
+                viperToast(pdfAttachments.length > 0
+                    ? `Generating PDF + merging ${pdfAttachments.length} attachment${pdfAttachments.length === 1 ? '' : 's'}…`
+                    : 'Generating PDF…', 'info');
                 const res = await window.electronAPI.saveHtmlAsPdf({
                     html: reportHtml,
                     defaultFileName,
-                    options: { pageSize: 'Letter', settleMs: 1800 }
+                    options: { pageSize: 'Letter', settleMs: 1800 },
+                    attachments: pdfAttachments
                 });
                 if (res && res.success) {
-                    viperToast('OPS Plan PDF saved', 'success');
+                    if (res.attachmentsMerged > 0) {
+                        viperToast(`OPS Plan PDF saved (${res.attachmentsMerged} attachment page${res.attachmentsMerged === 1 ? '' : 's'} merged)`, 'success');
+                    } else {
+                        viperToast('OPS Plan PDF saved', 'success');
+                    }
+                    if (res.mergeWarnings && res.mergeWarnings.length) {
+                        console.warn('OPS Plan PDF merge warnings:', res.mergeWarnings);
+                    }
                 } else if (res && res.canceled) {
                     // User dismissed save dialog — silent
                 } else {

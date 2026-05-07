@@ -3,15 +3,73 @@
 
 **Product:** V.I.P.E.R. (Versatile Investigative Platform for Enforcement Records)
 **Vendor:** Intellect LE, LLC
-**Document Version:** 1.0
+**Document Version:** 1.1
 **Aligned to:** NIST CSF v1.1 / MS-ISAC Policy Template Guide (2020)
 **Status:** Template — agencies should customize sections marked **[AGENCY-SPECIFIC]**
 
 ---
 
+## ⚠ READ FIRST — Vendor Boundary & Offline Architecture
+
+**VIPER is an offline, locally-installed desktop application. Intellect LE, LLC has no access to agency case data at any point in the product lifecycle. This is by design.**
+
+The agency owns and controls every byte of case data, evidence, warrant returns, and derivative work product produced inside VIPER. The vendor cannot see it, retrieve it, decrypt it, copy it, or destroy it remotely. This is not a service limitation — it is a deliberate architectural choice that keeps CJIS-classified information inside the agency's existing CJIS perimeter.
+
+### What Intellect LE CAN See (limited to licensing)
+- Installation registration: customer organization name, license-key **hash**, product version, last-seen timestamp, and the IP address from which validation was requested.
+- License-validation pings (version + license-key-hash + nonce — no case payload of any kind).
+- Voluntary, opt-in error reports if the agency enables them (off by default).
+
+### What Intellect LE CANNOT See — Ever
+- Case files, case numbers, case content, evidence files, narrative text.
+- Identities of witnesses, victims, suspects, missing persons, or any other subject.
+- Warrant returns (KIK, Google, Discord, Snapchat, Meta) or anything parsed from them.
+- Officer notes, audit-log contents, custom-metric values, or operations plans.
+- Master passphrases, encryption keys, or any data protected by Field Security (AES-256-GCM; the key is derived from the user's passphrase and never leaves the device).
+- Local file-system contents, local network state, local user accounts, or installed peripherals.
+- Whether a given case, evidence file, or warrant return exists, has been deleted, or has been exported.
+
+### Vendor Role in CJIS Compliance — None
+
+**Intellect LE is not a CJIS service provider.** VIPER does not store, transmit, view, or process CJIS-classified data on any vendor-controlled infrastructure. CJIS data never leaves the agency's control by passing through VIPER.
+
+The controlling authority over CJIS data on every workstation that runs VIPER is the **agency's CJIS Security Policy**, derived from the **FBI CJIS Security Policy (CJISD-ITS-DOC-08140)** and administered by the agency's **CJIS Systems Officer (CSO)** and **Local Agency Security Officer (LASO)**. Those officials retain full and exclusive authority over:
+
+- Personnel screening and access authorization (CJIS §5.12)
+- Auditing of access to CJIS data (CJIS §5.4)
+- Physical security of the host workstation (CJIS §5.9)
+- Incident response and breach notification (CJIS §5.3)
+- Media protection, retention, and destruction (CJIS §5.8)
+- Reporting to the State CJIS Systems Agency (CSA) and to the FBI CJIS Division
+
+This guide complements — it does not replace — the agency's CJIS Security Policy. **Where any conflict exists, the agency CJIS Security Policy and the FBI CJIS Security Policy govern.**
+
+### Vendor Role in Incident Response — Strictly Bounded
+
+**Intellect LE cannot lead, assist with, or participate in incident-response operations involving agency case data.** We have no access to:
+- The contents of the affected installation
+- Local audit logs (stored only on the agency device)
+- Encrypted case files (only the user's passphrase can decrypt them)
+- Information about which subjects, victims, suspects, or cases are affected
+
+In the event of a confirmed or suspected data breach involving a VIPER installation, the **agency leads the response** under its existing CJIS-compliant incident-response plan. The vendor's role is strictly limited to:
+1. Confirming whether the application's build pipeline and code-signing chain remain intact (supply-chain side only).
+2. Issuing license revocations on documented agency request.
+3. Supplying reference documentation (this guide, the build manifest, the dependency manifest) to support the agency's own forensic and notification work.
+
+### Vendor Role in Breach Notification — None
+
+**We have no ability to perform breach notifications on the agency's behalf, and we are not contractually positioned to do so.** We do not know what data was stored, who was affected, what jurisdictions are implicated, or which notification statutes apply.
+
+All breach notifications — to data subjects, to the State CJIS Systems Agency, to the FBI CJIS Division, to cyber-insurance carriers, to attorneys general under state breach-notification statutes (e.g. Cal. Civ. Code §1798.82, Tex. Bus. & Com. Code §521.053, N.Y. Gen. Bus. Law §899-aa, and equivalent laws in every state), to the press, and to any oversight or prosecutorial bodies — are **agency obligations** and must be executed under the agency's existing breach-response policy. The vendor will not, and cannot, transmit notifications, draft notification letters on the agency's behalf, or determine the scope of who must be notified.
+
+---
+
 ## How to Use This Document
 
-This guide mirrors the **MS-ISAC NIST CSF Policy Template Guide (2020)**. It documents how VIPER, when deployed and operated as recommended, satisfies each applicable NIST CSF subcategory. Agencies adopting VIPER may use this guide as the basis for their own information-security policy package.
+This guide mirrors the **MS-ISAC NIST CSF Policy Template Guide (2020)**. It documents how VIPER, when deployed and operated as recommended, satisfies each applicable NIST CSF subcategory. Agencies adopting VIPER may use this guide as **a supplement** to their existing information-security policy package and CJIS Security Policy.
+
+The guide is scoped to the VIPER application itself. It does **not** address the agency's broader CJIS Security Policy, which governs all CJIS-classified data on the host workstation regardless of which application processes it.
 
 The guide is organized by the five NIST CSF Functions:
 
@@ -36,8 +94,14 @@ Each subcategory (e.g. `PR.AC-1`) lists:
 This policy applies to:
 - All deployments of VIPER (per-user, per-machine MSI, and portable USB)
 - All officers, detectives, supervisors, and IT personnel using VIPER
-- All case data, evidence files, warrant returns, and derivative work product produced or stored within VIPER
+- All case data, evidence files, warrant returns, and derivative work product produced or stored within VIPER on agency-controlled devices
 - All systems on which VIPER is installed or executed
+
+This policy does **not** apply to, and does not modify:
+- The agency's CJIS Security Policy
+- The agency's broader information-security or breach-response policies
+- Any data store outside of VIPER, including agency RMS/CAD, evidence-management systems, or shared-drive content
+- Vendor-controlled infrastructure beyond the licensing/update endpoints described in ID.AM-4 (Intellect LE has no production data store containing agency case content)
 
 ---
 
@@ -49,10 +113,10 @@ This policy applies to:
 
 **VIPER Control:**
 - VIPER's **Settings → Licensing** page records the host machine fingerprint and license activation against the Intellect Dashboard at activation time.
-- The Intellect Dashboard maintains an authoritative inventory of every active VIPER installation: customer organization, license type, product version, last-seen timestamp, and registration IP.
-- The dashboard's `/admin/customers` view exports the full active-installation roster.
+- The Intellect Dashboard maintains an inventory of every active VIPER **installation**: customer organization, license type, product version, last-seen timestamp, and registration IP. **This inventory contains licensing metadata only — no agency case data, no subject identities, and no operational content.**
+- The dashboard's `/admin/customers` view exports the active-installation roster on agency request.
 
-**Policy Statement:** The agency shall maintain a current inventory of every workstation, laptop, and removable device on which VIPER is installed. The Intellect Dashboard customer roster is the system of record for this inventory.
+**Policy Statement:** The agency shall maintain its **own** authoritative inventory of every workstation, laptop, and removable device on which VIPER is installed (per the agency's CJIS Security Policy asset-management requirements). The vendor's licensing roster may be used as a secondary cross-reference but is not a substitute for the agency's CJIS asset inventory.
 
 **References (MS-ISAC):** Acceptable Use of Information Technology Resource Policy · Identification and Authentication Policy · Information Security Policy · Security Assessment and Authorization Policy
 
@@ -104,11 +168,12 @@ The Content-Security-Policy meta tag in every page restricts outbound fetches to
 ### ID.AM-6 — Cybersecurity roles and responsibilities are established.
 
 **Policy Statement [AGENCY-SPECIFIC]:**
-- **System Owner** — Agency IT Director: approves installations, manages MSI deployment.
-- **Application Administrator** — Designated officer or sworn supervisor: manages license keys, custom metrics, settings rollouts, and Field Security policy.
-- **End Users** — Officers/detectives: case data entry, evidence intake, warrant parsing.
-- **Vendor** — Intellect LE, LLC: support, updates, incident response coordination.
-- **Third-Party Stakeholders** — DA's Office (case exports), partner agencies (canvas forms, sealed-case sharing).
+- **CJIS Systems Officer (CSO) / Local Agency Security Officer (LASO)** — owns CJIS-Security-Policy compliance for every workstation that runs VIPER; owns incident response and breach notification.
+- **System Owner** — Agency IT Director: approves installations, manages MSI deployment, owns endpoint hardening and EDR coverage.
+- **Application Administrator** — Designated officer or sworn supervisor: manages license keys, custom metrics, settings rollouts, and Field Security policy on the agency side.
+- **End Users** — Officers/detectives: case data entry, evidence intake, warrant parsing, local audit-log review.
+- **Vendor — Intellect LE, LLC** — supplies the application, signs and publishes releases, validates licenses, and maintains supply-chain integrity. **The vendor has no access to agency case data, no operational visibility into installations, and no role in agency incident response or breach notification.** See the "Vendor Boundary & Offline Architecture" section above.
+- **Third-Party Stakeholders** — DA's Office (case exports), partner agencies (canvas forms, sealed-case sharing) — receive data only via agency-initiated export.
 
 **References:** Acceptable Use Policy · Information Security Policy · Security Awareness and Training Policy
 
@@ -155,12 +220,14 @@ The Content-Security-Policy meta tag in every page restricts outbound fetches to
 
 ### ID.SC-5 — Response and recovery planning is conducted with suppliers.
 
-**VIPER Control:** Intellect LE incident-response contact is published in vendor due-diligence package and in the VIPER `Settings → About` panel.
+**VIPER Control:** Intellect LE's incident-response scope is limited to its own supply-chain integrity (build pipeline, code-signing certificate, release artifacts, dashboard endpoints). Intellect LE does **not** provide incident response for agency case data, agency networks, agency endpoints, or any CJIS-classified information — and is not capable of doing so because the vendor has no access to that data (see "Vendor Boundary" section above).
 
-**Policy Statement:** In the event of a suspected supply-chain compromise (e.g. unauthorized release, certificate revocation, dashboard compromise), the agency shall:
-1. Halt auto-updates by setting `VIPER_DISABLE_AUTOUPDATE=1` in machine env or via GPO
-2. Notify Intellect LE incident response within 4 hours
-3. Capture audit logs from all installations for forensic review
+**Policy Statement:** In the event of a suspected **vendor-side / supply-chain** compromise (e.g. unauthorized release published, code-signing certificate revoked, dashboard endpoint compromise), the agency shall:
+1. Halt auto-updates by setting `VIPER_DISABLE_AUTOUPDATE=1` in machine env or via GPO.
+2. Notify Intellect LE through the published vendor contact channel so the vendor can investigate the supply-chain side.
+3. Preserve local installations unchanged for the agency's own forensic review under the agency CJIS-compliant incident-response plan.
+
+For a suspected **agency-side** compromise (lost device, unauthorized access, suspected exfiltration of case data), the agency executes its own incident-response plan; the vendor cannot assist (see RS section).
 
 ---
 
@@ -351,14 +418,23 @@ The Content-Security-Policy meta tag in every page restricts outbound fetches to
 
 ### PR.IP-9 — Response/recovery plans are in place and managed.
 
-**Policy Statement [AGENCY-SPECIFIC]:** The agency shall maintain a written incident-response plan covering:
-- Lost or stolen device with VIPER installed (license revocation, remote attestation if MDM-managed)
-- Suspected unauthorized access to a case
-- Compromise of an officer's master passphrase
-- Compromise of the Intellect Dashboard
-- Loss of case data (recovery from `.vbak` backup)
+**VIPER Control (vendor side):** None — the vendor has no operational visibility into agency installations, no access to case data, and no ability to remotely investigate or remediate (see "Vendor Boundary" section). The vendor maintains its own supply-chain incident-response plan covering build/sign/release integrity only.
 
-**References:** Data Breach Response Policy · Disaster Recovery Plan Policy · Security Response Plan Policy · Incident Response Policy
+**Policy Statement [AGENCY-SPECIFIC]:** The **agency** shall maintain a written incident-response plan, owned by the CSO/LASO and aligned to the FBI CJIS Security Policy §5.3, that addresses the following VIPER-related scenarios:
+
+| Scenario | Owner | Vendor Role |
+|---|---|---|
+| Lost or stolen device with VIPER installed | Agency | License revocation on agency request; otherwise none |
+| Suspected unauthorized access to a case | Agency | None |
+| Suspected compromise of an officer's master passphrase | Agency | None |
+| Suspected exfiltration of CJIS data from a VIPER host | Agency (notify CSA + FBI per CJIS §5.3) | None |
+| Compromise of the Intellect Dashboard licensing endpoint | Agency halts auto-updates; vendor investigates own infrastructure | Supply-chain investigation only |
+| Unauthorized release published to GitHub | Agency halts auto-updates; vendor revokes release | Supply-chain investigation only |
+| Loss of case data (corruption, deletion, ransomware) | Agency (recover from `.vbak`/`.vcase`) | None |
+
+**The vendor cannot perform breach notifications, cannot determine which subjects/cases were affected, and cannot characterize the scope of any exposure** because no such data exists on vendor-controlled systems. All notifications under state, federal, and CJIS authority are agency obligations.
+
+**References:** Data Breach Response Policy · Disaster Recovery Plan Policy · Security Response Plan Policy · Incident Response Policy · FBI CJIS Security Policy §5.3
 
 ---
 
@@ -486,8 +562,8 @@ The Content-Security-Policy meta tag in every page restricts outbound fetches to
 
 **Policy Statement [AGENCY-SPECIFIC]:**
 - **Officer** — reports anomalous VIPER behavior to supervisor.
-- **Supervisor** — escalates to agency IT.
-- **IT** — investigates, coordinates with Intellect LE incident response if vendor involvement is required.
+- **Supervisor** — escalates to agency IT and CSO/LASO.
+- **Agency IT / CSO / LASO** — investigates, executes the agency CJIS-compliant incident-response plan, and contacts Intellect LE only if a **supply-chain** question (signed-build integrity, license-system status) requires vendor input. Detection, investigation, containment, and remediation of agency-side events stay with the agency.
 
 **References:** Incident Response Policy · Information Security Policy
 
@@ -495,23 +571,30 @@ The Content-Security-Policy meta tag in every page restricts outbound fetches to
 
 ### DE.DP-4 — Event detection information is communicated.
 
-**Policy Statement [AGENCY-SPECIFIC]:** Confirmed VIPER security events shall be communicated to:
+**Policy Statement [AGENCY-SPECIFIC]:** Confirmed VIPER-related security events shall be communicated through the agency's existing CJIS-compliant notification chain, typically:
 - Affected officers (within 24 hours)
-- Agency CISO/IT director (immediately)
-- Intellect LE incident response (if vendor coordination required)
+- Agency CSO/LASO and CISO/IT director (immediately)
+- State CJIS Systems Agency / FBI CJIS Division (per CJIS §5.3 thresholds)
 - DA's office (if affected cases include active prosecution)
+- Cyber-insurance carrier (per policy terms)
+
+The vendor is **not** a recipient in this chain. The agency may separately contact Intellect LE for license actions or supply-chain inquiries; that contact is informational and does not relieve the agency of any CJIS or statutory notification obligation.
 
 ---
 
 # NIST FUNCTION: Respond (RS)
 
+> **Vendor scope reminder:** Every subcategory in this Function is the **agency's** responsibility. Intellect LE has no access to case data, no telemetry on case content, no ability to perform investigations, and no ability to issue notifications on the agency's behalf. The vendor's only response capability is supply-chain investigation of its own build/sign/release pipeline. The agency executes the response plan under its existing CJIS Security Policy.
+
 ## RS.RP — Response Planning
 
 ### RS.RP-1 — Response plan is executed.
 
-**Policy Statement [AGENCY-SPECIFIC]:** Upon detection of a VIPER-related cybersecurity incident, the on-call IT analyst shall execute the agency's incident-response plan, treating VIPER as in-scope per PR.IP-9.
+**VIPER Control (vendor side):** None.
 
-**References:** Security Response Plan Policy · Incident Response Policy · Planning Policy
+**Policy Statement [AGENCY-SPECIFIC]:** Upon detection of a VIPER-related cybersecurity incident, the agency's CSO/LASO and on-call IT analyst shall execute the **agency's** incident-response plan (treating VIPER as an in-scope endpoint application per PR.IP-9). The vendor is not part of the response chain except to receive a license-revocation request or a supply-chain-integrity inquiry. Do **not** wait on the vendor before acting — VIPER is offline by design and vendor coordination is not a prerequisite to any agency response action.
+
+**References:** Security Response Plan Policy · Incident Response Policy · Planning Policy · FBI CJIS Security Policy §5.3
 
 ---
 
@@ -519,20 +602,29 @@ The Content-Security-Policy meta tag in every page restricts outbound fetches to
 
 ### RS.CO-1 — Personnel know their roles and order of operations.
 
-**Policy Statement:** Per DE.DP-1 above. Roles shall be exercised annually per PR.IP-10.
+**Policy Statement:** Per DE.DP-1 and ID.AM-6 above. All response roles sit inside the agency. The vendor is not a response role. Roles shall be exercised annually per PR.IP-10.
 
 ---
 
 ### RS.CO-2 — Incidents are reported consistent with established criteria.
 
-**Policy Statement [AGENCY-SPECIFIC]:** Reportable VIPER incidents include (non-exhaustive):
+**Policy Statement [AGENCY-SPECIFIC]:** Reportable VIPER-related incidents include (non-exhaustive):
 - Lost/stolen device with VIPER installed
 - Suspected unauthorized case access
 - Suspected master-passphrase compromise
+- Suspected exfiltration of CJIS data from a VIPER host
 - Auto-updater installing an unsigned/unexpected version
-- Persistent license-validation failure indicating dashboard or network compromise
+- Persistent license-validation failure suggesting dashboard compromise
 
-**References:** Data Breach Response Policy · Security Response Plan Policy · Incident Response Policy
+**Reporting chain (agency-internal first):**
+1. Officer → Supervisor → Agency IT/CSO/LASO
+2. CSO/LASO determines whether the incident meets CJIS §5.3 reporting thresholds and, if so, reports to the **State CJIS Systems Agency (CSA)** and onward to the **FBI CJIS Division** per the agency's CJIS-compliant timetable.
+3. CSO/LASO determines breach-notification obligations under applicable state breach-notification statutes and executes notifications.
+4. The agency may notify Intellect LE only for license revocation or supply-chain integrity questions. **The vendor is not a substitute for, and does not replace, any CJIS or statutory reporting channel.**
+
+**The vendor will not draft, send, or coordinate breach notifications.** The vendor cannot determine the scope of affected subjects because no subject data exists on vendor-controlled systems.
+
+**References:** Data Breach Response Policy · Security Response Plan Policy · Incident Response Policy · FBI CJIS Security Policy §5.3 · Applicable state breach-notification statutes
 
 ---
 
@@ -540,7 +632,7 @@ The Content-Security-Policy meta tag in every page restricts outbound fetches to
 ### RS.CO-4 — Coordination with stakeholders occurs.
 ### RS.CO-5 — Voluntary information sharing occurs with external stakeholders.
 
-**Policy Statement:** Information sharing with Intellect LE, MS-ISAC, and partner agencies shall follow agency information-sharing policy. The Intellect LE incident-response contact is published in the vendor due-diligence package.
+**Policy Statement:** Information sharing with the State CSA, FBI CJIS Division, MS-ISAC, partner agencies, prosecuting attorneys, and cyber-insurance carriers shall follow the agency's CJIS-compliant information-sharing policy. **Intellect LE is not in the information-sharing chain for incident data** because no agency case content exists on vendor systems. Communication with the vendor is limited to license actions and supply-chain integrity inquiries.
 
 ---
 
@@ -548,7 +640,7 @@ The Content-Security-Policy meta tag in every page restricts outbound fetches to
 
 ### RS.AN-4 — Incidents are categorized consistent with response plans.
 
-**Policy Statement [AGENCY-SPECIFIC]:** VIPER incidents shall be categorized using the agency's standard incident taxonomy with a mandatory "VIPER" tag for trend analysis.
+**Policy Statement [AGENCY-SPECIFIC]:** The agency shall categorize VIPER-related incidents using its standard CJIS incident taxonomy with a mandatory "VIPER" tag for trend analysis. Categorization is an agency function; the vendor has no inputs.
 
 ---
 
@@ -557,31 +649,35 @@ The Content-Security-Policy meta tag in every page restricts outbound fetches to
 ### RS.IM-1 — Response plans incorporate lessons learned.
 ### RS.IM-2 — Response strategies are updated.
 
-**Policy Statement:** After-action reviews from PR.IP-10 exercises and from real incidents shall feed updates to this policy guide. Updates shall be tracked in the document version history at the top of this file.
+**Policy Statement:** After-action reviews from PR.IP-10 exercises and from real incidents shall feed updates to the **agency's** incident-response plan. Where lessons learned identify a documentation gap in this guide (e.g. an undocumented VIPER behavior the agency needed to know during response), the agency may submit the gap to Intellect LE for inclusion in the next revision.
 
 ---
 
 # NIST FUNCTION: Recover (RC)
 
+> **Vendor scope reminder:** Recovery is an agency function executed against agency-controlled local data using agency-controlled local backups. Intellect LE has no remote-recovery capability, no copy of agency case data, and no ability to restore lost cases. The vendor's role is limited to: (a) supplying signed installers from the official release channel, and (b) issuing a replacement license key on documented agency request.
+
 ## RC.RP — Recovery Planning
 
 ### RC.RP-1 — Recovery plan is executed during or after a cybersecurity incident.
 
-**VIPER Control:**
+**VIPER Control (local recovery tools — executed by agency, on agency hardware):**
 - Restore from `.vbak` backup (Settings → Restore).
 - Restore individual cases from `.vcase` exports.
 - Restore from per-case auto-snapshot via Settings → Snapshot Recovery (user-initiated).
 - Reinstall from signed installer; user data is preserved (`deleteAppDataOnUninstall: false`).
 
-**Policy Statement:** Recovery from a compromised installation shall follow this order:
-1. Quarantine the affected workstation.
-2. Confirm latest `.vbak` backup is intact and pre-compromise.
-3. Wipe and reimage the workstation per agency media-sanitization policy.
-4. Reinstall VIPER from the signed installer.
-5. Restore from the verified `.vbak` backup.
-6. Re-issue a new license key (revoking the old one) before bringing back online.
+**Vendor recovery capability:** None. There is no cloud backup. There is no vendor-side copy of any case. Recovery integrity depends entirely on the agency's local-backup discipline (PR.IP-4).
 
-**References:** Disaster Recovery Plan Policy · Contingency Planning Policy · Incident Response Policy
+**Policy Statement [AGENCY-SPECIFIC]:** Recovery from a compromised installation shall be executed by agency IT under the agency's CJIS-compliant recovery procedure, in this order:
+1. Quarantine the affected workstation.
+2. Confirm the latest agency-controlled `.vbak` backup is intact and pre-compromise.
+3. Wipe and reimage the workstation per the agency's media-sanitization policy (CJIS §5.8).
+4. Reinstall VIPER from the signed installer (verify Authenticode signature before install).
+5. Restore from the verified `.vbak` backup.
+6. Request a new license key from Intellect LE (revoking the old one) before bringing the workstation back online.
+
+**References:** Disaster Recovery Plan Policy · Contingency Planning Policy · Incident Response Policy · FBI CJIS Security Policy §5.8
 
 ---
 
@@ -590,7 +686,7 @@ The Content-Security-Policy meta tag in every page restricts outbound fetches to
 ### RC.IM-1 — Recovery plans incorporate lessons learned.
 ### RC.IM-2 — Recovery strategies are updated.
 
-**Policy Statement:** Annual review of this policy and the agency's recovery procedures shall incorporate lessons from any executed recoveries during the prior year.
+**Policy Statement:** Annual review of the agency's recovery procedures shall incorporate lessons from any executed recoveries during the prior year. The agency may submit documentation gaps in this guide to Intellect LE for inclusion in the next revision.
 
 ---
 
@@ -600,7 +696,7 @@ The Content-Security-Policy meta tag in every page restricts outbound fetches to
 ### RC.CO-2 — Reputation is repaired after an incident.
 ### RC.CO-3 — Recovery activities are communicated to internal and external stakeholders.
 
-**Policy Statement [AGENCY-SPECIFIC]:** Public communications regarding any VIPER-related incident shall be coordinated through the agency's public-information officer in consultation with Intellect LE.
+**Policy Statement [AGENCY-SPECIFIC]:** Public communications regarding any VIPER-related incident shall be coordinated through the agency's public-information officer (PIO) under the agency's existing media-relations policy. **Intellect LE will not issue public statements about agency incidents** because the vendor has no facts to attest to — no case data, no telemetry, no visibility into the affected installation. The vendor will respond only to direct questions about the application's documented security architecture (this guide). The agency's PIO is the sole authoritative voice regarding the incident's scope, affected subjects, and notification status.
 
 ---
 
@@ -616,7 +712,7 @@ The Content-Security-Policy meta tag in every page restricts outbound fetches to
 | ID.RM-1 | Risk management process | Annual review checklist |
 | ID.SC-2 | Supplier assessment | Vendor due-diligence package |
 | ID.SC-4 | Supplier reassessment | Annual cert/repo/TLS review |
-| ID.SC-5 | Supplier IR coordination | Intellect LE IR contact |
+| ID.SC-5 | Supplier IR coordination | Vendor scope limited to supply-chain (build/sign/release); agency owns operational IR |
 | PR.AC-1 | Identity management | API key + License key + dashboard revocation |
 | PR.AC-3 | Remote access | No inbound surface |
 | PR.AC-4 | Least privilege | Per-user install, no app elevation |
@@ -657,18 +753,33 @@ The Content-Security-Policy meta tag in every page restricts outbound fetches to
 
 Before placing VIPER into operational use, the agency shall confirm:
 
+**Vendor-boundary acknowledgments**
+- [ ] CSO/LASO has read and approved the "Vendor Boundary & Offline Architecture" section above
+- [ ] Agency leadership understands that Intellect LE has **no access** to agency case data and **no role** in incident response or breach notification
+- [ ] Agency leadership understands that **all CJIS compliance** for VIPER hosts is owned by the agency under its existing CJIS Security Policy
+- [ ] Agency leadership understands that **all breach-notification obligations** (CJIS, state, federal, contractual) are agency obligations and **cannot be performed by the vendor**
+
+**Operational baseline**
 - [ ] License keys issued only to named officers/workstations
 - [ ] Field Security enabled on all installations
 - [ ] Master passphrases meet agency password-construction guideline
 - [ ] Auto-update integrity verification enabled (default)
 - [ ] CSP whitelist not relaxed
 - [ ] Outbound firewall rules align with documented dependency list (ID.AM-4)
-- [ ] Backup schedule established (PR.IP-4)
-- [ ] Audit log retention configured (PR.PT-1)
-- [ ] Incident response plan documents VIPER scenarios (PR.IP-9)
+- [ ] Backup schedule established (PR.IP-4) — backups are the **only** path to data recovery; there is no vendor-side copy
+- [ ] Audit log retention configured locally per agency CJIS retention policy (PR.PT-1)
+
+**Agency-owned response artifacts**
+- [ ] Agency incident-response plan addresses VIPER scenarios (PR.IP-9)
+- [ ] CJIS §5.3 reporting chain documented (CSO → CSA → FBI)
+- [ ] State breach-notification statute(s) identified and reporting playbook drafted
+- [ ] Cyber-insurance reporting trigger documented
+- [ ] PIO playbook covers VIPER-incident scenarios (RC.CO)
+
+**Documentation & approval**
 - [ ] Vendor due-diligence package on file (ID.SC-2)
-- [ ] Section markers tagged **[AGENCY-SPECIFIC]** have been customized
-- [ ] Document approved by agency CISO / Information Security Officer
+- [ ] All sections marked **[AGENCY-SPECIFIC]** have been customized
+- [ ] Document approved by agency CSO/LASO and CISO/Information Security Officer
 
 ---
 
@@ -677,6 +788,7 @@ Before placing VIPER into operational use, the agency shall confirm:
 | Version | Date | Changes |
 |---|---|---|
 | 1.0 | 2026-05-06 | Initial release. Aligned to MS-ISAC NIST CSF Policy Template Guide (2020-07-20). Covers VIPER v3.1.0. |
+| 1.1 | 2026-05-07 | Added "Vendor Boundary & Offline Architecture" section. Reframed RS (Respond) and RC (Recover) Functions to make explicit that all incident response, breach notification, and recovery are agency obligations under the agency's CJIS Security Policy. Removed any language implying vendor-side incident response, vendor-led notifications, or vendor coordination as a prerequisite to agency action. Added explicit CJIS §5.3 / state breach-notification-statute references. Expanded Appendix B with vendor-boundary acknowledgments. |
 
 ---
 

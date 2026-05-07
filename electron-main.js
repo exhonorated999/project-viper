@@ -2638,7 +2638,14 @@ async function _doSaveHtmlAsPdf({ html, defaultFileName, options }) {
     // ~33% encodeURIComponent inflation.
     try { fs.mkdirSync(PDF_TEMP_ROOT, { recursive: true }); } catch (_) {}
     tempHtmlPath = path.join(PDF_TEMP_ROOT, `report-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`);
-    fs.writeFileSync(tempHtmlPath, html, 'utf8');
+    // Write with UTF-8 BOM. Chromium falls back to the OS legacy code page
+    // (Windows-1252) when loading file:// HTML that lacks both a <meta
+    // charset> tag and a BOM — that's how em-dashes and emoji rendered as
+    // â€" / ðŸ"" in earlier 3.1.1 exports. The BOM is an unconditional
+    // UTF-8 declaration that wins regardless of in-document meta tags.
+    const utf8Bom = '\ufeff';
+    const htmlForFile = (html && html.charCodeAt(0) === 0xFEFF) ? html : (utf8Bom + html);
+    fs.writeFileSync(tempHtmlPath, htmlForFile, 'utf8');
     await pdfWin.loadFile(tempHtmlPath);
     await ready;
     // Settle delay for in-page async work (Leaflet, fonts, image decode)

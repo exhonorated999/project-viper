@@ -1,0 +1,569 @@
+
+
+DRAFT
+ALLEGHANY CO SHERIFF'S OFFICE
+268 W MAIN ST
+COVINGTON , VA  244260000
+5409651770
+INCIDENT PAGE 1
+Incident No.
+2024-000181
+Call for Service No.
+CAD24-007129
+Occurred From Date:
+Occurred To Date:
+02-27-2024
+05-18-2024
+Time:
+Time:
+00:00
+09:00
+Reported Date:
+05-02-2024
+Time:
+14:12
+DETAILS
+Location Address
+1600 S CONRAD AVE; COVINGTON VA 24426
+Location Name
+FORT YOUNG
+Beat
+AGSO
+Sub Beat
+CVPD
+Geo CodeLatitude
+0
+Longitude
+0
+Response
+04 - ARREST
+ShiftWeather Conditions
+01 - No Adverse Condition (Cl...
+Lighting Conditions
+Agency Status
+2 - Cleared By Arrest
+Arrest(s) MadeEvidence CollectedGang RelatedPhoto(s) TakenUnknown Offender
+Source
+L - LAW ENFORCEMENT
+Exceptional ClearanceCleared ByClearance Date
+OFFENSE
+Seq
+1
+Category
+370
+Description
+[18.2-374.3]  PROPOSE SEX BY COMPUTER ETC.
+<15Y,<7Y OLDER
+VCC: OBS-3701-A5
+A/C
+C
+Location
+25
+Bias Motives
+88
+Usings
+C
+Domestic
+Securities
+# of PremisesEntry MethodEntry Locs.Exit MethodExit Locs.Activities
+E
+Weapons
+99
+OFFENSE
+Seq
+Category
+Description
+A/CLocationBias MotivesUsings
+Domestic
+Securities
+# of PremisesEntry MethodEntry Locs.Exit MethodExit Locs.ActivitiesWeapons
+VICTIM
+Seq
+1
+Victim Type
+Society/Public
+Victim (Last, First Middle - Business)
+INV. J.J. MORRIS
+DOBSSNDL#/ID#State
+Resident StatusAddressTelephoneMobileWork
+OccupationEmployerEmployment Address
+Offense Link
+1
+Age
+Unknown
+Age Range
+-
+SexRaceHeightWeightHairEyesEthnicity
+Offender Link/RelationshipInjuriesTreated ByTransported To
+Discovered CrimeCan ID SuspectVictim Crime Rights Served
+Circumstances
+Justified Homicide Circumstances
+LEOKA AssignmentLEOKA CircumstanceLEOKA Other ORILEOKA Status
+State Entry # - Date - ByState Cancellation # - Date - ByNCIC Entry # - Date - ByNCIC Cancellation # - Date - By
+SUSPECT ⁄ OFFENDER
+Seq
+1
+Offender Type
+Suspect
+Offender (Last, First Middle)
+FORAND, ALBERT CHANDLER
+DOB
+10-11-1966
+SSNDL#/ID#State
+Resident Status
+Non-Resident of Local
+Agency's Jurisdiction
+Address
+109 HAMMARLEE RD GLN; BURNIE MD 21060
+TelephoneMobileWork
+Occupation
+TRUCK DRIVER
+EmployerEmployment Address
+Place of BirthAge
+57
+Unknown
+Age Range
+-
+Sex
+M
+Race
+W
+HeightWeightHairEyesEthnicity
+U
+InjuryGang AffiliationAliasesClothing Description
+Offense Link
+1
+Scars/Marks/Tattoos/OtherHair StyleFacial HairComplexionBuildSpeechHanded
+Treated ByTransported ToMaster Name #Arrest
+State Entry # - Date - ByState Cancellation # - Date - ByNCIC Entry # - Date - ByNCIC Cancellation # - Date - By
+ADMIN
+Assisting Officers
+Custody Rel. DeathOfc. Non-Fatal ShootingSchool Related
+Follow Up AssignmentAssignedRelated Case Number(s)
+Reported By
+MORRIS, JEREMY - 1140
+Submitted for Review
+05-20-2024 09:11
+SupervisorSupervisor Approved
+Printed on 5/20/2024 9:13:09 AM
+Page 1 of 6
+
+DRAFT
+ALLEGHANY CO SHERIFF'S OFFICE
+268 W MAIN ST
+COVINGTON , VA  244260000
+5409651770
+INCIDENT PAGE 2
+Incident No.
+2024-000181
+Call for Service No.
+CAD24-007129
+Occurred From Date:
+Occurred To Date:
+02-27-2024
+05-18-2024
+Time:
+Time:
+00:00
+09:00
+Reported Date:
+05-02-2024
+Time:
+14:12
+PERSON
+Seq
+1
+Person Type
+SUBJECT
+Name (Last, First Middle - Business)
+FORAND, TAMARA
+DOBSSNDL#/ID#State
+Resident StatusAddressTelephoneMobileWork
+OccupationEmployerEmployment Address
+Offense Link
+1
+Age
+Age Range
+53-56
+Sex
+F
+Race
+W
+HeightWeightHairEyesEthnicity
+N
+Victim LinkOffender Link
+1
+Injury
+N
+Treated ByTransported To
+Discovered CrimeCan ID SuspectStatement Taken
+State Entry # - Date - ByState Cancellation # - Date - ByNCIC Entry # - Date - ByNCIC Cancellation # - Date - By
+VEHICLE
+SeqVehicle TypeColorYearMakeModelStyleStateRegistration
+VINValue
+Value Unknown
+ClassificationTowed ByTow Reason
+Offense LinkVictim LinkOffender LinkPerson LinkLoss TypeStored At
+Ownership Verified ByOwner (Last, First Middle - Business)Owner AddressOwner TelephoneOwner Mobile
+Insurance CompanyInsurance AddressIns. TelephoneNotes/Remarks
+Reg. CurrentDoors LockedKey in VehicleHold VehicleDamageTheft from VehicleEvidenceVehicle is Cargo
+Recovered DateTimeRecovered LocationRecovered ByRecovered Value
+Released DateTimeReleased LocationReleased By
+Released Contents
+State Entry # - Date - ByState Cancellation # - Date - ByNCIC Entry # - Date - ByNCIC Cancellation # - Date - By
+PROPERTY
+Seq
+1
+Property Type
+Firearms
+Quantity
+1
+Description
+SPRINGFIELD ARMORY HELLCAT 9MM HANDGUN
+Make / Brand
+SPRINGFIELD ARMORY
+Model
+HELLCAT
+Color
+BLK
+Serial Number
+BB514640
+Classification
+Drug QuantityDrug MeasurementDrug Type SuspectedValue
+Value UnknownEvidenceCargo
+Offense Link
+1
+Victim Link
+1
+Offender Link
+1
+Person LinkLoss Type
+6 - Seized
+Stored At
+Ownership Verified ByOwner (Last, First Middle - Business)Owner AddressOwner TelephoneOwner Mobile
+Notes/Remarks
+Recovered DateTimeRecovered LocationRecovered ByRecovered Value
+Released DateTimeReleased LocationReleased By
+State Entry # - Date - ByState Cancellation # - Date - ByNCIC Entry # - Date - ByNCIC Cancellation # - Date - By
+NARRATIVE
+Seq
+1
+Narrative Date
+05-20-2024
+Time
+09:09
+Narrative By
+MORRIS, JEREMY - 1140
+Investigative
+On 02/27/2024 I, Investigator Jeremy Morris, was conducting online undercover Internet Crimes Against Children
+operations. 
+I came across Craigslist Ad number 7721771282, I responded to the ad “Heyy seen ur post, im interested, im 14”
+They responded back but I did not check my email
+The user responded to tell them more details about myself. I advised them that I was 14 years old and that I lived in
+Covington, Virginia. 
+The user asked why I wanted to join their family. 
+Printed on 5/20/2024 9:13:09 AM
+Page 2 of 6
+
+DRAFT
+ALLEGHANY CO SHERIFF'S OFFICE
+268 W MAIN ST
+COVINGTON , VA  244260000
+5409651770
+NARRATIVE #1
+Incident No.
+2024-000181
+Call for Service No.
+CAD24-007129
+Occurred From Date:
+Occurred To Date:
+02-27-2024
+05-18-2024
+Time:
+Time:
+00:00
+09:00
+Reported Date:
+05-02-2024
+Time:
+14:12
+NARRATIVE
+Seq
+1
+Narrative Date
+05-20-2024
+Time
+09:09
+Narrative By
+MORRIS, JEREMY - 1140
+Investigative
+I gave the user an undercover number. 
+The user texted me on 05/02/2024 from telephone number (667)967-6512, the message read “Hi” when asked who it was
+they stated;
+Your potential new mom and dad
+We continue messaging and I send them an undercover photograph. 
+They also send me a photograph of a male and female standing in what appears to be the living room.
+After talking it was learned that they lived in Maryland. 
+05/03/2024
+Deputy Bowman of the Alleghany County Sheriffs Office spoke with a male on the phone, Bowman was pretending to be
+the juveniles mother. The talk was about letting the alleged Juvenile go to Maryland to live with them. During the
+conversation, the male identified himself as “Al” who drives trucks and the wife as “Tammy” who works at a doctors
+office. 
+Al stated that they had an RV and enjoy traveling, Al sent multiple photos of his vehicles to my undercover number. 
+In one of the photos was a yellow Chevrolet Car with Maryland Tags “5DF8068” and behind the vehicle is a Crusader
+Camper, brownish in color.
+In another photo shows a Silver Jeep.
+In another photo was of a black Chevrolet pickup with Maryland Registration “42S571”, in the background is a house with
+the bottom portion brick and the siding is a yellow in color.
+I open sourced the phone number and found that it belonged to;
+Albert Forand  Age 57, Born October 1966
+109 Hammarlee Rd. Glen Burnie, MD 21060
+I typed the address into google and it provided a street view of the address which match the house in the photograph of
+the black pickup, also in street view of google maps it showed what appeared to be the same black pickup truck. 
+On 05/06/2024 I had Deputy Swoope of the Alleghany County Sheriff’s Office call the number and spoke with a male.
+Swoope was pretending to be the underage girl. He stated to Swoope that he was wanting me to become a sister-wife.
+ On 05/15/2024 I, Investigator Morris, had Deputy Swoope of the Alleghany County Sheriff’s Office call the male. During
+the phone call he mentioned doing “Adult things” and wanted to have “Sex”, he also talked about birth control and asked
+about past sexual relationships juvenile may have had. 
+Later, I asked him what his last name was in which he stated “Forand” 
+On 05/18/2024 Forand traveled to Covington, VA to meet the alleged juvenile to take back to Maryland. Forand was driving
+a Silver Jeep Bearing Maryland Tags 5BY3055. In the vehicle was Albert Forand, Tamara Forand and their daughter Katie
+Forand. 
+Albert Forand admitted to talking to who he thought was a 14 year old female. He confessed that he was going to have the
+juvenile as a “Daughter-wife” then marry her when she turned 18. 
+Mr. Forand was taken before a magistrate where i received an arrest warrant for Code of Virginia 18.2-374.3(C) Use of
+communication systems to facilitate certain offenses against minors. 
+Forand was held with no bond.
+Printed on 5/20/2024 9:13:09 AM
+Page 3 of 6
+
+DRAFT
+ALLEGHANY CO SHERIFF'S OFFICE
+268 W MAIN ST
+COVINGTON , VA  244260000
+5409651770
+PROPERTIES
+Incident No.
+2024-000181
+Call for Service No.
+CAD24-007129
+Occurred From Date:
+Occurred To Date:
+02-27-2024
+05-18-2024
+Time:
+Time:
+00:00
+09:00
+Reported Date:
+05-02-2024
+Time:
+14:12
+PROPERTY
+Seq
+2
+Property Type
+Firearm
+Accessories
+Quantity
+1
+Description
+SPRINGFIELD MAGAZINE WITH 12 ROUNDS AMMUNITION
+Make / Brand
+SPRINGFIELD
+ModelColor
+SIL
+Serial NumberClassification
+Drug QuantityDrug MeasurementDrug Type SuspectedValue
+Value UnknownEvidenceCargo
+Offense Link
+1
+Victim LinkOffender Link
+1
+Person LinkLoss Type
+6 - Seized
+Stored At
+Ownership Verified ByOwner (Last, First Middle - Business)Owner AddressOwner TelephoneOwner Mobile
+Notes/Remarks
+Recovered DateTimeRecovered LocationRecovered ByRecovered Value
+Released DateTimeReleased LocationReleased By
+State Entry # - Date - ByState Cancellation # - Date - ByNCIC Entry # - Date - ByNCIC Cancellation # - Date - By
+PROPERTY
+Seq
+3
+Property Type
+Firearm
+Accessories
+Quantity
+1
+Description
+BLACK IWB HOLSTER
+Make / BrandModelColor
+BLK
+Serial NumberClassification
+Drug QuantityDrug MeasurementDrug Type SuspectedValue
+Value UnknownEvidenceCargo
+Offense Link
+1
+Victim LinkOffender Link
+1
+Person LinkLoss Type
+6 - Seized
+Stored At
+Ownership Verified ByOwner (Last, First Middle - Business)Owner AddressOwner TelephoneOwner Mobile
+Notes/Remarks
+Recovered DateTimeRecovered LocationRecovered ByRecovered Value
+Released DateTimeReleased LocationReleased By
+State Entry # - Date - ByState Cancellation # - Date - ByNCIC Entry # - Date - ByNCIC Cancellation # - Date - By
+PROPERTY
+Seq
+4
+Property Type
+Portable Electronic
+Communications
+Quantity
+1
+Description
+MOTOROLLA CELLPHONE IN PURPLE CASE
+Make / Brand
+MOTOROLLA
+Model
+XT21135
+ColorSerial NumberClassification
+Drug QuantityDrug MeasurementDrug Type SuspectedValue
+Value UnknownEvidenceCargo
+Offense Link
+1
+Victim Link
+1
+Offender LinkPerson Link
+1
+Loss Type
+6 - Seized
+Stored At
+Ownership Verified ByOwner (Last, First Middle - Business)Owner AddressOwner TelephoneOwner Mobile
+Notes/Remarks
+Recovered DateTimeRecovered LocationRecovered ByRecovered Value
+Released DateTimeReleased LocationReleased By
+State Entry # - Date - ByState Cancellation # - Date - ByNCIC Entry # - Date - ByNCIC Cancellation # - Date - By
+Printed on 5/20/2024 9:13:09 AM
+Page 4 of 6
+
+DRAFT
+ALLEGHANY CO SHERIFF'S OFFICE
+268 W MAIN ST
+COVINGTON , VA  244260000
+5409651770
+PROPERTIES
+Incident No.
+2024-000181
+Call for Service No.
+CAD24-007129
+Occurred From Date:
+Occurred To Date:
+02-27-2024
+05-18-2024
+Time:
+Time:
+00:00
+09:00
+Reported Date:
+05-02-2024
+Time:
+14:12
+PROPERTY
+Seq
+5
+Property Type
+Portable Electronic
+Communications
+Quantity
+1
+Description
+MOTOROLLA CELLPHONE IN RED CASE
+Make / Brand
+MOTOROLLA
+ModelColor
+GRY
+Serial NumberClassification
+Drug QuantityDrug MeasurementDrug Type SuspectedValue
+Value UnknownEvidenceCargo
+Offense Link
+1
+Victim Link
+1
+Offender Link
+1
+Person LinkLoss Type
+6 - Seized
+Stored At
+Ownership Verified ByOwner (Last, First Middle - Business)Owner AddressOwner TelephoneOwner Mobile
+Notes/Remarks
+Recovered DateTimeRecovered LocationRecovered ByRecovered Value
+Released DateTimeReleased LocationReleased By
+State Entry # - Date - ByState Cancellation # - Date - ByNCIC Entry # - Date - ByNCIC Cancellation # - Date - By
+PROPERTY
+SeqProperty TypeQuantityDescription
+Make / BrandModelColorSerial NumberClassification
+Drug QuantityDrug MeasurementDrug Type SuspectedValue
+Value UnknownEvidenceCargo
+Offense LinkVictim LinkOffender LinkPerson LinkLoss TypeStored At
+Ownership Verified ByOwner (Last, First Middle - Business)Owner AddressOwner TelephoneOwner Mobile
+Notes/Remarks
+Recovered DateTimeRecovered LocationRecovered ByRecovered Value
+Released DateTimeReleased LocationReleased By
+State Entry # - Date - ByState Cancellation # - Date - ByNCIC Entry # - Date - ByNCIC Cancellation # - Date - By
+PROPERTY
+SeqProperty TypeQuantityDescription
+Make / BrandModelColorSerial NumberClassification
+Drug QuantityDrug MeasurementDrug Type SuspectedValue
+Value UnknownEvidenceCargo
+Offense LinkVictim LinkOffender LinkPerson LinkLoss TypeStored At
+Ownership Verified ByOwner (Last, First Middle - Business)Owner AddressOwner TelephoneOwner Mobile
+Notes/Remarks
+Recovered DateTimeRecovered LocationRecovered ByRecovered Value
+Released DateTimeReleased LocationReleased By
+State Entry # - Date - ByState Cancellation # - Date - ByNCIC Entry # - Date - ByNCIC Cancellation # - Date - By
+Printed on 5/20/2024 9:13:09 AM
+Page 5 of 6
+
+DRAFT
+ALLEGHANY CO SHERIFF'S OFFICE
+268 W MAIN ST
+COVINGTON , VA  244260000
+5409651770
+APPROVALS
+Incident No.
+2024-000181
+Call for Service No.
+CAD24-007129
+Occurred From Date:
+Occurred To Date:
+02-27-2024
+05-18-2024
+Time:
+Time:
+00:00
+09:00
+Reported Date:
+05-02-2024
+Time:
+14:12
+SUMMARY
+Reporting Officer
+(1140) MORRIS, JEREMY
+Submitted By
+(1140) MORRIS, JEREMY
+Supervisor Approved By
+Records Approved By
+Final Approved By
+Submitted On
+05-20-2024 09:11
+Supervisor Approved On
+(pending)
+Records Approved On
+(pending)
+Final Approved On
+(pending)
+Printed on 5/20/2024 9:13:09 AM
+Page 6 of 6

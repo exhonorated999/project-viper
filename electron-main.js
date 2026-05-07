@@ -2530,9 +2530,73 @@ ipcMain.handle('read-dept-badge', async () => {
 // shows a Save dialog, and writes the file. Avoids the freeze caused by
 // invoking window.print() inside a renderer popup that's still rendering
 // html2canvas-captured Leaflet maps.
-ipcMain.handle('save-html-as-pdf', async (event, { html, defaultFileName, options }) => {
-  let pdfWin = null;
+//
+// Scaling notes (v3.1.1):
+// - HTML is written to a tempfile and loaded via file:// — data: URLs hit
+//   ERR_INVALID_URL above ~2MB and inflate ~33% from URL-encoding.
+// - A serialization mutex prevents concurrent generations from compounding
+//   memory pressure (2 parallel 200MB renders = 400MB peak + Chromium
+//   workers).
+// - Hard size cap surfaces a clear, actionable error instead of letting
+//   Chromium OOM or silently truncate.
+// - Session cache is cleared after each generation so cached image bytes
+//   from a prior huge report don't accumulate over a long-running session.
+// - Renderers are expected to emit disk-backed photos as file:// URLs
+//   rather than inline base64 — keeps payload near the structural HTML
+//   size regardless of photo count. Photos are decoded on-demand by
+//   Chromium during print, then released.
+
+const PDF_HTML_HARD_LIMIT_BYTES = 200 * 1024 * 1024; // 200 MB — sanity ceiling
+const PDF_HTML_WARN_BYTES = 50 * 1024 * 1024; // 50 MB — log warning but proceed
+const PDF_PRINT_TIMEOUT_MS = 90 * 1000; // 90s
+const PDF_TEMP_ROOT = path.join(os.tmpdir(), 'viper-pdf');
+
+let _pdfChain = Promise.resolve(); // mutex: serialize all PDF generations
+
+// Sweep stale PDF temp files (older than 1h) on startup. Prevents leak
+// across crash-recovered sessions.
+function _sweepPdfTempDir() {
   try {
+    if (!fs.existsSync(PDF_TEMP_ROOT)) return;
+    const cutoff = Date.now() - 60 * 60 * 1000;
+    for (const name of fs.readdirSync(PDF_TEMP_ROOT)) {
+      const full = path.join(PDF_TEMP_ROOT, name);
+      try {
+        const st = fs.statSync(full);
+        if (st.mtimeMs < cutoff) fs.unlinkSync(full);
+      } catch (_) {}
+    }
+  } catch (_) {}
+}
+app.whenReady().then(_sweepPdfTempDir);
+
+ipcMain.handle('save-html-as-pdf', async (event, payload) => {
+  // Serialize: each invocation chains onto the previous. Failures don't
+  // poison the chain (we always resolve, never reject the outer promise).
+  const run = _pdfChain.then(() => _doSaveHtmlAsPdf(payload), () => _doSaveHtmlAsPdf(payload));
+  _pdfChain = run.catch(() => {});
+  return run;
+});
+
+async function _doSaveHtmlAsPdf({ html, defaultFileName, options }) {
+  let pdfWin = null;
+  let tempHtmlPath = null;
+  let printTimer = null;
+  try {
+    // ── Size guard ──
+    const htmlBytes = Buffer.byteLength(html || '', 'utf8');
+    if (htmlBytes > PDF_HTML_HARD_LIMIT_BYTES) {
+      return {
+        success: false,
+        error: `Report too large to render (${(htmlBytes / 1024 / 1024).toFixed(1)} MB exceeds ${PDF_HTML_HARD_LIMIT_BYTES / 1024 / 1024} MB ceiling). ` +
+               `This usually means too many full-resolution photos are embedded inline. ` +
+               `Try unchecking "Include Photos" or reduce the number of attached photos.`
+      };
+    }
+    if (htmlBytes > PDF_HTML_WARN_BYTES) {
+      console.warn(`[save-html-as-pdf] Large payload: ${(htmlBytes / 1024 / 1024).toFixed(1)} MB — generation may be slow`);
+    }
+
     const fileName = (defaultFileName || 'report.pdf').replace(/[<>:"|?*\x00-\x1F\\/]/g, '_');
     const result = await dialog.showSaveDialog(mainWindow, {
       title: 'Save Report as PDF',
@@ -2546,45 +2610,72 @@ ipcMain.handle('save-html-as-pdf', async (event, { html, defaultFileName, option
       show: false,
       width: 1100,
       height: 1400,
+      backgroundThrottling: false,   // hidden window must run full-speed
       webPreferences: {
         offscreen: false,
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
-        webSecurity: false   // tile images from OSM etc. for offline-rendered report
+        backgroundThrottling: false,
+        webSecurity: false,           // tile images from OSM etc. + allow file:// → file://
+        devTools: false,
+        spellcheck: false
       }
     });
 
     // Wait for both did-finish-load AND a settle delay so Leaflet tiles +
     // images embedded as data URLs are fully painted.
-    const ready = new Promise((resolve) => {
+    const ready = new Promise((resolve, reject) => {
       pdfWin.webContents.once('did-finish-load', resolve);
+      pdfWin.webContents.once('did-fail-load', (_e, code, desc) => {
+        reject(new Error(`PDF window failed to load: ${desc} (${code})`));
+      });
     });
 
-    const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
-    await pdfWin.loadURL(dataUrl);
+    // Write HTML to a temp file and load via file:// — data: URLs break
+    // (ERR_INVALID_URL -300) once the encoded payload exceeds Chromium's
+    // URL length limit. file:// has no such limit and avoids the
+    // ~33% encodeURIComponent inflation.
+    try { fs.mkdirSync(PDF_TEMP_ROOT, { recursive: true }); } catch (_) {}
+    tempHtmlPath = path.join(PDF_TEMP_ROOT, `report-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`);
+    fs.writeFileSync(tempHtmlPath, html, 'utf8');
+    await pdfWin.loadFile(tempHtmlPath);
     await ready;
     // Settle delay for in-page async work (Leaflet, fonts, image decode)
     await new Promise(r => setTimeout(r, (options && options.settleMs) || 1500));
 
-    const pdfBuffer = await pdfWin.webContents.printToPDF({
+    // Print with timeout — if Chromium hangs on a malformed asset we don't
+    // want the hidden window to live forever holding GPU + RAM.
+    const printPromise = pdfWin.webContents.printToPDF({
       printBackground: true,
       pageSize: (options && options.pageSize) || 'Letter',
       margins: { marginType: 'default' },
       landscape: !!(options && options.landscape)
     });
+    const timeoutPromise = new Promise((_, rej) => {
+      printTimer = setTimeout(() => rej(new Error(`PDF render timed out after ${PDF_PRINT_TIMEOUT_MS / 1000}s`)), PDF_PRINT_TIMEOUT_MS);
+    });
+    const pdfBuffer = await Promise.race([printPromise, timeoutPromise]);
+    if (printTimer) { clearTimeout(printTimer); printTimer = null; }
 
     fs.writeFileSync(result.filePath, pdfBuffer);
-    return { success: true, path: result.filePath };
+    return { success: true, path: result.filePath, bytesIn: htmlBytes, bytesOut: pdfBuffer.length };
   } catch (error) {
     console.error('save-html-as-pdf failed:', error);
-    return { success: false, error: error.message };
+    return { success: false, error: error.message || String(error) };
   } finally {
+    if (printTimer) { try { clearTimeout(printTimer); } catch (_) {} }
     if (pdfWin && !pdfWin.isDestroyed()) {
+      // Drop session cache so a sequence of large reports doesn't
+      // accumulate decoded image bytes across the app's lifetime.
+      try { await pdfWin.webContents.session.clearCache(); } catch (_) {}
       try { pdfWin.destroy(); } catch (_) {}
     }
+    if (tempHtmlPath) {
+      try { fs.unlinkSync(tempHtmlPath); } catch (_) {}
+    }
   }
-});
+}
 
 // --- Select ZIP archive for warrant production uploads ---
 ipcMain.handle('select-production-zip', async (event, { caseNumber, warrantId }) => {

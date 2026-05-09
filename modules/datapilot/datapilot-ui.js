@@ -1589,9 +1589,23 @@ class DatapilotUI {
      */
     async _hydrateThumbnails(root) {
         const cards = Array.from(root.querySelectorAll('[data-thumbnail-path]'));
+        // Diagnostic: log what we found on the artifact grid so a missing-thumbnail
+        // bug can be triaged without a full page rebuild.
+        try {
+            const totalImageCards = root.querySelectorAll('.dp-art-thumb').length;
+            const imp = this.module.getActiveImport();
+            console.log('[Datapilot] hydrate thumbs:',
+                'cardsWithPath=', cards.length,
+                'totalImageCards=', totalImageCards,
+                'folderPath=', imp ? imp.folderPath : '(no imp)',
+                'sample-paths=', cards.slice(0, 3).map(c => c.dataset.thumbnailPath));
+        } catch (_) {}
         if (!cards.length) return;
         const cap = Math.min(cards.length, 120);
         let i = 0;
+        let okCount = 0;
+        let failCount = 0;
+        const firstFails = [];
         const next = async () => {
             while (i < cap) {
                 const idx = i++;
@@ -1604,12 +1618,23 @@ class DatapilotUI {
                         // Inline style guarantees the image fills its 180px
                         // parent thumb regardless of any stale cached CSS.
                         card.innerHTML = `<img src="${url}" loading="lazy" alt="" style="width:100%;height:100%;object-fit:cover;display:block">`;
+                        okCount++;
+                    } else if (!url) {
+                        failCount++;
+                        if (firstFails.length < 3) firstFails.push(p);
                     }
-                } catch (e) { /* ignore individual failures */ }
+                } catch (e) {
+                    failCount++;
+                    if (firstFails.length < 3) firstFails.push(p + ' (' + e.message + ')');
+                }
             }
         };
         // 4-way concurrency
         await Promise.all([next(), next(), next(), next()]);
+        try {
+            console.log('[Datapilot] hydrate thumbs done:',
+                'ok=', okCount, 'fail=', failCount, 'firstFails=', firstFails);
+        } catch (_) {}
     }
 
     /**

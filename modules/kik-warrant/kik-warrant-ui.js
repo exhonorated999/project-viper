@@ -37,6 +37,7 @@ class KikWarrantUI {
             <div class="kkp-layout">
                 <div class="kkp-sidebar">
                     ${this._renderImportSelector()}
+                    ${this._renderFlagToolbar()}
                     <div class="kkp-nav" id="kkp-nav"></div>
                     <div class="kkp-nav-actions">
                         <button onclick="window.kikWarrantUI.handleFilePicker()" class="kkp-btn-sm" title="Import another">+ Import</button>
@@ -64,6 +65,99 @@ class KikWarrantUI {
                 <button onclick="window.kikWarrantUI.handleFilePicker()" class="kkp-import-tab kkp-add-tab" title="Import another">+</button>
             </div>
         `;
+    }
+
+    // ─── Flag-to-Evidence toolbar (sidebar) ────────────────────────────
+
+    _renderFlagToolbar() {
+        const total = this.module.flagCount();
+        const enabled = total > 0;
+        return `
+            <div class="kwp-flag-toolbar">
+                <button class="kwp-flag-header-btn"
+                        title="Flagged item count — click to clear all flags"
+                        onclick="window.kikWarrantUI._clearAllFlags()">
+                    🚩 Flags
+                    <span class="kwp-flag-count-pill" id="kwp-flag-count">${total.toLocaleString()}</span>
+                </button>
+                <div class="kwp-flag-toolbar-spacer"></div>
+                <button class="kwp-push-btn" id="kwp-push-btn"
+                        ${enabled ? '' : 'disabled'}
+                        onclick="window.kikWarrantUI._pushFlagsToEvidence()"
+                        title="Push flagged items to the case Evidence module">
+                    📥 Push to Evidence
+                </button>
+            </div>
+        `;
+    }
+
+    _refreshFlagToolbar() {
+        const total = this.module.flagCount();
+        const pill = document.getElementById('kwp-flag-count');
+        if (pill) pill.textContent = total.toLocaleString();
+        const btn = document.getElementById('kwp-push-btn');
+        if (btn) btn.disabled = (total === 0);
+    }
+
+    async _pushFlagsToEvidence() {
+        const total = this.module.flagCount();
+        if (total === 0) {
+            this._toast('No items flagged yet. Click 🚩 on items first.', 'info');
+            return;
+        }
+        const ok = (typeof viperConfirm === 'function')
+            ? await viperConfirm(`Push ${total} flagged item${total === 1 ? '' : 's'} to the case Evidence module as a single bundle?`,
+                                  { okText: 'Push', danger: false })
+            : confirm(`Push ${total} flagged item(s) to Evidence as a single bundle?`);
+        if (!ok) return;
+
+        const btn = document.getElementById('kwp-push-btn');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ Building bundle…'; }
+        try {
+            const res = await this.module.pushFlagsToEvidence();
+            if (res && res.success) {
+                this.module.clearFlags();
+                this._refreshFlagToolbar();
+                this._renderSection();
+            }
+        } finally {
+            if (btn) { btn.disabled = false; btn.innerHTML = '📥 Push to Evidence'; }
+            this._refreshFlagToolbar();
+        }
+    }
+
+    _clearAllFlags() {
+        const total = this.module.flagCount();
+        if (total === 0) return;
+        this.module.clearFlags();
+        this._refreshFlagToolbar();
+        this._renderSection();
+    }
+
+    _toast(msg, type) {
+        try {
+            if (typeof window.showToast === 'function') { window.showToast(msg, type || 'info'); return; }
+        } catch (_) {}
+        console.log(`[KikWarrant ${type || 'info'}] ${msg}`);
+    }
+
+    _onFlagClick(section, key) {
+        this.module.toggleFlag(section, key);
+        this._refreshFlagToolbar();
+        this._renderSection();
+    }
+
+    _flagBtn(section, key, label) {
+        const on = this.module.isFlagged(section, key);
+        const safeKey = String(key)
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g, "\\'")
+            .replace(/"/g, '&quot;');
+        return `<button class="kwp-flag-btn ${on ? 'on' : ''}"
+                        title="${on ? 'Unflag' : 'Flag for evidence bundle'}"
+                        onclick="event.stopPropagation(); window.kikWarrantUI._onFlagClick('${section}', '${safeKey}')">
+                  🚩${label ? '<span style="margin-left:2px">' + label + '</span>' : ''}
+                </button>`;
     }
 
     _renderNav() {
@@ -245,6 +339,7 @@ class KikWarrantUI {
                             <span class="kkp-ip-chip">
                                 ${ip}<span class="kkp-ip-count">×${count}</span>
                                 <button class="kkp-arin-btn" onclick="kkpArinLookup(this, '${ip}')" title="ARIN Lookup">🔍</button>
+                                ${this._flagBtn('sessions', ip)}
                             </span>
                         `).join('')}
                     </div>
@@ -259,16 +354,22 @@ class KikWarrantUI {
                                 <th>IP Address</th>
                                 <th>Port</th>
                                 <th>Country</th>
+                                <th>Flag</th>
                             </tr></thead>
                             <tbody>
-                                ${binds.map(b => `
-                                    <tr>
+                                ${binds.map(b => {
+                                    const k = window.WarrantFlagsKey.session(b);
+                                    const flagged = this.module.isFlagged('sessions', k);
+                                    return `
+                                    <tr class="${flagged ? 'kwp-row-flagged' : ''}">
                                         <td>${b.datetime}</td>
                                         <td class="kkp-mono">${b.ip}</td>
                                         <td class="kkp-mono">${b.port}</td>
                                         <td>${b.country || '—'}</td>
+                                        <td>${this._flagBtn('sessions', k)}</td>
                                     </tr>
-                                `).join('')}
+                                    `;
+                                }).join('')}
                             </tbody>
                         </table>
                     </div>
@@ -300,6 +401,7 @@ class KikWarrantUI {
                             <thead><tr>
                                 <th>Username</th>
                                 <th>Added Date</th>
+                                <th>Flag</th>
                             </tr></thead>
                             <tbody id="kkp-friends-tbody">
                                 ${this._renderFriendsRows(friends)}
@@ -316,12 +418,17 @@ class KikWarrantUI {
             const q = this._friendFilter.toLowerCase();
             friends = friends.filter(f => f.friend.toLowerCase().includes(q));
         }
-        return friends.map(f => `
-            <tr>
+        return friends.map(f => {
+            const k = window.WarrantFlagsKey.friend(f);
+            const flagged = this.module.isFlagged('friends', k);
+            return `
+            <tr class="${flagged ? 'kwp-row-flagged' : ''}">
                 <td style="color: #4ade80; font-weight: 500;">${f.friend}</td>
                 <td>${f.datetime}</td>
+                <td>${this._flagBtn('friends', k)}</td>
             </tr>
-        `).join('') || '<tr><td colspan="2" style="text-align:center; color:#6b7280">No friends found</td></tr>';
+        `;
+        }).join('') || '<tr><td colspan="3" style="text-align:center; color:#6b7280">No friends found</td></tr>';
     }
 
     filterFriends(value) {
@@ -368,25 +475,25 @@ class KikWarrantUI {
             ensure(r.recipient);
             convos[r.recipient].sentText += r.msgCount;
             convos[r.recipient].total += r.msgCount;
-            convos[r.recipient].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'sent', type: 'text', count: r.msgCount, ip: r.ip });
+            convos[r.recipient].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'sent', type: 'text', count: r.msgCount, ip: r.ip, _raw: r });
         }
         for (const r of (d.chatSentReceived || [])) {
             ensure(r.sender);
             convos[r.sender].recvText += r.msgCount;
             convos[r.sender].total += r.msgCount;
-            convos[r.sender].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'recv', type: 'text', count: r.msgCount });
+            convos[r.sender].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'recv', type: 'text', count: r.msgCount, _raw: r });
         }
         for (const r of (d.chatPlatformSent || [])) {
             ensure(r.recipient);
             convos[r.recipient].sentMedia++;
             convos[r.recipient].total++;
-            convos[r.recipient].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'sent', type: 'media', mediaType: r.mediaType, uuid: r.mediaUuid, ip: r.ip });
+            convos[r.recipient].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'sent', type: 'media', mediaType: r.mediaType, uuid: r.mediaUuid, ip: r.ip, _raw: r });
         }
         for (const r of (d.chatPlatformSentReceived || [])) {
             ensure(r.sender);
             convos[r.sender].recvMedia++;
             convos[r.sender].total++;
-            convos[r.sender].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'recv', type: 'media', mediaType: r.mediaType, uuid: r.mediaUuid });
+            convos[r.sender].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'recv', type: 'media', mediaType: r.mediaType, uuid: r.mediaUuid, _raw: r });
         }
 
         // Sort events within each conversation
@@ -438,6 +545,8 @@ class KikWarrantUI {
                 ${events.map(e => {
                     const dirIcon = e.dir === 'sent' ? '↑' : '↓';
                     const dirClass = e.dir === 'sent' ? 'sent' : 'recv';
+                    const k = window.WarrantFlagsKey.dm(e._raw || e, e.dir);
+                    const flagged = this.module.isFlagged('dms', k);
                     let body = '';
                     if (e.type === 'text') {
                         body = `${e.count} text message${e.count > 1 ? 's' : ''}${e.ip && e.ip !== 'REDACTED' ? ` <span style="color:#6b7280">(${e.ip})</span>` : ''}`;
@@ -452,10 +561,11 @@ class KikWarrantUI {
                         }
                     }
                     return `
-                        <div class="kkp-msg">
+                        <div class="kkp-msg ${flagged ? 'kwp-msg-flagged' : ''}">
                             <span class="kkp-msg-time">${e.dt}</span>
                             <span class="kkp-msg-dir ${dirClass}">${dirIcon}</span>
                             <span class="kkp-msg-body">${body}</span>
+                            <span style="margin-left:auto; flex-shrink:0">${this._flagBtn('dms', k)}</span>
                         </div>
                     `;
                 }).join('')}
@@ -514,7 +624,7 @@ class KikWarrantUI {
             groups[r.groupId].participants.add(r.recipient);
             groups[r.groupId].sentText += r.msgCount;
             groups[r.groupId].total += r.msgCount;
-            groups[r.groupId].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'sent', type: 'text', sender: r.sender, recipient: r.recipient, count: r.msgCount, ip: r.ip });
+            groups[r.groupId].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'sent', type: 'text', sender: r.sender, recipient: r.recipient, count: r.msgCount, ip: r.ip, _raw: r });
         }
         for (const r of (d.groupReceiveMsg || [])) {
             ensure(r.groupId);
@@ -522,7 +632,7 @@ class KikWarrantUI {
             groups[r.groupId].participants.add(r.recipient);
             groups[r.groupId].recvText += r.msgCount;
             groups[r.groupId].total += r.msgCount;
-            groups[r.groupId].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'recv', type: 'text', sender: r.sender, recipient: r.recipient, count: r.msgCount });
+            groups[r.groupId].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'recv', type: 'text', sender: r.sender, recipient: r.recipient, count: r.msgCount, _raw: r });
         }
         for (const r of (d.groupSendMsgPlatform || [])) {
             ensure(r.groupId);
@@ -530,7 +640,7 @@ class KikWarrantUI {
             groups[r.groupId].participants.add(r.recipient);
             groups[r.groupId].sentMedia++;
             groups[r.groupId].total++;
-            groups[r.groupId].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'sent', type: 'media', sender: r.sender, recipient: r.recipient, mediaType: r.mediaType, uuid: r.mediaUuid, ip: r.ip });
+            groups[r.groupId].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'sent', type: 'media', sender: r.sender, recipient: r.recipient, mediaType: r.mediaType, uuid: r.mediaUuid, ip: r.ip, _raw: r });
         }
         for (const r of (d.groupReceiveMsgPlatform || [])) {
             ensure(r.groupId);
@@ -538,7 +648,7 @@ class KikWarrantUI {
             groups[r.groupId].participants.add(r.recipient);
             groups[r.groupId].recvMedia++;
             groups[r.groupId].total++;
-            groups[r.groupId].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'recv', type: 'media', sender: r.sender, recipient: r.recipient, mediaType: r.mediaType, uuid: r.mediaUuid });
+            groups[r.groupId].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'recv', type: 'media', sender: r.sender, recipient: r.recipient, mediaType: r.mediaType, uuid: r.mediaUuid, _raw: r });
         }
 
         for (const g of Object.values(groups)) {
@@ -589,6 +699,8 @@ class KikWarrantUI {
                     const isTarget = e.sender === this.data?.accountUsername;
                     const dirClass = e.dir === 'sent' ? 'sent' : 'recv';
                     const dirIcon = e.dir === 'sent' ? '↑' : '↓';
+                    const k = window.WarrantFlagsKey.group(e._raw || e, e.dir);
+                    const flagged = this.module.isFlagged('groups', k);
                     let body = '';
                     if (e.type === 'text') {
                         body = `<strong style="color:${isTarget ? '#4ade80' : '#c084fc'}">${e.sender}</strong> → ${e.recipient}: ${e.count} msg${e.count > 1 ? 's' : ''}`;
@@ -601,10 +713,11 @@ class KikWarrantUI {
                         }
                     }
                     return `
-                        <div class="kkp-msg">
+                        <div class="kkp-msg ${flagged ? 'kwp-msg-flagged' : ''}">
                             <span class="kkp-msg-time">${e.dt}</span>
                             <span class="kkp-msg-dir ${dirClass}">${dirIcon}</span>
                             <span class="kkp-msg-body">${body}</span>
+                            <span style="margin-left:auto; flex-shrink:0">${this._flagBtn('groups', k)}</span>
                         </div>
                     `;
                 }).join('')}
@@ -631,16 +744,16 @@ class KikWarrantUI {
         // Aggregate all platform files
         const media = [];
         for (const r of (d.chatPlatformSent || [])) {
-            media.push({ ts: r.timestamp, dt: r.datetime, sender: r.sender, recipient: r.recipient, dir: 'sent', context: 'DM', mediaType: r.mediaType, uuid: r.mediaUuid, ip: r.ip });
+            media.push({ ts: r.timestamp, dt: r.datetime, sender: r.sender, recipient: r.recipient, dir: 'sent', context: 'DM', mediaType: r.mediaType, uuid: r.mediaUuid, ip: r.ip, _raw: r });
         }
         for (const r of (d.chatPlatformSentReceived || [])) {
-            media.push({ ts: r.timestamp, dt: r.datetime, sender: r.sender, recipient: r.recipient, dir: 'recv', context: 'DM', mediaType: r.mediaType, uuid: r.mediaUuid });
+            media.push({ ts: r.timestamp, dt: r.datetime, sender: r.sender, recipient: r.recipient, dir: 'recv', context: 'DM', mediaType: r.mediaType, uuid: r.mediaUuid, _raw: r });
         }
         for (const r of (d.groupSendMsgPlatform || [])) {
-            media.push({ ts: r.timestamp, dt: r.datetime, sender: r.sender, recipient: r.recipient, dir: 'sent', context: `Group: ${r.groupId}`, mediaType: r.mediaType, uuid: r.mediaUuid, ip: r.ip });
+            media.push({ ts: r.timestamp, dt: r.datetime, sender: r.sender, recipient: r.recipient, dir: 'sent', context: `Group: ${r.groupId}`, mediaType: r.mediaType, uuid: r.mediaUuid, ip: r.ip, _raw: r });
         }
         for (const r of (d.groupReceiveMsgPlatform || [])) {
-            media.push({ ts: r.timestamp, dt: r.datetime, sender: r.sender, recipient: r.recipient, dir: 'recv', context: `Group: ${r.groupId}`, mediaType: r.mediaType, uuid: r.mediaUuid });
+            media.push({ ts: r.timestamp, dt: r.datetime, sender: r.sender, recipient: r.recipient, dir: 'recv', context: `Group: ${r.groupId}`, mediaType: r.mediaType, uuid: r.mediaUuid, _raw: r });
         }
         media.sort((a, b) => a.ts - b.ts);
 
@@ -673,13 +786,16 @@ class KikWarrantUI {
                                 <th>Type</th>
                                 <th>Preview</th>
                                 <th>Context</th>
+                                <th>Flag</th>
                             </tr></thead>
                             <tbody id="kkp-media-tbody">
                                 ${shown.map((m, i) => {
                                     const hasFile = this._hasMediaFile(m.uuid);
                                     const thumbId = `kkp-mtbl-${i}`;
+                                    const k = window.WarrantFlagsKey.media(m._raw || m, m.dir);
+                                    const flagged = this.module.isFlagged('media', k);
                                     return `
-                                    <tr>
+                                    <tr class="${flagged ? 'kwp-row-flagged' : ''}">
                                         <td>${m.dt}</td>
                                         <td><span class="kkp-badge ${m.dir === 'sent' ? 'kkp-badge-sent' : 'kkp-badge-recv'}">${m.dir === 'sent' ? '↑ Sent' : '↓ Recv'}</span></td>
                                         <td style="${m.sender === d.accountUsername ? 'color:#4ade80;font-weight:500' : ''}">${m.sender}</td>
@@ -687,6 +803,7 @@ class KikWarrantUI {
                                         <td>${m.mediaType}</td>
                                         <td>${hasFile ? `<span id="${thumbId}" style="cursor:pointer" onclick="window.kikWarrantUI.loadMediaThumb('${m.uuid}', '${thumbId}')">📷 Load</span>` : `<span class="kkp-mono" title="${m.uuid}">${m.uuid ? m.uuid.substring(0, 12) + '…' : '—'}</span>`}</td>
                                         <td>${m.context}</td>
+                                        <td>${this._flagBtn('media', k)}</td>
                                     </tr>
                                     `;
                                 }).join('')}
@@ -743,6 +860,7 @@ class KikWarrantUI {
                                 <span class="kkp-timeline-type ${e.category}">${e.typeLabel}</span>
                                 ${e.description}
                             </span>
+                            <span style="margin-left:auto; flex-shrink:0">${this._flagBtn(e.flagSection, e.flagKey)}</span>
                         </div>
                     `).join('')}
                 </div>
@@ -763,43 +881,53 @@ class KikWarrantUI {
 
         for (const b of (d.binds || [])) {
             events.push({ ts: b.timestamp, dt: b.datetime, category: 'bind', typeLabel: 'SESSION',
-                description: `Login from <span class="kkp-mono">${b.ip}</span> (${b.country || '?'})` });
+                description: `Login from <span class="kkp-mono">${b.ip}</span> (${b.country || '?'})`,
+                flagSection: 'sessions', flagKey: WarrantFlagsKey.session(b) });
         }
         for (const f of (d.friends || [])) {
             events.push({ ts: f.timestamp, dt: f.datetime, category: 'friend', typeLabel: 'FRIEND',
-                description: `Added <strong>${f.friend}</strong>` });
+                description: `Added <strong>${f.friend}</strong>`,
+                flagSection: 'friends', flagKey: WarrantFlagsKey.friend(f) });
         }
         for (const r of (d.chatSent || [])) {
             events.push({ ts: r.timestamp, dt: r.datetime, category: 'dm', typeLabel: 'DM',
-                description: `Sent ${r.msgCount} msg${r.msgCount > 1 ? 's' : ''} to <strong>${r.recipient}</strong>` });
+                description: `Sent ${r.msgCount} msg${r.msgCount > 1 ? 's' : ''} to <strong>${r.recipient}</strong>`,
+                flagSection: 'dms', flagKey: WarrantFlagsKey.dm(r, 'sent') });
         }
         for (const r of (d.chatSentReceived || [])) {
             events.push({ ts: r.timestamp, dt: r.datetime, category: 'dm', typeLabel: 'DM',
-                description: `Received ${r.msgCount} msg${r.msgCount > 1 ? 's' : ''} from <strong>${r.sender}</strong>` });
+                description: `Received ${r.msgCount} msg${r.msgCount > 1 ? 's' : ''} from <strong>${r.sender}</strong>`,
+                flagSection: 'dms', flagKey: WarrantFlagsKey.dm(r, 'recv') });
         }
         for (const r of (d.chatPlatformSent || [])) {
             events.push({ ts: r.timestamp, dt: r.datetime, category: 'media', typeLabel: 'MEDIA',
-                description: `Sent ${r.mediaType || 'media'} to <strong>${r.recipient}</strong>` });
+                description: `Sent ${r.mediaType || 'media'} to <strong>${r.recipient}</strong>`,
+                flagSection: 'media', flagKey: WarrantFlagsKey.media(r, 'sent') });
         }
         for (const r of (d.chatPlatformSentReceived || [])) {
             events.push({ ts: r.timestamp, dt: r.datetime, category: 'media', typeLabel: 'MEDIA',
-                description: `Received ${r.mediaType || 'media'} from <strong>${r.sender}</strong>` });
+                description: `Received ${r.mediaType || 'media'} from <strong>${r.sender}</strong>`,
+                flagSection: 'media', flagKey: WarrantFlagsKey.media(r, 'recv') });
         }
         for (const r of (d.groupSendMsg || [])) {
             events.push({ ts: r.timestamp, dt: r.datetime, category: 'group', typeLabel: 'GROUP',
-                description: `Sent ${r.msgCount} msg${r.msgCount > 1 ? 's' : ''} to <strong>${r.recipient}</strong> in ${r.groupId}` });
+                description: `Sent ${r.msgCount} msg${r.msgCount > 1 ? 's' : ''} to <strong>${r.recipient}</strong> in ${r.groupId}`,
+                flagSection: 'groups', flagKey: WarrantFlagsKey.group(r, 'sent') });
         }
         for (const r of (d.groupReceiveMsg || [])) {
             events.push({ ts: r.timestamp, dt: r.datetime, category: 'group', typeLabel: 'GROUP',
-                description: `<strong>${r.sender}</strong> sent ${r.msgCount} msg${r.msgCount > 1 ? 's' : ''} in ${r.groupId}` });
+                description: `<strong>${r.sender}</strong> sent ${r.msgCount} msg${r.msgCount > 1 ? 's' : ''} in ${r.groupId}`,
+                flagSection: 'groups', flagKey: WarrantFlagsKey.group(r, 'recv') });
         }
         for (const r of (d.groupSendMsgPlatform || [])) {
             events.push({ ts: r.timestamp, dt: r.datetime, category: 'media', typeLabel: 'MEDIA',
-                description: `Sent ${r.mediaType || 'media'} to <strong>${r.recipient}</strong> in group ${r.groupId}` });
+                description: `Sent ${r.mediaType || 'media'} to <strong>${r.recipient}</strong> in group ${r.groupId}`,
+                flagSection: 'media', flagKey: WarrantFlagsKey.media(r, 'sent') });
         }
         for (const r of (d.groupReceiveMsgPlatform || [])) {
             events.push({ ts: r.timestamp, dt: r.datetime, category: 'media', typeLabel: 'MEDIA',
-                description: `<strong>${r.sender}</strong> sent ${r.mediaType || 'media'} in group ${r.groupId}` });
+                description: `<strong>${r.sender}</strong> sent ${r.mediaType || 'media'} in group ${r.groupId}`,
+                flagSection: 'media', flagKey: WarrantFlagsKey.media(r, 'recv') });
         }
 
         events.sort((a, b) => a.ts - b.ts);

@@ -525,3 +525,103 @@
     font-size: 0.87em;
     margin-bottom: 4px;
 }
+
+/* ─── Flag-to-Evidence buttons ──────────────────────────────────────── */
+
+.mwp-flag-btn {
+    background: transparent;
+    border: 1px solid #374151;
+    color: #6b7280;
+    min-width: 28px;
+    height: 26px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 6px;
+    gap: 4px;
+    transition: all 0.15s;
+    user-select: none;
+}
+.mwp-flag-btn:hover { color: #fbbf24; border-color: #fbbf24; }
+.mwp-flag-btn.on {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fbbf24;
+    border-color: #fbbf24;
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.15);
+}
+
+.mwp-flag-header-btn {
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    color: #fbbf24;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.15s;
+}
+.mwp-flag-header-btn:hover { background: rgba(245, 158, 11, 0.22); }
+.mwp-flag-header-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+.mwp-flag-count-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    background: #fbbf24;
+    color: #1a1a1a;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.mwp-push-btn {
+    background: rgba(59, 130, 246, 0.12);
+    border: 1px solid rgba(59, 130, 246, 0.4);
+    color: #60a5fa;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.15s;
+}
+.mwp-push-btn:hover { background: rgba(59, 130, 246, 0.22); }
+.mwp-push-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.mwp-message.mwp-flagged { box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.5); border-left: 4px solid #fbbf24; }
+.mwp-post-item.mwp-flagged { box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.5); border-left: 4px solid #fbbf24; }
+.mwp-photo-card.mwp-flagged { box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.5); }
+tr.mwp-row-flagged > td { background: rgba(245, 158, 11, 0.08); }
+
+.mwp-flag-toolbar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    margin-bottom: 12px;
+}
+.mwp-flag-toolbar-spacer { flex: 1; }
+
+.mwp-photo-flag {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 2;
+}
+.mwp-photo-card { position: relative; }

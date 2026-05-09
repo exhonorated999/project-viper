@@ -40,6 +40,7 @@ class ApertureUI {
                         <div class="text-gray-400 text-sm">Investigative Email Parser</div>
                     </div>
                     <div class="flex items-center space-x-2">
+                        ${this._renderFlagToolbar()}
                         <button onclick="apertureUI.showReportDialog()"
                                 class="px-3 py-2 rounded-lg text-sm bg-viper-card border border-viper-purple/50 text-viper-purple hover:bg-viper-purple/20 transition-colors flex items-center space-x-1"
                                 title="Generate Report">
@@ -287,14 +288,17 @@ class ApertureUI {
             const hasAttachments = email.attachments && email.attachments.length > 0;
             const date = new Date(email.date);
             const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const isWarrantFlagged = this.module.isFlagged('emails', email.id);
 
             return `
                 <div class="email-item ${isSelected ? 'bg-viper-cyan/10 border-l-2 border-l-viper-cyan' : 'border-l-2 border-l-transparent hover:border-l-viper-cyan/30 hover:bg-viper-dark/50'} 
+                            ${isWarrantFlagged ? 'awp-row-flagged' : ''}
                             rounded-r-lg p-2.5 cursor-pointer transition-all"
                      onclick="apertureUI.selectEmail('${email.id}')">
                     <div class="flex items-start justify-between gap-1">
                         <h4 class="text-sm font-medium ${isSelected ? 'text-white' : 'text-gray-300'} truncate flex-1">${this.esc(email.subject)}</h4>
                         <div class="flex items-center space-x-1 flex-shrink-0">
+                            ${this._flagBtn('emails', email.id)}
                             ${email.flagged ? '<span class="text-sm">🚩</span>' : ''}
                             ${hasAttachments ? '<span class="text-xs text-viper-purple">📎</span>' : ''}
                         </div>
@@ -330,14 +334,17 @@ class ApertureUI {
                 <!-- Subject + Flag -->
                 <div class="flex items-start justify-between mb-4 gap-3">
                     <h2 class="text-xl font-bold text-white flex-1">${this.esc(email.subject)}</h2>
-                    <button onclick="apertureUI.toggleFlag('${email.id}')"
-                            class="px-3 py-1.5 text-sm rounded-lg transition-all flex-shrink-0 ${
-                                email.flagged
-                                    ? 'bg-orange-500/20 text-orange-400 border border-orange-500'
-                                    : 'bg-viper-dark text-gray-400 border border-gray-600 hover:border-orange-500'
-                            }">
-                        ${email.flagged ? '🚩 Flagged' : '⚑ Flag'}
-                    </button>
+                    <div class="flex items-center space-x-2 flex-shrink-0">
+                        ${this._flagBtn('emails', email.id, 'Flag')}
+                        <button onclick="apertureUI.toggleFlag('${email.id}')"
+                                class="px-3 py-1.5 text-sm rounded-lg transition-all ${
+                                    email.flagged
+                                        ? 'bg-orange-500/20 text-orange-400 border border-orange-500'
+                                        : 'bg-viper-dark text-gray-400 border border-gray-600 hover:border-orange-500'
+                                }">
+                            ${email.flagged ? '🚩 Flagged' : '⚑ Flag'}
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Meta -->
@@ -389,10 +396,13 @@ class ApertureUI {
                         <div class="w-1.5 h-1.5 rounded-full bg-viper-cyan animate-pulse"></div>
                         <span class="text-gray-400 text-xs font-semibold uppercase tracking-wide">IP Analysis</span>
                     </div>
-                    <button onclick="apertureUI.lookupIp('${ipInfo.ip_address}')"
-                            class="px-2 py-1 text-xs bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/50 rounded hover:bg-viper-cyan/30 transition-all ${this.lookingUpIp ? 'opacity-50' : ''}">
-                        ${this.lookingUpIp ? '...' : '🌐 Lookup'}
-                    </button>
+                    <div class="flex items-center space-x-2">
+                        ${this._flagBtn('ips', ipInfo.ip_address)}
+                        <button onclick="apertureUI.lookupIp('${ipInfo.ip_address}')"
+                                class="px-2 py-1 text-xs bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/50 rounded hover:bg-viper-cyan/30 transition-all ${this.lookingUpIp ? 'opacity-50' : ''}">
+                            ${this.lookingUpIp ? '...' : '🌐 Lookup'}
+                        </button>
+                    </div>
                 </div>
                 <div class="grid grid-cols-3 gap-2">
                     <div>
@@ -458,6 +468,7 @@ class ApertureUI {
                                 <div class="text-xs text-gray-500">${this.formatBytes(att.size)} · ${att.mime_type || 'unknown'}</div>
                             </div>
                             <div class="flex space-x-1 flex-shrink-0">
+                                ${this._flagBtn('attachments', `${email.id}::${idx}`)}
                                 <button onclick="apertureUI.viewAttachment(${idx})" class="text-viper-cyan hover:text-white px-1" title="Preview">👁️</button>
                                 <button onclick="apertureUI.openAttachmentExternal(${idx})" class="text-viper-green hover:text-white px-1" title="Open">📂</button>
                             </div>
@@ -709,6 +720,7 @@ class ApertureUI {
         this.refreshDetailView();
         this.refreshNotesPanel();
         this.updateSourceFilter();
+        this._refreshFlagToolbar();
     }
 
     refreshStats() {
@@ -741,6 +753,106 @@ class ApertureUI {
             });
             select.innerHTML = opts.join('');
         }
+    }
+
+    /* ═══════════════════════════════════════════════════
+       UTILITIES
+    ═══════════════════════════════════════════════════ */
+
+    // ─── Flag-to-Evidence toolbar (header area) ────────────────────────
+
+    _renderFlagToolbar() {
+        const total = this.module.flagCount();
+        const enabled = total > 0;
+        return `
+            <div class="awp-flag-toolbar">
+                <button class="awp-flag-header-btn"
+                        title="Flagged item count — click to clear all flags"
+                        onclick="window.apertureUI._clearAllFlags()">
+                    🚩 Flags
+                    <span class="awp-flag-count-pill" id="awp-flag-count">${total.toLocaleString()}</span>
+                </button>
+                <div class="awp-flag-toolbar-spacer"></div>
+                <button class="awp-push-btn" id="awp-push-btn"
+                        ${enabled ? '' : 'disabled'}
+                        onclick="window.apertureUI._pushFlagsToEvidence()"
+                        title="Push flagged items to the case Evidence module">
+                    📥 Push to Evidence
+                </button>
+            </div>
+        `;
+    }
+
+    _refreshFlagToolbar() {
+        const total = this.module.flagCount();
+        const pill = document.getElementById('awp-flag-count');
+        if (pill) pill.textContent = total.toLocaleString();
+        const btn = document.getElementById('awp-push-btn');
+        if (btn) btn.disabled = (total === 0);
+    }
+
+    async _pushFlagsToEvidence() {
+        const total = this.module.flagCount();
+        if (total === 0) {
+            this._toast('No items flagged yet. Click 🚩 on items first.', 'info');
+            return;
+        }
+        const ok = (typeof viperConfirm === 'function')
+            ? await viperConfirm(`Push ${total} flagged item${total === 1 ? '' : 's'} to the case Evidence module as a single bundle?`,
+                                  { okText: 'Push', danger: false })
+            : confirm(`Push ${total} flagged item(s) to Evidence as a single bundle?`);
+        if (!ok) return;
+
+        const btn = document.getElementById('awp-push-btn');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ Building bundle…'; }
+        try {
+            const res = await this.module.pushFlagsToEvidence();
+            if (res && res.success) {
+                this.module.clearFlags();
+                this._refreshFlagToolbar();
+                this.refreshAll();
+            }
+        } finally {
+            if (btn) { btn.disabled = false; btn.innerHTML = '📥 Push to Evidence'; }
+            this._refreshFlagToolbar();
+        }
+    }
+
+    _clearAllFlags() {
+        const total = this.module.flagCount();
+        if (total === 0) return;
+        if (!confirm(`Clear all ${total} flagged items?`)) return;
+        this.module.clearFlags();
+        this._refreshFlagToolbar();
+        this.refreshAll();
+    }
+
+    _toast(msg, type) {
+        try {
+            if (typeof window.showToast === 'function') { window.showToast(msg, type || 'info'); return; }
+        } catch (_) {}
+        console.log(`[Aperture ${type || 'info'}] ${msg}`);
+    }
+
+    _onFlagClick(section, key) {
+        this.module.toggleFlag(section, key);
+        this._refreshFlagToolbar();
+        // Re-render the current detail + list to update flag-button states
+        this.refreshEmailList();
+        this.refreshDetailView();
+    }
+
+    _flagBtn(section, key, label) {
+        const on = this.module.isFlagged(section, key);
+        const safeKey = String(key)
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g, "\\'")
+            .replace(/"/g, '&quot;');
+        return `<button class="awp-flag-btn ${on ? 'on' : ''}"
+                        title="${on ? 'Unflag' : 'Flag for evidence bundle'}"
+                        onclick="event.stopPropagation(); window.apertureUI._onFlagClick('${section}', '${safeKey}')">
+                  🚩${label ? '<span style="margin-left:2px">' + label + '</span>' : ''}
+                </button>`;
     }
 
     /* ═══════════════════════════════════════════════════

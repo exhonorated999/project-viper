@@ -788,6 +788,16 @@ class DatapilotModule {
             if (res && res.success) {
                 return `data:${res.mimeType};base64,${res.data}`;
             }
+            // Surface why the read failed so missing-thumbnail bugs are diagnosable
+            if (res && res.error) {
+                if (!this._readMediaErrLogged) {
+                    console.warn('[Datapilot] readMedia first failure:',
+                        'folderPath=', imp.folderPath,
+                        'relativePath=', relativePath,
+                        'error=', res.error);
+                    this._readMediaErrLogged = true;
+                }
+            }
             return null;
         } catch (e) {
             console.warn('readMedia error:', e);

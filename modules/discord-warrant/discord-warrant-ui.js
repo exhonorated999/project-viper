@@ -36,6 +36,7 @@ class DiscordWarrantUI {
             <div class="dwp-layout">
                 <div class="dwp-sidebar">
                     ${this._renderImportSelector()}
+                    ${this._renderFlagToolbar()}
                     ${this._renderNav()}
                 </div>
                 <div class="dwp-content" id="dwp-content-area">
@@ -45,6 +46,100 @@ class DiscordWarrantUI {
             <div id="dwp-evidence-bar"></div>
         `;
         this._loadLazyImages();
+    }
+
+    // ─── Flag-to-Evidence toolbar (sidebar) ────────────────────────────
+
+    _renderFlagToolbar() {
+        const total = this.module.flagCount();
+        const enabled = total > 0;
+        return `
+            <div class="dwp-flag-toolbar">
+                <button class="dwp-flag-header-btn"
+                        title="Flagged item count — click to clear all flags">
+                    🚩 Flags
+                    <span class="dwp-flag-count-pill" id="dwp-flag-count">${total.toLocaleString()}</span>
+                </button>
+                <div class="dwp-flag-toolbar-spacer"></div>
+                <button class="dwp-push-btn" id="dwp-push-btn"
+                        ${enabled ? '' : 'disabled'}
+                        onclick="window.discordWarrantUI._pushFlagsToEvidence()"
+                        title="Push flagged items to the case Evidence module">
+                    📥 Push to Evidence
+                </button>
+            </div>
+        `;
+    }
+
+    _refreshFlagToolbar() {
+        const total = this.module.flagCount();
+        const pill = document.getElementById('dwp-flag-count');
+        if (pill) pill.textContent = total.toLocaleString();
+        const btn = document.getElementById('dwp-push-btn');
+        if (btn) btn.disabled = (total === 0);
+    }
+
+    async _pushFlagsToEvidence() {
+        const total = this.module.flagCount();
+        if (total === 0) {
+            this._toast('No items flagged yet. Click 🚩 on items first.', 'info');
+            return;
+        }
+        const ok = (typeof viperConfirm === 'function')
+            ? await viperConfirm(`Push ${total} flagged item${total === 1 ? '' : 's'} to the case Evidence module as a single bundle?`,
+                                  { okText: 'Push', danger: false })
+            : confirm(`Push ${total} flagged item(s) to Evidence as a single bundle?`);
+        if (!ok) return;
+
+        const btn = document.getElementById('dwp-push-btn');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ Building bundle…'; }
+        try {
+            const res = await this.module.pushFlagsToEvidence();
+            if (res && res.success) {
+                // Clear flags after a successful push (mirrors Datapilot UX)
+                this.module.clearFlags();
+                this._refreshFlagToolbar();
+                const content = document.getElementById('dwp-content-area');
+                if (content) {
+                    content.innerHTML = this._renderSection();
+                    if (typeof this._loadLazyImages === 'function') this._loadLazyImages(content);
+                }
+            }
+        } finally {
+            if (btn) { btn.disabled = false; btn.innerHTML = '📥 Push to Evidence'; }
+            this._refreshFlagToolbar();
+        }
+    }
+
+    _toast(msg, type) {
+        try {
+            if (typeof window.showToast === 'function') { window.showToast(msg, type || 'info'); return; }
+        } catch (_) {}
+        console.log(`[DiscordWarrant ${type || 'info'}] ${msg}`);
+    }
+
+    _onFlagClick(section, key) {
+        this.module.toggleFlag(section, key);
+        this._refreshFlagToolbar();
+        // Re-render the current section to update flag-button state on the visible row
+        const content = document.getElementById('dwp-content-area');
+        if (content) {
+            content.innerHTML = this._renderSection();
+            if (typeof this._loadLazyImages === 'function') this._loadLazyImages(content);
+        }
+    }
+
+    _flagBtn(section, key, label) {
+        const on = this.module.isFlagged(section, key);
+        const safeKey = String(key)
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g, "\\'")
+            .replace(/"/g, '&quot;');
+        return `<button class="dwp-flag-btn ${on ? 'on' : ''}"
+                        title="${on ? 'Unflag' : 'Flag for evidence bundle'}"
+                        onclick="event.stopPropagation(); window.discordWarrantUI._onFlagClick('${section}', '${safeKey}')">
+                  🚩${label ? '<span style="margin-left:2px">' + label + '</span>' : ''}
+                </button>`;
     }
 
     renderEvidenceBar(files) {
@@ -375,13 +470,19 @@ class DiscordWarrantUI {
         this._activeChannelId = channelId;
         this._msgPage = 0;
         const content = document.getElementById('dwp-content-area');
-        if (content) content.innerHTML = this._renderSection();
+        if (content) {
+            content.innerHTML = this._renderSection();
+            if (typeof this._loadLazyImages === 'function') this._loadLazyImages(content);
+        }
     }
 
     _backToChannels() {
         this._activeChannelId = null;
         const content = document.getElementById('dwp-content-area');
-        if (content) content.innerHTML = this._renderSection();
+        if (content) {
+            content.innerHTML = this._renderSection();
+            if (typeof this._loadLazyImages === 'function') this._loadLazyImages(content);
+        }
     }
 
     _renderChannelDetail(ch) {
@@ -404,16 +505,19 @@ class DiscordWarrantUI {
                 </p>
 
                 <div class="dwp-messages">
-                    ${slice.length === 0 ? '<div class="dwp-empty-section">No messages.</div>' : slice.map(m => `
-                        <div class="dwp-message">
+                    ${slice.length === 0 ? '<div class="dwp-empty-section">No messages.</div>' : slice.map(m => {
+                        const flagged = this.module.isFlagged('messages', m.id);
+                        return `
+                        <div class="dwp-message ${flagged ? 'flagged' : ''}">
                             <div class="dwp-message-header">
                                 <span class="dwp-message-time">${this._fmtDate(m.timestamp)}</span>
                                 <span class="dwp-message-id">ID: <code>${this._esc(String(m.id || ''))}</code></span>
+                                <span style="margin-left:auto">${this._flagBtn('messages', m.id)}</span>
                             </div>
                             <div class="dwp-message-body">${this._esc(m.contents || '').replace(/\n/g, '<br>') || '<em class="dwp-muted">(no text)</em>'}</div>
-                            ${m.attachments ? `<div class="dwp-message-attach">📎 ${this._linkify(m.attachments)}</div>` : ''}
+                            ${m.attachments ? `<div class="dwp-message-attach">${this._renderAttachments(m.attachments)}</div>` : ''}
                         </div>
-                    `).join('')}
+                    `;}).join('')}
                 </div>
 
                 ${total > this._msgPageSize ? `
@@ -446,6 +550,66 @@ class DiscordWarrantUI {
         ).join(' ');
     }
 
+    // Detect media kind from a URL (ignores query string)
+    _attachmentKind(url) {
+        const path = String(url).split('?')[0].toLowerCase();
+        const m = path.match(/\.([a-z0-9]+)$/);
+        const ext = m ? m[1] : '';
+        if (['jpg','jpeg','png','gif','webp','bmp','svg','heic','heif','avif'].includes(ext)) return 'image';
+        if (['mp4','webm','mov','m4v','mkv','avi'].includes(ext)) return 'video';
+        if (['mp3','wav','ogg','m4a','aac','flac','opus'].includes(ext)) return 'audio';
+        return 'link';
+    }
+
+    // Render Discord attachments inline with graceful fallback to a link
+    _renderAttachments(txt) {
+        const s = String(txt || '');
+        const urls = s.split(/\s+/).filter(Boolean).filter(u => /^https?:\/\//i.test(u));
+        if (!urls.length) return '📎 ' + this._linkify(txt);
+
+        return urls.map(u => {
+            const kind = this._attachmentKind(u);
+            const safe = this._esc(u);
+            const fname = (u.split('?')[0].split('/').pop()) || u;
+            const fnameSafe = this._esc(fname);
+
+            if (kind === 'image') {
+                return `
+                    <div class="dwp-att dwp-att-img">
+                        <a href="${safe}" target="_blank" rel="noopener" title="${safe}">
+                            <img src="${safe}" alt="${fnameSafe}" loading="lazy"
+                                 onerror="this.parentNode.parentNode.classList.add('dwp-att-failed')" />
+                        </a>
+                        <div class="dwp-att-caption">📎 <a href="${safe}" target="_blank" rel="noopener">${fnameSafe}</a></div>
+                    </div>
+                `;
+            }
+            if (kind === 'video') {
+                return `
+                    <div class="dwp-att dwp-att-video">
+                        <video controls preload="metadata" src="${safe}"
+                               onerror="this.parentNode.classList.add('dwp-att-failed')"></video>
+                        <div class="dwp-att-caption">🎬 <a href="${safe}" target="_blank" rel="noopener">${fnameSafe}</a></div>
+                    </div>
+                `;
+            }
+            if (kind === 'audio') {
+                return `
+                    <div class="dwp-att dwp-att-audio">
+                        <audio controls preload="metadata" src="${safe}"
+                               onerror="this.parentNode.classList.add('dwp-att-failed')"></audio>
+                        <div class="dwp-att-caption">🔊 <a href="${safe}" target="_blank" rel="noopener">${fnameSafe}</a></div>
+                    </div>
+                `;
+            }
+            return `
+                <div class="dwp-att dwp-att-link">
+                    📎 <a href="${safe}" target="_blank" rel="noopener">${fnameSafe}</a>
+                </div>
+            `;
+        }).join('');
+    }
+
     // ─── Servers ────────────────────────────────────────────────────────
 
     _renderServers(d) {
@@ -455,9 +619,14 @@ class DiscordWarrantUI {
                 <h2 class="dwp-section-title">🏛️ Servers / Guilds</h2>
                 <p class="dwp-section-sub">${servers.length} server${servers.length === 1 ? '' : 's'}</p>
 
-                ${servers.map(s => `
-                    <div class="dwp-card dwp-mt">
-                        <h3 class="dwp-card-title">${this._esc(s.name)}</h3>
+                ${servers.map(s => {
+                    const flagged = this.module.isFlagged('servers', s.id);
+                    return `
+                    <div class="dwp-card dwp-mt" style="${flagged ? 'border:1px solid #fbbf24;box-shadow:0 0 0 2px rgba(245,158,11,.15);' : ''}">
+                        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
+                            <h3 class="dwp-card-title" style="margin:0">${this._esc(s.name)}</h3>
+                            ${this._flagBtn('servers', s.id)}
+                        </div>
                         <div class="dwp-kv-list">
                             ${this._kv('Server ID', s.id)}
                             ${this._kv('Audit Log Entries', s.auditLog.length)}
@@ -469,7 +638,7 @@ class DiscordWarrantUI {
                             </details>
                         `}
                     </div>
-                `).join('') || '<div class="dwp-empty-section">No server data.</div>'}
+                `;}).join('') || '<div class="dwp-empty-section">No server data.</div>'}
             </div>
         `;
     }
@@ -487,11 +656,13 @@ class DiscordWarrantUI {
                     <thead><tr>
                         <th>IP</th><th>Hits</th><th>Locations</th><th>ISP</th>
                         <th>OS</th><th>Browser</th><th>First Seen</th><th>Last Seen</th>
-                        <th>Sources</th><th></th>
+                        <th>Sources</th><th>ARIN</th><th>Flag</th>
                     </tr></thead>
                     <tbody>
-                        ${ips.map(r => `
-                            <tr>
+                        ${ips.map(r => {
+                            const flagged = this.module.isFlagged('ips', r.ip);
+                            return `
+                            <tr class="${flagged ? 'dwp-row-flagged' : ''}">
                                 <td><code>${this._esc(r.ip)}</code></td>
                                 <td>${r.count.toLocaleString()}</td>
                                 <td>${r.locations.map(l => this._esc(l)).join('<br>')}</td>
@@ -505,8 +676,9 @@ class DiscordWarrantUI {
                                     <button class="dwp-arin-btn" onclick="dwpArinLookup(this, '${this._esc(r.ip)}')" title="ARIN WHOIS Lookup">🌐 ARIN</button>
                                     <span class="dwp-arin-result"></span>
                                 </td>
+                                <td>${this._flagBtn('ips', r.ip)}</td>
                             </tr>
-                        `).join('')}
+                        `;}).join('')}
                     </tbody>
                 </table>
             </div>
@@ -526,12 +698,15 @@ class DiscordWarrantUI {
                     <thead><tr>
                         <th>Device Vendor ID</th><th>Device</th><th>OS</th><th>Browser</th>
                         <th>Client Version</th><th>Hits</th><th>IPs</th>
-                        <th>First Seen</th><th>Last Seen</th>
+                        <th>First Seen</th><th>Last Seen</th><th>Flag</th>
                     </tr></thead>
                     <tbody>
-                        ${devices.map(r => `
-                            <tr>
-                                <td><code class="dwp-trunc">${this._esc(r.device_vendor_id || r.key || '—')}</code></td>
+                        ${devices.map(r => {
+                            const k = r.device_vendor_id || r.key || '';
+                            const flagged = this.module.isFlagged('devices', k);
+                            return `
+                            <tr class="${flagged ? 'dwp-row-flagged' : ''}">
+                                <td><code class="dwp-trunc">${this._esc(k || '—')}</code></td>
                                 <td>${this._esc(r.device || '—')}</td>
                                 <td>${this._esc(r.os || '—')}${r.os_version ? ' ' + this._esc(r.os_version) : ''}</td>
                                 <td>${this._esc(r.browser || '—')}</td>
@@ -540,8 +715,9 @@ class DiscordWarrantUI {
                                 <td>${r.ips.map(ip => `<code>${this._esc(ip)}</code>`).join('<br>')}</td>
                                 <td>${this._fmtDate(r.firstSeen)}</td>
                                 <td>${this._fmtDate(r.lastSeen)}</td>
+                                <td>${this._flagBtn('devices', k)}</td>
                             </tr>
-                        `).join('')}
+                        `;}).join('')}
                     </tbody>
                 </table>
 
@@ -617,11 +793,14 @@ class DiscordWarrantUI {
                 <table class="dwp-table dwp-mt">
                     <thead><tr>
                         <th>Time</th><th>Event</th><th>Category</th><th>IP</th>
-                        <th>Location</th><th>Device / Browser</th><th>OS</th><th>Session</th>
+                        <th>Location</th><th>Device / Browser</th><th>OS</th><th>Session</th><th>Flag</th>
                     </tr></thead>
                     <tbody>
-                        ${slice.map(r => `
-                            <tr>
+                        ${slice.map(r => {
+                            const k = window.WarrantFlagsKey.activity(r);
+                            const flagged = this.module.isFlagged('activity', k);
+                            return `
+                            <tr class="${flagged ? 'dwp-row-flagged' : ''}">
                                 <td>${this._fmtDate(r.timestamp)}</td>
                                 <td><span class="dwp-tag dwp-tag-${this._eventClass(r.event_type)}">${this._esc(r.event_type)}</span></td>
                                 <td>${this._esc(r.category)}</td>
@@ -630,8 +809,9 @@ class DiscordWarrantUI {
                                 <td>${this._esc(r.device || r.browser || '—')}${r.client_version ? ' · v' + this._esc(r.client_version) : ''}</td>
                                 <td>${this._esc(r.os || '—')}${r.os_version ? ' ' + this._esc(r.os_version) : ''}</td>
                                 <td><code class="dwp-trunc">${this._esc(r.session || '—')}</code></td>
+                                <td>${this._flagBtn('activity', k)}</td>
                             </tr>
-                        `).join('')}
+                        `;}).join('')}
                     </tbody>
                 </table>
 
@@ -650,7 +830,10 @@ class DiscordWarrantUI {
         this._eventTypeFilter = v;
         this._activityPage = 0;
         const content = document.getElementById('dwp-content-area');
-        if (content) content.innerHTML = this._renderSection();
+        if (content) {
+            content.innerHTML = this._renderSection();
+            if (typeof this._loadLazyImages === 'function') this._loadLazyImages(content);
+        }
     }
 
     _eventClass(type) {

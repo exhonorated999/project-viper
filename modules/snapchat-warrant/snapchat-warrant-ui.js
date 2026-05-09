@@ -38,6 +38,7 @@ class SnapchatWarrantUI {
             <div class="swp-layout">
                 <div class="swp-sidebar">
                     ${this._renderImportSelector()}
+                    ${this._renderFlagToolbar()}
                     ${this._renderNav()}
                 </div>
                 <div class="swp-content" id="swp-content-area">
@@ -73,6 +74,91 @@ class SnapchatWarrantUI {
                 `).join('')}
             </div>
         `;
+    }
+
+    // ─── Flag-to-Evidence toolbar (sidebar) ────────────────────────────
+
+    _renderFlagToolbar() {
+        const total = this.module.flagCount();
+        const enabled = total > 0;
+        return `
+            <div class="swp-flag-toolbar">
+                <button class="swp-flag-header-btn"
+                        title="Flagged item count — click to clear all flags">
+                    🚩 Flags
+                    <span class="swp-flag-count-pill" id="swp-flag-count">${total.toLocaleString()}</span>
+                </button>
+                <div class="swp-flag-toolbar-spacer"></div>
+                <button class="swp-push-btn" id="swp-push-btn"
+                        ${enabled ? '' : 'disabled'}
+                        onclick="window.snapchatWarrantUI._pushFlagsToEvidence()"
+                        title="Push flagged items to the case Evidence module">
+                    📥 Push to Evidence
+                </button>
+            </div>
+        `;
+    }
+
+    _refreshFlagToolbar() {
+        const total = this.module.flagCount();
+        const pill = document.getElementById('swp-flag-count');
+        if (pill) pill.textContent = total.toLocaleString();
+        const btn = document.getElementById('swp-push-btn');
+        if (btn) btn.disabled = (total === 0);
+    }
+
+    async _pushFlagsToEvidence() {
+        const total = this.module.flagCount();
+        if (total === 0) {
+            this._toast('No items flagged yet. Click 🚩 on items first.', 'info');
+            return;
+        }
+        const ok = (typeof viperConfirm === 'function')
+            ? await viperConfirm(`Push ${total} flagged item${total === 1 ? '' : 's'} to the case Evidence module as a single bundle?`,
+                                  { okText: 'Push', danger: false })
+            : confirm(`Push ${total} flagged item(s) to Evidence as a single bundle?`);
+        if (!ok) return;
+
+        const btn = document.getElementById('swp-push-btn');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ Building bundle…'; }
+        try {
+            const res = await this.module.pushFlagsToEvidence();
+            if (res && res.success) {
+                this.module.clearFlags();
+                this._refreshFlagToolbar();
+                const content = document.getElementById('swp-content-area');
+                if (content) {
+                    content.innerHTML = this._renderSection();
+                    if (typeof this._loadLazyImages === 'function') this._loadLazyImages(content);
+                }
+            }
+        } finally {
+            if (btn) { btn.disabled = false; btn.innerHTML = '📥 Push to Evidence'; }
+            this._refreshFlagToolbar();
+        }
+    }
+
+    _onFlagClick(section, key) {
+        this.module.toggleFlag(section, key);
+        this._refreshFlagToolbar();
+        const content = document.getElementById('swp-content-area');
+        if (content) {
+            content.innerHTML = this._renderSection();
+            if (typeof this._loadLazyImages === 'function') this._loadLazyImages(content);
+        }
+    }
+
+    _flagBtn(section, key, label) {
+        const on = this.module.isFlagged(section, key);
+        const safeKey = String(key)
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g, "\\'")
+            .replace(/"/g, '&quot;');
+        return `<button class="swp-flag-btn ${on ? 'on' : ''}"
+                        title="${on ? 'Unflag' : 'Flag for evidence bundle'}"
+                        onclick="event.stopPropagation(); window.snapchatWarrantUI._onFlagClick('${section}', '${safeKey}')">
+                  🚩${label ? '<span style="margin-left:2px">' + label + '</span>' : ''}
+                </button>`;
     }
 
     async handleEvidenceClick(filePath, fileName, isFolder) {
@@ -403,11 +489,12 @@ class SnapchatWarrantUI {
         if (m.screen_recorded_by) flags.push('🎥 Recorded');
 
         return `
-            <div class="swp-message ${isFromTarget ? 'from-target' : 'from-other'}">
+            <div class="swp-message ${isFromTarget ? 'from-target' : 'from-other'} ${this.module.isFlagged('conversations', window.WarrantFlagsKey.snapchatMessage(m)) ? 'flagged' : ''}">
                 <div class="swp-msg-header">
                     <span class="swp-msg-author">${this._esc(m.sender_username || '?')}</span>
                     ${m.recipient_username ? `<span class="swp-msg-arrow">→</span><span class="swp-msg-recipient">${this._esc(m.recipient_username)}</span>` : ''}
                     <span class="swp-msg-time">${this._esc(m.timestamp || '')}</span>
+                    <span style="margin-left:auto">${this._flagBtn('conversations', window.WarrantFlagsKey.snapchatMessage(m))}</span>
                 </div>
                 <div class="swp-msg-meta">
                     <span class="swp-tag">${this._esc(m.content_type || m.message_type || '')}</span>
@@ -565,19 +652,23 @@ class SnapchatWarrantUI {
                             <th>Duration</th>
                             <th>Encrypted</th>
                             <th>Media ID</th>
+                            <th>Flag</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${mems.map(m => `
-                            <tr>
+                        ${mems.map(m => {
+                            const k = window.WarrantFlagsKey.snapchatMemory(m);
+                            return `
+                            <tr class="${this.module.isFlagged('memories', k) ? 'swp-row-flagged' : ''}">
                                 <td>${this._esc(m.timestamp || '')}</td>
                                 <td><span class="swp-tag">${this._esc(m.source_type || '')}</span></td>
                                 <td>${m.latitude && m.longitude ? `<span class="swp-mono">${this._esc(m.latitude)}, ${this._esc(m.longitude)}</span>` : ''}</td>
                                 <td>${m.duration ? parseFloat(m.duration).toFixed(2) + 's' : ''}</td>
                                 <td>${m.encrypted === 'true' ? '🔒' : ''}</td>
                                 <td class="swp-mono">${this._esc((m.media_id || m.id || '').slice(0, 24))}</td>
+                                <td>${this._flagBtn('memories', k)}</td>
                             </tr>
-                        `).join('')}
+                        `;}).join('')}
                     </tbody>
                 </table>
             </div>
@@ -597,16 +688,19 @@ class SnapchatWarrantUI {
                 <div class="swp-card">
                     <h3 class="swp-card-title">Recent Pings (latest 200)</h3>
                     <table class="swp-table">
-                        <thead><tr><th>Timestamp</th><th>Latitude</th><th>Longitude</th><th>Accuracy (m)</th></tr></thead>
+                        <thead><tr><th>Timestamp</th><th>Latitude</th><th>Longitude</th><th>Accuracy (m)</th><th>Flag</th></tr></thead>
                         <tbody>
-                            ${geo.slice(-200).reverse().map(g => `
-                                <tr>
+                            ${geo.slice(-200).reverse().map(g => {
+                                const k = window.WarrantFlagsKey.snapchatGeo(g);
+                                return `
+                                <tr class="${this.module.isFlagged('geo', k) ? 'swp-row-flagged' : ''}">
                                     <td>${this._esc(g.timestamp || '')}</td>
                                     <td class="swp-mono">${g.latitude}</td>
                                     <td class="swp-mono">${g.longitude}</td>
                                     <td>${g.latitudeAccuracy != null ? '±' + g.latitudeAccuracy.toFixed(0) : ''}</td>
+                                    <td>${this._flagBtn('geo', k)}</td>
                                 </tr>
-                            `).join('')}
+                            `;}).join('')}
                         </tbody>
                     </table>
                 </div>
@@ -670,9 +764,16 @@ class SnapchatWarrantUI {
             <div class="swp-section">
                 <h2 class="swp-section-title">📱 Device Advertising IDs (${devs.length.toLocaleString()})</h2>
                 <table class="swp-table">
-                    <thead><tr>${sampleKeys.map(k => `<th>${this._esc(k)}</th>`).join('')}</tr></thead>
+                    <thead><tr>${sampleKeys.map(k => `<th>${this._esc(k)}</th>`).join('')}<th>Flag</th></tr></thead>
                     <tbody>
-                        ${devs.map(d => `<tr>${sampleKeys.map(k => `<td class="${/id|device/i.test(k) ? 'swp-mono' : ''}">${this._esc(d[k] || '')}</td>`).join('')}</tr>`).join('')}
+                        ${devs.map(d => {
+                            const k = window.WarrantFlagsKey.snapchatDevice(d);
+                            return `
+                            <tr class="${this.module.isFlagged('devices', k) ? 'swp-row-flagged' : ''}">
+                                ${sampleKeys.map(k2 => `<td class="${/id|device/i.test(k2) ? 'swp-mono' : ''}">${this._esc(d[k2] || '')}</td>`).join('')}
+                                <td>${this._flagBtn('devices', k)}</td>
+                            </tr>
+                        `;}).join('')}
                     </tbody>
                 </table>
             </div>
@@ -689,13 +790,20 @@ class SnapchatWarrantUI {
             <div class="swp-section">
                 <h2 class="swp-section-title">🌐 Login History (${logs.length.toLocaleString()})</h2>
                 <table class="swp-table">
-                    <thead><tr>${cols.map(c => `<th>${this._esc(c)}</th>`).join('')}</tr></thead>
+                    <thead><tr>${cols.map(c => `<th>${this._esc(c)}</th>`).join('')}<th>Flag</th></tr></thead>
                     <tbody>
-                        ${logs.map(r => `<tr>${cols.map(c => {
-                            const v = r[c] || '';
-                            const isIp = /^ip$/i.test(c) || /ip_address/i.test(c);
-                            return `<td class="${isIp ? 'swp-mono' : ''}">${this._esc(v)}${isIp && v ? ` <button class="swp-arin-btn" onclick="swpArinLookup(this, '${this._escJs(v)}')" title="ARIN lookup">🔎</button>` : ''}</td>`;
-                        }).join('')}</tr>`).join('')}
+                        ${logs.map(r => {
+                            const k = window.WarrantFlagsKey.snapchatLogin(r);
+                            return `
+                            <tr class="${this.module.isFlagged('logins', k) ? 'swp-row-flagged' : ''}">
+                                ${cols.map(c => {
+                                    const v = r[c] || '';
+                                    const isIp = /^ip$/i.test(c) || /ip_address/i.test(c);
+                                    return `<td class="${isIp ? 'swp-mono' : ''}">${this._esc(v)}${isIp && v ? ` <button class="swp-arin-btn" onclick="swpArinLookup(this, '${this._escJs(v)}')" title="ARIN lookup">🔎</button>` : ''}</td>`;
+                                }).join('')}
+                                <td>${this._flagBtn('logins', k)}</td>
+                            </tr>
+                        `;}).join('')}
                     </tbody>
                 </table>
             </div>
@@ -712,9 +820,16 @@ class SnapchatWarrantUI {
             <div class="swp-section">
                 <h2 class="swp-section-title">👥 Friends (${friends.length.toLocaleString()})</h2>
                 <table class="swp-table">
-                    <thead><tr>${cols.map(c => `<th>${this._esc(c)}</th>`).join('')}</tr></thead>
+                    <thead><tr>${cols.map(c => `<th>${this._esc(c)}</th>`).join('')}<th>Flag</th></tr></thead>
                     <tbody>
-                        ${friends.map(r => `<tr>${cols.map(c => `<td class="${/id|user_id/i.test(c) ? 'swp-mono' : ''}">${this._esc(r[c] || '')}</td>`).join('')}</tr>`).join('')}
+                        ${friends.map(r => {
+                            const k = window.WarrantFlagsKey.snapchatFriend(r);
+                            return `
+                            <tr class="${this.module.isFlagged('friends', k) ? 'swp-row-flagged' : ''}">
+                                ${cols.map(c => `<td class="${/id|user_id/i.test(c) ? 'swp-mono' : ''}">${this._esc(r[c] || '')}</td>`).join('')}
+                                <td>${this._flagBtn('friends', k)}</td>
+                            </tr>
+                        `;}).join('')}
                     </tbody>
                 </table>
             </div>
@@ -731,9 +846,16 @@ class SnapchatWarrantUI {
             <div class="swp-section">
                 <h2 class="swp-section-title">👻 Snap History (${snaps.length.toLocaleString()})</h2>
                 <table class="swp-table">
-                    <thead><tr>${cols.map(c => `<th>${this._esc(c)}</th>`).join('')}</tr></thead>
+                    <thead><tr>${cols.map(c => `<th>${this._esc(c)}</th>`).join('')}<th>Flag</th></tr></thead>
                     <tbody>
-                        ${snaps.map(r => `<tr>${cols.map(c => `<td>${this._esc(r[c] || '')}</td>`).join('')}</tr>`).join('')}
+                        ${snaps.map(r => {
+                            const k = window.WarrantFlagsKey.snapchatSnap(r);
+                            return `
+                            <tr class="${this.module.isFlagged('snapHistory', k) ? 'swp-row-flagged' : ''}">
+                                ${cols.map(c => `<td>${this._esc(r[c] || '')}</td>`).join('')}
+                                <td>${this._flagBtn('snapHistory', k)}</td>
+                            </tr>
+                        `;}).join('')}
                     </tbody>
                 </table>
             </div>

@@ -412,8 +412,64 @@
     color: #b9bffd;
     font-size: 0.82em;
     word-break: break-all;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
 }
 .dwp-message-attach a { color: #b9bffd; }
+
+/* Inline media attachments */
+.dwp-att {
+    display: inline-block;
+    background: rgba(0,0,0,0.35);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 6px;
+    max-width: 320px;
+    vertical-align: top;
+}
+.dwp-att-img img {
+    display: block;
+    max-width: 100%;
+    max-height: 240px;
+    width: auto;
+    height: auto;
+    border-radius: 4px;
+    cursor: zoom-in;
+    background: rgba(0,0,0,0.4);
+}
+.dwp-att-video video,
+.dwp-att-audio audio {
+    display: block;
+    width: 100%;
+    max-width: 320px;
+    border-radius: 4px;
+    background: #000;
+}
+.dwp-att-audio audio { height: 36px; }
+.dwp-att-link {
+    padding: 8px 10px;
+    word-break: break-all;
+}
+.dwp-att-caption {
+    margin-top: 4px;
+    font-size: 0.78em;
+    color: #9ca3af;
+    word-break: break-all;
+    line-height: 1.3;
+}
+.dwp-att-caption a { color: #b9bffd; }
+.dwp-att-failed {
+    border-color: rgba(248,113,113,0.4);
+    background: rgba(248,113,113,0.06);
+}
+.dwp-att-failed::after {
+    content: "⚠️ Could not load (CDN may have expired)";
+    display: block;
+    margin-top: 4px;
+    font-size: 0.75em;
+    color: #fca5a5;
+}
 
 /* Pager */
 .dwp-pager {
@@ -479,3 +535,94 @@
 @keyframes dwp-spin {
     to { transform: rotate(360deg); }
 }
+
+
+/* ─── Flag-to-Evidence buttons ──────────────────────────────────────── */
+
+.dwp-flag-btn {
+    background: transparent;
+    border: 1px solid #374151;
+    color: #6b7280;
+    min-width: 28px;
+    height: 26px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 6px;
+    gap: 4px;
+    transition: all 0.15s;
+    user-select: none;
+}
+.dwp-flag-btn:hover { color: #fbbf24; border-color: #fbbf24; }
+.dwp-flag-btn.on {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fbbf24;
+    border-color: #fbbf24;
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.15);
+}
+
+.dwp-flag-header-btn {
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    color: #fbbf24;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.15s;
+}
+.dwp-flag-header-btn:hover { background: rgba(245, 158, 11, 0.22); }
+.dwp-flag-header-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+.dwp-flag-count-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    background: #fbbf24;
+    color: #1a1a1a;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.dwp-push-btn {
+    background: rgba(0, 255, 255, 0.12);
+    border: 1px solid rgba(0, 255, 255, 0.4);
+    color: #00ffff;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.15s;
+}
+.dwp-push-btn:hover { background: rgba(0, 255, 255, 0.22); }
+.dwp-push-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.dwp-message.flagged { box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.5); border-left: 4px solid #fbbf24; }
+tr.dwp-row-flagged > td { background: rgba(245, 158, 11, 0.08); }
+
+.dwp-flag-toolbar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    margin-bottom: 12px;
+}
+.dwp-flag-toolbar-spacer { flex: 1; }

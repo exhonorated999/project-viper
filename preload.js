@@ -103,6 +103,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   datapilotExportFlagsBundle: (data) => ipcRenderer.invoke('datapilot-export-flags-bundle', data),
   datapilotReadBundleFile: (data) => ipcRenderer.invoke('datapilot-read-bundle-file', data),
   datapilotBundleMediaUrl: (data) => ipcRenderer.invoke('datapilot-bundle-media-url', data),
+
+  // Generic Warrant Flag-to-Evidence (shared by Discord, Google, Meta, KIK, Snapchat, Aperture)
+  warrantExportFlagsBundle: (data) => ipcRenderer.invoke('warrant-export-flags-bundle', data),
+  warrantReadBundleFile: (data) => ipcRenderer.invoke('warrant-read-bundle-file', data),
   datapilotFolderSize: (data) => ipcRenderer.invoke('datapilot-folder-size', data),
   datapilotFolderExists: (data) => ipcRenderer.invoke('datapilot-folder-exists', data),
   datapilotCopyToEvidence: (data) => ipcRenderer.invoke('datapilot-copy-to-evidence', data),
@@ -248,6 +252,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   vigilantSetVisible: (visible) => ipcRenderer.send('vigilant-set-visible', visible),
   vigilantSearchPlate: (params) => ipcRenderer.invoke('vigilant-search-plate', params),
   vigilantReset: () => ipcRenderer.invoke('vigilant-reset'),
+
+  // ICAC Data System (persistent BrowserView)
+  icacDataSystemSetBounds: (bounds) => ipcRenderer.send('icac-data-system-set-bounds', bounds),
+  icacDataSystemSetVisible: (visible) => ipcRenderer.send('icac-data-system-set-visible', visible),
+
+  // ICACCOPS (persistent BrowserView)
+  icacCopsSetBounds: (bounds) => ipcRenderer.send('icac-cops-set-bounds', bounds),
+  icacCopsSetVisible: (visible) => ipcRenderer.send('icac-cops-set-visible', visible),
+
+  // Gridcop (persistent BrowserView)
+  gridcopSetBounds: (bounds) => ipcRenderer.send('gridcop-set-bounds', bounds),
+  gridcopSetVisible: (visible) => ipcRenderer.send('gridcop-set-visible', visible),
 
   // Resource Hub generic per-BV zoom factor (0.5 .. 2.0)
   rhSetZoom: (resId, factor) => ipcRenderer.send('rh-set-zoom', { resId, factor }),

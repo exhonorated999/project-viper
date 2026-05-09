@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: viper-media: https:; media-src 'self' blob: file: viper-media:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.genlogs.io https://trace-broker-production.up.railway.app https://router.project-osrm.org; font-src 'self' data:; frame-src 'self' blob: file: viper-media: https: http:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: viper-media: https:; media-src 'self' blob: file: viper-media: https:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.genlogs.io https://trace-broker-production.up.railway.app https://router.project-osrm.org; font-src 'self' data:; frame-src 'self' blob: file: viper-media: https: http:;">
     <title>V.I.P.E.R. - Case Detail</title>
     <script src="modules/viper-ui.js"></script>
     <script src="modules/viper-prefs.js"></script>
@@ -11,6 +11,7 @@
     <script src="modules/genlogs-api.js"></script>
     <script src="modules/trace-search-api.js"></script>
     <script src="modules/resource-hub.js"></script>
+    <script src="modules/case-link.js"></script>
     <script src="case-snapshot.js"></script>
 
     <script src="libs/tailwindcss.js"></script>
@@ -113,6 +114,47 @@
         
         ::-webkit-scrollbar-thumb:hover {
             background: rgba(0, 217, 255, 0.5);
+        }
+
+        /* Native date/time pickers — dark-theme legibility (matches index.html) */
+        input[type="date"],
+        input[type="time"],
+        input[type="datetime-local"],
+        input[type="month"],
+        input[type="week"] {
+            color-scheme: dark;
+        }
+        input[type="date"]::-webkit-calendar-picker-indicator,
+        input[type="time"]::-webkit-calendar-picker-indicator,
+        input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+        input[type="month"]::-webkit-calendar-picker-indicator,
+        input[type="week"]::-webkit-calendar-picker-indicator {
+            /* color-scheme: dark already produces a white-on-dark icon.
+               Do NOT also invert — that flips it back to black/invisible. */
+            opacity: 0.85;
+            cursor: pointer;
+        }
+        input[type="date"]::-webkit-calendar-picker-indicator:hover,
+        input[type="time"]::-webkit-calendar-picker-indicator:hover,
+        input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
+            opacity: 1;
+        }
+        /* Light-mode flip — let the browser pick light scheme so the icon
+           reads dark on the (now light) background. */
+        body.light-mode input[type="date"],
+        body.light-mode input[type="time"],
+        body.light-mode input[type="datetime-local"],
+        body.light-mode input[type="month"],
+        body.light-mode input[type="week"] {
+            color-scheme: light;
+        }
+        body.light-mode input[type="date"]::-webkit-calendar-picker-indicator,
+        body.light-mode input[type="time"]::-webkit-calendar-picker-indicator,
+        body.light-mode input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+        body.light-mode input[type="month"]::-webkit-calendar-picker-indicator,
+        body.light-mode input[type="week"]::-webkit-calendar-picker-indicator {
+            filter: none;
+            opacity: 0.7;
         }
         
         /* Responsive grid adjustments */
@@ -714,6 +756,8 @@
     <link rel="stylesheet" href="modules/snapchat-warrant/snapchat-warrant-styles.css">
     <link rel="stylesheet" href="modules/discord-warrant/discord-warrant-styles.css">
     <link rel="stylesheet" href="modules/datapilot/datapilot-styles.css">
+    <!-- Shared infrastructure: must load BEFORE any warrant module -->
+    <script src="modules/_shared/warrant-flags.js"></script>
     <script src="modules/google-warrant/google-warrant-module.js"></script>
     <script src="modules/google-warrant/google-warrant-ui.js"></script>
     <script src="modules/meta-warrant/meta-warrant-module.js"></script>
@@ -1279,6 +1323,8 @@
                     if (suspectPersons.length > 0) {
                         const existing = JSON.parse(localStorage.getItem(`suspects_${currentCase.id}`) || '[]');
                         for (const p of suspectPersons) {
+                            const phones = _rmsSplitPhones(p.phone);
+                            const phoneIdentifiers = phones.map(v => ({ type: 'phone', value: v, provider: '' }));
                             existing.push({
                                 name: p.name || '',
                                 dob: p.dob || '',
@@ -1291,8 +1337,8 @@
                                 scarsMarksTattoos: '',
                                 address: p.address || '',
                                 addressCityStateZip: '',
-                                phone: p.phone || '',
-                                phone2: '',
+                                phone: phones[0] || '',
+                                phone2: phones[1] || '',
                                 photo: '',
                                 residencePhoto: '',
                                 employerName: '',
@@ -1301,7 +1347,7 @@
                                 employerPhone: '',
                                 firearms: [],
                                 vehicles: [],
-                                identifiers: [],
+                                identifiers: phoneIdentifiers,
                                 criminalHistory: [],
                                 rapSheet: null,
                                 firearmsDoc: null,
@@ -1318,12 +1364,13 @@
                     if (victimPersons.length > 0) {
                         const existing = JSON.parse(localStorage.getItem(`victims_${currentCase.id}`) || '[]');
                         for (const p of victimPersons) {
+                            const phones = _rmsSplitPhones(p.phone);
                             existing.push({
                                 name: p.name || '',
                                 dob: p.dob || '',
                                 dlNumber: '',
-                                phone: p.phone || '',
-                                phone2: '',
+                                phone: phones[0] || '',
+                                phone2: phones[1] || '',
                                 email: '',
                                 email2: '',
                                 height: p.height || '',
@@ -1354,12 +1401,13 @@
                     if (witnessPersons.length > 0) {
                         const existing = JSON.parse(localStorage.getItem(`witnesses_${currentCase.id}`) || '[]');
                         for (const p of witnessPersons) {
+                            const phones = _rmsSplitPhones(p.phone);
                             existing.push({
                                 name: p.name || '',
                                 dob: p.dob || '',
                                 dlNumber: '',
-                                phone: p.phone || '',
-                                phone2: '',
+                                phone: phones[0] || '',
+                                phone2: phones[1] || '',
                                 email: '',
                                 email2: '',
                                 height: p.height || '',
@@ -1398,6 +1446,7 @@
                     if (involvedRouted.length > 0) {
                         const existing = JSON.parse(localStorage.getItem(`involvedPersons_${currentCase.id}`) || '[]');
                         for (const p of involvedRouted) {
+                            const phones = _rmsSplitPhones(p.phone);
                             existing.push({
                                 name: p.name || '',
                                 dob: p.dob || '',
@@ -1410,8 +1459,8 @@
                                 scarsMarksTattoos: '',
                                 address: p.address || '',
                                 addressCityStateZip: '',
-                                phone: p.phone || '',
-                                phone2: '',
+                                phone: phones[0] || '',
+                                phone2: phones[1] || '',
                                 email: '',
                                 email2: '',
                                 photo: '',
@@ -2366,7 +2415,31 @@
                     fieldBold('Investigator', currentCase.investigator);
                     if (currentCase.synopsis) { gap(); itemHeading('Synopsis'); bodyText(currentCase.synopsis); }
                     if (currentCase.description) { gap(); itemHeading('Description'); bodyText(currentCase.description); }
-                    if (currentCase.charges) { gap(); itemHeading('Charges'); bodyText(currentCase.charges); }
+                    {
+                        // Unified offenses: primary (with offenseType) + additional [{offense,type}], with legacy fallbacks
+                        const rawAdditional = Array.isArray(currentCase.additionalOffenses) ? currentCase.additionalOffenses : [];
+                        const additional = rawAdditional.map(item => {
+                            if (typeof item === 'string') return { offense: String(item).trim(), type: '' };
+                            return { offense: String(item?.offense || '').trim(), type: String(item?.type || '') };
+                        }).filter(x => x.offense);
+                        const legacy = (!additional.length && currentCase.charges)
+                            ? String(currentCase.charges).split(/\r?\n/).map(s => s.trim()).filter(Boolean).map(o => ({ offense: o, type: '' }))
+                            : [];
+                        const extras = additional.length ? additional : legacy;
+                        if (currentCase.primaryOffense || extras.length) {
+                            gap();
+                            itemHeading('Offenses');
+                            if (currentCase.primaryOffense) {
+                                const typeStr = currentCase.offenseType ? `  [${currentCase.offenseType}]` : '';
+                                fieldBold('Primary', `${currentCase.primaryOffense}${typeStr}`);
+                            }
+                            extras.forEach((o, i) => {
+                                const n = (currentCase.primaryOffense ? 2 : 1) + i;
+                                const typeStr = o.type ? `  [${o.type}]` : '';
+                                fieldBold(`Offense ${n}`, `${o.offense}${typeStr}`);
+                            });
+                        }
+                    }
                     break;
                 case 'suspects': {
                     const items = caseSuspects || JSON.parse(localStorage.getItem(`suspects_${caseId}`) || '[]');
@@ -2699,6 +2772,54 @@
                 await _renderTabPDF(tab.id);
             }
 
+            // ========== CASE TIMELINE (summary in main body) ==========
+            const _tlEvents = JSON.parse(localStorage.getItem(`timelineEvents_${currentCase.id}`) || '[]');
+            const _tlSorted = [..._tlEvents].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            const _tlLaneLabels = (typeof TIMELINE_LANES !== 'undefined') ? TIMELINE_LANES : {};
+            function _tlFmt(ts) {
+                if (!ts) return '—';
+                try {
+                    const d = new Date(ts);
+                    if (isNaN(d.getTime())) return String(ts);
+                    return d.toLocaleString('en-US', {
+                        year: 'numeric', month: 'short', day: '2-digit',
+                        hour: '2-digit', minute: '2-digit'
+                    });
+                } catch (_) { return String(ts); }
+            }
+            if (_tlSorted.length > 0) {
+                newPage();
+                tocEntries.push({ label: 'Case Timeline (Summary)', page: doc.getNumberOfPages() });
+                sectionTitle('Case Timeline — Summary');
+                doc.setFontSize(9); doc.setFont(undefined, 'italic'); doc.setTextColor(...GRAY);
+                const intro = `${_tlSorted.length} event${_tlSorted.length === 1 ? '' : 's'} on this case timeline. Full descriptions in Appendix A.`;
+                doc.text(intro, M + 2, y); y += 7;
+                doc.setFont(undefined, 'normal'); doc.setTextColor(...BLACK);
+                _tlSorted.forEach((e, i) => {
+                    need(7);
+                    const dt = _tlFmt(e.timestamp);
+                    const isMajor = (e.significance === 'major');
+                    // Bullet: filled circle for major, hollow for supporting
+                    doc.setFontSize(9);
+                    doc.setFont(undefined, 'bold'); doc.setTextColor(...ACCENT);
+                    doc.text(isMajor ? '\u25CF' : '\u25CB', M + 2, y);
+                    doc.setTextColor(...BLACK);
+                    doc.text(dt, M + 7, y);
+                    const dtW = doc.getTextWidth(dt);
+                    doc.setFont(undefined, 'normal');
+                    const titleStr = e.title || '(untitled)';
+                    const xTitle = M + 7 + dtW + 4;
+                    const titleLines = doc.splitTextToSize(titleStr, PW - M - xTitle);
+                    doc.text(titleLines[0], xTitle, y);
+                    y += 5;
+                    for (let j = 1; j < titleLines.length; j++) {
+                        need(5);
+                        doc.text(titleLines[j], xTitle, y);
+                        y += 5;
+                    }
+                });
+            }
+
             if (includeFilesList) {
                 newPage();
                 tocEntries.push({ label: 'Evidence & Warrant Files', page: doc.getNumberOfPages() });
@@ -2732,6 +2853,53 @@
                     });
                 } else emptyMsg('No warrants recorded.');
             }
+
+            // ========== APPENDIX A — CASE TIMELINE (full detail) ==========
+            if (_tlSorted.length > 0) {
+                newPage();
+                tocEntries.push({ label: 'Appendix A — Case Timeline', page: doc.getNumberOfPages() });
+                sectionTitle('Appendix A — Case Timeline');
+                doc.setFontSize(9); doc.setFont(undefined, 'italic'); doc.setTextColor(...GRAY);
+                doc.text('Chronological case timeline with full descriptions. Auto-generated entries are marked.', M + 2, y);
+                y += 7;
+                doc.setFont(undefined, 'normal'); doc.setTextColor(...BLACK);
+                _tlSorted.forEach((e, i) => {
+                    need(22);
+                    // Number + timestamp header
+                    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...ACCENT);
+                    doc.text(`${i + 1}.  ${_tlFmt(e.timestamp)}`, M + 2, y);
+                    if (e.endTimestamp) {
+                        doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...GRAY);
+                        const endStr = `  → ${_tlFmt(e.endTimestamp)}`;
+                        doc.text(endStr, M + 2 + doc.getTextWidth(`${i + 1}.  ${_tlFmt(e.timestamp)}`), y);
+                    }
+                    y += 6;
+                    // Title
+                    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...BLACK);
+                    const titleLines = doc.splitTextToSize(e.title || '(untitled)', CW - 4);
+                    for (const ln of titleLines) { need(6); doc.text(ln, M + 2, y); y += 5; }
+                    // Meta line
+                    const meta = [];
+                    if (e.lane && _tlLaneLabels[e.lane]) meta.push(_tlLaneLabels[e.lane].label || e.lane);
+                    if (e.category) meta.push(String(e.category));
+                    if (e.significance) meta.push(e.significance === 'major' ? 'Major' : 'Supporting');
+                    if (e.sourceType) meta.push(String(e.sourceType).startsWith('auto') ? 'auto-generated' : 'manual');
+                    if (meta.length) {
+                        need(5);
+                        doc.setFontSize(8); doc.setFont(undefined, 'italic'); doc.setTextColor(...GRAY);
+                        doc.text(meta.join('  •  '), M + 2, y);
+                        y += 5;
+                    }
+                    // Description
+                    doc.setFont(undefined, 'normal'); doc.setTextColor(...BLACK);
+                    if (e.description) {
+                        bodyText(e.description);
+                    }
+                    if (e.entityLink) fieldBold('Linked Entity', e.entityLink);
+                    gap(3);
+                });
+            }
+
 
             // ========== BACKFILL TOC ==========
             doc.setPage(tocPageIdx);
@@ -3452,6 +3620,405 @@
             }
         }
         
+        // Rebuild the case-link index and re-render the overview tab so the
+        // Related Cases card refreshes. Wired to the "Rescan" button.
+        function rescanRelatedCases() {
+            try {
+                if (window.CaseLink && typeof window.CaseLink.invalidateIndex === 'function') {
+                    window.CaseLink.invalidateIndex();
+                    window.CaseLink.buildIndex(true); // force rebuild now (not on next paint)
+                }
+            } catch (e) { console.warn('[CaseLink] rescan failed', e); }
+            if (typeof renderTabContent === 'function') {
+                renderTabContent('overview');
+            }
+            if (typeof viperToast === 'function') {
+                viperToast('Related cases rescanned', 'success');
+            }
+        }
+
+        // ─── A-3: Match details modal ───────────────────────────────────────
+        // Surfaces every shared person between this case and the chosen
+        // related case, with confidence + role mapping. Triggered by the
+        // "Details" pill on each related-case row.
+        function showCaseLinkDetails(caseNumber) {
+            if (!window.CaseLink || typeof window.CaseLink.getRelatedCases !== 'function') {
+                if (typeof viperToast === 'function') viperToast('Case-link engine not loaded', 'error');
+                return;
+            }
+            const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+                ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+            const ROLE_LABELS = (window.CaseLink && window.CaseLink.ROLE_LABELS) || {
+                suspect: 'Suspect', victim: 'Victim', witness: 'Witness', missingPerson: 'Missing Person'
+            };
+            const roleIcon = { suspect: '🚨', victim: '🆘', witness: '👁️', missingPerson: '🚸', manual: '🔗' };
+            const confClass = {
+                HIGH:   { bg: 'bg-viper-cyan/10',  text: 'text-viper-cyan',  border: 'border-viper-cyan/30', label: 'High' },
+                MEDIUM: { bg: 'bg-amber-400/10',   text: 'text-amber-400',   border: 'border-amber-400/30',  label: 'Medium' },
+                LOW:    { bg: 'bg-gray-500/10',    text: 'text-gray-400',    border: 'border-gray-500/30',   label: 'Low' },
+                MANUAL: { bg: 'bg-viper-purple/10', text: 'text-viper-purple', border: 'border-viper-purple/40', label: 'Manual' },
+            };
+
+            let related = [];
+            try { related = window.CaseLink.getRelatedCases(currentCase.id) || []; }
+            catch (e) { related = []; }
+            const r = related.find(x => String(x.caseNumber) === String(caseNumber));
+            if (!r) {
+                if (typeof viperToast === 'function') viperToast('No detail data found for that case', 'error');
+                return;
+            }
+
+            // Group shared persons by confidence band for clarity
+            const byConf = { MANUAL: [], HIGH: [], MEDIUM: [], LOW: [] };
+            r.sharedPersons.forEach(sp => {
+                (byConf[sp.confidence] || byConf.LOW).push(sp);
+            });
+
+            const renderRow = (sp) => {
+                const cc = confClass[sp.confidence] || confClass.LOW;
+                const sameRole = sp.myRole === sp.theirRole;
+                const myLabel = ROLE_LABELS[sp.myRole] || sp.myRole;
+                const theirLabel = ROLE_LABELS[sp.theirRole] || sp.theirRole;
+                const ico = roleIcon[sp.theirRole] || '👤';
+                return `
+                    <div class="flex items-start gap-3 p-3 rounded-lg bg-viper-card/40 border border-gray-700/40 hover:border-gray-600 transition">
+                        <div class="text-2xl flex-shrink-0">${ico}</div>
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 flex-wrap mb-1">
+                                <span class="text-sm font-semibold text-white">${escHtml(sp.name)}</span>
+                                ${sp.dob ? `<span class="text-xs text-gray-400 font-mono">DOB ${escHtml(sp.dob)}</span>` : '<span class="text-[10px] text-gray-500 italic">no DOB on record</span>'}
+                                <span class="px-1.5 py-0.5 text-[10px] font-medium rounded ${cc.bg} ${cc.text} border ${cc.border}">${cc.label} confidence</span>
+                            </div>
+                            <div class="text-xs text-gray-400">
+                                ${sameRole
+                                    ? `Same role in both cases: <span class="text-gray-200 font-medium">${escHtml(theirLabel)}</span>`
+                                    : `In <span class="text-gray-300 font-mono">${escHtml(currentCase.caseNumber)}</span> as <span class="text-gray-200 font-medium">${escHtml(myLabel)}</span> · In <span class="text-viper-cyan font-mono">${escHtml(r.caseNumber)}</span> as <span class="text-gray-200 font-medium">${escHtml(theirLabel)}</span>`}
+                            </div>
+                        </div>
+                    </div>`;
+            };
+
+            const renderBand = (label, list, badge) => {
+                if (!list.length) return '';
+                return `
+                    <div class="mb-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="text-xs font-semibold uppercase tracking-wider ${badge}">${label}</span>
+                            <span class="text-[11px] text-gray-500">${list.length}</span>
+                            <div class="flex-1 h-px bg-gradient-to-r from-gray-700/50 to-transparent"></div>
+                        </div>
+                        <div class="space-y-2">${list.map(renderRow).join('')}</div>
+                    </div>`;
+            };
+
+            const statusPill = (s) => {
+                if (!s) return '';
+                const map = { Active: ['bg-viper-green/15','text-viper-green','border-viper-green/30'],
+                              Closed: ['bg-gray-600/30','text-gray-300','border-gray-500/30'],
+                              Inactive: ['bg-amber-400/15','text-amber-400','border-amber-400/30'],
+                              Pending: ['bg-viper-cyan/15','text-viper-cyan','border-viper-cyan/30'] };
+                const cls = map[s] || ['bg-gray-700/40','text-gray-400','border-gray-600/30'];
+                return `<span class="px-2 py-0.5 text-[10px] font-medium rounded ${cls[0]} ${cls[1]} border ${cls[2]} whitespace-nowrap">${escHtml(s)}</span>`;
+            };
+
+            const modal = document.createElement('div');
+            modal.id = 'caseLinkDetailsModal';
+            modal.className = 'fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4';
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+
+            modal.innerHTML = `
+                <div class="glass-card rounded-xl p-6 max-w-2xl w-full max-h-[85vh] overflow-y-auto" onclick="event.stopPropagation()">
+                    <div class="flex justify-between items-start mb-5">
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center gap-2 mb-1">
+                                <svg class="w-5 h-5 text-viper-cyan flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                                </svg>
+                                <h2 class="text-xl font-bold text-white">Shared persons</h2>
+                            </div>
+                            <div class="flex items-center gap-2 flex-wrap text-sm">
+                                <span class="text-gray-400">Between</span>
+                                <span class="text-gray-200 font-mono">${escHtml(currentCase.caseNumber)}</span>
+                                <span class="text-gray-500">↔</span>
+                                <span class="text-viper-cyan font-mono font-semibold">${escHtml(r.caseNumber)}</span>
+                                ${r.caseTitle ? `<span class="text-gray-300 truncate">${escHtml(r.caseTitle)}</span>` : ''}
+                                ${statusPill(r.caseStatus)}
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1">${r.sharedPersons.length} shared person${r.sharedPersons.length !== 1 ? 's' : ''} · auto-detected by name + DOB / phone / SSN</p>
+                        </div>
+                        <button onclick="this.closest('#caseLinkDetailsModal').remove()" class="text-gray-400 hover:text-white p-1 -mr-1 -mt-1 flex-shrink-0">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    ${renderBand('Manually linked', byConf.MANUAL, 'text-viper-purple')}
+                    ${renderBand('High confidence (name + DOB)', byConf.HIGH, 'text-viper-cyan')}
+                    ${renderBand('Medium confidence (name + corroborator)', byConf.MEDIUM, 'text-amber-400')}
+                    ${renderBand('Low confidence (name only)', byConf.LOW, 'text-gray-400')}
+
+                    <div class="mt-5 pt-4 border-t border-gray-700/50 flex items-center justify-between gap-3">
+                        <div class="text-[11px] text-gray-500 italic">
+                            Confidence reflects how strong the link is. Verify identity before merging.
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button type="button" onclick="this.closest('#caseLinkDetailsModal').remove()"
+                                class="px-3 py-1.5 text-sm rounded-lg bg-viper-card/60 hover:bg-viper-card border border-gray-600 text-gray-300 transition">
+                                Close
+                            </button>
+                            <button type="button" onclick="window.location.href='case-detail-with-analytics.html?case=${encodeURIComponent(r.caseNumber)}'"
+                                class="px-3 py-1.5 text-sm rounded-lg bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan text-viper-cyan font-medium transition inline-flex items-center gap-1.5">
+                                Open ${escHtml(r.caseNumber)}
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+        // Expose for inline onclick handlers
+        if (typeof window !== 'undefined') window.showCaseLinkDetails = showCaseLinkDetails;
+
+        // ─── Badge action menu (Import / Link / Open) ──────────────────────
+        // Replaces the default "navigate-on-click" behavior of CaseLink hint
+        // badges. CaseLink calls this via window.handleCaseLinkBadgeClick.
+        function handleCaseLinkBadgeClick(match, anchorEl, ctx) {
+            if (!match) return;
+            // Remove any existing popover first
+            const existing = document.getElementById('caseLinkActionPopover');
+            if (existing) existing.remove();
+
+            const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+                ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+            const ROLE_LABELS = (window.CaseLink && window.CaseLink.ROLE_LABELS) || {};
+            const myRoleLbl  = ROLE_LABELS[(ctx && ctx.role) || ''] || (ctx && ctx.role) || 'Person';
+            const theirRoleLbl = ROLE_LABELS[match.role] || match.role;
+            const personName = match.person && match.person.raw && match.person.raw.name
+                ? match.person.raw.name
+                : `${(match.person && match.person.firstName) || ''} ${(match.person && match.person.lastName) || ''}`.trim();
+
+            const pop = document.createElement('div');
+            pop.id = 'caseLinkActionPopover';
+            pop.className = 'fixed z-[200] rounded-lg shadow-2xl border border-gray-700 bg-viper-card overflow-hidden';
+            pop.style.minWidth = '260px';
+            pop.innerHTML = `
+                <div class="px-3 py-2 border-b border-gray-700/70 bg-viper-dark/60">
+                    <div class="text-[11px] uppercase tracking-wider text-gray-500">Found in</div>
+                    <div class="text-sm font-mono text-viper-cyan">${escHtml(match.caseNumber)}</div>
+                    <div class="text-xs text-gray-400 mt-0.5">${escHtml(personName)} · <span class="text-gray-300">${escHtml(theirRoleLbl)}</span></div>
+                </div>
+                <div class="py-1">
+                    <button type="button" data-act="import"
+                        class="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-viper-cyan/15 hover:text-viper-cyan transition flex items-start gap-2">
+                        <svg class="w-4 h-4 mt-0.5 flex-shrink-0 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/>
+                        </svg>
+                        <span>
+                            <span class="block">Import this profile</span>
+                            <span class="block text-[11px] text-gray-500">Copy fields into the form (you'll still review &amp; save)</span>
+                        </span>
+                    </button>
+                    <button type="button" data-act="link"
+                        class="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-amber-500/15 hover:text-amber-300 transition flex items-start gap-2">
+                        <svg class="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                        </svg>
+                        <span>
+                            <span class="block">Link cases</span>
+                            <span class="block text-[11px] text-gray-500">Mark this case &amp; ${escHtml(match.caseNumber)} as related</span>
+                        </span>
+                    </button>
+                    <button type="button" data-act="open"
+                        class="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-white/5 transition flex items-start gap-2">
+                        <svg class="w-4 h-4 mt-0.5 flex-shrink-0 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
+                        </svg>
+                        <span>
+                            <span class="block">Open ${escHtml(match.caseNumber)}</span>
+                            <span class="block text-[11px] text-gray-500">Navigate to that case</span>
+                        </span>
+                    </button>
+                </div>
+            `;
+
+            document.body.appendChild(pop);
+
+            // Position below+aligned-left of the anchor; flip up if no room
+            const aRect = anchorEl ? anchorEl.getBoundingClientRect() : { left: 100, top: 100, bottom: 120, height: 20 };
+            const pRect = pop.getBoundingClientRect();
+            let left = aRect.left;
+            let top  = aRect.bottom + 6;
+            if (top + pRect.height > window.innerHeight - 10) {
+                top = aRect.top - pRect.height - 6;
+            }
+            if (left + pRect.width > window.innerWidth - 10) {
+                left = window.innerWidth - pRect.width - 10;
+            }
+            pop.style.left = Math.max(8, left) + 'px';
+            pop.style.top  = Math.max(8, top)  + 'px';
+
+            // Action handlers
+            pop.querySelectorAll('button[data-act]').forEach(btn => {
+                btn.addEventListener('click', (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    const act = btn.getAttribute('data-act');
+                    pop.remove();
+                    if (act === 'open') {
+                        window.location.href = 'case-detail-with-analytics.html?case=' + encodeURIComponent(match.caseNumber);
+                    } else if (act === 'import') {
+                        importPersonProfile(match, ctx);
+                    } else if (act === 'link') {
+                        confirmManualLink(match, ctx);
+                    }
+                });
+            });
+
+            // Dismiss on outside click / ESC
+            const dismiss = (ev) => {
+                if (pop.contains(ev.target) || ev.target === anchorEl) return;
+                pop.remove();
+                document.removeEventListener('mousedown', dismiss, true);
+                document.removeEventListener('keydown', escDismiss, true);
+            };
+            const escDismiss = (ev) => {
+                if (ev.key === 'Escape') {
+                    pop.remove();
+                    document.removeEventListener('mousedown', dismiss, true);
+                    document.removeEventListener('keydown', escDismiss, true);
+                }
+            };
+            // Defer to avoid catching the click that opened us
+            setTimeout(() => {
+                document.addEventListener('mousedown', dismiss, true);
+                document.addEventListener('keydown', escDismiss, true);
+            }, 0);
+        }
+        if (typeof window !== 'undefined') window.handleCaseLinkBadgeClick = handleCaseLinkBadgeClick;
+
+        // ─── Import an existing person profile into the open form ─────────
+        function importPersonProfile(match, ctx) {
+            if (!match || !match.person || !match.person.raw) {
+                if (typeof viperToast === 'function') viperToast('Source profile data not available', 'error');
+                return;
+            }
+            const raw = match.person.raw;
+            const role = (ctx && ctx.role) || match.role;
+
+            // Resolve the active form. For Suspect/Victim/Witness we have form
+            // ids; Missing Person has named element ids (mp_*).
+            const formIds = { suspect: 'suspectForm', victim: 'victimForm', witness: 'witnessForm' };
+            const formId = formIds[role];
+            let imported = 0;
+
+            const trySet = (el, value) => {
+                if (!el) return false;
+                if (value == null || value === '') return false;
+                el.value = value;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                imported++;
+                return true;
+            };
+
+            if (formId) {
+                const formEl = document.getElementById(formId);
+                if (!formEl) {
+                    if (typeof viperToast === 'function') viperToast('Form not found', 'error');
+                    return;
+                }
+                // Copy every field whose name matches a key on raw
+                const fields = formEl.querySelectorAll('input[name], textarea[name], select[name]');
+                fields.forEach(el => {
+                    const key = el.getAttribute('name');
+                    if (!key) return;
+                    if (raw[key] !== undefined && raw[key] !== null && raw[key] !== '') {
+                        trySet(el, raw[key]);
+                    }
+                });
+            } else if (role === 'missingPerson') {
+                // Map raw → mp_ ids
+                const mpFields = {
+                    name: 'mp_name', dob: 'mp_dob', height: 'mp_height',
+                    weight: 'mp_weight', hairColor: 'mp_hairColor',
+                    eyeColor: 'mp_eyeColor', tattoos: 'mp_tattoos',
+                    photo: 'mp_photo', address: 'mp_address',
+                    phone: 'mp_phone', email: 'mp_email',
+                };
+                Object.keys(mpFields).forEach(k => {
+                    const v = raw[k];
+                    if (v == null || v === '') return;
+                    const el = document.getElementById(mpFields[k]);
+                    trySet(el, v);
+                });
+            } else {
+                if (typeof viperToast === 'function') viperToast('Profile import not supported for this form', 'error');
+                return;
+            }
+
+            if (typeof viperToast === 'function') {
+                viperToast(`Imported ${imported} field${imported !== 1 ? 's' : ''} from ${match.caseNumber}. Review and save.`, 'success', 4000);
+            }
+
+            // After import, the auto-detect engine will pick up the shared
+            // person on next save — but we ALSO write a manual link now so the
+            // relationship survives even before save.
+            try {
+                if (currentCase && currentCase.id) {
+                    window.CaseLink.addManualLink(
+                        { caseId: currentCase.id, caseNumber: currentCase.caseNumber },
+                        { caseId: match.caseId, caseNumber: match.caseNumber },
+                        {
+                            name: `${(match.person.lastName || '').toLowerCase().replace(/\b([a-z])/g, (_, c) => c.toUpperCase())}, ${(match.person.firstName || '').toLowerCase().replace(/\b([a-z])/g, (_, c) => c.toUpperCase())}`,
+                            dob: match.person.dob || '',
+                            role: role,
+                        },
+                        'Profile imported'
+                    );
+                }
+            } catch (_) {}
+        }
+
+        // ─── Confirm + create a manual link (no profile copy) ─────────────
+        function confirmManualLink(match, ctx) {
+            if (!currentCase || !currentCase.id) {
+                if (typeof viperToast === 'function') viperToast('No active case to link', 'error');
+                return;
+            }
+            const role = (ctx && ctx.role) || match.role;
+            const personName = match.person && match.person.raw && match.person.raw.name
+                ? match.person.raw.name
+                : `${(match.person.firstName || '')} ${(match.person.lastName || '')}`.trim();
+
+            try {
+                const created = window.CaseLink.addManualLink(
+                    { caseId: currentCase.id, caseNumber: currentCase.caseNumber },
+                    { caseId: match.caseId, caseNumber: match.caseNumber },
+                    { name: personName, dob: match.person.dob || '', role: role },
+                    'Manually linked'
+                );
+                if (typeof viperToast === 'function') {
+                    if (created) viperToast(`Linked to ${match.caseNumber}`, 'success');
+                    else viperToast(`Already linked to ${match.caseNumber}`, 'info');
+                }
+                // Re-render Related Cases card if we're on the overview tab
+                if (typeof renderTabContent === 'function' && document.getElementById('overviewTab')) {
+                    // overviewTab id varies; use rescanRelatedCases when available
+                    if (typeof rescanRelatedCases === 'function') rescanRelatedCases();
+                }
+            } catch (e) {
+                if (typeof viperToast === 'function') viperToast('Failed to link cases: ' + e.message, 'error');
+            }
+        }
+
+        if (typeof window !== 'undefined') {
+            window.importPersonProfile = importPersonProfile;
+            window.confirmManualLink   = confirmManualLink;
+        }
+
         function renderOverviewTab() {
             const incompleteTasks = caseTasks.filter(t => !t.completed);
             
@@ -3517,20 +4084,41 @@
                                     <label class="text-sm text-gray-400">Date Closed</label>
                                     <p class="text-white mt-1">${currentCase.dateClosed ? new Date(String(currentCase.dateClosed).slice(0, 10) + 'T00:00').toLocaleDateString() : '<span class="text-gray-500 italic">—</span>'}</p>
                                 </div>
-                                <div>
-                                    <label class="text-sm text-gray-400">Primary Offense</label>
-                                    <p class="text-white mt-1">${currentCase.primaryOffense || '<span class="text-gray-500 italic">Not set</span>'}</p>
-                                </div>
-                                <div>
-                                    <label class="text-sm text-gray-400">Offense Type</label>
-                                    <p class="text-white mt-1">${currentCase.offenseType || '<span class="text-gray-500 italic">Not set</span>'}</p>
-                                </div>
-                                ${currentCase.charges ? `
                                 <div class="col-span-2">
-                                    <label class="text-sm text-gray-400">Charges</label>
-                                    <p class="text-white mt-2 leading-relaxed whitespace-pre-line">${currentCase.charges}</p>
+                                    <label class="text-sm text-gray-400">Offenses</label>
+                                    <div class="text-white mt-2 leading-relaxed">
+                                        ${(() => {
+                                            // Read additional offenses (back-compat: array of strings OR array of {offense,type})
+                                            const rawAdditional = Array.isArray(currentCase.additionalOffenses)
+                                                ? currentCase.additionalOffenses
+                                                : [];
+                                            const additional = rawAdditional.map(item => {
+                                                if (typeof item === 'string') return { offense: String(item).trim(), type: '' };
+                                                return { offense: String(item?.offense || '').trim(), type: String(item?.type || '') };
+                                            }).filter(x => x.offense);
+                                            // Legacy charges fallback
+                                            const legacy = (!additional.length && currentCase.charges)
+                                                ? String(currentCase.charges).split(/\r?\n/).map(s => s.trim()).filter(Boolean).map(o => ({ offense: o, type: '' }))
+                                                : [];
+                                            const extras = additional.length ? additional : legacy;
+                                            if (!currentCase.primaryOffense && !extras.length) {
+                                                return '<span class="text-gray-500 italic">No offenses recorded</span>';
+                                            }
+                                            const typePill = (t) => t
+                                                ? `<span class="px-2 py-0.5 text-xs font-medium rounded bg-gray-700/60 text-gray-300 border border-gray-600 ml-auto whitespace-nowrap">${t}</span>`
+                                                : '';
+                                            const rows = [];
+                                            if (currentCase.primaryOffense) {
+                                                rows.push(`<div class="flex items-center gap-2 mb-1.5"><span class="px-2 py-0.5 text-xs font-semibold rounded bg-viper-cyan/15 text-viper-cyan border border-viper-cyan/40 whitespace-nowrap">Primary</span><span class="flex-1">${currentCase.primaryOffense}</span>${typePill(currentCase.offenseType)}</div>`);
+                                            }
+                                            extras.forEach((o, i) => {
+                                                const n = (currentCase.primaryOffense ? 2 : 1) + i;
+                                                rows.push(`<div class="flex items-center gap-2 mb-1.5"><span class="px-2 py-0.5 text-xs font-semibold rounded bg-gray-700/60 text-gray-300 border border-gray-600 whitespace-nowrap">Offense ${n}</span><span class="flex-1">${o.offense}</span>${typePill(o.type)}</div>`);
+                                            });
+                                            return rows.join('');
+                                        })()}
+                                    </div>
                                 </div>
-                                ` : ''}
                                 ${renderCustomMetricsInline()}
                             </div>
                         </div>
@@ -3570,34 +4158,18 @@
                                     <label class="text-sm text-gray-400 block mb-1">Date Assigned</label>
                                     <input type="date" id="editDateAssigned" value="${currentCase.dateAssigned ? currentCase.dateAssigned.split('T')[0] : ''}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
                                 </div>
-                                <div>
-                                    <label class="text-sm text-gray-400 block mb-1">Primary Offense</label>
-                                    <div class="relative">
-                                        <select id="editPrimaryOffenseSelect" onchange="onPrimaryOffenseSelect(this)" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
-                                            <option value="">— Select from Offense Library —</option>
-                                            <option value="__custom__">✏️ Type custom offense...</option>
-                                        </select>
-                                        <input type="text" id="editPrimaryOffense" value="${currentCase.primaryOffense || ''}" placeholder="e.g. 487(a) PC - Grand Theft" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none mt-2 ${currentCase.primaryOffense ? '' : 'hidden'}">
+                                <div class="col-span-2">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <label class="text-sm text-gray-400">Offenses <span class="text-gray-600">(first row is the primary offense)</span></label>
+                                        <button type="button" onclick="addOffenseRow()" class="px-3 py-1 rounded-lg bg-viper-cyan/10 text-viper-cyan border border-viper-cyan/40 hover:bg-viper-cyan/20 transition text-sm font-medium flex items-center gap-1">
+                                            <span class="text-base leading-none">+</span> Add Offense
+                                        </button>
                                     </div>
-                                </div>
-                                <div>
-                                    <label class="text-sm text-gray-400 block mb-1">Offense Type</label>
-                                    <select id="editOffenseType" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
-                                        <option value="" ${!currentCase.offenseType ? 'selected' : ''}>— Select —</option>
-                                        <option value="Felony" ${currentCase.offenseType==='Felony' ? 'selected' : ''}>Felony</option>
-                                        <option value="Misdemeanor" ${currentCase.offenseType==='Misdemeanor' ? 'selected' : ''}>Misdemeanor</option>
-                                        <option value="Wobbler" ${currentCase.offenseType==='Wobbler' ? 'selected' : ''}>Wobbler</option>
-                                        <option value="Infraction" ${currentCase.offenseType==='Infraction' ? 'selected' : ''}>Infraction</option>
-                                        <option value="Non-Criminal" ${currentCase.offenseType==='Non-Criminal' ? 'selected' : ''}>Non-Criminal</option>
-                                    </select>
+                                    <div id="editOffensesList" class="space-y-2"></div>
                                 </div>
                                 <div class="col-span-2">
                                     <label class="text-sm text-gray-400 block mb-1">Synopsis</label>
                                     <textarea id="editCaseSynopsis" rows="4" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none resize-y">${currentCase.synopsis || ''}</textarea>
-                                </div>
-                                <div class="col-span-2">
-                                    <label class="text-sm text-gray-400 block mb-1">Charges <span class="text-gray-600">(optional)</span></label>
-                                    <textarea id="editCaseCharges" rows="3" placeholder="e.g. 487(a) PC - Grand Theft&#10;496(a) PC - Receiving Stolen Property" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none resize-y">${currentCase.charges || ''}</textarea>
                                 </div>
                             </div>
                             <div class="flex justify-end gap-3 mt-4 pt-4 border-t border-gray-700">
@@ -3650,8 +4222,134 @@
                         </div>`;
                     })()}
 
+                    <!-- Related Cases + Case Tasks (side-by-side, each 50% on lg+, equal height) -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Related Cases (Tier B — auto-detected by shared person) -->
+                    ${(() => {
+                        if (!window.CaseLink || typeof window.CaseLink.getRelatedCases !== 'function') {
+                            return `
+                            <div class="glass-card rounded-xl p-6">
+                                <h3 class="text-xl font-bold flex items-center mb-2">
+                                    <svg class="w-5 h-5 mr-2 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                                    </svg>
+                                    Related Cases
+                                </h3>
+                                <p class="text-sm text-gray-500 italic">Case-link engine not loaded — refresh the page to enable.</p>
+                            </div>`;
+                        }
+                        let related = [];
+                        try { related = window.CaseLink.getRelatedCases(currentCase.id) || []; }
+                        catch (e) { console.warn('[CaseLink] getRelatedCases failed', e); }
+
+                        const totalShared = related.reduce((s, r) => s + r.sharedPersons.length, 0);
+                        const cap = 8;
+                        const shown = related.slice(0, cap);
+                        const more = Math.max(0, related.length - cap);
+
+                        const roleIcon = { suspect: '🚨', victim: '🆘', witness: '👁️', missingPerson: '🚸', manual: '🔗' };
+                        const confClass = {
+                            HIGH:   { bg: 'bg-viper-cyan/10',  text: 'text-viper-cyan',  border: 'border-viper-cyan/30' },
+                            MEDIUM: { bg: 'bg-amber-400/10',   text: 'text-amber-400',   border: 'border-amber-400/30' },
+                            LOW:    { bg: 'bg-gray-500/10',    text: 'text-gray-400',    border: 'border-gray-500/30' },
+                            MANUAL: { bg: 'bg-viper-purple/10', text: 'text-viper-purple', border: 'border-viper-purple/40' },
+                        };
+                        const statusPill = (s) => {
+                            if (!s) return '';
+                            const map = { Active: ['bg-viper-green/15','text-viper-green','border-viper-green/30'],
+                                          Closed: ['bg-gray-600/30','text-gray-300','border-gray-500/30'],
+                                          Inactive: ['bg-amber-400/15','text-amber-400','border-amber-400/30'],
+                                          Pending: ['bg-viper-cyan/15','text-viper-cyan','border-viper-cyan/30'] };
+                            const cls = map[s] || ['bg-gray-700/40','text-gray-400','border-gray-600/30'];
+                            return `<span class="px-2 py-0.5 text-[10px] font-medium rounded ${cls[0]} ${cls[1]} border ${cls[2]} whitespace-nowrap">${s}</span>`;
+                        };
+                        const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+                        const headerMeta = related.length
+                            ? `<span class="ml-3 text-xs font-medium text-gray-400">${related.length} case${related.length !== 1 ? 's' : ''} · ${totalShared} shared person${totalShared !== 1 ? 's' : ''}</span>`
+                            : `<span class="ml-3 text-xs font-medium text-gray-500">No matches found</span>`;
+
+                        const body = related.length ? `
+                            <div class="space-y-2">
+                                ${shown.map(r => `
+                                    <div class="bg-viper-card/40 rounded-lg p-3 border-l-2 border-viper-cyan/40 hover:bg-viper-card/70 hover:border-viper-cyan transition-all cursor-pointer"
+                                         onclick="if(!event.target.closest('[data-cl-action]')){window.location.href='case-detail-with-analytics.html?case=${encodeURIComponent(r.caseNumber)}';}">
+                                        <div class="flex items-start justify-between gap-3 mb-2">
+                                            <div class="flex items-center gap-2 min-w-0 flex-1">
+                                                <span class="text-viper-cyan font-mono text-sm font-bold whitespace-nowrap">${escHtml(r.caseNumber)}</span>
+                                                ${r.caseTitle ? `<span class="text-sm text-gray-300 truncate">${escHtml(r.caseTitle)}</span>` : ''}
+                                                ${statusPill(r.caseStatus)}
+                                            </div>
+                                            <div class="flex items-center gap-2 flex-shrink-0">
+                                                <span class="text-xs text-gray-500 whitespace-nowrap">${r.sharedPersons.length} shared</span>
+                                                <button type="button" data-cl-action="details"
+                                                    onclick="event.stopPropagation(); showCaseLinkDetails('${escHtml(r.caseNumber)}')"
+                                                    class="px-2 py-0.5 text-[10px] font-medium rounded border border-viper-cyan/40 text-viper-cyan bg-viper-cyan/10 hover:bg-viper-cyan/25 transition whitespace-nowrap">
+                                                    Details
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="flex flex-wrap gap-1.5">
+                                            ${r.sharedPersons.slice(0, 6).map(sp => {
+                                                const cc = confClass[sp.confidence] || confClass.LOW;
+                                                const isManual = sp.confidence === 'MANUAL';
+                                                const sameRole = sp.myRole === sp.theirRole;
+                                                const myLabel = (window.CaseLink.ROLE_LABELS || {})[sp.myRole] || sp.myRole;
+                                                const theirLabel = (window.CaseLink.ROLE_LABELS || {})[sp.theirRole] || sp.theirRole;
+                                                const roleStr = isManual
+                                                    ? 'Manual link'
+                                                    : (sameRole ? theirLabel : `${myLabel} → ${theirLabel}`);
+                                                const ico = isManual ? '🔗' : (roleIcon[sp.theirRole] || '');
+                                                return `<span class="inline-flex items-center gap-1.5 px-2 py-1 text-xs rounded ${cc.bg} ${cc.text} border ${cc.border}" title="${escHtml(sp.confidence)} — ${escHtml(roleStr)}${sp.note ? ' · ' + escHtml(sp.note) : ''}">
+                                                    ${ico} <span class="font-medium">${escHtml(sp.name)}</span>
+                                                    <span class="text-[10px] opacity-70">(${escHtml(roleStr)})</span>
+                                                </span>`;
+                                            }).join('')}
+                                            ${r.sharedPersons.length > 6 ? `<span class="text-xs text-gray-500 self-center">+${r.sharedPersons.length - 6} more</span>` : ''}
+                                        </div>
+                                    </div>
+                                `).join('')}
+                                ${more > 0 ? `<div class="text-xs text-gray-500 text-center pt-1">…and ${more} more related case${more !== 1 ? 's' : ''}</div>` : ''}
+                            </div>
+                            <div class="mt-3 text-[11px] text-gray-500 italic">
+                                Cases auto-link when they share a suspect, victim, witness, or missing person. Click a card to open it.
+                            </div>` : `
+                            <div class="bg-viper-card/30 rounded-lg p-6 text-center border border-dashed border-gray-700 flex-1 flex flex-col items-center justify-center">
+                                <svg class="w-10 h-10 text-gray-600 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                                </svg>
+                                <p class="text-sm text-gray-300 font-medium mb-1">No Related Cases found</p>
+                                <p class="text-xs text-gray-500 mb-4">No other cases share a suspect, victim, witness, or missing person with this one.</p>
+                                <button type="button" onclick="rescanRelatedCases()" class="px-4 py-2 rounded-lg bg-viper-cyan/15 hover:bg-viper-cyan/25 border border-viper-cyan/40 text-viper-cyan text-sm font-medium transition inline-flex items-center gap-2">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                                    Rescan
+                                </button>
+                                <p class="text-[11px] text-gray-600 mt-3">Add this person to other cases or import data, then rescan to find links.</p>
+                            </div>`;
+
+                        return `
+                        <div class="glass-card rounded-xl p-6 flex flex-col h-full">
+                            <div class="flex items-center justify-between mb-4">
+                                <h3 class="text-xl font-bold flex items-center">
+                                    <svg class="w-5 h-5 mr-2 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                                    </svg>
+                                    Related Cases
+                                    ${headerMeta}
+                                </h3>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-[10px] text-gray-500 uppercase tracking-wide">Auto-detected</span>
+                                    ${related.length ? `<button type="button" onclick="rescanRelatedCases()" title="Rebuild the index" class="p-1.5 rounded-md bg-viper-card/50 hover:bg-viper-card border border-gray-600 text-gray-400 hover:text-viper-cyan transition">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                                    </button>` : ''}
+                                </div>
+                            </div>
+                            <div class="flex-1 flex flex-col min-h-0">${body}</div>
+                        </div>`;
+                    })()}
+
                     <!-- Case Tasks -->
-                    <div class="glass-card rounded-xl p-6">
+                    <div class="glass-card rounded-xl p-6 flex flex-col h-full">
                         <div class="flex items-center justify-between mb-4">
                             <h3 class="text-xl font-bold flex items-center">
                                 <svg class="w-5 h-5 mr-2 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3664,7 +4362,7 @@
                             </button>
                         </div>
                         
-                        <div id="caseTasksList" class="space-y-3">
+                        <div id="caseTasksList" class="space-y-3 flex-1 ${incompleteTasks.length === 0 ? 'flex flex-col items-center justify-center' : ''}">
                             ${incompleteTasks.length === 0 ? `
                                 <div class="text-center py-8">
                                     <svg class="w-16 h-16 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3694,6 +4392,7 @@
                             }).join('')}
                         </div>
                     </div>
+                    </div><!-- /grid: Related Cases + Case Tasks -->
 
                 </div>
             `;
@@ -5742,6 +6441,14 @@
                 return renderDatapilotEvidenceViewer(evidence);
             }
 
+            // Warrant flag bundles (Discord/Google/Meta/KIK/Snapchat/Aperture)
+            // — generic viewer that iframes the DA-ready report.html.
+            if (evidence.metadata && typeof evidence.metadata.kind === 'string'
+                && evidence.metadata.kind.indexOf('warrant-') === 0
+                && evidence.metadata.bundlePath) {
+                return renderWarrantBundleViewer(evidence);
+            }
+
             // Datapilot Extraction evidence (added via Add New Evidence form):
             // jump to the Datapilot tab and load the referenced extraction.
             if (evidence.type === 'datapilot' && evidence.datapilot && evidence.datapilot.folderPath) {
@@ -5918,6 +6625,359 @@
         //   IPC and lazy-loads thumbnails / full-size media.
         // ──────────────────────────────────────────────────────────────────
         const _datapilotViewerState = { evidence: null, report: null, tab: 'messages', search: '' };
+
+        // ──────────────────────────────────────────────────────────────────
+        // Warrant Bundle Viewer (Discord / Google / Meta / KIK / Snapchat / Aperture)
+        //   Iframes the bundle's self-contained DA-ready report.html.
+        //   The report.html lives at metadata.reportHtmlPath on disk and is
+        //   read via the warrant-read-bundle-file IPC (decrypts if Field
+        //   Security is on) — the result is rendered as a blob:// URL into
+        //   a sandboxed iframe.
+        // ──────────────────────────────────────────────────────────────────
+        // Generic native viewer for warrant flag bundles. State + dispatch
+        // mirrors the Datapilot evidence viewer but is driven entirely by
+        // sectionConfigs from report.json — so Discord, Google, Meta, KIK,
+        // Snapchat, and Aperture all get the same UX for free.
+        const _warrantViewerState = { evidence: null, report: null, tab: null, search: '' };
+
+        // atob() returns a Latin-1 binary string. To get a proper UTF-8
+        // JS string we must walk the bytes into a Uint8Array and let
+        // TextDecoder decode them. This fixes the 💬 → ðŸ'¬ mojibake.
+        function _warrantBytesFromB64(b64) {
+            const bin = atob(b64);
+            const arr = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+            return arr;
+        }
+        function _warrantTextFromB64(b64) {
+            return new TextDecoder('utf-8').decode(_warrantBytesFromB64(b64));
+        }
+
+        async function renderWarrantBundleViewer(evidence) {
+            const loadingOverlay = document.getElementById('evidenceLoadingOverlay');
+            const viewerContent  = document.getElementById('viewerContent');
+            const viewerTitle    = document.getElementById('viewerTitle');
+            const meta = evidence.metadata || {};
+            const moduleLabel = meta.moduleLabel || 'Warrant';
+            viewerTitle.textContent = evidence.tag || `${moduleLabel} Report`;
+            loadingOverlay.classList.remove('hidden');
+
+            const bundlePath = meta.bundlePath;
+            if (!bundlePath || !window.electronAPI || !window.electronAPI.warrantReadBundleFile) {
+                viewerContent.innerHTML = `
+                    <div class="p-6 text-center text-gray-400">
+                        <p class="text-lg">${escHtmlSafe(meta.iconEmoji || '📄')} ${escHtmlSafe(moduleLabel)} bundle not available</p>
+                        <p class="text-sm mt-2">${bundlePath ? 'Desktop API missing' : 'No bundlePath stored on this entry'}.</p>
+                    </div>`;
+                loadingOverlay.classList.add('hidden');
+                return;
+            }
+
+            try {
+                // Load report.json (transparently decrypted by main if needed)
+                const res = await window.electronAPI.warrantReadBundleFile({ bundlePath, relPath: 'report.json' });
+                if (!res || !res.success) throw new Error(res && res.error ? res.error : 'failed to read report.json');
+                const text = _warrantTextFromB64(res.dataBase64);
+                const report = JSON.parse(text);
+
+                _warrantViewerState.evidence = evidence;
+                _warrantViewerState.report = report;
+                _warrantViewerState.search = '';
+                // Default tab = first section that actually has items, else first config
+                const cfgs = Array.isArray(report.sectionConfigs) ? report.sectionConfigs : [];
+                const firstNonEmpty = cfgs.find(c => ((report.counts || {})[c.id] || 0) > 0) || cfgs[0];
+                _warrantViewerState.tab = firstNonEmpty ? firstNonEmpty.id : null;
+
+                _renderWarrantViewerInto(viewerContent);
+            } catch (e) {
+                console.error('Failed to load warrant bundle:', e);
+                viewerContent.innerHTML = `
+                    <div class="p-6 text-center text-red-400">
+                        <p class="text-lg">Failed to load ${escHtmlSafe(moduleLabel)} bundle</p>
+                        <p class="text-sm mt-2">${escHtmlSafe((e && e.message) || e)}</p>
+                    </div>`;
+            } finally {
+                loadingOverlay.classList.add('hidden');
+            }
+        }
+
+        function _renderWarrantViewerInto(container) {
+            const { evidence, report, tab } = _warrantViewerState;
+            if (!report) return;
+            const meta = evidence.metadata || {};
+            const counts = report.counts || {};
+            const cfgs = Array.isArray(report.sectionConfigs) ? report.sectionConfigs : [];
+            const icon = meta.iconEmoji || '📄';
+            const moduleLabel = report.moduleLabel || meta.moduleLabel || 'Warrant';
+
+            const subjectInfo = report.subjectInfo || meta.subjectInfo || {};
+            const subjectEntries = Object.entries(subjectInfo).filter(([_, v]) => v != null && v !== '');
+            const subjectGrid = subjectEntries.length ? `
+                <div class="grid gap-2 mt-2" style="grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));">
+                    ${subjectEntries.map(([k, v]) => `
+                        <div class="min-w-0">
+                            <div class="text-[10px] uppercase tracking-wider text-gray-500">${escHtmlSafe(k)}</div>
+                            <div class="text-xs text-gray-200 font-medium truncate" title="${escHtmlSafe(v)}">${escHtmlSafe(v)}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : '';
+
+            const tabBtn = (cfg) => {
+                const c = counts[cfg.id] || 0;
+                const active = tab === cfg.id;
+                return `
+                    <button data-warrant-tab="${escHtmlSafe(cfg.id)}"
+                            class="px-4 py-2 text-sm font-semibold transition-colors border-b-2 whitespace-nowrap
+                            ${active ? 'text-viper-cyan border-viper-cyan' : 'text-gray-400 border-transparent hover:text-gray-200'}">
+                        ${escHtmlSafe((cfg.icon ? cfg.icon + ' ' : '') + (cfg.title || cfg.id))} <span class="text-xs opacity-70">(${c})</span>
+                    </button>
+                `;
+            };
+
+            const sub = [
+                report.bundleLabel || report.bundleId || '',
+                report.source && report.source.fileName ? `Source: ${report.source.fileName}` : '',
+                report.generatedAt ? `Generated ${_wvFmtDate(report.generatedAt)}` : ''
+            ].filter(Boolean).map(escHtmlSafe).join(' · ');
+
+            container.innerHTML = `
+                <div class="flex flex-col h-full">
+                    <div class="px-4 py-3 border-b border-white/10 bg-black/30">
+                        <div class="flex items-start justify-between gap-3 flex-wrap">
+                            <div class="flex-1 min-w-0">
+                                <div class="text-base font-bold text-viper-cyan truncate">${escHtmlSafe(icon)} ${escHtmlSafe(evidence.tag || moduleLabel + ' Report')}</div>
+                                <div class="text-xs text-gray-400 mt-1">${sub}</div>
+                                ${subjectGrid}
+                            </div>
+                            <div class="flex gap-2 items-center flex-wrap">
+                                <button id="warrant-ev-open-report" class="px-3 py-1.5 text-xs font-semibold rounded border border-viper-cyan/40 text-viper-cyan hover:bg-viper-cyan/10">
+                                    📄 Open DA-ready HTML report
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex border-b border-white/10 bg-black/20 overflow-x-auto">
+                        ${cfgs.map(tabBtn).join('')}
+                    </div>
+                    <div id="warrant-ev-tab-body" class="flex-1 overflow-auto p-4 bg-black/10"></div>
+                </div>
+            `;
+
+            // Wire tabs
+            container.querySelectorAll('[data-warrant-tab]').forEach(b => {
+                b.onclick = () => {
+                    _warrantViewerState.tab = b.dataset.warrantTab;
+                    _warrantViewerState.search = '';
+                    _renderWarrantViewerInto(container);
+                };
+            });
+
+            // Wire "Open report" → standalone window with the saved HTML
+            const openBtn = container.querySelector('#warrant-ev-open-report');
+            if (openBtn) {
+                openBtn.onclick = async () => {
+                    try {
+                        const r = await window.electronAPI.warrantReadBundleFile({
+                            bundlePath: meta.bundlePath, relPath: 'report.html'
+                        });
+                        if (!r || !r.success) throw new Error(r && r.error || 'read failed');
+                        // Use Uint8Array (not raw atob string) so the Blob
+                        // preserves UTF-8 bytes exactly.
+                        const bytes = _warrantBytesFromB64(r.dataBase64);
+                        const blob = new Blob([bytes], { type: 'text/html;charset=utf-8' });
+                        window.open(URL.createObjectURL(blob), '_blank');
+                    } catch (e) {
+                        if (typeof showToast === 'function') showToast('Failed to open report: ' + e.message, 'error');
+                    }
+                };
+            }
+
+            // Render active tab body
+            const body = container.querySelector('#warrant-ev-tab-body');
+            const cfg = cfgs.find(c => c.id === tab);
+            if (!cfg) {
+                body.innerHTML = `<div class="text-center text-gray-500 py-12">No section selected.</div>`;
+                return;
+            }
+            const items = Array.isArray(report.sections && report.sections[cfg.id]) ? report.sections[cfg.id] : [];
+            _renderWarrantSection(body, cfg, items);
+        }
+
+        function _wvEsc(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+        function _wvFmtDate(s) {
+            if (!s) return '';
+            try { const d = new Date(s); if (!isNaN(d)) return d.toLocaleString(); } catch (_) {}
+            return s;
+        }
+        function _wvFmtCell(val, type) {
+            if (val == null || val === '') return '<span class="text-gray-600">—</span>';
+            if (Array.isArray(val)) return val.map(v => _wvEsc(v)).join('<br>');
+            if (type === 'date') return _wvEsc(_wvFmtDate(val));
+            if (type === 'mono') return `<code class="text-[11px] bg-black/40 px-1.5 py-0.5 rounded text-gray-300">${_wvEsc(val)}</code>`;
+            if (type === 'longtext') {
+                return `<div class="whitespace-pre-wrap break-words max-w-[600px] text-gray-200">${_wvEsc(val).replace(/\n/g, '<br>')}</div>`;
+            }
+            if (type === 'pre') {
+                let s = val;
+                if (typeof s !== 'string') {
+                    try { s = JSON.stringify(s, null, 2); } catch(_) { s = String(s); }
+                }
+                return `<pre class="bg-black/40 p-2 rounded text-[11px] text-gray-300 max-h-60 overflow-auto whitespace-pre-wrap break-words">${_wvEsc(s)}</pre>`;
+            }
+            return _wvEsc(val);
+        }
+
+        function _renderWarrantSection(body, cfg, items) {
+            if (!items.length) {
+                body.innerHTML = `<div class="text-center text-gray-500 py-12">${_wvEsc(cfg.emptyText || 'No items flagged.')}</div>`;
+                return;
+            }
+            const cols = Array.isArray(cfg.columns) ? cfg.columns : [];
+            const hint = cfg.renderHint || (cols.length ? 'table' : 'pre');
+
+            if (hint === 'messages') {
+                _renderWarrantMessages(body, cfg, items, cols);
+                return;
+            }
+            if (hint === 'cards') {
+                _renderWarrantCards(body, cfg, items, cols);
+                return;
+            }
+            if (hint === 'pre') {
+                body.innerHTML = items.map(item =>
+                    `<pre class="bg-black/40 p-3 rounded mb-2 text-[11px] text-gray-300 whitespace-pre-wrap break-words">${_wvEsc(JSON.stringify(item, null, 2))}</pre>`
+                ).join('');
+                return;
+            }
+            // default: table
+            _renderWarrantTable(body, cfg, items, cols);
+        }
+
+        function _wvAttachmentKind(url) {
+            const path = String(url).split('?')[0].toLowerCase();
+            const m = path.match(/\.([a-z0-9]+)$/);
+            const ext = m ? m[1] : '';
+            if (['jpg','jpeg','png','gif','webp','bmp','svg','heic','heif','avif'].includes(ext)) return 'image';
+            if (['mp4','webm','mov','m4v','mkv','avi'].includes(ext)) return 'video';
+            if (['mp3','wav','ogg','m4a','aac','flac','opus'].includes(ext)) return 'audio';
+            return 'link';
+        }
+        function _wvRenderAttachments(txt) {
+            const s = String(txt || '');
+            const urls = s.split(/\s+/).filter(Boolean).filter(u => /^https?:\/\//i.test(u));
+            if (!urls.length) return '';
+            return `<div class="mt-2 pt-2 border-t border-dashed border-white/10 flex flex-wrap gap-2">` +
+                urls.map(u => {
+                    const kind = _wvAttachmentKind(u);
+                    const safe = _wvEsc(u);
+                    const fname = (u.split('?')[0].split('/').pop()) || u;
+                    const fnameSafe = _wvEsc(fname);
+                    if (kind === 'image') {
+                        return `
+                            <div class="bg-black/40 border border-white/10 rounded p-1.5 max-w-[280px]">
+                                <a href="${safe}" target="_blank" rel="noopener">
+                                    <img src="${safe}" alt="${fnameSafe}" loading="lazy"
+                                         class="block max-w-full max-h-[200px] rounded bg-black/50"
+                                         onerror="this.parentNode.parentNode.classList.add('opacity-50');this.replaceWith(Object.assign(document.createElement('div'),{className:'text-[11px] text-red-300 p-2',textContent:'⚠️ Could not load image'}));" />
+                                </a>
+                                <div class="mt-1 text-[10px] text-gray-400 break-all">📎 <a href="${safe}" target="_blank" rel="noopener" class="text-cyan-300 hover:underline">${fnameSafe}</a></div>
+                            </div>`;
+                    }
+                    if (kind === 'video') {
+                        return `
+                            <div class="bg-black/40 border border-white/10 rounded p-1.5 max-w-[320px]">
+                                <video controls preload="metadata" src="${safe}" class="block w-full max-h-[220px] rounded bg-black"
+                                       onerror="this.parentNode.classList.add('opacity-50');"></video>
+                                <div class="mt-1 text-[10px] text-gray-400 break-all">🎬 <a href="${safe}" target="_blank" rel="noopener" class="text-cyan-300 hover:underline">${fnameSafe}</a></div>
+                            </div>`;
+                    }
+                    if (kind === 'audio') {
+                        return `
+                            <div class="bg-black/40 border border-white/10 rounded p-1.5 max-w-[320px]">
+                                <audio controls preload="metadata" src="${safe}" class="block w-full" style="height:36px"
+                                       onerror="this.parentNode.classList.add('opacity-50');"></audio>
+                                <div class="mt-1 text-[10px] text-gray-400 break-all">🔊 <a href="${safe}" target="_blank" rel="noopener" class="text-cyan-300 hover:underline">${fnameSafe}</a></div>
+                            </div>`;
+                    }
+                    return `<div class="bg-black/40 border border-white/10 rounded px-2 py-1.5 text-xs text-gray-300 break-all">📎 <a href="${safe}" target="_blank" rel="noopener" class="text-cyan-300 hover:underline">${fnameSafe}</a></div>`;
+                }).join('') + `</div>`;
+        }
+
+        function _renderWarrantMessages(body, cfg, items, cols) {
+            const timeF   = (cols.find(c => c.type === 'date') || {}).field;
+            const authorF = (cols.find(c => /author|from|sender|address/i.test((c.label || '') + ' ' + (c.field || ''))) || {}).field;
+            const bodyF   = (cols.find(c => c.type === 'longtext') || cols[cols.length-1] || {}).field;
+            const idF     = (cols.find(c => /id$/i.test(c.field || '')) || {}).field;
+            const attachF = (cols.find(c => /attach/i.test((c.label || '') + ' ' + (c.field || ''))) || {}).field;
+
+            // Group by date for readability
+            const groups = [];
+            let cur = null;
+            for (const m of items) {
+                const t = timeF ? m[timeF] : '';
+                const dKey = (t && String(t).split('T')[0]) || 'Unknown';
+                if (!cur || cur.date !== dKey) { cur = { date: dKey, items: [] }; groups.push(cur); }
+                cur.items.push(m);
+            }
+            body.innerHTML = groups.map(g => `
+                <div class="text-center text-[10px] uppercase tracking-wider text-gray-500 my-3">${_wvEsc(g.date)}</div>
+                ${g.items.map(item => `
+                    <div class="my-2 bg-cyan-900/15 border border-cyan-500/30 border-l-4 border-l-cyan-500 rounded-lg p-3">
+                        <div class="flex items-baseline gap-2 text-[10px] mb-1 flex-wrap">
+                            ${authorF ? `<span class="font-bold text-cyan-300">${_wvEsc(item[authorF] || '')}</span>` : ''}
+                            ${timeF ? `<span class="ml-auto text-gray-400">${_wvEsc(_wvFmtDate(item[timeF]))}</span>` : ''}
+                            ${idF ? `<span class="text-gray-500"><code class="bg-black/40 px-1.5 py-0.5 rounded text-gray-400">${_wvEsc(item[idF] || '')}</code></span>` : ''}
+                        </div>
+                        <div class="text-sm text-gray-100 whitespace-pre-wrap break-words">${(item[bodyF] != null && item[bodyF] !== '') ? _wvEsc(item[bodyF]).replace(/\n/g, '<br>') : '<em class="text-gray-500">(no body)</em>'}</div>
+                        ${attachF && item[attachF] ? _wvRenderAttachments(item[attachF]) : ''}
+                    </div>
+                `).join('')}
+            `).join('');
+        }
+
+        function _renderWarrantCards(body, cfg, items, cols) {
+            body.innerHTML = `
+                <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
+                    ${items.map(item => `
+                        <div class="bg-black/30 border border-white/10 rounded-lg p-3 hover:border-viper-cyan/40 transition-colors">
+                            ${cols.map(c => {
+                                const v = item[c.field];
+                                if (v == null || v === '') return '';
+                                return `
+                                    <div class="flex gap-2 py-1 border-b border-white/5 last:border-b-0 text-xs">
+                                        <div class="font-semibold text-gray-500 uppercase text-[10px] tracking-wider min-w-[110px]">${_wvEsc(c.label)}</div>
+                                        <div class="flex-1 break-words text-gray-200">${_wvFmtCell(v, c.type)}</div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function _renderWarrantTable(body, cfg, items, cols) {
+            const head = cols.map(c => `<th class="text-left p-2 text-[10px] uppercase tracking-wider text-gray-500 border-b border-white/10 bg-black/40">${_wvEsc(c.label)}</th>`).join('');
+            const rows = items.map(item =>
+                `<tr class="border-b border-white/5 hover:bg-white/5">${cols.map(c => `<td class="p-2 text-xs text-gray-200 align-top">${_wvFmtCell(item[c.field], c.type)}</td>`).join('')}</tr>`
+            ).join('');
+            body.innerHTML = `
+                <div class="overflow-auto">
+                    <table class="w-full"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>
+                </div>
+            `;
+        }
+
+        function escHtmlSafe(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
 
         async function renderDatapilotEvidenceViewer(evidence) {
             const loadingOverlay = document.getElementById('evidenceLoadingOverlay');
@@ -7560,6 +8620,7 @@
         
         function saveSuspects() {
             localStorage.setItem(`suspects_${currentCase.id}`, JSON.stringify(suspects));
+            try { window.CaseLink && window.CaseLink.invalidateIndex(); } catch (_) {}
         }
         
         function renderSuspectsTab() {
@@ -8704,6 +9765,17 @@
             
             document.body.appendChild(modal);
             
+            // A-4: live duplicate-person hints — surface existing matches as the user types
+            try {
+                const fEl = document.getElementById('suspectForm');
+                if (fEl && window.CaseLink && typeof window.CaseLink.attachInputSuggest === 'function') {
+                    window.CaseLink.attachInputSuggest(fEl, {
+                        currentCaseId: currentCase && currentCase.id,
+                        role: 'suspect',
+                    });
+                }
+            } catch (_) {}
+
             document.getElementById('suspectForm').onsubmit = (e) => {
                 e.preventDefault();
                 const formData = new FormData(e.target);
@@ -8744,6 +9816,175 @@
             };
         }
         
+        // ============================================================
+        // Shared people-module identifier display
+        // Used by Victim + Other Individual detail views (Suspect has its
+        // own richer UI). Read-only with delete + ARIN lookup.
+        // ============================================================
+        function renderPeopleIdentifiersSection(record, kind, index) {
+            // kind: 'victim' | 'other'
+            const items = Array.isArray(record.identifiers) ? record.identifiers : [];
+            const headerColor = kind === 'victim' ? 'text-viper-purple' : 'text-indigo-400';
+            const addBtn = `<button onclick="addPersonIdentifierInline('${kind}', ${index})" class="px-3 py-1 bg-${kind === 'victim' ? 'viper-purple' : 'indigo-500'}/20 hover:bg-${kind === 'victim' ? 'viper-purple' : 'indigo-500'}/30 border border-${kind === 'victim' ? 'viper-purple' : 'indigo-500'} rounded-lg ${headerColor} text-sm transition">+ Add Identifier</button>`;
+            if (!items.length) {
+                return `
+                <div class="glass-card rounded-xl p-5">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-lg font-bold ${headerColor}">Identifiers</h3>
+                        ${addBtn}
+                    </div>
+                    <p class="text-gray-500 text-sm">No identifiers added. Push from CyberTip module or click "+ Add Identifier".</p>
+                </div>`;
+            }
+            const typeColors = { email: 'viper-cyan', phone: 'viper-orange', username: 'viper-purple', ip: 'yellow-400', ssn: 'red-400', dl: 'amber-400' };
+            const typeIcons = { email: '📧', phone: '📱', username: '👤', ip: '🌐', ssn: '🔒', dl: '🪪' };
+            const rowsHtml = items.map((ident, iIdx) => {
+                const color = typeColors[ident.type] || 'gray-400';
+                const icon = typeIcons[ident.type] || '🔗';
+                const sourceBadge = ident.source ? `<span class="px-1.5 py-0.5 rounded text-[10px] bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">via ${escHtmlSafe(ident.source)}</span>` : '';
+                const platformBadge = ident.platform ? `<span class="px-1.5 py-0.5 rounded text-[10px] bg-viper-purple/20 text-viper-purple border border-viper-purple/40">${escHtmlSafe(ident.platform)}</span>` : '';
+                const providerBadge = ident.provider ? `<span class="px-1.5 py-0.5 rounded text-[10px] bg-green-500/20 text-green-400 border border-green-500/40">ISP: ${escHtmlSafe(ident.provider)}</span>` : '';
+                const arinBtn = ident.type === 'ip' ? `<button onclick="arinLookupPersonIdent('${kind}', ${index}, ${iIdx})" class="px-2 py-1 bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500 rounded text-yellow-400 text-xs transition" title="ARIN WHOIS Lookup">🌐 ARIN</button>` : '';
+                return `
+                <div class="bg-gradient-to-r from-${color}/10 to-transparent border border-${color}/20 rounded-lg p-3 flex items-center justify-between gap-3">
+                    <div class="flex items-center gap-3 flex-1 min-w-0 flex-wrap">
+                        <span class="text-lg">${icon}</span>
+                        <span class="px-2 py-0.5 rounded text-xs font-semibold bg-${color}/20 text-${color} border border-${color}/40 uppercase">${escHtmlSafe(ident.type)}</span>
+                        ${platformBadge}
+                        <span class="text-white font-medium break-all">${escHtmlSafe(ident.value)}</span>
+                        ${providerBadge}
+                        ${sourceBadge}
+                    </div>
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                        ${arinBtn}
+                        <button onclick="removePersonIdentifier('${kind}', ${index}, ${iIdx})" class="text-red-500 hover:text-red-400 p-1" title="Remove">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+                </div>`;
+            }).join('');
+            return `
+            <div class="glass-card rounded-xl p-5">
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="text-lg font-bold ${headerColor}">Identifiers <span class="text-xs font-normal text-gray-500">(${items.length})</span></h3>
+                    ${addBtn}
+                </div>
+                <div class="space-y-2">${rowsHtml}</div>
+            </div>`;
+        }
+
+        function _ppGetList(kind) {
+            if (kind === 'victim') return { storageKey: `victims_${currentCase.id}`, ref: 'victims' };
+            if (kind === 'other') return { storageKey: `involvedPersons_${currentCase.id}`, ref: 'involvedPersons' };
+            return null;
+        }
+
+        function _ppLoadAndGet(kind, index) {
+            const meta = _ppGetList(kind);
+            if (!meta) return null;
+            const records = JSON.parse(localStorage.getItem(meta.storageKey) || '[]');
+            const target = records[index];
+            if (!target) return null;
+            return { meta, records, target };
+        }
+
+        function _ppSave(kind, records) {
+            const meta = _ppGetList(kind);
+            if (!meta) return;
+            localStorage.setItem(meta.storageKey, JSON.stringify(records));
+            // Refresh in-memory array
+            try {
+                if (kind === 'victim' && typeof victims !== 'undefined') victims = records;
+                else if (kind === 'other' && typeof involvedPersons !== 'undefined') involvedPersons = records;
+            } catch (_) {}
+        }
+
+        function _ppRerender(kind) {
+            if (kind === 'victim') renderTabContent('victims');
+            else if (kind === 'other') renderTabContent('involvedPersons');
+        }
+
+        function removePersonIdentifier(kind, index, iIdx) {
+            const r = _ppLoadAndGet(kind, index);
+            if (!r) return;
+            if (!Array.isArray(r.target.identifiers)) return;
+            r.target.identifiers.splice(iIdx, 1);
+            _ppSave(kind, r.records);
+            _ppRerender(kind);
+            showToast('Identifier removed', 'success');
+        }
+
+        async function arinLookupPersonIdent(kind, index, iIdx) {
+            const r = _ppLoadAndGet(kind, index);
+            if (!r) return;
+            const ident = r.target.identifiers?.[iIdx];
+            if (!ident) return;
+            showToast(`Looking up ${ident.value}...`, 'info');
+            try {
+                const result = await window.electronAPI.arinLookup(ident.value);
+                if (result.success && result.provider) {
+                    ident.provider = result.provider;
+                    _ppSave(kind, r.records);
+                    _ppRerender(kind);
+                    showToast(`ISP: ${result.provider}${result.network ? ' | Network: ' + result.network : ''}${result.netRange ? ' | Range: ' + result.netRange : ''}`, 'success');
+                } else {
+                    showToast(result.error || 'ARIN lookup failed', 'error');
+                }
+            } catch (e) {
+                showToast('ARIN lookup error: ' + e.message, 'error');
+            }
+        }
+
+        function addPersonIdentifierInline(kind, index) {
+            const r = _ppLoadAndGet(kind, index);
+            if (!r) return;
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4';
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+            modal.innerHTML = `
+                <div class="glass-card rounded-xl p-6 max-w-md w-full" onclick="event.stopPropagation()">
+                    <h3 class="text-xl font-bold text-white mb-4">Add Identifier</h3>
+                    <form id="addPersonIdentForm" class="space-y-4">
+                        <select name="type" id="ppIdentTypeSelect" onchange="document.getElementById('ppIdentPlatformRow').style.display = this.value === 'username' ? 'block' : 'none'" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
+                            <option value="email">Email</option>
+                            <option value="phone">Phone</option>
+                            <option value="username">Username</option>
+                            <option value="ip">IP Address</option>
+                            <option value="dl">Driver's License</option>
+                            <option value="ssn">SSN</option>
+                        </select>
+                        <div id="ppIdentPlatformRow" style="display:none;">
+                            <input type="text" name="platform" placeholder="Platform (e.g. Snapchat, Instagram, Discord)" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
+                        </div>
+                        <input type="text" name="value" placeholder="Value" required class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
+                        <div class="flex justify-end gap-3">
+                            <button type="button" onclick="this.closest('.fixed').remove()" class="px-4 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white transition">Cancel</button>
+                            <button type="submit" class="px-4 py-2 bg-viper-cyan hover:bg-viper-cyan/80 rounded-lg text-black font-semibold transition">Add</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            document.getElementById('addPersonIdentForm').onsubmit = (e) => {
+                e.preventDefault();
+                const fd = new FormData(e.target);
+                const type = fd.get('type');
+                const value = String(fd.get('value') || '').trim();
+                if (!value) return;
+                if (!Array.isArray(r.target.identifiers)) r.target.identifiers = [];
+                const ident = { type, value, provider: '' };
+                if (type === 'username') {
+                    const platform = fd.get('platform');
+                    if (platform) ident.platform = platform;
+                }
+                r.target.identifiers.push(ident);
+                _ppSave(kind, r.records);
+                modal.remove();
+                _ppRerender(kind);
+                showToast(`Added ${type}: ${value}`, 'success');
+            };
+        }
+
         function addSuspectIdentifierRow() {
             const list = document.getElementById('suspectIdentifiersList');
             if (!list) return;
@@ -9580,6 +10821,7 @@
         
         function saveVictims() {
             localStorage.setItem(`victims_${currentCase.id}`, JSON.stringify(victims));
+            try { window.CaseLink && window.CaseLink.invalidateIndex(); } catch (_) {}
         }
         
         function renderVictimsTab() {
@@ -9747,6 +10989,9 @@
                                 </div>
                             </div>
                         </div>
+                        
+                        <!-- Identifiers -->
+                        ${renderPeopleIdentifiersSection(victim, 'victim', index)}
                         
                         <!-- Address Information -->
                         <div class="glass-card rounded-xl p-6">
@@ -10081,6 +11326,17 @@
             
             document.body.appendChild(modal);
             
+            // A-4: live duplicate-person hints
+            try {
+                const fEl = document.getElementById('victimForm');
+                if (fEl && window.CaseLink && typeof window.CaseLink.attachInputSuggest === 'function') {
+                    window.CaseLink.attachInputSuggest(fEl, {
+                        currentCaseId: currentCase && currentCase.id,
+                        role: 'victim',
+                    });
+                }
+            } catch (_) {}
+
             document.getElementById('victimForm').onsubmit = (e) => {
                 e.preventDefault();
                 const formData = new FormData(e.target);
@@ -11770,6 +13026,7 @@
         
         function saveWitnesses() {
             localStorage.setItem(`witnesses_${currentCase.id}`, JSON.stringify(witnesses));
+            try { window.CaseLink && window.CaseLink.invalidateIndex(); } catch (_) {}
         }
         
         function renderWitnessesTab() {
@@ -12192,6 +13449,17 @@
             
             document.body.appendChild(modal);
             
+            // A-4: live duplicate-person hints
+            try {
+                const fEl = document.getElementById('witnessForm');
+                if (fEl && window.CaseLink && typeof window.CaseLink.attachInputSuggest === 'function') {
+                    window.CaseLink.attachInputSuggest(fEl, {
+                        currentCaseId: currentCase && currentCase.id,
+                        role: 'witness',
+                    });
+                }
+            } catch (_) {}
+
             document.getElementById('witnessForm').onsubmit = (e) => {
                 e.preventDefault();
                 const formData = new FormData(e.target);
@@ -12759,6 +14027,9 @@
                                 </div>
                             </div>
                         </div>
+
+                        <!-- Identifiers -->
+                        ${renderPeopleIdentifiersSection(person, 'other', index)}
 
                         <!-- Address Information -->
                         <div class="glass-card rounded-xl p-6">
@@ -13805,6 +15076,7 @@
 
         function saveMissingPersons() {
             localStorage.setItem(`missingpersons_${currentCase.id}`, JSON.stringify(missingPersons));
+            try { window.CaseLink && window.CaseLink.invalidateIndex(); } catch (_) {}
         }
 
         function renderMissingPersonsTab() {
@@ -14853,6 +16125,24 @@
             `;
             
             document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+            // A-4: live duplicate-person hints (Missing Person uses mp_name / mp_dob)
+            try {
+                const modalEl = document.getElementById('missingPersonModal');
+                const formEl = modalEl ? modalEl.querySelector('form') : null;
+                const nameEl = document.getElementById('mp_name');
+                const dobEl  = document.getElementById('mp_dob');
+                if (formEl && nameEl && window.CaseLink && typeof window.CaseLink.attachInputSuggest === 'function') {
+                    // Insert hint above the first child of the form so it shows at the top
+                    window.CaseLink.attachInputSuggest(formEl, {
+                        currentCaseId: currentCase && currentCase.id,
+                        role: 'missingPerson',
+                        nameInput: nameEl,
+                        dobInput: dobEl,
+                        insertBefore: formEl.firstElementChild,
+                    });
+                }
+            } catch (_) {}
         }
 
         function previewMissingPersonPhoto(input) {
@@ -23297,7 +24587,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 readMode.classList.add('hidden');
                 editMode.classList.remove('hidden');
                 btn.classList.add('hidden');
-                populatePrimaryOffenseDropdown();
+                populateOffensesEditor();
             }
         }
 
@@ -23307,12 +24597,11 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             document.getElementById('overviewEditBtn').classList.remove('hidden');
         }
 
-        function populatePrimaryOffenseDropdown() {
-            const sel = document.getElementById('editPrimaryOffenseSelect');
-            const input = document.getElementById('editPrimaryOffense');
-            if (!sel) return;
+        // ─── Unified Offenses Editor ───────────────────────────────────────────
+        const _OFFENSE_TYPES = ['Felony', 'Misdemeanor', 'Wobbler', 'Infraction', 'Non-Criminal'];
+
+        function _offenseLibraryOptionsHtml(currentValue) {
             const offenses = JSON.parse(localStorage.getItem('viperOffenseReference') || '[]');
-            // Rebuild options
             let html = '<option value="">— Select from Offense Library —</option>';
             if (offenses.length > 0) {
                 const grouped = {};
@@ -23325,35 +24614,149 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     html += `<optgroup label="${type}">`;
                     grouped[type].forEach(o => {
                         const val = `${o.code} - ${o.description}`;
-                        html += `<option value="${val}" data-type="${o.type}">${o.code} — ${o.description}</option>`;
+                        const sel = (val === currentValue) ? ' selected' : '';
+                        html += `<option value="${val.replace(/"/g,'&quot;')}" data-type="${o.type || ''}"${sel}>${o.code} — ${o.description}</option>`;
                     });
                     html += '</optgroup>';
                 });
             }
-            html += '<option value="__custom__">✏️ Type custom offense...</option>';
-            sel.innerHTML = html;
-
-            // Pre-select current value if it matches
-            const cur = currentCase.primaryOffense || '';
-            if (cur) {
-                let matched = false;
-                for (const opt of sel.options) {
-                    if (opt.value === cur) { opt.selected = true; matched = true; break; }
-                }
-                if (!matched) {
-                    // Current value is custom text
-                    sel.value = '__custom__';
-                    input.classList.remove('hidden');
-                } else {
-                    input.value = cur;
-                    input.classList.add('hidden');
-                }
-            }
+            // Mark __custom__ selected when current value isn't in the library
+            const inLibrary = offenses.some(o => `${o.code} - ${o.description}` === currentValue);
+            const customSel = (currentValue && !inLibrary) ? ' selected' : '';
+            html += `<option value="__custom__"${customSel}>✏️ Type custom offense...</option>`;
+            return html;
         }
 
-        function onPrimaryOffenseSelect(sel) {
-            const input = document.getElementById('editPrimaryOffense');
-            const typeSelect = document.getElementById('editOffenseType');
+        function _offenseTypeOptionsHtml(currentType) {
+            let html = `<option value="" ${!currentType ? 'selected' : ''}>— Type —</option>`;
+            _OFFENSE_TYPES.forEach(t => {
+                html += `<option value="${t}"${currentType === t ? ' selected' : ''}>${t}</option>`;
+            });
+            return html;
+        }
+
+        function _offenseRowHtml(idx, value, type) {
+            const isPrimary = idx === 0;
+            const label = isPrimary ? 'Primary Offense' : `Offense ${idx + 1}`;
+            const offenses = JSON.parse(localStorage.getItem('viperOffenseReference') || '[]');
+            const inLibrary = offenses.some(o => `${o.code} - ${o.description}` === value);
+            const showInput = !!(value && !inLibrary);
+            const escVal = (value || '').replace(/"/g, '&quot;');
+            const removeBtn = isPrimary
+                ? '<div class="w-9 flex-shrink-0"></div>'
+                : `<button type="button" onclick="removeOffenseRow(this)" class="w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-lg bg-red-500/10 border border-red-500/40 text-red-400 hover:bg-red-500/20 transition text-lg leading-none mt-5" title="Remove offense">−</button>`;
+            return `
+            <div class="offense-row flex items-start gap-2" data-idx="${idx}">
+                <div class="flex-1 min-w-0">
+                    <label class="text-xs text-gray-500 block mb-1 ${isPrimary ? 'text-viper-cyan' : ''}">${label}</label>
+                    <select class="offense-select w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" onchange="onOffenseRowSelect(this)">
+                        ${_offenseLibraryOptionsHtml(value)}
+                    </select>
+                    <input type="text" class="offense-input w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none mt-2 ${showInput ? '' : 'hidden'}" placeholder="Type custom offense..." value="${escVal}">
+                </div>
+                <div class="w-44 flex-shrink-0">
+                    <label class="text-xs text-gray-500 block mb-1">Type</label>
+                    <select class="offense-type-select w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none">
+                        ${_offenseTypeOptionsHtml(type)}
+                    </select>
+                </div>
+                ${removeBtn}
+            </div>`;
+        }
+
+        // Accepts mixed shapes for back-compat:
+        //   string                 → { offense, type: '' }
+        //   { offense, type }      → as-is
+        function _normalizeOffenseEntry(item, fallbackType) {
+            if (item == null) return null;
+            if (typeof item === 'string') {
+                const v = item.trim();
+                if (!v) return null;
+                return { offense: v, type: fallbackType || '' };
+            }
+            const offense = String(item.offense || '').trim();
+            if (!offense) return null;
+            return { offense, type: String(item.type || fallbackType || '') };
+        }
+
+        function populateOffensesEditor() {
+            const list = document.getElementById('editOffensesList');
+            if (!list) return;
+            // Build initial values: primary first, then additional, with legacy `charges` migration
+            const rows = [];
+            if (currentCase.primaryOffense || currentCase.offenseType) {
+                rows.push({ offense: currentCase.primaryOffense || '', type: currentCase.offenseType || '' });
+            } else {
+                rows.push({ offense: '', type: '' });
+            }
+            const extraSrc = Array.isArray(currentCase.additionalOffenses) ? currentCase.additionalOffenses : [];
+            extraSrc.forEach(item => {
+                const norm = _normalizeOffenseEntry(item, '');
+                if (norm) rows.push(norm);
+            });
+            // Legacy migration: split "charges" textarea on newline (only when no additionalOffenses present)
+            if (extraSrc.length === 0 && currentCase.charges) {
+                String(currentCase.charges).split(/\r?\n/).map(s => s.trim()).filter(Boolean).forEach(line => {
+                    rows.push({ offense: line, type: '' });
+                });
+            }
+            list.innerHTML = rows.map((r, i) => _offenseRowHtml(i, r.offense, r.type)).join('');
+        }
+
+        function _renumberOffenseRows() {
+            const list = document.getElementById('editOffensesList');
+            if (!list) return;
+            const rows = list.querySelectorAll('.offense-row');
+            rows.forEach((row, i) => {
+                row.dataset.idx = i;
+                const lbl = row.querySelector('label');
+                if (lbl) {
+                    if (i === 0) {
+                        lbl.textContent = 'Primary Offense';
+                        lbl.classList.add('text-viper-cyan');
+                    } else {
+                        lbl.textContent = `Offense ${i + 1}`;
+                        lbl.classList.remove('text-viper-cyan');
+                    }
+                }
+                // Toggle remove button: primary has spacer div, others have button
+                const tail = row.lastElementChild;
+                if (tail) {
+                    const isSpacer = tail.tagName === 'DIV';
+                    if (i === 0 && !isSpacer) {
+                        tail.outerHTML = '<div class="w-9 flex-shrink-0"></div>';
+                    } else if (i !== 0 && isSpacer) {
+                        tail.outerHTML = `<button type="button" onclick="removeOffenseRow(this)" class="w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-lg bg-red-500/10 border border-red-500/40 text-red-400 hover:bg-red-500/20 transition text-lg leading-none mt-5" title="Remove offense">−</button>`;
+                    }
+                }
+            });
+        }
+
+        function addOffenseRow() {
+            const list = document.getElementById('editOffensesList');
+            if (!list) return;
+            const idx = list.querySelectorAll('.offense-row').length;
+            const wrap = document.createElement('div');
+            wrap.innerHTML = _offenseRowHtml(idx, '', '');
+            const newRow = wrap.firstElementChild;
+            list.appendChild(newRow);
+            // Focus the new offense select
+            const sel = newRow.querySelector('.offense-select');
+            if (sel) sel.focus();
+        }
+
+        function removeOffenseRow(btn) {
+            const row = btn.closest('.offense-row');
+            if (!row) return;
+            row.remove();
+            _renumberOffenseRows();
+        }
+
+        function onOffenseRowSelect(sel) {
+            const row = sel.closest('.offense-row');
+            if (!row) return;
+            const input = row.querySelector('.offense-input');
+            const typeSelect = row.querySelector('.offense-type-select');
             if (sel.value === '__custom__') {
                 input.classList.remove('hidden');
                 input.value = '';
@@ -23364,15 +24767,37 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             } else {
                 input.value = sel.value;
                 input.classList.add('hidden');
-                // Auto-fill offense type from selection
+                // Auto-fill THIS row's offense type from library data-type (only when empty so we don't clobber a manual choice)
                 const opt = sel.options[sel.selectedIndex];
                 const dataType = opt?.dataset?.type;
-                if (dataType && typeSelect) {
+                if (dataType && typeSelect && !typeSelect.value) {
                     for (const o of typeSelect.options) {
                         if (o.value === dataType) { typeSelect.value = dataType; break; }
                     }
                 }
             }
+        }
+
+        function _readOffensesFromEditor() {
+            const list = document.getElementById('editOffensesList');
+            if (!list) return { primary: '', primaryType: '', additional: [] };
+            const rows = Array.from(list.querySelectorAll('.offense-row'));
+            const entries = rows.map(row => {
+                const sel = row.querySelector('.offense-select');
+                const input = row.querySelector('.offense-input');
+                const typeSel = row.querySelector('.offense-type-select');
+                let offense = '';
+                if (sel && sel.value && sel.value !== '__custom__') offense = sel.value.trim();
+                else offense = (input?.value || '').trim();
+                const type = (typeSel?.value || '').trim();
+                return { offense, type };
+            }).filter(e => e.offense.length > 0);
+            const first = entries[0] || { offense: '', type: '' };
+            return {
+                primary: first.offense,
+                primaryType: first.type,
+                additional: entries.slice(1)
+            };
         }
 
         function saveOverviewEdit() {
@@ -23381,10 +24806,11 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const newStatus = document.getElementById('editCaseStatus').value;
             const newCreatedBy = document.getElementById('editCaseCreatedBy').value.trim();
             const newSynopsis = document.getElementById('editCaseSynopsis').value.trim();
-            const newCharges = document.getElementById('editCaseCharges').value.trim();
             const newDateAssigned = document.getElementById('editDateAssigned')?.value || '';
-            const newPrimaryOffense = document.getElementById('editPrimaryOffense')?.value?.trim() || '';
-            const newOffenseType = document.getElementById('editOffenseType')?.value || '';
+            const offenses = _readOffensesFromEditor();
+            const newPrimaryOffense = offenses.primary;
+            const newAdditionalOffenses = offenses.additional;
+            const newOffenseType = offenses.primaryType;
 
             if (!newCaseNumber) { showToast('Case number is required', 'error'); return; }
 
@@ -23395,9 +24821,11 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             currentCase.status = newStatus;
             currentCase.createdBy = newCreatedBy;
             currentCase.synopsis = newSynopsis;
-            currentCase.charges = newCharges;
             currentCase.dateAssigned = newDateAssigned || null;
             currentCase.primaryOffense = newPrimaryOffense || null;
+            currentCase.additionalOffenses = newAdditionalOffenses;
+            // Clear legacy charges field — superseded by additionalOffenses
+            currentCase.charges = '';
             currentCase.offenseType = newOffenseType || null;
 
             // Save priority if enabled
@@ -23945,7 +25373,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
         function renderTimelineSection() {
             const events = getFilteredTimelineEvents();
-            const hasEvents = events.length > 0;
+            const hasAnyEvents = (timelineEvents || []).length > 0;
+            const hasFilteredEvents = events.length > 0;
 
             return `
             <div class="glass-card rounded-xl p-6">
@@ -23964,7 +25393,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         </button>
                     </div>
                 </div>
-                ${hasEvents ? `
+                ${hasAnyEvents ? `
                 <!-- Controls -->
                 <div class="flex items-center gap-4 mb-4 text-sm">
                     <div class="flex items-center gap-2">
@@ -23987,10 +25416,18 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         ${['full', 'week', 'day'].map(z => `<button onclick="setTimelineZoom('${z}')" class="px-2 py-1 rounded text-xs ${timelineZoom === z ? 'bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/40' : 'bg-gray-700/50 text-gray-400 border border-gray-600 hover:text-white'} transition">${z.charAt(0).toUpperCase() + z.slice(1)}</button>`).join('')}
                     </div>
                 </div>
+                ${hasFilteredEvents ? `
                 <!-- Swimlane -->
                 ${renderSwimlane(events)}
                 <!-- Detail Panel -->
                 <div id="timelineDetailPanel">${selectedTimelineEvent ? renderTimelineDetailPanel(selectedTimelineEvent) : ''}</div>
+                ` : `
+                <div class="text-center py-8 border border-dashed border-gray-700 rounded-lg">
+                    <p class="text-sm text-gray-400 mb-1">No events match the current filters</p>
+                    <p class="text-xs text-gray-500 mb-3">${(timelineEvents || []).length} total event${(timelineEvents || []).length !== 1 ? 's' : ''} stored — try setting Lane to "All Lanes" or Show to "All Events"</p>
+                    <button onclick="setTimelineFilter('lane', 'all'); setTimelineFilter('significance', 'all');" class="px-3 py-1.5 text-xs bg-viper-cyan/10 text-viper-cyan border border-viper-cyan/30 rounded hover:bg-viper-cyan/20 transition">Reset filters</button>
+                </div>
+                `}
                 ` : `
                 <div class="text-center py-10">
                     <svg class="w-16 h-16 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -28966,6 +30403,12 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         }
 
         /* ---------- RMS Import Handler ---------- */
+        // Split RMS phone string ("(909) 688-9273; (520) 870-9193") into individual numbers.
+        // Suspects Extended parser joins multiple phones with "; ".
+        function _rmsSplitPhones(phoneStr) {
+            if (!phoneStr) return [];
+            return String(phoneStr).split(/\s*[;|]\s*/).map(s => s.trim()).filter(Boolean);
+        }
         // Route parsed RMS persons into case tabs (Suspects, Victims, Witnesses, Involved Persons)
         function routeRmsPersonsToTabs(report) {
             if (!report.personsInvolved || report.personsInvolved.length === 0) return [];
@@ -28981,15 +30424,17 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 for (const p of suspectPersons) {
                     // Skip if already imported from same source with same name
                     if (existing.some(e => e.rmsSource === src && e.name === (p.name || ''))) continue;
+                    const phones = _rmsSplitPhones(p.phone);
+                    const phoneIdentifiers = phones.map(v => ({ type: 'phone', value: v, provider: '' }));
                     existing.push({
                         name: p.name || '', dob: p.dob || '', dlNumber: '',
                         sex: p.sex || '', height: p.height || '', weight: p.weight || '',
                         hairColor: p.hair || '', eyeColor: p.eyes || '', scarsMarksTattoos: '',
                         address: p.address || '', addressCityStateZip: '',
-                        phone: p.phone || '', phone2: '',
+                        phone: phones[0] || '', phone2: phones[1] || '',
                         photo: '', residencePhoto: '',
                         employerName: '', occupation: '', employerAddress: '', employerPhone: '',
-                        firearms: [], vehicles: [], identifiers: [], criminalHistory: [],
+                        firearms: [], vehicles: [], identifiers: phoneIdentifiers, criminalHistory: [],
                         rapSheet: null, firearmsDoc: null,
                         rmsSource: src
                     });
@@ -29005,9 +30450,10 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 const existing = JSON.parse(localStorage.getItem(`victims_${caseId}`) || '[]');
                 for (const p of victimPersons) {
                     if (existing.some(e => e.rmsSource === src && e.name === (p.name || ''))) continue;
+                    const phones = _rmsSplitPhones(p.phone);
                     existing.push({
                         name: p.name || '', dob: p.dob || '', dlNumber: '',
-                        phone: p.phone || '', phone2: '', email: '', email2: '',
+                        phone: phones[0] || '', phone2: phones[1] || '', email: '', email2: '',
                         height: p.height || '', weight: p.weight || '',
                         hairColor: p.hair || '', eyeColor: p.eyes || '',
                         address: p.address || '', addressCityStateZip: '',
@@ -29028,9 +30474,10 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 const existing = JSON.parse(localStorage.getItem(`witnesses_${caseId}`) || '[]');
                 for (const p of witnessPersons) {
                     if (existing.some(e => e.rmsSource === src && e.name === (p.name || ''))) continue;
+                    const phones = _rmsSplitPhones(p.phone);
                     existing.push({
                         name: p.name || '', dob: p.dob || '', dlNumber: '',
-                        phone: p.phone || '', phone2: '', email: '', email2: '',
+                        phone: phones[0] || '', phone2: phones[1] || '', email: '', email2: '',
                         height: p.height || '', weight: p.weight || '',
                         hairColor: p.hair || '', eyeColor: p.eyes || '',
                         address: p.address || '', addressCityStateZip: '',
@@ -29057,13 +30504,14 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 const existing = JSON.parse(localStorage.getItem(`involvedPersons_${caseId}`) || '[]');
                 for (const p of involvedRouted) {
                     if (existing.some(e => e.rmsSource === src && e.name === (p.name || ''))) continue;
+                    const phones = _rmsSplitPhones(p.phone);
                     existing.push({
                         name: p.name || '', dob: p.dob || '', dlNumber: '',
                         sex: p.sex || '', height: p.height || '', weight: p.weight || '',
                         hairColor: p.hair || '', eyeColor: p.eyes || '',
                         scarsMarksTattoos: '',
                         address: p.address || '', addressCityStateZip: '',
-                        phone: p.phone || '', phone2: '', email: '', email2: '',
+                        phone: phones[0] || '', phone2: phones[1] || '', email: '', email2: '',
                         photo: '', residencePhoto: '',
                         role: p.involvement || 'Otherwise Involved',
                         relationship: '', notes: '',
@@ -29871,7 +31319,245 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
         }
 
+        // ============================================================
+        // CyberTip → People Modules: Send-To feature
+        // ============================================================
+        // Push CyberTip data (identifiers, persons) into existing
+        // Suspect / Victim / Other Individual records. Pickers only show
+        // existing records — the user must create the destination first.
+        // ============================================================
+        let __ctSendRegistry = [];        // payload index → items[]
+        let __ctSendToPayload = null;     // active modal state
+
+        // Called from cybertip card render — registers items, returns idx
+        function ctRegisterSend(items) {
+            if (!Array.isArray(items) || !items.length) return -1;
+            __ctSendRegistry.push(items);
+            return __ctSendRegistry.length - 1;
+        }
+
+        // Card onclick handler — opens the Send-To modal for a registered payload
+        function ctSendBtn(regIdx) {
+            const items = __ctSendRegistry[regIdx];
+            if (!items || !items.length) {
+                showToast('Nothing to send', 'error');
+                return;
+            }
+            __ctSendToPayload = { items: items.map(it => ({ ...it })), targetType: null, targetIdx: null };
+            ctOpenSendToModal();
+        }
+
+        function ctOpenSendToModal() {
+            if (!__ctSendToPayload) return;
+            const items = __ctSendToPayload.items;
+            const itemsHtml = items.map((it, i) => `
+                <label class="flex items-center gap-3 p-2 rounded hover:bg-white/5 cursor-pointer">
+                    <input type="checkbox" data-ct-send-item="${i}" checked class="rounded text-viper-cyan focus:ring-viper-cyan">
+                    <span class="text-[10px] uppercase font-bold text-gray-500 w-20 flex-shrink-0">${escHtmlSafe(it.label)}</span>
+                    <span class="text-sm text-white break-all flex-1 font-mono">${escHtmlSafe(it.value)}</span>
+                    ${it.espName ? `<span class="text-[10px] px-1.5 py-0.5 rounded border bg-cyan-500/20 text-cyan-400 border-cyan-500/40">${escHtmlSafe(it.espName)}</span>` : ''}
+                </label>
+            `).join('');
+
+            const modal = document.createElement('div');
+            modal.id = 'ctSendToModal';
+            modal.className = 'fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4';
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+            modal.innerHTML = `
+                <div class="glass-card rounded-xl p-6 max-w-2xl w-full max-h-[85vh] overflow-y-auto" onclick="event.stopPropagation()">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-xl font-bold text-white flex items-center gap-2">
+                            <svg class="w-5 h-5 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+                            Send to People Module
+                        </h3>
+                        <button type="button" onclick="document.getElementById('ctSendToModal').remove()" class="text-gray-400 hover:text-white">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="text-xs uppercase tracking-wide text-gray-400 block mb-2 font-semibold">1. Target Module</label>
+                        <div class="grid grid-cols-3 gap-2">
+                            <button type="button" data-ct-target="suspect" onclick="ctSetSendTarget('suspect')" class="ct-target-btn px-3 py-2 rounded-lg border bg-red-500/10 border-red-500/40 text-red-400 hover:bg-red-500/20 text-sm font-semibold transition">Suspect</button>
+                            <button type="button" data-ct-target="victim" onclick="ctSetSendTarget('victim')" class="ct-target-btn px-3 py-2 rounded-lg border bg-blue-500/10 border-blue-500/40 text-blue-400 hover:bg-blue-500/20 text-sm font-semibold transition">Victim</button>
+                            <button type="button" data-ct-target="other" onclick="ctSetSendTarget('other')" class="ct-target-btn px-3 py-2 rounded-lg border bg-purple-500/10 border-purple-500/40 text-purple-400 hover:bg-purple-500/20 text-sm font-semibold transition">Other Individual</button>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="text-xs uppercase tracking-wide text-gray-400 block mb-2 font-semibold">2. Target Person</label>
+                        <div id="ctSendTargetPicker" class="text-sm text-gray-500 italic p-3 rounded bg-viper-dark border border-gray-700">Pick a target module above</div>
+                    </div>
+
+                    <div class="mb-5">
+                        <label class="text-xs uppercase tracking-wide text-gray-400 block mb-2 font-semibold">3. Data to Send <span class="text-gray-600 normal-case font-normal">(uncheck to skip)</span></label>
+                        <div class="space-y-1 border border-gray-700 rounded-lg p-2 bg-viper-dark/50 max-h-72 overflow-y-auto">${itemsHtml}</div>
+                    </div>
+
+                    <div class="flex justify-end gap-3">
+                        <button type="button" onclick="document.getElementById('ctSendToModal').remove()" class="px-4 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white transition">Cancel</button>
+                        <button type="button" id="ctSendToConfirmBtn" onclick="ctSendToConfirm()" disabled class="px-4 py-2 bg-viper-cyan hover:bg-viper-cyan/80 rounded-lg text-black font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed">Send</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(modal);
+        }
+
+        function ctSetSendTarget(targetType) {
+            if (!__ctSendToPayload) return;
+            __ctSendToPayload.targetType = targetType;
+            __ctSendToPayload.targetIdx = null;
+            // Highlight chosen
+            document.querySelectorAll('.ct-target-btn').forEach(b => {
+                if (b.dataset.ctTarget === targetType) b.classList.add('ring-2', 'ring-white/60');
+                else b.classList.remove('ring-2', 'ring-white/60');
+            });
+            // Disable Send until person picked
+            const confirmBtn = document.getElementById('ctSendToConfirmBtn');
+            if (confirmBtn) confirmBtn.disabled = true;
+
+            // Load records for target type
+            const storageKey = ctSendStorageKey(targetType);
+            const records = JSON.parse(localStorage.getItem(storageKey) || '[]');
+            const picker = document.getElementById('ctSendTargetPicker');
+            if (!picker) return;
+
+            if (!records.length) {
+                const labelMap = { suspect: 'Suspects', victim: 'Victims', other: 'Other Individuals' };
+                const tabName = labelMap[targetType];
+                picker.innerHTML = `<div class="flex items-start gap-2 text-yellow-400">
+                    <svg class="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                    <div class="text-sm"><div class="font-semibold">No ${tabName.toLowerCase()} exist for this case.</div>
+                    <div class="text-gray-400 mt-1">Create one in the ${tabName} tab first, then come back to send data.</div></div>
+                </div>`;
+                return;
+            }
+
+            const optsHtml = records.map((r, i) => {
+                const lbl = (r.name && r.name.trim()) ? r.name : `(unnamed #${i + 1})`;
+                const sub = r.dob ? ` — DOB ${r.dob}` : '';
+                return `<option value="${i}">${escHtmlSafe(lbl + sub)}</option>`;
+            }).join('');
+            picker.innerHTML = `
+                <select id="ctSendTargetSelect" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-cyan focus:outline-none" onchange="ctOnTargetSelectChange(this.value)">
+                    <option value="">— Select person —</option>
+                    ${optsHtml}
+                </select>
+            `;
+        }
+
+        function ctOnTargetSelectChange(val) {
+            if (!__ctSendToPayload) return;
+            const idx = parseInt(val, 10);
+            if (isNaN(idx)) {
+                __ctSendToPayload.targetIdx = null;
+                document.getElementById('ctSendToConfirmBtn').disabled = true;
+                return;
+            }
+            __ctSendToPayload.targetIdx = idx;
+            document.getElementById('ctSendToConfirmBtn').disabled = false;
+        }
+
+        function ctSendStorageKey(targetType) {
+            if (!currentCase) return '';
+            if (targetType === 'suspect') return `suspects_${currentCase.id}`;
+            if (targetType === 'victim') return `victims_${currentCase.id}`;
+            if (targetType === 'other') return `involvedPersons_${currentCase.id}`;
+            return '';
+        }
+
+        function ctSendToConfirm() {
+            const p = __ctSendToPayload;
+            if (!p || !p.targetType || p.targetIdx == null || isNaN(p.targetIdx)) {
+                showToast('Pick a target person first', 'error');
+                return;
+            }
+            const modal = document.getElementById('ctSendToModal');
+            const checked = p.items.filter((_, i) => modal.querySelector(`[data-ct-send-item="${i}"]`)?.checked);
+            if (!checked.length) { showToast('Nothing selected to send', 'error'); return; }
+
+            const storageKey = ctSendStorageKey(p.targetType);
+            const records = JSON.parse(localStorage.getItem(storageKey) || '[]');
+            const target = records[p.targetIdx];
+            if (!target) { showToast('Target person not found (was it deleted?)', 'error'); return; }
+            if (!Array.isArray(target.identifiers)) target.identifiers = [];
+
+            let added = 0, skipped = 0;
+
+            const addIdent = (type, value, extra = {}) => {
+                const v = String(value || '').trim();
+                if (!v) return;
+                const dup = target.identifiers.some(id => id.type === type && String(id.value).trim().toLowerCase() === v.toLowerCase());
+                if (dup) { skipped++; return; }
+                const ident = { type, value: v, provider: '' };
+                if (extra.platform) ident.platform = extra.platform;
+                if (extra.note) ident.note = extra.note;
+                ident.source = 'CyberTip';
+                target.identifiers.push(ident);
+                added++;
+            };
+            const setIfEmpty = (field, value) => {
+                const v = String(value || '').trim();
+                if (!v) return;
+                if (!target[field] || !String(target[field]).trim()) {
+                    target[field] = v;
+                    added++;
+                } else {
+                    skipped++;
+                }
+            };
+            const appendNote = (line) => {
+                const v = String(line || '').trim();
+                if (!v) return;
+                if (target.notes && target.notes.includes(v)) { skipped++; return; }
+                target.notes = (target.notes ? target.notes + '\n' : '') + v;
+                added++;
+            };
+
+            checked.forEach(it => {
+                const k = (it.key || '').toLowerCase();
+                const platform = it.espName || it.platform || '';
+                if (k === 'name') setIfEmpty('name', it.value);
+                else if (k === 'dob') setIfEmpty('dob', it.value);
+                else if (k === 'age') appendNote(`Age (from CyberTip): ${it.value}`);
+                else if (k === 'location') setIfEmpty('address', it.value);
+                else if (k === 'email') addIdent('email', it.value, { platform });
+                else if (k === 'phone') addIdent('phone', it.value, { platform });
+                else if (k === 'username') addIdent('username', it.value, { platform });
+                else if (k === 'userid') addIdent('username', it.value, { platform: platform ? `${platform} (UserID)` : 'UserID' });
+                else if (k === 'ip') addIdent('ip', it.value, { platform, note: it.meta || '' });
+                else if (k === 'profile' || k === 'profileurl') addIdent('username', it.value, { platform: platform ? `${platform} (URL)` : 'URL' });
+                else addIdent('username', it.value, { platform: it.label || '' });
+            });
+
+            localStorage.setItem(storageKey, JSON.stringify(records));
+
+            // Refresh in-memory arrays (variables exist in same scope)
+            try {
+                if (p.targetType === 'suspect' && typeof suspects !== 'undefined') suspects = records;
+                else if (p.targetType === 'victim' && typeof victims !== 'undefined') victims = records;
+                else if (p.targetType === 'other' && typeof involvedPersons !== 'undefined') involvedPersons = records;
+            } catch (_) {}
+
+            // Audit-log
+            try {
+                if (typeof auditLog === 'function') {
+                    auditLog('case_op', `CyberTip → ${p.targetType}: pushed ${added} field(s) to "${target.name || `#${p.targetIdx + 1}`}"`, currentCase?.caseNumber);
+                }
+            } catch (_) {}
+
+            modal.remove();
+            const tgtLabel = { suspect: 'Suspect', victim: 'Victim', other: 'Other Individual' }[p.targetType];
+            const targetName = target.name || `#${p.targetIdx + 1}`;
+            const msg = added
+                ? `Sent ${added} field${added === 1 ? '' : 's'} to ${tgtLabel}: ${targetName}${skipped ? ` (${skipped} skipped — duplicates)` : ''}`
+                : `Nothing new to add (${skipped} duplicate${skipped === 1 ? '' : 's'} skipped)`;
+            showToast(msg, added ? 'success' : 'info');
+            __ctSendToPayload = null;
+        }
+
         function renderCyberTipDetail(idx) {
+            // Reset send-to payload registry per detail render
+            __ctSendRegistry = [];
             const tips = getCyberTips();
             const t = tips[idx];
             if (!t) return '';
@@ -29882,6 +31568,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             function identifierCard(type, value, role, espName, extra) {
                 const roleColor = role === 'Suspect' ? 'bg-red-500/20 text-red-400 border-red-500/40' : 'bg-blue-500/20 text-blue-400 border-blue-500/40';
                 const espColor = 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40';
+                const typeKey = (type || '').toLowerCase().replace(/\s+/g, '');
+                const sendKey = typeKey === 'userid' ? 'userid' : (typeKey === 'profileurl' ? 'profile' : typeKey);
+                const regIdx = ctRegisterSend([{ key: sendKey, label: type, value: value, espName: espName }]);
                 return `
                 <div class="glass-card rounded-lg p-4 border border-gray-700/50">
                     <div class="flex items-center gap-2 mb-2 flex-wrap">
@@ -29891,6 +31580,12 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     </div>
                     <div class="text-white font-semibold text-lg break-all">${value}</div>
                     ${extra || ''}
+                    <div class="mt-3 flex justify-end">
+                        <button onclick="ctSendBtn(${regIdx})" class="px-2.5 py-1 text-xs bg-viper-cyan/20 text-viper-cyan rounded border border-viper-cyan/40 hover:bg-viper-cyan/30 transition-colors flex items-center gap-1" title="Send to Suspect / Victim / Other Individual">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+                            Send To
+                        </button>
+                    </div>
                 </div>`;
             }
 
@@ -29900,6 +31595,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 const typeLabel = ip.type ? `${role} - ${ip.type}` : role;
                 const tsLabel = ip.timestamp ? ` ${ip.timestamp}` : '';
                 const uid = 'arin_' + ip.address.replace(/[.:]/g, '_') + '_' + Math.random().toString(36).slice(2, 8);
+                const regIdx = ctRegisterSend([{ key: 'ip', label: 'IP', value: ip.address, espName: espName, meta: ip.type || '' }]);
                 return `
                 <div class="glass-card rounded-lg p-4 border border-gray-700/50" id="${uid}_card">
                     <div class="flex items-center gap-2 mb-2 flex-wrap">
@@ -29909,10 +31605,14 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     </div>
                     <div class="text-white font-semibold text-lg break-all font-mono">${ip.address}</div>
                     <div id="${uid}_result"></div>
-                    <div class="flex gap-2 mt-3">
+                    <div class="flex gap-2 mt-3 flex-wrap">
                         <button onclick="ctArinLookup('${ip.address}','${uid}')" class="px-3 py-1 text-xs bg-cyan-500/20 text-cyan-400 rounded border border-cyan-500/40 hover:bg-cyan-500/30 transition-colors flex items-center gap-1">
                             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>
                             ARIN Lookup
+                        </button>
+                        <button onclick="ctSendBtn(${regIdx})" class="ml-auto px-2.5 py-1 text-xs bg-viper-cyan/20 text-viper-cyan rounded border border-viper-cyan/40 hover:bg-viper-cyan/30 transition-colors flex items-center gap-1" title="Send to Suspect / Victim / Other Individual">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+                            Send To
                         </button>
                     </div>
                 </div>`;
@@ -29990,13 +31690,32 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 <div class="glass-card rounded-xl p-6 border border-gray-700/50">
                     <h3 class="text-xl font-bold text-white mb-4">Persons (${t.persons.length})</h3>
                     <div class="space-y-4">
-                        ${t.persons.map(p => {
+                        ${t.persons.map((p, pIdx) => {
                             const roleColor = p.role === 'Suspect' ? 'text-red-400 bg-red-500/20 border-red-500/40' : 'text-blue-400 bg-blue-500/20 border-blue-500/40';
+                            // Build whole-person payload for Send-To
+                            const personItems = [];
+                            const espName = t.esp?.name || '';
+                            if (p.name) personItems.push({ key: 'name', label: 'Name', value: p.name, espName });
+                            if (p.dob) personItems.push({ key: 'dob', label: 'DOB', value: p.dob, espName });
+                            if (p.age) personItems.push({ key: 'age', label: 'Age', value: p.age, espName });
+                            if (p.estimatedLocation) personItems.push({ key: 'location', label: 'Location', value: p.estimatedLocation, espName });
+                            (p.emails || []).forEach(e => personItems.push({ key: 'email', label: 'Email', value: e, espName }));
+                            (p.phones || []).forEach(ph => personItems.push({ key: 'phone', label: 'Phone', value: ph, espName }));
+                            (p.screenNames || []).forEach(s => personItems.push({ key: 'username', label: 'Username', value: s, espName }));
+                            (p.userIds || []).forEach(u => personItems.push({ key: 'userid', label: 'User ID', value: u, espName }));
+                            (p.ipAddresses || []).forEach(ip => personItems.push({ key: 'ip', label: 'IP', value: ip.address, meta: ip.type || '', espName }));
+                            (p.profileUrls || []).forEach(u => personItems.push({ key: 'profile', label: 'Profile URL', value: u, espName }));
+                            const personRegIdx = ctRegisterSend(personItems);
+                            const sendBtnHtml = personRegIdx >= 0 ? `<button onclick="ctSendBtn(${personRegIdx})" class="ml-auto px-2.5 py-1 text-xs bg-viper-cyan/20 text-viper-cyan rounded border border-viper-cyan/40 hover:bg-viper-cyan/30 transition-colors flex items-center gap-1" title="Send this person's data to Suspect / Victim / Other Individual">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+                                    Send To
+                                </button>` : '';
                             return `
                             <div class="border border-gray-700 rounded-lg p-4">
                                 <div class="flex items-center gap-3 mb-2">
                                     <span class="text-xs px-2 py-0.5 rounded border font-semibold ${roleColor}">${p.role}</span>
                                     <span class="text-white font-bold">${p.name || '(unnamed)'}</span>
+                                    ${sendBtnHtml}
                                 </div>
                                 <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
                                     ${p.dob ? `<div><span class="text-gray-500">DOB:</span> <span class="text-gray-300">${p.dob}</span></div>` : ''}

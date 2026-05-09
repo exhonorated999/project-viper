@@ -48,6 +48,7 @@ class MetaWarrantUI {
             <div class="mwp-layout">
                 <div class="mwp-sidebar">
                     ${this._renderImportSelector()}
+                    ${this._renderFlagToolbar()}
                     ${this._renderNav()}
                 </div>
                 <div class="mwp-content" id="mwp-content-area">
@@ -59,6 +60,105 @@ class MetaWarrantUI {
 
         // Trigger lazy image loading for any disk-path images
         this._loadLazyImages();
+    }
+
+    // ─── Flag-to-Evidence toolbar (sidebar) ────────────────────────────
+
+    _renderFlagToolbar() {
+        const total = this.module.flagCount();
+        const enabled = total > 0;
+        return `
+            <div class="mwp-flag-toolbar">
+                <button class="mwp-flag-header-btn"
+                        title="Flagged item count — click to clear all flags"
+                        onclick="window.metaWarrantUI._clearAllFlags()">
+                    🚩 Flags
+                    <span class="mwp-flag-count-pill" id="mwp-flag-count">${total.toLocaleString()}</span>
+                </button>
+                <div class="mwp-flag-toolbar-spacer"></div>
+                <button class="mwp-push-btn" id="mwp-push-btn"
+                        ${enabled ? '' : 'disabled'}
+                        onclick="window.metaWarrantUI._pushFlagsToEvidence()"
+                        title="Push flagged items to the case Evidence module">
+                    📥 Push to Evidence
+                </button>
+            </div>
+        `;
+    }
+
+    _refreshFlagToolbar() {
+        const total = this.module.flagCount();
+        const pill = document.getElementById('mwp-flag-count');
+        if (pill) pill.textContent = total.toLocaleString();
+        const btn = document.getElementById('mwp-push-btn');
+        if (btn) btn.disabled = (total === 0);
+    }
+
+    async _pushFlagsToEvidence() {
+        const total = this.module.flagCount();
+        if (total === 0) {
+            this._toast('No items flagged yet. Click 🚩 on items first.', 'info');
+            return;
+        }
+        const ok = (typeof viperConfirm === 'function')
+            ? await viperConfirm(`Push ${total} flagged item${total === 1 ? '' : 's'} to the case Evidence module as a single bundle?`,
+                                  { okText: 'Push', danger: false })
+            : confirm(`Push ${total} flagged item(s) to Evidence as a single bundle?`);
+        if (!ok) return;
+
+        const btn = document.getElementById('mwp-push-btn');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ Building bundle…'; }
+        try {
+            const res = await this.module.pushFlagsToEvidence();
+            if (res && res.success) {
+                this.module.clearFlags();
+                this._refreshFlagToolbar();
+                const content = document.getElementById('mwp-content-area');
+                if (content) {
+                    content.innerHTML = this._renderSection();
+                    this._loadLazyImages(content);
+                }
+            }
+        } finally {
+            if (btn) { btn.disabled = false; btn.innerHTML = '📥 Push to Evidence'; }
+            this._refreshFlagToolbar();
+        }
+    }
+
+    _clearAllFlags() {
+        const total = this.module.flagCount();
+        if (total === 0) return;
+        if (!confirm(`Clear all ${total} flag(s)?`)) return;
+        this.module.clearFlags();
+        this._refreshFlagToolbar();
+        const content = document.getElementById('mwp-content-area');
+        if (content) {
+            content.innerHTML = this._renderSection();
+            this._loadLazyImages(content);
+        }
+    }
+
+    _onFlagClick(section, key) {
+        this.module.toggleFlag(section, key);
+        this._refreshFlagToolbar();
+        const content = document.getElementById('mwp-content-area');
+        if (content) {
+            content.innerHTML = this._renderSection();
+            this._loadLazyImages(content);
+        }
+    }
+
+    _flagBtn(section, key, label) {
+        const on = this.module.isFlagged(section, key);
+        const safeKey = String(key)
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g, "\\'")
+            .replace(/"/g, '&quot;');
+        return `<button class="mwp-flag-btn ${on ? 'on' : ''}"
+                        title="${on ? 'Unflag' : 'Flag for evidence bundle'}"
+                        onclick="event.stopPropagation(); window.metaWarrantUI._onFlagClick('${section}', '${safeKey}')">
+                  🚩${label ? '<span style="margin-left:2px">' + label + '</span>' : ''}
+                </button>`;
     }
 
     renderEvidenceBar(files) {
@@ -347,15 +447,18 @@ class MetaWarrantUI {
                 <div class="mwp-card">
                     <h3 class="mwp-card-title">Activity Log</h3>
                     <table class="mwp-table">
-                        <thead><tr><th>IP Address</th><th>ARIN</th><th>Timestamp</th></tr></thead>
+                        <thead><tr><th>IP Address</th><th>ARIN</th><th>Timestamp</th><th>Flag</th></tr></thead>
                         <tbody>
-                            ${ips.map(entry => `
-                                <tr>
+                            ${ips.map(entry => {
+                                const flagged = this.module.isFlagged('ipActivity', entry.ip);
+                                return `
+                                <tr class="${flagged ? 'mwp-row-flagged' : ''}">
                                     <td class="mwp-mono">${this._esc(entry.ip || '—')}</td>
                                     <td>${entry.ip ? `<button class="mwp-arin-btn" onclick="mwpArinLookup(this, '${this._esc(entry.ip)}')" title="ARIN WHOIS Lookup">🌐</button>` : '—'}</td>
                                     <td>${this._esc(entry.time || '—')}</td>
+                                    <td>${this._flagBtn('ipActivity', entry.ip || '')}</td>
                                 </tr>
-                            `).join('')}
+                            `;}).join('')}
                         </tbody>
                     </table>
                 </div>
@@ -379,17 +482,21 @@ class MetaWarrantUI {
                 <div class="mwp-card">
                     <h3 class="mwp-card-title">Status Updates (${updates.length})</h3>
                     <div class="mwp-post-list">
-                        ${updates.map(u => `
-                            <div class="mwp-post-item">
+                        ${updates.map(u => {
+                            const k = u.id || window.WarrantFlagsKey.metaStatusUpdate(u);
+                            const flagged = this.module.isFlagged('statusUpdates', k);
+                            return `
+                            <div class="mwp-post-item ${flagged ? 'mwp-flagged' : ''}">
                                 <div class="mwp-post-meta">
                                     <span class="mwp-post-author">${this._esc(u.author || 'Unknown')}</span>
                                     <span class="mwp-post-time">${this._esc(u.posted || '')}</span>
                                     ${u.mobile === 'true' ? '<span class="mwp-tag">📱 Mobile</span>' : ''}
+                                    <span style="margin-left:auto">${this._flagBtn('statusUpdates', k)}</span>
                                 </div>
                                 <div class="mwp-post-body">${this._esc(u.status || '(no text)')}</div>
                                 ${u.lifeExperience ? `<div class="mwp-post-extra">Life Experience: ${this._esc(u.lifeExperience)}</div>` : ''}
                             </div>
-                        `).join('')}
+                        `;}).join('')}
                     </div>
                 </div>
                 ` : ''}
@@ -398,15 +505,19 @@ class MetaWarrantUI {
                 <div class="mwp-card">
                     <h3 class="mwp-card-title">Wallposts (${wallposts.length})</h3>
                     <div class="mwp-post-list">
-                        ${wallposts.map(w => `
-                            <div class="mwp-post-item">
+                        ${wallposts.map(w => {
+                            const k = w.id || window.WarrantFlagsKey.metaWallpost(w);
+                            const flagged = this.module.isFlagged('wallposts', k);
+                            return `
+                            <div class="mwp-post-item ${flagged ? 'mwp-flagged' : ''}">
                                 <div class="mwp-post-meta">
                                     <span class="mwp-post-author">${this._esc(w.from || 'Unknown')} → ${this._esc(w.to || 'Unknown')}</span>
                                     <span class="mwp-post-time">${this._esc(w.time || '')}</span>
+                                    <span style="margin-left:auto">${this._flagBtn('wallposts', k)}</span>
                                 </div>
                                 <div class="mwp-post-body">${this._esc(w.text || '(no text)')}</div>
                             </div>
-                        `).join('')}
+                        `;}).join('')}
                     </div>
                 </div>
                 ` : ''}
@@ -415,15 +526,18 @@ class MetaWarrantUI {
                 <div class="mwp-card">
                     <h3 class="mwp-card-title">Posts to Other Walls (${otherWall.length})</h3>
                     <div class="mwp-post-list">
-                        ${otherWall.map(p => `
-                            <div class="mwp-post-item">
+                        ${otherWall.map(p => {
+                            const flagged = this.module.isFlagged('otherWallPosts', p.id);
+                            return `
+                            <div class="mwp-post-item ${flagged ? 'mwp-flagged' : ''}">
                                 <div class="mwp-post-meta">
                                     <span class="mwp-post-author">→ ${this._esc(p.timelineOwner || 'Unknown')}</span>
                                     <span class="mwp-post-time">${this._esc(p.time || '')}</span>
+                                    <span style="margin-left:auto">${this._flagBtn('otherWallPosts', p.id || '')}</span>
                                 </div>
                                 <div class="mwp-post-body">${this._esc(p.post || '(no text)')}</div>
                             </div>
-                        `).join('')}
+                        `;}).join('')}
                     </div>
                 </div>
                 ` : ''}
@@ -432,16 +546,20 @@ class MetaWarrantUI {
                 <div class="mwp-card">
                     <h3 class="mwp-card-title">Shares (${shares.length})</h3>
                     <div class="mwp-post-list">
-                        ${shares.map(s => `
-                            <div class="mwp-post-item">
+                        ${shares.map(s => {
+                            const k = window.WarrantFlagsKey.metaShare(s);
+                            const flagged = this.module.isFlagged('shares', k);
+                            return `
+                            <div class="mwp-post-item ${flagged ? 'mwp-flagged' : ''}">
                                 <div class="mwp-post-meta">
                                     <span class="mwp-post-time">${this._esc(s.dateCreated || '')}</span>
+                                    <span style="margin-left:auto">${this._flagBtn('shares', k)}</span>
                                 </div>
                                 ${s.title ? `<div class="mwp-post-title">${this._esc(s.title)}</div>` : ''}
                                 <div class="mwp-post-body">${this._esc(s.text || s.summary || '(no text)')}</div>
                                 ${s.url ? `<a class="mwp-link" href="${this._esc(s.url)}" target="_blank">${this._esc(s.url)}</a>` : ''}
                             </div>
-                        `).join('')}
+                        `;}).join('')}
                     </div>
                 </div>
                 ` : ''}
@@ -481,9 +599,11 @@ class MetaWarrantUI {
                                     : mediaInfo?.data
                                         ? `" src="data:${mediaInfo.mimeType};base64,${mediaInfo.data}`
                                         : null;
+                                const k = p.id || window.WarrantFlagsKey.metaPhoto(p);
+                                const flagged = this.module.isFlagged('photos', k);
 
                                 return `
-                                    <div class="mwp-photo-card" onclick="window.metaWarrantUI.showPhotoDetail('${this._escJs(p.id || '')}')">
+                                    <div class="mwp-photo-card ${flagged ? 'mwp-flagged' : ''}" onclick="window.metaWarrantUI.showPhotoDetail('${this._escJs(p.id || '')}')">
                                         ${imgSrc
                                             ? `<img class="${imgSrc}" alt="${this._esc(p.title || '')}" loading="lazy">`
                                             : '<div class="mwp-photo-placeholder">📷</div>'
@@ -493,6 +613,7 @@ class MetaWarrantUI {
                                             <div class="mwp-photo-meta">${this._esc(p.uploaded || '')}</div>
                                             ${p.uploadIp ? `<div class="mwp-photo-ip">${this._esc(p.uploadIp)}</div>` : ''}
                                         </div>
+                                        <div class="mwp-photo-flag">${this._flagBtn('photos', k)}</div>
                                     </div>
                                 `;
                             }).join('')}
@@ -555,6 +676,7 @@ class MetaWarrantUI {
                 <h2 class="mwp-section-title">💬 Messages (${threads.length} thread${threads.length !== 1 ? 's' : ''})</h2>
                 ${threads.map((thread, ti) => {
                     const msgCount = thread.messages?.length || 0;
+                    this._currentThreadId = thread.threadId || '?';
                     return `
                         <div class="mwp-card mwp-thread-card">
                             <div class="mwp-thread-header" onclick="this.closest('.mwp-thread-card').classList.toggle('expanded')">
@@ -584,12 +706,16 @@ class MetaWarrantUI {
     _renderMessage(msg) {
         const imp = this.currentImport;
         const media = imp?.mediaFiles || {};
+        const threadId = this._currentThreadId || '?';
+        const k = window.WarrantFlagsKey.metaMessage(threadId, msg);
+        const flagged = this.module.isFlagged('messages', k);
 
         return `
-            <div class="mwp-message">
+            <div class="mwp-message ${flagged ? 'mwp-flagged' : ''}">
                 <div class="mwp-msg-header">
                     <span class="mwp-msg-author">${this._esc(msg.author || 'Unknown')}</span>
                     <span class="mwp-msg-time">${this._esc(msg.sent || '')}</span>
+                    <span style="margin-left:auto">${this._flagBtn('messages', k)}</span>
                 </div>
                 <div class="mwp-msg-body">${this._esc(msg.body || '')}</div>
                 ${(msg.attachments || []).map(att => {

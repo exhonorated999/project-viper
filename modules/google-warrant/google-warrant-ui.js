@@ -33,6 +33,7 @@ class GoogleWarrantUI {
             <div class="gwp-layout">
                 <div class="gwp-sidebar">
                     ${this._renderImportSelector()}
+                    ${this._renderFlagToolbar()}
                     ${this._renderNav()}
                 </div>
                 <div class="gwp-content" id="gwp-content-area">
@@ -255,6 +256,87 @@ class GoogleWarrantUI {
         }
     }
 
+    // ─── Flag-to-Evidence toolbar (sidebar) ────────────────────────────
+
+    _renderFlagToolbar() {
+        const total = this.module.flagCount();
+        const enabled = total > 0;
+        return `
+            <div class="gwp-flag-toolbar">
+                <button class="gwp-flag-header-btn"
+                        title="Flagged item count — click to clear all flags"
+                        onclick="window.googleWarrantUI.module.clearFlags(); window.googleWarrantUI._refreshFlagToolbar(); const c=document.getElementById('gwp-content-area'); if(c) c.innerHTML=window.googleWarrantUI._renderSection();">
+                    🚩 Flags
+                    <span class="gwp-flag-count-pill" id="gwp-flag-count">${total.toLocaleString()}</span>
+                </button>
+                <div class="gwp-flag-toolbar-spacer"></div>
+                <button class="gwp-push-btn" id="gwp-push-btn"
+                        ${enabled ? '' : 'disabled'}
+                        onclick="window.googleWarrantUI._pushFlagsToEvidence()"
+                        title="Push flagged items to the case Evidence module">
+                    📥 Push to Evidence
+                </button>
+            </div>
+        `;
+    }
+
+    _refreshFlagToolbar() {
+        const total = this.module.flagCount();
+        const pill = document.getElementById('gwp-flag-count');
+        if (pill) pill.textContent = total.toLocaleString();
+        const btn = document.getElementById('gwp-push-btn');
+        if (btn) btn.disabled = (total === 0);
+    }
+
+    async _pushFlagsToEvidence() {
+        const total = this.module.flagCount();
+        if (total === 0) {
+            this._toast('No items flagged yet. Click 🚩 on items first.', 'info');
+            return;
+        }
+        const ok = (typeof viperConfirm === 'function')
+            ? await viperConfirm(`Push ${total} flagged item${total === 1 ? '' : 's'} to the case Evidence module as a single bundle?`,
+                                  { okText: 'Push', danger: false })
+            : confirm(`Push ${total} flagged item(s) to Evidence as a single bundle?`);
+        if (!ok) return;
+
+        const btn = document.getElementById('gwp-push-btn');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ Building bundle…'; }
+        try {
+            const res = await this.module.pushFlagsToEvidence();
+            if (res && res.success) {
+                this.module.clearFlags();
+                this._refreshFlagToolbar();
+                const content = document.getElementById('gwp-content-area');
+                if (content) content.innerHTML = this._renderSection();
+            }
+        } finally {
+            if (btn) { btn.disabled = false; btn.innerHTML = '📥 Push to Evidence'; }
+            this._refreshFlagToolbar();
+        }
+    }
+
+    _onFlagClick(section, key) {
+        this.module.toggleFlag(section, key);
+        this._refreshFlagToolbar();
+        // Re-render the current section to update flag-button state on the visible row
+        const content = document.getElementById('gwp-content-area');
+        if (content) content.innerHTML = this._renderSection();
+    }
+
+    _flagBtn(section, key, label) {
+        const on = this.module.isFlagged(section, key);
+        const safeKey = String(key)
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g, "\\'")
+            .replace(/"/g, '&quot;');
+        return `<button class="gwp-flag-btn ${on ? 'on' : ''}"
+                        title="${on ? 'Unflag' : 'Flag for evidence bundle'}"
+                        onclick="event.stopPropagation(); window.googleWarrantUI._onFlagClick('${section}', '${safeKey}')">
+                  🚩${label ? '<span style="margin-left:2px">' + label + '</span>' : ''}
+                </button>`;
+    }
+
     // ─── Account Overview ───────────────────────────────────────────────
 
     _renderOverview(imp) {
@@ -330,11 +412,15 @@ class GoogleWarrantUI {
                                     <th>Activity</th>
                                     <th>Android ID</th>
                                     <th>User Agent</th>
+                                    <th>Flag</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                ${imp.ipActivity.map((ip, idx) => `
-                                    <tr>
+                                ${imp.ipActivity.map((ip, idx) => {
+                                    const fk = window.WarrantFlagsKey.googleIpActivity(ip);
+                                    const flagged = this.module.isFlagged('ipActivity', fk);
+                                    return `
+                                    <tr class="${flagged ? 'gwp-row-flagged' : ''}">
                                         <td class="gwp-mono gwp-nowrap">${ip.timestamp}</td>
                                         <td class="gwp-mono">
                                             ${ip.ip}
@@ -344,8 +430,9 @@ class GoogleWarrantUI {
                                         <td>${ip.activityType}</td>
                                         <td class="gwp-mono gwp-truncate" title="${ip.androidId || ''}">${ip.androidId || '—'}</td>
                                         <td class="gwp-truncate" title="${ip.userAgent || ''}">${ip.userAgent || '—'}</td>
-                                    </tr>
-                                `).join('')}
+                                        <td>${this._flagBtn('ipActivity', fk)}</td>
+                                    </tr>`;
+                                }).join('')}
                             </tbody>
                         </table>
                     </div>
@@ -359,18 +446,22 @@ class GoogleWarrantUI {
                     <div class="gwp-table-wrap">
                         <table class="gwp-table">
                             <thead>
-                                <tr><th>Timestamp</th><th>IP</th><th>Change Type</th><th>Old Value</th><th>New Value</th></tr>
+                                <tr><th>Timestamp</th><th>IP</th><th>Change Type</th><th>Old Value</th><th>New Value</th><th>Flag</th></tr>
                             </thead>
                             <tbody>
-                                ${imp.changeHistory.map((ch, idx) => `
-                                    <tr>
+                                ${imp.changeHistory.map((ch, idx) => {
+                                    const fk = window.WarrantFlagsKey.googleChangeHistory(ch);
+                                    const flagged = this.module.isFlagged('changeHistory', fk);
+                                    return `
+                                    <tr class="${flagged ? 'gwp-row-flagged' : ''}">
                                         <td class="gwp-mono gwp-nowrap">${ch.timestamp}</td>
                                         <td class="gwp-mono">${ch.ip ? `${ch.ip} <button class="gwp-arin-btn" onclick="gwpArinLookup(this, '${ch.ip}')" title="ARIN WHOIS Lookup">🌐</button>` : '—'}</td>
                                         <td><span class="gwp-badge-change">${ch.changeType}</span></td>
                                         <td>${ch.oldValue || '—'}</td>
                                         <td>${ch.newValue || '—'}</td>
-                                    </tr>
-                                `).join('')}
+                                        <td>${this._flagBtn('changeHistory', fk)}</td>
+                                    </tr>`;
+                                }).join('')}
                             </tbody>
                         </table>
                     </div>
@@ -402,11 +493,14 @@ class GoogleWarrantUI {
                     <h3>📧 Email Messages (${emails.length})</h3>
                 </div>
                 <div class="gwp-email-list">
-                    ${emails.map((em, idx) => `
-                        <div class="gwp-email-item" onclick="window.googleWarrantUI.toggleEmailDetail(${idx})">
+                    ${emails.map((em, idx) => {
+                        const flagged = this.module.isFlagged('emails', em.id);
+                        return `
+                        <div class="gwp-email-item ${flagged ? 'gwp-flagged' : ''}" onclick="window.googleWarrantUI.toggleEmailDetail(${idx})">
                             <div class="gwp-email-row">
                                 <div class="gwp-email-from">${this._escHtml(em.from || 'Unknown')}</div>
                                 <div class="gwp-email-date">${em.date ? new Date(em.date).toLocaleString() : '—'}</div>
+                                <span style="margin-left:auto">${this._flagBtn('emails', em.id)}</span>
                             </div>
                             <div class="gwp-email-subject">${this._escHtml(em.subject)}</div>
                             <div class="gwp-email-to">To: ${this._escHtml(em.to || '—')}</div>
@@ -425,7 +519,7 @@ class GoogleWarrantUI {
                                 </div>
                             </div>
                         </div>
-                    `).join('')}
+                    `;}).join('')}
                 </div>
             </div>
         `;
@@ -467,17 +561,21 @@ class GoogleWarrantUI {
                     <h4 class="gwp-card-title">Place Visits (${visits.length})</h4>
                     <div class="gwp-table-wrap">
                         <table class="gwp-table">
-                            <thead><tr><th>Name</th><th>Address</th><th>Start</th><th>End</th><th>Confidence</th></tr></thead>
+                            <thead><tr><th>Name</th><th>Address</th><th>Start</th><th>End</th><th>Confidence</th><th>Flag</th></tr></thead>
                             <tbody>
-                                ${visits.map(v => `
-                                    <tr>
+                                ${visits.map(v => {
+                                    const fk = window.WarrantFlagsKey.googleLocationVisit(v);
+                                    const flagged = this.module.isFlagged('locationVisits', fk);
+                                    return `
+                                    <tr class="${flagged ? 'gwp-row-flagged' : ''}">
                                         <td>${v.name || '—'}</td>
                                         <td>${v.address || '—'}</td>
                                         <td class="gwp-mono gwp-nowrap">${v.startTime || '—'}</td>
                                         <td class="gwp-mono gwp-nowrap">${v.endTime || '—'}</td>
                                         <td>${v.confidence ? v.confidence + '%' : '—'}</td>
-                                    </tr>
-                                `).join('')}
+                                        <td>${this._flagBtn('locationVisits', fk)}</td>
+                                    </tr>`;
+                                }).join('')}
                             </tbody>
                         </table>
                     </div>
@@ -590,11 +688,12 @@ class GoogleWarrantUI {
                 <div class="gwp-card">
                     <h4 class="gwp-card-title">Chat Messages (${messages.length})</h4>
                     <div class="gwp-chat-list">
-                        ${messages.map(msg => {
+                        ${messages.map((msg, idx) => {
+                            const flagged = this.module.isFlagged('chatMessages', String(idx));
                             if (msg.type === 'html') {
-                                return `<div class="gwp-chat-html">${msg.content}</div>`;
+                                return `<div class="gwp-chat-html ${flagged ? 'gwp-flagged' : ''}" style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1">${msg.content}</div>${this._flagBtn('chatMessages', String(idx))}</div>`;
                             }
-                            return `<pre class="gwp-pre">${this._escHtml(JSON.stringify(msg, null, 2))}</pre>`;
+                            return `<div class="${flagged ? 'gwp-flagged' : ''}" style="display:flex;align-items:flex-start;gap:8px"><pre class="gwp-pre" style="flex:1">${this._escHtml(JSON.stringify(msg, null, 2))}</pre>${this._flagBtn('chatMessages', String(idx))}</div>`;
                         }).join('')}
                     </div>
                 </div>
@@ -622,11 +721,16 @@ class GoogleWarrantUI {
                 <div class="gwp-card">
                     <h4 class="gwp-card-title">Registered Devices (${devices.length})</h4>
                     <div class="gwp-device-grid">
-                        ${devices.map(d => `
-                            <div class="gwp-device-card">
+                        ${devices.map(d => {
+                            const flagged = this.module.isFlagged('devices', d.androidId || '');
+                            return `
+                            <div class="gwp-device-card ${flagged ? 'gwp-flagged' : ''}">
                                 <div class="gwp-device-icon">📱</div>
                                 <div class="gwp-device-info">
-                                    <div class="gwp-device-model">${d.manufacturer || ''} ${d.model || 'Unknown Device'}</div>
+                                    <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+                                        <div class="gwp-device-model">${d.manufacturer || ''} ${d.model || 'Unknown Device'}</div>
+                                        ${this._flagBtn('devices', d.androidId || '')}
+                                    </div>
                                     <div class="gwp-device-detail">${d.brand || ''} • ${d.carrier || 'No carrier'}</div>
                                     <div class="gwp-device-detail">Android SDK ${d.sdkVersion || '?'} • ${d.locale || ''}</div>
                                     <div class="gwp-device-detail gwp-mono" title="Android ID">${d.androidId || ''}</div>
@@ -635,7 +739,7 @@ class GoogleWarrantUI {
                                     ${d.buildFingerprint ? `<div class="gwp-device-fp gwp-mono">${d.buildFingerprint}</div>` : ''}
                                 </div>
                             </div>
-                        `).join('')}
+                        `;}).join('')}
                     </div>
                 </div>
                 ` : ''}
@@ -769,11 +873,17 @@ class GoogleWarrantUI {
                     <h4 class="gwp-card-title">Transactions (${pay.transactions.length})</h4>
                     <div class="gwp-table-wrap">
                         <table class="gwp-table">
-                            <thead><tr>${Object.keys(pay.transactions[0]).map(k => `<th>${k}</th>`).join('')}</tr></thead>
+                            <thead><tr>${Object.keys(pay.transactions[0]).map(k => `<th>${k}</th>`).join('')}<th>Flag</th></tr></thead>
                             <tbody>
-                                ${pay.transactions.map(t => `
-                                    <tr>${Object.values(t).map(v => `<td>${this._escHtml(String(v))}</td>`).join('')}</tr>
-                                `).join('')}
+                                ${pay.transactions.map(t => {
+                                    const fk = window.WarrantFlagsKey.googlePayment(t);
+                                    const flagged = this.module.isFlagged('payments', fk);
+                                    return `
+                                    <tr class="${flagged ? 'gwp-row-flagged' : ''}">
+                                        ${Object.values(t).map(v => `<td>${this._escHtml(String(v))}</td>`).join('')}
+                                        <td>${this._flagBtn('payments', fk)}</td>
+                                    </tr>`;
+                                }).join('')}
                             </tbody>
                         </table>
                     </div>

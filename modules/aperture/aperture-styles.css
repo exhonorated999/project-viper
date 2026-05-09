@@ -285,3 +285,93 @@ button[onclick*="toggleFlag"]:hover {
         max-width: 100%;
     }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Flag-to-Evidence Styles (awp- prefix)
+   ═══════════════════════════════════════════════════════════════════ */
+
+.awp-flag-btn {
+    background: transparent;
+    border: 1px solid #374151;
+    color: #6b7280;
+    min-width: 28px;
+    height: 26px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 6px;
+    gap: 4px;
+    transition: all 0.15s;
+    user-select: none;
+}
+.awp-flag-btn:hover { color: #fbbf24; border-color: #fbbf24; }
+.awp-flag-btn.on {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fbbf24;
+    border-color: #fbbf24;
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.15);
+}
+
+.awp-flag-header-btn {
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    color: #fbbf24;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.15s;
+}
+.awp-flag-header-btn:hover { background: rgba(245, 158, 11, 0.22); }
+
+.awp-flag-count-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    background: #fbbf24;
+    color: #1a1a1a;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.awp-push-btn {
+    background: rgba(0, 255, 255, 0.12);
+    border: 1px solid rgba(0, 255, 255, 0.4);
+    color: #00ffff;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.15s;
+}
+.awp-push-btn:hover { background: rgba(0, 255, 255, 0.22); }
+.awp-push-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.awp-flag-toolbar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 6px 10px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+}
+.awp-flag-toolbar-spacer { flex: 1; }
+
+.email-item.awp-row-flagged {
+    border-left-color: #fbbf24 !important;
+    background: rgba(245, 158, 11, 0.06) !important;
+}

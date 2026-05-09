@@ -445,3 +445,94 @@
     color: #9ca3af; font-size: 0.78em;
 }
 .swp-arin-success { color: #4ade80; }
+
+
+/* ─── Flag-to-Evidence buttons ──────────────────────────────────────── */
+
+.swp-flag-btn {
+    background: transparent;
+    border: 1px solid #374151;
+    color: #6b7280;
+    min-width: 28px;
+    height: 26px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 6px;
+    gap: 4px;
+    transition: all 0.15s;
+    user-select: none;
+}
+.swp-flag-btn:hover { color: #fbbf24; border-color: #fbbf24; }
+.swp-flag-btn.on {
+    background: rgba(255, 252, 0, 0.2);
+    color: #fffc00;
+    border-color: #fffc00;
+    box-shadow: 0 0 0 2px rgba(255, 252, 0, 0.15);
+}
+
+.swp-flag-header-btn {
+    background: rgba(255, 252, 0, 0.12);
+    border: 1px solid rgba(255, 252, 0, 0.4);
+    color: #fffc00;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.15s;
+}
+.swp-flag-header-btn:hover { background: rgba(255, 252, 0, 0.22); }
+.swp-flag-header-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+.swp-flag-count-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    background: #fffc00;
+    color: #1a1a1a;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.swp-push-btn {
+    background: rgba(0, 255, 255, 0.12);
+    border: 1px solid rgba(0, 255, 255, 0.4);
+    color: #00ffff;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.15s;
+}
+.swp-push-btn:hover { background: rgba(0, 255, 255, 0.22); }
+.swp-push-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.swp-message.flagged { box-shadow: 0 0 0 2px rgba(255, 252, 0, 0.5); border-left: 4px solid #fffc00; }
+tr.swp-row-flagged > td { background: rgba(255, 252, 0, 0.08); }
+
+.swp-flag-toolbar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    margin-bottom: 12px;
+}
+.swp-flag-toolbar-spacer { flex: 1; }

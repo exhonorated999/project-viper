@@ -74,6 +74,15 @@ let lastAccurintBounds = null;
 let vigilantBrowserView = null;
 let vigilantViewVisible = false;
 let lastVigilantBounds = null;
+let icacDataSystemBrowserView = null;
+let icacDataSystemViewVisible = false;
+let lastIcacDataSystemBounds = null;
+let icacCopsBrowserView = null;
+let icacCopsViewVisible = false;
+let lastIcacCopsBounds = null;
+let gridcopBrowserView = null;
+let gridcopViewVisible = false;
+let lastGridcopBounds = null;
 
 // Icon path: use unpacked asar path in production, normal path in dev
 const iconPath = app.isPackaged
@@ -500,6 +509,9 @@ app.whenReady().then(async () => {
       if (vigilantViewVisible && lastVigilantBounds) {
         vigilantBrowserView.setBounds(lastVigilantBounds);
       }
+      if (icacDataSystemViewVisible && lastIcacDataSystemBounds) icacDataSystemBrowserView.setBounds(lastIcacDataSystemBounds);
+      if (icacCopsViewVisible && lastIcacCopsBounds) icacCopsBrowserView.setBounds(lastIcacCopsBounds);
+      if (gridcopViewVisible && lastGridcopBounds) gridcopBrowserView.setBounds(lastGridcopBounds);
     });
 
     // Create persistent BrowserView for TLO (TransUnion) — people search / skip tracing
@@ -660,11 +672,86 @@ app.whenReady().then(async () => {
       }
     });
 
+    // Create persistent BrowserView for ICAC Data System
+    icacDataSystemBrowserView = new BrowserView({
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        partition: 'persist:icacDataSystem',
+      },
+    });
+    icacDataSystemBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    icacDataSystemBrowserView.setAutoResize({ width: false, height: false });
+    icacDataSystemBrowserView.webContents.on('did-finish-load', () => {
+      if (!icacDataSystemViewVisible) mainWindow.webContents.focus();
+      icacDataSystemBrowserView.webContents.insertCSS(`
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0d1117; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+      `).catch(() => {});
+    });
+    icacDataSystemBrowserView.webContents.on('did-fail-load', (_e, code, desc, url, isMain) => {
+      if (isMain) console.error('[ICAC-DS] did-fail-load', code, desc, url);
+    });
+    icacDataSystemBrowserView.webContents.on('render-process-gone', (_e, details) => {
+      console.error('[ICAC-DS] render-process-gone', details);
+    });
+
+    // Create persistent BrowserView for ICACCOPS
+    icacCopsBrowserView = new BrowserView({
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        partition: 'persist:icacCops',
+      },
+    });
+    icacCopsBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    icacCopsBrowserView.setAutoResize({ width: false, height: false });
+    icacCopsBrowserView.webContents.on('did-finish-load', () => {
+      if (!icacCopsViewVisible) mainWindow.webContents.focus();
+      icacCopsBrowserView.webContents.insertCSS(`
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0d1117; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+      `).catch(() => {});
+    });
+    icacCopsBrowserView.webContents.on('did-fail-load', (_e, code, desc, url, isMain) => {
+      if (isMain) console.error('[ICACCOPS] did-fail-load', code, desc, url);
+    });
+    icacCopsBrowserView.webContents.on('render-process-gone', (_e, details) => {
+      console.error('[ICACCOPS] render-process-gone', details);
+    });
+
+    // Create persistent BrowserView for Gridcop
+    gridcopBrowserView = new BrowserView({
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        partition: 'persist:gridcop',
+      },
+    });
+    gridcopBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    gridcopBrowserView.setAutoResize({ width: false, height: false });
+    gridcopBrowserView.webContents.on('did-finish-load', () => {
+      if (!gridcopViewVisible) mainWindow.webContents.focus();
+      gridcopBrowserView.webContents.insertCSS(`
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0d1117; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+      `).catch(() => {});
+    });
+    gridcopBrowserView.webContents.on('did-fail-load', (_e, code, desc, url, isMain) => {
+      if (isMain) console.error('[GRIDCOP] did-fail-load', code, desc, url);
+    });
+    gridcopBrowserView.webContents.on('render-process-gone', (_e, details) => {
+      console.error('[GRIDCOP] render-process-gone', details);
+    });
+
     // On page navigation, detach resource-hub BrowserViews so they can't steal clicks
     // on the next page. Media player is handled by its own show/hide via reportBounds().
     mainWindow.webContents.on('did-start-navigation', (_event, _url, isInPlace) => {
       if (isInPlace) return; // ignore hash/pushState navigations
-      const pageViews = [flockBrowserView, tloBrowserView, accurintBrowserView, vigilantBrowserView];
+      const pageViews = [flockBrowserView, tloBrowserView, accurintBrowserView, vigilantBrowserView, icacDataSystemBrowserView, icacCopsBrowserView, gridcopBrowserView];
       for (const bv of pageViews) {
         if (!bv) continue;
         try { mainWindow.removeBrowserView(bv); } catch (_) {}
@@ -674,6 +761,9 @@ app.whenReady().then(async () => {
       tloViewVisible = false;
       accurintViewVisible = false;
       vigilantViewVisible = false;
+      icacDataSystemViewVisible = false;
+      icacCopsViewVisible = false;
+      gridcopViewVisible = false;
     });
 
     // When the renderer page finishes loading, ask it to report media bounds
@@ -4247,7 +4337,79 @@ ipcMain.on('vigilant-set-visible', (_event, visible) => {
   }
 });
 
-// Generic zoom factor control for the four Resource Hub BrowserViews.
+// ── ICAC Data System IPC ────────────────────────────────────────────
+ipcMain.on('icac-data-system-set-bounds', (_event, bounds) => {
+  if (!icacDataSystemBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  const b = { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) };
+  if (b.width < 10 || b.height < 10) return;
+  lastIcacDataSystemBounds = b;
+  if (icacDataSystemViewVisible) icacDataSystemBrowserView.setBounds(b);
+});
+ipcMain.on('icac-data-system-set-visible', (_event, visible) => {
+  if (!icacDataSystemBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  icacDataSystemViewVisible = visible;
+  if (visible && lastIcacDataSystemBounds) {
+    const currentUrl = icacDataSystemBrowserView.webContents.getURL();
+    if (!currentUrl || currentUrl === 'about:blank') {
+      icacDataSystemBrowserView.webContents.loadURL('https://www.icacdatasystem.com/landing/login');
+    }
+    try { mainWindow.addBrowserView(icacDataSystemBrowserView); } catch (_) {}
+    icacDataSystemBrowserView.setBounds(lastIcacDataSystemBounds);
+  } else {
+    icacDataSystemBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    try { mainWindow.removeBrowserView(icacDataSystemBrowserView); } catch (_) {}
+  }
+});
+
+// ── ICACCOPS IPC ────────────────────────────────────────────────────
+ipcMain.on('icac-cops-set-bounds', (_event, bounds) => {
+  if (!icacCopsBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  const b = { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) };
+  if (b.width < 10 || b.height < 10) return;
+  lastIcacCopsBounds = b;
+  if (icacCopsViewVisible) icacCopsBrowserView.setBounds(b);
+});
+ipcMain.on('icac-cops-set-visible', (_event, visible) => {
+  if (!icacCopsBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  icacCopsViewVisible = visible;
+  if (visible && lastIcacCopsBounds) {
+    const currentUrl = icacCopsBrowserView.webContents.getURL();
+    if (!currentUrl || currentUrl === 'about:blank') {
+      icacCopsBrowserView.webContents.loadURL('https://www.icaccops.com/users?ReturnUrl=%2Fusers%2Fhome');
+    }
+    try { mainWindow.addBrowserView(icacCopsBrowserView); } catch (_) {}
+    icacCopsBrowserView.setBounds(lastIcacCopsBounds);
+  } else {
+    icacCopsBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    try { mainWindow.removeBrowserView(icacCopsBrowserView); } catch (_) {}
+  }
+});
+
+// ── Gridcop IPC ─────────────────────────────────────────────────────
+ipcMain.on('gridcop-set-bounds', (_event, bounds) => {
+  if (!gridcopBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  const b = { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) };
+  if (b.width < 10 || b.height < 10) return;
+  lastGridcopBounds = b;
+  if (gridcopViewVisible) gridcopBrowserView.setBounds(b);
+});
+ipcMain.on('gridcop-set-visible', (_event, visible) => {
+  if (!gridcopBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  gridcopViewVisible = visible;
+  if (visible && lastGridcopBounds) {
+    const currentUrl = gridcopBrowserView.webContents.getURL();
+    if (!currentUrl || currentUrl === 'about:blank') {
+      gridcopBrowserView.webContents.loadURL('https://www.gridcop.com/cb-login');
+    }
+    try { mainWindow.addBrowserView(gridcopBrowserView); } catch (_) {}
+    gridcopBrowserView.setBounds(lastGridcopBounds);
+  } else {
+    gridcopBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    try { mainWindow.removeBrowserView(gridcopBrowserView); } catch (_) {}
+  }
+});
+
+// Generic zoom factor control for the Resource Hub BrowserViews.
 // Renderer sends a resource id ('flock' | 'tlo' | 'accurint' | 'vigilant')
 // and a zoom factor (0.5 .. 2.0). Persists across visibility toggles
 // because we apply directly to the BV's webContents.
@@ -4260,6 +4422,9 @@ ipcMain.on('rh-set-zoom', (_event, payload) => {
     else if (resId === 'tlo') bv = tloBrowserView;
     else if (resId === 'accurint') bv = accurintBrowserView;
     else if (resId === 'vigilant') bv = vigilantBrowserView;
+    else if (resId === 'icacDataSystem') bv = icacDataSystemBrowserView;
+    else if (resId === 'icacCops') bv = icacCopsBrowserView;
+    else if (resId === 'gridcop') bv = gridcopBrowserView;
     if (bv && bv.webContents && !bv.webContents.isDestroyed()) {
       bv.webContents.setZoomFactor(f);
     }
@@ -5939,6 +6104,303 @@ ${mediaHtml ? `<div class="media-grid">${mediaHtml}</div>` : '<div class="empty"
 
 <h2>Flagged Contacts (${counts.contacts || 0})</h2>
 ${contactsHtml ? `<div class="contact-grid">${contactsHtml}</div>` : '<div class="empty">No contacts flagged.</div>'}
+
+</body></html>`;
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Generic Warrant Flag-to-Evidence Bundle System
+// Mirrors the Datapilot push-to-evidence pipeline but parameterized by
+// moduleSlug + sectionConfigs so all 6 warrant parsers (Discord, Google,
+// Meta, KIK, Snapchat, Aperture) can share one backend.
+// ════════════════════════════════════════════════════════════════════════
+
+/**
+ * Push flagged warrant items to the case Evidence module as a self-contained
+ * bundle. Writes structured report.json + DA-ready report.html into
+ * cases/<caseNumber>/Evidence/<ModuleFolder>/<bundleId>/.
+ */
+ipcMain.handle('warrant-export-flags-bundle', async (event, payload) => {
+  try {
+    const {
+      caseNumber, bundleId,
+      moduleSlug, moduleLabel, moduleFolder, bundleLabel,
+      sourceFileName, subjectInfo = {},
+      sectionConfigs = [],
+      sections = {},
+      generatedAt
+    } = payload || {};
+
+    if (!caseNumber || !bundleId || !moduleSlug || !moduleFolder) {
+      return { success: false, error: 'Missing caseNumber/bundleId/moduleSlug/moduleFolder' };
+    }
+
+    const safeModuleFolder = String(moduleFolder).replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').slice(0, 60);
+    const safeBundleId     = String(bundleId).replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').slice(0, 80);
+    const bundlePath = path.join(casesDir, caseNumber, 'Evidence', safeModuleFolder, safeBundleId);
+    fs.mkdirSync(bundlePath, { recursive: true });
+
+    const useEnc = security && security.isEnabled() && security.isUnlocked();
+    const writeFileMaybeEncrypted = (dest, buf) => {
+      fs.writeFileSync(dest, useEnc ? security.encryptBuffer(buf) : buf);
+    };
+
+    let totalItems = 0;
+    const counts = {};
+    for (const cfg of sectionConfigs) {
+      const arr = Array.isArray(sections[cfg.id]) ? sections[cfg.id] : [];
+      counts[cfg.id] = arr.length;
+      totalItems += arr.length;
+    }
+
+    const report = {
+      bundleId,
+      bundleLabel,
+      moduleSlug,
+      moduleLabel,
+      generatedAt: generatedAt || new Date().toISOString(),
+      source: { fileName: sourceFileName || '' },
+      subjectInfo,
+      sectionConfigs,
+      sections,
+      counts,
+      totalItems
+    };
+    const reportJsonPath = path.join(bundlePath, 'report.json');
+    writeFileMaybeEncrypted(reportJsonPath, Buffer.from(JSON.stringify(report, null, 2), 'utf-8'));
+
+    const html = _buildWarrantReportHtml(report);
+    const reportHtmlPath = path.join(bundlePath, 'report.html');
+    writeFileMaybeEncrypted(reportHtmlPath, Buffer.from(html, 'utf-8'));
+
+    return {
+      success: true,
+      bundlePath,
+      reportJsonPath,
+      reportHtmlPath,
+      totalItems,
+      counts
+    };
+  } catch (error) {
+    console.error('warrant-export-flags-bundle error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('warrant-read-bundle-file', async (event, { bundlePath, relPath }) => {
+  try {
+    if (!bundlePath || !relPath) return { success: false, error: 'Missing bundlePath/relPath' };
+    const normRel = path.normalize(relPath).replace(/^[\\/]+/, '');
+    if (normRel.startsWith('..')) return { success: false, error: 'Invalid relPath' };
+    const fullPath = path.join(bundlePath, normRel);
+    const resolvedRoot = path.resolve(bundlePath);
+    if (!path.resolve(fullPath).startsWith(resolvedRoot)) {
+      return { success: false, error: 'Path traversal blocked' };
+    }
+    if (!fs.existsSync(fullPath)) return { success: false, error: 'Not found: ' + relPath };
+    let buf = fs.readFileSync(fullPath);
+    if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
+      buf = security.decryptBuffer(buf);
+    }
+    const extLow = path.extname(fullPath).toLowerCase();
+    const mimeMap = { '.json':'application/json','.html':'text/html','.txt':'text/plain' };
+    const mimeType = mimeMap[extLow] || 'application/octet-stream';
+    return { success: true, mimeType, dataBase64: buf.toString('base64'), size: buf.length };
+  } catch (error) {
+    console.error('warrant-read-bundle-file error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+function _buildWarrantReportHtml(report) {
+  const esc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const fmtDate = (s) => {
+    if (!s) return '';
+    try { const d = new Date(s); if (!isNaN(d)) return d.toLocaleString(); } catch(_){}
+    return s;
+  };
+
+  const fmtCell = (val, type) => {
+    if (val == null || val === '') return '<span class="empty-cell">—</span>';
+    if (Array.isArray(val)) return val.map(v => esc(v)).join('<br>');
+    if (type === 'date') return esc(fmtDate(val));
+    if (type === 'mono') return `<code>${esc(val)}</code>`;
+    if (type === 'longtext') {
+      const s = String(val);
+      return `<div class="longtext">${esc(s).replace(/\n/g, '<br>')}</div>`;
+    }
+    if (type === 'pre') {
+      let s = val;
+      if (typeof s !== 'string') {
+        try { s = JSON.stringify(s, null, 2); } catch(_) { s = String(s); }
+      }
+      return `<pre class="pre-cell">${esc(s)}</pre>`;
+    }
+    return esc(val);
+  };
+
+  const renderSection = (cfg) => {
+    const items = Array.isArray(report.sections[cfg.id]) ? report.sections[cfg.id] : [];
+    const title = `${cfg.icon ? cfg.icon + ' ' : ''}${esc(cfg.title || cfg.id)}`;
+    if (!items.length) {
+      return `<h2>${title} <span class="count">(0)</span></h2>
+        <div class="empty">${esc(cfg.emptyText || 'No items flagged.')}</div>`;
+    }
+    const cols = Array.isArray(cfg.columns) ? cfg.columns : [];
+    const hint = cfg.renderHint || (cols.length ? 'table' : 'pre');
+
+    if (hint === 'messages') {
+      const timeF = (cols.find(c => c.type === 'date') || {}).field;
+      const authorF = (cols.find(c => /author|from|sender|address/i.test(c.label || c.field || '')) || {}).field;
+      const bodyF = (cols.find(c => c.type === 'longtext') || cols[cols.length-1] || {}).field;
+      const idF = (cols.find(c => /id$/i.test(c.field || '')) || {}).field;
+      const attachF = (cols.find(c => /attach/i.test((c.label || '') + ' ' + (c.field || ''))) || {}).field;
+      const attKind = (url) => {
+        const p = String(url).split('?')[0].toLowerCase();
+        const m = p.match(/\.([a-z0-9]+)$/);
+        const ext = m ? m[1] : '';
+        if (['jpg','jpeg','png','gif','webp','bmp','svg','heic','heif','avif'].includes(ext)) return 'image';
+        if (['mp4','webm','mov','m4v','mkv','avi'].includes(ext)) return 'video';
+        if (['mp3','wav','ogg','m4a','aac','flac','opus'].includes(ext)) return 'audio';
+        return 'link';
+      };
+      const renderAtts = (txt) => {
+        const s = String(txt || '');
+        const urls = s.split(/\s+/).filter(Boolean).filter(u => /^https?:\/\//i.test(u));
+        if (!urls.length) return '';
+        return `<div class="msg-attach">` + urls.map(u => {
+          const k = attKind(u);
+          const fname = (u.split('?')[0].split('/').pop()) || u;
+          if (k === 'image') return `<div class="att att-img"><a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="${esc(fname)}" loading="lazy"/></a><div class="att-cap">📎 <a href="${esc(u)}" target="_blank" rel="noopener">${esc(fname)}</a></div></div>`;
+          if (k === 'video') return `<div class="att att-video"><video controls preload="metadata" src="${esc(u)}"></video><div class="att-cap">🎬 <a href="${esc(u)}" target="_blank" rel="noopener">${esc(fname)}</a></div></div>`;
+          if (k === 'audio') return `<div class="att att-audio"><audio controls preload="metadata" src="${esc(u)}"></audio><div class="att-cap">🔊 <a href="${esc(u)}" target="_blank" rel="noopener">${esc(fname)}</a></div></div>`;
+          return `<div class="att att-link">📎 <a href="${esc(u)}" target="_blank" rel="noopener">${esc(fname)}</a></div>`;
+        }).join('') + `</div>`;
+      };
+      const html = items.map(item => `
+        <div class="msg">
+          <div class="msg-head">
+            ${authorF ? `<span class="msg-author">${esc(item[authorF] || '')}</span>` : ''}
+            ${timeF ? `<span class="msg-time">${esc(fmtDate(item[timeF]))}</span>` : ''}
+            ${idF ? `<span class="msg-id"><code>${esc(item[idF] || '')}</code></span>` : ''}
+          </div>
+          <div class="msg-body">${esc(item[bodyF] || '').replace(/\n/g, '<br>') || '<em class="muted">(no body)</em>'}</div>
+          ${attachF && item[attachF] ? renderAtts(item[attachF]) : ''}
+        </div>
+      `).join('');
+      return `<h2>${title} <span class="count">(${items.length})</span></h2>${html}`;
+    }
+
+    if (hint === 'cards') {
+      const html = items.map(item => `
+        <div class="warrant-card">
+          ${cols.map(c => {
+            const v = item[c.field];
+            if (v == null || v === '') return '';
+            return `<div class="kv-row">
+              <div class="kv-label">${esc(c.label)}</div>
+              <div class="kv-value">${fmtCell(v, c.type)}</div>
+            </div>`;
+          }).join('')}
+        </div>
+      `).join('');
+      return `<h2>${title} <span class="count">(${items.length})</span></h2>
+        <div class="card-grid">${html}</div>`;
+    }
+
+    if (hint === 'pre') {
+      const html = items.map(item => `<pre class="pre-cell">${esc(JSON.stringify(item, null, 2))}</pre>`).join('');
+      return `<h2>${title} <span class="count">(${items.length})</span></h2>${html}`;
+    }
+
+    const head = cols.map(c => `<th>${esc(c.label)}</th>`).join('');
+    const rows = items.map(item => `<tr>${cols.map(c => `<td>${fmtCell(item[c.field], c.type)}</td>`).join('')}</tr>`).join('');
+    return `<h2>${title} <span class="count">(${items.length})</span></h2>
+      <table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+  };
+
+  const subjectRows = Object.entries(report.subjectInfo || {})
+    .filter(([_, v]) => v != null && v !== '')
+    .map(([k, v]) => `
+      <div>
+        <div class="label">${esc(k)}</div>
+        <div class="value">${esc(v)}</div>
+      </div>
+    `).join('');
+
+  const countsBar = (report.sectionConfigs || [])
+    .filter(c => (report.counts || {})[c.id] > 0)
+    .map(c => `<span class="stat-pill">${(report.counts[c.id] || 0).toLocaleString()} ${esc(c.title)}</span>`)
+    .join('');
+
+  return `<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"/>
+<title>${esc(report.moduleLabel || 'Warrant')} Evidence Report — ${esc(report.bundleLabel || report.bundleId || '')}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 28px 36px; background: #f7f8fa; color: #111827; line-height: 1.45; }
+  h1 { font-size: 22px; margin: 0 0 6px; color: #0e7490; }
+  h2 { font-size: 16px; margin: 28px 0 10px; padding-bottom: 6px; border-bottom: 2px solid #d1d5db; color: #111827; display:flex; align-items:baseline; gap:8px; }
+  h2 .count { font-size: 12px; font-weight: 500; color: #6b7280; }
+  .sub { color: #6b7280; font-size: 13px; margin-bottom: 18px; }
+  .subject-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px 18px; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px 24px; font-size: 13px; }
+  .subject-card .label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; }
+  .subject-card .value { font-weight: 500; word-break: break-word; }
+  .stats { display: flex; gap: 10px; margin: 12px 0 22px; flex-wrap: wrap; }
+  .stat-pill { background: #0e7490; color: #fff; padding: 6px 14px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; margin-bottom: 8px; }
+  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #e5e7eb; font-size: 13px; vertical-align: top; }
+  th { background: #f3f4f6; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; }
+  tr:last-child td { border-bottom: none; }
+  td code, code { font-family: ui-monospace, "Menlo", monospace; font-size: 12px; background: #f3f4f6; padding: 1px 5px; border-radius: 3px; }
+  .empty-cell { color: #d1d5db; }
+  .longtext { white-space: pre-wrap; word-break: break-word; max-width: 600px; }
+  .pre-cell { background: #f3f4f6; padding: 8px 10px; border-radius: 4px; font-size: 11px; max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+  .msg { background: #fff; border: 1px solid #e5e7eb; border-left: 4px solid #0e7490; border-radius: 8px; padding: 10px 14px; margin: 8px 0; }
+  .msg-head { display: flex; gap: 10px; align-items: baseline; font-size: 11px; flex-wrap: wrap; margin-bottom: 4px; }
+  .msg-author { font-weight: 700; color: #0e7490; }
+  .msg-time { margin-left: auto; color: #6b7280; }
+  .msg-id { font-size: 10px; color: #9ca3af; }
+  .msg-body { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+  .msg-attach { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #e5e7eb; display: flex; flex-wrap: wrap; gap: 8px; }
+  .att { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px; max-width: 320px; }
+  .att-img img { display: block; max-width: 100%; max-height: 240px; height: auto; border-radius: 4px; }
+  .att-video video, .att-audio audio { display: block; width: 100%; max-width: 320px; border-radius: 4px; }
+  .att-audio audio { height: 36px; }
+  .att-link { padding: 8px 10px; word-break: break-all; }
+  .att-cap { margin-top: 4px; font-size: 11px; color: #6b7280; word-break: break-all; line-height: 1.3; }
+  .att-cap a, .att-link a { color: #0e7490; }
+  .muted { color: #9ca3af; }
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  .warrant-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 14px; }
+  .kv-row { display: flex; gap: 10px; padding: 4px 0; border-bottom: 1px dashed #e5e7eb; font-size: 12px; }
+  .kv-row:last-child { border-bottom: none; }
+  .kv-label { font-weight: 600; color: #6b7280; min-width: 110px; text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; }
+  .kv-value { flex: 1; word-break: break-word; }
+  .empty { color: #9ca3af; font-size: 13px; padding: 12px; background: #fff; border: 1px dashed #d1d5db; border-radius: 8px; text-align: center; }
+  @media print { body { background: #fff; padding: 0.5in; } .warrant-card, .msg, table, .subject-card { break-inside: avoid; } }
+</style>
+</head><body>
+
+<h1>${esc(report.moduleLabel || 'Warrant')} Evidence Report</h1>
+<div class="sub">
+  ${esc(report.bundleLabel || report.bundleId)}${report.source && report.source.fileName ? ` · Source: ${esc(report.source.fileName)}` : ''}
+  · Generated: ${esc(fmtDate(report.generatedAt))}
+</div>
+
+${subjectRows ? `<h2>Subject &amp; Account</h2>
+<div class="subject-card">${subjectRows}</div>` : ''}
+
+${countsBar ? `<div class="stats">${countsBar}</div>` : ''}
+
+${(report.sectionConfigs || []).map(renderSection).join('\n')}
+
+<div class="sub" style="margin-top:30px;border-top:1px solid #e5e7eb;padding-top:12px;">
+  Generated by Project VIPER · ${esc(report.moduleLabel || 'Warrant')} Module · Bundle ${esc(report.bundleId)}
+</div>
 
 </body></html>`;
 }

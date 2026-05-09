@@ -10,6 +10,7 @@
     <script src="modules/licensing.js"></script>
     <script src="modules/genlogs-api.js"></script>
     <script src="modules/trace-search-api.js"></script>
+    <script src="modules/case-link.js"></script>
     <script src="case-snapshot.js"></script>
     <script src="libs/tailwindcss.js"></script>
     <script src="libs/chart.min.js"></script>
@@ -50,6 +51,59 @@
             height: 100%;
             overflow-y: auto;
             overflow-x: hidden;
+        }
+        /* Bottom buffer so the last content row never feels cut off by the
+           Windows taskbar / window chrome. The actual scroll container in
+           every page is `<div class="flex-1 overflow-y-auto">` directly
+           under `.flex.h-screen`, so target that structurally instead of
+           relying on a class that the markup doesn't carry. */
+        body > .flex.h-screen > .flex-1.overflow-y-auto,
+        .main-content-area {
+            padding-bottom: 4rem;
+            scroll-padding-bottom: 4rem;
+        }
+
+        /* Native date/time pickers — make the calendar / clock indicator and
+           text legible on the dark theme. `color-scheme: dark` flips the
+           browser's native UI (picker popup, clear button, internal text,
+           AND the indicator glyph) to a light palette automatically — no
+           additional filter needed. */
+        input[type="date"],
+        input[type="time"],
+        input[type="datetime-local"],
+        input[type="month"],
+        input[type="week"] {
+            color-scheme: dark;
+        }
+        input[type="date"]::-webkit-calendar-picker-indicator,
+        input[type="time"]::-webkit-calendar-picker-indicator,
+        input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+        input[type="month"]::-webkit-calendar-picker-indicator,
+        input[type="week"]::-webkit-calendar-picker-indicator {
+            opacity: 0.85;
+            cursor: pointer;
+        }
+        input[type="date"]::-webkit-calendar-picker-indicator:hover,
+        input[type="time"]::-webkit-calendar-picker-indicator:hover,
+        input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
+            opacity: 1;
+        }
+        /* Light-mode flip — browser picks light scheme so the icon reads
+           dark on the now-light background. */
+        body.light-mode input[type="date"],
+        body.light-mode input[type="time"],
+        body.light-mode input[type="datetime-local"],
+        body.light-mode input[type="month"],
+        body.light-mode input[type="week"] {
+            color-scheme: light;
+        }
+        body.light-mode input[type="date"]::-webkit-calendar-picker-indicator,
+        body.light-mode input[type="time"]::-webkit-calendar-picker-indicator,
+        body.light-mode input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+        body.light-mode input[type="month"]::-webkit-calendar-picker-indicator,
+        body.light-mode input[type="week"]::-webkit-calendar-picker-indicator {
+            filter: none;
+            opacity: 0.7;
         }
         
         /* Grid improvements for smaller screens */
@@ -135,24 +189,27 @@
         }
         
         // Dashboard metrics data
+        // - `value`     = lifetime / all-time figure
+        // - `monthly`   = current-calendar-month figure (null = metric is static, no monthly view)
+        // - `subtitle`  = label for the lifetime number ("All time" by default)
         const dashboardMetrics = {
-            'arrests': { value: 0, subtitle: 'Suspects arrested', color: 'viper-orange' },
-            'recovered_guns': { value: 0, subtitle: 'Firearms secured', color: 'viper-cyan' },
-            'recovered_vehicles': { value: 0, subtitle: 'Vehicles recovered', color: 'viper-purple' },
-            'rescued_individuals': { value: 0, subtitle: 'Not yet tracked', color: 'viper-green' },
-            'located_missing': { value: 0, subtitle: 'Missing persons found', color: 'viper-cyan' },
-            'new_cases_assigned': { value: 0, subtitle: 'This month', color: 'viper-cyan' },
-            'cases_closed': { value: 0, subtitle: 'Cases resolved', color: 'viper-green' },
-            'narcotics_seized': { value: 0, subtitle: 'kg seized', color: 'viper-purple' },
-            'money_seized': { value: 0, subtitle: 'USD seized', color: 'viper-green' },
-            'cargo_recovered': { value: 0, subtitle: 'Merchandise recovered', color: 'viper-green' },
-            'cargo_loss': { value: 0, subtitle: 'Outstanding loss', color: 'viper-orange' },
-            'missing_persons': { value: 0, subtitle: 'Active cases', color: 'viper-orange' },
-            'open_cases': { value: 0, subtitle: 'Active investigations', color: 'viper-orange' },
-            'inactive_cases': { value: 0, subtitle: 'On hold / paused', color: 'viper-yellow' },
-            'closed_with_arrest': { value: 0, subtitle: 'Cleared by arrest', color: 'viper-green' },
-            'transferred_cases': { value: 0, subtitle: 'Cases transferred', color: 'viper-purple' },
-            'warrants_written': { value: 0, subtitle: 'This month', color: 'viper-orange' },
+            'arrests':            { value: 0, monthly: 0, subtitle: 'All time', color: 'viper-orange' },
+            'recovered_guns':     { value: 0, monthly: 0, subtitle: 'All time', color: 'viper-cyan' },
+            'recovered_vehicles': { value: 0, monthly: 0, subtitle: 'All time', color: 'viper-purple' },
+            'rescued_individuals':{ value: 0, monthly: null, subtitle: 'Not yet tracked', color: 'viper-green' },
+            'located_missing':    { value: 0, monthly: 0, subtitle: 'All time', color: 'viper-cyan' },
+            'new_cases_assigned': { value: 0, monthly: 0, subtitle: 'All time', color: 'viper-cyan' },
+            'cases_closed':       { value: 0, monthly: 0, subtitle: 'All time', color: 'viper-green' },
+            'narcotics_seized':   { value: 0, monthly: 0, subtitle: 'All time', color: 'viper-purple' },
+            'money_seized':       { value: 0, monthly: 0, subtitle: 'All time', color: 'viper-green' },
+            'cargo_recovered':    { value: 0, monthly: 0, subtitle: 'All time', color: 'viper-green' },
+            'cargo_loss':         { value: 0, monthly: 0, subtitle: 'All time', color: 'viper-orange' },
+            'missing_persons':    { value: 0, monthly: null, subtitle: 'Active cases', color: 'viper-orange' },
+            'open_cases':         { value: 0, monthly: null, subtitle: 'Active investigations', color: 'viper-orange' },
+            'inactive_cases':     { value: 0, monthly: null, subtitle: 'On hold / paused', color: 'viper-yellow' },
+            'closed_with_arrest': { value: 0, monthly: 0, subtitle: 'All time', color: 'viper-green' },
+            'transferred_cases':  { value: 0, monthly: 0, subtitle: 'All time', color: 'viper-purple' },
+            'warrants_written':   { value: 0, monthly: 0, subtitle: 'All time', color: 'viper-orange' },
         };
         
         const metricLabels = {
@@ -1714,91 +1771,118 @@
             const card = document.querySelector(`[data-card="${cardNum}"]`);
             const metric = dashboardMetrics[metricKey];
             
-            console.log(`updateCard(${cardNum}, ${metricKey}), value:`, metric.value, 'type:', typeof metric.value);
+            console.log(`updateCard(${cardNum}, ${metricKey}), value:`, metric.value, 'monthly:', metric.monthly, 'type:', typeof metric.value);
             
             card.querySelector('.card-title').textContent = metricLabels[metricKey];
+            const hasMonthly = metric.monthly !== null && metric.monthly !== undefined;
             
-            // Special handling for narcotics_seized
+            // Special handling for narcotics_seized (multi-unit)
             if (metricKey === 'narcotics_seized' && typeof metric.value === 'object') {
-                console.log('Using multi-unit narcotics display');
-                const narcotics = metric.value;
-                const parts = [];
-                
-                if (narcotics.kg > 0) {
-                    parts.push(`<div class="flex items-baseline gap-2 mb-1">
-                        <span class="text-4xl font-bold text-${metric.color}">${narcotics.kg.toFixed(2)}</span>
-                        <span class="text-base text-gray-400">kg</span>
-                    </div>`);
+                const renderUnits = (n, color) => {
+                    if (!n) return `<div class="text-3xl font-bold text-${color}">0</div>`;
+                    const parts = [];
+                    if (n.kg > 0)    parts.push(`<div class="flex items-baseline gap-1.5"><span class="text-2xl font-bold text-${color}">${n.kg.toFixed(2)}</span><span class="text-xs text-gray-400">kg</span></div>`);
+                    if (n.lbs > 0)   parts.push(`<div class="flex items-baseline gap-1.5"><span class="text-2xl font-bold text-${color}">${n.lbs.toFixed(2)}</span><span class="text-xs text-gray-400">lbs</span></div>`);
+                    if (n.pills > 0) parts.push(`<div class="flex items-baseline gap-1.5"><span class="text-2xl font-bold text-${color}">${Math.round(n.pills).toLocaleString()}</span><span class="text-xs text-gray-400">pills</span></div>`);
+                    return parts.length ? `<div class="space-y-0.5">${parts.join('')}</div>` : `<div class="text-3xl font-bold text-${color}">0</div>`;
+                };
+                if (hasMonthly) {
+                    card.querySelector('.card-value').innerHTML = `
+                        <div class="grid grid-cols-2 gap-3 items-end">
+                            <div>${renderUnits(metric.monthly, metric.color)}<p class="text-[10px] text-gray-500 uppercase tracking-wide mt-1">This month</p></div>
+                            <div class="border-l border-gray-700/60 pl-3">${renderUnits(metric.value, metric.color)}<p class="text-[10px] text-gray-500 uppercase tracking-wide mt-1">All time</p></div>
+                        </div>`;
+                    card.querySelector('.card-subtitle').textContent = '';
+                } else {
+                    card.querySelector('.card-value').innerHTML = renderUnits(metric.value, metric.color);
+                    card.querySelector('.card-subtitle').textContent = 'Total seized';
                 }
-                if (narcotics.lbs > 0) {
-                    parts.push(`<div class="flex items-baseline gap-2 mb-1">
-                        <span class="text-4xl font-bold text-${metric.color}">${narcotics.lbs.toFixed(2)}</span>
-                        <span class="text-base text-gray-400">lbs</span>
-                    </div>`);
-                }
-                if (narcotics.pills > 0) {
-                    parts.push(`<div class="flex items-baseline gap-2 mb-1">
-                        <span class="text-4xl font-bold text-${metric.color}">${Math.round(narcotics.pills).toLocaleString()}</span>
-                        <span class="text-base text-gray-400">pills</span>
-                    </div>`);
-                }
-                
-                const displayValue = parts.length > 0 ? 
-                    `<div class="space-y-1">${parts.join('')}</div>` : 
-                    `<div class="text-5xl font-bold text-${metric.color}">0</div>`;
-                card.querySelector('.card-value').innerHTML = displayValue;
-                card.querySelector('.card-subtitle').textContent = 'Total seized';
+                return;
+            }
+            
+            // Scalar metrics: dual layout when monthly is tracked, single otherwise
+            const valueEl = card.querySelector('.card-value');
+            if (hasMonthly) {
+                // Reset class so we don't keep stacking text-5xl from prior renders
+                valueEl.className = 'card-value';
+                valueEl.innerHTML = `
+                    <div class="grid grid-cols-2 gap-3 items-end">
+                        <div>
+                            <div class="text-4xl font-bold text-${metric.color} leading-none">${metric.monthly}</div>
+                            <p class="text-[10px] text-gray-500 uppercase tracking-wide mt-1">This month</p>
+                        </div>
+                        <div class="border-l border-gray-700/60 pl-3">
+                            <div class="text-4xl font-bold text-${metric.color} leading-none">${metric.value}</div>
+                            <p class="text-[10px] text-gray-500 uppercase tracking-wide mt-1">All time</p>
+                        </div>
+                    </div>`;
+                card.querySelector('.card-subtitle').textContent = '';
             } else {
-                // Normal cards - use text content and maintain text-5xl class
-                card.querySelector('.card-value').textContent = metric.value;
-                card.querySelector('.card-subtitle').textContent = metric.subtitle;
-                
-                // Update value color while preserving text-5xl
-                const valueEl = card.querySelector('.card-value');
+                // Single number (static metric) — keep original styling
                 valueEl.className = `text-5xl font-bold card-value text-${metric.color}`;
+                valueEl.textContent = metric.value;
+                card.querySelector('.card-subtitle').textContent = metric.subtitle;
             }
         }
         
         function updateQuickStats() {
             const container = document.getElementById('quick-stats-container');
             const colors = ['viper-cyan', 'viper-green', 'viper-purple', 'viper-orange'];
-            
+
+            // Compact narcotics renderer for dense rows: stack each unit on its own line
+            const renderNarcoticsCompact = (n, color) => {
+                if (!n || typeof n !== 'object') return `<span class="text-lg font-bold text-${color}">0</span>`;
+                const parts = [];
+                if (n.kg > 0)    parts.push(`<span class="whitespace-nowrap text-base font-bold text-${color}">${n.kg.toFixed(2)}<span class="text-[10px] text-gray-500 ml-0.5">kg</span></span>`);
+                if (n.lbs > 0)   parts.push(`<span class="whitespace-nowrap text-base font-bold text-${color}">${n.lbs.toFixed(2)}<span class="text-[10px] text-gray-500 ml-0.5">lbs</span></span>`);
+                if (n.pills > 0) parts.push(`<span class="whitespace-nowrap text-base font-bold text-${color}">${Math.round(n.pills).toLocaleString()}<span class="text-[10px] text-gray-500 ml-0.5">pi</span></span>`);
+                return parts.length ? `<div class="flex flex-col items-end gap-0.5">${parts.join('')}</div>` : `<span class="text-lg font-bold text-${color}">0</span>`;
+            };
+
             container.innerHTML = quickStatsPreferences.map((metric, index) => {
                 const data = dashboardMetrics[metric];
                 const isLast = index === quickStatsPreferences.length - 1;
-                
-                // Special handling for narcotics_seized to show multiple units
+                const color = colors[index];
+                const hasMonthly = data.monthly !== null && data.monthly !== undefined;
+
+                // Right-side value cell: dual layout when monthly is tracked, single otherwise
+                let valueCell;
                 if (metric === 'narcotics_seized' && typeof data.value === 'object') {
-                    const narcotics = data.value;
-                    const parts = [];
-                    
-                    if (narcotics.kg > 0) {
-                        parts.push(`<span class="whitespace-nowrap">${narcotics.kg.toFixed(2)} <span class="text-sm text-gray-500">kg</span></span>`);
+                    if (hasMonthly) {
+                        valueCell = `
+                            <div class="grid grid-cols-2 gap-2 items-end text-right">
+                                <div>
+                                    ${renderNarcoticsCompact(data.monthly, color)}
+                                    <p class="text-[9px] text-gray-500 uppercase tracking-wide mt-0.5">Month</p>
+                                </div>
+                                <div class="border-l border-gray-700/60 pl-2">
+                                    ${renderNarcoticsCompact(data.value, color)}
+                                    <p class="text-[9px] text-gray-500 uppercase tracking-wide mt-0.5">All time</p>
+                                </div>
+                            </div>`;
+                    } else {
+                        valueCell = `<div class="text-right">${renderNarcoticsCompact(data.value, color)}</div>`;
                     }
-                    if (narcotics.lbs > 0) {
-                        parts.push(`<span class="whitespace-nowrap">${narcotics.lbs.toFixed(2)} <span class="text-sm text-gray-500">lbs</span></span>`);
-                    }
-                    if (narcotics.pills > 0) {
-                        parts.push(`<span class="whitespace-nowrap">${Math.round(narcotics.pills).toLocaleString()} <span class="text-sm text-gray-500">pills</span></span>`);
-                    }
-                    
-                    const displayValue = parts.length > 0 ? parts.join(' <span class="text-gray-600">•</span> ') : '0';
-                    
-                    return `
-                        <div class="flex items-start justify-between py-3 ${!isLast ? 'border-b border-gray-700' : ''}">
-                            <span class="text-sm text-gray-400">${metricLabels[metric]}</span>
-                            <div class="text-right flex-1 ml-4">
-                                <div class="text-base font-bold text-${colors[index]} leading-relaxed">${displayValue}</div>
+                } else if (hasMonthly) {
+                    valueCell = `
+                        <div class="grid grid-cols-2 gap-2 items-end text-right">
+                            <div>
+                                <div class="text-lg font-bold text-${color} leading-none">${data.monthly}</div>
+                                <p class="text-[9px] text-gray-500 uppercase tracking-wide mt-0.5">Month</p>
                             </div>
-                        </div>
-                    `;
+                            <div class="border-l border-gray-700/60 pl-2">
+                                <div class="text-lg font-bold text-${color} leading-none">${data.value}</div>
+                                <p class="text-[9px] text-gray-500 uppercase tracking-wide mt-0.5">All time</p>
+                            </div>
+                        </div>`;
+                } else {
+                    valueCell = `<span class="text-lg font-bold text-${color}">${data.value}</span>`;
                 }
-                
-                // Default handling for other metrics
+
                 return `
-                    <div class="flex items-center justify-between py-3 ${!isLast ? 'border-b border-gray-700' : ''}">
-                        <span class="text-sm text-gray-400">${metricLabels[metric]}</span>
-                        <span class="text-lg font-bold text-${colors[index]}">${data.value}</span>
+                    <div class="flex items-center justify-between py-3 gap-3 ${!isLast ? 'border-b border-gray-700' : ''}">
+                        <span class="text-sm text-gray-400 flex-shrink-0">${metricLabels[metric]}</span>
+                        <div class="flex-1 flex justify-end">${valueCell}</div>
                     </div>
                 `;
             }).join('');
@@ -3310,6 +3394,15 @@
             
             return totalVehicles;
         }
+        function getMonthlyRecoveredVehicles() {
+            const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            let count = 0;
+            cases.forEach(caseItem => {
+                const recoveredVehicles = JSON.parse(localStorage.getItem(`recoveredVehicles_${caseItem.id}`)) || [];
+                recoveredVehicles.forEach(v => { if (_inThisMonth(_itemDate(v, caseItem))) count++; });
+            });
+            return count;
+        }
         
         function getTotalMoneySeized() {
             const allMoney = JSON.parse(localStorage.getItem('viperCaseMoney')) || {};
@@ -3331,6 +3424,21 @@
             console.log('Total money seized:', totalMoney);
             return '$' + totalMoney.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
         }
+        function getMonthlyMoneySeized() {
+            const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            const allMoney = JSON.parse(localStorage.getItem('viperCaseMoney')) || {};
+            const caseById = Object.fromEntries(cases.map(c => [c.id, c]));
+            let total = 0;
+            Object.entries(allMoney).forEach(([caseId, arr]) => {
+                if (!Array.isArray(arr)) return;
+                const caseItem = caseById[caseId];
+                arr.forEach(entry => {
+                    if (!_inThisMonth(_itemDate(entry, caseItem))) return;
+                    total += parseFloat(entry.totalValue) || parseFloat(entry.amount) || 0;
+                });
+            });
+            return '$' + total.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+        }
         
         function getTotalFirearmsRecovered() {
             const allFirearms = JSON.parse(localStorage.getItem('viperCaseFirearms')) || {};
@@ -3343,6 +3451,18 @@
             });
             
             return totalFirearms;
+        }
+        function getMonthlyFirearmsRecovered() {
+            const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            const allFirearms = JSON.parse(localStorage.getItem('viperCaseFirearms')) || {};
+            const caseById = Object.fromEntries(cases.map(c => [c.id, c]));
+            let count = 0;
+            Object.entries(allFirearms).forEach(([caseId, arr]) => {
+                if (!Array.isArray(arr)) return;
+                const caseItem = caseById[caseId];
+                arr.forEach(f => { if (_inThisMonth(_itemDate(f, caseItem))) count++; });
+            });
+            return count;
         }
         
         function getTotalNarcoticsSeized() {
@@ -3387,6 +3507,26 @@
             // Return object with all metrics
             return result;
         }
+        function getMonthlyNarcoticsSeized() {
+            const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            const allNarcotics = JSON.parse(localStorage.getItem('viperCaseNarcotics')) || {};
+            const caseById = Object.fromEntries(cases.map(c => [c.id, c]));
+            let totalKg = 0, totalLbs = 0, totalPills = 0;
+            Object.entries(allNarcotics).forEach(([caseId, arr]) => {
+                if (!Array.isArray(arr)) return;
+                const caseItem = caseById[caseId];
+                arr.forEach(entry => {
+                    if (!_inThisMonth(_itemDate(entry, caseItem))) return;
+                    const amount = parseFloat(entry.amount) || 0;
+                    const unit = entry.unit || '';
+                    if (unit === 'pounds' || unit === 'lbs') totalLbs += amount;
+                    else if (unit === 'pills') totalPills += amount;
+                    else if (unit === 'kilos' || unit === 'kg') totalKg += amount;
+                    else if (unit === 'grams' || unit === 'g') totalKg += amount / 1000;
+                });
+            });
+            return { kg: totalKg, lbs: totalLbs, pills: totalPills };
+        }
         
         function getTotalMissingPersonsLocated() {
             const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
@@ -3402,6 +3542,20 @@
             });
             
             return totalLocated;
+        }
+        function getMonthlyMissingPersonsLocated() {
+            const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            let count = 0;
+            cases.forEach(caseItem => {
+                const missingPersons = JSON.parse(localStorage.getItem(`missingpersons_${caseItem.id}`)) || [];
+                missingPersons.forEach(p => {
+                    if (!p.located) return;
+                    // Use locatedDate if present, fall back to item createdAt or case createdAt
+                    const d = p.locatedDate || p.dateLocated || _itemDate(p, caseItem);
+                    if (_inThisMonth(d)) count++;
+                });
+            });
+            return count;
         }
         
         function getTotalActiveMissingPersons() {
@@ -3437,6 +3591,22 @@
 
             return { totalValue, recoveredValue, lossValue: totalValue - recoveredValue };
         }
+        function getMonthlyCargoStats() {
+            const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            let totalValue = 0;
+            let recoveredValue = 0;
+            cases.forEach(caseItem => {
+                const cargo = JSON.parse(localStorage.getItem(`cargo_${caseItem.id}`)) || [];
+                cargo.forEach(item => {
+                    if (!_inThisMonth(_itemDate(item, caseItem))) return;
+                    const raw = parseFloat(item.estimatedValue) || 0;
+                    const val = item.valueType === 'total' ? raw : raw * (parseInt(item.quantity) || 1);
+                    totalValue += val;
+                    if (item.recovered) recoveredValue += val;
+                });
+            });
+            return { totalValue, recoveredValue, lossValue: totalValue - recoveredValue };
+        }
 
         function getTotalArrests() {
             const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
@@ -3452,6 +3622,26 @@
             const arrestStatuses = new Set(['closed-arrest', ...customArrestIds]);
             const arrestCases = cases.filter(c => arrestStatuses.has(c.status)).length;
             return Math.max(total, arrestCases);
+        }
+        function getMonthlyArrests() {
+            const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            let total = 0;
+            cases.forEach(caseItem => {
+                const suspects = JSON.parse(localStorage.getItem(`suspects_${caseItem.id}`) || '[]');
+                suspects.forEach(s => {
+                    if (!s.arrested) return;
+                    const d = s.arrestDate || s.dateArrested || _itemDate(s, caseItem);
+                    if (_inThisMonth(d)) total++;
+                });
+            });
+            // Also count closed-with-arrest cases closed/created this month
+            const customArrestIds = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]')
+                .filter(s => s.category === 'cleared-arrest').map(s => s.id);
+            const arrestStatuses = new Set(['closed-arrest', ...customArrestIds]);
+            const arrestCasesThisMonth = cases.filter(c =>
+                arrestStatuses.has(c.status) && _inThisMonth(c.closedAt || c.lastUpdated || c.createdAt)
+            ).length;
+            return Math.max(total, arrestCasesThisMonth);
         }
 
         function getNewCasesThisMonth() {
@@ -3472,11 +3662,38 @@
             
             return count;
         }
+        function getTotalNewCases() {
+            const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            return cases.length;
+        }
+        function getTotalWarrantsWritten() {
+            const allWarrants = JSON.parse(localStorage.getItem('viperCaseWarrants')) || {};
+            let count = 0;
+            Object.values(allWarrants).forEach(arr => {
+                if (Array.isArray(arr)) count += arr.length;
+            });
+            return count;
+        }
         
         function getCurrentMonthName() {
             const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
                 'July', 'August', 'September', 'October', 'November', 'December'];
             return monthNames[new Date().getMonth()] + ' ' + new Date().getFullYear();
+        }
+
+        // Helpers for "this month" filtering. Each metric falls back to the parent
+        // case.createdAt when the item itself has no timestamp.
+        function _inThisMonth(d) {
+            if (!d) return false;
+            const dt = new Date(d);
+            if (isNaN(dt.getTime())) return false;
+            const now = new Date();
+            return dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear();
+        }
+        function _itemDate(item, caseItem) {
+            return (item && (item.createdAt || item.dateSeized || item.dateRecovered ||
+                item.recoveredDate || item.seizedDate || item.dateAdded || item.arrestDate))
+                || (caseItem && caseItem.createdAt) || null;
         }
         
         // Update dashboard with case data
@@ -3507,6 +3724,13 @@
             // 'cases_closed' = all closure-type buckets summed (closed + cleared-arrest + other).
             dashboardMetrics['cases_closed'].value       = closedCases.length + closedWithArrestCases.length + otherClosureCases.length;
             dashboardMetrics['transferred_cases'].value  = cases.filter(c => c.status === 'transferred').length;
+
+            // Monthly counts for closure events — use case.closedAt / lastUpdated / createdAt fallback chain.
+            const _closedDate = c => c.closedAt || c.lastUpdated || c.createdAt;
+            dashboardMetrics['cases_closed'].monthly       = (closedCases.length + closedWithArrestCases.length + otherClosureCases.length) === 0 ? 0 :
+                [...closedCases, ...closedWithArrestCases, ...otherClosureCases].filter(c => _inThisMonth(_closedDate(c))).length;
+            dashboardMetrics['closed_with_arrest'].monthly = closedWithArrestCases.filter(c => _inThisMonth(_closedDate(c))).length;
+            dashboardMetrics['transferred_cases'].monthly  = cases.filter(c => c.status === 'transferred' && _inThisMonth(_closedDate(c))).length;
             
             // Update case analytics section
             updateCaseAnalytics(activeCases.length, closedCases.length + otherClosureCases.length, closedWithArrestCases.length);
@@ -4372,38 +4596,48 @@
             // Migrate existing data to central storage (one-time sync)
             migrateExistingDataToCentralStorage();
             
-            // Update new cases assigned this month
-            dashboardMetrics['new_cases_assigned'].value = getNewCasesThisMonth();
-            dashboardMetrics['new_cases_assigned'].subtitle = getCurrentMonthName();
-            
-            // Update warrants written count
-            dashboardMetrics['warrants_written'].value = getWarrantsWrittenThisMonth();
-            
-            // Update recovered vehicles count
-            dashboardMetrics['recovered_vehicles'].value = getTotalRecoveredVehicles();
-            
+            // Update new cases assigned (lifetime + this month)
+            dashboardMetrics['new_cases_assigned'].value   = getTotalNewCases();
+            dashboardMetrics['new_cases_assigned'].monthly = getNewCasesThisMonth();
+
+            // Update warrants written (lifetime + this month)
+            dashboardMetrics['warrants_written'].value   = getTotalWarrantsWritten();
+            dashboardMetrics['warrants_written'].monthly = getWarrantsWrittenThisMonth();
+
+            // Update recovered vehicles
+            dashboardMetrics['recovered_vehicles'].value   = getTotalRecoveredVehicles();
+            dashboardMetrics['recovered_vehicles'].monthly = getMonthlyRecoveredVehicles();
+
             // Update money seized
-            dashboardMetrics['money_seized'].value = getTotalMoneySeized();
-            
+            dashboardMetrics['money_seized'].value   = getTotalMoneySeized();
+            dashboardMetrics['money_seized'].monthly = getMonthlyMoneySeized();
+
             // Update firearms recovered
-            dashboardMetrics['recovered_guns'].value = getTotalFirearmsRecovered();
-            
-            // Update narcotics seized
-            dashboardMetrics['narcotics_seized'].value = getTotalNarcoticsSeized();
-            
+            dashboardMetrics['recovered_guns'].value   = getTotalFirearmsRecovered();
+            dashboardMetrics['recovered_guns'].monthly = getMonthlyFirearmsRecovered();
+
+            // Update narcotics seized (multi-unit)
+            dashboardMetrics['narcotics_seized'].value   = getTotalNarcoticsSeized();
+            dashboardMetrics['narcotics_seized'].monthly = getMonthlyNarcoticsSeized();
+
             // Update missing persons located
-            dashboardMetrics['located_missing'].value = getTotalMissingPersonsLocated();
-            
-            // Update active missing persons
+            dashboardMetrics['located_missing'].value   = getTotalMissingPersonsLocated();
+            dashboardMetrics['located_missing'].monthly = getMonthlyMissingPersonsLocated();
+
+            // Active missing persons — static (no monthly)
             dashboardMetrics['missing_persons'].value = getTotalActiveMissingPersons();
 
-            // Update cargo recovered / loss
+            // Update cargo recovered / loss (lifetime + monthly)
             const cargoStats = getTotalCargoStats();
-            dashboardMetrics['cargo_recovered'].value = '$' + cargoStats.recoveredValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-            dashboardMetrics['cargo_loss'].value = '$' + cargoStats.lossValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-            
-            // Update arrests count
-            dashboardMetrics['arrests'].value = getTotalArrests();
+            const cargoMonthly = getMonthlyCargoStats();
+            dashboardMetrics['cargo_recovered'].value   = '$' + cargoStats.recoveredValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+            dashboardMetrics['cargo_recovered'].monthly = '$' + cargoMonthly.recoveredValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+            dashboardMetrics['cargo_loss'].value        = '$' + cargoStats.lossValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+            dashboardMetrics['cargo_loss'].monthly      = '$' + cargoMonthly.lossValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+
+            // Update arrests (lifetime + monthly)
+            dashboardMetrics['arrests'].value   = getTotalArrests();
+            dashboardMetrics['arrests'].monthly = getMonthlyArrests();
 
             // Update case data on dashboard
             updateDashboardCaseData();
@@ -4946,6 +5180,15 @@
                                     </svg>
                                 </button>
                             </div>
+                            <div class="mt-3 flex items-center justify-between gap-3">
+                                <p class="text-[11px] text-gray-500">Search cases by number, synopsis, suspect/victim names, or offense.</p>
+                                <button onclick="openPersonSearchModal()" class="px-3 py-1.5 rounded-lg bg-viper-purple/15 hover:bg-viper-purple/25 border border-viper-purple/40 text-viper-purple hover:text-viper-purple text-xs font-medium transition inline-flex items-center gap-1.5" title="Find every case linked to a specific person">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+                                    </svg>
+                                    Find Person
+                                </button>
+                            </div>
                         </div>
 
                         <!-- Stats (customizable) -->
@@ -5181,6 +5424,184 @@
             if (tableBody) {
                 tableBody.innerHTML = renderCasesTableRows();
             }
+        }
+
+        // ═══ Find Person — searches across all cases by individual ═══
+        // Uses CaseLink.findPersons() to surface every unique person across
+        // suspect/victim/witness/missing-person rosters and shows the cases
+        // they appear in. Click a person → expand to see full case list →
+        // click a case to open it.
+        function openPersonSearchModal() {
+            // Bail early if engine isn't loaded
+            if (!window.CaseLink || typeof window.CaseLink.findPersons !== 'function') {
+                if (typeof viperToast === 'function') viperToast('Person search engine not loaded — refresh the page.', 'error');
+                return;
+            }
+            const existing = document.getElementById('personSearchModal');
+            if (existing) existing.remove();
+
+            const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+                ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+            const modal = document.createElement('div');
+            modal.id = 'personSearchModal';
+            modal.className = 'fixed inset-0 bg-black/70 backdrop-blur-sm flex items-start justify-center z-[60] p-4 pt-[8vh]';
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+
+            modal.innerHTML = `
+                <div class="bg-viper-card border border-gray-700 rounded-xl w-full max-w-3xl max-h-[80vh] overflow-hidden shadow-2xl flex flex-col" onclick="event.stopPropagation()">
+                    <div class="flex items-start justify-between gap-3 px-6 pt-5 pb-3 border-b border-gray-700/70">
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center gap-2 mb-1">
+                                <svg class="w-5 h-5 text-viper-purple flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+                                </svg>
+                                <h2 class="text-xl font-bold text-white">Find Person Across All Cases</h2>
+                            </div>
+                            <p class="text-xs text-gray-400">Type a first or last name to find every case (suspect, victim, witness, missing person) where they appear.</p>
+                        </div>
+                        <button onclick="document.getElementById('personSearchModal').remove()" class="text-gray-400 hover:text-white p-1 -mr-2 -mt-1 flex-shrink-0">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+
+                    <div class="px-6 py-4 border-b border-gray-700/70">
+                        <div class="relative">
+                            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                            </svg>
+                            <input type="text" id="personSearchInput" placeholder="e.g. Smith, John   /   John Smith   /   smith"
+                                class="w-full pl-9 pr-3 py-2.5 bg-viper-dark border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:border-viper-purple focus:outline-none text-sm">
+                        </div>
+                        <div id="personSearchSummary" class="text-[11px] text-gray-500 mt-2"></div>
+                    </div>
+
+                    <div id="personSearchResults" class="flex-1 overflow-y-auto px-3 py-2"></div>
+
+                    <div class="px-6 py-3 border-t border-gray-700/70 flex items-center justify-between text-[11px] text-gray-500">
+                        <span>Click a person to see all linked cases. Click a case to open it.</span>
+                        <button onclick="document.getElementById('personSearchModal').remove()"
+                            class="px-3 py-1 rounded-md bg-viper-card hover:bg-viper-dark border border-gray-600 text-gray-300">Close</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+
+            const inputEl   = document.getElementById('personSearchInput');
+            const resultsEl = document.getElementById('personSearchResults');
+            const summaryEl = document.getElementById('personSearchSummary');
+
+            const ROLE_LABELS = (window.CaseLink && window.CaseLink.ROLE_LABELS) || {};
+            const roleIcon = { suspect: '🚨', victim: '🆘', witness: '👁️', missingPerson: '🚸' };
+            const roleColor = {
+                suspect: 'text-red-300 bg-red-500/10 border-red-500/30',
+                victim:  'text-viper-purple bg-viper-purple/10 border-viper-purple/40',
+                witness: 'text-viper-green bg-viper-green/10 border-viper-green/30',
+                missingPerson: 'text-amber-300 bg-amber-500/10 border-amber-500/30',
+            };
+
+            // Pre-build the index once
+            try { window.CaseLink.invalidateIndex(); } catch (_) {}
+
+            const renderResults = (q) => {
+                let persons = [];
+                try { persons = window.CaseLink.findPersons(q || '', { limit: 200 }) || []; }
+                catch (e) { persons = []; }
+
+                if (!q && persons.length > 80) {
+                    summaryEl.textContent = `${persons.length} unique persons indexed — start typing to filter`;
+                    persons = persons.slice(0, 80);
+                } else if (!persons.length) {
+                    summaryEl.textContent = q ? 'No persons match that name' : 'No persons indexed yet';
+                } else {
+                    summaryEl.textContent = `${persons.length} matching person${persons.length !== 1 ? 's' : ''}`;
+                }
+
+                if (!persons.length) {
+                    resultsEl.innerHTML = `
+                        <div class="text-center py-12 text-sm text-gray-500">
+                            No persons found.<br>
+                            <span class="text-[11px] text-gray-600">Try a different name fragment, or add suspects/victims to your cases first.</span>
+                        </div>`;
+                    return;
+                }
+
+                resultsEl.innerHTML = persons.map((p, idx) => {
+                    const cnt = p.cases.length;
+                    const roleSet = new Set(p.cases.map(c => c.role));
+                    const rolePills = Array.from(roleSet).map(r => {
+                        const cls = roleColor[r] || 'text-gray-300 bg-gray-700/40 border-gray-600/40';
+                        return `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium border ${cls}">${roleIcon[r] || ''} ${escHtml(ROLE_LABELS[r] || r)}</span>`;
+                    }).join(' ');
+                    return `
+                        <div class="border-b border-gray-700/40 last:border-b-0">
+                            <button type="button" data-ps-toggle="${idx}"
+                                class="w-full text-left px-3 py-2.5 hover:bg-white/5 transition flex items-center gap-3">
+                                <svg class="w-4 h-4 text-gray-500 flex-shrink-0 transition-transform" data-ps-chev="${idx}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                                </svg>
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        <span class="text-sm font-semibold text-white">${escHtml(p.name)}</span>
+                                        ${p.dob ? `<span class="text-xs text-gray-400 font-mono">DOB ${escHtml(p.dob)}</span>` : '<span class="text-[10px] text-gray-500 italic">no DOB</span>'}
+                                        ${rolePills}
+                                    </div>
+                                </div>
+                                <span class="text-xs font-medium text-viper-cyan whitespace-nowrap">${cnt} case${cnt !== 1 ? 's' : ''}</span>
+                            </button>
+                            <div data-ps-body="${idx}" class="hidden px-10 pb-3 space-y-1.5">
+                                ${p.cases.map(c => `
+                                    <button type="button" data-ps-open="${escHtml(c.caseId)}"
+                                        class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-md bg-viper-dark/60 hover:bg-viper-cyan/10 hover:border-viper-cyan border border-gray-700/40 transition">
+                                        <span class="text-viper-cyan font-mono text-sm font-semibold whitespace-nowrap">${escHtml(c.caseNumber || '—')}</span>
+                                        <span class="text-xs text-gray-400">in this case as</span>
+                                        <span class="px-1.5 py-0.5 rounded text-[10px] font-medium border ${roleColor[c.role] || 'text-gray-300 bg-gray-700/40 border-gray-600/40'}">${roleIcon[c.role] || ''} ${escHtml(c.roleLabel || c.role)}</span>
+                                        <span class="ml-auto text-[11px] text-gray-500">Open →</span>
+                                    </button>
+                                `).join('')}
+                            </div>
+                        </div>`;
+                }).join('');
+
+                // Wire toggle + open
+                resultsEl.querySelectorAll('button[data-ps-toggle]').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const i = btn.getAttribute('data-ps-toggle');
+                        const body = resultsEl.querySelector(`[data-ps-body="${i}"]`);
+                        const chev = resultsEl.querySelector(`[data-ps-chev="${i}"]`);
+                        if (!body) return;
+                        const wasHidden = body.classList.contains('hidden');
+                        body.classList.toggle('hidden');
+                        if (chev) chev.style.transform = wasHidden ? 'rotate(90deg)' : '';
+                    });
+                });
+                resultsEl.querySelectorAll('button[data-ps-open]').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const id = btn.getAttribute('data-ps-open');
+                        if (!id) return;
+                        // openCase exists in this page's scope
+                        try { openCase(id); }
+                        catch (e) { window.location.href = 'case-detail-with-analytics.html?case=' + encodeURIComponent(id); }
+                    });
+                });
+            };
+
+            // Debounced live search
+            let timer = null;
+            inputEl.addEventListener('input', () => {
+                clearTimeout(timer);
+                timer = setTimeout(() => renderResults(inputEl.value || ''), 150);
+            });
+            inputEl.addEventListener('keydown', (ev) => {
+                if (ev.key === 'Escape') {
+                    if (inputEl.value) { inputEl.value = ''; renderResults(''); }
+                    else modal.remove();
+                }
+            });
+
+            // Initial render with empty query → show top persons by case count
+            renderResults('');
+            inputEl.focus();
         }
 
         function openACColumnPicker() {

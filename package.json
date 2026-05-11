@@ -1,6 +1,6 @@
 {
   "name": "viper-electron",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "description": "VIPER with Network Intelligence - Electron Desktop App",
   "main": "electron-main.js",
   "scripts": {
@@ -34,6 +34,7 @@
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^1.1.1",
     "qrcode": "^1.5.4",
+    "single-file-cli": "^2.0.83",
     "tesseract.js": "^7.0.0"
   }
 }

@@ -163,6 +163,7 @@
                         'viper-purple': '#9d4edd',
                         'viper-orange': '#ffa726',
                         'viper-yellow': '#fbbf24',
+                        'viper-red':    '#ef4444',
                     }
                 }
             }
@@ -231,6 +232,125 @@
             'transferred_cases': 'Transferred Cases',
             'warrants_written': 'Warrants Written',
         };
+
+        // ═══ Custom Metrics → Dashboard integration ═════════════════════
+        // User-defined per-case metrics (Settings → Custom Metrics) can be
+        // promoted onto the top stat cards and the Quick Stats panel.
+        // We synthesize dashboardMetrics entries with key `custom_<id>` so
+        // the existing dropdown / Quick Stats plumbing keeps working as-is.
+        const _CM_COLOR_TO_TAILWIND = {
+            cyan: 'viper-cyan',
+            purple: 'viper-purple',
+            green: 'viper-green',
+            orange: 'viper-orange',
+            amber: 'viper-yellow',
+            red: 'viper-red',
+        };
+
+        function _cmTailwindColor(name) {
+            return _CM_COLOR_TO_TAILWIND[name] || 'viper-cyan';
+        }
+
+        function _cmSubtitle(type) {
+            switch (type) {
+                case 'checkbox': return 'Cases flagged';
+                case 'counter':  return 'Total count';
+                case 'date':     return 'Dates recorded';
+                case 'text':     return 'Cases populated';
+                default:         return 'All time';
+            }
+        }
+
+        // Aggregate one custom metric across all cases. Returns { value, monthly }.
+        // - checkbox: count of cases where checked (monthly = case.lastUpdated/createdAt this month)
+        // - counter:  sum of integer values (monthly = sum restricted to cases updated this month)
+        // - date:     count of cases where date is set (monthly = stored date itself is this month)
+        // - text:     count of cases where text is non-empty (monthly = case updated this month)
+        function _computeCustomMetric(def) {
+            const cases = JSON.parse(localStorage.getItem('viperCases') || '[]');
+            let total = 0, monthly = 0;
+            cases.forEach(c => {
+                const vals = getCaseMetricsData(c.id);
+                const v = vals[def.id];
+                if (v === undefined || v === null || v === '') return;
+                const refDate = c.lastUpdated || c.createdAt;
+                const inMonth = _inThisMonth(refDate);
+                switch (def.type) {
+                    case 'checkbox':
+                        if (v === true || v === 'true') {
+                            total++;
+                            if (inMonth) monthly++;
+                        }
+                        break;
+                    case 'counter': {
+                        const n = parseInt(v, 10) || 0;
+                        if (n > 0) {
+                            total += n;
+                            if (inMonth) monthly += n;
+                        }
+                        break;
+                    }
+                    case 'date':
+                        total++;
+                        if (_inThisMonth(v)) monthly++;
+                        break;
+                    case 'text':
+                        if (String(v).trim()) {
+                            total++;
+                            if (inMonth) monthly++;
+                        }
+                        break;
+                }
+            });
+            return { value: total, monthly };
+        }
+
+        // Rebuild the `custom_*` entries in dashboardMetrics / metricLabels
+        // from the current viperCustomMetrics definitions. Safe to call
+        // multiple times — strips stale customs each pass.
+        function syncCustomMetricsIntoDashboard() {
+            // Strip prior synthesized entries
+            Object.keys(dashboardMetrics).forEach(k => {
+                if (k.startsWith('custom_')) delete dashboardMetrics[k];
+            });
+            Object.keys(metricLabels).forEach(k => {
+                if (k.startsWith('custom_')) delete metricLabels[k];
+            });
+
+            const defs = getCustomMetricDefs();
+            const _esc = (s) => String(s).replace(/[&<>"']/g, ch =>
+                ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch])
+            );
+            defs.forEach(def => {
+                const key = 'custom_' + def.id;
+                const { value, monthly } = _computeCustomMetric(def);
+                dashboardMetrics[key] = {
+                    value,
+                    monthly,
+                    subtitle: _cmSubtitle(def.type),
+                    color: _cmTailwindColor(def.color),
+                };
+                const icon = def.icon ? (_esc(def.icon) + ' ') : '';
+                metricLabels[key] = icon + _esc(def.name || 'Custom');
+            });
+
+            // Sanitize stored preferences — if user deleted a custom metric
+            // that was selected on a card or in Quick Stats, fall back to a
+            // built-in default so the UI doesn't render `undefined`.
+            const FALLBACKS_CARD = ['new_cases_assigned', 'arrests', 'recovered_guns', 'rescued_individuals'];
+            for (let i = 1; i <= 4; i++) {
+                if (!dashboardMetrics[cardPreferences[i]]) {
+                    cardPreferences[i] = FALLBACKS_CARD[i - 1];
+                }
+            }
+            try { localStorage.setItem('cardPreferences', JSON.stringify(cardPreferences)); } catch (_) {}
+
+            const QS_FALLBACK = ['open_cases', 'cases_closed', 'arrests', 'narcotics_seized'];
+            quickStatsPreferences = quickStatsPreferences.map((m, i) =>
+                dashboardMetrics[m] ? m : QS_FALLBACK[i] || 'arrests'
+            );
+            try { localStorage.setItem('quickStatsPreferences', JSON.stringify(quickStatsPreferences)); } catch (_) {}
+        }
     </script>
     <style>
         body {
@@ -1727,23 +1847,36 @@
         
         // Initialize dropdowns
         function initializeDropdowns() {
-            const metricOptions = Object.keys(dashboardMetrics);
-            
+            const allKeys = Object.keys(dashboardMetrics);
+            const builtIn = allKeys.filter(k => !k.startsWith('custom_'));
+            const customs = allKeys.filter(k => k.startsWith('custom_'));
+
+            const renderOption = (i, metric) => `
+                <button onclick="selectMetric(${i}, '${metric}')"
+                        class="w-full text-left px-4 py-2 text-sm hover:bg-viper-cyan/20 transition-colors ${cardPreferences[i] === metric ? 'bg-viper-cyan/10 text-viper-cyan' : 'text-gray-300'}">
+                    ${metricLabels[metric]}
+                </button>
+            `;
+            const customHeader = `
+                <div class="px-4 pt-2 pb-1 text-[10px] uppercase tracking-wider text-viper-purple/80 border-t border-gray-700/60 mt-1">
+                    Custom Metrics
+                </div>
+            `;
+
             for (let i = 1; i <= 4; i++) {
                 const dropdown = document.querySelector(`#dropdown-${i} .metric-dropdown`);
-                dropdown.innerHTML = metricOptions.map(metric => `
-                    <button onclick="selectMetric(${i}, '${metric}')" 
-                            class="w-full text-left px-4 py-2 text-sm hover:bg-viper-cyan/20 transition-colors ${cardPreferences[i] === metric ? 'bg-viper-cyan/10 text-viper-cyan' : 'text-gray-300'}">
-                        ${metricLabels[metric]}
-                    </button>
-                `).join('');
+                let html = builtIn.map(m => renderOption(i, m)).join('');
+                if (customs.length) {
+                    html += customHeader + customs.map(m => renderOption(i, m)).join('');
+                }
+                dropdown.innerHTML = html;
             }
-            
+
             // Update all cards with saved preferences
             for (let i = 1; i <= 4; i++) {
                 updateCard(i, cardPreferences[i]);
             }
-            
+
             // Initialize Quick Stats
             updateQuickStats();
         }
@@ -1922,19 +2055,33 @@
         
         function renderQuickStatsOptions() {
             const container = document.getElementById('quickStatsOptions');
-            container.innerHTML = Object.keys(dashboardMetrics).map(metric => {
+            const allKeys = Object.keys(dashboardMetrics);
+            const builtIn = allKeys.filter(k => !k.startsWith('custom_'));
+            const customs = allKeys.filter(k => k.startsWith('custom_'));
+
+            const renderRow = (metric) => {
                 const isChecked = tempQuickStatsPreferences.includes(metric);
                 return `
                     <label class="flex items-center space-x-3 p-3 rounded-lg cursor-pointer hover:bg-viper-card/30 transition-colors ${isChecked ? 'bg-viper-cyan/10 border border-viper-cyan/30' : ''}">
-                        <input type="checkbox" 
-                               value="${metric}" 
+                        <input type="checkbox"
+                               value="${metric}"
                                ${isChecked ? 'checked' : ''}
                                onchange="toggleQuickStatMetric('${metric}')"
                                class="w-4 h-4 rounded border-gray-600 text-viper-cyan focus:ring-viper-cyan focus:ring-offset-0">
                         <span class="text-sm">${metricLabels[metric]}</span>
                     </label>
                 `;
-            }).join('');
+            };
+
+            let html = builtIn.map(renderRow).join('');
+            if (customs.length) {
+                html += `
+                    <div class="px-1 pt-3 pb-1 text-[10px] uppercase tracking-wider text-viper-purple/80 border-t border-gray-700/60 mt-2">
+                        Custom Metrics
+                    </div>
+                ` + customs.map(renderRow).join('');
+            }
+            container.innerHTML = html;
         }
         
         function closeQuickStatsModal() {
@@ -4639,6 +4786,10 @@
             dashboardMetrics['arrests'].value   = getTotalArrests();
             dashboardMetrics['arrests'].monthly = getMonthlyArrests();
 
+            // Synthesize user-defined Custom Metrics into dashboardMetrics
+            // so they appear in card dropdowns + Quick Stats picker.
+            syncCustomMetricsIntoDashboard();
+
             // Update case data on dashboard
             updateDashboardCaseData();
             
@@ -5279,6 +5430,35 @@
                         mFilterEl.appendChild(opt);
                     });
                 }
+
+                // Restore persisted filter / search state — picks up whatever
+                // the user had selected the last time they were on this tab.
+                // Status: the saved value may be a custom-status ID that no
+                // longer exists; verify it's still in the dropdown before
+                // applying so we don't render `undefined`.
+                try {
+                    const savedSearch = localStorage.getItem('allCasesSearch') || '';
+                    const savedStatus = localStorage.getItem('allCasesStatusFilter') || 'all';
+                    const savedMetric = localStorage.getItem('allCasesMetricFilter') || 'all';
+                    const searchEl = document.getElementById('caseSearch');
+                    const statusEl = document.getElementById('caseStatusFilter');
+                    if (searchEl && savedSearch) searchEl.value = savedSearch;
+                    if (statusEl) {
+                        const hasOption = Array.from(statusEl.options).some(o => o.value === savedStatus);
+                        statusEl.value = hasOption ? savedStatus : 'all';
+                    }
+                    if (mFilterEl) {
+                        const hasMetric = Array.from(mFilterEl.options).some(o => o.value === savedMetric);
+                        mFilterEl.value = hasMetric ? savedMetric : 'all';
+                    }
+                    // Re-run the table filter so restored values take effect
+                    // (the initial render used whatever the elements had
+                    // before we restored — typically the defaults).
+                    if (savedSearch || (savedStatus && savedStatus !== 'all') || (savedMetric && savedMetric !== 'all')) {
+                        const tableBody = document.getElementById('casesTableBody');
+                        if (tableBody) tableBody.innerHTML = renderCasesTableRows();
+                    }
+                } catch (_) { /* persistence is best-effort */ }
             }, 0);
         }
 
@@ -5420,6 +5600,18 @@
         }
 
         function filterCases() {
+            // Persist current filter / search state so it survives leaving
+            // and returning to the All Cases tab. Read live from the DOM
+            // because change/keyup fire on every interaction.
+            try {
+                const searchEl = document.getElementById('caseSearch');
+                const statusEl = document.getElementById('caseStatusFilter');
+                const metricEl = document.getElementById('caseMetricFilter');
+                if (searchEl) localStorage.setItem('allCasesSearch',       searchEl.value || '');
+                if (statusEl) localStorage.setItem('allCasesStatusFilter', statusEl.value || 'all');
+                if (metricEl) localStorage.setItem('allCasesMetricFilter', metricEl.value || 'all');
+            } catch (_) { /* persistence is best-effort */ }
+
             const tableBody = document.getElementById('casesTableBody');
             if (tableBody) {
                 tableBody.innerHTML = renderCasesTableRows();

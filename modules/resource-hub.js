@@ -105,6 +105,12 @@
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 8v0M7 11h8a4 4 0 100-8 4 4 0 000 8z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5v6M8 8h6"/></svg>
             </button>
             <div class="w-px h-5 bg-white/10 mx-1"></div>
+            <button id="rhCapturePdfBtn" class="p-2 rounded-lg hover:bg-white/5 text-gray-500 hover:text-white transition disabled:opacity-30 disabled:cursor-not-allowed" title="Save current view as PDF → Evidence" onclick="window._rhCapturePdf()">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+            </button>
+            <button id="rhCaptureHtmlBtn" class="p-2 rounded-lg hover:bg-white/5 text-gray-500 hover:text-white transition disabled:opacity-30 disabled:cursor-not-allowed" title="Save current view as SingleFile HTML (inlined assets) → Evidence" onclick="window._rhCaptureHtml()">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+            </button>
             <button id="rhExpandBtn" class="p-2 rounded-lg hover:bg-white/5 text-gray-500 hover:text-white transition" title="Expand" onclick="window._rhToggleExpand()">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
             </button>
@@ -387,11 +393,13 @@
     const lbl = document.getElementById('rhZoomLabel');
     const out = document.getElementById('rhZoomOut');
     const inn = document.getElementById('rhZoomIn');
+    const cap = document.getElementById('rhCapturePdfBtn');
+    const caph = document.getElementById('rhCaptureHtmlBtn');
     if (!lbl) return;
     const res = RESOURCES.find(r => r.id === rhActiveTab);
     const isBV = !!(res && res.isBV);
-    // Zoom controls only meaningful for BV-backed tabs
-    [lbl, out, inn].forEach(el => { if (el) el.style.display = isBV ? '' : 'none'; });
+    // Zoom + Capture controls only meaningful for BV-backed tabs
+    [lbl, out, inn, cap, caph].forEach(el => { if (el) el.style.display = isBV ? '' : 'none'; });
     if (isBV) {
       const f = getZoomFactor(rhActiveTab);
       lbl.textContent = Math.round(f * 100) + '%';
@@ -407,6 +415,64 @@
     const res = RESOURCES.find(r => r.id === rhActiveTab);
     if (!res || !res.isBV) return;
     setZoomFactor(rhActiveTab, 1.0);
+  }
+
+  /* ── Capture current BrowserView as PDF ────────────────────
+   * Routes through the same destination-picker modal as
+   * intercepted downloads (rh-download-ready). */
+  async function capturePdf() {
+    const res = RESOURCES.find(r => r.id === rhActiveTab);
+    if (!res || !res.isBV) {
+      viperToast('Switch to a web resource tab first.', 'warning');
+      return;
+    }
+    if (!window.electronAPI || !window.electronAPI.resourceHubCapturePdf) {
+      viperToast('PDF capture unavailable (electronAPI missing).', 'error');
+      return;
+    }
+    const btn = document.getElementById('rhCapturePdfBtn');
+    if (btn) btn.disabled = true;
+    try {
+      viperToast(`Capturing ${res.label} as PDF…`, 'info');
+      const r = await window.electronAPI.resourceHubCapturePdf({ resourceId: res.id });
+      if (!r || !r.success) {
+        viperToast('PDF capture failed: ' + ((r && r.error) || 'unknown'), 'error');
+      }
+      // On success the main process emits rh-download-ready,
+      // which opens the destination-picker modal automatically.
+    } catch (e) {
+      console.error('[ResourceHub] capturePdf', e);
+      viperToast('PDF capture error: ' + (e.message || e), 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  /* ── Capture current BrowserView as SingleFile HTML ──────── */
+  async function captureHtml() {
+    const res = RESOURCES.find(r => r.id === rhActiveTab);
+    if (!res || !res.isBV) {
+      viperToast('Switch to a web resource tab first.', 'warning');
+      return;
+    }
+    if (!window.electronAPI || !window.electronAPI.resourceHubCaptureHtml) {
+      viperToast('HTML capture unavailable (electronAPI missing).', 'error');
+      return;
+    }
+    const btn = document.getElementById('rhCaptureHtmlBtn');
+    if (btn) btn.disabled = true;
+    try {
+      viperToast(`Archiving ${res.label} as SingleFile HTML… (this can take ~10–20s)`, 'info');
+      const r = await window.electronAPI.resourceHubCaptureHtml({ resourceId: res.id });
+      if (!r || !r.success) {
+        viperToast('HTML archive failed: ' + ((r && r.error) || 'unknown'), 'error');
+      }
+    } catch (e) {
+      console.error('[ResourceHub] captureHtml', e);
+      viperToast('HTML archive error: ' + (e.message || e), 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   /* ── Trace Network Search ─────────────────────────────────── */
@@ -541,11 +607,268 @@
   window._rhFmcsaDot         = fmcsaLookupByDot;
   window._rhZoomStep         = zoomStep;
   window._rhZoomReset        = zoomReset;
+  window._rhCapturePdf       = capturePdf;
+  window._rhCaptureHtml      = captureHtml;
+
+  /* ── Download routing modal ─────────────────────────────────
+   * When the main process intercepts a Resource Hub BrowserView
+   * download, it emits `rh-download-ready` with the temp file
+   * path.  We surface a routing prompt so the user can send the
+   * file straight to a case's Evidence module or Warrants/
+   * Production folder, bypassing ~/Downloads entirely. */
+  let _rhPendingDownload = null;
+
+  function injectDownloadRouter() {
+    if (document.getElementById('rhDlRouter')) return;
+    const wrap = document.createElement('div');
+    wrap.id = 'rhDlRouter';
+    wrap.className = 'fixed inset-0 z-[10001] hidden items-center justify-center';
+    wrap.style.cssText = 'background:rgba(2,6,18,.78);backdrop-filter:blur(6px);';
+    wrap.innerHTML = `
+      <div class="w-full max-w-lg rounded-2xl p-6 border border-pink-400/30" style="background:linear-gradient(160deg,#0f172a 0%,#0b1220 100%);box-shadow:0 24px 64px rgba(236,72,153,.18);">
+        <div class="flex items-start justify-between mb-4">
+          <div>
+            <div class="text-[10px] uppercase tracking-[0.25em] text-pink-300/80 mb-1">Resource Hub Download</div>
+            <h3 class="text-xl font-bold text-white">Route this file</h3>
+            <p class="text-xs text-gray-400 mt-1" id="rhDlSource">From: —</p>
+          </div>
+          <button type="button" onclick="window._rhDlAction('cancel')" class="text-gray-500 hover:text-gray-200 text-2xl leading-none">×</button>
+        </div>
+
+        <div class="rounded-lg p-3 mb-4 border border-gray-700/60" style="background:rgba(15,23,42,.6);">
+          <div class="text-[11px] uppercase tracking-wider text-gray-500 mb-0.5">File</div>
+          <div id="rhDlFileName" class="text-sm text-white font-medium break-all">—</div>
+          <div class="text-[11px] text-gray-500 mt-1"><span id="rhDlSize">—</span> · <span id="rhDlMime" class="text-gray-400">—</span></div>
+        </div>
+
+        <label class="block text-[11px] uppercase tracking-wider text-gray-500 mb-1">Case</label>
+        <select id="rhDlCase" class="w-full mb-3 px-3 py-2 rounded-lg bg-[#0b1220] border border-gray-700 text-sm text-white focus:border-pink-400 focus:outline-none"></select>
+
+        <label class="block text-[11px] uppercase tracking-wider text-gray-500 mb-1">Destination</label>
+        <div class="grid grid-cols-2 gap-2 mb-3">
+          <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-700 cursor-pointer hover:border-pink-400/60" style="background:rgba(15,23,42,.6);">
+            <input type="radio" name="rhDlDest" value="evidence" checked class="accent-pink-400">
+            <span class="text-sm text-white">Evidence module</span>
+          </label>
+          <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-700 cursor-pointer hover:border-pink-400/60" style="background:rgba(15,23,42,.6);">
+            <input type="radio" name="rhDlDest" value="warrant-production" class="accent-pink-400">
+            <span class="text-sm text-white">Warrants / Production</span>
+          </label>
+        </div>
+
+        <label class="block text-[11px] uppercase tracking-wider text-gray-500 mb-1" id="rhDlTagLabel">Evidence Tag (subfolder)</label>
+        <input id="rhDlTag" type="text" class="w-full mb-3 px-3 py-2 rounded-lg bg-[#0b1220] border border-gray-700 text-sm text-white focus:border-pink-400 focus:outline-none" placeholder="e.g., Flock-Reports">
+
+        <label class="block text-[11px] uppercase tracking-wider text-gray-500 mb-1">Description (optional)</label>
+        <textarea id="rhDlDesc" rows="2" class="w-full mb-4 px-3 py-2 rounded-lg bg-[#0b1220] border border-gray-700 text-sm text-white focus:border-pink-400 focus:outline-none resize-none" placeholder="Auto-generated from source"></textarea>
+
+        <div class="flex items-center justify-between gap-2">
+          <button type="button" onclick="window._rhDlAction('downloads')" class="px-3 py-2 rounded-lg text-xs text-gray-300 hover:text-white border border-gray-700 hover:border-gray-500">
+            Save to Downloads instead
+          </button>
+          <div class="flex gap-2">
+            <button type="button" onclick="window._rhDlAction('cancel')" class="px-4 py-2 rounded-lg text-sm text-gray-300 hover:text-white border border-gray-700 hover:border-gray-500">Cancel</button>
+            <button type="button" onclick="window._rhDlAction('save')" class="px-4 py-2 rounded-lg text-sm font-semibold text-[#0b1220] bg-gradient-to-r from-pink-300 to-pink-400 hover:from-pink-200 hover:to-pink-300">
+              Save to Case
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+
+    // Destination radio → toggle Tag label
+    wrap.querySelectorAll('input[name="rhDlDest"]').forEach(r => {
+      r.addEventListener('change', () => {
+        const isWarr = r.checked && r.value === 'warrant-production';
+        const tagLbl = document.getElementById('rhDlTagLabel');
+        const tagInp = document.getElementById('rhDlTag');
+        if (!tagLbl || !tagInp) return;
+        if (isWarr) {
+          tagLbl.textContent = 'Production folder (filename only — no subfolder)';
+          tagInp.style.display = 'none';
+        } else {
+          tagLbl.textContent = 'Evidence Tag (subfolder)';
+          tagInp.style.display = '';
+        }
+      });
+    });
+  }
+
+  function handleResourceDownloadReady(payload) {
+    if (!payload) return;
+    if (!payload.success) {
+      const msg = `Download from ${payload.resource || 'Resource Hub'} was ${payload.state || 'cancelled'}`;
+      if (typeof viperToast === 'function') viperToast(msg, 'error');
+      else console.warn('[ResourceHub-DL]', msg);
+      return;
+    }
+    _rhPendingDownload = payload;
+
+    // Populate case list — most-recently-touched first
+    const cases = (() => {
+      try { return JSON.parse(localStorage.getItem('viperCases') || '[]'); } catch { return []; }
+    })();
+    cases.sort((a, b) => {
+      const da = new Date(a.lastUpdated || a.createdAt || 0).getTime();
+      const db = new Date(b.lastUpdated || b.createdAt || 0).getTime();
+      return db - da;
+    });
+
+    const sel = document.getElementById('rhDlCase');
+    sel.innerHTML = cases.length
+      ? cases.map(c => `<option value="${_rhEsc(c.caseNumber)}">${_rhEsc(c.caseNumber)} — ${_rhEsc((c.synopsis||'').slice(0,60))}</option>`).join('')
+      : '<option value="">No cases yet — create one first</option>';
+
+    document.getElementById('rhDlSource').textContent   = `From: ${payload.resource || 'Resource Hub'}`;
+    document.getElementById('rhDlFileName').textContent = payload.fileName || 'download';
+    document.getElementById('rhDlSize').textContent     = _rhFmtSize(payload.size || 0);
+    document.getElementById('rhDlMime').textContent     = payload.mime || 'application/octet-stream';
+    document.getElementById('rhDlTag').value            = payload.defaultTag || 'Imports';
+    document.getElementById('rhDlDesc').value           = `Downloaded from ${payload.resource || 'Resource Hub'} on ${new Date().toLocaleString()}`;
+    // Reset destination to Evidence
+    const evRadio = document.querySelector('input[name="rhDlDest"][value="evidence"]');
+    if (evRadio) { evRadio.checked = true; evRadio.dispatchEvent(new Event('change')); }
+
+    // Hide ALL BrowserViews so the modal isn't covered by the native
+    // overlay.  Restored in _rhDlAction's finally block.
+    hideAllBVs();
+
+    const router = document.getElementById('rhDlRouter');
+    router.classList.remove('hidden');
+    router.classList.add('flex');
+  }
+
+  function _rhEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function _rhFmtSize(n) {
+    if (!n || n < 1024) return (n || 0) + ' B';
+    if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+    if (n < 1024*1024*1024) return (n/1024/1024).toFixed(1) + ' MB';
+    return (n/1024/1024/1024).toFixed(2) + ' GB';
+  }
+
+  async function _rhDlAction(action) {
+    const router = document.getElementById('rhDlRouter');
+    const dl = _rhPendingDownload;
+    if (!dl) {
+      router.classList.add('hidden');
+      router.classList.remove('flex');
+      return;
+    }
+
+    try {
+      if (action === 'cancel') {
+        await window.electronAPI.resourceHubRouteDownload({ action: 'cancel', tempPath: dl.tempPath, fileName: dl.fileName });
+        if (typeof viperToast === 'function') viperToast('Download discarded', 'info');
+        return;
+      }
+
+      if (action === 'downloads') {
+        const res = await window.electronAPI.resourceHubRouteDownload({ action: 'downloads', tempPath: dl.tempPath, fileName: dl.fileName });
+        if (res && res.success) {
+          if (typeof viperToast === 'function') viperToast(`Saved to Downloads folder`, 'success');
+        } else {
+          if (typeof viperToast === 'function') viperToast(`Save failed: ${(res && res.error) || 'unknown error'}`, 'error');
+        }
+        return;
+      }
+
+      // action === 'save' → resolve destination from the radio group
+      const dest = document.querySelector('input[name="rhDlDest"]:checked');
+      const destAction = dest ? dest.value : 'evidence';
+      const caseNumber = document.getElementById('rhDlCase').value;
+      if (!caseNumber) {
+        if (typeof viperToast === 'function') viperToast('Pick a case first (or create one).', 'error');
+        return;
+      }
+      const tagInput = (document.getElementById('rhDlTag').value || '').trim();
+      const evidenceTag = destAction === 'evidence' ? (tagInput || dl.defaultTag || 'Imports') : '';
+
+      const res = await window.electronAPI.resourceHubRouteDownload({
+        action: destAction,
+        tempPath: dl.tempPath,
+        caseNumber,
+        evidenceTag,
+        fileName: dl.fileName,
+      });
+
+      if (!res || !res.success) {
+        if (typeof viperToast === 'function') viperToast(`Save failed: ${(res && res.error) || 'unknown error'}`, 'error');
+        return;
+      }
+
+      if (destAction === 'evidence') {
+        // Persist a viperCaseEvidence entry so it appears on the case
+        // Evidence tab without a manual import step.
+        try {
+          const desc = (document.getElementById('rhDlDesc').value || '').trim();
+          const ev = {
+            id: Date.now(),
+            type: 'digital',
+            tag: evidenceTag,
+            description: desc || `Downloaded from ${dl.resource || 'Resource Hub'}`,
+            fileCount: 1,
+            totalSize: res.size || dl.size || 0,
+            files: [{
+              name: res.fileName || dl.fileName,
+              path: res.path,
+              size: res.size || dl.size || 0,
+              type: dl.mime || '',
+              lastModified: Date.now(),
+            }],
+            source: dl.resource || 'Resource Hub',
+            sourceUrl: dl.sourceUrl || '',
+            createdAt: new Date().toISOString(),
+            dateAdded: new Date().toISOString(),
+            metadata: {
+              kind: 'resource-hub-download',
+              resource: dl.resource,
+              tag: evidenceTag,
+            },
+          };
+          const all = JSON.parse(localStorage.getItem('viperCaseEvidence') || '{}');
+          if (!Array.isArray(all[caseNumber])) all[caseNumber] = [];
+          all[caseNumber].push(ev);
+          localStorage.setItem('viperCaseEvidence', JSON.stringify(all));
+          // If the case-detail page is open in this window, refresh
+          try {
+            if (typeof window.refreshCaseEvidenceFromStorage === 'function') {
+              window.refreshCaseEvidenceFromStorage();
+            }
+          } catch (_) {}
+          if (typeof viperToast === 'function') viperToast(`Saved to Evidence (${evidenceTag})`, 'success');
+        } catch (e) {
+          console.error('[ResourceHub-DL] viperCaseEvidence update failed', e);
+          if (typeof viperToast === 'function') viperToast('Saved file, but Evidence index update failed — see console', 'error');
+        }
+      } else if (destAction === 'warrant-production') {
+        if (typeof viperToast === 'function') viperToast(`Saved to ${caseNumber} / Warrants / Production`, 'success');
+      }
+    } catch (err) {
+      console.error('[ResourceHub-DL] route error', err);
+      if (typeof viperToast === 'function') viperToast('Routing error: ' + (err.message || err), 'error');
+    } finally {
+      _rhPendingDownload = null;
+      router.classList.add('hidden');
+      router.classList.remove('flex');
+      // Restore the active BrowserView that was hidden when the modal opened.
+      try {
+        const res = RESOURCES.find(r => r.id === rhActiveTab);
+        if (res && res.isBV && rhOpen) {
+          requestAnimationFrame(() => positionBV(rhActiveTab));
+        }
+      } catch (_) {}
+    }
+  }
+  window._rhDlAction = _rhDlAction;
 
   /* ── Init ─────────────────────────────────────────────────── */
   function init() {
     injectStyles();
     injectDOM();
+    injectDownloadRouter();
     updateFab();
 
     // Trace type → show/hide state input
@@ -569,6 +892,18 @@
         if (rhOpen) buildTabBar();
       }
     });
+
+    // Listen for downloads intercepted from Resource Hub BrowserViews
+    // (Flock, ICACCOPS, ICAC Data System, Gridcop, TLO, Accurint,
+    // Vigilant). Main process saves them to a temp file, then we
+    // present a routing modal so the user can drop the file into a
+    // case's Evidence or Warrants/Production folder without going
+    // through ~/Downloads first.
+    try {
+      if (window.electronAPI && typeof window.electronAPI.onResourceHubDownloadReady === 'function') {
+        window.electronAPI.onResourceHubDownloadReady(handleResourceDownloadReady);
+      }
+    } catch (e) { console.error('[ResourceHub-DL] listener attach failed', e); }
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

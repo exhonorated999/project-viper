@@ -10,6 +10,11 @@ const SecurityManager = require('./modules/security');
 const AuditLogger = require('./modules/audit-log');
 const AUDIT_EVENTS = AuditLogger.EVENT_TYPES;
 
+// Shared temp dir for Resource Hub captures (downloads, PDFs, single-file HTML).
+// Hoisted to module scope so IPC handlers can access it.
+const rhDownloadTmpDir = path.join(os.tmpdir(), 'viper-rh-downloads');
+try { fs.mkdirSync(rhDownloadTmpDir, { recursive: true }); } catch (_) {}
+
 // ── Datapilot custom media protocol ──────────────────────────────────
 // The renderer is loaded over http://localhost, which blocks `file:///` URLs
 // for local resources (e.g. videos). We register a custom `viper-media://`
@@ -714,6 +719,53 @@ app.whenReady().then(async () => {
         ::-webkit-scrollbar-track { background: #0d1117; }
         ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
       `).catch(() => {});
+
+      // Auto-fill credentials on ICACCOPS login page
+      const url = icacCopsBrowserView.webContents.getURL();
+      const looksLikeLogin = /login|signin|sign-in|authenticate|account/i.test(url) || url.endsWith('/') || url.includes('icaccops');
+      if (!looksLikeLogin) return;
+      mainWindow.webContents.executeJavaScript(
+        `JSON.stringify({ username: localStorage.getItem('icacCopsUsername') || '', password: localStorage.getItem('icacCopsPassword') || '' })`
+      ).then(json => {
+        const creds = JSON.parse(json);
+        if (!creds.username && !creds.password) return;
+        icacCopsBrowserView.webContents.executeJavaScript(`
+          (function() {
+            function setVal(el, val) {
+              if (!el || !val) return;
+              const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+              nativeSetter.call(el, val);
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              el.dispatchEvent(new Event('blur', { bubbles: true }));
+            }
+            function pickUser() {
+              return document.querySelector('input[name="username"]')
+                  || document.querySelector('input#username')
+                  || document.querySelector('input[name="user"]')
+                  || document.querySelector('input[name="email"]')
+                  || document.querySelector('input[type="email"]')
+                  || document.querySelector('input[autocomplete="username"]')
+                  || (function() {
+                       const all = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
+                       return all.find(i => /user|email|login/i.test((i.name||'') + ' ' + (i.id||'') + ' ' + (i.placeholder||''))) || all[0] || null;
+                     })();
+            }
+            function pickPass() {
+              return document.querySelector('input[type="password"]')
+                  || document.querySelector('input[name="password"]')
+                  || document.querySelector('input#password');
+            }
+            function fill() {
+              setVal(pickUser(), ${JSON.stringify(creds.username)});
+              setVal(pickPass(), ${JSON.stringify(creds.password)});
+            }
+            setTimeout(fill, 400);
+            setTimeout(fill, 1200);
+            setTimeout(fill, 2500);
+          })();
+        `).catch(() => {});
+      }).catch(() => {});
     });
     icacCopsBrowserView.webContents.on('did-fail-load', (_e, code, desc, url, isMain) => {
       if (isMain) console.error('[ICACCOPS] did-fail-load', code, desc, url);
@@ -746,6 +798,80 @@ app.whenReady().then(async () => {
     gridcopBrowserView.webContents.on('render-process-gone', (_e, details) => {
       console.error('[GRIDCOP] render-process-gone', details);
     });
+
+    // ── Resource-Hub download interceptor ────────────────────────────
+    // Intercept file downloads that originate INSIDE a Resource Hub
+    // BrowserView (Flock, ICACCOPS, ICAC Data System, etc.) and route
+    // them to the renderer so the user can drop the file straight into
+    // a case's Evidence module without bouncing through ~/Downloads.
+    //
+    // Flow: will-download → pause → save to temp → forward {tempPath,
+    // filename, size, mime, sourceUrl, resource} to renderer over
+    // `rh-download-ready`.  Renderer presents a routing modal and
+    // posts back to `rh-download-route` with the chosen destination.
+    const RESOURCE_PARTITIONS = [
+      { partition: 'persist:flock',          label: 'Flock Safety',     defaultTag: 'Flock-Reports'    },
+      { partition: 'persist:tlo',            label: 'TLO',              defaultTag: 'TLO-Reports'      },
+      { partition: 'persist:accurint',       label: 'Accurint',         defaultTag: 'Accurint-Reports' },
+      { partition: 'persist:vigilant',       label: 'Vigilant LPR',     defaultTag: 'Vigilant-Reports' },
+      { partition: 'persist:icacDataSystem', label: 'ICAC Data System', defaultTag: 'CyberTip-Reports' },
+      { partition: 'persist:icacCops',       label: 'ICACCOPS',         defaultTag: 'ICACCOPS-Reports' },
+      { partition: 'persist:gridcop',        label: 'Gridcop',          defaultTag: 'Gridcop-Reports'  },
+    ];
+
+    const _sanitizeDlName = (n) => String(n || 'download').replace(/[\\/:*?"<>|\r\n]+/g, '_').slice(0, 180) || 'download';
+
+    function _attachResourceDownloadInterceptor(meta) {
+      try {
+        const ses = session.fromPartition(meta.partition);
+        ses.on('will-download', (event, item, _wc) => {
+          try {
+            const originalName = _sanitizeDlName(item.getFilename());
+            const tempName = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}-${originalName}`;
+            const tempPath = path.join(rhDownloadTmpDir, tempName);
+            // Don't prompt the user with a Save dialog — route to temp first.
+            item.setSavePath(tempPath);
+
+            const startedAt = Date.now();
+            const sourceUrl = item.getURL();
+            const mime      = item.getMimeType();
+            const totalBytes= item.getTotalBytes();
+
+            item.on('done', (_evt, state) => {
+              if (state !== 'completed') {
+                // Failed or cancelled — clean up partial file if any
+                try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch (_) {}
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                  mainWindow.webContents.send('rh-download-ready', {
+                    success: false, state, resource: meta.label, fileName: originalName,
+                  });
+                }
+                return;
+              }
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('rh-download-ready', {
+                  success: true,
+                  tempPath,
+                  fileName: originalName,
+                  size: totalBytes || (fs.existsSync(tempPath) ? fs.statSync(tempPath).size : 0),
+                  mime,
+                  sourceUrl,
+                  resource: meta.label,
+                  defaultTag: meta.defaultTag,
+                  durationMs: Date.now() - startedAt,
+                });
+              }
+            });
+          } catch (err) {
+            console.error(`[ResourceHub-DL ${meta.label}] will-download handler error:`, err);
+          }
+        });
+        console.log(`[ResourceHub-DL] interceptor attached: ${meta.label} (${meta.partition})`);
+      } catch (err) {
+        console.error(`[ResourceHub-DL] failed to attach for ${meta.label}:`, err);
+      }
+    }
+    RESOURCE_PARTITIONS.forEach(_attachResourceDownloadInterceptor);
 
     // On page navigation, detach resource-hub BrowserViews so they can't steal clicks
     // on the next page. Media player is handled by its own show/hide via reportBounds().
@@ -2388,6 +2514,266 @@ ipcMain.handle('save-evidence-file', async (event, data) => {
   } catch (error) {
     console.error('Failed to save evidence file:', error);
     throw error;
+  }
+});
+
+// --- Route a Resource-Hub download to its final destination ---
+// Called by the renderer after the user picks where the file should go.
+// Sources are always a temp file under `${os.tmpdir()}/viper-rh-downloads/`
+// produced by the will-download interceptor; we move/encrypt them
+// into the case folder and clean up.
+ipcMain.handle('rh-download-route', async (_e, payload) => {
+  try {
+    const action   = payload && payload.action;
+    const tempPath = payload && payload.tempPath;
+    if (!tempPath || !fs.existsSync(tempPath)) {
+      return { success: false, error: 'Source file no longer exists' };
+    }
+    // Hard safety: tempPath must live inside our temp dir
+    const tmpRoot = path.join(os.tmpdir(), 'viper-rh-downloads');
+    if (path.resolve(tempPath).indexOf(path.resolve(tmpRoot)) !== 0) {
+      return { success: false, error: 'Invalid source path' };
+    }
+
+    const fileName = _sanitizeNameSafe(payload.fileName || path.basename(tempPath));
+
+    if (action === 'cancel') {
+      try { fs.unlinkSync(tempPath); } catch (_) {}
+      return { success: true, action: 'cancel' };
+    }
+
+    if (action === 'downloads') {
+      const dlDir = app.getPath('downloads');
+      let dest = path.join(dlDir, fileName);
+      // Avoid clobbering existing file
+      if (fs.existsSync(dest)) {
+        const ext = path.extname(fileName);
+        const base = path.basename(fileName, ext);
+        dest = path.join(dlDir, `${base}-${Date.now()}${ext}`);
+      }
+      fs.copyFileSync(tempPath, dest);
+      try { fs.unlinkSync(tempPath); } catch (_) {}
+      try { shell.showItemInFolder(dest); } catch (_) {}
+      return { success: true, action: 'downloads', path: dest };
+    }
+
+    const caseNumber = _safeCaseNumber(payload.caseNumber);
+    if (!caseNumber) return { success: false, error: 'Invalid case number' };
+
+    if (action === 'evidence') {
+      const evidenceTag = _sanitizeNameSafe(payload.evidenceTag || 'Imports');
+      const evidenceDir = path.join(casesDir, caseNumber, 'Evidence', evidenceTag);
+      fs.mkdirSync(evidenceDir, { recursive: true });
+
+      let dest = path.join(evidenceDir, fileName);
+      if (fs.existsSync(dest)) {
+        const ext = path.extname(fileName);
+        const base = path.basename(fileName, ext);
+        dest = path.join(evidenceDir, `${base}-${Date.now()}${ext}`);
+      }
+      const buffer = fs.readFileSync(tempPath);
+      if (security && security.isEnabled() && security.isUnlocked()) {
+        fs.writeFileSync(dest, security.encryptBuffer(buffer));
+      } else {
+        fs.writeFileSync(dest, buffer);
+      }
+      try { fs.unlinkSync(tempPath); } catch (_) {}
+      return {
+        success: true,
+        action: 'evidence',
+        path: dest,
+        size: buffer.length,
+        evidenceTag,
+        fileName: path.basename(dest),
+      };
+    }
+
+    if (action === 'warrant-production') {
+      const subfolder = 'Production';
+      const warrantDir = path.join(casesDir, caseNumber, 'Warrants', subfolder);
+      fs.mkdirSync(warrantDir, { recursive: true });
+      let dest = path.join(warrantDir, fileName);
+      if (fs.existsSync(dest)) {
+        const ext = path.extname(fileName);
+        const base = path.basename(fileName, ext);
+        dest = path.join(warrantDir, `${base}-${Date.now()}${ext}`);
+      }
+      const buffer = fs.readFileSync(tempPath);
+      if (security && security.isEnabled() && security.isUnlocked()) {
+        fs.writeFileSync(dest, security.encryptBuffer(buffer));
+      } else {
+        fs.writeFileSync(dest, buffer);
+      }
+      try { fs.unlinkSync(tempPath); } catch (_) {}
+      return { success: true, action: 'warrant-production', path: dest, size: buffer.length, fileName: path.basename(dest) };
+    }
+
+    return { success: false, error: `Unknown action: ${action}` };
+  } catch (err) {
+    console.error('rh-download-route failed:', err);
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
+function _sanitizeNameSafe(n) {
+  return String(n || '').replace(/[\\/:*?"<>|\r\n]+/g, '_').slice(0, 180) || 'file';
+}
+
+// --- Capture current Resource-Hub BrowserView as PDF ---
+// Uses Electron's native webContents.printToPDF() — captures the full
+// rendered page (including content below the fold). The resulting file
+// is written to the same temp dir as downloads, then `rh-download-ready`
+// is emitted so the existing destination-picker modal handles routing.
+const _rhResourceMap = () => ({
+  flock:          { bv: flockBrowserView,          label: 'Flock Safety',     defaultTag: 'Flock-Reports'    },
+  tlo:            { bv: tloBrowserView,            label: 'TLO',              defaultTag: 'TLO-Reports'      },
+  accurint:       { bv: accurintBrowserView,       label: 'Accurint',         defaultTag: 'Accurint-Reports' },
+  vigilant:       { bv: vigilantBrowserView,       label: 'Vigilant LPR',     defaultTag: 'Vigilant-Reports' },
+  icacDataSystem: { bv: icacDataSystemBrowserView, label: 'ICAC Data System', defaultTag: 'CyberTip-Reports' },
+  icacCops:       { bv: icacCopsBrowserView,       label: 'ICACCOPS',         defaultTag: 'ICACCOPS-Reports' },
+  gridcop:        { bv: gridcopBrowserView,        label: 'Gridcop',          defaultTag: 'Gridcop-Reports'  },
+});
+
+ipcMain.handle('rh-capture-pdf', async (_e, payload) => {
+  const resourceId = payload && payload.resourceId;
+  const meta = _rhResourceMap()[resourceId];
+  if (!meta || !meta.bv || meta.bv.webContents.isDestroyed()) {
+    return { success: false, error: 'Resource view not available' };
+  }
+  try {
+    const wc = meta.bv.webContents;
+    const url = wc.getURL() || '';
+    let title = '';
+    try { title = await wc.executeJavaScript('document.title || ""'); } catch (_) {}
+    const safeTitle = _sanitizeNameSafe((title || meta.label).replace(/\s+/g, '_')).slice(0, 80);
+    const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+    const fileName = `${safeTitle || meta.label.replace(/\s+/g, '_')}_${ts}.pdf`;
+
+    const tempName = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}-${fileName}`;
+    const tempPath = path.join(rhDownloadTmpDir, tempName);
+
+    const pdfBuf = await wc.printToPDF({
+      printBackground: true,
+      pageSize: 'Letter',
+      margins: { marginType: 'custom', top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 },
+    });
+    fs.writeFileSync(tempPath, pdfBuf);
+    const stat = fs.statSync(tempPath);
+
+    mainWindow.webContents.send('rh-download-ready', {
+      success: true,
+      tempPath,
+      fileName,
+      size: stat.size,
+      mime: 'application/pdf',
+      sourceUrl: url,
+      resource: meta.label,
+      defaultTag: meta.defaultTag,
+      capture: true,
+    });
+    return { success: true, fileName };
+  } catch (err) {
+    console.error('[rh-capture-pdf]', err);
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
+// --- Capture current Resource-Hub BrowserView as SingleFile HTML ---
+// Loads the SingleFile bundle (single-file-cli) into the BrowserView via
+// executeJavaScript, then calls singlefile.getPageData() to produce a
+// fully-inlined .html file with all assets embedded as base64 (images,
+// fonts, stylesheets). Output is a true single-file archive — opens in
+// any browser offline, no broken links.
+let _sfScriptCache = null;
+async function _loadSingleFileScript() {
+  if (_sfScriptCache) return _sfScriptCache;
+  try {
+    // Bundle is ESM; use dynamic import to get the script string.
+    // pathToFileURL ensures Windows path is converted correctly.
+    const bundlePath = path.join(__dirname, 'node_modules', 'single-file-cli', 'lib', 'single-file-bundle.js');
+    const fileUrl = url.pathToFileURL(bundlePath).href;
+    const mod = await import(fileUrl);
+    _sfScriptCache = mod.script;
+    return _sfScriptCache;
+  } catch (err) {
+    console.error('[rh-capture-html] Failed to load SingleFile bundle:', err);
+    throw err;
+  }
+}
+
+ipcMain.handle('rh-capture-html', async (_e, payload) => {
+  const resourceId = payload && payload.resourceId;
+  const meta = _rhResourceMap()[resourceId];
+  if (!meta || !meta.bv || meta.bv.webContents.isDestroyed()) {
+    return { success: false, error: 'Resource view not available' };
+  }
+  try {
+    const wc = meta.bv.webContents;
+    const url2 = wc.getURL() || '';
+    let title = '';
+    try { title = await wc.executeJavaScript('document.title || ""'); } catch (_) {}
+    const safeTitle = _sanitizeNameSafe((title || meta.label).replace(/\s+/g, '_')).slice(0, 80);
+    const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+    const fileName = `${safeTitle || meta.label.replace(/\s+/g, '_')}_${ts}.html`;
+
+    const tempName = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}-${fileName}`;
+    const tempPath = path.join(rhDownloadTmpDir, tempName);
+
+    // 1) Inject SingleFile bundle into the BrowserView's main world.
+    const sfScript = await _loadSingleFileScript();
+    await wc.executeJavaScript(sfScript, /* userGesture */ true);
+
+    // 2) Run getPageData and return the inlined HTML.
+    const html = await wc.executeJavaScript(`
+      (async () => {
+        try {
+          const opts = {
+            removeHiddenElements: false,
+            removeUnusedStyles: false,
+            removeUnusedFonts: false,
+            removeImports: false,
+            blockScripts: true,
+            blockVideos: false,
+            blockAudios: false,
+            saveFavicon: true,
+            removeFrames: false,
+            compressHTML: true,
+            backgroundSave: false,
+            networkTimeout: 30000,
+          };
+          const pd = await singlefile.getPageData(opts);
+          return pd && pd.content ? pd.content : '';
+        } catch (e) {
+          return '__SF_ERR__:' + (e && e.message ? e.message : String(e));
+        }
+      })()
+    `, /* userGesture */ true);
+
+    if (typeof html !== 'string' || !html) {
+      return { success: false, error: 'SingleFile returned empty content' };
+    }
+    if (html.startsWith('__SF_ERR__:')) {
+      return { success: false, error: html.slice('__SF_ERR__:'.length) };
+    }
+
+    fs.writeFileSync(tempPath, html, 'utf8');
+    const stat = fs.statSync(tempPath);
+
+    mainWindow.webContents.send('rh-download-ready', {
+      success: true,
+      tempPath,
+      fileName,
+      size: stat.size,
+      mime: 'text/html',
+      sourceUrl: url2,
+      resource: meta.label,
+      defaultTag: meta.defaultTag,
+      capture: true,
+    });
+    return { success: true, fileName, size: stat.size };
+  } catch (err) {
+    console.error('[rh-capture-html]', err);
+    return { success: false, error: err.message || String(err) };
   }
 });
 

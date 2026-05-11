@@ -141,6 +141,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveEvidenceFile: (data) => ipcRenderer.invoke('save-evidence-file', data),
   readEvidenceFile: (filePath) => ipcRenderer.invoke('read-evidence-file', filePath),
 
+  // Resource Hub download interception — route downloads from Flock /
+  // ICACCOPS / ICAC Data System / etc. straight into a case's Evidence
+  // or Warrants/Production folder instead of bouncing through Downloads.
+  onResourceHubDownloadReady: (callback) => {
+    const listener = (_evt, payload) => { try { callback(payload); } catch (e) { console.error(e); } };
+    ipcRenderer.on('rh-download-ready', listener);
+    return () => ipcRenderer.removeListener('rh-download-ready', listener);
+  },
+  resourceHubRouteDownload: (payload) => ipcRenderer.invoke('rh-download-route', payload),
+  resourceHubCapturePdf: (payload) => ipcRenderer.invoke('rh-capture-pdf', payload),
+  resourceHubCaptureHtml: (payload) => ipcRenderer.invoke('rh-capture-html', payload),
+
   // Warrant file storage
   saveWarrantFile: (data) => ipcRenderer.invoke('save-warrant-file', data),
   readWarrantFile: (filePath) => ipcRenderer.invoke('read-warrant-file', filePath),

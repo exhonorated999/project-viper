@@ -6499,7 +6499,8 @@
                     mp4:'video/mp4',webm:'video/webm',ogg:'video/ogg',mov:'video/quicktime',
                     avi:'video/x-msvideo',mkv:'video/x-matroska',flv:'video/x-flv',m4v:'video/x-m4v',wmv:'video/x-ms-wmv',
                     mp3:'audio/mpeg',wav:'audio/wav',m4a:'audio/mp4',aac:'audio/aac',flac:'audio/flac',wma:'audio/x-ms-wma',
-                    pdf:'application/pdf'
+                    pdf:'application/pdf',
+                    html:'text/html',htm:'text/html'
                 };
                 return map[ext] || '';
             };
@@ -6510,7 +6511,8 @@
                     const mime = file.type || mimeFromExt(file.name);
                     const isViewable = mime && (
                         mime.startsWith('audio/') || mime.startsWith('video/') ||
-                        mime.startsWith('image/') || mime === 'application/pdf'
+                        mime.startsWith('image/') || mime === 'application/pdf' ||
+                        mime === 'text/html'
                     );
                     if (isViewable && window.electronAPI && window.electronAPI.readEvidenceFile) {
                         try {
@@ -7417,7 +7419,8 @@
                         const isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'heic', 'heif', 'tiff', 'tif', 'svg'].includes(fileExt);
                         const isVideo = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv', 'flv', 'm4v', 'wmv'].includes(fileExt);
                         const isAudio = ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'wma'].includes(fileExt);
-                        const isDocument = ['doc', 'docx', 'txt', 'rtf', 'html', 'htm', 'xls', 'xlsx', 'csv'].includes(fileExt);
+                        const isHtml = ['html', 'htm'].includes(fileExt);
+                        const isDocument = ['doc', 'docx', 'txt', 'rtf', 'xls', 'xlsx', 'csv'].includes(fileExt);
                         const fileUrl = file.displayUrl || file.url || file.path;
                         
                         return `
@@ -7475,6 +7478,18 @@
                                             Your browser does not support this audio format.
                                         </audio>
                                         <p class="text-center text-sm text-gray-400 mt-3">Audio: ${fileExt.toUpperCase()}</p>
+                                    </div>
+                                ` : isHtml ? `
+                                    <div class="space-y-2">
+                                        <div class="flex items-center justify-between text-[11px] text-gray-500 px-1">
+                                            <span>🗂 Archived web page (SingleFile)</span>
+                                            <span>Sandboxed preview — scripts disabled · scroll to navigate</span>
+                                        </div>
+                                        <div class="bg-white rounded overflow-auto border border-white/10" style="max-height: 800px;">
+                                            <iframe ${_S}="${fileUrl}" sandbox="allow-same-origin" frameborder="0" scrolling="auto"
+                                                onload="try{this.contentWindow.scrollTo(0,0);}catch(e){}"
+                                                style="width: 100%; min-width: 1400px; height: 800px; background: white; display: block; border: 0;"></iframe>
+                                        </div>
                                     </div>
                                 ` : isDocument ? `
                                     <div class="text-center py-12">

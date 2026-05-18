@@ -23627,11 +23627,57 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     });
                 });
 
+                // ── Auto-merge DMV printouts from every person record.
+                // Parity with the rap-sheet flow above: any imported DMV
+                // printout gets appended to the OPS Plan PDF automatically;
+                // no Upload-modal attach step required. Dedup is handled in
+                // the opsPlans loop below (DMV-sourced opsPlans entries are
+                // skipped to avoid double-merging the same PDF).
+                //
+                // Read directly from localStorage — the outer `suspects`
+                // const is shadowed by getSuspectSummary() (and is empty
+                // when "Include Detailed Suspect Profiles" is unchecked),
+                // so we cannot reuse it here.
+                const dmvKeysMerged = new Set();
+                const _readPersonArr = (key) => {
+                    try { return JSON.parse(localStorage.getItem(`${key}_${currentCase.id}`) || '[]'); }
+                    catch (_) { return []; }
+                };
+                const collectDmvFromArray = (arr, kindLabel) => {
+                    if (!Array.isArray(arr)) return;
+                    arr.forEach((p, i) => {
+                        if (!p || !p.dmvPrintout || !p.dmvPrintout.fileData) return;
+                        const rec = p.dmvPrintout;
+                        const ft = (rec.fileType || '').toLowerCase();
+                        const fn = rec.fileName || '';
+                        const isImage = ft.includes('image');
+                        const isPdf = ft.includes('pdf') || /\.pdf$/i.test(fn);
+                        if (isImage || !isPdf) return; // images are inline-embedded elsewhere
+                        let b64 = rec.fileData;
+                        const comma = b64.indexOf(',');
+                        if (comma >= 0) b64 = b64.slice(comma + 1);
+                        const pname = (p.name || p.fullName || '').toString();
+                        const state = rec.state ? ` (${rec.state})` : '';
+                        pdfAttachments.push({
+                            filename: fn || `DMV-${kindLabel}-${i}.pdf`,
+                            label: `DMV Printout — ${kindLabel}: ${pname || 'Unknown'}${state}`,
+                            base64: b64
+                        });
+                        dmvKeysMerged.add(`${kindLabel.toLowerCase()}:${i}`);
+                    });
+                };
+                collectDmvFromArray(_readPersonArr('suspects'),         'Suspect');
+                collectDmvFromArray(_readPersonArr('victims'),          'Victim');
+                collectDmvFromArray(_readPersonArr('witnesses'),        'Witness');
+                collectDmvFromArray(_readPersonArr('involvedPersons'),  'Other Involved');
+                console.log('[OpsPlan] auto-merged DMV printouts:', dmvKeysMerged.size, [...dmvKeysMerged]);
+
                 // ── Collect attached PDFs from the OPS plan attachments
                 // (uploaded primary files + DMV printouts attached via the
                 //  Upload modal). These are the items in `opsPlans`.
                 //  filePath → disk-backed (preferred): read bytes via IPC
                 //  fileData → inline base64 (legacy / fallback)
+                //  DMV-sourced entries are skipped — already auto-merged above.
                 if (includeAttachments && Array.isArray(opsPlans) && opsPlans.length > 0) {
                     for (const plan of opsPlans) {
                         if (!plan) continue;
@@ -23639,6 +23685,14 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         const fn = (plan.fileName || '').toLowerCase();
                         const isPdf = ft.includes('pdf') || /\.pdf$/i.test(fn);
                         if (!isPdf) continue;
+
+                        // Dedup: skip DMV-sourced opsPlan entries when the
+                        // corresponding person's dmvPrintout was already merged.
+                        if (plan.sourceKind === 'dmv' && plan.sourcePerson) {
+                            const kindMap = { suspect: 'suspect', victim: 'victim', witness: 'witness', involved: 'other involved' };
+                            const key = `${kindMap[plan.sourcePerson.kind] || plan.sourcePerson.kind}:${plan.sourcePerson.index}`;
+                            if (dmvKeysMerged.has(key)) continue;
+                        }
 
                         const label = plan.sourceKind === 'dmv' && plan.sourcePerson
                             ? `DMV Printout — ${plan.sourcePerson.name}${plan.state ? ' (' + plan.state + ')' : ''}`

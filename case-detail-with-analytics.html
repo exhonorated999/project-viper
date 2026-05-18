@@ -8749,8 +8749,14 @@
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                                     </svg>
-                                    Import DMV
+                                    ${suspect.dmvPrintout ? 'Re-import DMV' : 'Import DMV'}
                                 </button>
+                                ${suspect.dmvPrintout ? `
+                                <button onclick="viewDmvPrintout(suspects[${index}])" class="px-4 py-2 bg-amber-500/30 hover:bg-amber-500/40 border border-amber-400 rounded-lg text-amber-200 transition flex items-center gap-2" title="${(suspect.dmvPrintout.fileName||'').replace(/"/g,'&quot;')}">
+                                    📄 View DMV${suspect.dmvPrintout.state ? ' (' + suspect.dmvPrintout.state + ')' : ''}
+                                </button>
+                                <button onclick="removeDmvPrintoutFor('suspect', ${index})" class="px-3 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/40 rounded-lg text-red-400 transition text-xs" title="Remove stored DMV printout">×</button>
+                                ` : ''}
                                 ${isAccurintEnabled() && suspect.name ? `
                                 <button onclick="event.stopPropagation(); openAccurintPanel('${(suspect.name.split(' ')[0]||'').replace(/'/g,"\\'")}', '${(suspect.name.split(' ').slice(1).join(' ')||'').replace(/'/g,"\\'")}', '')" class="px-4 py-2 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500 rounded-lg text-blue-400 transition flex items-center gap-2">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
@@ -9075,6 +9081,63 @@
             'XXX': 'Unknown', 'UNK': 'Unknown'
         };
 
+        // Detect issuing state from the printout (e.g. Colorado DOR header, OLN
+        // state suffix, CO__LICENSE_CATEGORY label).  Returns a 2-letter code
+        // or '' when nothing recognisable was found.  Later printouts (CA, TX…)
+        // can extend this list; the parser is otherwise format-agnostic.
+        function detectDmvState(text) {
+            const t = text || '';
+            // CO: state-specific labels we've seen in DOR exports
+            if (/\bCO__LICENSE_CATEGORY\b/i.test(t) || /\bColorado\s+Department\s+of\s+Revenue\b/i.test(t)
+                || /\bDOR(?:-R\d|\s*R\d)/i.test(t)) return 'CO';
+            // OLN with explicit (XX) state suffix
+            const m = t.match(/OLN[^\n]*\(\s*([A-Z]{2})\s*\)/i);
+            if (m) return m[1].toUpperCase();
+            // CA driver license printout heuristics (will be expanded when CA
+            // sample arrives): DMV CDL header or "STATE OF CALIFORNIA"
+            if (/\bSTATE\s+OF\s+CALIFORNIA\b/i.test(t)) return 'CA';
+            return '';
+        }
+
+        // Read the raw printout file bytes as a data: URL so we can store the
+        // PDF directly on the person record (for later viewing or attaching
+        // to an OPS plan).  Falls back to null when the IPC isn't available
+        // (e.g. dropped-file paths in some Electron versions).
+        async function _readDmvFileAsDataUrl(filePath) {
+            try {
+                if (window.electronAPI && typeof window.electronAPI.readFileAsDataUrl === 'function') {
+                    return await window.electronAPI.readFileAsDataUrl(filePath);
+                }
+            } catch (err) {
+                console.warn('[DMV] readFileAsDataUrl failed:', err && err.message);
+            }
+            return null;
+        }
+
+        // Open a stored DMV printout in the same popup we use for rap sheets.
+        // `person` is the object that owns `dmvPrintout` (suspect / victim /
+        // witness / involvedPerson).
+        function viewDmvPrintout(person) {
+            if (!person || !person.dmvPrintout) { showToast && showToast('No DMV printout on file', 'error'); return; }
+            _viewSuspectDocPopup(person.dmvPrintout);
+        }
+
+        // Render the standard "DMV Printout attached" pill that shows up next
+        // to the Import DMV button when a printout is on file.  `onView` and
+        // `onRemove` are JS expressions that resolve in the caller's scope.
+        function renderDmvPrintoutPill(person, onView, onRemove) {
+            if (!person || !person.dmvPrintout) return '';
+            const fn = (person.dmvPrintout.fileName || 'DMV.pdf').replace(/[<>&"']/g, '');
+            return `
+                <div class="px-3 py-2 bg-amber-500/10 border border-amber-500/30 rounded-lg flex items-center gap-2" title="DMV printout on file">
+                    <span class="text-amber-400">📄</span>
+                    <span class="text-amber-300 text-xs font-medium truncate" style="max-width:180px">${fn}</span>
+                    <button onclick="${onView}" class="text-viper-green hover:underline text-xs font-medium">View</button>
+                    <button onclick="${onRemove}" class="text-red-500 hover:text-red-400 text-xs" title="Remove">×</button>
+                </div>
+            `;
+        }
+
         function parseDmvText(text) {
             const result = {};
 
@@ -9188,6 +9251,10 @@
                     return;
                 }
 
+                // Stash the original PDF so it can be re-viewed / attached to OPS plan later.
+                const printoutFile = await _readDmvFileAsDataUrl(filePath);
+                const dmvState = detectDmvState(pdfResult.text);
+
                 // Build a preview of what was found
                 const fields = [];
                 if (parsed.name) fields.push(`<b>Name:</b> ${parsed.name}`);
@@ -9234,6 +9301,11 @@
                     if (parsed.addressCityStateZip && !suspect.addressCityStateZip) suspect.addressCityStateZip = parsed.addressCityStateZip;
                     if (parsed.sex && !suspect.sex) suspect.sex = parsed.sex;
 
+                    // Attach the printout PDF (don't clobber an existing one).
+                    if (printoutFile && !suspect.dmvPrintout) {
+                        suspect.dmvPrintout = { ...printoutFile, state: dmvState, importedAt: new Date().toISOString() };
+                    }
+
                     // Add SSN as identifier if not already present
                     if (parsed.ssn) {
                         if (!suspect.identifiers) suspect.identifiers = [];
@@ -9278,7 +9350,8 @@
                         identifiers: [],
                         criminalHistory: [],
                         rapSheet: null,
-                        firearmsDoc: null
+                        firearmsDoc: null,
+                        dmvPrintout: printoutFile ? { ...printoutFile, state: dmvState, importedAt: new Date().toISOString() } : null
                     };
 
                     // Add SSN as identifier
@@ -9320,6 +9393,9 @@
                     return;
                 }
 
+                const printoutFile = await _readDmvFileAsDataUrl(filePath);
+                const dmvState = detectDmvState(pdfResult.text);
+
                 const fields = [];
                 if (parsed.name) fields.push(`<b>Name:</b> ${parsed.name}`);
                 if (parsed.dob) fields.push(`<b>DOB:</b> ${formatDate(parsed.dob)}`);
@@ -9360,6 +9436,9 @@
                     if (parsed.hairColor && !victim.hairColor) victim.hairColor = parsed.hairColor;
                     if (parsed.address && !victim.address) victim.address = parsed.address;
                     if (parsed.addressCityStateZip && !victim.addressCityStateZip) victim.addressCityStateZip = parsed.addressCityStateZip;
+                    if (printoutFile && !victim.dmvPrintout) {
+                        victim.dmvPrintout = { ...printoutFile, state: dmvState, importedAt: new Date().toISOString() };
+                    }
                     saveVictims();
                     renderTabContent('victims');
                 } else {
@@ -9371,7 +9450,8 @@
                         address: parsed.address || '', addressCityStateZip: parsed.addressCityStateZip || '',
                         residencePhoto: '', employerName: '', occupation: '',
                         employerAddress: '', employerPhone: '',
-                        injuryPhotos: [], propertyPhotos: [], vehicles: []
+                        injuryPhotos: [], propertyPhotos: [], vehicles: [],
+                        dmvPrintout: printoutFile ? { ...printoutFile, state: dmvState, importedAt: new Date().toISOString() } : null
                     });
                     saveVictims();
                     currentVictimView = victims.length - 1;
@@ -9401,6 +9481,9 @@
                     showToast('Could not identify DMV fields in this document.', 'error');
                     return;
                 }
+
+                const printoutFile = await _readDmvFileAsDataUrl(filePath);
+                const dmvState = detectDmvState(pdfResult.text);
 
                 const fields = [];
                 if (parsed.name) fields.push(`<b>Name:</b> ${parsed.name}`);
@@ -9442,6 +9525,9 @@
                     if (parsed.hairColor && !witness.hairColor) witness.hairColor = parsed.hairColor;
                     if (parsed.address && !witness.address) witness.address = parsed.address;
                     if (parsed.addressCityStateZip && !witness.addressCityStateZip) witness.addressCityStateZip = parsed.addressCityStateZip;
+                    if (printoutFile && !witness.dmvPrintout) {
+                        witness.dmvPrintout = { ...printoutFile, state: dmvState, importedAt: new Date().toISOString() };
+                    }
                     saveWitnesses();
                     renderTabContent('witnesses');
                 } else {
@@ -9452,7 +9538,8 @@
                         hairColor: parsed.hairColor || '', eyeColor: parsed.eyeColor || '',
                         address: parsed.address || '', addressCityStateZip: parsed.addressCityStateZip || '',
                         residencePhoto: '', employerName: '', occupation: '',
-                        employerAddress: '', employerPhone: '', statement: ''
+                        employerAddress: '', employerPhone: '', statement: '',
+                        dmvPrintout: printoutFile ? { ...printoutFile, state: dmvState, importedAt: new Date().toISOString() } : null
                     });
                     saveWitnesses();
                     currentWitnessView = witnesses.length - 1;
@@ -9481,6 +9568,9 @@
                     showToast('Could not identify DMV fields in this document.', 'error');
                     return;
                 }
+
+                const printoutFile = await _readDmvFileAsDataUrl(filePath);
+                const dmvState = detectDmvState(pdfResult.text);
 
                 const fields = [];
                 if (parsed.name) fields.push(`<b>Name:</b> ${parsed.name}`);
@@ -9523,6 +9613,9 @@
                     if (parsed.hairColor && !person.hairColor) person.hairColor = parsed.hairColor;
                     if (parsed.address && !person.address) person.address = parsed.address;
                     if (parsed.addressCityStateZip && !person.addressCityStateZip) person.addressCityStateZip = parsed.addressCityStateZip;
+                    if (printoutFile && !person.dmvPrintout) {
+                        person.dmvPrintout = { ...printoutFile, state: dmvState, importedAt: new Date().toISOString() };
+                    }
                     saveInvolvedPersons();
                     renderTabContent('involvedPersons');
                 } else {
@@ -9535,7 +9628,8 @@
                         scarsMarksTattoos: '',
                         address: parsed.address || '', addressCityStateZip: parsed.addressCityStateZip || '',
                         residencePhoto: '', role: '', relationship: '', notes: '',
-                        rmsSource: '', rmsRole: ''
+                        rmsSource: '', rmsRole: '',
+                        dmvPrintout: printoutFile ? { ...printoutFile, state: dmvState, importedAt: new Date().toISOString() } : null
                     });
                     saveInvolvedPersons();
                     currentInvolvedPersonView = involvedPersons.length - 1;
@@ -9545,6 +9639,31 @@
                 console.error('DMV involved person import error:', err);
                 showToast('Error importing DMV printout: ' + err.message, 'error');
             }
+        }
+
+        // ─── DMV printout remove helpers (per tab) ──────────────────────
+        async function removeDmvPrintoutFor(kind, index) {
+            const label = kind === 'suspect' ? 'suspect'
+                : kind === 'victim' ? 'victim'
+                : kind === 'witness' ? 'witness'
+                : 'involved person';
+            if (!await viperConfirm(`Remove the DMV printout from this ${label}?`, { danger: true, okText: 'Remove' })) return;
+            const arr = kind === 'suspect' ? suspects
+                : kind === 'victim' ? victims
+                : kind === 'witness' ? witnesses
+                : involvedPersons;
+            const saver = kind === 'suspect' ? saveSuspects
+                : kind === 'victim' ? saveVictims
+                : kind === 'witness' ? saveWitnesses
+                : saveInvolvedPersons;
+            const tab = kind === 'suspect' ? 'suspects'
+                : kind === 'victim' ? 'victims'
+                : kind === 'witness' ? 'witnesses'
+                : 'involvedPersons';
+            if (!arr[index]) return;
+            arr[index].dmvPrintout = null;
+            saver();
+            renderTabContent(tab);
         }
 
         function addNewSuspect() {
@@ -10991,8 +11110,14 @@
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                                     </svg>
-                                    Import DMV
+                                    ${victim.dmvPrintout ? 'Re-import DMV' : 'Import DMV'}
                                 </button>
+                                ${victim.dmvPrintout ? `
+                                <button onclick="viewDmvPrintout(victims[${index}])" class="px-4 py-2 bg-amber-500/30 hover:bg-amber-500/40 border border-amber-400 rounded-lg text-amber-200 transition flex items-center gap-2" title="${(victim.dmvPrintout.fileName||'').replace(/"/g,'&quot;')}">
+                                    📄 View DMV${victim.dmvPrintout.state ? ' (' + victim.dmvPrintout.state + ')' : ''}
+                                </button>
+                                <button onclick="removeDmvPrintoutFor('victim', ${index})" class="px-3 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/40 rounded-lg text-red-400 transition text-xs" title="Remove stored DMV printout">×</button>
+                                ` : ''}
                                 <button onclick="deleteVictim(${index})" class="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500 rounded-lg text-red-500 transition">
                                     Delete
                                 </button>
@@ -13195,8 +13320,14 @@
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                                     </svg>
-                                    Import DMV
+                                    ${witness.dmvPrintout ? 'Re-import DMV' : 'Import DMV'}
                                 </button>
+                                ${witness.dmvPrintout ? `
+                                <button onclick="viewDmvPrintout(witnesses[${index}])" class="px-4 py-2 bg-amber-500/30 hover:bg-amber-500/40 border border-amber-400 rounded-lg text-amber-200 transition flex items-center gap-2" title="${(witness.dmvPrintout.fileName||'').replace(/"/g,'&quot;')}">
+                                    📄 View DMV${witness.dmvPrintout.state ? ' (' + witness.dmvPrintout.state + ')' : ''}
+                                </button>
+                                <button onclick="removeDmvPrintoutFor('witness', ${index})" class="px-3 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/40 rounded-lg text-red-400 transition text-xs" title="Remove stored DMV printout">×</button>
+                                ` : ''}
                                 <button onclick="deleteWitness(${index})" class="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500 rounded-lg text-red-500 transition">
                                     Delete
                                 </button>
@@ -14017,8 +14148,14 @@
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                                     </svg>
-                                    Import DMV
+                                    ${person.dmvPrintout ? 'Re-import DMV' : 'Import DMV'}
                                 </button>
+                                ${person.dmvPrintout ? `
+                                <button onclick="viewDmvPrintout(involvedPersons[${index}])" class="px-4 py-2 bg-amber-500/30 hover:bg-amber-500/40 border border-amber-400 rounded-lg text-amber-200 transition flex items-center gap-2" title="${(person.dmvPrintout.fileName||'').replace(/"/g,'&quot;')}">
+                                    📄 View DMV${person.dmvPrintout.state ? ' (' + person.dmvPrintout.state + ')' : ''}
+                                </button>
+                                <button onclick="removeDmvPrintoutFor('involved', ${index})" class="px-3 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/40 rounded-lg text-red-400 transition text-xs" title="Remove stored DMV printout">×</button>
+                                ` : ''}
                                 <button onclick="deleteInvolvedPerson(${index})" class="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500 rounded-lg text-red-500 transition">
                                     Delete
                                 </button>

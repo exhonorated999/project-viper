@@ -1641,6 +1641,29 @@ ipcMain.handle('select-dmv-file', async () => {
   return result.filePaths[0];
 });
 
+// Read an arbitrary file as a base64 data URL. Used by the DMV import to
+// persist the original PDF onto the suspect / victim / witness / involved
+// person object so the user can re-open or attach it to an OPS plan later.
+ipcMain.handle('read-file-as-data-url', async (event, filePath) => {
+  try {
+    const buf = fs.readFileSync(filePath);
+    const ext = (path.extname(filePath) || '').toLowerCase();
+    const mime = ext === '.pdf' ? 'application/pdf'
+      : ext === '.png' ? 'image/png'
+      : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+      : 'application/octet-stream';
+    return {
+      fileName: path.basename(filePath),
+      fileSize: buf.length,
+      fileType: mime,
+      fileData: `data:${mime};base64,${buf.toString('base64')}`,
+    };
+  } catch (err) {
+    console.error('read-file-as-data-url error:', err);
+    throw err;
+  }
+});
+
 ipcMain.handle('extract-pdf-text', async (event, filePath) => {
   try {
     const pdfParse = require('pdf-parse');
@@ -1714,6 +1737,7 @@ ipcMain.handle('extract-pdf-text', async (event, filePath) => {
     console.log('MuPDF text also garbled, falling back to Tesseract OCR...');
     const Tesseract = (await import('tesseract.js')).default;
 
+    let ocrText = '';
     for (let i = 0; i < numPages; i++) {
       const page = doc.loadPage(i);
       const matrix = mupdf.Matrix.scale(300 / 72, 300 / 72);

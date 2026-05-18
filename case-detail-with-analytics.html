@@ -23048,6 +23048,28 @@
                                     <p class="text-xs text-gray-500">Capture route maps as images in the report</p>
                                 </div>
                             </label>
+                            ${(() => {
+                                const attachable = (opsPlans || []).filter(p => {
+                                    const ft = (p.fileType || '').toLowerCase();
+                                    const fn = (p.fileName || '').toLowerCase();
+                                    return ft.includes('pdf') || /\.pdf$/i.test(fn);
+                                });
+                                if (attachable.length === 0) return '';
+                                const dmvCount = attachable.filter(p => p.sourceKind === 'dmv').length;
+                                const other = attachable.length - dmvCount;
+                                const desc = [
+                                    dmvCount ? `${dmvCount} DMV printout${dmvCount === 1 ? '' : 's'}` : null,
+                                    other ? `${other} other PDF${other === 1 ? '' : 's'}` : null
+                                ].filter(Boolean).join(' + ');
+                                return `
+                                <label class="flex items-center gap-3 p-3 bg-viper-dark rounded-lg cursor-pointer hover:bg-viper-dark/70">
+                                    <input type="checkbox" id="genOps_includeAttachments" class="accent-viper-cyan w-4 h-4" checked>
+                                    <div>
+                                        <span class="text-white text-sm">Merge Attached Documents</span>
+                                        <p class="text-xs text-gray-500">Append ${desc} as additional pages after the report</p>
+                                    </div>
+                                </label>`;
+                            })()}
                         </div>
                         <div class="flex gap-3 justify-end">
                             <button onclick="document.getElementById('genOpsPlanModal').remove()" class="px-4 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white transition text-sm">Cancel</button>
@@ -23063,6 +23085,7 @@
             const includeSuspects = document.getElementById('genOps_includeSuspectPDF')?.checked;
             const includePhotos = document.getElementById('genOps_includePhotos')?.checked;
             const includeMaps = document.getElementById('genOps_includeMaps')?.checked;
+            const includeAttachments = document.getElementById('genOps_includeAttachments')?.checked !== false;
             document.getElementById('genOpsPlanModal')?.remove();
 
             const d = opsPlanData || {};
@@ -23603,6 +23626,53 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         });
                     });
                 });
+
+                // ── Collect attached PDFs from the OPS plan attachments
+                // (uploaded primary files + DMV printouts attached via the
+                //  Upload modal). These are the items in `opsPlans`.
+                //  filePath → disk-backed (preferred): read bytes via IPC
+                //  fileData → inline base64 (legacy / fallback)
+                if (includeAttachments && Array.isArray(opsPlans) && opsPlans.length > 0) {
+                    for (const plan of opsPlans) {
+                        if (!plan) continue;
+                        const ft = (plan.fileType || '').toLowerCase();
+                        const fn = (plan.fileName || '').toLowerCase();
+                        const isPdf = ft.includes('pdf') || /\.pdf$/i.test(fn);
+                        if (!isPdf) continue;
+
+                        const label = plan.sourceKind === 'dmv' && plan.sourcePerson
+                            ? `DMV Printout — ${plan.sourcePerson.name}${plan.state ? ' (' + plan.state + ')' : ''}`
+                            : (plan.fileName || 'Attached Document');
+
+                        let b64 = null;
+                        if (plan.filePath && window.electronAPI && window.electronAPI.readOpsPlanFile) {
+                            try {
+                                const bytes = await window.electronAPI.readOpsPlanFile(plan.filePath);
+                                const u8 = new Uint8Array(bytes);
+                                let bin = '';
+                                for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
+                                b64 = btoa(bin);
+                            } catch (e) {
+                                console.warn('[OpsPlan] failed to read attachment for merge:', plan.fileName, e);
+                            }
+                        }
+                        if (!b64 && plan.fileData) {
+                            let s = plan.fileData;
+                            const comma = s.indexOf(',');
+                            if (comma >= 0) s = s.slice(comma + 1);
+                            b64 = s;
+                        }
+                        if (!b64) {
+                            console.warn('[OpsPlan] attachment has no readable PDF data — skipped:', plan.fileName);
+                            continue;
+                        }
+                        pdfAttachments.push({
+                            filename: plan.fileName || 'attachment.pdf',
+                            label,
+                            base64: b64
+                        });
+                    }
+                }
                 const safeCase = (currentCase.caseNumber || 'case').replace(/[^A-Za-z0-9_-]+/g, '_');
                 const stamp = new Date().toISOString().slice(0, 10);
                 const defaultFileName = `OpsPlan_${safeCase}_${stamp}.pdf`;

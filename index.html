@@ -3882,9 +3882,11 @@
             // Update case analytics section
             updateCaseAnalytics(activeCases.length, closedCases.length + otherClosureCases.length, closedWithArrestCases.length);
             
-            // Update investigations table using current filter
-            const filtered = cases.filter(c => c.status === currentInvestigationsFilter);
-            updateActiveInvestigationsTable(filtered, currentInvestigationsFilter);
+            // Update investigations table using current filter — delegate to
+            // setInvestigationsFilter so the saved filter (incl. rolled-up
+            // categories like 'closed', 'closed-arrest', priority-* and
+            // custom statuses) is fully respected on first render.
+            setInvestigationsFilter(currentInvestigationsFilter);
         }
         
         function updateCaseAnalytics(openCount, closedCount, closedWithArrestCount) {
@@ -3912,8 +3914,15 @@
             }
         }
         
-        let currentInvestigationsFilter = 'active';
-        let investigationsSort = { key: 'caseNumber', dir: 'asc' };
+        // Persisted across navigation so user's filter/sort survives tab switches.
+        let currentInvestigationsFilter = localStorage.getItem('viperInvestigationsFilter') || 'active';
+        let investigationsSort = (function() {
+            try {
+                const s = JSON.parse(localStorage.getItem('viperInvestigationsSort') || 'null');
+                if (s && typeof s.key === 'string' && (s.dir === 'asc' || s.dir === 'desc')) return s;
+            } catch {}
+            return { key: 'caseNumber', dir: 'asc' };
+        })();
 
         function toggleInvestigationsFilter() {
             // Dynamically rebuild the dropdown to include custom statuses + priority filters
@@ -3959,7 +3968,9 @@
 
         function setInvestigationsFilter(filter) {
             currentInvestigationsFilter = filter;
-            document.getElementById('investigationsFilterDropdown').classList.add('hidden');
+            try { localStorage.setItem('viperInvestigationsFilter', filter); } catch {}
+            const dd = document.getElementById('investigationsFilterDropdown');
+            if (dd) dd.classList.add('hidden');
 
             const builtinTitles = { active: 'Active Investigations', closed: 'Closed Investigations', 'closed-arrest': 'Closed with Arrest', transferred: 'Transferred Cases', all: 'All Cases' };
             const priorityTitles = { 'priority-1': 'Critical Priority', 'priority-2': 'High Priority', 'priority-3': 'Medium Priority', 'priority-4': 'Low Priority', 'priority-none': 'No Priority Assigned' };
@@ -3969,7 +3980,7 @@
                 const cs = customs.find(s => s.id === filter);
                 title = cs ? `${cs.category.replace(/-/g,' ')} — ${cs.label}` : filter;
             }
-            document.getElementById('investigationsTitle').textContent = title;
+            document.getElementById('investigationsTitle') && (document.getElementById('investigationsTitle').textContent = title);
 
             const allCases = JSON.parse(localStorage.getItem('viperCases')) || [];
             let filtered;
@@ -4005,6 +4016,7 @@
             } else {
                 investigationsSort = { key, dir: 'asc' };
             }
+            try { localStorage.setItem('viperInvestigationsSort', JSON.stringify(investigationsSort)); } catch {}
             // Re-render with current filter — header rebuilds itself with arrow indicators.
             filterInvestigations();
         }

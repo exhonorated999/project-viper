@@ -694,6 +694,53 @@ app.whenReady().then(async () => {
         ::-webkit-scrollbar-track { background: #0d1117; }
         ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
       `).catch(() => {});
+
+      // Auto-fill credentials on ICAC Data System login page
+      const url = icacDataSystemBrowserView.webContents.getURL();
+      const looksLikeLogin = /login|signin|sign-in|authenticate|landing|account/i.test(url) || url.endsWith('/') || url.includes('icacdatasystem');
+      if (!looksLikeLogin) return;
+      mainWindow.webContents.executeJavaScript(
+        `JSON.stringify({ username: localStorage.getItem('icacDataSystemUsername') || '', password: localStorage.getItem('icacDataSystemPassword') || '' })`
+      ).then(json => {
+        const creds = JSON.parse(json);
+        if (!creds.username && !creds.password) return;
+        icacDataSystemBrowserView.webContents.executeJavaScript(`
+          (function() {
+            function setVal(el, val) {
+              if (!el || !val) return;
+              const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+              nativeSetter.call(el, val);
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              el.dispatchEvent(new Event('blur', { bubbles: true }));
+            }
+            function pickUser() {
+              return document.querySelector('input[name="username"]')
+                  || document.querySelector('input#username')
+                  || document.querySelector('input[name="user"]')
+                  || document.querySelector('input[name="email"]')
+                  || document.querySelector('input[type="email"]')
+                  || document.querySelector('input[autocomplete="username"]')
+                  || (function() {
+                       const all = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
+                       return all.find(i => /user|email|login/i.test((i.name||'') + ' ' + (i.id||'') + ' ' + (i.placeholder||''))) || all[0] || null;
+                     })();
+            }
+            function pickPass() {
+              return document.querySelector('input[type="password"]')
+                  || document.querySelector('input[name="password"]')
+                  || document.querySelector('input#password');
+            }
+            function fill() {
+              setVal(pickUser(), ${JSON.stringify(creds.username)});
+              setVal(pickPass(), ${JSON.stringify(creds.password)});
+            }
+            setTimeout(fill, 400);
+            setTimeout(fill, 1200);
+            setTimeout(fill, 2500);
+          })();
+        `).catch(() => {});
+      }).catch(() => {});
     });
     icacDataSystemBrowserView.webContents.on('did-fail-load', (_e, code, desc, url, isMain) => {
       if (isMain) console.error('[ICAC-DS] did-fail-load', code, desc, url);
@@ -791,6 +838,53 @@ app.whenReady().then(async () => {
         ::-webkit-scrollbar-track { background: #0d1117; }
         ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
       `).catch(() => {});
+
+      // Auto-fill credentials on Gridcop login page
+      const url = gridcopBrowserView.webContents.getURL();
+      const looksLikeLogin = /login|signin|sign-in|authenticate|cb-login|account/i.test(url) || url.endsWith('/') || url.includes('gridcop');
+      if (!looksLikeLogin) return;
+      mainWindow.webContents.executeJavaScript(
+        `JSON.stringify({ username: localStorage.getItem('gridcopUsername') || '', password: localStorage.getItem('gridcopPassword') || '' })`
+      ).then(json => {
+        const creds = JSON.parse(json);
+        if (!creds.username && !creds.password) return;
+        gridcopBrowserView.webContents.executeJavaScript(`
+          (function() {
+            function setVal(el, val) {
+              if (!el || !val) return;
+              const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+              nativeSetter.call(el, val);
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              el.dispatchEvent(new Event('blur', { bubbles: true }));
+            }
+            function pickUser() {
+              return document.querySelector('input[name="username"]')
+                  || document.querySelector('input#username')
+                  || document.querySelector('input[name="user"]')
+                  || document.querySelector('input[name="email"]')
+                  || document.querySelector('input[type="email"]')
+                  || document.querySelector('input[autocomplete="username"]')
+                  || (function() {
+                       const all = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
+                       return all.find(i => /user|email|login/i.test((i.name||'') + ' ' + (i.id||'') + ' ' + (i.placeholder||''))) || all[0] || null;
+                     })();
+            }
+            function pickPass() {
+              return document.querySelector('input[type="password"]')
+                  || document.querySelector('input[name="password"]')
+                  || document.querySelector('input#password');
+            }
+            function fill() {
+              setVal(pickUser(), ${JSON.stringify(creds.username)});
+              setVal(pickPass(), ${JSON.stringify(creds.password)});
+            }
+            setTimeout(fill, 400);
+            setTimeout(fill, 1200);
+            setTimeout(fill, 2500);
+          })();
+        `).catch(() => {});
+      }).catch(() => {});
     });
     gridcopBrowserView.webContents.on('did-fail-load', (_e, code, desc, url, isMain) => {
       if (isMain) console.error('[GRIDCOP] did-fail-load', code, desc, url);

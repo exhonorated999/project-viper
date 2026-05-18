@@ -23881,17 +23881,76 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
         }
 
+        // Gather every stored DMV printout across suspects/victims/witnesses/involved
+        // persons on the current case. Returns array of:
+        //   { kind, kindLabel, index, personName, fileName, fileSize, fileType,
+        //     state, dataUrl, key }   where `key` is a stable id like 'suspect:3'.
+        function _collectDmvPrintoutsForOpsPlan() {
+            const out = [];
+            const push = (kind, kindLabel, arr) => {
+                if (!Array.isArray(arr)) return;
+                arr.forEach((p, i) => {
+                    if (!p || !p.dmvPrintout || !p.dmvPrintout.fileData) return;
+                    out.push({
+                        kind, kindLabel, index: i,
+                        personName: (p.name || p.fullName || '(unnamed)').toString(),
+                        fileName: p.dmvPrintout.fileName || `${kind}-${i}-DMV.pdf`,
+                        fileSize: p.dmvPrintout.fileSize || 0,
+                        fileType: p.dmvPrintout.fileType || 'application/pdf',
+                        state: p.dmvPrintout.state || '',
+                        dataUrl: p.dmvPrintout.fileData,
+                        key: `${kind}:${i}`
+                    });
+                });
+            };
+            push('suspect', 'Suspect', typeof suspects !== 'undefined' ? suspects : []);
+            push('victim', 'Victim', typeof victims !== 'undefined' ? victims : []);
+            push('witness', 'Witness', typeof witnesses !== 'undefined' ? witnesses : []);
+            push('involved', 'Other Involved', typeof involvedPersons !== 'undefined' ? involvedPersons : []);
+            return out;
+        }
+
         function addOpsPlan() {
+            const dmvList = _collectDmvPrintoutsForOpsPlan();
+            const dmvSection = dmvList.length === 0 ? '' : `
+                <div class="border border-amber-500/30 rounded-lg bg-amber-500/5 p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <label class="text-sm text-amber-300 font-medium flex items-center gap-2">
+                            <span>📄</span>
+                            Attach DMV Printouts from this Case
+                            <span class="text-xs text-amber-400/70 font-normal">(${dmvList.length} on file)</span>
+                        </label>
+                        <div class="flex gap-2 text-xs">
+                            <button type="button" onclick="document.querySelectorAll('input[name=\\'ops_dmv_attach\\']').forEach(c=>c.checked=true)" class="text-amber-400 hover:text-amber-300 underline">Select all</button>
+                            <button type="button" onclick="document.querySelectorAll('input[name=\\'ops_dmv_attach\\']').forEach(c=>c.checked=false)" class="text-gray-500 hover:text-gray-400 underline">None</button>
+                        </div>
+                    </div>
+                    <div class="space-y-1 max-h-44 overflow-auto pr-1">
+                        ${dmvList.map(d => `
+                            <label class="flex items-center gap-3 py-1.5 px-2 hover:bg-amber-500/10 rounded cursor-pointer">
+                                <input type="checkbox" name="ops_dmv_attach" value="${d.key}" class="accent-amber-500">
+                                <span class="text-amber-300 text-sm flex-1 truncate">${(d.personName||'').replace(/[<>&]/g,'')}</span>
+                                <span class="text-xs text-amber-400/60 px-1.5 py-0.5 bg-amber-500/10 rounded">${d.kindLabel}${d.state ? ' · ' + d.state : ''}</span>
+                                <span class="text-xs text-gray-500 truncate" style="max-width:160px" title="${(d.fileName||'').replace(/"/g,'&quot;')}">${(d.fileName||'').replace(/[<>&]/g,'')}</span>
+                            </label>
+                        `).join('')}
+                    </div>
+                    <p class="text-xs text-gray-500 mt-2">Each checked printout will be added as a separate Operations Plan attachment.</p>
+                </div>
+            `;
+
             const modalHTML = `
                 <div id="opsPlanModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id === 'opsPlanModal') closeOpsPlanModal()">
                     <div class="glass-card rounded-xl p-6 max-w-2xl w-full">
                         <h3 class="text-2xl font-bold text-white mb-6">Upload Operations Plan</h3>
                         <form onsubmit="saveOpsPlan(event)" class="space-y-6">
                             <div>
-                                <label class="block text-sm text-gray-400 mb-2">Select File *</label>
-                                <input type="file" id="ops_file" accept=".pdf,.doc,.docx,image/*" required class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-viper-cyan/20 file:text-viper-cyan hover:file:bg-viper-cyan/30">
-                                <p class="text-xs text-gray-500 mt-2">Supported formats: PDF, DOC, DOCX, Images</p>
+                                <label class="block text-sm text-gray-400 mb-2">Select File ${dmvList.length ? '' : '*'}</label>
+                                <input type="file" id="ops_file" accept=".pdf,.doc,.docx,image/*" ${dmvList.length ? '' : 'required'} class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-viper-cyan/20 file:text-viper-cyan hover:file:bg-viper-cyan/30">
+                                <p class="text-xs text-gray-500 mt-2">Supported formats: PDF, DOC, DOCX, Images${dmvList.length ? ' — optional if attaching DMV printouts below' : ''}</p>
                             </div>
+
+                            ${dmvSection}
 
                             <div>
                                 <label class="block text-sm text-gray-400 mb-2">Notes (Optional)</label>
@@ -23921,59 +23980,130 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
         async function saveOpsPlan(event) {
             event.preventDefault();
-            
+
             const fileInput = document.getElementById('ops_file');
             const file = fileInput.files[0];
-            
-            if (!file) {
-                viperToast('Please select a file', 'error');
+            const notes = document.getElementById('ops_notes').value.trim();
+
+            // Collect DMV printouts the user wants to attach
+            const dmvAll = _collectDmvPrintoutsForOpsPlan();
+            const checkedKeys = Array.from(document.querySelectorAll('input[name="ops_dmv_attach"]:checked')).map(c => c.value);
+            const dmvSelected = dmvAll.filter(d => checkedKeys.includes(d.key));
+
+            if (!file && dmvSelected.length === 0) {
+                viperToast('Select a file or check at least one DMV printout to attach', 'error');
                 return;
             }
 
-            // Save the document to disk under cases/{caseNumber}/OpsPlan/Documents/
-            // and store ONLY the file path + metadata in localStorage.
-            const filePath = await _opsSaveBytesToDisk(file, 'Documents');
-            const newPlan = {
-                id: Date.now(),
-                fileName: file.name,
-                fileSize: file.size,
-                fileType: file.type,
-                notes: document.getElementById('ops_notes').value.trim(),
-                uploadedDate: new Date().toISOString(),
-                uploadedBy: 'Current User'
-            };
+            const added = [];
 
-            if (filePath) {
-                newPlan.filePath = filePath;
-            } else {
-                // IPC unavailable (e.g. browser context) — fall back to inline base64
-                // but apply a hard size guard to avoid quota errors.
-                const MAX_BYTES = 3 * 1024 * 1024;
-                if (file.size > MAX_BYTES) {
-                    viperToast(
-                        `File too large (${(file.size / 1048576).toFixed(1)}MB). Disk save unavailable; under 3MB only without IPC.`,
-                        'error',
-                        8000
-                    );
-                    return;
+            // ─ Primary uploaded file (optional when DMVs are attached) ─
+            if (file) {
+                const filePath = await _opsSaveBytesToDisk(file, 'Documents');
+                const newPlan = {
+                    id: Date.now(),
+                    fileName: file.name,
+                    fileSize: file.size,
+                    fileType: file.type,
+                    notes,
+                    uploadedDate: new Date().toISOString(),
+                    uploadedBy: 'Current User'
+                };
+
+                if (filePath) {
+                    newPlan.filePath = filePath;
+                } else {
+                    // IPC unavailable (e.g. browser context) — fall back to inline base64
+                    // but apply a hard size guard to avoid quota errors.
+                    const MAX_BYTES = 3 * 1024 * 1024;
+                    if (file.size > MAX_BYTES) {
+                        viperToast(
+                            `File too large (${(file.size / 1048576).toFixed(1)}MB). Disk save unavailable; under 3MB only without IPC.`,
+                            'error',
+                            8000
+                        );
+                        return;
+                    }
+                    const reader = new FileReader();
+                    newPlan.fileData = await new Promise((resolve) => {
+                        reader.onload = (e) => resolve(e.target.result);
+                        reader.readAsDataURL(file);
+                    });
                 }
-                const reader = new FileReader();
-                newPlan.fileData = await new Promise((resolve) => {
-                    reader.onload = (e) => resolve(e.target.result);
-                    reader.readAsDataURL(file);
-                });
+                added.push(newPlan);
             }
 
-            opsPlans.push(newPlan);
+            // ─ DMV printouts: convert each to an opsPlan entry, prefer disk-save ─
+            for (let i = 0; i < dmvSelected.length; i++) {
+                const d = dmvSelected[i];
+                const conv = _dataUrlToBytes(d.dataUrl);
+                if (!conv) continue;
+                // Stable filename so re-attaches don't proliferate copies.
+                const safeName = `DMV-${d.kindLabel.replace(/\s+/g, '')}-${(d.personName || 'unknown').replace(/[^A-Za-z0-9_\-]+/g, '_')}.pdf`;
+                let filePath = null;
+                try {
+                    if (window.electronAPI && window.electronAPI.saveOpsPlanFile && currentCase?.caseNumber) {
+                        filePath = await window.electronAPI.saveOpsPlanFile({
+                            caseNumber: currentCase.caseNumber,
+                            subfolder: 'Documents',
+                            fileName: safeName,
+                            fileData: conv.bytes
+                        });
+                    }
+                } catch (e) { console.error('[OpsPlan] DMV disk-save failed', e); }
+
+                const entry = {
+                    id: Date.now() + i + 1,
+                    fileName: safeName,
+                    fileSize: d.fileSize,
+                    fileType: d.fileType || 'application/pdf',
+                    notes: notes
+                        ? `${notes}\n— DMV printout for ${d.kindLabel}: ${d.personName}${d.state ? ' (' + d.state + ')' : ''}`
+                        : `DMV printout for ${d.kindLabel}: ${d.personName}${d.state ? ' (' + d.state + ')' : ''}`,
+                    uploadedDate: new Date().toISOString(),
+                    uploadedBy: 'Current User',
+                    sourceKind: 'dmv',
+                    sourcePerson: { kind: d.kind, index: d.index, name: d.personName },
+                    state: d.state || ''
+                };
+
+                if (filePath) {
+                    entry.filePath = filePath;
+                } else {
+                    // Fall back to inline — size cap defends localStorage quota.
+                    const MAX_BYTES = 3 * 1024 * 1024;
+                    if ((d.fileSize || 0) > MAX_BYTES) {
+                        viperToast(`DMV printout for ${d.personName} too large to attach without disk save`, 'error');
+                        continue;
+                    }
+                    entry.fileData = d.dataUrl;
+                }
+                added.push(entry);
+            }
+
+            if (added.length === 0) {
+                viperToast('Nothing was attached', 'error');
+                return;
+            }
+
+            // Snapshot for rollback if save fails
+            const before = opsPlans.slice();
+            added.forEach(p => opsPlans.push(p));
             try {
                 saveOpsPlans();
             } catch (err) {
-                opsPlans.pop();
+                opsPlans.length = 0;
+                before.forEach(p => opsPlans.push(p));
                 return;
             }
             closeOpsPlanModal();
             renderTabContent('opsplan');
-            viperToast('Operations Plan uploaded', 'success');
+            viperToast(
+                added.length === 1
+                    ? 'Operations Plan uploaded'
+                    : `${added.length} attachments added to Operations Plan`,
+                'success'
+            );
         }
 
         async function viewOpsPlan(index) {

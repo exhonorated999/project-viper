@@ -38,9 +38,10 @@
  * Activity files are JSON Lines (one event per line).
  */
 
-const AdmZip = require('adm-zip');
+const AdmZip = require('adm-zip'); // retained for back-compat with buffer-based sync detection
 const fs = require('fs');
 const path = require('path');
+const { openZip } = require('../_shared/zip-reader');
 
 // IP-bearing event types we surface in IP Activity table.
 const IP_EVENT_TYPES = new Set([
@@ -63,8 +64,14 @@ class DiscordWarrantParser {
      * Detect a Discord Data Package ZIP.
      * Heuristic: README.txt mentions "Discord Data Package", OR
      *           Account/user.json + Messages/index.json both present.
+     *
+     * Accepts a Buffer (legacy sync) OR a file path (preferred for files
+     * over 2 GB — returns a Promise).
      */
     static isDiscordWarrantZip(zipBufferOrPath) {
+        if (typeof zipBufferOrPath === 'string') {
+            return DiscordWarrantParser.isDiscordWarrantZipAsync(zipBufferOrPath);
+        }
         try {
             const zip = new AdmZip(zipBufferOrPath);
             const entries = zip.getEntries();
@@ -78,7 +85,6 @@ class DiscordWarrantParser {
             }
             if (readme && /Discord Data Package/i.test(readme)) return true;
             if (names.has('Account/user.json') && names.has('Messages/index.json')) return true;
-            // Some productions strip README — accept user.json + Activity dir as fallback.
             if (names.has('Account/user.json')) {
                 for (const n of names) {
                     if (n.startsWith('Activity/')) return true;
@@ -88,6 +94,32 @@ class DiscordWarrantParser {
         } catch (e) {
             return false;
         }
+    }
+
+    static async isDiscordWarrantZipAsync(filePath, options = {}) {
+        let zip;
+        try {
+            zip = await openZip(filePath, { security: options.security });
+            const entries = zip.getEntries();
+            const names = new Set();
+            let readme = null;
+            for (const e of entries) {
+                names.add(e.entryName.replace(/^\/+/, ''));
+                if (!readme && /(^|\/)README\.txt$/i.test(e.entryName)) {
+                    try { readme = zip.readAsText(e).slice(0, 800); } catch (_) {}
+                }
+            }
+            if (readme && /Discord Data Package/i.test(readme)) return true;
+            if (names.has('Account/user.json') && names.has('Messages/index.json')) return true;
+            if (names.has('Account/user.json')) {
+                for (const n of names) {
+                    if (n.startsWith('Activity/')) return true;
+                }
+            }
+            return false;
+        } catch (e) {
+            return false;
+        } finally { try { if (zip) zip.close(); } catch (_) {} }
     }
 
     /**
@@ -115,30 +147,33 @@ class DiscordWarrantParser {
     // ─── Public Parse Entry Points ──────────────────────────────────────
 
     /**
-     * Parse a Discord warrant ZIP buffer or path.
-     * @param {Buffer|string} zipBufferOrPath
+     * Parse a Discord warrant ZIP.
+     * @param {Buffer|string} input  ZIP file path (preferred — required for files > 2 GB) OR Buffer
      * @param {Object} options { extractDir, security }
      */
-    async parseZip(zipBufferOrPath, options = {}) {
-        const zip = new AdmZip(zipBufferOrPath);
-        const entries = zip.getEntries();
+    async parseZip(input, options = {}) {
+        const zip = await openZip(input, { security: options.security });
+        try {
+            const entries = zip.getEntries();
 
-        // Build a lookup of entry name → adm-zip entry for fast access
-        const entryMap = new Map();
-        for (const e of entries) entryMap.set(e.entryName.replace(/\\/g, '/'), e);
+            const entryMap = new Map();
+            for (const e of entries) entryMap.set(e.entryName.replace(/\\/g, '/'), e);
 
-        return this._parseSources({
-            entryNames: Array.from(entryMap.keys()),
-            readText: (name) => {
-                const e = entryMap.get(name);
-                return e ? zip.readAsText(e) : null;
-            },
-            readBinary: (name) => {
-                const e = entryMap.get(name);
-                return e ? e.getData() : null;
-            },
-            options
-        });
+            return await this._parseSources({
+                entryNames: Array.from(entryMap.keys()),
+                readText: (name) => {
+                    const e = entryMap.get(name);
+                    return e ? zip.readAsText(e) : null;
+                },
+                readBinary: (name) => {
+                    const e = entryMap.get(name);
+                    return e ? e.getData() : null;
+                },
+                options
+            });
+        } finally {
+            zip.close();
+        }
     }
 
     /**

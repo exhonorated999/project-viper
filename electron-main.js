@@ -5041,7 +5041,7 @@ ipcMain.handle('google-warrant-scan', async (event, { caseNumber }) => {
 
     for (const dir of dirsToScan) {
       if (!fs.existsSync(dir)) continue;
-      const scanDir = (d) => {
+      const scanDir = async (d) => {
         const entries = fs.readdirSync(d, { withFileTypes: true });
 
         // Check if this directory itself contains Google warrant inner ZIPs
@@ -5062,15 +5062,14 @@ ipcMain.handle('google-warrant-scan', async (event, { caseNumber }) => {
         for (const entry of entries) {
           const fullPath = path.join(d, entry.name);
           if (entry.isDirectory()) {
-            scanDir(fullPath);
+            await scanDir(fullPath);
           } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')) {
+            // Use file-path detection so warrant returns > 2 GB don't blow
+            // the Node Buffer limit. Encrypted files are decrypted to temp
+            // by the streaming reader when security is unlocked.
             try {
-              let buf = fs.readFileSync(fullPath);
-              // Decrypt if Field Security is active
-              if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
-                buf = security.decryptBuffer(buf);
-              }
-              if (GoogleWarrantParser.isGoogleWarrantZip(buf)) {
+              const isMatch = await GoogleWarrantParser.isGoogleWarrantZip(fullPath, { security });
+              if (isMatch) {
                 files.push({
                   name: entry.name,
                   path: fullPath,
@@ -5081,7 +5080,7 @@ ipcMain.handle('google-warrant-scan', async (event, { caseNumber }) => {
           }
         }
       };
-      scanDir(dir);
+      await scanDir(dir);
     }
 
     return { success: true, files };
@@ -5114,13 +5113,9 @@ ipcMain.handle('google-warrant-import', async (event, { filePath }) => {
       return { success: true, data };
     }
 
-    // Single ZIP file
-    let buf = fs.readFileSync(filePath);
-    // Decrypt if Field Security is active
-    if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
-      buf = security.decryptBuffer(buf);
-    }
-    const data = await gwParser.parseOuterZip(buf);
+    // Single ZIP file — pass the path; the parser streams it via node-stream-zip,
+    // so we no longer load multi-GB warrant returns into a Buffer.
+    const data = await gwParser.parseOuterZip(filePath, { security });
     return { success: true, data };
   } catch (error) {
     console.error('Google warrant import error:', error);
@@ -5155,19 +5150,16 @@ ipcMain.handle('meta-warrant-scan', async (event, { caseNumber }) => {
 
     for (const dir of dirsToScan) {
       if (!fs.existsSync(dir)) continue;
-      const scanDir = (d) => {
+      const scanDir = async (d) => {
         const entries = fs.readdirSync(d, { withFileTypes: true });
         for (const entry of entries) {
           const fullPath = path.join(d, entry.name);
           if (entry.isDirectory()) {
-            scanDir(fullPath);
+            await scanDir(fullPath);
           } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')) {
             try {
-              let buf = fs.readFileSync(fullPath);
-              if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
-                buf = security.decryptBuffer(buf);
-              }
-              if (MetaWarrantParser.isMetaWarrantZip(buf)) {
+              const isMatch = await MetaWarrantParser.isMetaWarrantZip(fullPath, { security });
+              if (isMatch) {
                 files.push({
                   name: entry.name,
                   path: fullPath,
@@ -5178,7 +5170,7 @@ ipcMain.handle('meta-warrant-scan', async (event, { caseNumber }) => {
           }
         }
       };
-      scanDir(dir);
+      await scanDir(dir);
     }
 
     return { success: true, files };
@@ -5190,11 +5182,7 @@ ipcMain.handle('meta-warrant-scan', async (event, { caseNumber }) => {
 
 ipcMain.handle('meta-warrant-import', async (event, { filePath, caseNumber }) => {
   try {
-    let buf = fs.readFileSync(filePath);
-    if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
-      buf = security.decryptBuffer(buf);
-    }
-    const data = await mwParser.parseZip(buf);
+    const data = await mwParser.parseZip(filePath, { security });
 
     // Save large media files to disk instead of keeping in localStorage
     if (caseNumber && data.mediaFiles) {
@@ -5271,19 +5259,16 @@ ipcMain.handle('kik-warrant-scan', async (event, { caseNumber }) => {
 
     for (const dir of dirsToScan) {
       if (!fs.existsSync(dir)) continue;
-      const scanDir = (d) => {
+      const scanDir = async (d) => {
         const entries = fs.readdirSync(d, { withFileTypes: true });
         for (const entry of entries) {
           const fullPath = path.join(d, entry.name);
           if (entry.isDirectory()) {
-            scanDir(fullPath);
+            await scanDir(fullPath);
           } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')) {
             try {
-              let buf = fs.readFileSync(fullPath);
-              if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
-                buf = security.decryptBuffer(buf);
-              }
-              if (KikWarrantParser.isKikWarrantZip(buf)) {
+              const isMatch = await KikWarrantParser.isKikWarrantZip(fullPath, { security });
+              if (isMatch) {
                 files.push({
                   name: entry.name,
                   path: fullPath,
@@ -5294,7 +5279,7 @@ ipcMain.handle('kik-warrant-scan', async (event, { caseNumber }) => {
           }
         }
       };
-      scanDir(dir);
+      await scanDir(dir);
     }
 
     return { success: true, files };
@@ -5306,22 +5291,16 @@ ipcMain.handle('kik-warrant-scan', async (event, { caseNumber }) => {
 
 ipcMain.handle('kik-warrant-import', async (event, { filePath, caseNumber }) => {
   try {
-    let buf = fs.readFileSync(filePath);
-    if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
-      buf = security.decryptBuffer(buf);
-    }
-
-    // Single-pass: parse + extract content to disk simultaneously
+    // Single-pass: parse + extract content to disk simultaneously.
+    // Pass the file path (not a Buffer) so warrant returns > 2 GB are
+    // streamed by node-stream-zip rather than blowing Node's Buffer limit.
     const extractDir = caseNumber
       ? path.join(casesDir, caseNumber, 'Evidence', 'KikWarrant', 'content')
       : null;
-    const data = await kkParser.parseZip(buf, {
+    const data = await kkParser.parseZip(filePath, {
       extractDir,
       security: security && security.isUnlocked() ? security : null
     });
-
-    // Free buffer immediately
-    buf = null;
 
     const extractedCount = extractDir
       ? Object.values(data.contentFiles).filter(f => f.diskPath).length
@@ -5390,24 +5369,13 @@ ipcMain.handle('snapchat-warrant-scan', async (event, { caseNumber }) => {
       path.join(casesDir, caseNumber, 'Warrants', 'Production')
     ];
 
-    // Helper: detect Field Security encryption via 6-byte magic header (no full read)
-    const isFileEncrypted = (filePath) => {
-      try {
-        const fd = fs.openSync(filePath, 'r');
-        const head = Buffer.alloc(6);
-        fs.readSync(fd, head, 0, 6, 0);
-        fs.closeSync(fd);
-        return head.equals(Buffer.from('VIPENC'));
-      } catch (e) { return false; }
-    };
-
     const files = [];
     const seen = new Set();
 
     for (const dir of dirsToScan) {
       if (!fs.existsSync(dir)) continue;
 
-      const scanDir = (d, depth) => {
+      const scanDir = async (d, depth) => {
         if (depth > 5) return; // safety cap (deeper for nested Evidence groups)
         let entries;
         try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { return; }
@@ -5417,16 +5385,8 @@ ipcMain.handle('snapchat-warrant-scan', async (event, { caseNumber }) => {
 
           if (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')) {
             try {
-              let detected = false;
-              if (isFileEncrypted(fullPath)) {
-                if (security && security.isUnlocked()) {
-                  const buf = security.decryptBuffer(fs.readFileSync(fullPath));
-                  detected = SnapchatWarrantParser.isSnapchatWarrantZip(buf);
-                }
-              } else {
-                // Fast path: AdmZip reads only central directory from disk
-                detected = SnapchatWarrantParser.isSnapchatWarrantZip(fullPath);
-              }
+              // Streaming detection — handles encrypted + > 2 GB transparently.
+              const detected = await SnapchatWarrantParser.isSnapchatWarrantZip(fullPath, { security });
               if (detected) {
                 seen.add(fullPath);
                 files.push({
@@ -5450,11 +5410,11 @@ ipcMain.handle('snapchat-warrant-scan', async (event, { caseNumber }) => {
               // Don't descend further into a confirmed production folder
               continue;
             }
-            scanDir(fullPath, depth + 1);
+            await scanDir(fullPath, depth + 1);
           }
         }
       };
-      scanDir(dir, 0);
+      await scanDir(dir, 0);
     }
 
     return { success: true, files };
@@ -5471,29 +5431,12 @@ ipcMain.handle('snapchat-warrant-import', async (event, { filePath, caseNumber, 
       : null;
     if (extractDir && !fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
 
-    // Detect Field Security encryption via 6-byte magic header (no full read)
-    const isFileEncrypted = (fp) => {
-      try {
-        const fd = fs.openSync(fp, 'r');
-        const head = Buffer.alloc(6);
-        fs.readSync(fd, head, 0, 6, 0);
-        fs.closeSync(fd);
-        return head.equals(Buffer.from('VIPENC'));
-      } catch (e) { return false; }
-    };
-
     let data;
     if (isFolder) {
       data = await swParser.parseFolder(filePath, { extractDir, security });
-    } else if (isFileEncrypted(filePath)) {
-      // Encrypted ZIP — must load + decrypt fully into memory
-      if (!security || !security.isUnlocked()) {
-        return { success: false, error: 'File is Field Security encrypted but security is locked' };
-      }
-      const buf = security.decryptBuffer(fs.readFileSync(filePath));
-      data = await swParser.parseZip(buf, { extractDir, security });
     } else {
-      // Unencrypted: pass path directly so AdmZip streams from disk (no full buffer in RAM)
+      // Pass file path directly — the streaming reader handles VIPENC
+      // decryption transparently and supports ZIP64 (no 2 GB cap).
       data = await swParser.parseZip(filePath, { extractDir, security });
     }
 
@@ -5596,7 +5539,7 @@ ipcMain.handle('discord-warrant-scan', async (event, { caseNumber }) => {
       const exists = fs.existsSync(dir);
       debug.scannedDirs.push({ dir, exists });
       if (!exists) continue;
-      const scanDir = (d, depth) => {
+      const scanDir = async (d, depth) => {
         if (depth > 5) return;
         let entries;
         try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { return; }
@@ -5610,29 +5553,24 @@ ipcMain.handle('discord-warrant-scan', async (event, { caseNumber }) => {
             try {
               const enc = isFileEncrypted(fullPath);
               cand.encrypted = enc;
-              if (enc) {
-                if (security && security.isUnlocked && security.isUnlocked()) {
-                  try {
-                    const buf = security.decryptBuffer(fs.readFileSync(fullPath));
-                    cand.detected = DiscordWarrantParser.isDiscordWarrantZip(buf);
-                    cand.reason = cand.detected ? 'decrypted+matched' : 'decrypted+nomatch';
-                  } catch (e) {
-                    cand.reason = 'decrypt-error:' + e.message;
-                  }
+              if (enc && !(security && security.isUnlocked && security.isUnlocked())) {
+                // Can't open — fall back to filename / parent-folder hint
+                if (looksLikeDiscord(parentDir) || looksLikeDiscord(entry.name)) {
+                  cand.detected = true;
+                  cand.reason = 'encrypted-locked, hint:' + parentDir + '/' + entry.name;
                 } else {
-                  // Can't open — fall back to filename / parent-folder hint
-                  if (looksLikeDiscord(parentDir) || looksLikeDiscord(entry.name)) {
-                    cand.detected = true;
-                    cand.reason = 'encrypted-locked, hint:' + parentDir + '/' + entry.name;
-                  } else {
-                    cand.reason = 'encrypted-locked, no hint';
-                  }
+                  cand.reason = 'encrypted-locked, no hint';
                 }
               } else {
-                cand.detected = DiscordWarrantParser.isDiscordWarrantZip(fullPath);
-                cand.reason = cand.detected ? 'matched' : 'nomatch';
-                // Fall back to hint even for unencrypted files (e.g. partial productions)
-                if (!cand.detected && (looksLikeDiscord(parentDir) || looksLikeDiscord(entry.name))) {
+                // Streaming detection — handles encrypted-unlocked + > 2 GB transparently.
+                try {
+                  cand.detected = await DiscordWarrantParser.isDiscordWarrantZip(fullPath, { security });
+                  cand.reason = cand.detected ? (enc ? 'decrypted+matched' : 'matched') : (enc ? 'decrypted+nomatch' : 'nomatch');
+                } catch (e) {
+                  cand.reason = (enc ? 'decrypt-error:' : 'open-error:') + e.message;
+                }
+                // Fall back to hint for unencrypted partial productions too
+                if (!enc && !cand.detected && (looksLikeDiscord(parentDir) || looksLikeDiscord(entry.name))) {
                   cand.detected = true;
                   cand.reason = 'fallback hint:' + parentDir + '/' + entry.name;
                 }
@@ -5663,11 +5601,11 @@ ipcMain.handle('discord-warrant-scan', async (event, { caseNumber }) => {
               });
               continue;
             }
-            scanDir(fullPath, depth + 1);
+            await scanDir(fullPath, depth + 1);
           }
         }
       };
-      scanDir(dir, 0);
+      await scanDir(dir, 0);
     }
 
     console.log('[discord-warrant-scan]', JSON.stringify(debug, null, 2));
@@ -5685,26 +5623,12 @@ ipcMain.handle('discord-warrant-import', async (event, { filePath, caseNumber, i
       : null;
     if (extractDir && !fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
 
-    const isFileEncrypted = (fp) => {
-      try {
-        const fd = fs.openSync(fp, 'r');
-        const head = Buffer.alloc(6);
-        fs.readSync(fd, head, 0, 6, 0);
-        fs.closeSync(fd);
-        return head.equals(Buffer.from('VIPENC'));
-      } catch (e) { return false; }
-    };
-
     let data;
     if (isFolder) {
       data = await dwParser.parseFolder(filePath, { extractDir, security });
-    } else if (isFileEncrypted(filePath)) {
-      if (!security || !security.isUnlocked()) {
-        return { success: false, error: 'File is Field Security encrypted but security is locked' };
-      }
-      const buf = security.decryptBuffer(fs.readFileSync(filePath));
-      data = await dwParser.parseZip(buf, { extractDir, security });
     } else {
+      // Pass file path directly — streaming reader handles VIPENC decryption
+      // transparently and supports ZIP64 (no 2 GB cap).
       data = await dwParser.parseZip(filePath, { extractDir, security });
     }
 

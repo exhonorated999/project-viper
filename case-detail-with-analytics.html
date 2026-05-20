@@ -7569,7 +7569,15 @@
                                         <input type="text" id="warrantIssuedTo" placeholder="e.g., Google LLC, John Doe" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white placeholder-gray-500">
                                     </div>
                                 </div>
-                                
+
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">
+                                        ESP Reference / Case # <span class="text-xs text-gray-500 font-normal">— searchable across all cases</span>
+                                    </label>
+                                    <input type="text" id="warrantReferenceNumber" placeholder="e.g., Google case ID, Meta reference, subpoena tracking #" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white placeholder-gray-500">
+                                    <p class="text-xs text-gray-500 mt-1">The tracking number the provider gives you when you submit the warrant. Type this into the All Cases search bar later to jump straight to this case.</p>
+                                </div>
+
                                 <div>
                                     <label class="block text-sm font-medium text-gray-300 mb-2">Description *</label>
                                     <textarea id="warrantDescription" required rows="2" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white placeholder-gray-500 resize-none" placeholder="Brief description of what the warrant seeks..."></textarea>
@@ -7705,6 +7713,16 @@
                                 </div>
                                 
                                 <p class="text-gray-300 mb-3">${warrant.description}</p>
+                                
+                                ${warrant.referenceNumber ? `
+                                    <div class="inline-flex items-center gap-2 mb-3 px-3 py-1.5 bg-viper-cyan/10 border border-viper-cyan/30 rounded-lg">
+                                        <svg class="w-4 h-4 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z"/>
+                                        </svg>
+                                        <span class="text-xs text-gray-400">Ref #:</span>
+                                        <span class="text-sm text-viper-cyan font-mono font-semibold select-all">${warrant.referenceNumber}</span>
+                                    </div>
+                                ` : ''}
                                 
                                 ${warrant.judge ? `
                                     <p class="text-sm text-gray-400 mb-3">
@@ -7875,6 +7893,7 @@
             document.getElementById('warrantFormTitle').textContent = 'Add New Warrant';
             document.getElementById('warrantType').value = '';
             document.getElementById('warrantIssuedTo').value = '';
+            document.getElementById('warrantReferenceNumber').value = '';
             document.getElementById('warrantDescription').value = '';
             document.getElementById('warrantDateSigned').value = '';
             document.getElementById('warrantDateServed').value = '';
@@ -7893,6 +7912,7 @@
             document.getElementById('warrantFormTitle').textContent = 'Edit Warrant';
             document.getElementById('warrantType').value = warrant.type;
             document.getElementById('warrantIssuedTo').value = warrant.issuedTo || '';
+            document.getElementById('warrantReferenceNumber').value = warrant.referenceNumber || '';
             document.getElementById('warrantDescription').value = warrant.description;
             document.getElementById('warrantDateSigned').value = warrant.dateSigned || '';
             document.getElementById('warrantDateServed').value = warrant.dateServed || '';
@@ -7941,6 +7961,7 @@
             
             const type = document.getElementById('warrantType').value;
             const issuedTo = document.getElementById('warrantIssuedTo').value;
+            const referenceNumber = document.getElementById('warrantReferenceNumber').value.trim();
             const description = document.getElementById('warrantDescription').value;
             const dateSigned = document.getElementById('warrantDateSigned').value;
             const dateServed = document.getElementById('warrantDateServed').value;
@@ -7981,6 +8002,7 @@
                 if (warrant) {
                     warrant.type = type;
                     warrant.issuedTo = issuedTo;
+                    warrant.referenceNumber = referenceNumber;
                     warrant.description = description;
                     warrant.dateSigned = dateSigned;
                     warrant.dateServed = dateServed;
@@ -8000,6 +8022,7 @@
                     id: targetWarrantId,
                     type: type,
                     issuedTo: issuedTo,
+                    referenceNumber: referenceNumber,
                     description: description,
                     dateSigned: dateSigned,
                     dateServed: dateServed,
@@ -8026,6 +8049,7 @@
                     warrant_id: newWarrant.id,
                     type: type,
                     issued_to: issuedTo,
+                    reference_number: referenceNumber,
                     judge: judge,
                 });
             }

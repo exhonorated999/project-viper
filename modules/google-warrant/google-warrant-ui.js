@@ -339,6 +339,43 @@ class GoogleWarrantUI {
 
     // ─── Account Overview ───────────────────────────────────────────────
 
+    _renderParserReport(imp) {
+        const d = imp._diagnostics;
+        if (!d) return '';
+        const innerCount = d.innerZipsFound || 0;
+        const bundlesOpened = d.masterBundlesOpened || 0;
+        const accounted = (d.processed || 0) + (d.noRecords || 0) + (d.skippedPattern || 0) + ((d.errors && d.errors.length) || 0);
+        const hasErrors = (d.errors && d.errors.length) > 0;
+        const hasPatternSkip = (d.skippedPattern || 0) > 0;
+        // Note: bundle contents add to innerZipsFound; accounted should match within reason after dedup
+        const healthy = !hasErrors && !hasPatternSkip;
+        const color = healthy ? '#10b981' : (hasErrors ? '#ef4444' : '#f59e0b');
+        const label = healthy ? 'OK' : (hasErrors ? 'ISSUES' : 'WARNINGS');
+        const errorList = hasErrors
+            ? d.errors.map(e => `<div style="margin-top:4px;color:#fca5a5;font-family:monospace;font-size:11px;">⚠ ${e.category} (${e.sizeMB} MB${e.source ? ', src=' + e.source : ''}): ${(e.error || '').replace(/</g,'&lt;')}</div>`).join('')
+            : '';
+        const patternSkipped = hasPatternSkip
+            ? `<div style="margin-top:4px;color:#fcd34d;font-size:12px;">⚠ ${d.skippedPattern} inner zip(s) skipped because filename didn't match the Google warrant pattern. If this number is non-zero, the warrant return may use a non-standard layout — please share the file with the developer.</div>`
+            : '';
+        const bundleNote = bundlesOpened > 0
+            ? `<span style="font-size:12px;color:#94a3b8;">(${bundlesOpened} master bundle${bundlesOpened > 1 ? 's' : ''} expanded)</span>`
+            : '';
+        return `
+            <div class="gwp-field" style="align-items:flex-start;">
+                <label>Parser Report</label>
+                <div style="flex:1;">
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                        <span style="background:${color};color:#000;padding:2px 8px;border-radius:10px;font-weight:600;font-size:11px;">${label}</span>
+                        <span style="font-size:12px;color:#cbd5e1;">${innerCount} inner zip(s) found</span>
+                        ${bundleNote}
+                        <span style="font-size:12px;color:#94a3b8;">→ ${d.processed} with records, ${d.noRecords} empty, ${d.skippedPattern} non-standard, ${(d.errors && d.errors.length) || 0} errors</span>
+                    </div>
+                    ${patternSkipped}
+                    ${errorList}
+                </div>
+            </div>`;
+    }
+
     _renderOverview(imp) {
         const sub = imp.subscriber || {};
         const cats = imp.categories || [];
@@ -390,6 +427,7 @@ class GoogleWarrantUI {
                     <div class="gwp-field"><label>File</label><span>${imp.fileName}</span></div>
                     <div class="gwp-field"><label>Imported</label><span>${new Date(imp.importedAt).toLocaleString()}</span></div>
                     <div class="gwp-field"><label>Date Range</label><span>${imp.dateRange?.start || 'Not specified'} — ${imp.dateRange?.end || 'Not specified'}</span></div>
+                    ${this._renderParserReport(imp)}
                     <div class="gwp-categories">
                         <label>Data Categories (${cats.length} with data, ${noCats.length} empty):</label>
                         <div class="gwp-category-tags">

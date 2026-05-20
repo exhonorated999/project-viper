@@ -26,9 +26,9 @@ class MetaWarrantParser {
      * Accepts a Buffer (legacy sync) OR a file path (preferred for files
      * over 2 GB — returns a Promise).
      */
-    static isMetaWarrantZip(input) {
+    static isMetaWarrantZip(input, options) {
         if (typeof input === 'string') {
-            return MetaWarrantParser.isMetaWarrantZipAsync(input);
+            return MetaWarrantParser.isMetaWarrantZipAsync(input, options);
         }
         try {
             const zip = new AdmZip(input);

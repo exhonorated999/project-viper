@@ -5076,7 +5076,7 @@ ipcMain.handle('google-warrant-scan', async (event, { caseNumber }) => {
                   size: fs.statSync(fullPath).size
                 });
               }
-            } catch (e) { /* not a valid zip or encrypted, skip */ }
+            } catch (e) { console.warn('[google-warrant-scan] skipped', fullPath, e.message); }
           }
         }
       };

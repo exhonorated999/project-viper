@@ -133,7 +133,8 @@ class GoogleWarrantModule {
             driveFiles: result.data.driveFiles,
             accessLogActivity: result.data.accessLogActivity,
             ipActivity: result.data.ipActivity,
-            playStorePreferences: result.data.playStorePreferences
+            playStorePreferences: result.data.playStorePreferences,
+            _diagnostics: result.data._diagnostics
         };
 
         // Replace if same file was imported before, else add

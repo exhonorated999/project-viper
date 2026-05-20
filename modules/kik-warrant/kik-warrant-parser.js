@@ -37,9 +37,9 @@ class KikWarrantParser {
      * Accepts a Buffer OR a file path (path preferred for files > 2 GB —
      * returns a Promise in that case). Backward-compatible with Buffer callers.
      */
-    static isKikWarrantZip(zipBufferOrPath) {
+    static isKikWarrantZip(zipBufferOrPath, options) {
         if (typeof zipBufferOrPath === 'string') {
-            return KikWarrantParser.isKikWarrantZipAsync(zipBufferOrPath);
+            return KikWarrantParser.isKikWarrantZipAsync(zipBufferOrPath, options);
         }
         try {
             const zip = new AdmZip(zipBufferOrPath);

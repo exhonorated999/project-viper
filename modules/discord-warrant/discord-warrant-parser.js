@@ -68,9 +68,9 @@ class DiscordWarrantParser {
      * Accepts a Buffer (legacy sync) OR a file path (preferred for files
      * over 2 GB — returns a Promise).
      */
-    static isDiscordWarrantZip(zipBufferOrPath) {
+    static isDiscordWarrantZip(zipBufferOrPath, options) {
         if (typeof zipBufferOrPath === 'string') {
-            return DiscordWarrantParser.isDiscordWarrantZipAsync(zipBufferOrPath);
+            return DiscordWarrantParser.isDiscordWarrantZipAsync(zipBufferOrPath, options);
         }
         try {
             const zip = new AdmZip(zipBufferOrPath);

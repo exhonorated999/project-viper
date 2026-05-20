@@ -34,6 +34,8 @@ class GoogleWarrantParser {
 
     async _parseFromZip(zip, options) {
         const entries = zip.getEntries();
+        const _diag = { outerEntries: entries.length, innerZipsFound: 0, processed: 0, noRecords: 0, skippedMaster: 0, skippedPattern: 0, errors: [], byCategory: [] };
+        console.log(`[google-warrant] _parseFromZip: outer has ${entries.length} entries`);
 
         const result = {
             accountEmail: null,
@@ -82,16 +84,96 @@ class GoogleWarrantParser {
             }
         }
 
-        // Process inner ZIPs — skip the master bundle (matches pattern XXXXXXX-YYYYMMDD-N.zip)
+        // Process inner ZIPs — including recursing into master bundle ZIPs
+        // (pattern XXXXXXX-YYYYMMDD-N.zip). Master bundles can contain the
+        // *only* copy of the per-service inner zips in some Google warrant
+        // layouts, so we MUST open and walk them, not just skip them.
+        _diag.innerZipsFound = innerZips.length;
+        console.log(`[google-warrant] inner zip candidates: ${innerZips.length}`);
+
+        // Track filenames we've already processed so a master bundle that
+        // duplicates outer-level service zips doesn't get parsed twice.
+        const seenInnerNames = new Set();
+
+        // Build the work queue: { entry, ownerZip, sourceLabel }
+        // ownerZip is whichever reader holds entry.getData(). We populate
+        // outer-level entries first, then expand each master bundle's
+        // contents and append.
+        const workQueue = [];
+        const masterBundles = [];
+
         for (const zipEntry of innerZips) {
             const fileName = path.basename(zipEntry.entryName);
+            if (/^\d+-\d{8}-\d+\.zip$/i.test(fileName)) {
+                masterBundles.push(zipEntry);
+                continue;
+            }
+            workQueue.push({ entry: zipEntry, ownerZip: zip, sourceLabel: 'outer' });
+        }
 
-            // Skip master bundle ZIP (numeric-date-seq pattern)
-            if (/^\d+-\d{8}-\d+\.zip$/i.test(fileName)) continue;
+        // Open each master bundle and append its inner zips to the queue.
+        // We keep each master bundle reader open until ALL its service zips
+        // have been processed (their .getData() depends on it).
+        const bundleReaders = []; // { reader, tempPath } — closed after queue drains
+        for (const bundleEntry of masterBundles) {
+            const bundleFileName = path.basename(bundleEntry.entryName);
+            const bundleSizeMB = ((bundleEntry.size || 0) / (1024 * 1024)).toFixed(1);
+            console.log(`[google-warrant]   master bundle: ${bundleFileName} (${bundleSizeMB} MB) → opening`);
+            let bundleReader = null;
+            let bundleTempPath = null;
+            try {
+                if (typeof zip.extractEntryToTemp === 'function' && bundleEntry.size && bundleEntry.size > (256 * 1024 * 1024)) {
+                    bundleTempPath = await zip.extractEntryToTemp(bundleEntry, '.zip');
+                    bundleReader = await openZip(bundleTempPath);
+                } else {
+                    const bundleBuf = bundleEntry.getData();
+                    bundleReader = await openZip(bundleBuf);
+                }
+                const bundleEntries = bundleReader.getEntries();
+                let added = 0;
+                for (const be of bundleEntries) {
+                    if (be.isDirectory) continue;
+                    if (!be.entryName.toLowerCase().endsWith('.zip')) continue;
+                    const innerName = path.basename(be.entryName);
+                    // A master bundle inside a master bundle would be weird, but skip just in case
+                    if (/^\d+-\d{8}-\d+\.zip$/i.test(innerName)) continue;
+                    workQueue.push({ entry: be, ownerZip: bundleReader, sourceLabel: `bundle:${bundleFileName}` });
+                    added++;
+                }
+                console.log(`[google-warrant]     bundle ${bundleFileName}: +${added} inner zip(s) queued`);
+                _diag.innerZipsFound += added;
+                bundleReaders.push({ reader: bundleReader, tempPath: bundleTempPath });
+            } catch (err) {
+                console.error(`[google-warrant]   bundle ${bundleFileName} failed to open:`, err.message);
+                _diag.errors.push({ category: `master-bundle:${bundleFileName}`, sizeMB: Number(bundleSizeMB), error: err.message, stack: err.stack });
+                try { if (bundleReader) bundleReader.close(); } catch (_) {}
+                if (bundleTempPath) { try { fs.unlinkSync(bundleTempPath); } catch (_) {} }
+            }
+        }
+        _diag.masterBundlesOpened = masterBundles.length;
+
+        // Process the queue
+        for (const work of workQueue) {
+            const zipEntry = work.entry;
+            const ownerZip = work.ownerZip;
+            const sourceLabel = work.sourceLabel;
+            const fileName = path.basename(zipEntry.entryName);
+            const sizeMB = ((zipEntry.size || 0) / (1024 * 1024)).toFixed(1);
+
+            // Dedupe (same service zip may appear at outer level AND inside bundle)
+            if (seenInnerNames.has(fileName)) {
+                console.log(`[google-warrant]   DEDUP skip: ${fileName} (already processed from ${sourceLabel})`);
+                continue;
+            }
+            seenInnerNames.add(fileName);
 
             // Parse service.resource from filename
             const svcMatch = fileName.match(/\.(\w+)\.(\w+)_\d+\.zip$/i);
-            if (!svcMatch) continue;
+            if (!svcMatch) {
+                _diag.skippedPattern++;
+                console.log(`[google-warrant]   SKIP no-pattern-match: ${fileName} (${sizeMB} MB, src=${sourceLabel})`);
+                continue;
+            }
 
             const service = svcMatch[1];
             const resource = svcMatch[2];
@@ -114,11 +196,13 @@ class GoogleWarrantParser {
                 // Inner ZIP can be multi-GB on its own (e.g. Mail.MessageContent).
                 // Extract it to a temp file then open it via the streaming reader
                 // instead of buffering through Buffer/AdmZip.
-                if (typeof zip.extractEntryToTemp === 'function' && zipEntry.size && zipEntry.size > (256 * 1024 * 1024)) {
-                    tempInnerPath = await zip.extractEntryToTemp(zipEntry, '.zip');
+                if (typeof ownerZip.extractEntryToTemp === 'function' && zipEntry.size && zipEntry.size > (256 * 1024 * 1024)) {
+                    console.log(`[google-warrant]   ${category} (${sizeMB} MB, src=${sourceLabel}) → temp-extract path`);
+                    tempInnerPath = await ownerZip.extractEntryToTemp(zipEntry, '.zip');
                     innerZip = await openZip(tempInnerPath);
                     innerEntries = innerZip.getEntries();
                 } else {
+                    console.log(`[google-warrant]   ${category} (${sizeMB} MB, src=${sourceLabel}) → buffer path`);
                     const innerBuf = zipEntry.getData();
                     innerZip = await openZip(innerBuf);
                     innerEntries = innerZip.getEntries();
@@ -128,12 +212,16 @@ class GoogleWarrantParser {
                 const hasNoRecords = innerEntries.some(e => e.entryName.toLowerCase().includes('norecords'));
                 if (hasNoRecords) {
                     result.noRecordCategories.push(category);
+                    _diag.noRecords++;
+                    _diag.byCategory.push({ category, sizeMB: Number(sizeMB), source: sourceLabel, result: 'no-records' });
                     // Still parse ExportSummary
                     const summary = innerEntries.find(e => e.entryName.includes('ExportSummary'));
                     if (summary) {
                         const meta = this.parseExportSummary(summary.getData().toString('utf-8'));
                         if (meta.dateRange) result.dateRange = meta.dateRange;
                     }
+                    try { if (innerZip) innerZip.close(); } catch (_) {}
+                    if (tempInnerPath) { try { fs.unlinkSync(tempInnerPath); } catch (_) {} }
                     continue;
                 }
 
@@ -148,15 +236,33 @@ class GoogleWarrantParser {
 
                 // Route to appropriate parser based on service.resource
                 await this._parseCategory(service, resource, innerEntries, result);
+                _diag.processed++;
+                _diag.byCategory.push({ category, sizeMB: Number(sizeMB), source: sourceLabel, result: 'ok' });
 
                 try { if (innerZip) innerZip.close(); } catch (_) {}
                 if (tempInnerPath) { try { fs.unlinkSync(tempInnerPath); } catch (_) {} }
 
             } catch (err) {
-                console.error(`Error parsing ${category}:`, err.message);
+                console.error(`[google-warrant] Error parsing ${category} (${sizeMB} MB, src=${sourceLabel}):`, err.message);
+                _diag.errors.push({ category, sizeMB: Number(sizeMB), source: sourceLabel, error: err.message, stack: err.stack });
+                _diag.byCategory.push({ category, sizeMB: Number(sizeMB), source: sourceLabel, result: 'error', error: err.message });
                 try { if (innerZip) innerZip.close(); } catch (_) {}
                 if (tempInnerPath) { try { fs.unlinkSync(tempInnerPath); } catch (_) {} }
             }
+        }
+
+        // Close master-bundle readers and unlink temp files
+        for (const br of bundleReaders) {
+            try { br.reader.close(); } catch (_) {}
+            if (br.tempPath) { try { fs.unlinkSync(br.tempPath); } catch (_) {} }
+        }
+
+        // Surface diagnostics on the result so the renderer can display them
+        result._diagnostics = _diag;
+        console.log(`[google-warrant] DONE: ${_diag.processed} with-records + ${_diag.noRecords} no-records + ${_diag.masterBundlesOpened || 0} master-bundles-opened + ${_diag.skippedPattern} pattern-mismatch + ${_diag.errors.length} errors  /  ${_diag.innerZipsFound} total inner zips (outer + bundle contents)`);
+        if (_diag.errors.length) {
+            console.log('[google-warrant] error summary:');
+            for (const e of _diag.errors) console.log(`  - ${e.category} (${e.sizeMB} MB, src=${e.source || 'outer'}): ${e.error}`);
         }
 
         // Handle loose MBOX files (not inside an inner ZIP)
@@ -908,9 +1014,9 @@ class GoogleWarrantParser {
      * @param {Buffer|string} input
      * @returns {boolean | Promise<boolean>}
      */
-    static isGoogleWarrantZip(input) {
+    static isGoogleWarrantZip(input, options) {
         if (typeof input === 'string') {
-            return GoogleWarrantParser.isGoogleWarrantZipAsync(input);
+            return GoogleWarrantParser.isGoogleWarrantZipAsync(input, options);
         }
         try {
             const zip = new AdmZip(input);

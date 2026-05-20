@@ -55,9 +55,9 @@ class SnapchatWarrantParser {
      * returns a Promise in that case). Backward-compatible: callers that
      * pass a Buffer still get a sync boolean.
      */
-    static isSnapchatWarrantZip(zipBufferOrPath) {
+    static isSnapchatWarrantZip(zipBufferOrPath, options) {
         if (typeof zipBufferOrPath === 'string') {
-            return SnapchatWarrantParser.isSnapchatWarrantZipAsync(zipBufferOrPath);
+            return SnapchatWarrantParser.isSnapchatWarrantZipAsync(zipBufferOrPath, options);
         }
         try {
             const zip = new AdmZip(zipBufferOrPath);

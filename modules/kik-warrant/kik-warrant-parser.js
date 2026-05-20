@@ -16,21 +16,33 @@
  * All TSV files: no headers, TAB-delimited, 13-digit ms timestamps.
  */
 
-const AdmZip = require('adm-zip');
+const AdmZip = require('adm-zip'); // retained for back-compat with sync detection callers
 const path = require('path');
+const fs = require('fs');
+const { openZip } = require('../_shared/zip-reader');
+
+// When an inner KIK case ZIP is larger than this, extract it to a temp file
+// and re-open with the streaming reader instead of loading into a Buffer.
+const INNER_ZIP_BUFFER_LIMIT = 256 * 1024 * 1024; // 256 MiB
 
 class KikWarrantParser {
 
     // ─── Detection ──────────────────────────────────────────────────────
 
     /**
-     * Check if a ZIP buffer is a KIK warrant production.
+     * Check if a ZIP is a KIK warrant production.
      * Looks for nested ZIP structure with logs/ directory containing
      * characteristic KIK TSV files.
+     *
+     * Accepts a Buffer OR a file path (path preferred for files > 2 GB —
+     * returns a Promise in that case). Backward-compatible with Buffer callers.
      */
-    static isKikWarrantZip(zipBuffer) {
+    static isKikWarrantZip(zipBufferOrPath) {
+        if (typeof zipBufferOrPath === 'string') {
+            return KikWarrantParser.isKikWarrantZipAsync(zipBufferOrPath);
+        }
         try {
-            const zip = new AdmZip(zipBuffer);
+            const zip = new AdmZip(zipBufferOrPath);
             const entries = zip.getEntries();
 
             // Check for direct logs/ with KIK files (already-extracted inner ZIP)
@@ -77,21 +89,91 @@ class KikWarrantParser {
         }
     }
 
+    /**
+     * Async variant — opens the warrant ZIP via the streaming reader
+     * (file-handle backed, ZIP64 capable). Required for warrant returns
+     * larger than 2 GB which would overflow Node's Buffer limit.
+     */
+    static async isKikWarrantZipAsync(filePath, options = {}) {
+        let zip = null;
+        let innerZip = null;
+        let innerTempPath = null;
+        try {
+            zip = await openZip(filePath, { security: options.security });
+            const entries = zip.getEntries();
+
+            let hasKikLogs = false;
+            let innerZipEntry = null;
+            for (const entry of entries) {
+                const name = entry.entryName.toLowerCase();
+                if (name.endsWith('/logs/bind.txt') || name.endsWith('/logs/chat_sent.txt') ||
+                    name.endsWith('/logs/friend_added.txt')) {
+                    hasKikLogs = true;
+                }
+                if (!innerZipEntry && !entry.isDirectory && name.endsWith('.zip') && /_case\d+/i.test(name)) {
+                    innerZipEntry = entry;
+                }
+            }
+            if (hasKikLogs) return true;
+            if (!innerZipEntry) return false;
+
+            // Open inner case ZIP — buffer if small, temp-extract if huge.
+            try {
+                if ((innerZipEntry.size || 0) > INNER_ZIP_BUFFER_LIMIT) {
+                    innerTempPath = await zip.extractEntryToTemp(innerZipEntry, '.zip');
+                    innerZip = await openZip(innerTempPath, {});
+                } else {
+                    innerZip = await openZip(innerZipEntry.getData(), {});
+                }
+                for (const ie of innerZip.getEntries()) {
+                    const iname = ie.entryName.toLowerCase();
+                    if (iname.endsWith('/logs/bind.txt') || iname.endsWith('/logs/chat_sent.txt') ||
+                        iname.endsWith('/logs/friend_added.txt')) {
+                        return true;
+                    }
+                }
+            } catch (_) { /* not a valid inner zip */ }
+
+            return false;
+        } catch (e) {
+            return false;
+        } finally {
+            try { if (innerZip) innerZip.close(); } catch (_) {}
+            try { if (innerTempPath) fs.unlinkSync(innerTempPath); } catch (_) {}
+            try { if (zip) zip.close(); } catch (_) {}
+        }
+    }
+
     // ─── Main Parse ─────────────────────────────────────────────────────
 
     /**
      * Parse a KIK warrant ZIP file.
      * Handles nested ZIP-of-ZIP structure.
-     * @param {Buffer} zipBuffer
+     * @param {Buffer|string} input  Buffer OR ZIP file path (preferred for files > 2 GB)
      * @param {Object} opts — optional { extractDir, security } to extract
      *   content files to disk in the same pass (avoids re-reading ZIP)
      * @returns {Object} parsed data
      */
-    async parseZip(zipBuffer, opts = {}) {
-        const fs = require('fs');
-        const zip = new AdmZip(zipBuffer);
+    async parseZip(input, opts = {}) {
+        const zip = await openZip(input, { security: opts.security });
+        let innerZip = null;
+        let innerTempPath = null;
+        try {
+            return await this._parseFromZip(zip, opts, (z, t) => { innerZip = z; innerTempPath = t; });
+        } finally {
+            try { if (innerZip) innerZip.close(); } catch (_) {}
+            try { if (innerTempPath) fs.unlinkSync(innerTempPath); } catch (_) {}
+            try { zip.close(); } catch (_) {}
+        }
+    }
+
+    async _parseFromZip(zip, opts, registerInner) {
         let entries = zip.getEntries();
+        // The reader currently in scope when we read entries (logs / content).
+        // Starts as the outer reader; swapped to innerZip if KIK nested structure detected.
+        let activeZip = zip;
         let contentSourceEntries = null; // entries that contain content/ files
+        let contentSourceZip = null;     // reader to use when reading content bytes
 
         // Check if we need to unwrap an inner ZIP
         let logsPrefix = this._findLogsPrefix(entries);
@@ -100,10 +182,12 @@ class KikWarrantParser {
             // Look for inner ZIP (KIK nested structure)
             const innerZipEntry = this._findInnerZip(entries);
             if (innerZipEntry) {
-                const innerBuf = innerZipEntry.getData();
-                const innerZip = new AdmZip(innerBuf);
-                entries = innerZip.getEntries();
+                const inner = await this._openInnerZip(zip, innerZipEntry);
+                registerInner(inner.zip, inner.tempPath);
+                activeZip = inner.zip;
+                entries = activeZip.getEntries();
                 contentSourceEntries = entries; // content is in inner ZIP
+                contentSourceZip = activeZip;
                 logsPrefix = this._findLogsPrefix(entries);
             }
         } else {
@@ -115,14 +199,16 @@ class KikWarrantParser {
 
             if (hasDirectContent) {
                 contentSourceEntries = entries;
+                contentSourceZip = activeZip;
             } else {
                 // Content only in inner ZIP — open it now (single read)
                 const innerZipEntry = this._findInnerZip(zip.getEntries());
                 if (innerZipEntry) {
                     try {
-                        const innerBuf = innerZipEntry.getData();
-                        const innerZip = new AdmZip(innerBuf);
-                        contentSourceEntries = innerZip.getEntries();
+                        const inner = await this._openInnerZip(zip, innerZipEntry);
+                        registerInner(inner.zip, inner.tempPath);
+                        contentSourceEntries = inner.zip.getEntries();
+                        contentSourceZip = inner.zip;
                     } catch (e) { /* ignore */ }
                 }
             }
@@ -181,20 +267,28 @@ class KikWarrantParser {
                 // Detect mime type
                 let mimeType = this._detectMimeType(fileName, entry);
 
-                const info = { size: entry.header.size, mimeType };
+                const entrySize = (entry.size != null)
+                    ? entry.size
+                    : (entry.header && entry.header.size) || 0;
+                const info = { size: entrySize, mimeType };
 
                 // Extract to disk in the same pass if extractDir provided
                 if (extractDir) {
                     try {
-                        let buf = entry.getData();
                         const destPath = path.join(extractDir, fileName);
                         if (opts.security && opts.security.isUnlocked()) {
+                            // Encrypted output requires the full buffer in memory
+                            // (security helper encrypts a Buffer in one shot).
+                            const buf = entry.getData();
                             fs.writeFileSync(destPath, opts.security.encryptBuffer(buf));
+                        } else if (entrySize > INNER_ZIP_BUFFER_LIMIT && contentSourceZip && contentSourceZip.extractEntryToFile) {
+                            // Stream very large media direct to disk — no Buffer round-trip.
+                            await contentSourceZip.extractEntryToFile(entry, destPath);
                         } else {
+                            const buf = entry.getData();
                             fs.writeFileSync(destPath, buf);
                         }
                         info.diskPath = destPath;
-                        buf = null; // help GC
                     } catch (e) {
                         console.error(`Failed to extract content file ${fileName}:`, e.message);
                     }
@@ -295,6 +389,27 @@ class KikWarrantParser {
             }
         }
         return null;
+    }
+
+    /**
+     * Open an inner ZIP entry — small enough → buffer; >256 MiB → temp-extract
+     * and re-open as a streaming reader. Returns { zip, tempPath } where
+     * tempPath is non-null only when a temp file was created (must be unlinked
+     * by the caller via the registerInner cleanup hook).
+     */
+    async _openInnerZip(outerZip, innerEntry) {
+        const innerSize = (innerEntry.size != null)
+            ? innerEntry.size
+            : (innerEntry.header && innerEntry.header.size) || 0;
+
+        if (innerSize > INNER_ZIP_BUFFER_LIMIT && outerZip.extractEntryToTemp) {
+            const tempPath = await outerZip.extractEntryToTemp(innerEntry, '.zip');
+            const zip = await openZip(tempPath, {});
+            return { zip, tempPath };
+        }
+        const buf = innerEntry.getData();
+        const zip = await openZip(buf, {});
+        return { zip, tempPath: null };
     }
 
     /**

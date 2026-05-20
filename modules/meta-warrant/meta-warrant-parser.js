@@ -12,20 +12,26 @@
  * HTML uses nested div.div_table with CSS display:table for key-value pairs.
  */
 
-const AdmZip = require('adm-zip');
+const AdmZip = require('adm-zip'); // retained for back-compat with buffer-based sync detection
 const { parse: parseHTML } = require('node-html-parser');
 const path = require('path');
+const { openZip } = require('../_shared/zip-reader');
 
 class MetaWarrantParser {
 
     // ─── Detection ──────────────────────────────────────────────────────
 
     /**
-     * Check if a ZIP buffer is a META warrant production
+     * Check if a ZIP is a META warrant production.
+     * Accepts a Buffer (legacy sync) OR a file path (preferred for files
+     * over 2 GB — returns a Promise).
      */
-    static isMetaWarrantZip(zipBuffer) {
+    static isMetaWarrantZip(input) {
+        if (typeof input === 'string') {
+            return MetaWarrantParser.isMetaWarrantZipAsync(input);
+        }
         try {
-            const zip = new AdmZip(zipBuffer);
+            const zip = new AdmZip(input);
             const entries = zip.getEntries();
             let hasRecordsHtml = false;
             let hasPreservation = false;
@@ -38,11 +44,9 @@ class MetaWarrantParser {
                 if (name.startsWith('linked_media/')) hasLinkedMedia = true;
             }
 
-            // Primary: records.html + linked_media/ is definitive
             if (hasRecordsHtml && hasLinkedMedia) return true;
             if (hasRecordsHtml && hasPreservation) return true;
 
-            // Fallback: check HTML title
             if (hasRecordsHtml) {
                 try {
                     const html = zip.readAsText('records.html');
@@ -58,62 +62,97 @@ class MetaWarrantParser {
         }
     }
 
+    static async isMetaWarrantZipAsync(filePath, options = {}) {
+        let zip;
+        try {
+            zip = await openZip(filePath, { security: options.security });
+            const entries = zip.getEntries();
+            let hasRecordsHtml = false;
+            let hasPreservation = false;
+            let hasLinkedMedia = false;
+            for (const entry of entries) {
+                const name = entry.entryName.toLowerCase();
+                if (name === 'records.html') hasRecordsHtml = true;
+                if (/^preservation-\d+\.html$/i.test(entry.entryName)) hasPreservation = true;
+                if (name.startsWith('linked_media/')) hasLinkedMedia = true;
+            }
+            if (hasRecordsHtml && hasLinkedMedia) return true;
+            if (hasRecordsHtml && hasPreservation) return true;
+            if (hasRecordsHtml) {
+                try {
+                    const html = zip.readAsText('records.html');
+                    if (/Facebook Legal Request|Instagram Legal Request|Meta Legal Request/i.test(html.substring(0, 500))) {
+                        return true;
+                    }
+                } catch (e) { /* ignore */ }
+            }
+            return false;
+        } catch (e) {
+            return false;
+        } finally { try { if (zip) zip.close(); } catch (_) {} }
+    }
+
     // ─── Main Parse ─────────────────────────────────────────────────────
 
     /**
-     * Parse a META warrant ZIP file.
-     * @param {Buffer} zipBuffer
+     * Parse a META warrant ZIP.
+     * @param {Buffer|string} input  ZIP file path (preferred — required for files > 2 GB) OR Buffer
+     * @param {Object} [options]     { security }
      * @returns {Object} { records: [...], mediaFiles: {...} }
      */
-    async parseZip(zipBuffer) {
-        const zip = new AdmZip(zipBuffer);
-        const entries = zip.getEntries();
+    async parseZip(input, options = {}) {
+        const zip = await openZip(input, { security: options && options.security });
+        try {
+            const entries = zip.getEntries();
 
-        const result = {
-            records: [],     // one per HTML file (records.html, preservation-*.html)
-            mediaFiles: {},  // filename → { data: base64, size: bytes, mimeType }
-        };
+            const result = {
+                records: [],
+                mediaFiles: {},
+            };
 
-        // Extract media files
-        for (const entry of entries) {
-            if (entry.isDirectory) continue;
-            const name = entry.entryName;
+            // Extract media files
+            for (const entry of entries) {
+                if (entry.isDirectory) continue;
+                const name = entry.entryName;
 
-            if (name.startsWith('linked_media/') && name !== 'linked_media/') {
-                const fileName = path.basename(name);
-                const buf = entry.getData();
-                const ext = path.extname(fileName).toLowerCase();
-                const mimeMap = {
-                    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
-                    '.gif': 'image/gif', '.mp4': 'video/mp4', '.webm': 'video/webm',
-                    '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.pdf': 'application/pdf'
-                };
-                result.mediaFiles[fileName] = {
-                    data: buf.toString('base64'),
-                    size: buf.length,
-                    mimeType: mimeMap[ext] || 'application/octet-stream',
-                    originalPath: name
-                };
-            }
-        }
-
-        // Parse HTML files
-        for (const entry of entries) {
-            if (entry.isDirectory) continue;
-            const name = entry.entryName.toLowerCase();
-
-            if (name === 'records.html' || /^preservation-\d+\.html$/i.test(entry.entryName)) {
-                try {
-                    const html = entry.getData().toString('utf-8');
-                    const parsed = this._parseHtmlFile(html, entry.entryName);
-                    result.records.push(parsed);
-                } catch (e) {
-                    console.error(`Error parsing ${entry.entryName}:`, e.message);
+                if (name.startsWith('linked_media/') && name !== 'linked_media/') {
+                    const fileName = path.basename(name);
+                    const buf = entry.getData();
+                    const ext = path.extname(fileName).toLowerCase();
+                    const mimeMap = {
+                        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+                        '.gif': 'image/gif', '.mp4': 'video/mp4', '.webm': 'video/webm',
+                        '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.pdf': 'application/pdf'
+                    };
+                    result.mediaFiles[fileName] = {
+                        data: buf.toString('base64'),
+                        size: buf.length,
+                        mimeType: mimeMap[ext] || 'application/octet-stream',
+                        originalPath: name
+                    };
                 }
             }
-        }
 
-        return result;
+            // Parse HTML files
+            for (const entry of entries) {
+                if (entry.isDirectory) continue;
+                const name = entry.entryName.toLowerCase();
+
+                if (name === 'records.html' || /^preservation-\d+\.html$/i.test(entry.entryName)) {
+                    try {
+                        const html = entry.getData().toString('utf-8');
+                        const parsed = this._parseHtmlFile(html, entry.entryName);
+                        result.records.push(parsed);
+                    } catch (e) {
+                        console.error(`Error parsing ${entry.entryName}:`, e.message);
+                    }
+                }
+            }
+
+            return result;
+        } finally {
+            zip.close();
+        }
     }
 
     // ─── HTML File Parser ───────────────────────────────────────────────

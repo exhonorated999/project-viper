@@ -23,9 +23,10 @@
  * line is the column header.
  */
 
-const AdmZip = require('adm-zip');
+const AdmZip = require('adm-zip'); // retained for back-compat with sync detection callers
 const fs = require('fs');
 const path = require('path');
+const { openZip } = require('../_shared/zip-reader');
 
 // Filenames we have hardcoded handlers for (lowercase basenames).
 const KNOWN_CSVS = new Set([
@@ -49,10 +50,16 @@ class SnapchatWarrantParser {
      * Check if a buffer looks like a Snapchat warrant ZIP.
      * Heuristic: contains at least one folder with conversations.csv whose
      * first line contains the Snapchat preamble token "Target username".
+     *
+     * Accepts a Buffer OR a file path (path is preferred for files > 2 GB;
+     * returns a Promise in that case). Backward-compatible: callers that
+     * pass a Buffer still get a sync boolean.
      */
     static isSnapchatWarrantZip(zipBufferOrPath) {
+        if (typeof zipBufferOrPath === 'string') {
+            return SnapchatWarrantParser.isSnapchatWarrantZipAsync(zipBufferOrPath);
+        }
         try {
-            // Accept Buffer OR file path string — file path uses central-directory only (no full file read)
             const zip = new AdmZip(zipBufferOrPath);
             const entries = zip.getEntries();
             for (const entry of entries) {
@@ -66,7 +73,6 @@ class SnapchatWarrantParser {
                     } catch (e) { /* keep looking */ }
                 }
             }
-            // Fallback: filename pattern in part folders
             for (const entry of entries) {
                 const segs = entry.entryName.split('/');
                 if (segs.length >= 2 && /^[\w.-]+-\d+-\d+-\d+-\d+\/?$/.test(segs[0] + '/')) {
@@ -77,6 +83,34 @@ class SnapchatWarrantParser {
         } catch (e) {
             return false;
         }
+    }
+
+    static async isSnapchatWarrantZipAsync(filePath, options = {}) {
+        let zip;
+        try {
+            zip = await openZip(filePath, { security: options.security });
+            const entries = zip.getEntries();
+            for (const entry of entries) {
+                const lower = entry.entryName.toLowerCase();
+                if (lower.endsWith('/conversations.csv') || lower === 'conversations.csv') {
+                    try {
+                        const head = zip.readAsText(entry).slice(0, 800);
+                        if (/Target username/i.test(head) || /User ID/i.test(head)) {
+                            return true;
+                        }
+                    } catch (e) { /* keep looking */ }
+                }
+            }
+            for (const entry of entries) {
+                const segs = entry.entryName.split('/');
+                if (segs.length >= 2 && /^[\w.-]+-\d+-\d+-\d+-\d+\/?$/.test(segs[0] + '/')) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (e) {
+            return false;
+        } finally { try { if (zip) zip.close(); } catch (_) {} }
     }
 
     /**
@@ -112,43 +146,46 @@ class SnapchatWarrantParser {
     // ─── Public Parse Entry Points ──────────────────────────────────────
 
     /**
-     * Parse a Snapchat warrant ZIP buffer.
-     * @param {Buffer} zipBuffer
+     * Parse a Snapchat warrant ZIP.
+     * @param {Buffer|string} input  ZIP file path (preferred — required for files > 2 GB) OR Buffer
      * @param {Object} options { extractDir, security }
      *   - extractDir: directory where media files are extracted (required for media)
      *   - security: optional VIPER security helper for encryption
      * @returns {Object} parse result
      */
-    async parseZip(zipBuffer, options = {}) {
-        const zip = new AdmZip(zipBuffer);
-        const entries = zip.getEntries();
+    async parseZip(input, options = {}) {
+        const zip = await openZip(input, { security: options.security });
+        try {
+            const entries = zip.getEntries();
 
-        // Group entries by part folder (top-level dir)
-        const partMap = new Map(); // partFolder -> { csvEntries: [], mediaEntries: [] }
-        for (const entry of entries) {
-            if (entry.isDirectory) continue;
-            const segs = entry.entryName.split('/');
-            // Files at root => single-part production at top level
-            const partFolder = segs.length >= 2 ? segs[0] : '__root__';
-            if (!partMap.has(partFolder)) {
-                partMap.set(partFolder, { csvEntries: [], mediaEntries: [] });
+            // Group entries by part folder (top-level dir)
+            const partMap = new Map(); // partFolder -> { csvEntries: [], mediaEntries: [] }
+            for (const entry of entries) {
+                if (entry.isDirectory) continue;
+                const segs = entry.entryName.split('/');
+                const partFolder = segs.length >= 2 ? segs[0] : '__root__';
+                if (!partMap.has(partFolder)) {
+                    partMap.set(partFolder, { csvEntries: [], mediaEntries: [] });
+                }
+                const bucket = partMap.get(partFolder);
+                const lower = entry.entryName.toLowerCase();
+                if (lower.endsWith('.csv')) {
+                    bucket.csvEntries.push(entry);
+                } else {
+                    const ext = path.extname(lower);
+                    if (MEDIA_EXTS.has(ext)) bucket.mediaEntries.push(entry);
+                }
             }
-            const bucket = partMap.get(partFolder);
-            const lower = entry.entryName.toLowerCase();
-            if (lower.endsWith('.csv')) {
-                bucket.csvEntries.push(entry);
-            } else {
-                const ext = path.extname(lower);
-                if (MEDIA_EXTS.has(ext)) bucket.mediaEntries.push(entry);
-            }
+
+            return await this._parsePartMap({
+                partMap,
+                readCsv: (entry) => zip.readAsText(entry),
+                readBinary: (entry) => entry.getData(),
+                options
+            });
+        } finally {
+            zip.close();
         }
-
-        return this._parsePartMap({
-            partMap,
-            readCsv: (entry) => zip.readAsText(entry),
-            readBinary: (entry) => entry.getData(),
-            options
-        });
     }
 
     /**

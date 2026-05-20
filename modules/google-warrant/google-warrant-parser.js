@@ -1,23 +1,38 @@
 /**
  * Google Warrant Parser
  * Parses Google warrant return ZIP-of-ZIPs archives
- * Runs in Electron main process (Node.js) — uses adm-zip, node-html-parser, mailparser
+ * Runs in Electron main process (Node.js) — uses node-stream-zip (via the
+ * shared ZipReader), node-html-parser, mailparser
+ *
+ * Accepts either a Buffer (legacy / small in-memory case) or a file path
+ * (preferred — required for warrant returns over 2 GB).
  */
 
-const AdmZip = require('adm-zip');
+const AdmZip = require('adm-zip'); // retained for any external callers
 const { parse: parseHTML } = require('node-html-parser');
 const { simpleParser } = require('mailparser');
 const path = require('path');
+const fs   = require('fs');
+const { openZip } = require('../_shared/zip-reader');
 
 class GoogleWarrantParser {
 
     /**
-     * Parse the outer Google warrant ZIP file
-     * @param {Buffer} zipBuffer - the ZIP file contents
+     * Parse a Google warrant return.
+     * @param {Buffer|string} input  ZIP file path (recommended) OR Buffer
+     * @param {Object} [options]     { security }
      * @returns {Object} parsed warrant data
      */
-    async parseOuterZip(zipBuffer) {
-        const zip = new AdmZip(zipBuffer);
+    async parseOuterZip(input, options = {}) {
+        const zip = await openZip(input, { security: options.security });
+        try {
+            return await this._parseFromZip(zip, options);
+        } finally {
+            zip.close();
+        }
+    }
+
+    async _parseFromZip(zip, options) {
         const entries = zip.getEntries();
 
         const result = {
@@ -60,7 +75,7 @@ class GoogleWarrantParser {
             } else if (name.toLowerCase().endsWith('.zip')) {
                 innerZips.push(entry);
             } else if (name.toLowerCase().endsWith('.pdf')) {
-                result.coverLetter = { name: path.basename(name), size: entry.header.size };
+                result.coverLetter = { name: path.basename(name), size: entry.size != null ? entry.size : (entry.header && entry.header.size) };
             } else if (name.toLowerCase().endsWith('.mbox')) {
                 // Loose mbox (extracted from inner zip that was too large)
                 otherFiles.push(entry);
@@ -91,10 +106,23 @@ class GoogleWarrantParser {
                 }
             }
 
+            // Declare cleanup-able locals OUTSIDE the try so the catch can also see them.
+            let innerEntries;
+            let innerZip = null;
+            let tempInnerPath = null;
             try {
-                const innerBuf = zipEntry.getData();
-                const innerZip = new AdmZip(innerBuf);
-                const innerEntries = innerZip.getEntries();
+                // Inner ZIP can be multi-GB on its own (e.g. Mail.MessageContent).
+                // Extract it to a temp file then open it via the streaming reader
+                // instead of buffering through Buffer/AdmZip.
+                if (typeof zip.extractEntryToTemp === 'function' && zipEntry.size && zipEntry.size > (256 * 1024 * 1024)) {
+                    tempInnerPath = await zip.extractEntryToTemp(zipEntry, '.zip');
+                    innerZip = await openZip(tempInnerPath);
+                    innerEntries = innerZip.getEntries();
+                } else {
+                    const innerBuf = zipEntry.getData();
+                    innerZip = await openZip(innerBuf);
+                    innerEntries = innerZip.getEntries();
+                }
 
                 // Check for NoRecords
                 const hasNoRecords = innerEntries.some(e => e.entryName.toLowerCase().includes('norecords'));
@@ -121,8 +149,13 @@ class GoogleWarrantParser {
                 // Route to appropriate parser based on service.resource
                 await this._parseCategory(service, resource, innerEntries, result);
 
+                try { if (innerZip) innerZip.close(); } catch (_) {}
+                if (tempInnerPath) { try { fs.unlinkSync(tempInnerPath); } catch (_) {} }
+
             } catch (err) {
                 console.error(`Error parsing ${category}:`, err.message);
+                try { if (innerZip) innerZip.close(); } catch (_) {}
+                if (tempInnerPath) { try { fs.unlinkSync(tempInnerPath); } catch (_) {} }
             }
         }
 
@@ -866,22 +899,43 @@ class GoogleWarrantParser {
     // ─── Detection Heuristic ────────────────────────────────────────────
 
     /**
-     * Check if a ZIP file is a Google warrant return
-     * @param {Buffer} zipBuffer
-     * @returns {boolean}
+     * Check if a ZIP is a Google warrant return.
+     * Accepts a Buffer (legacy) OR a file path (preferred — central
+     * directory only, no full-file read). Returns boolean.
+     *
+     * For backward compatibility this remains synchronous when given a
+     * Buffer; pass a path to use the streaming async detector.
+     * @param {Buffer|string} input
+     * @returns {boolean | Promise<boolean>}
      */
-    static isGoogleWarrantZip(zipBuffer) {
+    static isGoogleWarrantZip(input) {
+        if (typeof input === 'string') {
+            return GoogleWarrantParser.isGoogleWarrantZipAsync(input);
+        }
         try {
-            const zip = new AdmZip(zipBuffer);
+            const zip = new AdmZip(input);
             const entries = zip.getEntries();
             for (const entry of entries) {
                 const name = entry.entryName;
-                // Check for ExportSummary pattern
                 if (name.includes('ExportSummary.txt')) return true;
-                // Check for Google service naming pattern
                 if (/\.\d+\.(GoogleAccount|GooglePlayStore|Mail|LocationHistory|GoogleChat|Hangouts|GooglePay|Drive)\./i.test(name)) return true;
             }
         } catch (e) { /* not a valid zip */ }
+        return false;
+    }
+
+    static async isGoogleWarrantZipAsync(filePath, options = {}) {
+        let zip;
+        try {
+            zip = await openZip(filePath, { security: options.security });
+            const entries = zip.getEntries();
+            for (const entry of entries) {
+                const name = entry.entryName;
+                if (name.includes('ExportSummary.txt')) return true;
+                if (/\.\d+\.(GoogleAccount|GooglePlayStore|Mail|LocationHistory|GoogleChat|Hangouts|GooglePay|Drive)\./i.test(name)) return true;
+            }
+        } catch (e) { /* not a valid zip */ }
+        finally { try { if (zip) zip.close(); } catch (_) {} }
         return false;
     }
 }

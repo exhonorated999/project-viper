@@ -9093,10 +9093,20 @@
             // OLN with explicit (XX) state suffix
             const m = t.match(/OLN[^\n]*\(\s*([A-Z]{2})\s*\)/i);
             if (m) return m[1].toUpperCase();
-            // CA driver license printout heuristics (will be expanded when CA
-            // sample arrives): DMV CDL header or "STATE OF CALIFORNIA"
+            // CA: CAL-PHOTO image record (DOJ Cal-Photo network export from CA DMV)
+            if (/CAL[-\s]?PHOTO/i.test(t) || /CALIFORNIA\s+DEPARTMENT\s+OF\s+MOTOR\s+VEHICLES/i.test(t)) return 'CA';
+            // CA driver license printout heuristics: "STATE OF CALIFORNIA"
             if (/\bSTATE\s+OF\s+CALIFORNIA\b/i.test(t)) return 'CA';
             return '';
+        }
+
+        // CAL-PHOTO printout detector. CAL-PHOTO is the DOJ image-record export
+        // delivered over the Cal-Photo communications network — distinct layout
+        // from the long CA CDL printout (label/value lines, concatenated
+        // HAIR/EYES/HEIGHT/WEIGHT, one-line ADDRESS).
+        function isCalPhotoFormat(text) {
+            const t = text || '';
+            return /CAL[-\s]?PHOTO/i.test(t) && /IMAGE\s+RECORD\s+FOR/i.test(t);
         }
 
         // Read the raw printout file bytes as a data: URL so we can store the
@@ -9138,7 +9148,105 @@
             `;
         }
 
+        // ---- CAL-PHOTO printout parser ----------------------------------
+        // Sample layout (single page, label/value):
+        //   IMAGE RECORD FOR:
+        //   AWAD RANIA T          <-- LAST FIRST [MIDDLE]
+        //   D6074798              <-- DL number (bare line, A + digits)
+        //   EXPIRES: 10/10/2026CLASS: FSEX: F
+        //   HAIR: BLKEYES: BRNHEIGHT: 504WEIGHT: 220
+        //   DATE OF BIRTH: 10/10/1980
+        //   ADDRESS: 918 S TEAKWOOD AVE, BLOOMINGTON, CA 92316
+        //
+        // Concatenated label/value pairs require lookahead bounding so we
+        // don't grab the next label as the current value.
+        function parseCalPhotoText(text) {
+            const result = {};
+            const lines = (text || '').split(/\r?\n/).map(l => l.trim()).filter(l => l);
+
+            // Name + DL: two lines after "IMAGE RECORD FOR:"
+            const recIdx = lines.findIndex(l => /^IMAGE\s+RECORD\s+FOR:?\s*$/i.test(l));
+            if (recIdx >= 0 && recIdx + 1 < lines.length) {
+                const rawName = lines[recIdx + 1];
+                // Format: LAST FIRST [MIDDLE...] in all caps
+                if (/^[A-Z][A-Z'\-]*(?:\s+[A-Z][A-Z'\-]*){1,4}$/.test(rawName)) {
+                    const parts = rawName.split(/\s+/);
+                    const last = parts[0];
+                    const rest = parts.slice(1);
+                    const cased = (s) => s.charAt(0) + s.slice(1).toLowerCase();
+                    // Render as "First [Middle] Last" — matches how other
+                    // VIPER imports normalize person names.
+                    result.name = [...rest.map(cased), cased(last)].join(' ');
+                }
+                if (recIdx + 2 < lines.length) {
+                    const dlCandidate = lines[recIdx + 2];
+                    // CA DL numbers are 1 letter + 7 digits (e.g. D6074798, Y7432022)
+                    if (/^[A-Z]\d{6,8}$/.test(dlCandidate)) {
+                        result.dlNumber = dlCandidate;
+                    }
+                }
+            }
+
+            // DOB — DATE OF BIRTH: MM/DD/YYYY
+            const dobMatch = text.match(/DATE\s+OF\s+BIRTH:\s*(\d{2})\/(\d{2})\/(\d{4})/i);
+            if (dobMatch) {
+                result.dob = `${dobMatch[3]}-${dobMatch[1]}-${dobMatch[2]}`;
+            }
+
+            // Sex — appears as "...CLASS: FSEX: F" (concatenated)
+            const sexMatch = text.match(/SEX:\s*([MF])\b/i);
+            if (sexMatch) result.sex = sexMatch[1].toUpperCase();
+
+            // Height — 3-digit FtIn (504 = 5'04"). Bounded by WEIGHT: or end.
+            const htMatch = text.match(/HEIGHT:\s*(\d{3})(?=WEIGHT:|\s|$)/i);
+            if (htMatch) {
+                const raw = htMatch[1];
+                result.height = String(parseInt(raw[0]) * 12 + parseInt(raw.slice(1)));
+            }
+
+            // Weight
+            const wtMatch = text.match(/WEIGHT:\s*(\d+)/i);
+            if (wtMatch) result.weight = wtMatch[1];
+
+            // Hair color — bounded by EYES: (concatenated "HAIR: BLKEYES: ...")
+            const hairMatch = text.match(/HAIR:\s*([A-Z]+?)\s*(?=EYES:|$|\n)/i);
+            if (hairMatch) {
+                const code = hairMatch[1].toUpperCase();
+                result.hairColor = DMV_COLOR_MAP[code] || code;
+            }
+
+            // Eye color — bounded by HEIGHT: (concatenated "EYES: BRNHEIGHT: ...")
+            const eyeMatch = text.match(/EYES:\s*([A-Z]+?)\s*(?=HEIGHT:|$|\n)/i);
+            if (eyeMatch) {
+                const code = eyeMatch[1].toUpperCase();
+                result.eyeColor = DMV_COLOR_MAP[code] || code;
+            }
+
+            // Address — single line "ADDRESS: STREET, CITY, ST ZIP"
+            const addrMatch = text.match(/ADDRESS:\s*([^\n]+)/i);
+            if (addrMatch) {
+                const fullAddr = addrMatch[1].trim();
+                const segments = fullAddr.split(',').map(s => s.trim()).filter(Boolean);
+                if (segments.length >= 2) {
+                    result.address = segments[0];
+                    result.addressCityStateZip = segments.slice(1).join(', ');
+                } else {
+                    result.address = fullAddr;
+                }
+            }
+
+            return result;
+        }
+
         function parseDmvText(text) {
+            // CAL-PHOTO printouts use a distinct labeled-field layout with
+            // concatenated tokens (HAIR: BLKEYES: BRNHEIGHT: 504WEIGHT: 220).
+            // Dispatch to the dedicated parser so we don't fight the generic
+            // regex below — other formats still flow through unchanged.
+            if (isCalPhotoFormat(text)) {
+                return parseCalPhotoText(text);
+            }
+
             const result = {};
 
             // DL / OLN number — handles OLN, DL, DLN, License No, Lic No, DL Number, Driver License

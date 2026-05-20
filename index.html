@@ -5257,7 +5257,25 @@
             const victims  = JSON.parse(localStorage.getItem('victims_' + c.id) || '[]');
             const suspectNames = suspects.map(s => s.name || ((s.firstName||'')+ ' '+(s.lastName||'')).trim() || 'Unknown').join(', ');
             const victimNames  = victims.map(v => v.name || 'Unknown').join(', ');
-            return { suspectNames, victimNames };
+
+            // Pull warrants so the case search bar can also match by ESP
+            // reference / case ID, issued-to provider, and warrant
+            // description.  Investigators who file many warrants per case
+            // (and especially several with the same ESP) often only get a
+            // reference number back months later; this lets them paste that
+            // number into the search bar and jump straight to the case.
+            let warrantRefs = '';
+            let warrantIssuedTo = '';
+            let warrantDesc = '';
+            try {
+                const allWarrants = JSON.parse(localStorage.getItem('viperCaseWarrants') || '{}');
+                const caseWarrants = Array.isArray(allWarrants[c.caseNumber]) ? allWarrants[c.caseNumber] : [];
+                warrantRefs     = caseWarrants.map(w => w && w.referenceNumber ? String(w.referenceNumber) : '').filter(Boolean).join(' | ');
+                warrantIssuedTo = caseWarrants.map(w => w && w.issuedTo        ? String(w.issuedTo)        : '').filter(Boolean).join(' | ');
+                warrantDesc     = caseWarrants.map(w => w && w.description     ? String(w.description)     : '').filter(Boolean).join(' | ');
+            } catch (_) { /* corrupt warrant store — ignore */ }
+
+            return { suspectNames, victimNames, warrantRefs, warrantIssuedTo, warrantDesc };
         }
 
         function getCellValue(c, col, extras) {
@@ -5323,7 +5341,7 @@
                                     <svg class="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                                     </svg>
-                                    <input type="text" id="caseSearch" placeholder="Search cases..." onkeyup="filterCases()" class="w-full pl-12 pr-4 py-3 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
+                                    <input type="text" id="caseSearch" placeholder="Search cases, suspects, victims, warrant ref #..." onkeyup="filterCases()" class="w-full pl-12 pr-4 py-3 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
                                 </div>
                                 <select id="caseStatusFilter" onchange="filterCases()" class="px-4 py-3 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
                                     <option value="all">All Statuses</option>
@@ -5492,7 +5510,10 @@
                            (c.synopsis||'').toLowerCase().includes(searchTerm) ||
                            (c.primaryOffense||'').toLowerCase().includes(searchTerm) ||
                            (ex.suspectNames||'').toLowerCase().includes(searchTerm) ||
-                           (ex.victimNames||'').toLowerCase().includes(searchTerm);
+                           (ex.victimNames||'').toLowerCase().includes(searchTerm) ||
+                           (ex.warrantRefs||'').toLowerCase().includes(searchTerm) ||
+                           (ex.warrantIssuedTo||'').toLowerCase().includes(searchTerm) ||
+                           (ex.warrantDesc||'').toLowerCase().includes(searchTerm);
                 });
             }
 

@@ -203,14 +203,36 @@ class GoogleWarrantUI {
         const imp = this.currentImport;
         if (!imp) return '';
 
+        // Count rawSections (catch-all) entries — sidebar tab shows if non-zero
+        const rawSectionCount = imp.rawSections
+            ? Object.values(imp.rawSections).reduce((sum, b) => sum + (b.html?.length || 0) + (b.csv?.length || 0) + (b.json?.length || 0) + (b.other?.length || 0), 0)
+            : 0;
+        const rawCatCount = imp.rawSections ? Object.keys(imp.rawSections).length : 0;
+
+        // Extra category counts
+        const myActivityCount = imp.myActivity?.length || 0;
+        const contactsCount = imp.contacts?.length || 0;
+        const calendarsCount = imp.calendars?.length || 0;
+        const tasksCount = imp.tasks?.length || 0;
+        const meetCount = imp.meetHistory?.length || 0;
+        const linkedCount = imp.linkedByPhone?.length || 0;
+        const aggCount = imp.aggregatedActivity?.length || 0;
+
         const sections = [
             { id: 'overview', label: 'Account Overview', icon: '👤', show: true },
             { id: 'email', label: 'Email', icon: '📧', count: imp.emails?.length, show: imp.emails?.length > 0 },
             { id: 'location', label: 'Location', icon: '📍', count: imp.locationRecords?.length + (imp.semanticLocations?.length || 0), show: imp.locationRecords?.length > 0 || imp.semanticLocations?.length > 0 },
             { id: 'communications', label: 'Communications', icon: '💬', show: imp.chatMessages?.length > 0 || imp.hangoutsInfo },
+            { id: 'activity', label: 'Activity', icon: '⚡', count: myActivityCount + aggCount, show: (myActivityCount + aggCount) > 0 },
             { id: 'devices', label: 'Devices & Apps', icon: '📱', count: imp.devices?.length, show: imp.devices?.length > 0 || imp.installs?.length > 0 },
-            { id: 'payments', label: 'Payments', icon: '💳', show: imp.googlePay?.instruments?.length > 0 || imp.googlePay?.transactions?.length > 0 },
+            { id: 'contacts', label: 'Contacts', icon: '👥', count: contactsCount, show: contactsCount > 0 },
+            { id: 'calendar', label: 'Calendar', icon: '📅', count: calendarsCount, show: calendarsCount > 0 || imp.calendarSettings },
+            { id: 'tasks', label: 'Tasks', icon: '✅', count: tasksCount, show: tasksCount > 0 },
+            { id: 'meet', label: 'Meet History', icon: '🎥', count: meetCount, show: meetCount > 0 },
+            { id: 'linked', label: 'Linked Accounts', icon: '🔗', count: linkedCount, show: linkedCount > 0 },
+            { id: 'payments', label: 'Payments', icon: '💳', show: imp.googlePay?.instruments?.length > 0 || imp.googlePay?.transactions?.length > 0 || imp.googlePay?.customerInfo },
             { id: 'files', label: 'Files', icon: '📁', show: imp.driveFiles?.length > 0 },
+            { id: 'other', label: 'Other Data', icon: '📦', count: rawCatCount, show: rawSectionCount > 0 },
             { id: 'timeline', label: 'Timeline', icon: '🕐', show: true }
         ];
 
@@ -248,9 +270,16 @@ class GoogleWarrantUI {
             case 'email': return this._renderEmail(imp);
             case 'location': return this._renderLocation(imp);
             case 'communications': return this._renderCommunications(imp);
+            case 'activity': return this._renderActivity(imp);
             case 'devices': return this._renderDevices(imp);
+            case 'contacts': return this._renderContacts(imp);
+            case 'calendar': return this._renderCalendar(imp);
+            case 'tasks': return this._renderTasks(imp);
+            case 'meet': return this._renderMeet(imp);
+            case 'linked': return this._renderLinked(imp);
             case 'payments': return this._renderPayments(imp);
             case 'files': return this._renderFiles(imp);
+            case 'other': return this._renderOther(imp);
             case 'timeline': return this._renderTimeline(imp);
             default: return '<div class="gwp-empty-section">Unknown section</div>';
         }
@@ -1101,6 +1130,181 @@ class GoogleWarrantUI {
 
         html += '</div>';
         return html;
+    }
+
+    // ─── Activity (MyActivity + Aggregated) ────────────────────────────
+
+    _renderActivity(imp) {
+        const myAct = imp.myActivity || [];
+        const agg = imp.aggregatedActivity || [];
+        if (!myAct.length && !agg.length) return '<div class="gwp-empty-section">No activity records.</div>';
+
+        let html = '';
+        if (myAct.length) {
+            html += `<div class="gwp-section-header"><h2>My Activity</h2><span class="gwp-count-badge">${myAct.length.toLocaleString()}</span></div>`;
+            html += this._renderRowsTable(myAct.slice(0, 500));
+            if (myAct.length > 500) html += `<div class="gwp-note">Showing first 500 of ${myAct.length.toLocaleString()} records.</div>`;
+        }
+        if (agg.length) {
+            html += `<div class="gwp-section-header"><h2>Aggregated Activities</h2><span class="gwp-count-badge">${agg.length.toLocaleString()}</span></div>`;
+            html += this._renderRowsTable(agg.slice(0, 500));
+            if (agg.length > 500) html += `<div class="gwp-note">Showing first 500 of ${agg.length.toLocaleString()} records.</div>`;
+        }
+        return html;
+    }
+
+    // ─── Contacts ──────────────────────────────────────────────────────
+
+    _renderContacts(imp) {
+        const rows = imp.contacts || [];
+        if (!rows.length) return '<div class="gwp-empty-section">No contacts.</div>';
+        return `<div class="gwp-section-header"><h2>Contacts</h2><span class="gwp-count-badge">${rows.length.toLocaleString()}</span></div>${this._renderRowsTable(rows.slice(0, 1000))}${rows.length > 1000 ? `<div class="gwp-note">Showing first 1000 of ${rows.length.toLocaleString()}.</div>` : ''}`;
+    }
+
+    // ─── Calendar ──────────────────────────────────────────────────────
+
+    _renderCalendar(imp) {
+        const rows = imp.calendars || [];
+        const settings = imp.calendarSettings;
+        if (!rows.length && !settings) return '<div class="gwp-empty-section">No calendar data.</div>';
+        let html = '';
+        if (rows.length) {
+            html += `<div class="gwp-section-header"><h2>Calendar Events</h2><span class="gwp-count-badge">${rows.length.toLocaleString()}</span></div>`;
+            // Separate raw .ics files from structured rows
+            const ics = rows.filter(r => r._ics);
+            const structured = rows.filter(r => !r._ics);
+            if (structured.length) html += this._renderRowsTable(structured.slice(0, 500));
+            if (ics.length) {
+                html += `<div class="gwp-section-subheader">iCalendar Files (${ics.length})</div>`;
+                for (const f of ics) {
+                    html += `<div class="gwp-raw-file"><div class="gwp-raw-name">${this._escape(f.name)}</div><pre class="gwp-raw-content">${this._escape((f.content || '').slice(0, 20000))}</pre></div>`;
+                }
+            }
+        }
+        if (settings) {
+            html += `<div class="gwp-section-header"><h2>Calendar Settings</h2></div>`;
+            html += this._renderRawBucket(settings);
+        }
+        return html;
+    }
+
+    // ─── Tasks ─────────────────────────────────────────────────────────
+
+    _renderTasks(imp) {
+        const rows = imp.tasks || [];
+        if (!rows.length) return '<div class="gwp-empty-section">No tasks.</div>';
+        return `<div class="gwp-section-header"><h2>Tasks</h2><span class="gwp-count-badge">${rows.length.toLocaleString()}</span></div>${this._renderRowsTable(rows.slice(0, 1000))}`;
+    }
+
+    // ─── Meet History ──────────────────────────────────────────────────
+
+    _renderMeet(imp) {
+        const rows = imp.meetHistory || [];
+        if (!rows.length) return '<div class="gwp-empty-section">No meeting history.</div>';
+        return `<div class="gwp-section-header"><h2>Google Meet History</h2><span class="gwp-count-badge">${rows.length.toLocaleString()}</span></div>${this._renderRowsTable(rows.slice(0, 1000))}`;
+    }
+
+    // ─── Linked Accounts ───────────────────────────────────────────────
+
+    _renderLinked(imp) {
+        const rows = imp.linkedByPhone || [];
+        if (!rows.length) return '<div class="gwp-empty-section">No linked-account data.</div>';
+        return `<div class="gwp-section-header"><h2>Accounts Linked by Phone / Cookies</h2><span class="gwp-count-badge">${rows.length.toLocaleString()}</span></div>${this._renderRowsTable(rows.slice(0, 1000))}`;
+    }
+
+    // ─── Other Data (catch-all for unknown categories) ─────────────────
+
+    _renderOther(imp) {
+        const sections = imp.rawSections || {};
+        const cats = Object.keys(sections).sort();
+        if (!cats.length) return '<div class="gwp-empty-section">No additional data.</div>';
+
+        let html = `<div class="gwp-section-header"><h2>Other Data Categories</h2><span class="gwp-count-badge">${cats.length}</span></div>
+            <div class="gwp-note">These categories were present in the warrant return but do not have a dedicated viewer yet. Raw content is shown below for review and evidence export.</div>`;
+
+        for (const cat of cats) {
+            const bucket = sections[cat];
+            const total = (bucket.html?.length || 0) + (bucket.csv?.length || 0) + (bucket.json?.length || 0) + (bucket.other?.length || 0);
+            html += `<details class="gwp-raw-cat" open><summary><strong>${this._escape(cat)}</strong> · ${total} file${total === 1 ? '' : 's'}</summary>`;
+            html += this._renderRawBucket(bucket);
+            html += `</details>`;
+        }
+        return html;
+    }
+
+    // ─── Helpers: generic row table & raw bucket ───────────────────────
+
+    _renderRowsTable(rows) {
+        if (!rows || !rows.length) return '<div class="gwp-empty-section">No rows.</div>';
+        // Collect union of keys, drop noisy internal ones
+        const keys = [];
+        const seen = new Set();
+        for (const r of rows.slice(0, 200)) {
+            if (!r || typeof r !== 'object') continue;
+            for (const k of Object.keys(r)) {
+                if (k.startsWith('_')) continue;
+                if (!seen.has(k)) { seen.add(k); keys.push(k); }
+            }
+        }
+        if (!keys.length) {
+            // Rows aren't tabular — dump as JSON
+            return `<pre class="gwp-raw-content">${this._escape(JSON.stringify(rows.slice(0, 50), null, 2))}</pre>`;
+        }
+        let html = '<div class="gwp-table-wrap"><table class="gwp-table"><thead><tr>';
+        for (const k of keys) html += `<th>${this._escape(k)}</th>`;
+        html += '</tr></thead><tbody>';
+        for (const r of rows) {
+            html += '<tr>';
+            for (const k of keys) {
+                let v = r ? r[k] : '';
+                if (v == null) v = '';
+                if (typeof v === 'object') { try { v = JSON.stringify(v); } catch (_) { v = String(v); } }
+                v = String(v);
+                if (v.length > 500) v = v.slice(0, 500) + '…';
+                html += `<td>${this._escape(v)}</td>`;
+            }
+            html += '</tr>';
+        }
+        html += '</tbody></table></div>';
+        return html;
+    }
+
+    _renderRawBucket(bucket) {
+        if (!bucket) return '';
+        let html = '';
+        if (bucket.html?.length) {
+            for (const f of bucket.html) {
+                html += `<div class="gwp-raw-file"><div class="gwp-raw-name">📄 ${this._escape(f.name)}</div>`;
+                if (f.tables?.length) {
+                    html += this._renderRowsTable(f.tables);
+                } else if (f.text) {
+                    html += `<pre class="gwp-raw-content">${this._escape(f.text)}</pre>`;
+                }
+                html += `</div>`;
+            }
+        }
+        if (bucket.csv?.length) {
+            for (const f of bucket.csv) {
+                html += `<div class="gwp-raw-file"><div class="gwp-raw-name">📊 ${this._escape(f.name)}</div>${this._renderRowsTable(f.rows || [])}</div>`;
+            }
+        }
+        if (bucket.json?.length) {
+            for (const f of bucket.json) {
+                html += `<div class="gwp-raw-file"><div class="gwp-raw-name">{ } ${this._escape(f.name)}</div><pre class="gwp-raw-content">${this._escape(JSON.stringify(f.data, null, 2).slice(0, 50000))}</pre></div>`;
+            }
+        }
+        if (bucket.other?.length) {
+            for (const f of bucket.other) {
+                html += `<div class="gwp-raw-file"><div class="gwp-raw-name">📎 ${this._escape(f.name)} (${this._escape(f.ext)})</div>${f.text ? `<pre class="gwp-raw-content">${this._escape(f.text.slice(0, 20000))}</pre>` : '<div class="gwp-note">Binary file — not displayed.</div>'}</div>`;
+            }
+        }
+        return html;
+    }
+
+    _escape(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
     }
 
     // ─── Timeline ───────────────────────────────────────────────────────

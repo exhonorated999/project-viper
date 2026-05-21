@@ -845,3 +845,15 @@ tr.gwp-row-flagged > td { background: rgba(245, 158, 11, 0.08); }
     margin-bottom: 12px;
 }
 .gwp-flag-toolbar-spacer { flex: 1; }
+
+
+/* v3.4.2 — new sidebar sections (Activity, Contacts, Calendar, Tasks, Meet, Linked, Other) */
+.gwp-section-header h2 { font-size: 18px; font-weight: 600; color: #fff; }
+.gwp-section-subheader { font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.7); margin: 16px 0 8px; }
+.gwp-count-badge { font-size: 12px; padding: 2px 8px; background: rgba(0,217,255,0.12); color: #00d9ff; border-radius: 10px; }
+.gwp-note { font-size: 12px; color: rgba(255,255,255,0.45); margin: 8px 0; }
+.gwp-raw-cat { margin: 12px 0; padding: 10px 12px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; }
+.gwp-raw-cat > summary { cursor: pointer; padding: 4px 0; color: rgba(255,255,255,0.85); }
+.gwp-raw-file { margin: 8px 0; padding: 8px 10px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.04); border-radius: 4px; }
+.gwp-raw-name { font-size: 12px; color: rgba(0,217,255,0.7); margin-bottom: 6px; font-family: monospace; }
+.gwp-raw-content { max-height: 400px; overflow: auto; font-size: 11px; font-family: monospace; color: rgba(255,255,255,0.6); background: rgba(0,0,0,0.3); padding: 8px; border-radius: 3px; white-space: pre-wrap; word-break: break-word; }

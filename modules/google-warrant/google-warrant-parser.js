@@ -57,11 +57,25 @@ class GoogleWarrantParser {
             chatUserInfo: null,
             chatGroupInfo: [],
             hangoutsInfo: null,
-            googlePay: { instruments: [], transactions: [], addresses: [] },
+            googlePay: { instruments: [], transactions: [], addresses: [], customerInfo: null },
             driveFiles: [],
             accessLogActivity: [],
+            aggregatedActivity: [],
+            myActivity: [],
             ipActivity: [],
             playStorePreferences: [],
+            contacts: [],
+            calendars: [],
+            calendarSettings: null,
+            tasks: [],
+            mailUserSettings: null,
+            voiceSubscriber: null,
+            meetHistory: [],
+            linkedByPhone: [],
+            // Generic fallback bucket: any category we don't have an explicit
+            // handler for ends up here so the renderer can still display it.
+            //   { [category]: { html: [{name, text, tables}], csv: [{name, rows}], json: [{name, data}], other: [{name, ext}] } }
+            rawSections: {},
             noRecordCategories: []
         };
 
@@ -307,6 +321,8 @@ class GoogleWarrantParser {
                 break;
 
             case 'Mail.MessageContent':
+            case 'Mail.Messages':            // newer Google warrant schema
+            case 'Gmail.Messages':           // alt naming
                 for (const e of innerEntries) {
                     if (e.entryName.toLowerCase().endsWith('.mbox')) {
                         const emails = await this.parseMbox(e.getData());
@@ -324,6 +340,10 @@ class GoogleWarrantParser {
                         } catch (err) { /* skip bad JSON */ }
                     }
                 }
+                break;
+
+            case 'Mail.UserSettings':
+                result.mailUserSettings = this._captureGenericCategory(key, innerEntries) || result.mailUserSettings;
                 break;
 
             case 'LocationHistory.Records':
@@ -424,7 +444,63 @@ class GoogleWarrantParser {
             case 'AccessLogActivity.Activity':
                 for (const e of innerEntries) {
                     if (e.entryName.endsWith('.html')) {
-                        result.accessLogActivity = this.parseAccessLogHtml(e.getData().toString('utf-8'));
+                        const parsed = this.parseAccessLogHtml(e.getData().toString('utf-8'));
+                        if (Array.isArray(parsed)) result.accessLogActivity.push(...parsed);
+                    }
+                }
+                break;
+
+            case 'AccessLogActivity.Devices':
+                // Newer Google warrant schema: per-device access log table.
+                // Reuse the access-log HTML parser and ALSO mirror entries
+                // into result.devices so the Devices sidebar tab lights up.
+                for (const e of innerEntries) {
+                    if (e.entryName.endsWith('.html')) {
+                        const rows = this.parseAccessLogHtml(e.getData().toString('utf-8')) || [];
+                        // Some warrant returns put device columns in the same table;
+                        // copy them into the device list (deduplicated by raw row).
+                        for (const r of rows) {
+                            result.devices.push({
+                                manufacturer: r.manufacturer || null,
+                                model: r.model || r.device || r.details || null,
+                                deviceName: r.deviceName || r.device || null,
+                                lastActive: r.timestamp || r.lastActive || null,
+                                _raw: r
+                            });
+                        }
+                    } else if (e.entryName.toLowerCase().endsWith('.csv')) {
+                        const rows = this.csvToObjects(e.getData().toString('utf-8'));
+                        result.devices.push(...rows.map(r => ({
+                            manufacturer: r['Manufacturer'] || r['manufacturer'] || null,
+                            model: r['Model'] || r['model'] || null,
+                            deviceName: r['Device Name'] || r['Name'] || null,
+                            lastActive: r['Last Active'] || r['Timestamp'] || null,
+                            _raw: r
+                        })));
+                    }
+                }
+                break;
+
+            case 'AccessLogActivity.AggregatedActivities':
+                for (const e of innerEntries) {
+                    if (e.entryName.endsWith('.html')) {
+                        const rows = this.parseGenericHtmlTables(e.getData().toString('utf-8'));
+                        result.aggregatedActivity.push(...rows);
+                    } else if (e.entryName.toLowerCase().endsWith('.csv')) {
+                        result.aggregatedActivity.push(...this.csvToObjects(e.getData().toString('utf-8')));
+                    }
+                }
+                break;
+
+            case 'MyActivity.MyActivity':
+                for (const e of innerEntries) {
+                    if (e.entryName.endsWith('.html')) {
+                        // Reuse Play Store user-activity HTML parser (same mdl-card layout)
+                        const acts = this.parseUserActivityHtml(e.getData().toString('utf-8'));
+                        if (Array.isArray(acts)) result.myActivity.push(...acts);
+                    } else if (e.entryName.endsWith('.json') && !e.entryName.includes('ExportSummary')) {
+                        try { result.myActivity.push(JSON.parse(e.getData().toString('utf-8'))); }
+                        catch (err) { /* skip */ }
                     }
                 }
                 break;
@@ -433,12 +509,15 @@ class GoogleWarrantParser {
             case 'GooglePay.Transactions':
             case 'GooglePay.PaymentMethods':
             case 'GooglePay.PaymentInstruments':
+            case 'GooglePay.CustomerInformation':
             case 'Google Pay.Transactions':
                 for (const e of innerEntries) {
                     if (e.entryName.toLowerCase().endsWith('.csv')) {
                         const rows = this.csvToObjects(e.getData().toString('utf-8'));
                         if (resource.toLowerCase().includes('transaction')) {
                             result.googlePay.transactions.push(...rows);
+                        } else if (resource.toLowerCase().includes('customer')) {
+                            result.googlePay.customerInfo = rows[0] || result.googlePay.customerInfo;
                         } else {
                             result.googlePay.instruments.push(...rows);
                         }
@@ -447,12 +526,19 @@ class GoogleWarrantParser {
                         if (parsed.transactions) result.googlePay.transactions.push(...parsed.transactions);
                         if (parsed.instruments) result.googlePay.instruments.push(...parsed.instruments);
                         if (parsed.addresses) result.googlePay.addresses.push(...parsed.addresses);
+                        if (resource.toLowerCase().includes('customer')) {
+                            // Store summary HTML text under customerInfo for display
+                            const root = parseHTML(e.getData().toString('utf-8'));
+                            result.googlePay.customerInfo = result.googlePay.customerInfo || {};
+                            result.googlePay.customerInfo._html = root.text.trim().slice(0, 8000);
+                        }
                     }
                 }
                 break;
 
             // Drive
             case 'Drive.Files':
+            case 'Drive.DriveFiles':                 // newer naming
             case 'Drive.DriveMetadata':
             case 'Drive.FileContentAndMetadata':
             case 'Drive.DriveFileContent':
@@ -467,6 +553,10 @@ class GoogleWarrantParser {
                         catch (err) { /* skip */ }
                     } else if (lower.endsWith('.csv')) {
                         result.driveFiles.push(...this.csvToObjects(e.getData().toString('utf-8')));
+                    } else if (lower.endsWith('.html') && !lower.includes('exportsummary')) {
+                        // Newer Drive.DriveFiles ships an index.html table of files
+                        const rows = this.parseGenericHtmlTables(e.getData().toString('utf-8'));
+                        result.driveFiles.push(...rows);
                     } else {
                         // Binary file (image, video, PDF, doc, etc.)
                         const ext = lower.substring(lower.lastIndexOf('.'));
@@ -496,11 +586,177 @@ class GoogleWarrantParser {
                 }
                 break;
 
+            // ─── Newer Google warrant categories — capture generically ─────
+            case 'Contacts.Contacts':
+                // Try to extract structured contact rows from HTML/CSV
+                for (const e of innerEntries) {
+                    if (e.entryName.toLowerCase().endsWith('.csv')) {
+                        result.contacts.push(...this.csvToObjects(e.getData().toString('utf-8')));
+                    } else if (e.entryName.endsWith('.html') && !e.entryName.includes('ExportSummary')) {
+                        result.contacts.push(...this.parseGenericHtmlTables(e.getData().toString('utf-8')));
+                    } else if (e.entryName.toLowerCase().endsWith('.vcf')) {
+                        result.contacts.push({ _vcard: e.getData().toString('utf-8') });
+                    } else if (e.entryName.endsWith('.json') && !e.entryName.includes('ExportSummary')) {
+                        try { result.contacts.push(JSON.parse(e.getData().toString('utf-8'))); }
+                        catch (err) { /* skip */ }
+                    }
+                }
+                break;
+
+            case 'Calendar.Calendars':
+                for (const e of innerEntries) {
+                    if (e.entryName.toLowerCase().endsWith('.ics')) {
+                        result.calendars.push({ _ics: true, name: e.entryName.split('/').pop(), content: e.getData().toString('utf-8') });
+                    } else if (e.entryName.endsWith('.html') && !e.entryName.includes('ExportSummary')) {
+                        result.calendars.push(...this.parseGenericHtmlTables(e.getData().toString('utf-8')));
+                    } else if (e.entryName.toLowerCase().endsWith('.csv')) {
+                        result.calendars.push(...this.csvToObjects(e.getData().toString('utf-8')));
+                    }
+                }
+                break;
+
+            case 'Calendar.UserSettings':
+                result.calendarSettings = this._captureGenericCategory(key, innerEntries) || result.calendarSettings;
+                break;
+
+            case 'Voice.SubscriberInformation':
+                result.voiceSubscriber = this._captureGenericCategory(key, innerEntries) || result.voiceSubscriber;
+                break;
+
+            case 'GoogleMeet.MeetingHistory':
+                for (const e of innerEntries) {
+                    if (e.entryName.endsWith('.html') && !e.entryName.includes('ExportSummary')) {
+                        result.meetHistory.push(...this.parseGenericHtmlTables(e.getData().toString('utf-8')));
+                    } else if (e.entryName.toLowerCase().endsWith('.csv')) {
+                        result.meetHistory.push(...this.csvToObjects(e.getData().toString('utf-8')));
+                    }
+                }
+                break;
+
+            case 'Tasks.TaskList':
+            case 'Tasks.Tasks':
+                for (const e of innerEntries) {
+                    if (e.entryName.endsWith('.html') && !e.entryName.includes('ExportSummary')) {
+                        result.tasks.push(...this.parseGenericHtmlTables(e.getData().toString('utf-8')));
+                    } else if (e.entryName.toLowerCase().endsWith('.csv')) {
+                        result.tasks.push(...this.csvToObjects(e.getData().toString('utf-8')));
+                    } else if (e.entryName.endsWith('.json') && !e.entryName.includes('ExportSummary')) {
+                        try { result.tasks.push(JSON.parse(e.getData().toString('utf-8'))); }
+                        catch (err) { /* skip */ }
+                    }
+                }
+                break;
+
+            case 'GoogleAccountTargetAssociation.LinkedByPhone':
+            case 'GoogleAccountTargetAssociation.LinkedByCookies':
+                for (const e of innerEntries) {
+                    if (e.entryName.endsWith('.html') && !e.entryName.includes('ExportSummary')) {
+                        result.linkedByPhone.push(...this.parseGenericHtmlTables(e.getData().toString('utf-8')));
+                    } else if (e.entryName.toLowerCase().endsWith('.csv')) {
+                        result.linkedByPhone.push(...this.csvToObjects(e.getData().toString('utf-8')));
+                    }
+                }
+                break;
+
             default:
-                // Unknown category — try to extract any HTML/CSV/JSON as generic data
-                console.log(`Unknown Google warrant category: ${key}`);
+                // Unknown category — capture into rawSections so investigators
+                // can still see HTML/CSV/JSON content in the Other Data tab.
+                // This is the safety net against future Google schema changes.
+                console.log(`[google-warrant] No explicit handler for category "${key}" — capturing to rawSections`);
+                for (const e of innerEntries) this._captureEntryToRawSection(key, e, result);
                 break;
         }
+    }
+
+    // ─── Generic capture helpers (for unknown / newer categories) ──────
+
+    /**
+     * Read an entry and stash it under result.rawSections[category]
+     * Buckets: html (parsed text + tables), csv (rows), json (data), other.
+     * Skips ExportSummary / NoRecords markers.
+     */
+    _captureEntryToRawSection(category, entry, result) {
+        if (entry.isDirectory) return;
+        const name = entry.entryName.split('/').pop() || entry.entryName;
+        const lower = name.toLowerCase();
+        if (lower.includes('exportsummary') || lower.includes('norecords')) return;
+
+        if (!result.rawSections[category]) {
+            result.rawSections[category] = { html: [], csv: [], json: [], other: [] };
+        }
+        const bucket = result.rawSections[category];
+
+        try {
+            if (lower.endsWith('.html') || lower.endsWith('.htm')) {
+                const html = entry.getData().toString('utf-8');
+                const root = parseHTML(html);
+                const tables = this.parseGenericHtmlTables(html);
+                // Trim text to keep the payload reasonable
+                const text = (root.text || '').replace(/\s+/g, ' ').trim().slice(0, 50000);
+                bucket.html.push({ name, text, tables });
+            } else if (lower.endsWith('.csv')) {
+                const rows = this.csvToObjects(entry.getData().toString('utf-8'));
+                bucket.csv.push({ name, rows });
+            } else if (lower.endsWith('.json')) {
+                try {
+                    const data = JSON.parse(entry.getData().toString('utf-8'));
+                    bucket.json.push({ name, data });
+                } catch (_) {
+                    bucket.other.push({ name, ext: 'json', text: entry.getData().toString('utf-8').slice(0, 50000) });
+                }
+            } else if (lower.endsWith('.txt') || lower.endsWith('.vcf') || lower.endsWith('.ics')) {
+                bucket.other.push({ name, ext: lower.slice(lower.lastIndexOf('.') + 1), text: entry.getData().toString('utf-8').slice(0, 100000) });
+            } else {
+                bucket.other.push({ name, ext: lower.slice(lower.lastIndexOf('.') + 1) || 'bin' });
+            }
+        } catch (err) {
+            console.error(`[google-warrant] capture failed for ${category}/${name}: ${err.message}`);
+        }
+    }
+
+    /**
+     * Capture a whole category to rawSections AND return the bucket so the
+     * caller can stash it in a top-level field (e.g. result.mailUserSettings).
+     */
+    _captureGenericCategory(category, innerEntries) {
+        const bucket = { html: [], csv: [], json: [], other: [] };
+        const tmpResult = { rawSections: { [category]: bucket } };
+        for (const e of innerEntries) this._captureEntryToRawSection(category, e, tmpResult);
+        return (bucket.html.length || bucket.csv.length || bucket.json.length || bucket.other.length) ? bucket : null;
+    }
+
+    /**
+     * Parse all <table> elements in an HTML doc to row-objects keyed by header text.
+     * Returns a flat array (concatenated across all tables).
+     */
+    parseGenericHtmlTables(html) {
+        const out = [];
+        try {
+            const root = parseHTML(html);
+            const tables = root.querySelectorAll('table');
+            for (const table of tables) {
+                const headerEls = table.querySelectorAll('th');
+                let headers = Array.from(headerEls).map(h => h.text.trim());
+                const rows = table.querySelectorAll('tr');
+                // If no <th>, use first row as headers
+                let startIdx = 1;
+                if (!headers.length && rows.length) {
+                    headers = Array.from(rows[0].querySelectorAll('td')).map(c => c.text.trim());
+                    startIdx = 1;
+                }
+                for (let i = startIdx; i < rows.length; i++) {
+                    const cells = rows[i].querySelectorAll('td');
+                    if (!cells.length) continue;
+                    const obj = {};
+                    cells.forEach((c, idx) => {
+                        const key = headers[idx] || `col${idx}`;
+                        obj[key] = c.text.trim();
+                    });
+                    out.push(obj);
+                }
+            }
+        } catch (_) { /* ignore */ }
+        return out;
     }
 
     // ─── Export Summary Parser ──────────────────────────────────────────

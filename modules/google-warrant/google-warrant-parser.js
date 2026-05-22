@@ -24,17 +24,36 @@ class GoogleWarrantParser {
      * @returns {Object} parsed warrant data
      */
     async parseOuterZip(input, options = {}) {
+        // Build a parse context so handlers can write media to disk and tag
+        // each photo with the master-bundle it came from.
+        //   mediaRoot:  cases/{caseNumber}/Evidence/google-warrant   (optional)
+        //   inputName:  '30136296-20260514-1'  (top-level zip basename without .zip)
+        //   accountId:  populated as soon as we see it on an inner zip
+        const inputName = (typeof input === 'string')
+            ? path.basename(input).replace(/\.zip$/i, '')
+            : (options.inputName || 'warrant-' + Date.now());
+        const ctx = {
+            mediaRoot: options.mediaRoot || null,
+            inputName,
+            accountId: null,
+            accountEmail: null,
+            // Tracks photos extracted in *this* parse pass so we can report
+            // counts in the import banner even if photos got streamed.
+            mediaWritten: 0,
+            mediaBytes: 0,
+            mediaErrors: 0
+        };
         const zip = await openZip(input, { security: options.security });
         try {
-            return await this._parseFromZip(zip, options);
+            return await this._parseFromZip(zip, options, ctx);
         } finally {
             zip.close();
         }
     }
 
-    async _parseFromZip(zip, options) {
-        const entries = zip.getEntries();
-        const _diag = { outerEntries: entries.length, innerZipsFound: 0, processed: 0, noRecords: 0, skippedMaster: 0, skippedPattern: 0, errors: [], byCategory: [] };
+    async _parseFromZip(zip, options, ctx) {
+        ctx = ctx || { mediaRoot: null, inputName: 'warrant', accountId: null, accountEmail: null, mediaWritten: 0, mediaBytes: 0, mediaErrors: 0 };
+        const entries = zip.getEntries();        const _diag = { outerEntries: entries.length, innerZipsFound: 0, processed: 0, noRecords: 0, skippedMaster: 0, skippedPattern: 0, errors: [], byCategory: [] };
         console.log(`[google-warrant] _parseFromZip: outer has ${entries.length} entries`);
 
         const result = {
@@ -72,6 +91,14 @@ class GoogleWarrantParser {
             voiceSubscriber: null,
             meetHistory: [],
             linkedByPhone: [],
+            // GooglePhotos.PhotoResourceLegal media — files extracted to disk.
+            //   { filename, path (absolute), relPath (relative to mediaRoot),
+            //     mimeType, size, bundle, takenAt? (parsed from name) }
+            photos: [],
+            // Track the master bundles seen during this parse so the renderer
+            // can show "Imported from: 30136296-20260514-1, ...-2, ...-3" and
+            // the auto-merge logic can dedupe by sourceFile.
+            bundleSources: [],
             // Generic fallback bucket: any category we don't have an explicit
             // handler for ends up here so the renderer can still display it.
             //   { [category]: { html: [{name, text, tables}], csv: [{name, rows}], json: [{name, data}], other: [{name, ext}] } }
@@ -131,6 +158,10 @@ class GoogleWarrantParser {
         const bundleReaders = []; // { reader, tempPath } — closed after queue drains
         for (const bundleEntry of masterBundles) {
             const bundleFileName = path.basename(bundleEntry.entryName);
+            // Record this master bundle in the source list so the renderer/
+            // auto-merge can show "Imported from: ...-1, ...-2, ...-3".
+            const bundleLabel = bundleFileName.replace(/\.zip$/i, '');
+            if (!result.bundleSources.includes(bundleLabel)) result.bundleSources.push(bundleLabel);
             const bundleSizeMB = ((bundleEntry.size || 0) / (1024 * 1024)).toFixed(1);
             console.log(`[google-warrant]   master bundle: ${bundleFileName} (${bundleSizeMB} MB) → opening`);
             let bundleReader = null;
@@ -181,8 +212,18 @@ class GoogleWarrantParser {
             }
             seenInnerNames.add(fileName);
 
-            // Parse service.resource from filename
-            const svcMatch = fileName.match(/\.(\w+)\.(\w+)_\d+\.zip$/i);
+            // Parse service.resource from filename.
+            // Accepts both the standard pattern (`<...>.<Service>.<Resource>_<N>.zip`)
+            // and large-warrant variants that carry an extra dotted marker before .zip
+            // — most commonly `.Preserved` (preserved-data extraction) but the suffix
+            // group is intentionally permissive so any future marker (`.Encrypted`,
+            // `.Continuation`, etc.) still routes correctly.
+            //
+            // Examples:
+            //   raptor26x@gmail.com.518160276335.GooglePhotos.PhotoResourceLegal_005.zip          ✓
+            //   raptor26x@gmail.com.518160276335.GoogleMeet.MediaInformation_001.Preserved.zip   ✓
+            //   raptor26x@gmail.com.518160276335.GoogleMeet.UserSessions_001.Preserved.zip       ✓
+            const svcMatch = fileName.match(/\.(\w+)\.(\w+)_\d+(?:\.[\w]+)*\.zip$/i);
             if (!svcMatch) {
                 _diag.skippedPattern++;
                 console.log(`[google-warrant]   SKIP no-pattern-match: ${fileName} (${sizeMB} MB, src=${sourceLabel})`);
@@ -199,6 +240,8 @@ class GoogleWarrantParser {
                 if (idMatch) {
                     result.accountEmail = idMatch[1];
                     result.accountId = idMatch[2];
+                    ctx.accountEmail = idMatch[1];
+                    ctx.accountId = idMatch[2];
                 }
             }
 
@@ -249,7 +292,7 @@ class GoogleWarrantParser {
                 }
 
                 // Route to appropriate parser based on service.resource
-                await this._parseCategory(service, resource, innerEntries, result);
+                await this._parseCategory(service, resource, innerEntries, result, ctx, work.sourceLabel);
                 _diag.processed++;
                 _diag.byCategory.push({ category, sizeMB: Number(sizeMB), source: sourceLabel, result: 'ok' });
 
@@ -273,7 +316,20 @@ class GoogleWarrantParser {
 
         // Surface diagnostics on the result so the renderer can display them
         result._diagnostics = _diag;
+        _diag.photosExtracted = ctx.mediaWritten;
+        _diag.photosBytes = ctx.mediaBytes;
+        _diag.photosErrors = ctx.mediaErrors;
+        // If we didn't recurse through any master bundle, the input itself
+        // is the "bundle" — record it so multi-part auto-merge has something
+        // to key on. Same logic when caller is parsing a virtual outer zip
+        // built from a folder of inner zips (ctx.inputName then is generic).
+        if (!result.bundleSources.length && ctx.inputName) {
+            result.bundleSources.push(ctx.inputName);
+        }
         console.log(`[google-warrant] DONE: ${_diag.processed} with-records + ${_diag.noRecords} no-records + ${_diag.masterBundlesOpened || 0} master-bundles-opened + ${_diag.skippedPattern} pattern-mismatch + ${_diag.errors.length} errors  /  ${_diag.innerZipsFound} total inner zips (outer + bundle contents)`);
+        if (ctx.mediaWritten) {
+            console.log(`[google-warrant]   media extracted: ${ctx.mediaWritten} file(s), ${(ctx.mediaBytes/1024/1024).toFixed(1)} MB (errors: ${ctx.mediaErrors})`);
+        }
         if (_diag.errors.length) {
             console.log('[google-warrant] error summary:');
             for (const e of _diag.errors) console.log(`  - ${e.category} (${e.sizeMB} MB, src=${e.source || 'outer'}): ${e.error}`);
@@ -297,8 +353,15 @@ class GoogleWarrantParser {
 
     /**
      * Route parsing to the correct handler based on service/resource
+     * @param {string} service
+     * @param {string} resource
+     * @param {Array}  innerEntries
+     * @param {Object} result
+     * @param {Object} ctx          Parse context (mediaRoot, accountId, …). May be undefined for legacy callers.
+     * @param {string} sourceLabel  'outer' | 'bundle:<filename>' — for diagnostics + per-bundle media subdir
      */
-    async _parseCategory(service, resource, innerEntries, result) {
+    async _parseCategory(service, resource, innerEntries, result, ctx, sourceLabel) {
+        ctx = ctx || { mediaRoot: null, inputName: 'warrant', accountId: null, mediaWritten: 0, mediaBytes: 0, mediaErrors: 0 };
         const key = `${service}.${resource}`;
 
         switch (key) {
@@ -658,6 +721,28 @@ class GoogleWarrantParser {
                 }
                 break;
 
+            // ─── Google Photos / Media-bearing categories ───────────────
+            // PhotoResourceLegal: typically the largest payload in any
+            // warrant — contains the actual JPG/MP4/HEIC files plus a
+            // companion JSON/HTML metadata file. We stream each binary to
+            // disk under ctx.mediaRoot (instead of base64-inlining into
+            // the result blob, which would blow up localStorage and JSON
+            // serialization for multi-GB returns).
+            case 'GooglePhotos.PhotoResourceLegal':
+            case 'GooglePhotos.Photos':
+            case 'GooglePhotos.Videos':
+            case 'GooglePhotos.AlbumLegal':
+            case 'GoogleFiWireless.Voicemails':
+            case 'GoogleFiWireless.Voicemails&Greetings':
+            case 'GoogleMeet.MediaInformation':
+            case 'GoogleMeet.UserSessions':
+            case 'YoutubeAndYoutubeMusic.MediaUploads':
+            case 'Keep.Media':
+                for (const e of innerEntries) {
+                    await this._extractMediaEntry(e, result, ctx, sourceLabel, key);
+                }
+                break;
+
             default:
                 // Unknown category — capture into rawSections so investigators
                 // can still see HTML/CSV/JSON content in the Other Data tab.
@@ -723,6 +808,114 @@ class GoogleWarrantParser {
         const tmpResult = { rawSections: { [category]: bucket } };
         for (const e of innerEntries) this._captureEntryToRawSection(category, e, tmpResult);
         return (bucket.html.length || bucket.csv.length || bucket.json.length || bucket.other.length) ? bucket : null;
+    }
+
+    // ─── Media extraction (GooglePhotos / large binary categories) ─────
+
+    /**
+     * Stream a single entry from a media-bearing inner zip to disk.
+     *
+     * Disk layout (when ctx.mediaRoot is set):
+     *   <mediaRoot>/<accountId | 'unknown'>/<inputName>/<category>/<basename>
+     *
+     * Companion JSON/HTML metadata files are written next to their binaries
+     * AND also parsed-as-JSON into the photo's metadata field where possible.
+     *
+     * If ctx.mediaRoot is null we fall back to cataloging (filename + size)
+     * so the UI can still tell the investigator something is there.
+     */
+    async _extractMediaEntry(entry, result, ctx, sourceLabel, category) {
+        if (!entry || entry.isDirectory) return;
+        const raw = entry.entryName;
+        const name = raw.split('/').pop() || raw;
+        if (!name) return;
+        const lower = name.toLowerCase();
+        if (lower.includes('exportsummary') || lower.includes('norecords')) return;
+
+        const ext = lower.includes('.') ? lower.substring(lower.lastIndexOf('.')) : '';
+        const mimeMap = {
+            '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+            '.gif': 'image/gif', '.bmp': 'image/bmp', '.webp': 'image/webp',
+            '.svg': 'image/svg+xml', '.heic': 'image/heic', '.heif': 'image/heif',
+            '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.avi': 'video/x-msvideo',
+            '.mkv': 'video/x-matroska', '.webm': 'video/webm', '.3gp': 'video/3gpp',
+            '.m4v': 'video/mp4',
+            '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4',
+            '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.amr': 'audio/amr',
+            '.pdf': 'application/pdf',
+            '.json': 'application/json', '.html': 'text/html', '.htm': 'text/html',
+            '.csv': 'text/csv', '.txt': 'text/plain', '.xml': 'application/xml',
+        };
+        const mimeType = mimeMap[ext] || 'application/octet-stream';
+        const isMedia = mimeType.startsWith('image/') || mimeType.startsWith('video/') || mimeType.startsWith('audio/');
+        const isMetadata = lower.endsWith('.json') || lower.endsWith('.html') || lower.endsWith('.htm') || lower.endsWith('.csv') || lower.endsWith('.xml');
+
+        // Without a mediaRoot we can't write to disk — still record a stub
+        // so the renderer can show counts.
+        if (!ctx.mediaRoot) {
+            result.photos.push({
+                filename: name,
+                stub: true,
+                mimeType,
+                isMedia,
+                size: entry.size || 0,
+                bundle: ctx.inputName,
+                category
+            });
+            return;
+        }
+
+        const acctSub = (ctx.accountId || 'unknown').toString().replace(/[^\w.-]/g, '_');
+        const bundleSub = (ctx.inputName || 'warrant').replace(/[^\w.-]/g, '_');
+        const catSub = (category || 'media').replace(/[^\w.-]/g, '_');
+        const targetDir = path.join(ctx.mediaRoot, acctSub, bundleSub, catSub);
+
+        try {
+            fs.mkdirSync(targetDir, { recursive: true });
+            const targetPath = path.join(targetDir, name);
+            // .getData() returns a Buffer — for inner zip reads this means
+            // the *single file* is buffered, not the whole zip. Individual
+            // photos/videos are reasonable sizes (typically <50 MB each).
+            const buf = entry.getData();
+            fs.writeFileSync(targetPath, buf);
+            ctx.mediaWritten++;
+            ctx.mediaBytes += buf.length;
+
+            const relPath = path.relative(ctx.mediaRoot, targetPath).split(path.sep).join('/');
+            const meta = {
+                filename: name,
+                path: targetPath,
+                relPath,
+                mimeType,
+                size: buf.length,
+                bundle: ctx.inputName,
+                category,
+                isMedia,
+                isMetadata
+            };
+
+            // Try to parse companion JSON metadata inline so the gallery can
+            // show takenAt / geolocation / device.
+            if (lower.endsWith('.json')) {
+                try {
+                    const parsed = JSON.parse(buf.toString('utf-8'));
+                    meta.metadata = parsed;
+                    if (parsed.photoTakenTime && parsed.photoTakenTime.timestamp) {
+                        meta.takenAt = new Date(Number(parsed.photoTakenTime.timestamp) * 1000).toISOString();
+                    } else if (parsed.creationTime && parsed.creationTime.timestamp) {
+                        meta.takenAt = new Date(Number(parsed.creationTime.timestamp) * 1000).toISOString();
+                    }
+                    if (parsed.geoData && (parsed.geoData.latitude || parsed.geoData.longitude)) {
+                        meta.geo = { lat: parsed.geoData.latitude, lon: parsed.geoData.longitude };
+                    }
+                } catch (_) { /* keep raw file, ignore parse error */ }
+            }
+
+            result.photos.push(meta);
+        } catch (err) {
+            ctx.mediaErrors++;
+            console.error(`[google-warrant] media extract failed: ${category}/${name}: ${err.message}`);
+        }
     }
 
     /**

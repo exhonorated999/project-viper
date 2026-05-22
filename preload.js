@@ -70,6 +70,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   googleWarrantScan: (data) => ipcRenderer.invoke('google-warrant-scan', data),
   googleWarrantImport: (data) => ipcRenderer.invoke('google-warrant-import', data),
   googleWarrantPickFile: () => ipcRenderer.invoke('google-warrant-pick-file'),
+  googleWarrantReadMedia: (data) => ipcRenderer.invoke('google-warrant-read-media', data),
+  googleWarrantGetMediaUrl: (data) => ipcRenderer.invoke('google-warrant-get-media-url', data),
 
   // META Warrant Parser
   metaWarrantScan: (data) => ipcRenderer.invoke('meta-warrant-scan', data),

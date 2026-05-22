@@ -1794,91 +1794,184 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber 
   restoreFocus();
   if (result.canceled || !result.filePath) return null;
 
-  // Walk a directory tree and collect files (decrypting if needed)
-  const collectFiles = (baseDir) => {
-    const files = [];
-    if (fs.existsSync(baseDir)) {
-      const walkDir = (dir, rel) => {
-        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-          const full = path.join(dir, entry.name);
-          const relPath = rel ? `${rel}/${entry.name}` : entry.name;
-          if (entry.isDirectory()) walkDir(full, relPath);
-          else {
-            let buf = fs.readFileSync(full);
-            if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
-              buf = security.decryptBuffer(buf);
-            }
-            files.push({ name: relPath, data: buf });
-          }
-        }
-      };
-      walkDir(baseDir, '');
-    }
-    return files;
-  };
-
-  // Collect evidence and warrant files for this case
-  const evidenceFiles = collectFiles(path.join(casesDir, caseNumber, 'Evidence'));
-  const warrantFiles = collectFiles(path.join(casesDir, caseNumber, 'Warrants'));
-
-  // Build ZIP using Node.js built-in zlib (no external lib needed)
-  // Use archiver-like manual ZIP construction or write a simple one
-  // For simplicity, use the 'archiver' package or manual approach
-  // Since we don't want external deps, write files to a temp dir then use native zip
-  // Actually, let's use a simple approach: save PDF + copy evidence to a temp folder, then zip
-
   const archiver = (() => {
     try { return require('archiver'); } catch { return null; }
   })();
 
-  if (archiver) {
-    // Use archiver if available
-    const output = fs.createWriteStream(result.filePath);
-    const archive = archiver('zip', { zlib: { level: 9 } });
-    return new Promise((resolve, reject) => {
-      output.on('close', () => resolve(result.filePath));
-      archive.on('error', err => reject(err));
-      archive.pipe(output);
-      archive.append(Buffer.from(pdfBytes), { name: `${caseNumber}_DA_Report.pdf` });
-      for (const f of evidenceFiles) {
-        archive.append(f.data, { name: `Evidence/${f.name}` });
+  // Walk a directory tree and stream each file into the archive.
+  // - Plain (unencrypted) files: stream directly from disk via archive.file()
+  //   to avoid loading hundreds of MB into RAM.
+  // - VIPENC-encrypted files: when security is unlocked, decrypt to a buffer
+  //   (these files are individually small enough). When LOCKED, skip — they
+  //   can't be read by the DA without the key anyway, and including the
+  //   ciphertext is misleading.
+  // - Per-file try/catch so one bad file can't take down the whole export.
+  const log = [];
+  let okCount = 0, skipCount = 0, errCount = 0, totalBytes = 0;
+
+  const isVipencBuffer = (buf) => {
+    if (!buf || buf.length < 6) return false;
+    return buf[0] === 0x56 && buf[1] === 0x49 && buf[2] === 0x50
+        && buf[3] === 0x45 && buf[4] === 0x4E && buf[5] === 0x43;
+  };
+
+  // Path-length safety:
+  // Windows file copy/extract uses MAX_PATH (260) for non-prefixed paths. The
+  // Downloads-destination + in-zip relative path together must stay under that
+  // limit, or Windows Explorer's unzip fails with 0x80010135 "Path too long".
+  // Strategy: cap each path COMPONENT (basename or directory name) at 80 chars.
+  // If a component is longer, replace its middle with a short content hash so
+  // the result remains stable across re-exports of the same file.
+  const crypto = require('crypto');
+  const MAX_COMPONENT_LEN = 80; // safe leaf-name length on extraction
+  const renameLog = [];
+  const shortenComponent = (name) => {
+    if (!name || name.length <= MAX_COMPONENT_LEN) return name;
+    const ext = path.extname(name);
+    const stem = name.slice(0, name.length - ext.length);
+    const safeExt = ext.length > 12 ? '' : ext; // weird "ext" longer than 12 chars → treat as part of name
+    const hash = crypto.createHash('sha1').update(name, 'utf8').digest('hex').slice(0, 8);
+    // Reserve: hash (8) + separator '~' (1) + ext
+    const keep = Math.max(8, MAX_COMPONENT_LEN - 9 - safeExt.length);
+    const newName = `${stem.slice(0, keep)}~${hash}${safeExt}`;
+    renameLog.push({ original: name, archived: newName });
+    return newName;
+  };
+  const sanitizeArchiveRel = (relPath) => relPath.split('/').map(shortenComponent).join('/');
+
+  const addTreeToArchive = (baseDir, archivePrefix, archive) => {
+    if (!fs.existsSync(baseDir)) return;
+    const walk = (dir, rel) => {
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+      catch (e) { log.push(`[readdir-fail] ${dir}: ${e.message}`); errCount++; return; }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) {
+          walk(full, relPath);
+          continue;
+        }
+        const archiveName = `${archivePrefix}/${sanitizeArchiveRel(relPath)}`;
+        try {
+          // Cheap header sniff to decide encrypted vs plain (read first 8 bytes only)
+          const fd = fs.openSync(full, 'r');
+          const headBuf = Buffer.alloc(8);
+          const readN = fs.readSync(fd, headBuf, 0, 8, 0);
+          fs.closeSync(fd);
+          const encrypted = readN >= 6 && isVipencBuffer(headBuf);
+
+          let stat;
+          try { stat = fs.statSync(full); } catch { stat = null; }
+
+          if (encrypted) {
+            if (security && security.isUnlocked()) {
+              // Small enough to decrypt in memory — these are typically <100MB per file
+              const cipher = fs.readFileSync(full);
+              const plain = security.decryptBuffer(cipher);
+              archive.append(plain, { name: archiveName });
+              okCount++;
+              totalBytes += plain.length;
+            } else {
+              log.push(`[skip-encrypted-locked] ${archiveName}`);
+              skipCount++;
+            }
+          } else {
+            // Stream directly from disk — zero JS-heap overhead for media files.
+            archive.file(full, { name: archiveName });
+            okCount++;
+            if (stat) totalBytes += stat.size;
+          }
+        } catch (e) {
+          log.push(`[file-fail] ${archiveName}: ${e.message}`);
+          errCount++;
+        }
       }
-      for (const f of warrantFiles) {
-        archive.append(f.data, { name: `Warrants/${f.name}` });
-      }
-      archive.finalize();
-    });
-  } else {
-    // Fallback: save PDF directly and copy evidence alongside
+    };
+    walk(baseDir, '');
+  };
+
+  if (!archiver) {
+    // No archiver → fall back to writing PDF + sidecar folder (legacy behaviour)
     const dir = path.dirname(result.filePath);
     const base = path.basename(result.filePath, '.zip');
     const exportDir = path.join(dir, base);
-    fs.mkdirSync(exportDir, { recursive: true });
-
-    // Save PDF
-    fs.writeFileSync(path.join(exportDir, `${caseNumber}_DA_Report.pdf`), Buffer.from(pdfBytes));
-
-    // Copy evidence
-    if (evidenceFiles.length > 0) {
-      const evDir = path.join(exportDir, 'Evidence');
-      for (const f of evidenceFiles) {
-        const dest = path.join(evDir, f.name);
-        fs.mkdirSync(path.dirname(dest), { recursive: true });
-        fs.writeFileSync(dest, f.data);
-      }
+    try {
+      fs.mkdirSync(exportDir, { recursive: true });
+      fs.writeFileSync(path.join(exportDir, `${caseNumber}_DA_Report.pdf`), Buffer.from(pdfBytes));
+    } catch (e) {
+      console.error('[save-da-export] sidecar write failed:', e);
+      throw new Error('Could not write export sidecar: ' + e.message);
     }
-
-    // Copy warrants
-    if (warrantFiles.length > 0) {
-      const wDir = path.join(exportDir, 'Warrants');
-      for (const f of warrantFiles) {
-        const dest = path.join(wDir, f.name);
-        fs.mkdirSync(path.dirname(dest), { recursive: true });
-        fs.writeFileSync(dest, f.data);
-      }
-    }
+    console.warn('[save-da-export] archiver package not installed; wrote sidecar dir at', exportDir);
     return exportDir;
   }
+
+  console.log('[save-da-export] starting ZIP at', result.filePath, 'for case', caseNumber);
+
+  return await new Promise((resolve, reject) => {
+    const output = fs.createWriteStream(result.filePath);
+    const archive = archiver('zip', { zlib: { level: 6 } }); // level 6 = good balance, level 9 wedges on multi-GB
+
+    let settled = false;
+    const settle = (fn, val) => { if (!settled) { settled = true; fn(val); } };
+
+    output.on('close', () => {
+      console.log(`[save-da-export] DONE — wrote ${archive.pointer()} bytes; files ok=${okCount} skipped=${skipCount} errors=${errCount}; logical input bytes=${totalBytes}`);
+      if (log.length) console.log('[save-da-export] log:\n' + log.slice(0, 40).join('\n'));
+      settle(resolve, result.filePath);
+    });
+    output.on('error', (err) => {
+      console.error('[save-da-export] output stream error:', err);
+      settle(reject, err);
+    });
+    archive.on('error', (err) => {
+      console.error('[save-da-export] archive error:', err);
+      try { output.destroy(); } catch (_) {}
+      settle(reject, err);
+    });
+    archive.on('warning', (err) => {
+      console.warn('[save-da-export] archive warning:', err && err.message);
+    });
+
+    archive.pipe(output);
+
+    try {
+      // 1. PDF report goes at archive root
+      archive.append(Buffer.from(pdfBytes), { name: `${caseNumber}_DA_Report.pdf` });
+
+      // 2. Evidence (streamed from disk)
+      addTreeToArchive(path.join(casesDir, caseNumber, 'Evidence'), 'Evidence', archive);
+
+      // 3. Warrants (streamed from disk)
+      addTreeToArchive(path.join(casesDir, caseNumber, 'Warrants'), 'Warrants', archive);
+
+      // 4. Manifest with per-file outcome — useful for DA-side audit
+      const manifest = {
+        caseNumber,
+        generatedAt: new Date().toISOString(),
+        viperVersion: app.getVersion ? app.getVersion() : 'unknown',
+        securityUnlocked: !!(security && security.isUnlocked()),
+        counts: { added: okCount, skipped: skipCount, errors: errCount, renamed: renameLog.length },
+        logicalBytes: totalBytes,
+        notes: renameLog.length
+          ? 'Some filenames were shortened to satisfy Windows MAX_PATH (260 chars) on extraction. See renameMap for original → archived.'
+          : undefined,
+        renameMap: renameLog.length ? renameLog : undefined,
+        log,
+      };
+      archive.append(JSON.stringify(manifest, null, 2), { name: 'EXPORT_MANIFEST.json' });
+    } catch (e) {
+      console.error('[save-da-export] pre-finalize error:', e);
+      try { output.destroy(); } catch (_) {}
+      return settle(reject, e);
+    }
+
+    archive.finalize().catch((err) => {
+      console.error('[save-da-export] finalize error:', err);
+      settle(reject, err);
+    });
+  });
 });
 
 ipcMain.handle('open-case-import', async () => {

@@ -2307,9 +2307,12 @@
             const M = 20;           // margin
             const CW = PW - 2 * M;  // content width
             const ACCENT = [0, 90, 160];   // navy blue
-            const BLACK = [30, 30, 30];
+            const BLACK = [0, 0, 0];       // true black (data must read crisp)
             const GRAY = [100, 100, 100];
             const LGRAY = [180, 180, 180];
+            const CYAN = [0, 184, 212];    // matches in-tab Suspect/Victim/Witness Report
+            const SUBJECT_BAR = [10, 14, 20]; // dark header bar (mirrors HTML report)
+            const ROW_ALT = [248, 248, 248];
             let y = M;
 
             // ── helpers ──
@@ -2321,6 +2324,13 @@
                 doc.text(`Page ${doc.getNumberOfPages()}`, PW - M, 10, { align: 'right' });
                 doc.setDrawColor(...LGRAY); doc.setLineWidth(0.2);
                 doc.line(M, 12, PW - M, 12);
+                // CRITICAL: restore body defaults so content rendered AFTER a page
+                // break doesn't inherit the header's 7pt LGRAY state. Without this
+                // reset, long narratives (RMS reports etc.) render light-gray on
+                // every page after the first.
+                doc.setFontSize(10); doc.setFont(undefined, 'normal');
+                doc.setTextColor(...BLACK);
+                doc.setDrawColor(...BLACK); doc.setLineWidth(0.2);
             }
             function sectionTitle(label) {
                 need(18);
@@ -2335,11 +2345,10 @@
                 doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...BLACK);
                 doc.text(`${label}: `, M + 2, y);
                 const lw = doc.getTextWidth(`${label}: `);
-                doc.setFont(undefined, 'normal'); doc.setTextColor(60, 60, 60);
+                doc.setFont(undefined, 'normal'); doc.setTextColor(...BLACK);
                 const lines = doc.splitTextToSize(String(value), CW - lw - 4);
                 doc.text(lines, M + 2 + lw, y);
                 y += lines.length * 5 + 1;
-                doc.setTextColor(...BLACK); // reset
             }
             function bodyText(text) {
                 if (!text) return;
@@ -2358,6 +2367,104 @@
                 need(10);
                 doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...BLACK);
                 doc.text(label, M + 2, y); y += 6;
+            }
+            // === Subject-style helpers (mirror in-tab Suspect/Victim/Witness Report layout) ===
+            // Dark header bar with white subject name — e.g. "Suspect 1 : Calvin Hobbes"
+            function subjectBar(text) {
+                need(16);
+                doc.setFillColor(...SUBJECT_BAR);
+                doc.rect(M, y, CW, 11, 'F');
+                doc.setFontSize(12); doc.setFont(undefined, 'bold');
+                doc.setTextColor(255, 255, 255);
+                doc.text(text, M + 4, y + 7.5);
+                y += 14;
+                doc.setTextColor(...BLACK);
+            }
+            // Cyan sub-section title with underline (Personal Information, Address Information, etc.)
+            function subTitle(label) {
+                need(12);
+                doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...CYAN);
+                doc.text(label, M + 2, y); y += 1.5;
+                doc.setDrawColor(...CYAN); doc.setLineWidth(0.4);
+                doc.line(M + 2, y, PW - M - 2, y); y += 5;
+                doc.setTextColor(...BLACK);
+            }
+            // Render a 2-column field grid. pairs: [{label, value}, ...] — null/'' values are skipped.
+            function fieldGrid(pairs) {
+                const valid = pairs.filter(p => p && (p.value !== undefined && p.value !== null && p.value !== ''));
+                if (!valid.length) return;
+                const colW = (CW - 4) / 2;
+                const labelGap = 1.5; // mm between label and value rows
+                const rowGap = 4;     // mm between rows
+                for (let i = 0; i < valid.length; i += 2) {
+                    const left = valid[i];
+                    const right = valid[i + 1];
+                    // Pre-split both columns to figure out row height
+                    doc.setFontSize(9);
+                    doc.setFont(undefined, 'normal');
+                    const leftLines = doc.splitTextToSize(String(left.value), colW - 4);
+                    const rightLines = right ? doc.splitTextToSize(String(right.value), colW - 4) : [];
+                    const rowH = 4 /* label */ + labelGap + Math.max(leftLines.length, rightLines.length) * 4.2 + rowGap;
+                    need(rowH);
+                    // Left column label + value
+                    doc.setFont(undefined, 'bold'); doc.setFontSize(8); doc.setTextColor(...GRAY);
+                    doc.text(String(left.label) + ':', M + 2, y);
+                    doc.setFont(undefined, 'normal'); doc.setFontSize(10); doc.setTextColor(...BLACK);
+                    doc.text(leftLines, M + 2, y + 4 + labelGap);
+                    // Right column
+                    if (right) {
+                        doc.setFont(undefined, 'bold'); doc.setFontSize(8); doc.setTextColor(...GRAY);
+                        doc.text(String(right.label) + ':', M + 2 + colW, y);
+                        doc.setFont(undefined, 'normal'); doc.setFontSize(10); doc.setTextColor(...BLACK);
+                        doc.text(rightLines, M + 2 + colW, y + 4 + labelGap);
+                    }
+                    y += rowH;
+                }
+            }
+            // Try to embed a base64/dataURL image. Returns true if added (and bumps y), false otherwise.
+            function addImageSafe(dataUrl, w = 40, h = 40) {
+                if (!dataUrl || typeof dataUrl !== 'string') return false;
+                // Accept "data:image/..." dataURLs only — pure base64 strings without prefix
+                // are not reliable across jsPDF formats.
+                if (!/^data:image\/(png|jpeg|jpg|gif|webp);base64,/i.test(dataUrl)) return false;
+                try {
+                    need(h + 4);
+                    const fmt = dataUrl.toLowerCase().includes('jpeg') || dataUrl.toLowerCase().includes('jpg')
+                        ? 'JPEG' : 'PNG';
+                    doc.addImage(dataUrl, fmt, M + 2, y, w, h, undefined, 'FAST');
+                    y += h + 4;
+                    return true;
+                } catch (e) {
+                    console.warn('[DA-PDF] addImage failed:', e && e.message);
+                    return false;
+                }
+            }
+            // Identifiers table (autoTable). rows: [{type, platform, value, provider}, ...]
+            function identifiersTable(rows) {
+                if (!rows || !rows.length || typeof doc.autoTable !== 'function') return;
+                need(20);
+                doc.autoTable({
+                    startY: y,
+                    head: [['Type', 'Platform', 'Value', 'Provider / Status']],
+                    body: rows.map(r => [
+                        (r.type || '').toString().toUpperCase(),
+                        r.platform || '—',
+                        r.value || '',
+                        r.provider ? ('ISP: ' + r.provider) : (r.status || '')
+                    ]),
+                    theme: 'grid',
+                    headStyles: { fillColor: CYAN, textColor: [255,255,255], fontStyle: 'bold', fontSize: 9 },
+                    bodyStyles: { fontSize: 9, textColor: BLACK, cellPadding: 2 },
+                    alternateRowStyles: { fillColor: ROW_ALT },
+                    margin: { left: M, right: M },
+                    columnStyles: {
+                        0: { cellWidth: 26, fontStyle: 'bold' },
+                        1: { cellWidth: 30 },
+                        2: { cellWidth: 'auto' },
+                        3: { cellWidth: 38 }
+                    }
+                });
+                y = doc.lastAutoTable.finalY + 5;
             }
             function gap(h = 4) { y += h; }
             function emptyMsg(msg) { doc.setFontSize(10); doc.setFont(undefined, 'italic'); doc.setTextColor(...LGRAY); doc.text(msg, M + 2, y); y += 6; }
@@ -2405,6 +2512,19 @@
             async function _renderTabPDF(tabId) {
                 const caseId = currentCase.id;
                 const caseNum = currentCase.caseNumber;
+
+                // Prefer Pattern 2 (current source of truth: `<key>_${caseId}`); fall
+                // back to a legacy Pattern 1 array only when Pattern 2 is empty.
+                // Empty arrays are truthy in JS — the previous `legacy || JSON.parse(...)`
+                // pattern silently dropped all tab data when legacy var was [].
+                const _readItems = (p2Key, legacyArr) => {
+                    try {
+                        const p2 = JSON.parse(localStorage.getItem(`${p2Key}_${caseId}`) || '[]');
+                        if (Array.isArray(p2) && p2.length) return p2;
+                    } catch (_) {}
+                    return Array.isArray(legacyArr) && legacyArr.length ? legacyArr : [];
+                };
+
                 switch(tabId) {
                 case 'overview':
                     fieldBold('Case Number', currentCase.caseNumber);
@@ -2442,36 +2562,136 @@
                     }
                     break;
                 case 'suspects': {
-                    const items = caseSuspects || JSON.parse(localStorage.getItem(`suspects_${caseId}`) || '[]');
+                    const items = _readItems('suspects', caseSuspects);
                     if (!items.length) { emptyMsg('No suspects recorded.'); break; }
                     items.forEach((s, i) => {
-                        itemHeading(`Suspect ${i+1}: ${s.name || s.firstName && s.lastName ? s.firstName+' '+s.lastName : 'Unknown'}`);
-                        fieldBold('DOB', s.dob ? formatDate(s.dob) : null);
-                        fieldBold('DL#', s.dlNumber); fieldBold('SSN (last 4)', s.ssn);
-                        fieldBold('Race', s.race); fieldBold('Sex', s.sex);
-                        fieldBold('Height', s.height); fieldBold('Weight', s.weight);
-                        fieldBold('Hair', s.hair); fieldBold('Eyes', s.eyes);
-                        fieldBold('Address', s.address); fieldBold('Phone', s.phone);
-                        if (s.description) { bodyText(s.description); }
-                        gap(3);
+                        const fullName = s.name
+                            || [s.firstName, s.lastName].filter(Boolean).join(' ').trim()
+                            || 'Unknown';
+                        subjectBar(`Suspect ${i+1}: ${fullName}`);
+
+                        // ----- Personal Information -----
+                        subTitle('Personal Information');
+                        // Photo at top of section (if present) — kept compact so 2-col grid still fits below
+                        const hadPhoto = addImageSafe(s.photo, 32, 32);
+                        fieldGrid([
+                            { label: 'Full Name',  value: fullName },
+                            { label: 'Date of Birth', value: s.dob ? formatDate(s.dob) : '' },
+                            { label: 'Age',        value: s.age },
+                            { label: "Driver's License", value: s.dlNumber || s.driverLicense || s.driversLicense },
+                            { label: 'Sex',        value: s.sex },
+                            { label: 'Race',       value: s.race },
+                            { label: 'Ethnicity',  value: s.ethnicity },
+                            { label: 'Build',      value: s.build },
+                            { label: 'Height',     value: s.height ? (String(s.height).length === 3 && /^\d+$/.test(String(s.height)) ? `${String(s.height)[0]}'${String(s.height).slice(1)}"` : s.height) : '' },
+                            { label: 'Weight',     value: s.weight ? (String(s.weight).match(/lbs?$/i) ? s.weight : `${s.weight} lbs`) : '' },
+                            { label: 'Hair Color', value: s.hairColor || s.hair },
+                            { label: 'Eye Color',  value: s.eyeColor || s.eyes },
+                            { label: 'Scars/Marks/Tattoos', value: s.scarsMarksTattoos }
+                        ]);
+                        gap(2);
+
+                        // ----- Address Information -----
+                        if (s.address || s.addressCityStateZip || s.residencePhoto) {
+                            subTitle('Address Information');
+                            addImageSafe(s.residencePhoto, 50, 35);
+                            fieldGrid([
+                                { label: 'Street Address', value: s.address },
+                                { label: 'City, State, ZIP', value: s.addressCityStateZip },
+                                { label: 'Phone', value: s.phone || s.phone1 },
+                                { label: 'Phone 2', value: s.phone2 },
+                                { label: 'Email', value: s.email }
+                            ]);
+                            gap(2);
+                        }
+
+                        // ----- Employer Information -----
+                        if (s.employerName || s.occupation || s.employerAddress || s.employerPhone) {
+                            subTitle('Employer Information');
+                            fieldGrid([
+                                { label: 'Employer Name', value: s.employerName },
+                                { label: 'Occupation',    value: s.occupation },
+                                { label: 'Employer Address', value: s.employerAddress },
+                                { label: 'Employer Phone',   value: s.employerPhone }
+                            ]);
+                            gap(2);
+                        }
+
+                        // ----- Identifiers table -----
+                        if (Array.isArray(s.identifiers) && s.identifiers.length) {
+                            const validIds = s.identifiers.filter(id => id && (id.value || id.type));
+                            if (validIds.length) {
+                                subTitle('Identifiers');
+                                identifiersTable(validIds);
+                            }
+                        }
+
+                        // ----- Aliases -----
+                        if (Array.isArray(s.aliases) && s.aliases.length) {
+                            const aliasStr = s.aliases.filter(Boolean).join(', ');
+                            if (aliasStr) {
+                                subTitle('Aliases');
+                                bodyText(aliasStr);
+                            }
+                        }
+
+                        // ----- Description / Notes -----
+                        if (s.description) { subTitle('Description'); bodyText(s.description); }
+                        if (s.notes)       { subTitle('Notes');       bodyText(s.notes);       }
+
+                        gap(5);
                     });
                     break;
                 }
                 case 'victims': {
-                    const items = caseVictims || JSON.parse(localStorage.getItem(`victims_${caseId}`) || '[]');
+                    const items = _readItems('victims', caseVictims);
                     if (!items.length) { emptyMsg('No victims recorded.'); break; }
                     items.forEach((v, i) => {
-                        itemHeading(`Victim ${i+1}: ${v.name || 'Unknown'}`);
-                        fieldBold('DOB', v.dob ? formatDate(v.dob) : null);
-                        fieldBold('Address', v.address); fieldBold('Phone', v.phone);
-                        fieldBold('Email', v.email);
-                        if (v.statement) { bodyText(v.statement); }
-                        gap(3);
+                        const vname = v.name
+                            || [v.firstName, v.lastName].filter(Boolean).join(' ').trim()
+                            || 'Unknown';
+                        subjectBar(`Victim ${i+1}: ${vname}`);
+
+                        subTitle('Personal Information');
+                        addImageSafe(v.photo, 32, 32);
+                        fieldGrid([
+                            { label: 'Full Name', value: vname },
+                            { label: 'Date of Birth', value: v.dob ? formatDate(v.dob) : '' },
+                            { label: 'Age',  value: v.age },
+                            { label: 'Sex',  value: v.sex },
+                            { label: 'Race', value: v.race },
+                            { label: 'Ethnicity', value: v.ethnicity }
+                        ]);
+                        gap(2);
+
+                        if (v.address || v.addressCityStateZip || v.phone || v.email) {
+                            subTitle('Contact / Address');
+                            fieldGrid([
+                                { label: 'Street Address', value: v.address },
+                                { label: 'City, State, ZIP', value: v.addressCityStateZip },
+                                { label: 'Phone',   value: v.phone || v.phone1 },
+                                { label: 'Phone 2', value: v.phone2 },
+                                { label: 'Email',   value: v.email }
+                            ]);
+                            gap(2);
+                        }
+
+                        if (Array.isArray(v.identifiers) && v.identifiers.length) {
+                            const validIds = v.identifiers.filter(id => id && (id.value || id.type));
+                            if (validIds.length) {
+                                subTitle('Identifiers');
+                                identifiersTable(validIds);
+                            }
+                        }
+
+                        if (v.statement) { subTitle('Statement'); bodyText(v.statement); }
+                        if (v.notes)     { subTitle('Notes');     bodyText(v.notes);     }
+                        gap(5);
                     });
                     break;
                 }
                 case 'victimBusiness': {
-                    const items = JSON.parse(localStorage.getItem(`victimBusinesses_${caseId}`) || '[]');
+                    const items = _readItems('victimBusinesses', null);
                     if (!items.length) { emptyMsg('No victim businesses recorded.'); break; }
                     items.forEach((b, i) => {
                         itemHeading(`Business ${i+1}: ${b.businessName || 'Unknown'}`);
@@ -2485,19 +2705,44 @@
                     break;
                 }
                 case 'witnesses': {
-                    const items = caseWitnesses || JSON.parse(localStorage.getItem(`witnesses_${caseId}`) || '[]');
+                    const items = _readItems('witnesses', caseWitnesses);
                     if (!items.length) { emptyMsg('No witnesses recorded.'); break; }
                     items.forEach((w, i) => {
-                        itemHeading(`Witness ${i+1}: ${w.name || 'Unknown'}`);
-                        fieldBold('Phone', w.phone); fieldBold('Email', w.email);
-                        fieldBold('Address', w.address);
-                        if (w.statement) { bodyText(w.statement); }
-                        gap(3);
+                        const wname = w.name
+                            || [w.firstName, w.lastName].filter(Boolean).join(' ').trim()
+                            || 'Unknown';
+                        subjectBar(`Witness ${i+1}: ${wname}`);
+
+                        subTitle('Personal Information');
+                        addImageSafe(w.photo, 32, 32);
+                        fieldGrid([
+                            { label: 'Full Name',     value: wname },
+                            { label: 'Date of Birth', value: w.dob ? formatDate(w.dob) : '' },
+                            { label: 'Age', value: w.age },
+                            { label: 'Sex', value: w.sex }
+                        ]);
+                        gap(2);
+
+                        if (w.address || w.addressCityStateZip || w.phone || w.email) {
+                            subTitle('Contact / Address');
+                            fieldGrid([
+                                { label: 'Street Address',    value: w.address },
+                                { label: 'City, State, ZIP',  value: w.addressCityStateZip },
+                                { label: 'Phone',   value: w.phone || w.phone1 },
+                                { label: 'Phone 2', value: w.phone2 },
+                                { label: 'Email',   value: w.email }
+                            ]);
+                            gap(2);
+                        }
+
+                        if (w.statement) { subTitle('Statement'); bodyText(w.statement); }
+                        if (w.notes)     { subTitle('Notes');     bodyText(w.notes);     }
+                        gap(5);
                     });
                     break;
                 }
                 case 'vehicles': {
-                    const items = caseVehicles || JSON.parse(localStorage.getItem(`recoveredVehicles_${caseId}`) || '[]');
+                    const items = _readItems('recoveredVehicles', caseVehicles);
                     if (!items.length) { emptyMsg('No vehicles recorded.'); break; }
                     items.forEach((v, i) => {
                         itemHeading(`Vehicle ${i+1}: ${[v.year, v.make, v.model].filter(Boolean).join(' ') || 'Unknown'}`);
@@ -2509,7 +2754,7 @@
                     break;
                 }
                 case 'cargo': {
-                    const items = JSON.parse(localStorage.getItem(`cargo_${caseId}`) || '[]');
+                    const items = _readItems('cargo', null);
                     if (!items.length) { emptyMsg('No cargo/merchandise recorded.'); break; }
                     let totalValue = 0;
                     items.forEach((c, i) => {
@@ -2528,7 +2773,7 @@
                     break;
                 }
                 case 'firearms': {
-                    const items = caseFirearms || JSON.parse(localStorage.getItem(`firearms_${caseId}`) || '[]');
+                    const items = _readItems('firearms', caseFirearms);
                     if (!items.length) { emptyMsg('No firearms recorded.'); break; }
                     items.forEach((f, i) => {
                         itemHeading(`Firearm ${i+1}: ${[f.make, f.model].filter(Boolean).join(' ') || 'Unknown'}`);
@@ -2539,7 +2784,7 @@
                     break;
                 }
                 case 'narcotics': {
-                    const items = caseNarcotics || JSON.parse(localStorage.getItem(`narcotics_${caseId}`) || '[]');
+                    const items = _readItems('narcotics', caseNarcotics);
                     if (!items.length) { emptyMsg('No narcotics recorded.'); break; }
                     items.forEach((n, i) => {
                         itemHeading(`Narcotic ${i+1}`);
@@ -2550,7 +2795,7 @@
                     break;
                 }
                 case 'money': {
-                    const items = caseMoney || JSON.parse(localStorage.getItem(`money_${caseId}`) || '[]');
+                    const items = _readItems('money', caseMoney);
                     if (!items.length) { emptyMsg('No money seizures recorded.'); break; }
                     let total = 0;
                     items.forEach((m, i) => {
@@ -2564,7 +2809,7 @@
                     break;
                 }
                 case 'missingpersons': {
-                    const items = caseMissingPersons || JSON.parse(localStorage.getItem(`missingpersons_${caseId}`) || '[]');
+                    const items = _readItems('missingpersons', caseMissingPersons);
                     if (!items.length) { emptyMsg('No missing persons recorded.'); break; }
                     items.forEach((p, i) => {
                         itemHeading(`Missing Person ${i+1}: ${p.name || 'Unknown'}`);
@@ -2575,7 +2820,7 @@
                     break;
                 }
                 case 'prosecution': {
-                    const items = caseProsecution || JSON.parse(localStorage.getItem(`prosecution_${caseId}`) || '[]');
+                    const items = _readItems('prosecution', caseProsecution);
                     if (!items.length) { emptyMsg('No prosecution information recorded.'); break; }
                     items.forEach((p, i) => {
                         itemHeading(`Charge ${i+1}`);
@@ -2586,7 +2831,7 @@
                     break;
                 }
                 case 'areacanvas': {
-                    const items = caseCanvasEntries || JSON.parse(localStorage.getItem(`areacanvas_${caseId}`) || '[]');
+                    const items = _readItems('areacanvas', caseCanvasEntries);
                     if (!items.length) { emptyMsg('No area canvas entries recorded.'); break; }
                     items.forEach((e, i) => {
                         itemHeading(`Canvas Entry ${i+1}`);

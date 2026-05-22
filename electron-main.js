@@ -5090,9 +5090,18 @@ ipcMain.handle('google-warrant-scan', async (event, { caseNumber }) => {
   }
 });
 
-ipcMain.handle('google-warrant-import', async (event, { filePath }) => {
+ipcMain.handle('google-warrant-import', async (event, { filePath, caseNumber }) => {
   try {
     const stat = fs.statSync(filePath);
+
+    // Build a media output root for any GooglePhotos.PhotoResourceLegal / video
+    // payloads the parser encounters. Without this, large binary attachments
+    // would be dropped (their per-file size makes base64-inline unworkable).
+    let mediaRoot = null;
+    if (caseNumber) {
+      mediaRoot = path.join(casesDir, caseNumber, 'Evidence', 'google-warrant');
+      try { fs.mkdirSync(mediaRoot, { recursive: true }); } catch (_) {}
+    }
 
     if (stat.isDirectory()) {
       // Folder of extracted inner ZIPs — reassemble into a virtual outer ZIP
@@ -5109,16 +5118,101 @@ ipcMain.handle('google-warrant-import', async (event, { filePath }) => {
           outerZip.addFile(name, buf);
         }
       }
-      const data = await gwParser.parseOuterZip(outerZip.toBuffer());
+      const data = await gwParser.parseOuterZip(outerZip.toBuffer(), {
+        mediaRoot,
+        inputName: path.basename(filePath)
+      });
       return { success: true, data };
     }
 
     // Single ZIP file — pass the path; the parser streams it via node-stream-zip,
     // so we no longer load multi-GB warrant returns into a Buffer.
-    const data = await gwParser.parseOuterZip(filePath, { security });
+    const data = await gwParser.parseOuterZip(filePath, { security, mediaRoot });
     return { success: true, data };
   } catch (error) {
     console.error('Google warrant import error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// ─── Google Warrant media read (base64) — for image thumbnails ──────────
+ipcMain.handle('google-warrant-read-media', async (event, { caseNumber, relPath }) => {
+  try {
+    if (!caseNumber || !relPath) return { success: false, error: 'Missing caseNumber or relPath' };
+    const root = path.join(casesDir, caseNumber, 'Evidence', 'google-warrant');
+    const normRel = path.normalize(relPath).replace(/^[\\/]+/, '');
+    if (normRel.startsWith('..')) return { success: false, error: 'Invalid relative path' };
+    const fullPath = path.join(root, normRel);
+    const resolvedRoot = path.resolve(root);
+    if (!path.resolve(fullPath).startsWith(resolvedRoot)) {
+      return { success: false, error: 'Path traversal blocked' };
+    }
+    if (!fs.existsSync(fullPath)) return { success: false, error: 'File not found: ' + relPath };
+    let buf = fs.readFileSync(fullPath);
+    if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
+      buf = security.decryptBuffer(buf);
+    }
+    // Quick magic-byte → mime detection (same set as datapilot-read-media)
+    let mimeType = 'application/octet-stream';
+    if (buf.length > 1 && buf[0] === 0xFF && buf[1] === 0xD8) mimeType = 'image/jpeg';
+    else if (buf.length > 1 && buf[0] === 0x89 && buf[1] === 0x50) mimeType = 'image/png';
+    else if (buf.length > 7 && buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70) mimeType = 'video/mp4';
+    else if (buf.length > 5 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) mimeType = 'image/gif';
+    else if (buf.length > 11 && buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) mimeType = 'image/webp';
+    else {
+      const ext = path.extname(fullPath).toLowerCase();
+      const map = {
+        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+        '.gif': 'image/gif', '.webp': 'image/webp', '.heic': 'image/heic',
+        '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm',
+        '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4',
+        '.pdf': 'application/pdf'
+      };
+      if (map[ext]) mimeType = map[ext];
+    }
+    return { success: true, data: buf.toString('base64'), mimeType, size: buf.length, fileName: path.basename(fullPath) };
+  } catch (error) {
+    console.error('Google warrant read-media error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// ─── Google Warrant streamable URL — for videos / large originals ───────
+ipcMain.handle('google-warrant-get-media-url', async (event, { caseNumber, relPath }) => {
+  try {
+    if (!caseNumber || !relPath) return { success: false, error: 'Missing caseNumber or relPath' };
+    const root = path.join(casesDir, caseNumber, 'Evidence', 'google-warrant');
+    const normRel = path.normalize(relPath).replace(/^[\\/]+/, '');
+    if (normRel.startsWith('..')) return { success: false, error: 'Invalid relative path' };
+    const fullPath = path.join(root, normRel);
+    const resolvedRoot = path.resolve(root);
+    if (!path.resolve(fullPath).startsWith(resolvedRoot)) {
+      return { success: false, error: 'Path traversal blocked' };
+    }
+    if (!fs.existsSync(fullPath)) return { success: false, error: 'File not found' };
+    let servePath = fullPath;
+    let isTemp = false;
+    if (security && security.isUnlocked()) {
+      const fd = fs.openSync(fullPath, 'r');
+      const head = Buffer.alloc(64);
+      try { fs.readSync(fd, head, 0, 64, 0); } finally { fs.closeSync(fd); }
+      if (security.isEncryptedBuffer(head)) {
+        const buf = fs.readFileSync(fullPath);
+        const decrypted = security.decryptBuffer(buf);
+        const tempDir = path.join(app.getPath('temp'), 'viper-view-google-warrant');
+        fs.mkdirSync(tempDir, { recursive: true });
+        const tempName = `${Date.now()}_${path.basename(fullPath)}`;
+        servePath = path.join(tempDir, tempName);
+        fs.writeFileSync(servePath, decrypted);
+        isTemp = true;
+      }
+    }
+    const stat = fs.statSync(servePath);
+    // Reuse the datapilot token store + viper-media:// protocol — they're path-agnostic.
+    const token = _datapilotIssueMediaToken(servePath);
+    return { success: true, fileUrl: `viper-media://m/${token}`, sizeBytes: stat.size, isTemp, fileName: path.basename(fullPath) };
+  } catch (error) {
+    console.error('Google warrant get-media-url error:', error);
     return { success: false, error: error.message };
   }
 });

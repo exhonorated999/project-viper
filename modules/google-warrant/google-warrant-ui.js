@@ -80,7 +80,13 @@ class GoogleWarrantUI {
             this.activeImportIdx = this.module.imports.findIndex(i => i.id === record.id);
             this.activeSection = 'overview';
             this.render();
-            this._toast(`Imported: ${record.accountEmail || fileName}`, 'success');
+            const notice = this.module._mergeNotice;
+            if (notice && notice.targetId === record.id) {
+                this._toast(`Merged into existing import for ${notice.accountEmail} — ${notice.partsCount} part(s) total`, 'success');
+            } else {
+                const photoCount = (record.photos && record.photos.filter(p => p.isMedia).length) || 0;
+                this._toast(`Imported: ${record.accountEmail || fileName}${photoCount ? ` · ${photoCount} media file(s) extracted` : ''}`, 'success');
+            }
         } catch (err) {
             this._toast('Import failed: ' + err.message, 'error');
             this.render();
@@ -95,7 +101,13 @@ class GoogleWarrantUI {
             this.activeImportIdx = this.module.imports.findIndex(i => i.id === record.id);
             this.activeSection = 'overview';
             this.render();
-            this._toast(`Imported: ${record.accountEmail || record.fileName}`, 'success');
+            const notice = this.module._mergeNotice;
+            if (notice && notice.targetId === record.id) {
+                this._toast(`Merged into existing import for ${notice.accountEmail} — ${notice.partsCount} part(s) total`, 'success');
+            } else {
+                const photoCount = (record.photos && record.photos.filter(p => p.isMedia).length) || 0;
+                this._toast(`Imported: ${record.accountEmail || record.fileName}${photoCount ? ` · ${photoCount} media file(s) extracted` : ''}`, 'success');
+            }
         } catch (err) {
             this._toast('Import failed: ' + err.message, 'error');
             this.render();
@@ -217,6 +229,7 @@ class GoogleWarrantUI {
         const meetCount = imp.meetHistory?.length || 0;
         const linkedCount = imp.linkedByPhone?.length || 0;
         const aggCount = imp.aggregatedActivity?.length || 0;
+        const photosCount = imp.photos?.filter(p => p.isMedia !== false).length || 0;
 
         const sections = [
             { id: 'overview', label: 'Account Overview', icon: '👤', show: true },
@@ -231,6 +244,7 @@ class GoogleWarrantUI {
             { id: 'meet', label: 'Meet History', icon: '🎥', count: meetCount, show: meetCount > 0 },
             { id: 'linked', label: 'Linked Accounts', icon: '🔗', count: linkedCount, show: linkedCount > 0 },
             { id: 'payments', label: 'Payments', icon: '💳', show: imp.googlePay?.instruments?.length > 0 || imp.googlePay?.transactions?.length > 0 || imp.googlePay?.customerInfo },
+            { id: 'photos', label: 'Photos & Media', icon: '🖼️', count: photosCount, show: photosCount > 0 },
             { id: 'files', label: 'Files', icon: '📁', show: imp.driveFiles?.length > 0 },
             { id: 'other', label: 'Other Data', icon: '📦', count: rawCatCount, show: rawSectionCount > 0 },
             { id: 'timeline', label: 'Timeline', icon: '🕐', show: true }
@@ -278,6 +292,7 @@ class GoogleWarrantUI {
             case 'meet': return this._renderMeet(imp);
             case 'linked': return this._renderLinked(imp);
             case 'payments': return this._renderPayments(imp);
+            case 'photos': return this._renderPhotos(imp);
             case 'files': return this._renderFiles(imp);
             case 'other': return this._renderOther(imp);
             case 'timeline': return this._renderTimeline(imp);
@@ -1210,6 +1225,199 @@ class GoogleWarrantUI {
         const rows = imp.linkedByPhone || [];
         if (!rows.length) return '<div class="gwp-empty-section">No linked-account data.</div>';
         return `<div class="gwp-section-header"><h2>Accounts Linked by Phone / Cookies</h2><span class="gwp-count-badge">${rows.length.toLocaleString()}</span></div>${this._renderRowsTable(rows.slice(0, 1000))}`;
+    }
+
+    // ─── Photos & Media (GooglePhotos.PhotoResourceLegal etc.) ─────────
+
+    _renderPhotos(imp) {
+        const all = imp.photos || [];
+        // Split media vs companion metadata so the gallery doesn't show JSON tiles
+        const media = all.filter(p => p && p.isMedia && !p.stub);
+        const stubs = all.filter(p => p && p.stub);  // imported without mediaRoot
+        const metaFiles = all.filter(p => p && !p.isMedia && !p.stub);
+
+        if (!media.length && !stubs.length && !metaFiles.length) {
+            return '<div class="gwp-empty-section">No photos or media files in this warrant return.</div>';
+        }
+
+        // Bundle breakdown — show user that data came from N master parts
+        const bundleBreakdown = {};
+        for (const p of media) {
+            const b = p.bundle || 'unknown';
+            bundleBreakdown[b] = (bundleBreakdown[b] || 0) + 1;
+        }
+        const bundleList = Object.entries(bundleBreakdown).map(([b, n]) => `${this._escape(b)} (${n})`).join(' · ');
+
+        // Group by category for filter chips
+        const byCategory = {};
+        for (const p of media) {
+            const c = p.category || 'GooglePhotos.PhotoResourceLegal';
+            (byCategory[c] = byCategory[c] || []).push(p);
+        }
+        const categories = Object.keys(byCategory).sort();
+
+        const totalBytes = media.reduce((s, p) => s + (p.size || 0), 0);
+        const totalMB = (totalBytes / (1024 * 1024)).toFixed(1);
+
+        let html = `<div class="gwp-section-header">
+            <h2>Photos & Media</h2>
+            <span class="gwp-count-badge">${media.length}</span>
+        </div>`;
+
+        html += `<div class="gwp-photos-summary">
+            <div><strong>${media.length}</strong> media file${media.length === 1 ? '' : 's'} · <strong>${totalMB}</strong> MB total</div>`;
+        if (bundleList) html += `<div class="gwp-photos-meta">From: ${bundleList}</div>`;
+        if (metaFiles.length) html += `<div class="gwp-photos-meta">+${metaFiles.length} companion metadata file${metaFiles.length === 1 ? '' : 's'} (JSON / HTML)</div>`;
+        if (stubs.length) {
+            html += `<div class="gwp-photos-meta" style="color:#fbbf24">⚠️ ${stubs.length} file(s) detected but not extracted — re-import with a case loaded so VIPER can write media to disk.</div>`;
+        }
+        html += `</div>`;
+
+        if (categories.length > 1) {
+            html += `<div class="gwp-photos-filters">
+                <button class="gwp-photos-filter active" data-filter="all">All (${media.length})</button>`;
+            for (const c of categories) {
+                html += `<button class="gwp-photos-filter" data-filter="${this._escape(c)}">${this._escape(c)} (${byCategory[c].length})</button>`;
+            }
+            html += `</div>`;
+        }
+
+        html += `<div class="gwp-photos-grid" id="gwp-photos-grid">`;
+        for (let i = 0; i < media.length; i++) {
+            const p = media[i];
+            const isVideo = p.mimeType && p.mimeType.startsWith('video/');
+            const taken = p.takenAt ? new Date(p.takenAt).toLocaleString() : '';
+            html += `<div class="gwp-photo-tile" data-category="${this._escape(p.category || '')}" data-idx="${i}" data-rel="${this._escape(p.relPath || '')}" onclick="window.googleWarrantUI.openPhotoLightbox(${i})">
+                <div class="gwp-photo-thumb" data-rel="${this._escape(p.relPath || '')}" data-video="${isVideo ? '1' : '0'}">
+                    ${isVideo ? '<div class="gwp-photo-video-badge">▶</div>' : ''}
+                    <div class="gwp-photo-loading">…</div>
+                </div>
+                <div class="gwp-photo-caption">
+                    <div class="gwp-photo-name" title="${this._escape(p.filename)}">${this._escape(p.filename)}</div>
+                    <div class="gwp-photo-meta">${(p.size/1024).toFixed(0)} KB${taken ? ' · ' + this._escape(taken) : ''}</div>
+                </div>
+            </div>`;
+        }
+        html += `</div>`;
+
+        // Hydrate thumbs after render — defer so the DOM is in place
+        setTimeout(() => this._hydratePhotoThumbs(media), 50);
+        // Wire filter chips
+        setTimeout(() => this._wirePhotoFilters(), 60);
+
+        // Stash photo array on the UI instance so the lightbox can resolve by idx
+        this._currentPhotos = media;
+
+        return html;
+    }
+
+    /**
+     * Lazy-load thumbnails — fetches base64 from main, swaps into <img>.
+     * Uses IntersectionObserver so off-screen tiles don't get hammered.
+     */
+    _hydratePhotoThumbs(media) {
+        const tiles = document.querySelectorAll('#gwp-photos-grid .gwp-photo-thumb');
+        if (!tiles.length || !this.module) return;
+        const mod = this.module;
+
+        const load = async (tile) => {
+            const rel = tile.getAttribute('data-rel');
+            if (!rel || tile.dataset.loaded === '1') return;
+            tile.dataset.loaded = '1';
+            try {
+                const url = await mod.readMedia(rel);
+                if (url) {
+                    const img = document.createElement('img');
+                    img.src = url;
+                    img.loading = 'lazy';
+                    img.alt = '';
+                    tile.querySelector('.gwp-photo-loading')?.remove();
+                    tile.appendChild(img);
+                } else {
+                    const loading = tile.querySelector('.gwp-photo-loading');
+                    if (loading) loading.textContent = '⚠';
+                }
+            } catch (_) {
+                const loading = tile.querySelector('.gwp-photo-loading');
+                if (loading) loading.textContent = '⚠';
+            }
+        };
+
+        if ('IntersectionObserver' in window) {
+            const io = new IntersectionObserver((entries) => {
+                for (const e of entries) {
+                    if (e.isIntersecting) { load(e.target); io.unobserve(e.target); }
+                }
+            }, { rootMargin: '300px' });
+            tiles.forEach(t => io.observe(t));
+        } else {
+            tiles.forEach(load);
+        }
+    }
+
+    _wirePhotoFilters() {
+        const btns = document.querySelectorAll('.gwp-photos-filter');
+        btns.forEach(b => b.addEventListener('click', () => {
+            btns.forEach(x => x.classList.remove('active'));
+            b.classList.add('active');
+            const want = b.getAttribute('data-filter');
+            document.querySelectorAll('.gwp-photo-tile').forEach(tile => {
+                const cat = tile.getAttribute('data-category');
+                tile.style.display = (want === 'all' || cat === want) ? '' : 'none';
+            });
+        }));
+    }
+
+    /**
+     * Lightbox — full-res photo or video playback via viper-media:// URL.
+     */
+    async openPhotoLightbox(idx) {
+        const list = this._currentPhotos || [];
+        const p = list[idx];
+        if (!p) return;
+        const isVideo = p.mimeType && p.mimeType.startsWith('video/');
+
+        // Build overlay
+        let overlay = document.getElementById('gwp-photo-lightbox');
+        if (overlay) overlay.remove();
+        overlay = document.createElement('div');
+        overlay.id = 'gwp-photo-lightbox';
+        overlay.className = 'gwp-lightbox';
+        overlay.innerHTML = `
+            <button class="gwp-lightbox-close" title="Close (Esc)">×</button>
+            <button class="gwp-lightbox-prev" title="Previous (←)">‹</button>
+            <button class="gwp-lightbox-next" title="Next (→)">›</button>
+            <div class="gwp-lightbox-stage"><div class="gwp-lightbox-loading">Loading…</div></div>
+            <div class="gwp-lightbox-caption">
+                <div class="gwp-lightbox-name">${this._escape(p.filename)}</div>
+                <div class="gwp-lightbox-meta">${(p.size/1024/1024).toFixed(2)} MB${p.takenAt ? ' · ' + this._escape(new Date(p.takenAt).toLocaleString()) : ''}${p.bundle ? ' · ' + this._escape(p.bundle) : ''}</div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        const stage = overlay.querySelector('.gwp-lightbox-stage');
+        const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+        const goto = (delta) => this.openPhotoLightbox((idx + delta + list.length) % list.length);
+        const onKey = (e) => {
+            if (e.key === 'Escape') close();
+            else if (e.key === 'ArrowLeft') goto(-1);
+            else if (e.key === 'ArrowRight') goto(1);
+        };
+        document.addEventListener('keydown', onKey);
+        overlay.querySelector('.gwp-lightbox-close').onclick = close;
+        overlay.querySelector('.gwp-lightbox-prev').onclick = () => goto(-1);
+        overlay.querySelector('.gwp-lightbox-next').onclick = () => goto(1);
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+        try {
+            const url = await this.module.getMediaUrl(p.relPath);
+            if (!url) throw new Error('No media URL');
+            stage.innerHTML = isVideo
+                ? `<video src="${url}" controls autoplay style="max-width:90vw;max-height:80vh"></video>`
+                : `<img src="${url}" alt="" style="max-width:90vw;max-height:80vh">`;
+        } catch (err) {
+            stage.innerHTML = `<div class="gwp-lightbox-error">Failed to load: ${this._escape(err.message || String(err))}</div>`;
+        }
     }
 
     // ─── Other Data (catch-all for unknown categories) ─────────────────

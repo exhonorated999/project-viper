@@ -97,7 +97,7 @@ class GoogleWarrantModule {
             throw new Error('Google Warrant IPC handler not available');
         }
 
-        const result = await window.electronAPI.googleWarrantImport({ filePath });
+        const result = await window.electronAPI.googleWarrantImport({ filePath, caseNumber: this.caseNumber });
 
         if (!result.success) {
             throw new Error(result.error || 'Import failed');
@@ -132,17 +132,51 @@ class GoogleWarrantModule {
             googlePay: result.data.googlePay,
             driveFiles: result.data.driveFiles,
             accessLogActivity: result.data.accessLogActivity,
+            aggregatedActivity: result.data.aggregatedActivity || [],
+            myActivity: result.data.myActivity || [],
             ipActivity: result.data.ipActivity,
             playStorePreferences: result.data.playStorePreferences,
+            contacts: result.data.contacts || [],
+            calendars: result.data.calendars || [],
+            calendarSettings: result.data.calendarSettings || null,
+            tasks: result.data.tasks || [],
+            mailUserSettings: result.data.mailUserSettings || null,
+            voiceSubscriber: result.data.voiceSubscriber || null,
+            meetHistory: result.data.meetHistory || [],
+            linkedByPhone: result.data.linkedByPhone || [],
+            photos: result.data.photos || [],
+            bundleSources: result.data.bundleSources || [],
+            rawSections: result.data.rawSections || {},
+            sourceFiles: [filePath], // tracks which physical files contributed
             _diagnostics: result.data._diagnostics
         };
 
-        // Replace if same file was imported before, else add
-        const existingIdx = this.imports.findIndex(i => i.filePath === filePath);
-        if (existingIdx >= 0) {
-            this.imports[existingIdx] = importRecord;
+        // ─── Auto-merge across multi-part master ZIPs ───────────────────
+        // Google splits very large warrant returns into 10+ parts
+        // (e.g. 30136296-20260514-1.zip, …-2.zip, …). Each part contains a
+        // different slice of the per-service inner zips. We detect a
+        // previously-imported record for the same account (+ overlapping
+        // date range) and merge instead of creating a second card.
+        const existingMergeIdx = this._findMergeTarget(importRecord);
+        const sameFileIdx = this.imports.findIndex(i => i.filePath === filePath);
+
+        if (sameFileIdx >= 0) {
+            // Re-import of the exact same file — replace (current behaviour)
+            this.imports[sameFileIdx] = importRecord;
+            this._mergeNotice = null;
+        } else if (existingMergeIdx >= 0) {
+            // Merge into the existing import for this account
+            const merged = this._mergeImports(this.imports[existingMergeIdx], importRecord);
+            this.imports[existingMergeIdx] = merged;
+            this._mergeNotice = {
+                targetId: merged.id,
+                accountEmail: merged.accountEmail,
+                partsCount: merged.sourceFiles.length,
+                bundleSources: merged.bundleSources
+            };
         } else {
             this.imports.push(importRecord);
+            this._mergeNotice = null;
         }
 
         this.saveData();
@@ -150,7 +184,169 @@ class GoogleWarrantModule {
         // Refresh evidence bar
         await this.scanForWarrants();
 
-        return importRecord;
+        return existingMergeIdx >= 0 ? this.imports[existingMergeIdx] : importRecord;
+    }
+
+    /**
+     * Find an existing import to auto-merge into. Match criteria (any):
+     *   1. Same accountEmail AND same accountId AND not the same filePath
+     *   2. Same accountEmail AND overlapping date range (within 30 days)
+     * Returns index in this.imports, or -1.
+     */
+    _findMergeTarget(incoming) {
+        if (!incoming.accountEmail && !incoming.accountId) return -1;
+        for (let i = 0; i < this.imports.length; i++) {
+            const ex = this.imports[i];
+            if (!ex) continue;
+            if (ex.filePath === incoming.filePath) continue; // same file → replace, not merge
+            const sameEmail = ex.accountEmail && incoming.accountEmail && ex.accountEmail.toLowerCase() === incoming.accountEmail.toLowerCase();
+            const sameAcctId = ex.accountId && incoming.accountId && String(ex.accountId) === String(incoming.accountId);
+            if (sameEmail || sameAcctId) return i;
+        }
+        return -1;
+    }
+
+    /**
+     * Deep-merge two import records. Dedupes arrays where it can identify
+     * stable keys (msg id, photo relPath, ip+timestamp). Falls back to
+     * concatenation for opaque arrays.
+     */
+    _mergeImports(base, incoming) {
+        const merged = { ...base };
+        // Concatenation helpers
+        const concat = (a, b) => [...(a || []), ...(b || [])];
+        const concatById = (a, b, idFn) => {
+            const seen = new Set((a || []).map(idFn).filter(Boolean));
+            const out = [...(a || [])];
+            for (const item of (b || [])) {
+                const id = idFn(item);
+                if (id && seen.has(id)) continue;
+                if (id) seen.add(id);
+                out.push(item);
+            }
+            return out;
+        };
+
+        merged.categories = Array.from(new Set([...(base.categories || []), ...(incoming.categories || [])]));
+        merged.noRecordCategories = Array.from(new Set([...(base.noRecordCategories || []), ...(incoming.noRecordCategories || [])]));
+        merged.bundleSources = Array.from(new Set([...(base.bundleSources || []), ...(incoming.bundleSources || [])]));
+        merged.sourceFiles = Array.from(new Set([...(base.sourceFiles || []), ...(incoming.sourceFiles || [])]));
+
+        // Subscriber / cover letter / change history: take incoming if base missing
+        merged.subscriber = base.subscriber || incoming.subscriber;
+        merged.coverLetter = base.coverLetter || incoming.coverLetter;
+        merged.chatUserInfo = base.chatUserInfo || incoming.chatUserInfo;
+        merged.hangoutsInfo = base.hangoutsInfo || incoming.hangoutsInfo;
+        merged.calendarSettings = base.calendarSettings || incoming.calendarSettings;
+        merged.mailUserSettings = base.mailUserSettings || incoming.mailUserSettings;
+        merged.voiceSubscriber = base.voiceSubscriber || incoming.voiceSubscriber;
+        merged.changeHistory = concat(base.changeHistory, incoming.changeHistory);
+
+        // Date range — pick widest
+        if (incoming.dateRange) {
+            merged.dateRange = merged.dateRange || { start: null, end: null };
+            if (incoming.dateRange.start && (!merged.dateRange.start || incoming.dateRange.start < merged.dateRange.start)) merged.dateRange.start = incoming.dateRange.start;
+            if (incoming.dateRange.end && (!merged.dateRange.end || incoming.dateRange.end > merged.dateRange.end)) merged.dateRange.end = incoming.dateRange.end;
+        }
+
+        // Mail
+        merged.emails = concatById(base.emails, incoming.emails, e => (e && (e.messageId || e.id)) || null);
+        merged.emailMetadata = concat(base.emailMetadata, incoming.emailMetadata);
+
+        // Location
+        merged.locationRecords = concat(base.locationRecords, incoming.locationRecords);
+        merged.semanticLocations = concat(base.semanticLocations, incoming.semanticLocations);
+
+        // Devices / installs / library (dedupe by JSON when possible)
+        merged.devices = concat(base.devices, incoming.devices);
+        merged.installs = concat(base.installs, incoming.installs);
+        merged.library = concat(base.library, incoming.library);
+        merged.userActivity = concat(base.userActivity, incoming.userActivity);
+
+        // Chat / Pay / Drive
+        merged.chatMessages = concat(base.chatMessages, incoming.chatMessages);
+        merged.chatGroupInfo = concat(base.chatGroupInfo, incoming.chatGroupInfo);
+        merged.googlePay = {
+            instruments:  concat(base.googlePay && base.googlePay.instruments,  incoming.googlePay && incoming.googlePay.instruments),
+            transactions: concat(base.googlePay && base.googlePay.transactions, incoming.googlePay && incoming.googlePay.transactions),
+            addresses:    concat(base.googlePay && base.googlePay.addresses,    incoming.googlePay && incoming.googlePay.addresses),
+            customerInfo: (base.googlePay && base.googlePay.customerInfo) || (incoming.googlePay && incoming.googlePay.customerInfo)
+        };
+        merged.driveFiles = concat(base.driveFiles, incoming.driveFiles);
+
+        // Access log / activity
+        merged.accessLogActivity = concat(base.accessLogActivity, incoming.accessLogActivity);
+        merged.aggregatedActivity = concat(base.aggregatedActivity, incoming.aggregatedActivity);
+        merged.myActivity = concat(base.myActivity, incoming.myActivity);
+        merged.ipActivity = concat(base.ipActivity, incoming.ipActivity);
+        merged.playStorePreferences = concat(base.playStorePreferences, incoming.playStorePreferences);
+
+        // Newer categories
+        merged.contacts = concat(base.contacts, incoming.contacts);
+        merged.calendars = concat(base.calendars, incoming.calendars);
+        merged.tasks = concat(base.tasks, incoming.tasks);
+        merged.meetHistory = concat(base.meetHistory, incoming.meetHistory);
+        merged.linkedByPhone = concat(base.linkedByPhone, incoming.linkedByPhone);
+
+        // Photos — dedupe by relPath (each master bundle writes into its own subdir)
+        merged.photos = concatById(base.photos, incoming.photos, p => p && p.relPath);
+
+        // Raw sections — merge bucket arrays per-category
+        merged.rawSections = { ...(base.rawSections || {}) };
+        for (const cat of Object.keys(incoming.rawSections || {})) {
+            const a = merged.rawSections[cat] || { html: [], csv: [], json: [], other: [] };
+            const b = incoming.rawSections[cat] || { html: [], csv: [], json: [], other: [] };
+            merged.rawSections[cat] = {
+                html:  concat(a.html, b.html),
+                csv:   concat(a.csv, b.csv),
+                json:  concat(a.json, b.json),
+                other: concat(a.other, b.other)
+            };
+        }
+
+        // Bookkeeping
+        merged.importedAt = base.importedAt; // first-import timestamp wins
+        merged.fileName = base.fileName + ` (+${(merged.sourceFiles.length - 1)} part${merged.sourceFiles.length > 2 ? 's' : ''})`;
+        // Preserve flags from base; nothing in incoming yet.
+
+        return merged;
+    }
+
+    // ─── Media accessors (for the gallery UI) ──────────────────────────
+
+    /**
+     * Read a photo as base64 — use for thumbnail rendering. Routes through the
+     * Field-Security-aware IPC so encrypted media is transparently decrypted.
+     */
+    async readMedia(relPath) {
+        if (!window.electronAPI?.googleWarrantReadMedia || !relPath) return null;
+        try {
+            const res = await window.electronAPI.googleWarrantReadMedia({ caseNumber: this.caseNumber, relPath });
+            if (res && res.success) return `data:${res.mimeType};base64,${res.data}`;
+            if (res && res.error && !this._readMediaErrLogged) {
+                console.warn('[google-warrant] readMedia failure:', relPath, res.error);
+                this._readMediaErrLogged = true;
+            }
+            return null;
+        } catch (e) {
+            console.warn('readMedia error:', e);
+            return null;
+        }
+    }
+
+    /**
+     * Get a streamable viper-media:// URL for full-res view / video playback.
+     */
+    async getMediaUrl(relPath) {
+        if (!window.electronAPI?.googleWarrantGetMediaUrl || !relPath) return null;
+        try {
+            const res = await window.electronAPI.googleWarrantGetMediaUrl({ caseNumber: this.caseNumber, relPath });
+            if (res && res.success) return res.fileUrl;
+            return null;
+        } catch (e) {
+            console.warn('getMediaUrl error:', e);
+            return null;
+        }
     }
 
     /**

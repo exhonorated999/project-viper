@@ -1,0 +1,33 @@
+v3.4.5 — Notes overhaul, spellcheck, Prosecution module
+
+Case Notes:
+- Rich-text editor (B/I/U, lists, font size, Ctrl+B/I/U)
+- Image paste from clipboard + click-to-select for delete
+- Spellcheck with right-click suggestions menu
+- Multi-file attachments persisted under cases/{caseNumber}/Notes/
+  (Field Security encryption; auto-included in DA Export ZIP)
+- Inline PDF/image preview via blob: URL
+- Legacy plain-text notes migrate by wrapping in <p> on first edit
+
+Reports:
+- Spellcheck enabled
+- Click-to-select images for delete
+
+App-wide:
+- Right-click context menu: spelling suggestions, Add to Dictionary,
+  cut/copy/paste/select-all (BrowserWindow context-menu handler)
+- Menu added to electron destructure
+
+Prosecution module - full rewrite:
+- Court Case Number
+- Multiple Court Dates (date/time/courtroom/type/notes)
+- Court dates auto-push to dashboard task list with amber styling
+- Prosecutor name/email/phone
+- Charges filed from Offense Reference library OR custom typed
+- Per-charge conviction tracking
+- Structured sentencing (years/months incarceration, probation, notes)
+- Backward-compatible migration of legacy {charge, description} array
+
+Dashboard:
+- New 'Court' task category (amber + scale icon) - distinct from priority
+- getTaskColors/getTaskLabel helpers route kind:'court' tasks

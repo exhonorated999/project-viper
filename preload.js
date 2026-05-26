@@ -28,6 +28,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listCaseSnapshots: () => ipcRenderer.invoke('list-case-snapshots'),
   deleteCaseSnapshot: (caseNumber) => ipcRenderer.invoke('delete-case-snapshot', caseNumber),
 
+  // Note attachments — saved to cases/{caseNumber}/Notes/ on disk,
+  // automatically included in the DA Export ZIP.
+  noteSaveAttachment: (data) => ipcRenderer.invoke('note-save-attachment', data),
+  noteReadAttachment: (data) => ipcRenderer.invoke('note-read-attachment', data),
+  noteDeleteAttachment: (data) => ipcRenderer.invoke('note-delete-attachment', data),
+  noteListAttachments: (caseNumber) => ipcRenderer.invoke('note-list-attachments', caseNumber),
+
   // Backup & Restore
   selectBackupDirectory: () => ipcRenderer.invoke('select-backup-directory'),
   createBackup: (data) => ipcRenderer.invoke('create-backup', data),

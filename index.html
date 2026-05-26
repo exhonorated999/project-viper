@@ -3294,11 +3294,19 @@
             const colors = {
                 high: { border: 'red-500', bg: 'red-500/10', text: 'red-400', badge: 'red-500/20', badgeText: 'red-400', badgeBorder: 'red-500/50' },
                 medium: { border: 'orange-500', bg: 'orange-500/10', text: 'orange-400', badge: 'orange-500/20', badgeText: 'orange-400', badgeBorder: 'orange-500/50' },
-                low: { border: 'green-500', bg: 'green-500/10', text: 'green-400', badge: 'green-500/20', badgeText: 'green-400', badgeBorder: 'green-500/50' }
+                low: { border: 'green-500', bg: 'green-500/10', text: 'green-400', badge: 'green-500/20', badgeText: 'green-400', badgeBorder: 'green-500/50' },
+                court: { border: 'amber-500', bg: 'amber-500/10', text: 'amber-400', badge: 'amber-500/20', badgeText: 'amber-300', badgeBorder: 'amber-500/50' }
             };
             return colors[priority] || colors.medium;
         }
-        
+
+        // Court-flagged tasks (pushed from Prosecution module) override priority styling
+        // so they're visually distinct from regular high-priority tasks.
+        function getTaskColors(task) {
+            if (task && task.kind === 'court') return getPriorityColors('court');
+            return getPriorityColors(task && task.priority);
+        }
+
         function getPriorityLabel(priority) {
             const labels = {
                 high: '🔴 High',
@@ -3306,6 +3314,11 @@
                 low: '🟢 Low'
             };
             return labels[priority] || labels.medium;
+        }
+
+        function getTaskLabel(task) {
+            if (task && task.kind === 'court') return '⚖️ Court';
+            return getPriorityLabel(task && task.priority);
         }
         
         function setTaskView(view) {
@@ -3409,8 +3422,9 @@
             
             container.innerHTML = sortedTasks.map((task) => {
                 const overdue = isOverdue(task.date, task.time);
-                const colors = getPriorityColors(task.priority);
-                const priorityLabel = getPriorityLabel(task.priority);
+                const colors = getTaskColors(task);
+                const priorityLabel = getTaskLabel(task);
+                const isCourt = task.kind === 'court';
                 
                 return `
                     <div class="bg-viper-card/50 rounded-lg p-3 border-l-4 border-${colors.border} hover:bg-viper-card/70 transition-colors ${task.completed ? 'opacity-60' : ''}">

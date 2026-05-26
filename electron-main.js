@@ -1,4 +1,4 @@
-const { app, BrowserWindow, BrowserView, ipcMain, shell, dialog, globalShortcut, session, protocol, net } = require('electron');
+const { app, BrowserWindow, BrowserView, ipcMain, shell, dialog, globalShortcut, session, protocol, net, Menu } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -187,12 +187,79 @@ function createWindow() {
       webSecurity: true,
       webviewTag: true,
       backgroundThrottling: false,
+      spellcheck: true,
       preload: path.join(__dirname, 'preload.js')
     },
     title: 'VIPER - Network Intelligence',
     icon: iconPath,
     show: false,
     backgroundColor: '#1a1a1a'
+  });
+
+  // Spellchecker language — default to system locale, fall back to en-US.
+  try {
+    const ses = mainWindow.webContents.session;
+    const avail = ses.availableSpellCheckerLanguages || [];
+    const sysLocale = (app.getLocale && app.getLocale()) || 'en-US';
+    const langs = [sysLocale, 'en-US'].filter((v, i, a) =>
+      v && a.indexOf(v) === i && (avail.length === 0 || avail.includes(v))
+    );
+    if (langs.length) ses.setSpellCheckerLanguages(langs);
+  } catch (e) {
+    console.warn('[spellcheck] language setup failed:', e.message);
+  }
+
+  // Right-click context menu — surfaces spelling suggestions, add-to-dictionary,
+  // and standard cut/copy/paste/select-all. Chromium underlines misspellings by
+  // default but does NOT provide a UI for accepting suggestions; we wire that up
+  // here using params.dictionarySuggestions + webContents.replaceMisspelling().
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const wc = mainWindow.webContents;
+    const ses = wc.session;
+    const template = [];
+
+    if (params.misspelledWord && Array.isArray(params.dictionarySuggestions) && params.dictionarySuggestions.length) {
+      for (const suggestion of params.dictionarySuggestions.slice(0, 8)) {
+        template.push({
+          label: suggestion,
+          click: () => wc.replaceMisspelling(suggestion)
+        });
+      }
+      template.push({ type: 'separator' });
+      template.push({
+        label: `Add "${params.misspelledWord}" to dictionary`,
+        click: () => {
+          try { ses.addWordToSpellCheckerDictionary(params.misspelledWord); } catch (_) {}
+        }
+      });
+      template.push({ type: 'separator' });
+    } else if (params.misspelledWord) {
+      template.push({ label: 'No suggestions', enabled: false });
+      template.push({
+        label: `Add "${params.misspelledWord}" to dictionary`,
+        click: () => {
+          try { ses.addWordToSpellCheckerDictionary(params.misspelledWord); } catch (_) {}
+        }
+      });
+      template.push({ type: 'separator' });
+    }
+
+    // Standard editing actions (always shown so right-click works everywhere)
+    if (params.isEditable) {
+      template.push({ role: 'undo' });
+      template.push({ role: 'redo' });
+      template.push({ type: 'separator' });
+      template.push({ role: 'cut', enabled: !!params.selectionText });
+      template.push({ role: 'copy', enabled: !!params.selectionText });
+      template.push({ role: 'paste' });
+      template.push({ role: 'selectAll' });
+    } else if (params.selectionText) {
+      template.push({ role: 'copy' });
+    }
+
+    if (template.length) {
+      Menu.buildFromTemplate(template).popup({ window: mainWindow });
+    }
   });
 
   // Handle window.open calls from renderer — create properly-sized popup windows
@@ -1204,6 +1271,130 @@ ipcMain.handle('delete-case-snapshot', async (_e, caseNumber) => {
   }
 });
 
+// ── Note attachments (cases/{caseNumber}/Notes/) ─────────────────────
+// Notes module persists pasted PDFs, images, and other files to disk
+// (out of localStorage — which has a ~5–10MB quota). Files are written
+// under Field Security encryption when security is enabled+unlocked,
+// matching the pattern used by snapshots, warrants, and evidence.
+// The save-da-export ZIP automatically walks this directory and includes
+// every attachment in the bundle delivered to the DA.
+function _sanitizeAttachmentName(name) {
+  if (!name || typeof name !== 'string') return null;
+  // Strip path components — only keep the basename.
+  let base = name.replace(/[\\/]/g, '_').trim();
+  // Forbid the obvious traversal/control characters and Windows reserved chars
+  base = base.replace(/[\x00-\x1f<>:"|?*]/g, '_');
+  if (base === '.' || base === '..' || !base) return null;
+  // Cap length so the eventual archive path stays under MAX_PATH on Windows
+  if (base.length > 200) {
+    const ext = path.extname(base);
+    const stem = base.slice(0, base.length - ext.length);
+    base = stem.slice(0, 200 - ext.length) + ext;
+  }
+  return base;
+}
+
+ipcMain.handle('note-save-attachment', async (_e, payload) => {
+  try {
+    const caseNumber = _safeCaseNumber(payload && payload.caseNumber);
+    if (!caseNumber) return { success: false, error: 'Invalid case number' };
+    const rawName = _sanitizeAttachmentName(payload && payload.fileName);
+    if (!rawName) return { success: false, error: 'Invalid file name' };
+    if (!payload || typeof payload.dataBase64 !== 'string' || !payload.dataBase64.length) {
+      return { success: false, error: 'No file data provided' };
+    }
+
+    const buf = Buffer.from(payload.dataBase64, 'base64');
+    const notesDir = path.join(casesDir, caseNumber, 'Notes');
+    fs.mkdirSync(notesDir, { recursive: true });
+
+    // Collision handling: if a file with the same name already exists,
+    // append a short numeric suffix until we find a free slot. The renderer
+    // gets back the final saved name so its note JSON can reference it.
+    const ext = path.extname(rawName);
+    const stem = rawName.slice(0, rawName.length - ext.length);
+    let finalName = rawName, n = 1;
+    while (fs.existsSync(path.join(notesDir, finalName))) {
+      finalName = `${stem} (${n})${ext}`;
+      n++;
+      if (n > 999) return { success: false, error: 'Too many collisions' };
+    }
+    const filePath = path.join(notesDir, finalName);
+
+    if (security && security.isEnabled() && security.isUnlocked()) {
+      fs.writeFileSync(filePath, security.encryptBuffer(buf));
+    } else {
+      fs.writeFileSync(filePath, buf);
+    }
+    return { success: true, fileName: finalName, size: buf.length };
+  } catch (err) {
+    console.error('note-save-attachment failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('note-read-attachment', async (_e, payload) => {
+  try {
+    const caseNumber = _safeCaseNumber(payload && payload.caseNumber);
+    if (!caseNumber) return { success: false, error: 'Invalid case number' };
+    const fileName = _sanitizeAttachmentName(payload && payload.fileName);
+    if (!fileName) return { success: false, error: 'Invalid file name' };
+    const filePath = path.join(casesDir, caseNumber, 'Notes', fileName);
+    if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' };
+
+    let raw = fs.readFileSync(filePath);
+    if (security && security.isUnlocked() && security.isEncryptedBuffer && security.isEncryptedBuffer(raw)) {
+      raw = security.decryptBuffer(raw);
+    } else if (security && security.isEnabled() && !security.isUnlocked()) {
+      // Heuristic: if file starts with VIPENC magic but security is locked,
+      // we can't read it. Return a clear error so renderer can show a hint.
+      if (raw.length >= 6 && raw[0] === 0x56 && raw[1] === 0x49 && raw[2] === 0x50
+          && raw[3] === 0x45 && raw[4] === 0x4E && raw[5] === 0x43) {
+        return { success: false, error: 'File is encrypted; unlock Field Security to open.' };
+      }
+    }
+    return { success: true, dataBase64: raw.toString('base64'), size: raw.length };
+  } catch (err) {
+    console.error('note-read-attachment failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('note-delete-attachment', async (_e, payload) => {
+  try {
+    const caseNumber = _safeCaseNumber(payload && payload.caseNumber);
+    if (!caseNumber) return { success: false, error: 'Invalid case number' };
+    const fileName = _sanitizeAttachmentName(payload && payload.fileName);
+    if (!fileName) return { success: false, error: 'Invalid file name' };
+    const filePath = path.join(casesDir, caseNumber, 'Notes', fileName);
+    if (!fs.existsSync(filePath)) return { success: true, alreadyGone: true };
+    fs.unlinkSync(filePath);
+    return { success: true };
+  } catch (err) {
+    console.error('note-delete-attachment failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('note-list-attachments', async (_e, caseNumber) => {
+  try {
+    const safe = _safeCaseNumber(caseNumber);
+    if (!safe) return { success: false, error: 'Invalid case number', files: [] };
+    const notesDir = path.join(casesDir, safe, 'Notes');
+    if (!fs.existsSync(notesDir)) return { success: true, files: [] };
+    const entries = fs.readdirSync(notesDir, { withFileTypes: true });
+    const files = entries.filter(e => e.isFile()).map(e => {
+      let size = 0;
+      try { size = fs.statSync(path.join(notesDir, e.name)).size; } catch (_) {}
+      return { fileName: e.name, size };
+    });
+    return { success: true, files };
+  } catch (err) {
+    console.error('note-list-attachments failed:', err);
+    return { success: false, error: err.message, files: [] };
+  }
+});
+
 // --- Open external URL in system browser ---
 ipcMain.handle('open-external-url', async (_e, url) => {
   if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
@@ -1946,7 +2137,10 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber 
       // 3. Warrants (streamed from disk)
       addTreeToArchive(path.join(casesDir, caseNumber, 'Warrants'), 'Warrants', archive);
 
-      // 4. Manifest with per-file outcome — useful for DA-side audit
+      // 4. Note attachments (PDFs, pasted images stored from the Notes tab)
+      addTreeToArchive(path.join(casesDir, caseNumber, 'Notes'), 'Notes', archive);
+
+      // 5. Manifest with per-file outcome — useful for DA-side audit
       const manifest = {
         caseNumber,
         generatedAt: new Date().toISOString(),

@@ -292,25 +292,60 @@
         #reportEditor h6,
         #reportEditor li,
         #reportEditor td,
-        #reportEditor th {
+        #reportEditor th,
+        #noteEditor p,
+        #noteEditor div,
+        #noteEditor span,
+        #noteEditor h1,
+        #noteEditor h2,
+        #noteEditor h3,
+        #noteEditor h4,
+        #noteEditor h5,
+        #noteEditor h6,
+        #noteEditor li,
+        #noteEditor td,
+        #noteEditor th {
             color: #e5e7eb !important;
         }
 
-        #reportEditor {
+        #reportEditor,
+        #noteEditor {
             caret-color: #00d9ff;
         }
 
-        #reportEditor::selection {
+        #reportEditor::selection,
+        #noteEditor::selection {
             background-color: rgba(0, 217, 255, 0.3);
         }
 
-        #reportEditor img {
+        #reportEditor img,
+        #noteEditor img {
             max-width: 100%;
             height: auto;
             margin: 10px 0;
             border-radius: 4px;
             border: 1px solid rgba(0, 217, 255, 0.3);
             display: block;
+        }
+
+        /* Click-to-select highlight for images inside editable editors —
+           a visible indicator that Backspace/Delete will remove the image. */
+        #reportEditor img.viper-img-selected,
+        #noteEditor img.viper-img-selected {
+            outline: 2px solid #00d9ff;
+            outline-offset: 2px;
+            box-shadow: 0 0 0 4px rgba(0, 217, 255, 0.25);
+            cursor: pointer;
+        }
+        #reportEditor img,
+        #noteEditor img {
+            cursor: pointer;
+        }
+
+        /* Browser native spellcheck red underline — keep visible on dark editor */
+        #reportEditor[spellcheck="true"],
+        #noteEditor[spellcheck="true"] {
+            text-decoration-skip-ink: none;
         }
         
         /* Map Styling */
@@ -542,7 +577,19 @@
         body.light-mode #reportEditor h6,
         body.light-mode #reportEditor li,
         body.light-mode #reportEditor td,
-        body.light-mode #reportEditor th {
+        body.light-mode #reportEditor th,
+        body.light-mode #noteEditor p,
+        body.light-mode #noteEditor div,
+        body.light-mode #noteEditor span,
+        body.light-mode #noteEditor h1,
+        body.light-mode #noteEditor h2,
+        body.light-mode #noteEditor h3,
+        body.light-mode #noteEditor h4,
+        body.light-mode #noteEditor h5,
+        body.light-mode #noteEditor h6,
+        body.light-mode #noteEditor li,
+        body.light-mode #noteEditor td,
+        body.light-mode #noteEditor th {
             color: #1a1a1a !important;
         }
 
@@ -551,7 +598,8 @@
             background: linear-gradient(135deg, #f3e5f5 0%, #ede7f6 50%, #e8eaf6 100%) !important;
         }
 
-        body.light-mode #reportEditor {
+        body.light-mode #reportEditor,
+        body.light-mode #noteEditor {
             caret-color: #6a1b9a;
         }
 
@@ -960,7 +1008,9 @@
         let caseTasks = [];
         let caseNotes = [];
         let editingNoteId = null;
-        let noteAttachment = null;
+        let noteAttachment = null;          // legacy single-file; kept for backwards-compat shims
+        let pendingNoteAttachments = [];    // [{ id, fileName, size, type, dataBase64, status }] staged during edit
+        let savedNoteAttachments = [];      // [{ fileName, size, type }] already on disk for the note being edited
         let caseReport = '';
         let reportLastSaved = null;
         let caseEvidence = [];
@@ -2820,14 +2870,74 @@
                     break;
                 }
                 case 'prosecution': {
-                    const items = _readItems('prosecution', caseProsecution);
-                    if (!items.length) { emptyMsg('No prosecution information recorded.'); break; }
-                    items.forEach((p, i) => {
-                        itemHeading(`Charge ${i+1}`);
-                        fieldBold('Charge', p.charge); fieldBold('Defendant', p.defendant);
-                        fieldBold('Status', p.status); fieldBold('Court Date', p.courtDate);
-                        gap(3);
-                    });
+                    // New shape: single object on disk (per-case key OR global by case number)
+                    let p = null;
+                    try {
+                        p = JSON.parse(localStorage.getItem(`prosecution_${caseId}`) || 'null');
+                    } catch (_) { p = null; }
+                    if (!p) {
+                        try {
+                            const all = JSON.parse(localStorage.getItem('viperCaseProsecution') || '{}');
+                            p = all[caseNum] || null;
+                        } catch (_) { p = null; }
+                    }
+                    if (!p) { emptyMsg('No prosecution information recorded.'); break; }
+
+                    if (p.courtCaseNumber) fieldBold('Court Case #', p.courtCaseNumber);
+                    if (p.court) fieldBold('Court', p.court);
+                    if (p.daAssigned) fieldBold('Prosecutor', p.daAssigned);
+                    if (p.daEmail) fieldBold('Email', p.daEmail);
+                    if (p.daPhone) fieldBold('Phone', p.daPhone);
+
+                    const courtDates = Array.isArray(p.courtDates) ? p.courtDates : [];
+                    if (courtDates.length) {
+                        gap(2);
+                        fieldBold('Upcoming Court Dates', '');
+                        courtDates
+                            .slice()
+                            .sort((a, b) => (a.date + ' ' + (a.time || '')).localeCompare(b.date + ' ' + (b.time || '')))
+                            .forEach((cd, idx) => {
+                                const parts = [`${cd.date || '—'}${cd.time ? ' ' + cd.time : ''}`];
+                                if (cd.type) parts.push(cd.type);
+                                if (cd.courtroom) parts.push(cd.courtroom);
+                                if (cd.notes) parts.push(cd.notes);
+                                bodyText(`  ${idx + 1}. ${parts.join(' · ')}`);
+                            });
+                    }
+
+                    const charges = Array.isArray(p.charges) ? p.charges : [];
+                    if (charges.length) {
+                        gap(2);
+                        fieldBold('Charges Filed', `${charges.length} total · ${charges.filter(c => c.convicted).length} convicted`);
+                        charges.forEach((c, i) => {
+                            const off = c.offense || c.charge || '(unspecified)';
+                            const t = c.type ? ` (${c.type})` : '';
+                            const conv = c.convicted ? ' — CONVICTED' : '';
+                            bodyText(`  ${i + 1}. ${off}${t}${conv}`);
+                        });
+                    }
+
+                    const sentence = [];
+                    const y = parseInt(p.incarcerationYears, 10) || 0;
+                    const m = parseInt(p.incarcerationMonths, 10) || 0;
+                    const prob = parseInt(p.probationMonths, 10) || 0;
+                    if (y || m) {
+                        const inc = [];
+                        if (y) inc.push(`${y} year${y === 1 ? '' : 's'}`);
+                        if (m) inc.push(`${m} month${m === 1 ? '' : 's'}`);
+                        sentence.push('Incarceration: ' + inc.join(' '));
+                    }
+                    if (prob) sentence.push(`Probation: ${prob} month${prob === 1 ? '' : 's'}`);
+                    if (sentence.length) {
+                        gap(2);
+                        fieldBold('Sentencing', sentence.join(' · '));
+                    }
+                    if (p.sentenceNotes || p.sentenceInfo) {
+                        gap(1);
+                        fieldBold('Sentence Notes', '');
+                        bodyText(p.sentenceNotes || p.sentenceInfo);
+                    }
+                    gap(3);
                     break;
                 }
                 case 'areacanvas': {
@@ -2847,7 +2957,31 @@
                     items.forEach((n, i) => {
                         itemHeading(`${n.title || 'Note ' + (i+1)}`);
                         fieldBold('Created', n.createdAt ? new Date(n.createdAt).toLocaleString() : '');
-                        bodyText(n.content);
+                        // Render HTML-based notes as plain text for PDF (images live
+                        // inline as base64 in the source — would be visible only in
+                        // the live app). Fall back to legacy plain-text `content`.
+                        let plain = '';
+                        if (typeof n.contentHtml === 'string' && n.contentHtml.trim()) {
+                            const div = document.createElement('div');
+                            div.innerHTML = n.contentHtml;
+                            plain = div.textContent || div.innerText || '';
+                        } else if (typeof n.content === 'string') {
+                            plain = n.content;
+                        }
+                        if (plain.trim()) bodyText(plain);
+                        // Attachment manifest — the actual files are in the ZIP under Notes/
+                        const atts = Array.isArray(n.attachments) ? n.attachments : [];
+                        if (atts.length) {
+                            gap(2);
+                            fieldBold('Attachments', `${atts.length} file(s) included in ZIP under /Notes/`);
+                            atts.forEach((a, ai) => {
+                                bodyText(`  ${ai + 1}. ${a.fileName}${a.size ? '  (' + Math.round(a.size / 1024) + ' KB)' : ''}`);
+                            });
+                        } else if (n.hasAttachment && n.attachmentName) {
+                            // Legacy: file was never persisted — flag for the DA reviewer
+                            gap(2);
+                            fieldBold('Attachment', `${n.attachmentName} (legacy — file was not saved to disk)`);
+                        }
                         gap(4);
                     });
                     break;
@@ -3315,7 +3449,7 @@
                         caseNotes.forEach((note, index) => {
                             checkPage();
                             doc.setFont(undefined, 'bold');
-                            doc.text(`Note ${index + 1}: ${note.title}`, margin, yPos);
+                            doc.text(`Note ${index + 1}${note.title ? ': ' + note.title : ''}`, margin, yPos);
                             yPos += 6;
                             doc.setFont(undefined, 'normal');
                             doc.setTextColor(150, 150, 150);
@@ -3324,9 +3458,29 @@
                             yPos += 5;
                             doc.setFontSize(10);
                             doc.setTextColor(200, 200, 200);
-                            const lines = doc.splitTextToSize(note.content, contentWidth - 10);
+                            // Prefer HTML-based content, strip tags for PDF text
+                            let plain = '';
+                            if (typeof note.contentHtml === 'string' && note.contentHtml.trim()) {
+                                const div = document.createElement('div');
+                                div.innerHTML = note.contentHtml;
+                                plain = div.textContent || div.innerText || '';
+                            } else if (typeof note.content === 'string') {
+                                plain = note.content;
+                            }
+                            const lines = doc.splitTextToSize(plain, contentWidth - 10);
                             doc.text(lines, margin + 5, yPos);
                             yPos += (lines.length * 5) + 5;
+                            const atts = Array.isArray(note.attachments) ? note.attachments : [];
+                            if (atts.length) {
+                                doc.setTextColor(150, 100, 200);
+                                doc.text(`📎 ${atts.length} attachment(s) included in ZIP under /Notes/:`, margin + 5, yPos);
+                                yPos += 5;
+                                atts.forEach((a) => {
+                                    doc.text(`   • ${a.fileName}`, margin + 5, yPos);
+                                    yPos += 5;
+                                });
+                                doc.setTextColor(200, 200, 200);
+                            }
                         });
                     } else {
                         doc.text('No case notes', margin, yPos);
@@ -4672,44 +4826,65 @@
                     <!-- Add/Edit Note Form -->
                     <div id="noteForm" class="hidden glass-card rounded-xl p-6 border-2 border-viper-cyan/30">
                         <h4 class="text-lg font-bold mb-4" id="noteFormTitle">Add New Note</h4>
-                        <form onsubmit="saveNote(event)">
+                        <form id="noteFormEl" onsubmit="return saveNote(event);">
                             <div class="space-y-4">
+                                <!-- Rich Editor -->
                                 <div>
                                     <label class="block text-sm font-medium text-gray-300 mb-2">Note Content *</label>
-                                    <textarea id="noteContent" required rows="6" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none text-white placeholder-gray-500 resize-none" placeholder="Enter note details..."></textarea>
+                                    <div class="glass-card rounded-lg overflow-hidden border border-gray-600 focus-within:border-viper-cyan transition-colors">
+                                        <!-- Toolbar -->
+                                        <div class="bg-viper-card/70 border-b border-gray-700 p-2 flex items-center flex-wrap gap-1">
+                                            <button type="button" onclick="formatNoteText('bold')" title="Bold (Ctrl+B)" class="p-2 rounded hover:bg-viper-cyan/20 text-gray-300 hover:text-viper-cyan transition-colors w-9 h-9 flex items-center justify-center">
+                                                <span class="font-bold text-sm">B</span>
+                                            </button>
+                                            <button type="button" onclick="formatNoteText('italic')" title="Italic (Ctrl+I)" class="p-2 rounded hover:bg-viper-cyan/20 text-gray-300 hover:text-viper-cyan transition-colors w-9 h-9 flex items-center justify-center">
+                                                <span class="italic text-sm">I</span>
+                                            </button>
+                                            <button type="button" onclick="formatNoteText('underline')" title="Underline (Ctrl+U)" class="p-2 rounded hover:bg-viper-cyan/20 text-gray-300 hover:text-viper-cyan transition-colors w-9 h-9 flex items-center justify-center">
+                                                <span class="underline text-sm">U</span>
+                                            </button>
+                                            <button type="button" onclick="formatNoteText('insertUnorderedList')" title="Bullet list" class="p-2 rounded hover:bg-viper-cyan/20 text-gray-300 hover:text-viper-cyan transition-colors w-9 h-9 flex items-center justify-center text-sm">•≡</button>
+                                            <button type="button" onclick="formatNoteText('insertOrderedList')" title="Numbered list" class="p-2 rounded hover:bg-viper-cyan/20 text-gray-300 hover:text-viper-cyan transition-colors w-9 h-9 flex items-center justify-center text-sm">1.</button>
+                                            <div class="w-px h-6 bg-gray-600 mx-1"></div>
+                                            <select onchange="changeNoteFontSize(this.value)" id="noteFontSizeSelect" class="px-2 py-1 bg-viper-card border border-gray-600 rounded text-white text-xs focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none">
+                                                <option value="12">12</option>
+                                                <option value="14" selected>14</option>
+                                                <option value="16">16</option>
+                                                <option value="18">18</option>
+                                                <option value="20">20</option>
+                                                <option value="24">24</option>
+                                            </select>
+                                            <div class="flex-1"></div>
+                                            <span class="text-[10px] text-gray-500">Spellcheck ON • Paste images with Ctrl+V</span>
+                                        </div>
+                                        <!-- Editor Area -->
+                                        <div class="p-4 min-h-[220px] bg-viper-card/30" style="font-family: Arial, sans-serif;">
+                                            <div id="noteEditor" contenteditable="true" spellcheck="true" class="outline-none text-gray-100 min-h-[200px]" style="font-size: 14px; line-height: 1.6;" data-placeholder="Enter note details — paste screenshots with Ctrl+V, drag &amp; drop files below…"></div>
+                                        </div>
+                                    </div>
                                 </div>
-                                
+
+                                <!-- Attachments (multi-file, persisted to disk) -->
                                 <div>
-                                    <label class="block text-sm font-medium text-gray-300 mb-2">Attach Document (Optional)</label>
-                                    <div class="relative">
-                                        <input type="file" id="noteFile" accept=".pdf" class="hidden" onchange="handleNoteFileSelect(event)">
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Attachments (Optional — PDFs, images, any file)</label>
+                                    <div class="relative" id="noteDropZone">
+                                        <input type="file" id="noteFile" multiple class="hidden" onchange="handleNoteFileSelect(event)">
                                         <button type="button" onclick="document.getElementById('noteFile').click()" class="w-full px-4 py-3 bg-viper-card/50 border-2 border-dashed border-gray-600 rounded-lg hover:border-viper-cyan transition-colors flex items-center justify-center space-x-2 text-gray-400 hover:text-viper-cyan">
                                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
                                             </svg>
-                                            <span id="noteFileButtonText">Click to attach PDF</span>
+                                            <span id="noteFileButtonText">Click to attach files (or drop them here)</span>
                                         </button>
-                                        <div id="noteFileInfo" class="hidden mt-2 p-3 bg-viper-cyan/10 border border-viper-cyan/30 rounded-lg flex items-center justify-between">
-                                            <div class="flex items-center space-x-2">
-                                                <svg class="w-5 h-5 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                                                </svg>
-                                                <span id="noteFileName" class="text-sm text-viper-cyan"></span>
-                                            </div>
-                                            <button type="button" onclick="clearNoteFile()" class="text-gray-400 hover:text-red-400">
-                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                                                </svg>
-                                            </button>
-                                        </div>
+                                        <div id="noteAttachmentsList" class="mt-2 space-y-2"></div>
+                                        <p class="text-[11px] text-gray-500 mt-2">Files are stored under <code class="px-1 bg-viper-card/50 rounded">cases/${currentCase.caseNumber}/Notes/</code> and automatically included in the DA Export ZIP.</p>
                                     </div>
                                 </div>
-                                
+
                                 <div class="flex justify-end space-x-3 pt-4">
                                     <button type="button" onclick="cancelNoteForm()" class="px-4 py-2 rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-700 transition-colors">
                                         Cancel
                                     </button>
-                                    <button type="submit" class="px-6 py-2 rounded-lg bg-gradient-to-r from-viper-green to-viper-cyan font-medium text-viper-dark hover:shadow-lg hover:shadow-viper-green/50 transition-all">
+                                    <button type="button" onclick="saveNote(event)" class="px-6 py-2 rounded-lg bg-gradient-to-r from-viper-green to-viper-cyan font-medium text-viper-dark hover:shadow-lg hover:shadow-viper-green/50 transition-all">
                                         Save Note
                                     </button>
                                 </div>
@@ -4727,7 +4902,10 @@
                                 <h3 class="text-xl font-bold text-gray-300 mb-2">No Notes Yet</h3>
                                 <p class="text-gray-400 mb-6">Start documenting this case by adding your first note</p>
                             </div>
-                        ` : caseNotes.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(note => `
+                        ` : caseNotes.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(note => {
+                            const html = _noteRenderHtml(note);
+                            const atts = _noteAttachmentList(note);
+                            return `
                             <div class="glass-card rounded-xl p-6 hover:border-viper-cyan/30 transition-colors">
                                 <div class="flex items-start justify-between mb-4">
                                     <div class="flex-1">
@@ -4747,35 +4925,24 @@
                                         ` : ''}
                                     </div>
                                     <div class="flex items-center space-x-2">
-                                        <button onclick="editNote(${note.id})" class="p-2 rounded-lg text-gray-400 hover:text-viper-cyan hover:bg-viper-cyan/10 transition-colors">
+                                        <button onclick="editNote(${note.id})" class="p-2 rounded-lg text-gray-400 hover:text-viper-cyan hover:bg-viper-cyan/10 transition-colors" title="Edit note">
                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
                                             </svg>
                                         </button>
-                                        <button onclick="deleteNote(${note.id})" class="p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-400/10 transition-colors">
+                                        <button onclick="deleteNote(${note.id})" class="p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-400/10 transition-colors" title="Delete note">
                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                                             </svg>
                                         </button>
                                     </div>
                                 </div>
-                                
-                                <div class="prose prose-invert max-w-none">
-                                    <p class="text-gray-200 whitespace-pre-wrap">${note.content}</p>
-                                </div>
-                                
-                                ${note.hasAttachment ? `
-                                    <div class="mt-4 pt-4 border-t border-gray-700">
-                                        <div class="flex items-center space-x-2 text-viper-purple">
-                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
-                                            </svg>
-                                            <span class="text-sm font-medium">Attachment: ${note.attachmentName}</span>
-                                        </div>
-                                    </div>
-                                ` : ''}
+
+                                <div class="note-rendered text-gray-200" style="line-height: 1.6;">${html}</div>
+
+                                ${atts}
                             </div>
-                        `).join('')}
+                        `; }).join('')}
                     </div>
                 </div>
             `;
@@ -4783,98 +4950,497 @@
         
         function openAddNoteForm() {
             editingNoteId = null;
+            pendingNoteAttachments = [];
+            savedNoteAttachments = [];
             document.getElementById('noteFormTitle').textContent = 'Add New Note';
-            document.getElementById('noteContent').value = '';
-            clearNoteFile();
             document.getElementById('noteForm').classList.remove('hidden');
-            document.getElementById('noteContent').focus();
+            // Editor element only exists once the form is in the DOM, so we
+            // init AFTER unhiding. Wait one frame so layout settles for focus().
+            requestAnimationFrame(() => {
+                initializeNoteEditor('');
+                renderNoteAttachmentsList();
+                const ed = document.getElementById('noteEditor');
+                if (ed) ed.focus();
+            });
         }
-        
+
         function editNote(noteId) {
             const note = caseNotes.find(n => n.id === noteId);
             if (!note) return;
-            
+
             editingNoteId = noteId;
-            document.getElementById('noteFormTitle').textContent = 'Edit Note';
-            document.getElementById('noteContent').value = note.content;
-            
-            if (note.hasAttachment) {
-                document.getElementById('noteFileName').textContent = note.attachmentName;
-                document.getElementById('noteFileInfo').classList.remove('hidden');
-                document.getElementById('noteFileButtonText').textContent = 'Change PDF';
+            pendingNoteAttachments = [];
+            // Existing attachments: new schema first, then legacy single-file shim
+            if (Array.isArray(note.attachments)) {
+                savedNoteAttachments = note.attachments.map(a => ({ ...a }));
+            } else if (note.hasAttachment && note.attachmentName) {
+                savedNoteAttachments = [{
+                    fileName: note.attachmentName,
+                    size: 0,
+                    type: 'application/octet-stream',
+                    legacy: true   // file was never actually written to disk
+                }];
+            } else {
+                savedNoteAttachments = [];
             }
-            
+
+            document.getElementById('noteFormTitle').textContent = 'Edit Note';
             document.getElementById('noteForm').classList.remove('hidden');
-            document.getElementById('noteContent').focus();
-            document.getElementById('noteForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+            // Hydrate editor with HTML (or migrated plain text)
+            const initialHtml = _noteResolveHtml(note);
+            requestAnimationFrame(() => {
+                initializeNoteEditor(initialHtml);
+                renderNoteAttachmentsList();
+                const ed = document.getElementById('noteEditor');
+                if (ed) ed.focus();
+                document.getElementById('noteForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
         }
-        
+
         function cancelNoteForm() {
             editingNoteId = null;
+            pendingNoteAttachments = [];
+            savedNoteAttachments = [];
             document.getElementById('noteForm').classList.add('hidden');
-            document.getElementById('noteContent').value = '';
-            clearNoteFile();
+            const ed = document.getElementById('noteEditor');
+            if (ed) ed.innerHTML = '';
+            const list = document.getElementById('noteAttachmentsList');
+            if (list) list.innerHTML = '';
+            const fileInput = document.getElementById('noteFile');
+            if (fileInput) fileInput.value = '';
         }
-        
-        function handleNoteFileSelect(event) {
-            const file = event.target.files[0];
-            if (file && file.type === 'application/pdf') {
-                noteAttachment = file;
-                document.getElementById('noteFileName').textContent = file.name;
-                document.getElementById('noteFileInfo').classList.remove('hidden');
-                document.getElementById('noteFileButtonText').textContent = 'Change PDF';
-            } else if (file) {
-                viperToast('Please select a PDF file', 'error');
-                event.target.value = '';
+
+        // ── Note editor wiring (mirrors Reports module) ─────────────
+        function initializeNoteEditor(initialHtml) {
+            const editor = document.getElementById('noteEditor');
+            if (!editor) return;
+
+            if (initialHtml && initialHtml.trim()) {
+                editor.innerHTML = initialHtml;
+            } else {
+                editor.innerHTML = '';
             }
-        }
-        
-        function clearNoteFile() {
-            noteAttachment = null;
-            document.getElementById('noteFile').value = '';
-            document.getElementById('noteFileInfo').classList.add('hidden');
-            document.getElementById('noteFileButtonText').textContent = 'Click to attach PDF';
-        }
-        
-        function saveNote(event) {
-            event.preventDefault();
-            
-            const content = document.getElementById('noteContent').value.trim();
-            if (!content) return;
-            
-            if (editingNoteId) {
-                // Edit existing note
-                const note = caseNotes.find(n => n.id === editingNoteId);
-                if (note) {
-                    note.content = content;
-                    note.editHistory = note.editHistory || [];
-                    note.editHistory.push(new Date().toISOString());
-                    
-                    if (noteAttachment) {
-                        note.hasAttachment = true;
-                        note.attachmentName = noteAttachment.name;
+
+            // Keyboard shortcuts — B/I/U
+            editor.addEventListener('keydown', function(e) {
+                if (e.ctrlKey || e.metaKey) {
+                    if (e.key === 'b') { e.preventDefault(); formatNoteText('bold'); }
+                    else if (e.key === 'i') { e.preventDefault(); formatNoteText('italic'); }
+                    else if (e.key === 'u') { e.preventDefault(); formatNoteText('underline'); }
+                }
+            });
+
+            // Clipboard image paste — inlined as base64 data URL (matches Reports)
+            editor.addEventListener('paste', function(e) {
+                const items = e.clipboardData && e.clipboardData.items;
+                if (!items) return;
+                for (let i = 0; i < items.length; i++) {
+                    if (items[i].type.indexOf('image') !== -1) {
+                        e.preventDefault();
+                        const blob = items[i].getAsFile();
+                        const reader = new FileReader();
+                        reader.onload = function(ev) {
+                            const img = document.createElement('img');
+                            img.src = ev.target.result;
+                            img.style.maxWidth = '100%';
+                            img.style.height = 'auto';
+                            img.style.margin = '8px 0';
+                            img.style.borderRadius = '4px';
+                            img.style.border = '1px solid rgba(0, 217, 255, 0.3)';
+                            const sel = window.getSelection();
+                            if (sel.rangeCount > 0) {
+                                const range = sel.getRangeAt(0);
+                                range.deleteContents();
+                                range.insertNode(img);
+                                range.setStartAfter(img);
+                                range.setEndAfter(img);
+                                sel.removeAllRanges();
+                                sel.addRange(range);
+                            } else {
+                                editor.appendChild(img);
+                            }
+                        };
+                        reader.readAsDataURL(blob);
+                        return;
                     }
                 }
-            } else {
-                // Add new note
-                const newNote = {
-                    id: Date.now(),
-                    content: content,
-                    createdAt: new Date().toISOString(),
-                    editHistory: [],
-                    hasAttachment: noteAttachment !== null,
-                    attachmentName: noteAttachment ? noteAttachment.name : null
-                };
-                caseNotes.push(newNote);
+            });
+
+            // Drag-and-drop file attachments onto the editor — route to attachments list
+            editor.addEventListener('dragover', e => { e.preventDefault(); });
+            editor.addEventListener('drop', e => {
+                if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+                    // Only intercept if the drop is actual files (not text being dragged)
+                    e.preventDefault();
+                    _stageNoteFiles(e.dataTransfer.files);
+                }
+            });
+
+            // Click-to-select images so Backspace/Delete can remove them
+            _attachEditorImageHandlers(editor);
+        }
+
+        // Shared helper — makes <img> elements inside a contenteditable
+        // selectable/deletable. In contenteditable, single-clicking an image
+        // does not by default create a text Range that Backspace can target,
+        // so users couldn't delete pasted screenshots. This wires click → range
+        // selection + a CSS highlight, then explicit Backspace/Delete removal.
+        function _attachEditorImageHandlers(editor) {
+            if (!editor || editor._imgHandlersAttached) return;
+            editor._imgHandlersAttached = true;
+
+            editor.addEventListener('click', function(e) {
+                const img = (e.target && e.target.tagName === 'IMG') ? e.target : null;
+                // Clear any previously highlighted image first
+                editor.querySelectorAll('img.viper-img-selected').forEach(el => {
+                    if (el !== img) el.classList.remove('viper-img-selected');
+                });
+                if (!img) return;
+                e.preventDefault();
+                const sel = window.getSelection();
+                const range = document.createRange();
+                try { range.selectNode(img); } catch (_) { return; }
+                sel.removeAllRanges();
+                sel.addRange(range);
+                img.classList.add('viper-img-selected');
+                editor.focus();
+            });
+
+            editor.addEventListener('keydown', function(e) {
+                if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+                const selected = editor.querySelector('img.viper-img-selected');
+                if (!selected) return;
+                e.preventDefault();
+                selected.remove();
+                // Place caret where the image used to be (best-effort: at start of editor)
+                editor.focus();
+            });
+        }
+
+        function formatNoteText(command) {
+            document.execCommand(command, false, null);
+            const ed = document.getElementById('noteEditor');
+            if (ed) ed.focus();
+        }
+
+        function changeNoteFontSize(size) {
+            const ed = document.getElementById('noteEditor');
+            if (!ed) return;
+            ed.style.fontSize = size + 'px';
+            ed.focus();
+        }
+
+        function handleNoteFileSelect(event) {
+            const files = event.target.files;
+            if (!files || !files.length) return;
+            _stageNoteFiles(files);
+            event.target.value = ''; // allow re-picking the same file
+        }
+
+        function _stageNoteFiles(fileList) {
+            const arr = Array.from(fileList || []);
+            arr.forEach(f => {
+                const id = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+                pendingNoteAttachments.push({
+                    id, file: f, fileName: f.name, size: f.size,
+                    type: f.type || 'application/octet-stream', status: 'pending'
+                });
+            });
+            renderNoteAttachmentsList();
+        }
+
+        function removePendingNoteAttachment(id) {
+            pendingNoteAttachments = pendingNoteAttachments.filter(a => a.id !== id);
+            renderNoteAttachmentsList();
+        }
+
+        async function removeSavedNoteAttachment(fileName) {
+            if (!await viperConfirm(`Remove "${fileName}" from this note? The file will be deleted from disk.`, {danger:true, okText:'Remove'})) return;
+            savedNoteAttachments = savedNoteAttachments.filter(a => a.fileName !== fileName);
+            // Delete the file on disk immediately (best-effort — note save will re-sync the JSON)
+            try {
+                if (window.electronAPI && window.electronAPI.noteDeleteAttachment) {
+                    await window.electronAPI.noteDeleteAttachment({
+                        caseNumber: currentCase.caseNumber, fileName
+                    });
+                }
+            } catch (e) { console.warn('note attachment delete failed:', e); }
+            renderNoteAttachmentsList();
+        }
+
+        function renderNoteAttachmentsList() {
+            const list = document.getElementById('noteAttachmentsList');
+            if (!list) return;
+            const rows = [];
+            savedNoteAttachments.forEach(a => {
+                const sizeStr = a.size ? ` · ${_formatBytes(a.size)}` : '';
+                const legacy = a.legacy ? ' <span class="text-amber-400 text-[10px]">(legacy — file not on disk)</span>' : '';
+                rows.push(`
+                    <div class="flex items-center justify-between p-2 bg-viper-cyan/10 border border-viper-cyan/30 rounded-lg">
+                        <div class="flex items-center space-x-2 min-w-0 flex-1">
+                            <svg class="w-4 h-4 text-viper-cyan flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                            <span class="text-sm text-viper-cyan truncate" title="${_escapeAttr(a.fileName)}">${_escapeHtml(a.fileName)}</span>
+                            <span class="text-xs text-gray-500">${sizeStr}${legacy}</span>
+                        </div>
+                        <div class="flex items-center space-x-1 flex-shrink-0">
+                            ${a.legacy ? '' : `<button type="button" onclick="openNoteAttachment('${_escapeAttr(a.fileName)}')" class="px-2 py-1 text-xs rounded text-viper-green hover:bg-viper-green/10" title="Open">Open</button>`}
+                            <button type="button" onclick="removeSavedNoteAttachment('${_escapeAttr(a.fileName)}')" class="p-1 text-gray-400 hover:text-red-400" title="Remove">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                            </button>
+                        </div>
+                    </div>`);
+            });
+            pendingNoteAttachments.forEach(a => {
+                rows.push(`
+                    <div class="flex items-center justify-between p-2 bg-viper-purple/10 border border-viper-purple/30 rounded-lg">
+                        <div class="flex items-center space-x-2 min-w-0 flex-1">
+                            <svg class="w-4 h-4 text-viper-purple flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                            </svg>
+                            <span class="text-sm text-viper-purple truncate" title="${_escapeAttr(a.fileName)}">${_escapeHtml(a.fileName)}</span>
+                            <span class="text-xs text-gray-500"> · ${_formatBytes(a.size)} · queued</span>
+                        </div>
+                        <button type="button" onclick="removePendingNoteAttachment('${a.id}')" class="p-1 text-gray-400 hover:text-red-400" title="Cancel">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>`);
+            });
+            list.innerHTML = rows.join('');
+        }
+
+        async function openNoteAttachment(fileName) {
+            try {
+                if (!window.electronAPI || !window.electronAPI.noteReadAttachment) {
+                    viperToast('Opening attachments requires the VIPER desktop app.', 'info'); return;
+                }
+                const res = await window.electronAPI.noteReadAttachment({
+                    caseNumber: currentCase.caseNumber, fileName
+                });
+                if (!res || !res.success) {
+                    viperToast(`Could not open attachment: ${(res && res.error) || 'unknown error'}`, 'error');
+                    return;
+                }
+                // Best-effort content-type detection
+                const ext = (fileName.split('.').pop() || '').toLowerCase();
+                const mime = ext === 'pdf' ? 'application/pdf'
+                          : ext === 'png' ? 'image/png'
+                          : (ext === 'jpg' || ext === 'jpeg') ? 'image/jpeg'
+                          : ext === 'gif' ? 'image/gif'
+                          : ext === 'webp' ? 'image/webp'
+                          : ext === 'txt' ? 'text/plain'
+                          : 'application/octet-stream';
+
+                // Decode base64 → Uint8Array → Blob → blob: URL.
+                // Chromium blocks `data:application/pdf` in iframes (the built-in
+                // PDF viewer refuses to load from data: URLs), so PDFs would
+                // appear as a blank popup. blob: URLs are treated as same-origin
+                // and the PDF viewer accepts them.
+                const bin = atob(res.dataBase64);
+                const bytes = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                const blob = new Blob([bytes], { type: mime });
+                const blobUrl = URL.createObjectURL(blob);
+
+                if (mime === 'application/pdf' || mime.startsWith('image/')) {
+                    const w = window.open(blobUrl, '_blank');
+                    if (!w) {
+                        viperToast('Popup blocked — allow popups for VIPER.', 'error');
+                        URL.revokeObjectURL(blobUrl);
+                        return;
+                    }
+                    // Revoke the URL after the new window has loaded it (give
+                    // plenty of buffer for the PDF viewer to mount).
+                    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+                } else {
+                    const a = document.createElement('a');
+                    a.href = blobUrl; a.download = fileName;
+                    document.body.appendChild(a); a.click(); a.remove();
+                    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+                }
+            } catch (e) {
+                console.error('[openNoteAttachment] error:', e);
+                viperToast('Error opening attachment: ' + e.message, 'error');
             }
-            
-            // Save to localStorage
-            const allNotes = JSON.parse(localStorage.getItem('viperCaseNotes')) || {};
-            allNotes[currentCase.caseNumber] = caseNotes;
-            localStorage.setItem('viperCaseNotes', JSON.stringify(allNotes));
-            
-            // Refresh the tab
-            renderTabContent('notes');
+        }
+
+        // Read a File object as base64 (without the data:...;base64, prefix)
+        function _fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const r = new FileReader();
+                r.onload = () => {
+                    const s = r.result || '';
+                    const i = String(s).indexOf('base64,');
+                    resolve(i >= 0 ? String(s).slice(i + 7) : '');
+                };
+                r.onerror = () => reject(r.error || new Error('FileReader failed'));
+                r.readAsDataURL(file);
+            });
+        }
+
+        function _formatBytes(n) {
+            if (!n) return '0 B';
+            const u = ['B','KB','MB','GB']; let i = 0;
+            while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+            return n.toFixed(n < 10 && i > 0 ? 1 : 0) + ' ' + u[i];
+        }
+        function _escapeHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+        }
+        function _escapeAttr(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'})[c]);
+        }
+
+        // Resolve a note's display HTML: prefer contentHtml, fall back to legacy
+        // plain-text `content` (wrap in <p> with line breaks preserved).
+        function _noteResolveHtml(note) {
+            if (note && typeof note.contentHtml === 'string' && note.contentHtml.trim()) return note.contentHtml;
+            const txt = note && typeof note.content === 'string' ? note.content : '';
+            if (!txt.trim()) return '';
+            return '<p>' + _escapeHtml(txt).replace(/\r?\n/g, '<br>') + '</p>';
+        }
+
+        // Render-safe HTML used in the notes list (strips <script>/<iframe>)
+        function _noteRenderHtml(note) {
+            const html = _noteResolveHtml(note);
+            return html
+                .replace(/<\s*script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                .replace(/<\s*iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
+                .replace(/\son\w+\s*=\s*"[^"]*"/gi, '')
+                .replace(/\son\w+\s*=\s*'[^']*'/gi, '');
+        }
+
+        function _noteAttachmentList(note) {
+            const items = Array.isArray(note.attachments)
+                ? note.attachments
+                : (note.hasAttachment && note.attachmentName
+                    ? [{ fileName: note.attachmentName, legacy: true, size: 0 }]
+                    : []);
+            if (!items.length) return '';
+            return `
+                <div class="mt-4 pt-4 border-t border-gray-700">
+                    <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">Attachments (${items.length}) — included in DA Export</div>
+                    <div class="space-y-1.5">
+                        ${items.map(a => `
+                            <div class="flex items-center justify-between text-sm">
+                                <div class="flex items-center space-x-2 min-w-0 flex-1">
+                                    <svg class="w-4 h-4 text-viper-purple flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+                                    </svg>
+                                    <span class="text-viper-purple truncate" title="${_escapeAttr(a.fileName)}">${_escapeHtml(a.fileName)}</span>
+                                    ${a.size ? `<span class="text-xs text-gray-500">${_formatBytes(a.size)}</span>` : ''}
+                                    ${a.legacy ? `<span class="text-[10px] text-amber-400">(legacy — file not on disk)</span>` : ''}
+                                </div>
+                                ${a.legacy ? '' : `<button onclick="openNoteAttachment('${_escapeAttr(a.fileName)}')" class="text-xs text-viper-green hover:underline">Open</button>`}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>`;
+        }
+
+        async function saveNote(event) {
+            if (event && typeof event.preventDefault === 'function') event.preventDefault();
+            if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+            console.log('[saveNote] invoked');
+
+            try {
+                const editor = document.getElementById('noteEditor');
+                if (!editor) {
+                    console.error('[saveNote] noteEditor element not found');
+                    viperToast('Editor element missing — close and reopen the form.', 'error');
+                    return;
+                }
+                if (!currentCase || !currentCase.caseNumber) {
+                    console.error('[saveNote] currentCase missing', currentCase);
+                    viperToast('No case loaded — cannot save note.', 'error');
+                    return;
+                }
+
+                const contentHtml = editor.innerHTML.trim();
+                const plainText = (editor.innerText || editor.textContent || '').trim();
+                console.log('[saveNote] contentHtml length:', contentHtml.length, 'plainText length:', plainText.length, 'pendingAttachments:', pendingNoteAttachments.length);
+
+                const hasContent = plainText.length > 0
+                    || /<img\b/i.test(contentHtml)
+                    || pendingNoteAttachments.length > 0
+                    || savedNoteAttachments.filter(a => !a.legacy).length > 0;
+                if (!hasContent) {
+                    viperToast('Note is empty — type something, paste a screenshot, or attach a file.', 'info');
+                    return;
+                }
+
+                // 1. Upload any pending attachments to disk before mutating note JSON
+                const successfullySaved = [];
+                for (const att of pendingNoteAttachments) {
+                    try {
+                        if (!window.electronAPI || !window.electronAPI.noteSaveAttachment) {
+                            viperToast('Attachments require the VIPER desktop app — note saved without files.', 'info');
+                            break;
+                        }
+                        const dataBase64 = await _fileToBase64(att.file);
+                        const res = await window.electronAPI.noteSaveAttachment({
+                            caseNumber: currentCase.caseNumber,
+                            fileName: att.fileName,
+                            dataBase64
+                        });
+                        if (res && res.success) {
+                            successfullySaved.push({
+                                fileName: res.fileName,
+                                size: res.size || att.size,
+                                type: att.type,
+                                savedAt: new Date().toISOString()
+                            });
+                        } else {
+                            viperToast(`Failed to save attachment "${att.fileName}": ${(res && res.error) || 'unknown error'}`, 'error');
+                        }
+                    } catch (e) {
+                        console.error('[saveNote] attachment save failed:', e);
+                        viperToast(`Failed to save attachment "${att.fileName}": ${e.message}`, 'error');
+                    }
+                }
+                const finalAttachments = [...savedNoteAttachments.filter(a => !a.legacy), ...successfullySaved];
+
+                // 2. Update note JSON
+                if (editingNoteId) {
+                    const note = caseNotes.find(n => n.id === editingNoteId);
+                    if (note) {
+                        note.contentHtml = contentHtml;
+                        delete note.content;
+                        note.attachments = finalAttachments;
+                        delete note.hasAttachment;
+                        delete note.attachmentName;
+                        note.editHistory = note.editHistory || [];
+                        note.editHistory.push(new Date().toISOString());
+                    }
+                } else {
+                    caseNotes.push({
+                        id: Date.now(),
+                        contentHtml,
+                        createdAt: new Date().toISOString(),
+                        editHistory: [],
+                        attachments: finalAttachments
+                    });
+                }
+
+                const allNotes = JSON.parse(localStorage.getItem('viperCaseNotes')) || {};
+                allNotes[currentCase.caseNumber] = caseNotes;
+                localStorage.setItem('viperCaseNotes', JSON.stringify(allNotes));
+                console.log('[saveNote] saved. caseNotes count:', caseNotes.length);
+
+                // Reset state and re-render
+                editingNoteId = null;
+                pendingNoteAttachments = [];
+                savedNoteAttachments = [];
+                renderTabContent('notes');
+                viperToast('Note saved.', 'success');
+            } catch (err) {
+                console.error('[saveNote] unexpected error:', err);
+                viperToast('Failed to save note: ' + (err && err.message ? err.message : err), 'error');
+            }
         }
         
         async function deleteNote(noteId) {
@@ -4959,17 +5525,32 @@
                 
                 yPos += 3;
                 
-                // Content
+                // Content — prefer HTML-based contentHtml; fall back to legacy plain text
+                let plainContent = '';
+                if (typeof note.contentHtml === 'string' && note.contentHtml.trim()) {
+                    const div = document.createElement('div');
+                    div.innerHTML = note.contentHtml;
+                    plainContent = div.textContent || div.innerText || '';
+                } else if (typeof note.content === 'string') {
+                    plainContent = note.content;
+                }
                 doc.setFontSize(10);
                 doc.setTextColor(50, 50, 50);
-                const splitContent = doc.splitTextToSize(note.content, 180);
+                const splitContent = doc.splitTextToSize(plainContent, 180);
                 doc.text(splitContent, 15, yPos);
                 yPos += splitContent.length * 5 + 5;
                 
-                // Attachment info
-                if (note.hasAttachment) {
+                // Attachment info — new schema (array) or legacy single-file
+                const atts = Array.isArray(note.attachments) ? note.attachments : [];
+                if (atts.length) {
                     doc.setTextColor(157, 78, 221);
-                    doc.text(`📎 Attachment: ${note.attachmentName}`, 15, yPos);
+                    atts.forEach(a => {
+                        doc.text(`📎 ${a.fileName}${a.size ? ' (' + Math.round(a.size / 1024) + ' KB)' : ''}`, 15, yPos);
+                        yPos += 5;
+                    });
+                } else if (note.hasAttachment) {
+                    doc.setTextColor(157, 78, 221);
+                    doc.text(`📎 Attachment: ${note.attachmentName} (legacy — file not on disk)`, 15, yPos);
                     yPos += 5;
                 }
                 
@@ -5074,7 +5655,7 @@
                         
                         <!-- Editor Area -->
                         <div class="p-8 min-h-[600px]" style="font-family: Arial, sans-serif; background-color: #2a3441;">
-                            <div id="reportEditor" contenteditable="true" class="outline-none text-gray-100 min-h-[560px]" style="font-size: 14px; line-height: 1.6;">
+                            <div id="reportEditor" contenteditable="true" spellcheck="true" class="outline-none text-gray-100 min-h-[560px]" style="font-size: 14px; line-height: 1.6;">
                                 ${caseReport || '<p style="color: #e5e7eb;">Start typing your report here...</p>'}
                             </div>
                         </div>
@@ -5170,6 +5751,9 @@
                     }
                 }
             });
+
+            // Click-to-select images so Backspace/Delete can remove them
+            _attachEditorImageHandlers(editor);
         }
         
         function formatText(command) {
@@ -20184,29 +20768,135 @@
 
         function loadProsecutionData() {
             const stored = localStorage.getItem(`prosecution_${currentCase.id}`);
-            prosecutionData = stored ? JSON.parse(stored) : {
-                charges: [],
-                daAssigned: '',
+            const raw = stored ? JSON.parse(stored) : {};
+
+            // Defaults — covers brand-new cases AND missing fields on legacy records
+            prosecutionData = {
+                courtCaseNumber: '',
+                charges: [],            // [{offense, type, source, convicted}]
+                courtDates: [],         // [{id, date, time, courtroom, type, notes}]
+                daAssigned: '',         // also surfaced as "Prosecutor Name" in UI
                 daEmail: '',
                 daPhone: '',
-                court: '',
+                court: '',              // legacy single-court text — kept for back-compat
                 convicted: false,
-                convictedOffenses: '',
-                sentenceInfo: ''
+                convictedOffenses: '',  // legacy free-text — used as fallback if no per-charge data
+                incarcerationYears: '',
+                incarcerationMonths: '',
+                probationMonths: '',
+                sentenceNotes: '',
+                sentenceInfo: '',       // legacy free-text — kept as fallback
+                ...raw
             };
+
+            // Migrate legacy charge entries — older shape was {charge, description}
+            prosecutionData.charges = (prosecutionData.charges || []).map(c => {
+                if (c && typeof c === 'object' && (c.offense !== undefined || c.type !== undefined)) {
+                    return {
+                        offense: c.offense || c.charge || '',
+                        type: c.type || '',
+                        source: c.source || 'custom',
+                        convicted: !!c.convicted,
+                        description: c.description || ''
+                    };
+                }
+                // {charge, description}
+                return {
+                    offense: c.charge || '',
+                    type: '',
+                    source: 'custom',
+                    convicted: false,
+                    description: c.description || ''
+                };
+            });
+
+            // courtDates always an array
+            if (!Array.isArray(prosecutionData.courtDates)) prosecutionData.courtDates = [];
         }
 
         function saveProsecutionData() {
             localStorage.setItem(`prosecution_${currentCase.id}`, JSON.stringify(prosecutionData));
+            // Also sync to global so dashboard widgets / exports can read by case number
+            const all = JSON.parse(localStorage.getItem('viperCaseProsecution') || '{}');
+            all[currentCase.caseNumber] = prosecutionData;
+            localStorage.setItem('viperCaseProsecution', JSON.stringify(all));
+            _syncProsecutionTasks();
+        }
+
+        // ── Court dates → main dashboard task list ─────────────────────
+        // Each court date row becomes a dashboard task with kind:'court'.
+        // Tasks are tagged with source='prosecution' + courtDateId so we can
+        // safely re-sync (add new, update existing, prune deleted) without
+        // disturbing user-created tasks.
+        function _syncProsecutionTasks() {
+            try {
+                const tasks = JSON.parse(localStorage.getItem('viperTasks') || '[]');
+                const caseRef = currentCase.caseNumber;
+                const liveIds = new Set(prosecutionData.courtDates.map(d => d.id).filter(Boolean));
+
+                // 1. Remove orphaned prosecution-source tasks for this case
+                const filtered = tasks.filter(t => {
+                    if (t.source !== 'prosecution') return true;
+                    if (t.caseId !== caseRef) return true;
+                    return liveIds.has(t.courtDateId);
+                });
+
+                // 2. Upsert one task per court date
+                prosecutionData.courtDates.forEach(cd => {
+                    if (!cd.date) return; // skip empty rows
+                    const existing = filtered.find(t => t.source === 'prosecution' && t.courtDateId === cd.id);
+                    const title = `Court: ${cd.type || 'Hearing'}${cd.courtroom ? ' · ' + cd.courtroom : ''}`;
+                    const notes = [
+                        prosecutionData.courtCaseNumber ? `Case #${prosecutionData.courtCaseNumber}` : '',
+                        cd.notes || ''
+                    ].filter(Boolean).join(' — ');
+
+                    if (existing) {
+                        existing.title = title;
+                        existing.date = cd.date;
+                        existing.time = cd.time || '';
+                        existing.notes = notes;
+                        existing.caseId = caseRef;
+                        existing.priority = 'high';
+                        existing.kind = 'court';
+                        existing.source = 'prosecution';
+                    } else {
+                        filtered.push({
+                            id: Date.now() + Math.floor(Math.random() * 1000),
+                            title,
+                            date: cd.date,
+                            time: cd.time || '',
+                            priority: 'high',
+                            notes,
+                            caseId: caseRef,
+                            kind: 'court',           // dashboard renders these with gold/amber court styling
+                            source: 'prosecution',
+                            courtDateId: cd.id,
+                            hasFile: false,
+                            fileName: null,
+                            completed: false,
+                            createdAt: new Date().toISOString()
+                        });
+                    }
+                });
+
+                localStorage.setItem('viperTasks', JSON.stringify(filtered));
+            } catch (err) {
+                console.warn('[prosecution] task sync failed:', err);
+            }
         }
 
         function renderProsecutionTab() {
             loadProsecutionData();
 
+            const convictedCount = prosecutionData.charges.filter(c => c.convicted).length;
+            const totalCharges = prosecutionData.charges.length;
+            const sentenceSummary = _formatSentenceSummary(prosecutionData);
+
             return `
                 <div class="space-y-6">
                     <div class="flex justify-between items-center mb-6">
-                        <h2 class="text-2xl font-bold text-white">Prosecution</h2>
+                        <h2 class="text-2xl font-bold text-white">⚖️ Prosecution</h2>
                         <button onclick="editProsecutionData()" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition flex items-center gap-2">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
@@ -20215,76 +20905,147 @@
                         </button>
                     </div>
 
+                    <!-- Court Case Number + Prosecutor -->
+                    <div class="glass-card rounded-xl p-6">
+                        <h3 class="text-xl font-bold text-viper-cyan mb-4">Court Filing</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label class="text-sm text-gray-400">Court Case Number</label>
+                                <p class="text-lg text-white mt-1 font-mono">${prosecutionData.courtCaseNumber || '<span class="text-gray-500 font-sans">Not assigned</span>'}</p>
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-400">Court</label>
+                                <p class="text-lg text-white mt-1">${prosecutionData.court || '<span class="text-gray-500">Not specified</span>'}</p>
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-400">Prosecutor Name</label>
+                                <p class="text-lg text-white mt-1">${prosecutionData.daAssigned || '<span class="text-gray-500">Not assigned</span>'}</p>
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-400">Prosecutor Email</label>
+                                <p class="text-lg text-white mt-1">
+                                    ${prosecutionData.daEmail ? `<a href="mailto:${prosecutionData.daEmail}" class="text-viper-cyan hover:text-white">${prosecutionData.daEmail}</a>` : '<span class="text-gray-500">N/A</span>'}
+                                </p>
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-400">Prosecutor Phone</label>
+                                <p class="text-lg text-white mt-1">
+                                    ${prosecutionData.daPhone ? `<a href="tel:${prosecutionData.daPhone}" class="text-viper-cyan hover:text-white">${prosecutionData.daPhone}</a>` : '<span class="text-gray-500">N/A</span>'}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Upcoming Court Dates -->
+                    <div class="glass-card rounded-xl p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-xl font-bold text-amber-400 flex items-center gap-2">
+                                <span>⚖️</span>
+                                Upcoming Court Dates
+                            </h3>
+                            ${prosecutionData.courtDates.length > 0 ? `<span class="text-xs text-gray-400 uppercase tracking-wide">Pushed to dashboard tasks</span>` : ''}
+                        </div>
+                        ${prosecutionData.courtDates.length === 0 ? `
+                            <p class="text-gray-400 text-sm">No court dates scheduled. Click <span class="text-viper-cyan">Edit</span> to add one — it will automatically appear on the main dashboard task list.</p>
+                        ` : `
+                            <div class="space-y-2">
+                                ${prosecutionData.courtDates
+                                    .slice()
+                                    .sort((a, b) => (a.date + ' ' + (a.time || '')).localeCompare(b.date + ' ' + (b.time || '')))
+                                    .map(cd => {
+                                        const dt = cd.date ? new Date(cd.date + 'T' + (cd.time || '00:00')) : null;
+                                        const past = dt && dt < new Date();
+                                        return `
+                                            <div class="flex items-start justify-between p-3 rounded-lg border ${past ? 'bg-gray-500/5 border-gray-600 opacity-70' : 'bg-amber-500/10 border-amber-500/40'}">
+                                                <div class="flex-1 min-w-0">
+                                                    <div class="flex items-center gap-2 mb-1">
+                                                        <span class="font-semibold text-amber-300">${cd.type || 'Hearing'}</span>
+                                                        ${cd.courtroom ? `<span class="text-xs px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-200">${cd.courtroom}</span>` : ''}
+                                                        ${past ? '<span class="text-[10px] uppercase text-gray-500">past</span>' : ''}
+                                                    </div>
+                                                    <div class="text-sm text-white">${cd.date}${cd.time ? ' at ' + cd.time : ''}</div>
+                                                    ${cd.notes ? `<div class="text-xs text-gray-400 mt-1 italic">${cd.notes}</div>` : ''}
+                                                </div>
+                                            </div>`;
+                                    }).join('')}
+                            </div>
+                        `}
+                    </div>
+
                     <!-- Charges Filed -->
                     <div class="glass-card rounded-xl p-6">
-                        <h3 class="text-xl font-bold text-viper-cyan mb-4">Charges Filed</h3>
-                        ${prosecutionData.charges.length === 0 ? `
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-xl font-bold text-viper-cyan">Charges Filed</h3>
+                            ${totalCharges > 0 ? `<span class="text-xs text-gray-400">${totalCharges} total · ${convictedCount} convicted</span>` : ''}
+                        </div>
+                        ${totalCharges === 0 ? `
                             <p class="text-gray-400">No charges filed yet</p>
                         ` : `
-                            <div class="space-y-3">
-                                ${prosecutionData.charges.map((charge, index) => `
-                                    <div class="flex items-center justify-between p-4 bg-gradient-to-r from-viper-cyan/10 to-viper-purple/10 border border-viper-cyan/20 rounded-lg">
-                                        <div>
-                                            <p class="text-white font-medium">${charge.charge}</p>
-                                            ${charge.description ? `<p class="text-sm text-gray-400 mt-1">${charge.description}</p>` : ''}
+                            <div class="space-y-2">
+                                ${prosecutionData.charges.map(charge => `
+                                    <div class="flex items-center justify-between p-3 rounded-lg border ${charge.convicted ? 'bg-viper-green/10 border-viper-green/40' : 'bg-viper-cyan/5 border-viper-cyan/20'}">
+                                        <div class="flex-1 min-w-0">
+                                            <div class="flex items-center gap-2 flex-wrap">
+                                                <span class="font-medium text-white">${charge.offense || '(unspecified)'}</span>
+                                                ${charge.type ? `<span class="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-viper-card/70 text-gray-300 border border-gray-600">${charge.type}</span>` : ''}
+                                                ${charge.convicted ? '<span class="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-viper-green/30 text-viper-green border border-viper-green/50">✓ Convicted</span>' : ''}
+                                            </div>
+                                            ${charge.description ? `<div class="text-sm text-gray-400 mt-1">${charge.description}</div>` : ''}
                                         </div>
-                                        <button onclick="removeCharge(${index})" class="text-red-500 hover:text-red-400 transition">
-                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                                            </svg>
-                                        </button>
                                     </div>
                                 `).join('')}
                             </div>
                         `}
                     </div>
 
-                    <!-- District Attorney Information -->
-                    <div class="glass-card rounded-xl p-6">
-                        <h3 class="text-xl font-bold text-viper-cyan mb-4">District Attorney Information</h3>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div>
-                                <label class="text-sm text-gray-400">DA Assigned</label>
-                                <p class="text-lg text-white mt-1">${prosecutionData.daAssigned || 'Not assigned'}</p>
-                            </div>
-                            <div>
-                                <label class="text-sm text-gray-400">Court</label>
-                                <p class="text-lg text-white mt-1">${prosecutionData.court || 'Not specified'}</p>
-                            </div>
-                            <div>
-                                <label class="text-sm text-gray-400">Email</label>
-                                <p class="text-lg text-white mt-1">
-                                    ${prosecutionData.daEmail ? `<a href="mailto:${prosecutionData.daEmail}" class="text-viper-cyan hover:text-white">${prosecutionData.daEmail}</a>` : 'N/A'}
-                                </p>
-                            </div>
-                            <div>
-                                <label class="text-sm text-gray-400">Phone</label>
-                                <p class="text-lg text-white mt-1">
-                                    ${prosecutionData.daPhone ? `<a href="tel:${prosecutionData.daPhone}" class="text-viper-cyan hover:text-white">${prosecutionData.daPhone}</a>` : 'N/A'}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Conviction Status -->
+                    <!-- Conviction & Sentencing -->
                     <div class="glass-card rounded-xl p-6">
                         <div class="flex items-center justify-between mb-4">
-                            <h3 class="text-xl font-bold text-viper-cyan">Conviction Status</h3>
-                            <label class="flex items-center gap-3 cursor-pointer">
-                                <span class="text-white">Convicted</span>
-                                <input type="checkbox" ${prosecutionData.convicted ? 'checked' : ''} onchange="toggleConviction()" class="w-6 h-6 rounded border-2 border-viper-cyan bg-viper-dark checked:bg-viper-green">
-                            </label>
+                            <h3 class="text-xl font-bold text-viper-cyan">Conviction & Sentencing</h3>
+                            ${convictedCount > 0 || prosecutionData.convicted
+                                ? '<span class="text-xs px-2 py-1 rounded bg-viper-green/20 text-viper-green border border-viper-green/40">CONVICTED</span>'
+                                : '<span class="text-xs px-2 py-1 rounded bg-gray-500/20 text-gray-400 border border-gray-500/40">Not yet adjudicated</span>'}
                         </div>
-                        ${prosecutionData.convicted ? `
-                            <div class="space-y-4 p-4 bg-viper-green/10 rounded-lg border border-viper-green">
-                                <div>
-                                    <label class="text-sm text-gray-400">Offenses Convicted</label>
-                                    <p class="text-white mt-1 whitespace-pre-wrap">${prosecutionData.convictedOffenses || 'Not specified'}</p>
+                        ${(convictedCount > 0 || prosecutionData.convicted) ? `
+                            <div class="space-y-4">
+                                ${convictedCount > 0 ? `
+                                    <div>
+                                        <label class="text-sm text-gray-400">Convicted Offenses</label>
+                                        <ul class="mt-2 space-y-1">
+                                            ${prosecutionData.charges.filter(c => c.convicted).map(c => `
+                                                <li class="text-white flex items-center gap-2">
+                                                    <span class="text-viper-green">✓</span>
+                                                    <span>${c.offense}${c.type ? ` <span class="text-xs text-gray-400">(${c.type})</span>` : ''}</span>
+                                                </li>
+                                            `).join('')}
+                                        </ul>
+                                    </div>
+                                ` : (prosecutionData.convictedOffenses ? `
+                                    <div>
+                                        <label class="text-sm text-gray-400">Convicted Offenses (legacy)</label>
+                                        <p class="text-white mt-1 whitespace-pre-wrap">${prosecutionData.convictedOffenses}</p>
+                                    </div>
+                                ` : '')}
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 border-t border-gray-700">
+                                    <div>
+                                        <label class="text-sm text-gray-400">Incarceration</label>
+                                        <p class="text-white text-lg mt-1">${_fmtIncarceration(prosecutionData)}</p>
+                                    </div>
+                                    <div>
+                                        <label class="text-sm text-gray-400">Probation</label>
+                                        <p class="text-white text-lg mt-1">${prosecutionData.probationMonths ? prosecutionData.probationMonths + ' months' : '<span class="text-gray-500">—</span>'}</p>
+                                    </div>
+                                    <div>
+                                        <label class="text-sm text-gray-400">Summary</label>
+                                        <p class="text-white text-lg mt-1">${sentenceSummary || '<span class="text-gray-500">—</span>'}</p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <label class="text-sm text-gray-400">Sentence Information</label>
-                                    <p class="text-white mt-1 whitespace-pre-wrap">${prosecutionData.sentenceInfo || 'Not specified'}</p>
-                                </div>
+                                ${prosecutionData.sentenceNotes || prosecutionData.sentenceInfo ? `
+                                    <div>
+                                        <label class="text-sm text-gray-400">Sentence Notes</label>
+                                        <p class="text-white mt-1 whitespace-pre-wrap">${prosecutionData.sentenceNotes || prosecutionData.sentenceInfo}</p>
+                                    </div>
+                                ` : ''}
                             </div>
                         ` : `
                             <p class="text-gray-400">Case has not resulted in conviction</p>
@@ -20294,94 +21055,137 @@
             `;
         }
 
+        function _fmtIncarceration(p) {
+            const y = parseInt(p.incarcerationYears, 10);
+            const m = parseInt(p.incarcerationMonths, 10);
+            const parts = [];
+            if (y) parts.push(`${y} year${y === 1 ? '' : 's'}`);
+            if (m) parts.push(`${m} month${m === 1 ? '' : 's'}`);
+            return parts.length ? parts.join(' ') : '<span class="text-gray-500">—</span>';
+        }
+
+        function _formatSentenceSummary(p) {
+            const y = parseInt(p.incarcerationYears, 10) || 0;
+            const m = parseInt(p.incarcerationMonths, 10) || 0;
+            const prob = parseInt(p.probationMonths, 10) || 0;
+            const parts = [];
+            if (y || m) {
+                const inc = [];
+                if (y) inc.push(`${y}y`);
+                if (m) inc.push(`${m}m`);
+                parts.push(`Incarc. ${inc.join(' ')}`);
+            }
+            if (prob) parts.push(`Probation ${prob}m`);
+            return parts.join(' · ');
+        }
+
         function editProsecutionData() {
+            // Render the modal once; the inner blocks (charges/courtDates) get
+            // re-rendered piece-by-piece as the user adds/removes rows so we
+            // don't lose focus inside <input> elements on every keystroke.
             const modalHTML = `
                 <div id="prosecutionModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id === 'prosecutionModal') closeProsecutionModal()">
-                    <div class="glass-card rounded-xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+                    <div class="glass-card rounded-xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
                         <h3 class="text-2xl font-bold text-white mb-6">Edit Prosecution Information</h3>
                         <form onsubmit="saveProsecutionForm(event)" class="space-y-6">
-                            <!-- Charges Section -->
+
+                            <!-- Court Filing -->
                             <div class="glass-card rounded-lg p-4">
-                                <h4 class="text-lg font-bold text-viper-cyan mb-4">Charges Filed</h4>
-                                <div id="chargesList" class="space-y-3 mb-4">
-                                    ${prosecutionData.charges.map((charge, index) => `
-                                        <div class="flex gap-3 items-start">
-                                            <div class="flex-1">
-                                                <input type="text" value="${charge.charge}" onchange="updateCharge(${index}, 'charge', this.value)" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none mb-2" placeholder="Charge">
-                                                <input type="text" value="${charge.description || ''}" onchange="updateCharge(${index}, 'description', this.value)" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none" placeholder="Description (optional)">
-                                            </div>
-                                            <button type="button" onclick="removeCharge(${index})" class="px-3 py-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500 rounded-lg text-red-500 transition">
-                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                                                </svg>
-                                            </button>
-                                        </div>
-                                    `).join('')}
+                                <h4 class="text-lg font-bold text-viper-cyan mb-4">Court Filing</h4>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm text-gray-400 mb-2">Court Case Number</label>
+                                        <input type="text" id="courtCaseNumber" value="${(prosecutionData.courtCaseNumber || '').replace(/"/g,'&quot;')}" placeholder="e.g. 26CR-001234" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none font-mono">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm text-gray-400 mb-2">Court</label>
+                                        <input type="text" id="court" value="${(prosecutionData.court || '').replace(/"/g,'&quot;')}" placeholder="e.g. Superior Court, Dept 5" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
+                                    </div>
                                 </div>
-                                <button type="button" onclick="addCharge()" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition flex items-center gap-2">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-                                    </svg>
+                            </div>
+
+                            <!-- Prosecutor -->
+                            <div class="glass-card rounded-lg p-4">
+                                <h4 class="text-lg font-bold text-viper-cyan mb-4">Prosecutor</h4>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm text-gray-400 mb-2">Prosecutor Name</label>
+                                        <input type="text" id="daAssigned" value="${(prosecutionData.daAssigned || '').replace(/"/g,'&quot;')}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
+                                    </div>
+                                    <div></div>
+                                    <div>
+                                        <label class="block text-sm text-gray-400 mb-2">Email</label>
+                                        <input type="email" id="daEmail" value="${(prosecutionData.daEmail || '').replace(/"/g,'&quot;')}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm text-gray-400 mb-2">Phone</label>
+                                        <input type="tel" id="daPhone" value="${(prosecutionData.daPhone || '').replace(/"/g,'&quot;')}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Court Dates -->
+                            <div class="glass-card rounded-lg p-4">
+                                <div class="flex items-center justify-between mb-3">
+                                    <h4 class="text-lg font-bold text-amber-400">⚖️ Court Dates</h4>
+                                    <span class="text-[11px] text-gray-400">Each row auto-creates a high-priority task on the main dashboard.</span>
+                                </div>
+                                <div id="courtDatesList" class="space-y-3 mb-3"></div>
+                                <button type="button" onclick="addProsecutionCourtDate()" class="px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500 rounded-lg text-amber-400 transition flex items-center gap-2">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                                    Add Court Date
+                                </button>
+                            </div>
+
+                            <!-- Charges -->
+                            <div class="glass-card rounded-lg p-4">
+                                <div class="flex items-center justify-between mb-3">
+                                    <h4 class="text-lg font-bold text-viper-cyan">Charges Filed</h4>
+                                    <span class="text-[11px] text-gray-400">Pick from the Offense Library or type a custom charge.</span>
+                                </div>
+                                <div id="chargesList" class="space-y-3 mb-3"></div>
+                                <button type="button" onclick="addProsecutionCharge()" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition flex items-center gap-2">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                                     Add Charge
                                 </button>
                             </div>
 
-                            <!-- DA Information -->
+                            <!-- Sentencing -->
                             <div class="glass-card rounded-lg p-4">
-                                <h4 class="text-lg font-bold text-viper-cyan mb-4">District Attorney Information</h4>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <h4 class="text-lg font-bold text-viper-cyan mb-4">Sentencing</h4>
+                                <p class="text-xs text-gray-400 mb-3">Mark individual charges as "Convicted" in the Charges section above. Fill in sentence details here.</p>
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                                     <div>
-                                        <label class="block text-sm text-gray-400 mb-2">DA Assigned</label>
-                                        <input type="text" id="daAssigned" value="${prosecutionData.daAssigned || ''}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
+                                        <label class="block text-sm text-gray-400 mb-2">Incarceration (Years)</label>
+                                        <input type="number" min="0" step="1" id="incarcerationYears" value="${prosecutionData.incarcerationYears || ''}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
                                     </div>
                                     <div>
-                                        <label class="block text-sm text-gray-400 mb-2">Court</label>
-                                        <input type="text" id="court" value="${prosecutionData.court || ''}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
+                                        <label class="block text-sm text-gray-400 mb-2">Incarceration (Months)</label>
+                                        <input type="number" min="0" step="1" id="incarcerationMonths" value="${prosecutionData.incarcerationMonths || ''}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
                                     </div>
                                     <div>
-                                        <label class="block text-sm text-gray-400 mb-2">Email</label>
-                                        <input type="email" id="daEmail" value="${prosecutionData.daEmail || ''}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm text-gray-400 mb-2">Phone</label>
-                                        <input type="tel" id="daPhone" value="${prosecutionData.daPhone || ''}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
+                                        <label class="block text-sm text-gray-400 mb-2">Probation (Months)</label>
+                                        <input type="number" min="0" step="1" id="probationMonths" value="${prosecutionData.probationMonths || ''}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
                                     </div>
                                 </div>
-                            </div>
-
-                            <!-- Conviction Information -->
-                            <div class="glass-card rounded-lg p-4">
-                                <h4 class="text-lg font-bold text-viper-cyan mb-4">Conviction Information</h4>
-                                <label class="flex items-center gap-3 mb-4 cursor-pointer">
-                                    <input type="checkbox" id="convicted" ${prosecutionData.convicted ? 'checked' : ''} onchange="toggleConvictionForm()" class="w-5 h-5 rounded border-gray-600 text-viper-cyan focus:ring-viper-cyan">
-                                    <span class="text-white font-medium">Convicted</span>
-                                </label>
-                                <div id="convictionDetails" class="${prosecutionData.convicted ? '' : 'hidden'} space-y-4">
-                                    <div>
-                                        <label class="block text-sm text-gray-400 mb-2">Offenses Convicted</label>
-                                        <textarea id="convictedOffenses" rows="3" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">${prosecutionData.convictedOffenses || ''}</textarea>
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm text-gray-400 mb-2">Sentence Information</label>
-                                        <textarea id="sentenceInfo" rows="3" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">${prosecutionData.sentenceInfo || ''}</textarea>
-                                    </div>
+                                <div>
+                                    <label class="block text-sm text-gray-400 mb-2">Sentence Notes (Restitution, conditions, etc.)</label>
+                                    <textarea id="sentenceNotes" rows="3" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">${prosecutionData.sentenceNotes || prosecutionData.sentenceInfo || ''}</textarea>
                                 </div>
                             </div>
 
                             <div class="flex gap-3 justify-end">
-                                <button type="button" onclick="closeProsecutionModal()" class="px-6 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white transition">
-                                    Cancel
-                                </button>
-                                <button type="submit" class="px-6 py-2 bg-viper-cyan hover:bg-viper-cyan/80 rounded-lg text-white font-semibold transition">
-                                    Save
-                                </button>
+                                <button type="button" onclick="closeProsecutionModal()" class="px-6 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white transition">Cancel</button>
+                                <button type="submit" class="px-6 py-2 bg-viper-cyan hover:bg-viper-cyan/80 rounded-lg text-white font-semibold transition">Save</button>
                             </div>
                         </form>
                     </div>
                 </div>
             `;
-            
+
             document.body.insertAdjacentHTML('beforeend', modalHTML);
+            _renderProsecutionCourtDates();
+            _renderProsecutionCharges();
         }
 
         function closeProsecutionModal() {
@@ -20389,42 +21193,196 @@
             if (modal) modal.remove();
         }
 
-        function toggleConvictionForm() {
-            const checkbox = document.getElementById('convicted');
-            const details = document.getElementById('convictionDetails');
-            if (checkbox.checked) {
-                details.classList.remove('hidden');
+        // ── Court date rows (modal sub-renderer) ────────────────────────
+        function _renderProsecutionCourtDates() {
+            const host = document.getElementById('courtDatesList');
+            if (!host) return;
+            if (!prosecutionData.courtDates.length) {
+                host.innerHTML = '<p class="text-sm text-gray-500 italic">No court dates yet.</p>';
+                return;
+            }
+            host.innerHTML = prosecutionData.courtDates.map((cd, idx) => `
+                <div class="grid grid-cols-1 md:grid-cols-12 gap-2 items-end p-3 rounded-lg bg-amber-500/5 border border-amber-500/30" data-cd-idx="${idx}">
+                    <div class="md:col-span-3">
+                        <label class="block text-[11px] text-gray-400 mb-1">Date</label>
+                        <input type="date" value="${cd.date || ''}" onchange="updateProsecutionCourtDate(${idx}, 'date', this.value)" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-amber-500 focus:outline-none">
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="block text-[11px] text-gray-400 mb-1">Time</label>
+                        <input type="time" value="${cd.time || ''}" onchange="updateProsecutionCourtDate(${idx}, 'time', this.value)" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-amber-500 focus:outline-none">
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="block text-[11px] text-gray-400 mb-1">Type</label>
+                        <select onchange="updateProsecutionCourtDate(${idx}, 'type', this.value)" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-amber-500 focus:outline-none">
+                            ${['Arraignment','Preliminary Hearing','Pre-Trial','Motion','Trial','Sentencing','Status','Other'].map(t => `<option value="${t}"${cd.type === t ? ' selected' : ''}>${t}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="block text-[11px] text-gray-400 mb-1">Courtroom</label>
+                        <input type="text" value="${(cd.courtroom || '').replace(/"/g,'&quot;')}" onchange="updateProsecutionCourtDate(${idx}, 'courtroom', this.value)" placeholder="e.g. Dept 5" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-amber-500 focus:outline-none">
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="block text-[11px] text-gray-400 mb-1">Notes</label>
+                        <input type="text" value="${(cd.notes || '').replace(/"/g,'&quot;')}" onchange="updateProsecutionCourtDate(${idx}, 'notes', this.value)" placeholder="Optional" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-amber-500 focus:outline-none">
+                    </div>
+                    <div class="md:col-span-1 flex justify-end">
+                        <button type="button" onclick="removeProsecutionCourtDate(${idx})" class="w-9 h-9 flex items-center justify-center rounded-lg bg-red-500/10 border border-red-500/40 text-red-400 hover:bg-red-500/20 transition" title="Remove">−</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function addProsecutionCourtDate() {
+            prosecutionData.courtDates.push({
+                id: 'cd_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+                date: '', time: '', type: 'Pre-Trial', courtroom: '', notes: ''
+            });
+            _renderProsecutionCourtDates();
+        }
+
+        function updateProsecutionCourtDate(idx, field, value) {
+            if (!prosecutionData.courtDates[idx]) return;
+            prosecutionData.courtDates[idx][field] = value;
+        }
+
+        function removeProsecutionCourtDate(idx) {
+            prosecutionData.courtDates.splice(idx, 1);
+            _renderProsecutionCourtDates();
+        }
+
+        // ── Charge rows (modal sub-renderer) ────────────────────────────
+        function _renderProsecutionCharges() {
+            const host = document.getElementById('chargesList');
+            if (!host) return;
+            if (!prosecutionData.charges.length) {
+                host.innerHTML = '<p class="text-sm text-gray-500 italic">No charges yet.</p>';
+                return;
+            }
+            host.innerHTML = prosecutionData.charges.map((c, idx) => `
+                <div class="grid grid-cols-1 md:grid-cols-12 gap-2 items-end p-3 rounded-lg ${c.convicted ? 'bg-viper-green/5 border border-viper-green/40' : 'bg-viper-cyan/5 border border-viper-cyan/20'}" data-charge-idx="${idx}">
+                    <div class="md:col-span-6">
+                        <label class="block text-[11px] text-gray-400 mb-1">Offense</label>
+                        <select class="prosecution-charge-select w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none mb-2" onchange="onProsecutionChargeSelect(${idx}, this)">
+                            ${_offenseLibraryOptionsHtml(c.offense)}
+                        </select>
+                        <input type="text" class="prosecution-charge-input w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none ${(c.source === 'custom' || (c.offense && !_offenseInLibrary(c.offense))) ? '' : 'hidden'}" placeholder="Type custom offense..." value="${(c.offense || '').replace(/"/g,'&quot;')}" oninput="updateProsecutionCharge(${idx}, 'offense', this.value)">
+                    </div>
+                    <div class="md:col-span-3">
+                        <label class="block text-[11px] text-gray-400 mb-1">Type</label>
+                        <select onchange="updateProsecutionCharge(${idx}, 'type', this.value)" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none">
+                            ${_offenseTypeOptionsHtml(c.type)}
+                        </select>
+                    </div>
+                    <div class="md:col-span-2 flex items-end pb-1">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" ${c.convicted ? 'checked' : ''} onchange="toggleProsecutionChargeConvicted(${idx}, this.checked)" class="w-5 h-5 rounded border-gray-600 text-viper-green focus:ring-viper-green">
+                            <span class="text-sm ${c.convicted ? 'text-viper-green font-medium' : 'text-gray-300'}">Convicted</span>
+                        </label>
+                    </div>
+                    <div class="md:col-span-1 flex justify-end">
+                        <button type="button" onclick="removeProsecutionCharge(${idx})" class="w-9 h-9 flex items-center justify-center rounded-lg bg-red-500/10 border border-red-500/40 text-red-400 hover:bg-red-500/20 transition" title="Remove">−</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function _offenseInLibrary(value) {
+            const offenses = JSON.parse(localStorage.getItem('viperOffenseReference') || '[]');
+            return offenses.some(o => `${o.code} - ${o.description}` === value);
+        }
+
+        function addProsecutionCharge() {
+            prosecutionData.charges.push({ offense: '', type: '', source: 'custom', convicted: false, description: '' });
+            _renderProsecutionCharges();
+        }
+
+        function updateProsecutionCharge(idx, field, value) {
+            if (!prosecutionData.charges[idx]) return;
+            prosecutionData.charges[idx][field] = value;
+        }
+
+        function onProsecutionChargeSelect(idx, sel) {
+            if (!prosecutionData.charges[idx]) return;
+            const row = sel.closest('[data-charge-idx]');
+            const input = row && row.querySelector('.prosecution-charge-input');
+            const typeSel = row && row.querySelectorAll('select')[1]; // second select = type
+            if (sel.value === '__custom__') {
+                prosecutionData.charges[idx].offense = '';
+                prosecutionData.charges[idx].source = 'custom';
+                if (input) { input.classList.remove('hidden'); input.value = ''; input.focus(); }
+            } else if (sel.value === '') {
+                prosecutionData.charges[idx].offense = '';
+                prosecutionData.charges[idx].source = 'library';
+                if (input) input.classList.add('hidden');
             } else {
-                details.classList.add('hidden');
+                prosecutionData.charges[idx].offense = sel.value;
+                prosecutionData.charges[idx].source = 'library';
+                if (input) input.classList.add('hidden');
+                // Auto-fill type from the picked option's data-type, only if currently empty
+                const opt = sel.selectedOptions && sel.selectedOptions[0];
+                const inferredType = opt && opt.dataset && opt.dataset.type;
+                if (inferredType && typeSel && !typeSel.value) {
+                    typeSel.value = inferredType;
+                    prosecutionData.charges[idx].type = inferredType;
+                }
             }
         }
 
-        function addCharge() {
-            prosecutionData.charges.push({ charge: '', description: '' });
-            closeProsecutionModal();
-            editProsecutionData();
+        function toggleProsecutionChargeConvicted(idx, checked) {
+            if (!prosecutionData.charges[idx]) return;
+            prosecutionData.charges[idx].convicted = !!checked;
+            // Mirror to top-level convicted flag if any charge is convicted
+            prosecutionData.convicted = prosecutionData.charges.some(c => c.convicted);
+            _renderProsecutionCharges();
         }
 
-        function updateCharge(index, field, value) {
-            prosecutionData.charges[index][field] = value;
+        function removeProsecutionCharge(idx) {
+            prosecutionData.charges.splice(idx, 1);
+            _renderProsecutionCharges();
         }
 
         async function removeCharge(index) {
+            // Kept for backward compat with old buttons that may still bind it
             if (await viperConfirm('Remove this charge?', {danger:true, okText:'Delete'})) {
                 prosecutionData.charges.splice(index, 1);
                 saveProsecutionData();
                 if (document.getElementById('prosecutionModal')) {
-                    closeProsecutionModal();
-                    editProsecutionData();
+                    _renderProsecutionCharges();
                 } else {
                     renderTabContent('prosecution');
                 }
             }
         }
 
+        function saveProsecutionForm(event) {
+            event.preventDefault();
+
+            // Pull non-array fields from the form
+            prosecutionData.courtCaseNumber = document.getElementById('courtCaseNumber').value.trim();
+            prosecutionData.court = document.getElementById('court').value.trim();
+            prosecutionData.daAssigned = document.getElementById('daAssigned').value.trim();
+            prosecutionData.daEmail = document.getElementById('daEmail').value.trim();
+            prosecutionData.daPhone = document.getElementById('daPhone').value.trim();
+            prosecutionData.incarcerationYears = document.getElementById('incarcerationYears').value.trim();
+            prosecutionData.incarcerationMonths = document.getElementById('incarcerationMonths').value.trim();
+            prosecutionData.probationMonths = document.getElementById('probationMonths').value.trim();
+            prosecutionData.sentenceNotes = document.getElementById('sentenceNotes').value.trim();
+
+            // Charges/courtDates have been mutated in-place by onchange handlers, but
+            // pick up any custom-input typing that fires only on blur (already wired
+            // via oninput on custom input). Refresh the convicted aggregate.
+            prosecutionData.convicted = prosecutionData.charges.some(c => c.convicted);
+
+            saveProsecutionData();
+            closeProsecutionModal();
+            renderTabContent('prosecution');
+            viperToast('Prosecution info saved. Court dates pushed to dashboard.', 'success');
+        }
+
+        // Legacy entry point kept so older callers still work
         function toggleConviction() {
             prosecutionData.convicted = !prosecutionData.convicted;
-            if (prosecutionData.convicted && !prosecutionData.convictedOffenses) {
+            if (prosecutionData.convicted && !prosecutionData.charges.some(c => c.convicted)) {
                 editProsecutionData();
             } else {
                 saveProsecutionData();
@@ -20432,20 +21390,9 @@
             }
         }
 
-        function saveProsecutionForm(event) {
-            event.preventDefault();
-            
-            prosecutionData.daAssigned = document.getElementById('daAssigned').value.trim();
-            prosecutionData.court = document.getElementById('court').value.trim();
-            prosecutionData.daEmail = document.getElementById('daEmail').value.trim();
-            prosecutionData.daPhone = document.getElementById('daPhone').value.trim();
-            prosecutionData.convicted = document.getElementById('convicted').checked;
-            prosecutionData.convictedOffenses = document.getElementById('convictedOffenses').value.trim();
-            prosecutionData.sentenceInfo = document.getElementById('sentenceInfo').value.trim();
-            
-            saveProsecutionData();
-            closeProsecutionModal();
-            renderTabContent('prosecution');
+        function toggleConvictionForm() {
+            // Legacy — the modal no longer uses a single boolean toggle, but
+            // any leftover wiring should be a no-op rather than throw.
         }
 
         // ============================================

@@ -88,6 +88,9 @@ let lastIcacCopsBounds = null;
 let gridcopBrowserView = null;
 let gridcopViewVisible = false;
 let lastGridcopBounds = null;
+let callyoBrowserView = null;
+let callyoViewVisible = false;
+let lastCallyoBounds = null;
 
 // Icon path: use unpacked asar path in production, normal path in dev
 const iconPath = app.isPackaged
@@ -584,6 +587,7 @@ app.whenReady().then(async () => {
       if (icacDataSystemViewVisible && lastIcacDataSystemBounds) icacDataSystemBrowserView.setBounds(lastIcacDataSystemBounds);
       if (icacCopsViewVisible && lastIcacCopsBounds) icacCopsBrowserView.setBounds(lastIcacCopsBounds);
       if (gridcopViewVisible && lastGridcopBounds) gridcopBrowserView.setBounds(lastGridcopBounds);
+      if (callyoViewVisible && lastCallyoBounds) callyoBrowserView.setBounds(lastCallyoBounds);
     });
 
     // Create persistent BrowserView for TLO (TransUnion) — people search / skip tracing
@@ -960,6 +964,78 @@ app.whenReady().then(async () => {
       console.error('[GRIDCOP] render-process-gone', details);
     });
 
+    // Create persistent BrowserView for Callyo (10-21 / undercover phone platform)
+    callyoBrowserView = new BrowserView({
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        partition: 'persist:callyo',
+      },
+    });
+    callyoBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    callyoBrowserView.setAutoResize({ width: false, height: false });
+    callyoBrowserView.webContents.on('did-finish-load', () => {
+      if (!callyoViewVisible) mainWindow.webContents.focus();
+      callyoBrowserView.webContents.insertCSS(`
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0d1117; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+      `).catch(() => {});
+
+      // Auto-fill credentials on Callyo login page
+      const url = callyoBrowserView.webContents.getURL();
+      const looksLikeLogin = /log-in|login|signin|sign-in|authenticate|account/i.test(url) || url.endsWith('/') || url.includes('callyo');
+      if (!looksLikeLogin) return;
+      mainWindow.webContents.executeJavaScript(
+        `JSON.stringify({ username: localStorage.getItem('callyoUsername') || '', password: localStorage.getItem('callyoPassword') || '' })`
+      ).then(json => {
+        const creds = JSON.parse(json);
+        if (!creds.username && !creds.password) return;
+        callyoBrowserView.webContents.executeJavaScript(`
+          (function() {
+            function setVal(el, val) {
+              if (!el || !val) return;
+              const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+              nativeSetter.call(el, val);
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              el.dispatchEvent(new Event('blur', { bubbles: true }));
+            }
+            function pickUser() {
+              return document.querySelector('input[name="username"]')
+                  || document.querySelector('input#username')
+                  || document.querySelector('input[name="user"]')
+                  || document.querySelector('input[name="email"]')
+                  || document.querySelector('input[type="email"]')
+                  || document.querySelector('input[autocomplete="username"]')
+                  || (function() {
+                       const all = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
+                       return all.find(i => /user|email|login/i.test((i.name||'') + ' ' + (i.id||'') + ' ' + (i.placeholder||''))) || all[0] || null;
+                     })();
+            }
+            function pickPass() {
+              return document.querySelector('input[type="password"]')
+                  || document.querySelector('input[name="password"]')
+                  || document.querySelector('input#password');
+            }
+            function fill() {
+              setVal(pickUser(), ${JSON.stringify(creds.username)});
+              setVal(pickPass(), ${JSON.stringify(creds.password)});
+            }
+            setTimeout(fill, 400);
+            setTimeout(fill, 1200);
+            setTimeout(fill, 2500);
+          })();
+        `).catch(() => {});
+      }).catch(() => {});
+    });
+    callyoBrowserView.webContents.on('did-fail-load', (_e, code, desc, url, isMain) => {
+      if (isMain) console.error('[CALLYO] did-fail-load', code, desc, url);
+    });
+    callyoBrowserView.webContents.on('render-process-gone', (_e, details) => {
+      console.error('[CALLYO] render-process-gone', details);
+    });
+
     // ── Resource-Hub download interceptor ────────────────────────────
     // Intercept file downloads that originate INSIDE a Resource Hub
     // BrowserView (Flock, ICACCOPS, ICAC Data System, etc.) and route
@@ -978,6 +1054,7 @@ app.whenReady().then(async () => {
       { partition: 'persist:icacDataSystem', label: 'ICAC Data System', defaultTag: 'CyberTip-Reports' },
       { partition: 'persist:icacCops',       label: 'ICACCOPS',         defaultTag: 'ICACCOPS-Reports' },
       { partition: 'persist:gridcop',        label: 'Gridcop',          defaultTag: 'Gridcop-Reports'  },
+      { partition: 'persist:callyo',         label: 'Callyo',           defaultTag: 'Callyo-Reports'   },
     ];
 
     const _sanitizeDlName = (n) => String(n || 'download').replace(/[\\/:*?"<>|\r\n]+/g, '_').slice(0, 180) || 'download';
@@ -1038,7 +1115,7 @@ app.whenReady().then(async () => {
     // on the next page. Media player is handled by its own show/hide via reportBounds().
     mainWindow.webContents.on('did-start-navigation', (_event, _url, isInPlace) => {
       if (isInPlace) return; // ignore hash/pushState navigations
-      const pageViews = [flockBrowserView, tloBrowserView, accurintBrowserView, vigilantBrowserView, icacDataSystemBrowserView, icacCopsBrowserView, gridcopBrowserView];
+      const pageViews = [flockBrowserView, tloBrowserView, accurintBrowserView, vigilantBrowserView, icacDataSystemBrowserView, icacCopsBrowserView, gridcopBrowserView, callyoBrowserView];
       for (const bv of pageViews) {
         if (!bv) continue;
         try { mainWindow.removeBrowserView(bv); } catch (_) {}
@@ -1051,6 +1128,7 @@ app.whenReady().then(async () => {
       icacDataSystemViewVisible = false;
       icacCopsViewVisible = false;
       gridcopViewVisible = false;
+      callyoViewVisible = false;
     });
 
     // When the renderer page finishes loading, ask it to report media bounds
@@ -1375,6 +1453,81 @@ ipcMain.handle('note-delete-attachment', async (_e, payload) => {
     return { success: false, error: err.message };
   }
 });
+
+// Merge PDF attachments into the Notes-export PDF and save via dialog.
+// Renderer builds the cover/notes section with jsPDF, hands us the
+// base PDF as base64 + the names of PDF attachments to append.
+// We read each PDF from cases/{caseNumber}/Notes/, decrypt if needed,
+// copy pages with pdf-lib, then prompt save location.
+ipcMain.handle('notes-export-merge-attachments', async (_e, payload) => {
+  try {
+    const caseNumber = _safeCaseNumber(payload && payload.caseNumber);
+    if (!caseNumber) return { success: false, error: 'Invalid case number' };
+    const basePdfBase64 = payload && payload.basePdfBase64;
+    if (!basePdfBase64 || typeof basePdfBase64 !== 'string') {
+      return { success: false, error: 'Missing base PDF data' };
+    }
+    const attachmentNames = Array.isArray(payload && payload.attachmentNames) ? payload.attachmentNames : [];
+    const defaultFilename = (payload && payload.defaultFilename) || `Case_${caseNumber}_Notes.pdf`;
+
+    const saveDlg = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export Case Notes',
+      defaultPath: defaultFilename,
+      filters: [{ name: 'PDF Document', extensions: ['pdf'] }]
+    });
+    if (saveDlg.canceled || !saveDlg.filePath) return { success: false, canceled: true };
+
+    const { PDFDocument } = require('pdf-lib');
+    const baseBytes = Buffer.from(basePdfBase64, 'base64');
+    const outDoc = await PDFDocument.load(baseBytes);
+
+    let mergedCount = 0;
+    const warnings = [];
+
+    for (const rawName of attachmentNames) {
+      const fileName = _sanitizeAttachmentName(rawName);
+      if (!fileName) { warnings.push(`${rawName}: invalid filename`); continue; }
+      const attPath = path.join(casesDir, caseNumber, 'Notes', fileName);
+      if (!fs.existsSync(attPath)) { warnings.push(`${fileName}: file not found`); continue; }
+      try {
+        let raw = fs.readFileSync(attPath);
+        if (security && security.isUnlocked() && security.isEncryptedBuffer && security.isEncryptedBuffer(raw)) {
+          raw = security.decryptBuffer(raw);
+        } else if (security && security.isEnabled() && !security.isUnlocked()) {
+          if (raw.length >= 6 && raw[0] === 0x56 && raw[1] === 0x49 && raw[2] === 0x50
+              && raw[3] === 0x45 && raw[4] === 0x4E && raw[5] === 0x43) {
+            warnings.push(`${fileName}: encrypted (unlock Field Security)`);
+            continue;
+          }
+        }
+        const attDoc = await PDFDocument.load(raw, { ignoreEncryption: true });
+        const pageIndices = attDoc.getPageIndices();
+        const copied = await outDoc.copyPages(attDoc, pageIndices);
+        for (const p of copied) outDoc.addPage(p);
+        mergedCount += pageIndices.length;
+      } catch (perErr) {
+        warnings.push(`${fileName}: ${perErr.message}`);
+        console.warn(`[notes-export-merge-attachments] failed for ${fileName}:`, perErr.message);
+      }
+    }
+
+    const mergedBytes = await outDoc.save({ useObjectStreams: true });
+    fs.writeFileSync(saveDlg.filePath, Buffer.from(mergedBytes));
+
+    return {
+      success: true,
+      path: saveDlg.filePath,
+      mergedCount,
+      requested: attachmentNames.length,
+      warnings: warnings.length ? warnings : undefined
+    };
+  } catch (err) {
+    console.error('notes-export-merge-attachments failed:', err);
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
+
 
 ipcMain.handle('note-list-attachments', async (_e, caseNumber) => {
   try {
@@ -3037,6 +3190,7 @@ const _rhResourceMap = () => ({
   icacDataSystem: { bv: icacDataSystemBrowserView, label: 'ICAC Data System', defaultTag: 'CyberTip-Reports' },
   icacCops:       { bv: icacCopsBrowserView,       label: 'ICACCOPS',         defaultTag: 'ICACCOPS-Reports' },
   gridcop:        { bv: gridcopBrowserView,        label: 'Gridcop',          defaultTag: 'Gridcop-Reports'  },
+  callyo:         { bv: callyoBrowserView,         label: 'Callyo',           defaultTag: 'Callyo-Reports'   },
 });
 
 ipcMain.handle('rh-capture-pdf', async (_e, payload) => {
@@ -5200,6 +5354,30 @@ ipcMain.on('gridcop-set-visible', (_event, visible) => {
   }
 });
 
+// ── Callyo IPC ──────────────────────────────────────────────────────
+ipcMain.on('callyo-set-bounds', (_event, bounds) => {
+  if (!callyoBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  const b = { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) };
+  if (b.width < 10 || b.height < 10) return;
+  lastCallyoBounds = b;
+  if (callyoViewVisible) callyoBrowserView.setBounds(b);
+});
+ipcMain.on('callyo-set-visible', (_event, visible) => {
+  if (!callyoBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  callyoViewVisible = visible;
+  if (visible && lastCallyoBounds) {
+    const currentUrl = callyoBrowserView.webContents.getURL();
+    if (!currentUrl || currentUrl === 'about:blank') {
+      callyoBrowserView.webContents.loadURL('https://callyo.com/log-in');
+    }
+    try { mainWindow.addBrowserView(callyoBrowserView); } catch (_) {}
+    callyoBrowserView.setBounds(lastCallyoBounds);
+  } else {
+    callyoBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    try { mainWindow.removeBrowserView(callyoBrowserView); } catch (_) {}
+  }
+});
+
 // Generic zoom factor control for the Resource Hub BrowserViews.
 // Renderer sends a resource id ('flock' | 'tlo' | 'accurint' | 'vigilant')
 // and a zoom factor (0.5 .. 2.0). Persists across visibility toggles
@@ -5216,6 +5394,7 @@ ipcMain.on('rh-set-zoom', (_event, payload) => {
     else if (resId === 'icacDataSystem') bv = icacDataSystemBrowserView;
     else if (resId === 'icacCops') bv = icacCopsBrowserView;
     else if (resId === 'gridcop') bv = gridcopBrowserView;
+    else if (resId === 'callyo') bv = callyoBrowserView;
     if (bv && bv.webContents && !bv.webContents.isDestroyed()) {
       bv.webContents.setZoomFactor(f);
     }

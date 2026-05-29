@@ -20,6 +20,7 @@
     { id: 'icacDataSystem', label: 'ICAC Data System',  enabledKey: 'icacDataSystemEnabled', isBV: true },
     { id: 'icacCops',       label: 'ICACCOPS',          enabledKey: 'icacCopsEnabled',       isBV: true },
     { id: 'gridcop',        label: 'Gridcop',           enabledKey: 'gridcopEnabled',        isBV: true },
+    { id: 'callyo',         label: 'Callyo',            enabledKey: 'callyoEnabled',         isBV: true },
     { id: 'trace',    label: 'TRACE Network',       enabledKey: 'traceSearch_enabled', isBV: false },
     { id: 'fmcsa',    label: 'FMCSA Carrier',       enabledKey: 'fmcsaEnabled',        isBV: false },
   ];
@@ -57,6 +58,7 @@
       .rh-tab[data-res=icacDataSystem].rh-active::after{width:100%;background:#fbbf24}
       .rh-tab[data-res=icacCops].rh-active::after{width:100%;background:#22d3ee}
       .rh-tab[data-res=gridcop].rh-active::after{width:100%;background:#a855f7}
+      .rh-tab[data-res=callyo].rh-active::after{width:100%;background:#fb923c}
       .rh-bv-placeholder{background:rgba(10,15,28,.5);border:1px dashed rgba(255,255,255,.08);border-radius:8px}
       .rh-result-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:14px;transition:border-color .15s}
       .rh-result-card:hover{border-color:rgba(255,255,255,.12)}
@@ -141,6 +143,9 @@
           </div>
           <div id="rhPanel_gridcop" class="absolute inset-0 hidden">
             <div id="rhBV_gridcop" class="rh-bv-placeholder w-full h-full flex items-center justify-center"><p class="text-gray-600 text-xs">Loading Gridcop…</p></div>
+          </div>
+          <div id="rhPanel_callyo" class="absolute inset-0 hidden">
+            <div id="rhBV_callyo" class="rh-bv-placeholder w-full h-full flex items-center justify-center"><p class="text-gray-600 text-xs">Loading Callyo…</p></div>
           </div>
           <div id="rhPanel_trace" class="absolute inset-0 hidden overflow-y-auto">
             <div class="p-5 space-y-4">
@@ -287,6 +292,7 @@
     if (resId === 'icacDataSystem') { window.electronAPI.icacDataSystemSetBounds(b); window.electronAPI.icacDataSystemSetVisible(true); }
     if (resId === 'icacCops')       { window.electronAPI.icacCopsSetBounds(b);       window.electronAPI.icacCopsSetVisible(true); }
     if (resId === 'gridcop')        { window.electronAPI.gridcopSetBounds(b);        window.electronAPI.gridcopSetVisible(true); }
+    if (resId === 'callyo')         { window.electronAPI.callyoSetBounds(b);         window.electronAPI.callyoSetVisible(true); }
     // Re-assert the persisted per-BV zoom every time a BV is shown so it
     // survives reloads, lazy-init, and tab switches.
     if (window.electronAPI && window.electronAPI.rhSetZoom) {
@@ -303,6 +309,7 @@
     if (resId === 'icacDataSystem') window.electronAPI.icacDataSystemSetVisible(false);
     if (resId === 'icacCops')       window.electronAPI.icacCopsSetVisible(false);
     if (resId === 'gridcop')        window.electronAPI.gridcopSetVisible(false);
+    if (resId === 'callyo')         window.electronAPI.callyoSetVisible(false);
   }
 
   function hideAllBVs() { RESOURCES.filter(r => r.isBV).forEach(r => hideBV(r.id)); }

@@ -191,10 +191,16 @@ class SnapchatWarrantUI {
     }
 
     switchSection(section) {
+        // Only reset pagination/conversation state when actually switching to a
+        // different section. Re-rendering the SAME section (e.g. after a page
+        // change or filter change) must preserve the just-mutated state.
+        const isSectionChange = section !== this.activeSection;
         this.activeSection = section;
-        this._activeConversationId = null;
-        this._convPage = 0;
-        this._mediaPage = 0;
+        if (isSectionChange) {
+            this._activeConversationId = null;
+            this._convPage = 0;
+            this._mediaPage = 0;
+        }
         const content = document.getElementById('swp-content-area');
         if (content) {
             content.innerHTML = this._renderSection();
@@ -204,6 +210,19 @@ class SnapchatWarrantUI {
         document.querySelectorAll('.swp-nav-item').forEach(el => {
             el.classList.toggle('active', el.dataset.section === section);
         });
+    }
+
+    /**
+     * Rerender the current section without touching pagination/filter state.
+     * Used by pagination buttons (which already mutated _convPage / _mediaPage
+     * before calling this).
+     */
+    rerenderSection() {
+        const content = document.getElementById('swp-content-area');
+        if (!content) return;
+        content.innerHTML = this._renderSection();
+        this._loadLazyImages(content);
+        if (this.activeSection === 'geo') this._initGeoMap();
     }
 
     switchImport(idx) {
@@ -432,7 +451,7 @@ class SnapchatWarrantUI {
                 <h2 class="swp-section-title">💬 Conversations (${total.toLocaleString()})</h2>
                 <div class="swp-toolbar">
                     <input type="text" placeholder="Filter by participant or title..." value="${this._esc(this._convFilter)}"
-                        class="swp-input" oninput="window.snapchatWarrantUI._convFilter = this.value; window.snapchatWarrantUI._convPage = 0; window.snapchatWarrantUI.switchSection('conversations')">
+                        class="swp-input" oninput="window.snapchatWarrantUI._convFilter = this.value; window.snapchatWarrantUI._convPage = 0; window.snapchatWarrantUI.rerenderSection()">
                 </div>
                 <div class="swp-conv-list">
                     ${pageGroups.map(g => `
@@ -572,7 +591,7 @@ class SnapchatWarrantUI {
                     <div class="swp-filter-tabs">
                         ${['all', 'image', 'video'].map(t => `
                             <button class="swp-filter-tab ${this._mediaFilterType === t ? 'active' : ''}"
-                                onclick="window.snapchatWarrantUI._mediaFilterType='${t}'; window.snapchatWarrantUI._mediaPage=0; window.snapchatWarrantUI.switchSection('media')">
+                                onclick="window.snapchatWarrantUI._mediaFilterType='${t}'; window.snapchatWarrantUI._mediaPage=0; window.snapchatWarrantUI.rerenderSection()">
                                 ${t === 'all' ? 'All' : t === 'image' ? '🖼️ Images' : '🎬 Videos'}
                             </button>
                         `).join('')}
@@ -955,10 +974,10 @@ class SnapchatWarrantUI {
         return `
             <div class="swp-pagination">
                 <button class="swp-btn-sm" ${prevDisabled ? 'disabled' : ''}
-                    onclick="window.snapchatWarrantUI.${stateField} = Math.max(0, window.snapchatWarrantUI.${stateField} - 1); window.snapchatWarrantUI.switchSection(window.snapchatWarrantUI.activeSection)">← Prev</button>
+                    onclick="window.snapchatWarrantUI.${stateField} = Math.max(0, window.snapchatWarrantUI.${stateField} - 1); window.snapchatWarrantUI.rerenderSection()">← Prev</button>
                 <span class="swp-page-label">Page ${page + 1} of ${totalPages}</span>
                 <button class="swp-btn-sm" ${nextDisabled ? 'disabled' : ''}
-                    onclick="window.snapchatWarrantUI.${stateField} = Math.min(${totalPages - 1}, window.snapchatWarrantUI.${stateField} + 1); window.snapchatWarrantUI.switchSection(window.snapchatWarrantUI.activeSection)">Next →</button>
+                    onclick="window.snapchatWarrantUI.${stateField} = Math.min(${totalPages - 1}, window.snapchatWarrantUI.${stateField} + 1); window.snapchatWarrantUI.rerenderSection()">Next →</button>
             </div>
         `;
     }
@@ -1030,6 +1049,12 @@ class SnapchatWarrantUI {
 
     /**
      * Lazy-load disk-path images & videos via IPC.
+     *
+     * Images use data: URLs (cheap to cache, fine for img.src).
+     * Videos use blob: URLs — Chromium's HTML5 video pipeline is unreliable
+     * with data: URLs for AAC/H.264 streams (audio often fails to decode and
+     * seeking breaks on large files). Blob URLs hit the same memory path the
+     * Media element expects.
      */
     async _loadLazyImages(container) {
         const root = container || document;
@@ -1056,6 +1081,7 @@ class SnapchatWarrantUI {
         for (const vid of videos) {
             const diskPath = vid.dataset.diskPath;
             if (!diskPath) continue;
+            // Reuse a cached blob URL if we made one
             if (this._mediaCache[diskPath]) {
                 vid.src = this._mediaCache[diskPath];
                 vid.classList.remove('swp-lazy-video');
@@ -1063,12 +1089,16 @@ class SnapchatWarrantUI {
             }
             try {
                 const result = await this.module.readMedia(diskPath);
-                if (result) {
-                    const dataUrl = `data:${result.mimeType};base64,${result.data}`;
-                    this._mediaCache[diskPath] = dataUrl;
-                    vid.src = dataUrl;
-                    vid.classList.remove('swp-lazy-video');
-                }
+                if (!result) continue;
+                // Decode base64 → Uint8Array → Blob → blob: URL
+                const bin = atob(result.data);
+                const bytes = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                const blob = new Blob([bytes], { type: result.mimeType || 'video/mp4' });
+                const blobUrl = URL.createObjectURL(blob);
+                this._mediaCache[diskPath] = blobUrl;
+                vid.src = blobUrl;
+                vid.classList.remove('swp-lazy-video');
             } catch (e) { /* ignore */ }
         }
     }

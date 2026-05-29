@@ -11,6 +11,8 @@ vault.enc
 vault_plain.json
 cases/
 _parse_pdfs*.py
+_extract_pdfs.js
+test_fixtures/
 *.traineddata
 test_pdf_output.txt
 sample-data/kik-sample/

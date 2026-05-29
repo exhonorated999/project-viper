@@ -1308,6 +1308,78 @@
             // Load timeline events (Pattern 2)
             loadTimelineEvents();
 
+            // ── Self-heal modules from persisted data ──────────────────
+            // If a case has data persisted under a module's storage key but
+            // the corresponding tab isn't in `currentCase.modules`, restore
+            // it so the user doesn't see "empty" cases / disappearing tabs.
+            // The data is keyed by caseNumber/caseId and survives even when
+            // the modules array gets out of sync (older case format, a
+            // sync bug, manual JSON edit, etc.).
+            try {
+                if (!Array.isArray(currentCase.modules)) currentCase.modules = [];
+                const caseId = currentCase.id;
+                const caseNum = currentCase.caseNumber;
+                const hasArr = (v) => Array.isArray(v) && v.length > 0;
+                const _ls = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (_) { return null; } };
+
+                // Map of moduleId → "does this case have data for it?"
+                const dataChecks = {
+                    notes:           hasArr(caseNotes),
+                    reports:         !!(caseReport && String(caseReport).trim()),
+                    evidence:        hasArr(caseEvidence),
+                    warrants:        hasArr(caseWarrants),
+                    suspects:        hasArr(caseSuspects)        || hasArr(_ls(`suspects_${caseId}`)),
+                    victims:         hasArr(caseVictims)         || hasArr(_ls(`victims_${caseId}`)),
+                    victimBusiness:  hasArr(_ls(`victimBusinesses_${caseId}`)),
+                    witnesses:       hasArr(caseWitnesses)       || hasArr(_ls(`witnesses_${caseId}`)),
+                    vehicles:        hasArr(caseVehicles)        || hasArr(_ls(`recoveredVehicles_${caseId}`)),
+                    cargo:           hasArr(_ls(`cargo_${caseId}`)),
+                    firearms:        hasArr(caseFirearms)        || hasArr(_ls(`firearms_${caseId}`)),
+                    narcotics:       hasArr(caseNarcotics)       || hasArr(_ls(`narcotics_${caseId}`)),
+                    money:           hasArr(caseMoney)           || hasArr(_ls(`money_${caseId}`)),
+                    missingpersons:  hasArr(caseMissingPersons)  || hasArr(_ls(`missingpersons_${caseId}`)),
+                    areacanvas:      hasArr(caseCanvasEntries)   || hasArr(_ls(`areacanvas_${caseId}`)),
+                    prosecution:     hasArr(caseProsecution)     || !!_ls(`prosecution_${caseId}`),
+                    opsplan:         !!_ls(`opsplan_${caseId}`),
+                    involvedPersons: hasArr(_ls(`involvedPersons_${caseId}`)),
+                    consentSearch:   hasArr(_ls(`consentSearches_${caseId}`)),
+                    cyberTips:       hasArr(_ls(`cyberTips_${caseId}`)),
+                    traceImport:     hasArr((_ls('viperTraceImports') || {})[caseNum]),
+                    rmsImport:       hasArr(_ls(`rmsImports_${caseId}`)),
+                    oversightImport: hasArr(_ls(`oversightImport_${caseId}`)),
+                    googleWarrant:   hasArr(_ls(`googleWarrant_${caseId}`)),
+                    kikWarrant:      hasArr(_ls(`kikWarrant_${caseId}`)),
+                    discordWarrant:  hasArr(_ls(`discordWarrant_${caseId}`)),
+                    snapchatWarrant: hasArr(_ls(`snapchatWarrant_${caseId}`)),
+                    metaWarrant:     hasArr(_ls(`metaWarrant_${caseId}`))
+                };
+
+                const restored = [];
+                for (const [modId, hasData] of Object.entries(dataChecks)) {
+                    if (hasData && !currentCase.modules.includes(modId)) {
+                        currentCase.modules.push(modId);
+                        restored.push(modId);
+                    }
+                }
+                if (restored.length) {
+                    if (Array.isArray(currentCase.tabOrder)) {
+                        for (const modId of restored) {
+                            if (!currentCase.tabOrder.includes(modId)) currentCase.tabOrder.push(modId);
+                        }
+                    }
+                    const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+                    const ci = cases.findIndex(c => c.id === currentCase.id);
+                    if (ci >= 0) {
+                        cases[ci].modules = currentCase.modules;
+                        if (currentCase.tabOrder) cases[ci].tabOrder = currentCase.tabOrder;
+                        localStorage.setItem('viperCases', JSON.stringify(cases));
+                    }
+                    console.log('[loadCase] self-healed missing modules from persisted data:', restored);
+                }
+            } catch (e) {
+                console.warn('[loadCase] module self-heal failed:', e);
+            }
+
             renderCaseHeader();
             renderTabs();
 
@@ -2519,6 +2591,158 @@
             function gap(h = 4) { y += h; }
             function emptyMsg(msg) { doc.setFontSize(10); doc.setFont(undefined, 'italic'); doc.setTextColor(...LGRAY); doc.text(msg, M + 2, y); y += 6; }
 
+            // ── Image embed helpers (used by Notes section) ────────────────
+            // Resolve format from a data: URL or MIME string.
+            function _imgFormatFromMime(mime) {
+                if (!mime) return 'PNG';
+                const m = mime.toLowerCase();
+                if (m.includes('jpeg') || m.includes('jpg')) return 'JPEG';
+                if (m.includes('webp')) return 'WEBP';
+                if (m.includes('gif')) return 'GIF';
+                return 'PNG'; // jsPDF auto-handles PNG; safe default
+            }
+            // Load an image source (data: URL OR blob URL) and return { dataUrl, w, h, format }.
+            function _loadImageMeta(src) {
+                return new Promise((resolve, reject) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const fmtMatch = /^data:([^;]+);/i.exec(src);
+                        const mime = fmtMatch ? fmtMatch[1] : 'image/png';
+                        resolve({
+                            dataUrl: src,
+                            w: img.naturalWidth || img.width,
+                            h: img.naturalHeight || img.height,
+                            format: _imgFormatFromMime(mime)
+                        });
+                    };
+                    img.onerror = () => reject(new Error('image load failed'));
+                    img.src = src;
+                });
+            }
+            // Embed a data-URL image into the PDF at the current cursor.
+            // Scales width to fit content area; honors page breaks via need().
+            async function embedImageDataUrl(dataUrl, opts = {}) {
+                if (!dataUrl || typeof dataUrl !== 'string') return;
+                let meta;
+                try { meta = await _loadImageMeta(dataUrl); }
+                catch (e) { return; }
+                if (!meta.w || !meta.h) return;
+                // Available drawing width (PDF units = mm by default in jsPDF).
+                const maxW = CW - 6;
+                // jsPDF works in mm. naturalWidth is in CSS px (~96 dpi).
+                // Convert px → mm assuming 96 dpi: px * 25.4 / 96 ≈ px * 0.2646
+                const pxToMm = 25.4 / 96;
+                let drawW = meta.w * pxToMm;
+                let drawH = meta.h * pxToMm;
+                if (drawW > maxW) {
+                    const scale = maxW / drawW;
+                    drawW *= scale;
+                    drawH *= scale;
+                }
+                // Cap height to one page minus margins so a huge screenshot
+                // doesn't render off-page.
+                const maxH = PH - 50;
+                if (drawH > maxH) {
+                    const scale = maxH / drawH;
+                    drawW *= scale;
+                    drawH *= scale;
+                }
+                need(drawH + 4);
+                try {
+                    doc.addImage(dataUrl, meta.format, M + 2, y, drawW, drawH, undefined, 'FAST');
+                } catch (e) {
+                    // Some PNGs trip jsPDF's CRC check; retry as JPEG via canvas.
+                    try {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = meta.w; canvas.height = meta.h;
+                        const ctx = canvas.getContext('2d');
+                        const tmp = new Image();
+                        await new Promise((res, rej) => { tmp.onload = res; tmp.onerror = rej; tmp.src = dataUrl; });
+                        ctx.fillStyle = '#fff';
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        ctx.drawImage(tmp, 0, 0);
+                        const jpg = canvas.toDataURL('image/jpeg', 0.85);
+                        doc.addImage(jpg, 'JPEG', M + 2, y, drawW, drawH, undefined, 'FAST');
+                    } catch (_) {
+                        console.warn('[DA Export] image embed failed:', e && e.message);
+                        return;
+                    }
+                }
+                y += drawH + 4;
+                if (opts.caption) {
+                    doc.setFontSize(8); doc.setFont(undefined, 'italic'); doc.setTextColor(...LGRAY);
+                    const capLines = doc.splitTextToSize(String(opts.caption), CW - 4);
+                    for (const line of capLines) { need(5); doc.text(line, M + 2, y); y += 4; }
+                    doc.setTextColor(...BLACK); doc.setFont(undefined, 'normal'); doc.setFontSize(10);
+                    y += 2;
+                }
+            }
+            // Walk the rich-text contentHtml and emit text + inline images
+            // to the PDF in document order.
+            async function renderNoteContentHtml(html) {
+                if (!html || typeof html !== 'string' || !html.trim()) return;
+                const root = document.createElement('div');
+                root.innerHTML = html;
+                let buffer = '';
+                const flush = () => {
+                    const trimmed = buffer.replace(/\u00a0/g, ' ').replace(/[ \t]+\n/g, '\n');
+                    if (trimmed.trim()) bodyText(trimmed);
+                    buffer = '';
+                };
+                const blockTags = new Set(['P', 'DIV', 'BR', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TR', 'BLOCKQUOTE', 'PRE']);
+                const walk = async (node) => {
+                    if (node.nodeType === Node.TEXT_NODE) {
+                        buffer += node.nodeValue || '';
+                        return;
+                    }
+                    if (node.nodeType !== Node.ELEMENT_NODE) return;
+                    const tag = node.tagName;
+                    if (tag === 'IMG') {
+                        flush();
+                        const src = node.getAttribute('src');
+                        if (src && /^data:image\//i.test(src)) {
+                            await embedImageDataUrl(src);
+                        } else if (src && /^https?:/i.test(src)) {
+                            // External — log as a placeholder, not embedding remote URLs.
+                            bodyText(`[image: ${src}]`);
+                        }
+                        return;
+                    }
+                    if (tag === 'BR') { buffer += '\n'; return; }
+                    if (tag === 'LI') { buffer += '\n• '; }
+                    for (const child of Array.from(node.childNodes)) {
+                        await walk(child);
+                    }
+                    if (blockTags.has(tag)) { buffer += '\n'; }
+                };
+                for (const child of Array.from(root.childNodes)) {
+                    await walk(child);
+                }
+                flush();
+            }
+            // Fetch a Notes/ attachment by name (honors Field Security via main process)
+            // and return a data: URL suitable for embedImageDataUrl().
+            async function _readNoteImageAttachment(fileName, caseNumber) {
+                try {
+                    if (!window.electronAPI || !window.electronAPI.noteReadAttachment) return null;
+                    const res = await window.electronAPI.noteReadAttachment({ caseNumber, fileName });
+                    if (!res || !res.success || !res.dataBase64) return null;
+                    const ext = (fileName.split('.').pop() || '').toLowerCase();
+                    const mimeMap = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
+                    const mime = mimeMap[ext];
+                    if (!mime) return null;
+                    return `data:${mime};base64,${res.dataBase64}`;
+                } catch (e) {
+                    console.warn('[DA Export] read note attachment failed:', fileName, e && e.message);
+                    return null;
+                }
+            }
+            function _isImageAttachment(att) {
+                if (!att || !att.fileName) return false;
+                if (typeof att.type === 'string' && att.type.startsWith('image/')) return true;
+                return /\.(png|jpe?g|gif|webp|bmp)$/i.test(att.fileName);
+            }
+
             // ========== TITLE PAGE ==========
             doc.setFillColor(255, 255, 255);
             doc.rect(0, 0, PW, PH, 'F');
@@ -2954,36 +3178,47 @@
                 case 'notes': {
                     const items = caseNotes || [];
                     if (!items.length) { emptyMsg('No case notes.'); break; }
-                    items.forEach((n, i) => {
+                    for (let i = 0; i < items.length; i++) {
+                        const n = items[i];
                         itemHeading(`${n.title || 'Note ' + (i+1)}`);
                         fieldBold('Created', n.createdAt ? new Date(n.createdAt).toLocaleString() : '');
-                        // Render HTML-based notes as plain text for PDF (images live
-                        // inline as base64 in the source — would be visible only in
-                        // the live app). Fall back to legacy plain-text `content`.
-                        let plain = '';
+                        // Render the note body: walk contentHtml and embed any
+                        // pasted/inline images via doc.addImage(). Fall back to
+                        // legacy plain-text `content`.
                         if (typeof n.contentHtml === 'string' && n.contentHtml.trim()) {
-                            const div = document.createElement('div');
-                            div.innerHTML = n.contentHtml;
-                            plain = div.textContent || div.innerText || '';
-                        } else if (typeof n.content === 'string') {
-                            plain = n.content;
+                            await renderNoteContentHtml(n.contentHtml);
+                        } else if (typeof n.content === 'string' && n.content.trim()) {
+                            bodyText(n.content);
                         }
-                        if (plain.trim()) bodyText(plain);
-                        // Attachment manifest — the actual files are in the ZIP under Notes/
+                        // Attachments: embed image files inline (PNG/JPG/etc.) so
+                        // the DA sees the actual evidence in the PDF, not just a
+                        // filename. Non-image attachments (PDFs, docs) are still
+                        // listed and remain available in the ZIP under /Notes/.
                         const atts = Array.isArray(n.attachments) ? n.attachments : [];
                         if (atts.length) {
                             gap(2);
-                            fieldBold('Attachments', `${atts.length} file(s) included in ZIP under /Notes/`);
-                            atts.forEach((a, ai) => {
-                                bodyText(`  ${ai + 1}. ${a.fileName}${a.size ? '  (' + Math.round(a.size / 1024) + ' KB)' : ''}`);
-                            });
+                            fieldBold('Attachments', `${atts.length} file(s) — image files embedded below; all files included in ZIP under /Notes/`);
+                            for (let ai = 0; ai < atts.length; ai++) {
+                                const a = atts[ai];
+                                const sizeStr = a.size ? ' (' + Math.round(a.size / 1024) + ' KB)' : '';
+                                if (_isImageAttachment(a)) {
+                                    const dataUrl = await _readNoteImageAttachment(a.fileName, caseNum);
+                                    if (dataUrl) {
+                                        await embedImageDataUrl(dataUrl, { caption: `${ai + 1}. ${a.fileName}${sizeStr}` });
+                                    } else {
+                                        bodyText(`  ${ai + 1}. ${a.fileName}${sizeStr}  [image — could not load (encrypted or missing)]`);
+                                    }
+                                } else {
+                                    bodyText(`  ${ai + 1}. ${a.fileName}${sizeStr}`);
+                                }
+                            }
                         } else if (n.hasAttachment && n.attachmentName) {
                             // Legacy: file was never persisted — flag for the DA reviewer
                             gap(2);
                             fieldBold('Attachment', `${n.attachmentName} (legacy — file was not saved to disk)`);
                         }
                         gap(4);
-                    });
+                    }
                     break;
                 }
                 case 'reports': {
@@ -5431,6 +5666,27 @@
                 localStorage.setItem('viperCaseNotes', JSON.stringify(allNotes));
                 console.log('[saveNote] saved. caseNotes count:', caseNotes.length);
 
+                // Defensive: ensure the 'notes' module stays in the case's
+                // module list so the tab survives a reload. saveCase() may have
+                // been called from a stale path that lost the modules array;
+                // re-asserting here is cheap and idempotent.
+                try {
+                    if (!Array.isArray(currentCase.modules)) currentCase.modules = [];
+                    if (!currentCase.modules.includes('notes')) {
+                        currentCase.modules.push('notes');
+                        if (Array.isArray(currentCase.tabOrder) && !currentCase.tabOrder.includes('notes')) {
+                            currentCase.tabOrder.push('notes');
+                        }
+                        const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+                        const ci = cases.findIndex(c => c.id === currentCase.id);
+                        if (ci >= 0) {
+                            cases[ci].modules = currentCase.modules;
+                            if (currentCase.tabOrder) cases[ci].tabOrder = currentCase.tabOrder;
+                            localStorage.setItem('viperCases', JSON.stringify(cases));
+                        }
+                    }
+                } catch (e) { console.warn('[saveNote] modules guard failed:', e); }
+
                 // Reset state and re-render
                 editingNoteId = null;
                 pendingNoteAttachments = [];
@@ -5459,103 +5715,249 @@
             renderTabContent('notes');
         }
         
-        function exportNotesToPDF() {
+        async function exportNotesToPDF() {
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
-            
+            const PW = doc.internal.pageSize.width;
+            const PH = doc.internal.pageSize.height;
+            const M = 15;
+            const CW = PW - 2 * M;
+
             let yPos = 20;
-            
-            // Header
+
+            // ── helpers (mirror DA Export image-embed pipeline) ──
+            const need = (h) => { if (yPos + h > PH - 25) { doc.addPage(); yPos = 20; } };
+            const imgFormatFromMime = (mime) => {
+                const m = (mime || '').toLowerCase();
+                if (m.includes('jpeg') || m.includes('jpg')) return 'JPEG';
+                if (m.includes('webp')) return 'WEBP';
+                if (m.includes('gif')) return 'GIF';
+                return 'PNG';
+            };
+            const loadImageMeta = (src) => new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => {
+                    const fm = /^data:([^;]+);/i.exec(src);
+                    resolve({ dataUrl: src, w: img.naturalWidth || img.width, h: img.naturalHeight || img.height, format: imgFormatFromMime(fm ? fm[1] : 'image/png') });
+                };
+                img.onerror = () => reject(new Error('image load failed'));
+                img.src = src;
+            });
+            const embedImageDataUrl = async (dataUrl, caption) => {
+                if (!dataUrl) return;
+                let meta;
+                try { meta = await loadImageMeta(dataUrl); } catch (_) { return; }
+                if (!meta.w || !meta.h) return;
+                const pxToMm = 25.4 / 96;
+                let drawW = meta.w * pxToMm;
+                let drawH = meta.h * pxToMm;
+                const maxW = CW - 4;
+                if (drawW > maxW) { const s = maxW / drawW; drawW *= s; drawH *= s; }
+                const maxH = PH - 50;
+                if (drawH > maxH) { const s = maxH / drawH; drawW *= s; drawH *= s; }
+                need(drawH + 4);
+                try {
+                    doc.addImage(dataUrl, meta.format, M, yPos, drawW, drawH, undefined, 'FAST');
+                } catch (_) {
+                    // Re-encode through canvas → JPEG to dodge jsPDF PNG CRC issues
+                    try {
+                        const cnv = document.createElement('canvas');
+                        cnv.width = meta.w; cnv.height = meta.h;
+                        const ctx = cnv.getContext('2d');
+                        const tmp = new Image();
+                        await new Promise((res, rej) => { tmp.onload = res; tmp.onerror = rej; tmp.src = dataUrl; });
+                        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cnv.width, cnv.height);
+                        ctx.drawImage(tmp, 0, 0);
+                        const jpg = cnv.toDataURL('image/jpeg', 0.85);
+                        doc.addImage(jpg, 'JPEG', M, yPos, drawW, drawH, undefined, 'FAST');
+                    } catch (_) { return; }
+                }
+                yPos += drawH + 4;
+                if (caption) {
+                    doc.setFontSize(8); doc.setFont(undefined, 'italic'); doc.setTextColor(120, 120, 120);
+                    const lines = doc.splitTextToSize(String(caption), CW - 4);
+                    for (const line of lines) { need(5); doc.text(line, M, yPos); yPos += 4; }
+                    doc.setTextColor(50, 50, 50); doc.setFont(undefined, 'normal'); doc.setFontSize(10);
+                    yPos += 2;
+                }
+            };
+            const bodyText = (text) => {
+                if (!text) return;
+                doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(50, 50, 50);
+                const paragraphs = String(text).split(/\n\s*\n|\r?\n/);
+                for (const p of paragraphs) {
+                    const t = p.trim();
+                    if (!t) { yPos += 2; continue; }
+                    const lines = doc.splitTextToSize(t, CW);
+                    for (const line of lines) { need(6); doc.text(line, M, yPos); yPos += 5; }
+                    yPos += 1;
+                }
+            };
+            const renderNoteContentHtml = async (html) => {
+                if (!html || typeof html !== 'string' || !html.trim()) return;
+                const root = document.createElement('div');
+                root.innerHTML = html;
+                let buffer = '';
+                const flush = () => {
+                    const t = buffer.replace(/\u00a0/g, ' ');
+                    if (t.trim()) bodyText(t);
+                    buffer = '';
+                };
+                const blockTags = new Set(['P', 'DIV', 'BR', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TR', 'BLOCKQUOTE', 'PRE']);
+                const walk = async (node) => {
+                    if (node.nodeType === Node.TEXT_NODE) { buffer += node.nodeValue || ''; return; }
+                    if (node.nodeType !== Node.ELEMENT_NODE) return;
+                    const tag = node.tagName;
+                    if (tag === 'IMG') {
+                        flush();
+                        const src = node.getAttribute('src');
+                        if (src && /^data:image\//i.test(src)) await embedImageDataUrl(src);
+                        else if (src && /^https?:/i.test(src)) bodyText(`[image: ${src}]`);
+                        return;
+                    }
+                    if (tag === 'BR') { buffer += '\n'; return; }
+                    if (tag === 'LI') { buffer += '\n• '; }
+                    for (const c of Array.from(node.childNodes)) await walk(c);
+                    if (blockTags.has(tag)) buffer += '\n';
+                };
+                for (const c of Array.from(root.childNodes)) await walk(c);
+                flush();
+            };
+            const readNoteImageAttachment = async (fileName) => {
+                try {
+                    if (!window.electronAPI || !window.electronAPI.noteReadAttachment) return null;
+                    const res = await window.electronAPI.noteReadAttachment({ caseNumber: currentCase.caseNumber, fileName });
+                    if (!res || !res.success || !res.dataBase64) return null;
+                    const ext = (fileName.split('.').pop() || '').toLowerCase();
+                    const map = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
+                    if (!map[ext]) return null;
+                    return `data:${map[ext]};base64,${res.dataBase64}`;
+                } catch (_) { return null; }
+            };
+            const isImageAttachment = (a) => {
+                if (!a || !a.fileName) return false;
+                if (typeof a.type === 'string' && a.type.startsWith('image/')) return true;
+                return /\.(png|jpe?g|gif|webp|bmp)$/i.test(a.fileName);
+            };
+            const isPdfAttachment = (a) => {
+                if (!a || !a.fileName) return false;
+                if (typeof a.type === 'string' && a.type.toLowerCase().includes('pdf')) return true;
+                return /\.pdf$/i.test(a.fileName);
+            };
+            // Collected as we render so we can append actual PDF pages
+            // at the end of the export via pdf-lib in main process.
+            const pdfAttachmentNames = [];
+
+            // ── Header ──
             doc.setFillColor(10, 14, 20);
             doc.rect(0, 0, 210, 40, 'F');
-            
+
             doc.setTextColor(0, 217, 255);
             doc.setFontSize(24);
             doc.setFont(undefined, 'bold');
-            doc.text('V.I.P.E.R.', 15, 20);
-            
+            doc.text('V.I.P.E.R.', M, 20);
+
             doc.setFontSize(10);
             doc.setFont(undefined, 'normal');
-            doc.text('Case Notes Export', 15, 27);
-            
+            doc.text('Case Notes Export', M, 27);
+
             doc.setTextColor(255, 255, 255);
             doc.setFontSize(16);
             doc.setFont(undefined, 'bold');
-            doc.text(`Case ${currentCase.caseNumber}`, 15, 35);
-            
+            doc.text(`Case ${currentCase.caseNumber}`, M, 35);
+
             yPos = 50;
-            
+
             // Export info
             doc.setFontSize(10);
             doc.setTextColor(150, 150, 150);
-            doc.text(`Generated: ${new Date().toLocaleString()}`, 15, yPos);
-            doc.text(`Total Notes: ${caseNotes.length}`, 15, yPos + 5);
-            
+            doc.text(`Generated: ${new Date().toLocaleString()}`, M, yPos);
+            doc.text(`Total Notes: ${caseNotes.length}`, M, yPos + 5);
+
             yPos += 15;
-            
+
             // Notes
             const sortedNotes = [...caseNotes].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-            
-            sortedNotes.forEach((note, index) => {
-                if (yPos > 250) {
-                    doc.addPage();
-                    yPos = 20;
-                }
-                
-                // Note header
+
+            for (let index = 0; index < sortedNotes.length; index++) {
+                const note = sortedNotes[index];
+                need(20);
+
+                // Note header bar
                 doc.setFillColor(0, 217, 255);
-                doc.rect(15, yPos - 5, 180, 8, 'F');
+                doc.rect(M, yPos - 5, 180, 8, 'F');
                 doc.setFontSize(11);
                 doc.setFont(undefined, 'bold');
                 doc.setTextColor(10, 14, 20);
-                doc.text(`Note ${sortedNotes.length - index}`, 17, yPos);
-                
+                doc.text(`Note ${sortedNotes.length - index}`, M + 2, yPos);
                 yPos += 10;
-                
+
                 // Timestamps
                 doc.setFontSize(9);
                 doc.setTextColor(100, 100, 100);
-                doc.text(`Created: ${new Date(note.createdAt).toLocaleString()}`, 15, yPos);
+                doc.text(`Created: ${new Date(note.createdAt).toLocaleString()}`, M, yPos);
                 yPos += 5;
-                
+
                 if (note.editHistory && note.editHistory.length > 0) {
-                    doc.text(`Last Edited: ${new Date(note.editHistory[note.editHistory.length - 1]).toLocaleString()}`, 15, yPos);
+                    doc.text(`Last Edited: ${new Date(note.editHistory[note.editHistory.length - 1]).toLocaleString()}`, M, yPos);
                     yPos += 5;
                 }
-                
+
                 yPos += 3;
-                
-                // Content — prefer HTML-based contentHtml; fall back to legacy plain text
-                let plainContent = '';
+
+                // Body — walk contentHtml so pasted/inline images render inline
                 if (typeof note.contentHtml === 'string' && note.contentHtml.trim()) {
-                    const div = document.createElement('div');
-                    div.innerHTML = note.contentHtml;
-                    plainContent = div.textContent || div.innerText || '';
-                } else if (typeof note.content === 'string') {
-                    plainContent = note.content;
+                    await renderNoteContentHtml(note.contentHtml);
+                } else if (typeof note.content === 'string' && note.content.trim()) {
+                    bodyText(note.content);
                 }
-                doc.setFontSize(10);
-                doc.setTextColor(50, 50, 50);
-                const splitContent = doc.splitTextToSize(plainContent, 180);
-                doc.text(splitContent, 15, yPos);
-                yPos += splitContent.length * 5 + 5;
-                
-                // Attachment info — new schema (array) or legacy single-file
+
+                // Attachments — embed image files inline; list non-image files
                 const atts = Array.isArray(note.attachments) ? note.attachments : [];
                 if (atts.length) {
+                    yPos += 2;
                     doc.setTextColor(157, 78, 221);
-                    atts.forEach(a => {
-                        doc.text(`📎 ${a.fileName}${a.size ? ' (' + Math.round(a.size / 1024) + ' KB)' : ''}`, 15, yPos);
-                        yPos += 5;
-                    });
+                    doc.setFontSize(10);
+                    doc.setFont(undefined, 'bold');
+                    need(6);
+                    doc.text(`Attachments (${atts.length}):`, M, yPos);
+                    yPos += 5;
+                    doc.setFont(undefined, 'normal');
+                    for (let ai = 0; ai < atts.length; ai++) {
+                        const a = atts[ai];
+                        const sizeStr = a.size ? ' (' + Math.round(a.size / 1024) + ' KB)' : '';
+                        if (isImageAttachment(a)) {
+                            const dataUrl = await readNoteImageAttachment(a.fileName);
+                            if (dataUrl) {
+                                await embedImageDataUrl(dataUrl, `${ai + 1}. ${a.fileName}${sizeStr}`);
+                            } else {
+                                doc.setTextColor(157, 78, 221);
+                                need(5);
+                                doc.text(`  ${ai + 1}. ${a.fileName}${sizeStr}  [image - could not load]`, M, yPos);
+                                yPos += 5;
+                            }
+                        } else if (isPdfAttachment(a)) {
+                            pdfAttachmentNames.push(a.fileName);
+                            doc.setTextColor(157, 78, 221);
+                            need(5);
+                            doc.text(`  ${ai + 1}. ${a.fileName}${sizeStr}  [PDF - appended at end of report]`, M, yPos);
+                            yPos += 5;
+                        } else {
+                            doc.setTextColor(157, 78, 221);
+                            need(5);
+                            doc.text(`  ${ai + 1}. ${a.fileName}${sizeStr}`, M, yPos);
+                            yPos += 5;
+                        }
+                    }
                 } else if (note.hasAttachment) {
                     doc.setTextColor(157, 78, 221);
-                    doc.text(`📎 Attachment: ${note.attachmentName} (legacy — file not on disk)`, 15, yPos);
+                    need(5);
+                    doc.text(`Attachment: ${note.attachmentName} (legacy - file not on disk)`, M, yPos);
                     yPos += 5;
                 }
-                
+
                 yPos += 10;
-            });
+            }
             
             // Footer
             const pageCount = doc.internal.getNumberOfPages();
@@ -5568,8 +5970,51 @@
             }
             
             const filename = `Case_${currentCase.caseNumber}_Notes_${new Date().toISOString().split('T')[0]}.pdf`;
+
+            // If any PDF attachments need to be appended, hand the
+            // jsPDF output to the main process where pdf-lib copies
+            // pages from each attachment and saves via dialog.
+            if (pdfAttachmentNames.length && window.electronAPI && window.electronAPI.notesExportMergeAttachments) {
+                try {
+                    const ab = doc.output('arraybuffer');
+                    const bytes = new Uint8Array(ab);
+                    let binary = '';
+                    const CHUNK = 0x8000;
+                    for (let i = 0; i < bytes.length; i += CHUNK) {
+                        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+                    }
+                    const basePdfBase64 = btoa(binary);
+                    const res = await window.electronAPI.notesExportMergeAttachments({
+                        caseNumber: currentCase.caseNumber,
+                        defaultFilename: filename,
+                        basePdfBase64,
+                        attachmentNames: pdfAttachmentNames
+                    });
+                    if (res && res.success) {
+                        const warn = Array.isArray(res.warnings) && res.warnings.length
+                            ? ` (${res.warnings.length} warning${res.warnings.length === 1 ? '' : 's'} — check console)`
+                            : '';
+                        if (warn) console.warn('[exportNotesToPDF] merge warnings:', res.warnings);
+                        viperToast(`Notes exported (${res.mergedCount}/${res.requested} attachment page${res.mergedCount === 1 ? '' : 's'} appended)${warn}`, 'success');
+                        return;
+                    } else if (res && res.canceled) {
+                        return;
+                    } else {
+                        console.warn('[exportNotesToPDF] merge IPC failed, falling back to direct save:', res && res.error);
+                        viperToast('Could not merge PDF attachments — saving report only.', 'warning');
+                        doc.save(filename);
+                        return;
+                    }
+                } catch (mergeErr) {
+                    console.error('[exportNotesToPDF] merge path errored, falling back:', mergeErr);
+                    viperToast('Could not merge PDF attachments — saving report only.', 'warning');
+                    doc.save(filename);
+                    return;
+                }
+            }
+
             doc.save(filename);
-            
+
             viperToast('Case notes exported successfully!', 'success');
         }
         

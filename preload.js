@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   noteReadAttachment: (data) => ipcRenderer.invoke('note-read-attachment', data),
   noteDeleteAttachment: (data) => ipcRenderer.invoke('note-delete-attachment', data),
   noteListAttachments: (caseNumber) => ipcRenderer.invoke('note-list-attachments', caseNumber),
+  notesExportMergeAttachments: (data) => ipcRenderer.invoke('notes-export-merge-attachments', data),
 
   // Backup & Restore
   selectBackupDirectory: () => ipcRenderer.invoke('select-backup-directory'),
@@ -286,6 +287,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Gridcop (persistent BrowserView)
   gridcopSetBounds: (bounds) => ipcRenderer.send('gridcop-set-bounds', bounds),
   gridcopSetVisible: (visible) => ipcRenderer.send('gridcop-set-visible', visible),
+
+  // Callyo (persistent BrowserView)
+  callyoSetBounds: (bounds) => ipcRenderer.send('callyo-set-bounds', bounds),
+  callyoSetVisible: (visible) => ipcRenderer.send('callyo-set-visible', visible),
 
   // Resource Hub generic per-BV zoom factor (0.5 .. 2.0)
   rhSetZoom: (resId, factor) => ipcRenderer.send('rh-set-zoom', { resId, factor }),

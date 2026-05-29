@@ -40,7 +40,11 @@ const KNOWN_CSVS = new Set([
     'snap_history.csv'
 ]);
 
-const MEDIA_EXTS = new Set(['.jpeg', '.jpg', '.png', '.gif', '.mp4', '.webp', '.webm', '.mov']);
+const MEDIA_EXTS = new Set([
+    '.jpeg', '.jpg', '.png', '.gif', '.webp', '.heic', '.heif', '.svg',
+    '.mp4', '.webm', '.mov', '.m4v',
+    '.aac', '.m4a', '.mp3', '.wav', '.ogg', '.opus'
+]);
 
 class SnapchatWarrantParser {
 
@@ -231,10 +235,42 @@ class SnapchatWarrantParser {
             }
         };
 
-        // Determine layout: single-part (folderPath itself contains conversations.csv) vs multi-part
+        // Determine layout. Snapchat productions are split into multiple
+        // "part" sibling folders named like:
+        //   {username}-{caseId}-{requestId}-{partNum}-{date}/
+        // The user often points us at ONE part folder. To avoid silently
+        // missing 5/6 of the production we walk up to the parent and pick
+        // up sibling part folders sharing the same caseId+requestId tokens.
         const topConv = path.join(folderPath, 'conversations.csv');
+        const baseName = path.basename(folderPath);
+        const partTokens = this._extractPartTokens(baseName);
+
         if (fs.existsSync(topConv)) {
-            collectFromDir(folderPath, path.basename(folderPath));
+            // Always include the selected folder itself
+            collectFromDir(folderPath, baseName);
+
+            // If the folder name matches the part naming convention, try to
+            // discover sibling parts in the parent directory.
+            if (partTokens) {
+                const parent = path.dirname(folderPath);
+                try {
+                    const siblings = fs.readdirSync(parent, { withFileTypes: true });
+                    for (const sib of siblings) {
+                        if (!sib.isDirectory()) continue;
+                        if (sib.name === baseName) continue; // already added
+                        const sibTokens = this._extractPartTokens(sib.name);
+                        if (!sibTokens) continue;
+                        // Match on caseId + requestId (ignore partNum and username)
+                        if (sibTokens.caseId !== partTokens.caseId ||
+                            sibTokens.requestId !== partTokens.requestId) continue;
+                        const sibPath = path.join(parent, sib.name);
+                        const sibConv = path.join(sibPath, 'conversations.csv');
+                        if (fs.existsSync(sibConv)) {
+                            collectFromDir(sibPath, sib.name);
+                        }
+                    }
+                } catch (_) { /* parent unreadable — fall through to single-part */ }
+            }
         } else {
             const subs = fs.readdirSync(folderPath, { withFileTypes: true });
             for (const s of subs) {
@@ -723,6 +759,29 @@ class SnapchatWarrantParser {
         const m2 = partFolder.match(/-(\d+)-/);
         if (m2) return parseInt(m2[1], 10);
         return null;
+    }
+
+    /**
+     * Parse the Snapchat part-folder naming convention:
+     *   {username}-{caseId}-{requestId}-{partNum}-{date}
+     * Returns { username, caseId, requestId, partNum, date } or null if it
+     * doesn't match. caseId/requestId are the wide tokens we use to match
+     * sibling parts in the same production.
+     */
+    _extractPartTokens(folderName) {
+        if (!folderName) return null;
+        // username may contain underscores/digits/letters; caseId, requestId,
+        // partNum, date are all numeric. We anchor on the trailing numeric
+        // triplet (requestId-partNum-date) and extract everything before it.
+        const m = folderName.match(/^(.+)-(\d+)-(\d+)-(\d+)-(\d{6,})$/);
+        if (!m) return null;
+        return {
+            username: m[1],
+            caseId: m[2],
+            requestId: m[3],
+            partNum: parseInt(m[4], 10),
+            date: m[5]
+        };
     }
 
     _parseLatLon(cell) {

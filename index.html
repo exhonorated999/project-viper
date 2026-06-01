@@ -3996,32 +3996,13 @@
             }
             document.getElementById('investigationsTitle') && (document.getElementById('investigationsTitle').textContent = title);
 
-            const allCases = JSON.parse(localStorage.getItem('viperCases')) || [];
-            let filtered;
-            if (filter === 'all') {
-                filtered = allCases;
-            } else if (filter.startsWith('priority-')) {
-                const pVal = filter === 'priority-none' ? null : parseInt(filter.split('-')[1]);
-                filtered = allCases.filter(c => pVal === null ? !c.priority : c.priority === pVal);
-            } else if (filter === 'active') {
-                // Roll up custom 'active' category into the Active filter.
-                const customs = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
-                const activeIds = new Set(['active', ...customs.filter(s => s.category === 'active').map(s => s.id)]);
-                filtered = allCases.filter(c => activeIds.has(c.status));
-            } else if (filter === 'closed') {
-                // Roll up custom 'closed' / 'exceptionally-cleared' into Closed.
-                const customs = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
-                const closedIds = new Set(['closed', ...customs.filter(s => s.category === 'closed' || s.category === 'exceptionally-cleared').map(s => s.id)]);
-                filtered = allCases.filter(c => closedIds.has(c.status));
-            } else if (filter === 'closed-arrest') {
-                // Roll up custom 'cleared-arrest' into Closed w/ Arrest.
-                const customs = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
-                const arrestIds = new Set(['closed-arrest', ...customs.filter(s => s.category === 'cleared-arrest').map(s => s.id)]);
-                filtered = allCases.filter(c => arrestIds.has(c.status));
-            } else {
-                filtered = allCases.filter(c => c.status === filter);
-            }
-            updateActiveInvestigationsTable(filtered, filter);
+            // Delegate filtering + sorting to filterInvestigations so the persisted
+            // investigationsSort (key/dir) is applied. Previously this function
+            // duplicated the filter logic but skipped the sort step, which made
+            // the sort appear non-persistent every time a filter was selected
+            // (including the page-load call at the bottom of this script that
+            // initializes from saved currentInvestigationsFilter).
+            filterInvestigations();
         }
 
         function setInvestigationsSort(key) {
@@ -4164,14 +4145,30 @@
         function filterInvestigations() {
             const query = (document.getElementById('investigationsSearch')?.value || '').toLowerCase().trim();
             const allCases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            const f = currentInvestigationsFilter;
             let filtered;
-            if (currentInvestigationsFilter === 'all') {
+            if (f === 'all') {
                 filtered = allCases;
-            } else if (currentInvestigationsFilter.startsWith('priority-')) {
-                const pVal = currentInvestigationsFilter === 'priority-none' ? null : parseInt(currentInvestigationsFilter.split('-')[1]);
+            } else if (f.startsWith('priority-')) {
+                const pVal = f === 'priority-none' ? null : parseInt(f.split('-')[1]);
                 filtered = allCases.filter(c => pVal === null ? !c.priority : c.priority === pVal);
+            } else if (f === 'active') {
+                // Roll up custom 'active' category into the Active filter.
+                const customs = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
+                const activeIds = new Set(['active', ...customs.filter(s => s.category === 'active').map(s => s.id)]);
+                filtered = allCases.filter(c => activeIds.has(c.status));
+            } else if (f === 'closed') {
+                // Roll up custom 'closed' / 'exceptionally-cleared' into Closed.
+                const customs = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
+                const closedIds = new Set(['closed', ...customs.filter(s => s.category === 'closed' || s.category === 'exceptionally-cleared').map(s => s.id)]);
+                filtered = allCases.filter(c => closedIds.has(c.status));
+            } else if (f === 'closed-arrest') {
+                // Roll up custom 'cleared-arrest' into Closed w/ Arrest.
+                const customs = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
+                const arrestIds = new Set(['closed-arrest', ...customs.filter(s => s.category === 'cleared-arrest').map(s => s.id)]);
+                filtered = allCases.filter(c => arrestIds.has(c.status));
             } else {
-                filtered = allCases.filter(c => c.status === currentInvestigationsFilter);
+                filtered = allCases.filter(c => c.status === f);
             }
 
             if (query) {

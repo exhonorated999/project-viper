@@ -1,0 +1,57 @@
+v3.5.1: Westminster RMS parser fixes, manual person re-routing, sort persistence
+
+RMS Import — Westminster Draft Copy parser
+- Fix Event Information block embedded mid-list in Other Person(s).
+  Westminster prints Event Info at the bottom of page 1 between Person 1
+  and Persons 2..N (which continue on page 2); parser was terminating at
+  the Event Info section boundary and silently dropping persons 2..N.
+  Now scans past the Event Info block for additional "Person\n\d+" entries
+  and parses them with the same parsePersonBlock helper.
+- Add bare "By Officer X Y BadgeNum" pattern to narrative-header detection
+  (in addition to the existing "Original/Supplemental Report Narrative By"
+  INFORM RMS pattern). Westminster narratives were previously dropped
+  because the regex didn't match the bare form.
+- Tighten the embedded Reporting Employee skip in narrative collection:
+  skip the column-header line ("Reporting Role ... Position/Title ...")
+  and the concatenated value line ("ReportingOfficerTravis Morgan 2511")
+  rather than blindly advancing on whitespace.
+- Phone field hardening: reject phone values that look like field labels
+  ("Phone 2", "Employer", etc.) when the source field is empty. Was
+  promoting "Phone 2" label text into the Suspect's phone slot because it
+  contained a digit.
+
+RMS Import — Manual person re-routing
+- Each parsed person card on the RMS Import detail view now exposes a
+  "Move to:" action row (Suspect / Victim / Witness / Involved) so users
+  can override the auto-route classification.
+- The move is idempotent: prior auto-routed copies (matched on name +
+  rmsSource) are removed from Suspects/Victims/Witnesses/InvolvedPersons
+  before the new entry is added to the chosen tab.
+- Each target tab gets a schema-correct record (identifiers/firearms for
+  Suspects, injury/property photos for Victims, statement for Witnesses,
+  role/relationship/notes for Involved Persons).
+- Auto-activates the Involved Persons module on the case when moving
+  someone there.
+- Selection is persisted on the report (person.routedTo / routedToTarget)
+  and surfaces as a green badge on the card so overrides are visible.
+- Refreshes loadSuspects / loadVictims / loadWitnesses / loadInvolvedPersons
+  / renderInvolvedPersons after the move; re-renders the active tab via
+  renderTabContent(currentTab || 'rmsImport') — fixes "undefined Module"
+  fall-through that occurred when renderTabContent was called with no arg.
+
+Dashboard — Active Investigations sort persistence
+- setInvestigationsFilter(filter) duplicated the filtering logic from
+  filterInvestigations() but skipped the sort step, then called
+  updateActiveInvestigationsTable directly. On every dashboard load the
+  init script calls setInvestigationsFilter(savedFilter) at line 3903, so
+  rows were rebuilt unsorted while the header arrow still showed the
+  saved direction — looking like the sort wasn't persistent.
+- filterInvestigations() is now the single source of truth: ported the
+  active/closed/closed-arrest custom-status category rollup logic into
+  it so it covers every filter case the dropdown produces.
+- setInvestigationsFilter(filter) now updates currentInvestigationsFilter,
+  persists it, sets the title, then delegates to filterInvestigations()
+  so sort + filter stay in sync.
+
+Internal
+- .gitignore: also exclude _test_*.js (scratch parser test harnesses).

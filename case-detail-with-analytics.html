@@ -30702,6 +30702,137 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             rmsImports = getRmsImports();
         }
 
+        /* ---------- Manual person re-routing from RMS Import detail view ----------
+           Allows the user to override the auto-route classification and move a
+           parsed RMS person into a different tab (Suspect / Victim / Witness /
+           Involved Persons). The person is REMOVED from any prior auto-routed
+           tab (matched on name + rmsSource) and ADDED to the chosen tab. The
+           selection is persisted on the report so the UI reflects the override. */
+
+        function _rmsRemoveRoutedPerson(tabKey, name, source) {
+            const k = `${tabKey}_${currentCase.id}`;
+            const arr = JSON.parse(localStorage.getItem(k) || '[]');
+            const cleanName = (name || '').trim();
+            const cleanSrc = (source || '').trim();
+            const filtered = arr.filter(x => !(
+                (x.name || '').trim() === cleanName &&
+                ((x.rmsSource || '').trim() === cleanSrc || cleanSrc === '')
+            ));
+            if (filtered.length !== arr.length) {
+                localStorage.setItem(k, JSON.stringify(filtered));
+                return arr.length - filtered.length;
+            }
+            return 0;
+        }
+
+        function rmsManualRoutePerson(reportIdx, personIdx, target) {
+            if (!rmsImports || !rmsImports[reportIdx]) return;
+            const rpt = rmsImports[reportIdx];
+            const p = rpt.personsInvolved && rpt.personsInvolved[personIdx];
+            if (!p) return;
+            const fileName = rpt.fileName || '';
+            const source = rpt.reportNumber || fileName;
+            const phones = (typeof _rmsSplitPhones === 'function')
+                ? _rmsSplitPhones(p.phone || '')
+                : (p.phone ? [p.phone] : []);
+
+            // Strip any prior auto-route across all four tabs (idempotent move)
+            ['suspects', 'victims', 'witnesses', 'involvedPersons'].forEach(k => {
+                _rmsRemoveRoutedPerson(k, p.name, source);
+            });
+
+            let tabKey = '', label = '', moduleId = null, entry = null;
+            const common = {
+                name: p.name || '',
+                dob: p.dob || '',
+                dlNumber: '',
+                sex: p.sex || '',
+                height: p.height || '',
+                weight: p.weight || '',
+                hairColor: p.hair || '',
+                eyeColor: p.eyes || '',
+                address: p.address || '',
+                addressCityStateZip: '',
+                phone: phones[0] || '',
+                phone2: phones[1] || '',
+                photo: '',
+                residencePhoto: '',
+                employerName: '',
+                occupation: '',
+                employerAddress: '',
+                employerPhone: '',
+                rmsSource: source
+            };
+
+            if (target === 'suspect') {
+                tabKey = 'suspects'; label = 'Suspects';
+                entry = Object.assign({}, common, {
+                    scarsMarksTattoos: '',
+                    firearms: [], vehicles: [],
+                    identifiers: phones.map(v => ({ type: 'phone', value: v, provider: '' })),
+                    criminalHistory: [], rapSheet: null, firearmsDoc: null
+                });
+            } else if (target === 'victim') {
+                tabKey = 'victims'; label = 'Victims';
+                entry = Object.assign({}, common, {
+                    email: '', email2: '',
+                    injuryPhotos: [], propertyPhotos: [], vehicles: []
+                });
+            } else if (target === 'witness') {
+                tabKey = 'witnesses'; label = 'Witnesses';
+                entry = Object.assign({}, common, {
+                    email: '', email2: '',
+                    statement: ''
+                });
+            } else if (target === 'involved') {
+                tabKey = 'involvedPersons'; label = 'Involved Persons'; moduleId = 'involvedPersons';
+                entry = Object.assign({}, common, {
+                    scarsMarksTattoos: '',
+                    email: '', email2: '',
+                    role: p.involvement || 'Otherwise Involved',
+                    relationship: '', notes: '',
+                    rmsRole: p.involvement || 'Unknown'
+                });
+            } else {
+                return;
+            }
+
+            const existing = JSON.parse(localStorage.getItem(`${tabKey}_${currentCase.id}`) || '[]');
+            existing.push(entry);
+            localStorage.setItem(`${tabKey}_${currentCase.id}`, JSON.stringify(existing));
+
+            // Ensure module is active (Involved Persons is optional)
+            if (moduleId) {
+                const caseModules = currentCase.modules || [];
+                if (!caseModules.includes(moduleId)) {
+                    caseModules.push(moduleId);
+                    currentCase.modules = caseModules;
+                    const cases = JSON.parse(localStorage.getItem('viperCases') || '[]');
+                    const ci = cases.findIndex(c => c.id === currentCase.id);
+                    if (ci >= 0) { cases[ci].modules = caseModules; localStorage.setItem('viperCases', JSON.stringify(cases)); }
+                }
+            }
+
+            // Mark routed on the report (persist override)
+            p.routedTo = label;
+            p.routedToTarget = target;
+            saveRmsImports(rmsImports);
+
+            // Refresh dependent tabs if their loaders exist
+            try { if (typeof loadSuspects === 'function') loadSuspects(); } catch (e) {}
+            try { if (typeof loadVictims === 'function') loadVictims(); } catch (e) {}
+            try { if (typeof loadWitnesses === 'function') loadWitnesses(); } catch (e) {}
+            try { if (typeof loadInvolvedPersons === 'function') loadInvolvedPersons(); } catch (e) {}
+            try { if (typeof renderInvolvedPersons === 'function') renderInvolvedPersons(); } catch (e) {}
+
+            viperToast(`${p.name || 'Person'} moved to ${label}`, 'success', 2500);
+            // Re-render the RMS Import tab so the routed badge updates without
+            // navigating away. currentTab is the active tab id at call time.
+            if (typeof renderTabContent === 'function') {
+                renderTabContent(typeof currentTab === 'string' && currentTab ? currentTab : 'rmsImport');
+            }
+        }
+
         /* ---------- Prosecution Report Parser (Westminster PD / case filing format) ---------- */
         function parseProsecutionReport(text, fileName) {
             const rawLines = text.split('\n').map(l => l.trim());
@@ -31021,7 +31152,12 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const orgSecIdx = lines.findIndex(l => /Organization\(s\)\s*-\s*\d+\s*Involved/i.test(l));
             const otherSecIdx = lines.findIndex(l => /Other Person\(s\)\s*-\s*\d+\s*Involved/i.test(l));
             const eventSecIdx = lines.findIndex(l => /^Event Information$/i.test(l));
-            const narrSecIdx = lines.findIndex(l => /Report Narrative By/i.test(l));
+            // Narrative header — matches both INFORM RMS ("Original/Supplemental Report Narrative By ...")
+            // and Westminster Draft Copy bare "By Officer X Y BadgeNum"
+            const narrSecIdx = lines.findIndex(l =>
+                /Report Narrative By/i.test(l) ||
+                /^By Officer\s+.+\s+\d{3,5}\s*$/i.test(l)
+            );
             const empSecIdx = lines.findIndex(l => /^Reporting Employee\(?s?\)?$/i.test(l));
 
             console.log('[parseIncidentSummary] cleaned lines:', lines.length,
@@ -31068,7 +31204,11 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     else if (l === 'Home Address') { if (nv) cur.address = nv; j++; }
                     else if (/^Phone\s*[12]$/i.test(l)) {
                         const pv = nv.trim();
-                        if (pv && /[\d(]/.test(pv)) cur.phone = cur.phone ? cur.phone + '; ' + pv : pv;
+                        // Reject if value is another field label (e.g. empty Phone 1
+                        // followed by "Phone 2" label) or doesn't contain a real digit
+                        const looksLikePhone = /\d/.test(pv) && !/^Phone\s*[12]$/i.test(pv)
+                            && !/^(Employer|Job Title|Home Address|Suspect Of|Victim Of|Parent)/i.test(pv);
+                        if (pv && looksLikePhone) cur.phone = cur.phone ? cur.phone + '; ' + pv : pv;
                         j++;
                     }
                     else if (l === 'Employer Name and Address') { j++; }
@@ -31125,7 +31265,28 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 report.personsInvolved.push(...vp);
             }
             if (otherSecIdx >= 0) {
-                const op = parsePersonBlock(otherSecIdx + 1, nextBound(otherSecIdx), 'WITNESS');
+                const otherEnd = nextBound(otherSecIdx);
+                const op = parsePersonBlock(otherSecIdx + 1, otherEnd, 'WITNESS');
+                // Westminster Draft Copy quirk: Event Information block is printed
+                // at the bottom of page 1 between Person 1 and Persons 2..N (which
+                // continue on page 2). When the next section after Other Person(s)
+                // is Event Information, scan PAST it for additional "Person\n\d+"
+                // blocks and parse them too.
+                if (otherEnd === eventSecIdx && eventSecIdx >= 0) {
+                    const upperBound = [narrSecIdx, empSecIdx, lines.length]
+                        .filter(x => x > eventSecIdx)
+                        .sort((a, b) => a - b)[0] || lines.length;
+                    for (let k = eventSecIdx + 1; k < upperBound; k++) {
+                        if (/^Person$/i.test(lines[k]) && /^\d+$/.test(lines[k + 1] || '')) {
+                            const extra = parsePersonBlock(k, upperBound, 'WITNESS');
+                            if (extra.length) {
+                                console.log('[parseIncidentSummary] others (post-event):', extra.length, extra.map(p => p.name + ' (' + p.involvement + ')'));
+                                op.push(...extra);
+                            }
+                            break;
+                        }
+                    }
+                }
                 console.log('[parseIncidentSummary] others parsed:', op.length, op.map(p => p.name + ' (' + p.involvement + ')'));
                 report.personsInvolved.push(...op);
             }
@@ -31151,7 +31312,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             // ---- Narratives (full text for individual reports, metadata for summaries) ----
             if (narrSecIdx >= 0) {
                 for (let j = narrSecIdx; j < lines.length; j++) {
-                    const m = lines[j].match(/(?:(?:Original|Supplemental)\s+)?Report Narrative By\s+(.+?)\s+(\d{3,5})/i);
+                    const m = lines[j].match(/(?:(?:Original|Supplemental)\s+)?Report Narrative By\s+(.+?)\s+(\d{3,5})/i)
+                          || lines[j].match(/^By Officer\s+(.+?)\s+(\d{3,5})\s*$/i);
                     if (m) {
                         const suppMatch = lines[j].match(/\(Supplement #(\d+)\)/);
                         const meta = [];
@@ -31162,13 +31324,17 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         const narrLines = [];
                         while (j < lines.length) {
                             const nl = lines[j];
-                            // Stop at next narrative header
+                            // Stop at next narrative header (INFORM or Westminster bare form)
                             if (/Report Narrative By/i.test(nl)) { j--; break; }
+                            if (/^By Officer\s+.+\s+\d{3,5}\s*$/i.test(nl)) { j--; break; }
                             // Skip Reporting Employee blocks embedded in narrative
                             if (/^Reporting Employee\(?s?\)?$/i.test(nl)) {
                                 j++;
-                                while (j < lines.length && lines[j] && !/^\s*$/.test(lines[j])) j++;
-                                j++; continue;
+                                // Skip the column-header line (Reporting Role ... Position/Title ... Employee Name ...)
+                                if (j < lines.length && /Reporting Role/i.test(lines[j])) j++;
+                                // Skip the concatenated value line (e.g. "ReportingOfficerTravis Morgan 2511")
+                                if (j < lines.length && /^[A-Z][a-zA-Z]+[A-Z][a-zA-Z]+.+\s+\d{3,5}\s*$/.test(lines[j])) j++;
+                                continue;
                             }
                             narrLines.push(nl);
                             j++;
@@ -32972,12 +33138,17 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             // Persons Involved
             const personsHtml = rpt.personsInvolved.length ? sectionCard('Persons Involved', '👥', `
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    ${rpt.personsInvolved.map(p => {
+                    ${rpt.personsInvolved.map((p, pi) => {
                         const invColor = p.involvement.startsWith('SUSPECT') ? 'red' : p.involvement.startsWith('VICTIM') ? 'orange' : p.involvement.startsWith('WITNESS') ? 'blue' : p.involvement.startsWith('DEFENDANT') ? 'red' : 'gray';
                         const physicals = [p.height ? 'Ht: ' + p.height : '', p.weight ? 'Wt: ' + p.weight : '', p.hair ? 'Hair: ' + p.hair : '', p.eyes ? 'Eyes: ' + p.eyes : ''].filter(Boolean).join(' | ');
+                        const routedBadge = p.routedTo ? `<span class="text-xs px-2 py-0.5 rounded bg-green-500/15 text-green-400 border border-green-500/30 ml-2">✓ ${p.routedTo}</span>` : '';
+                        const btn = (target, label, color) => `<button type="button" onclick="rmsManualRoutePerson(${index}, ${pi}, '${target}')" class="px-2 py-0.5 rounded text-xs bg-${color}-500/10 hover:bg-${color}-500/30 text-${color}-400 border border-${color}-500/30 transition-colors" title="Move ${(p.name || 'this person').replace(/'/g, '&apos;')} to ${label}">${label}</button>`;
                         return `
                         <div class="p-3 bg-viper-dark/50 rounded-lg">
-                            <span class="text-xs px-2 py-0.5 rounded bg-${invColor}-500/20 text-${invColor}-400 border border-${invColor}-500/30">${p.involvement}</span>
+                            <div class="flex items-center flex-wrap">
+                                <span class="text-xs px-2 py-0.5 rounded bg-${invColor}-500/20 text-${invColor}-400 border border-${invColor}-500/30">${p.involvement}</span>
+                                ${routedBadge}
+                            </div>
                             <p class="text-white font-medium mt-2">${p.name || 'Unknown'}</p>
                             <div class="text-xs text-gray-400 mt-1">
                                 ${p.dob ? 'DOB: ' + p.dob : ''}${p.age ? ' (' + p.age + ')' : ''} ${p.sex ? '| ' + p.sex : ''} ${p.race ? '| ' + p.race : ''}${p.ethnicity ? ' | ' + p.ethnicity : ''}
@@ -32990,6 +33161,13 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             ${p.guardian ? '<div class="text-xs text-gray-400 mt-1">\uD83D\uDC64 Guardian: ' + p.guardian + '</div>' : ''}
                             ${p.comments ? '<div class="text-xs text-cyan-400/70 mt-1 italic">' + p.comments + '</div>' : ''}
                             ${p.detail ? '<div class="text-xs text-gray-500 mt-1">' + p.detail + '</div>' : ''}
+                            <div class="mt-3 pt-2 border-t border-gray-700/50 flex items-center gap-1.5 flex-wrap">
+                                <span class="text-[10px] uppercase tracking-wide text-gray-500">Move to:</span>
+                                ${btn('suspect', 'Suspect', 'red')}
+                                ${btn('victim', 'Victim', 'orange')}
+                                ${btn('witness', 'Witness', 'blue')}
+                                ${btn('involved', 'Involved', 'gray')}
+                            </div>
                         </div>`;
                     }).join('')}
                 </div>

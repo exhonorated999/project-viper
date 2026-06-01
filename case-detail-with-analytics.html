@@ -31152,11 +31152,36 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const orgSecIdx = lines.findIndex(l => /Organization\(s\)\s*-\s*\d+\s*Involved/i.test(l));
             const otherSecIdx = lines.findIndex(l => /Other Person\(s\)\s*-\s*\d+\s*Involved/i.test(l));
             const eventSecIdx = lines.findIndex(l => /^Event Information$/i.test(l));
-            // Narrative header — matches both INFORM RMS ("Original/Supplemental Report Narrative By ...")
-            // and Westminster Draft Copy bare "By Officer X Y BadgeNum"
+            // Westminster bundled reports sometimes contain BOTH an Adult Arrest
+            // Report (which has its own "Event Information" with Arrest Date/Time +
+            // Arrest Location) AND an Initial Incident Report (which has the real
+            // "Event Information" with Date Reported / Occurred From-To / Incident
+            // Location). When that happens we need the Initial Incident's block to
+            // populate location/date fields. Detect by scanning for the FIRST
+            // "Event Information" line followed (within ~20 lines) by "Date Reported"
+            // or "Incident Location". If the first one fails the check, look for the
+            // next occurrence.
+            const allEventIdxs = [];
+            for (let _ei = 0; _ei < lines.length; _ei++) {
+                if (/^Event Information$/i.test(lines[_ei])) allEventIdxs.push(_ei);
+            }
+            const incidentEventSecIdx = allEventIdxs.find(idx => {
+                for (let k = idx + 1; k < Math.min(idx + 30, lines.length); k++) {
+                    if (/^Date Reported$/i.test(lines[k]) || /^Incident Location$/i.test(lines[k])) return true;
+                    if (/^(Suspect|Victim|Person)$/i.test(lines[k])) return false;
+                }
+                return false;
+            });
+            // Narrative header — matches:
+            //   - INFORM RMS:           "Original/Supplemental Report Narrative By ..."
+            //   - Westminster Draft Copy: "By Officer X Y BadgeNum"
+            //   - Westminster bare form:  "By X Y BadgeNum"  (no "Officer" keyword, may have double-space)
+            // NB: not matched: "Reporting By", "Supplementing By" etc — the regex anchors on a
+            //     standalone "By" at the start of the line.
+            const NARR_BARE_RE = /^By\s+(?:Officer\s+)?[A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){1,3}\s+\d{3,5}\s*$/;
             const narrSecIdx = lines.findIndex(l =>
                 /Report Narrative By/i.test(l) ||
-                /^By Officer\s+.+\s+\d{3,5}\s*$/i.test(l)
+                NARR_BARE_RE.test(l)
             );
             const empSecIdx = lines.findIndex(l => /^Reporting Employee\(?s?\)?$/i.test(l));
 
@@ -31293,9 +31318,16 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             console.log('[parseIncidentSummary] TOTAL personsInvolved:', report.personsInvolved.length);
 
             // ---- Event Information ----
-            if (eventSecIdx >= 0) {
-                const end = nextBound(eventSecIdx);
-                for (let j = eventSecIdx + 1; j < end - 1; j++) {
+            // Prefer the Incident-style Event Information block (with Date Reported /
+            // Incident Location) when present. Falls back to whatever the first
+            // "Event Information" header was.
+            const evtIdx = (typeof incidentEventSecIdx === 'number') ? incidentEventSecIdx : eventSecIdx;
+            if (evtIdx >= 0) {
+                // Compute end bound: next "section-like" marker after evtIdx
+                const endCandidates = [offenseSecIdx, suspectSecIdx, victimSecIdx, orgSecIdx, otherSecIdx, narrSecIdx, empSecIdx, lines.length]
+                    .filter(x => x > evtIdx).sort((a, b) => a - b);
+                const end = endCandidates[0] || lines.length;
+                for (let j = evtIdx + 1; j < end - 1; j++) {
                     if (lines[j] === 'Date Reported') { report.reportDate = lines[j + 1]; j++; }
                     else if (lines[j] === 'Occurred From') { report.fromDateTime = lines[j + 1]; j++; }
                     else if (lines[j] === 'Occurred To') { report.toDateTime = lines[j + 1]; j++; }
@@ -31313,7 +31345,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             if (narrSecIdx >= 0) {
                 for (let j = narrSecIdx; j < lines.length; j++) {
                     const m = lines[j].match(/(?:(?:Original|Supplemental)\s+)?Report Narrative By\s+(.+?)\s+(\d{3,5})/i)
-                          || lines[j].match(/^By Officer\s+(.+?)\s+(\d{3,5})\s*$/i);
+                          || lines[j].match(/^By\s+(?:Officer\s+)?(.+?)\s+(\d{3,5})\s*$/i);
                     if (m) {
                         const suppMatch = lines[j].match(/\(Supplement #(\d+)\)/);
                         const meta = [];
@@ -31326,7 +31358,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             const nl = lines[j];
                             // Stop at next narrative header (INFORM or Westminster bare form)
                             if (/Report Narrative By/i.test(nl)) { j--; break; }
-                            if (/^By Officer\s+.+\s+\d{3,5}\s*$/i.test(nl)) { j--; break; }
+                            if (NARR_BARE_RE.test(nl)) { j--; break; }
                             // Skip Reporting Employee blocks embedded in narrative
                             if (/^Reporting Employee\(?s?\)?$/i.test(nl)) {
                                 j++;

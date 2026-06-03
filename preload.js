@@ -169,6 +169,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readWarrantFile: (filePath) => ipcRenderer.invoke('read-warrant-file', filePath),
   selectProductionZip: (data) => ipcRenderer.invoke('select-production-zip', data),
 
+  // Forensic Devices (Device Exams) file storage
+  saveForensicsFile: (data) => ipcRenderer.invoke('save-forensics-file', data),
+  readForensicsFile: (filePath) => ipcRenderer.invoke('read-forensics-file', filePath),
+
   // Ops Plan file storage (photos/documents — bypass localStorage quota)
   saveOpsPlanFile: (data) => ipcRenderer.invoke('save-opsplan-file', data),
   readOpsPlanFile: (filePath) => ipcRenderer.invoke('read-opsplan-file', filePath),

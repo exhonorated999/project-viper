@@ -1023,6 +1023,11 @@
         let evidenceFiles = [];
         let caseWarrants = [];
         let warrantSortBy = 'dateSigned'; // dateSigned | dueDate | type | issuedTo | status
+        let caseForensicDevices = [];
+        let forensicSortBy = 'acquisitionDate'; // acquisitionDate | tool | category | reviewed | subject
+        let forensicFilter = { tool: 'all', category: 'all', reviewed: 'all' };
+        let editingForensicId = null;
+        let forensicReportFile = null;
         let timelineEvents = [];
         let timelineFilter = { lane: 'all', significance: 'all' };
         let timelineZoom = 'full';
@@ -1277,6 +1282,10 @@
             // Load warrants for this case
             const allWarrants = JSON.parse(localStorage.getItem('viperCaseWarrants')) || {};
             caseWarrants = allWarrants[currentCase.caseNumber] || [];
+
+            // Load forensic devices for this case
+            const allForensic = JSON.parse(localStorage.getItem('viperCaseForensicDevices')) || {};
+            caseForensicDevices = allForensic[currentCase.caseNumber] || [];
             
             // Load suspects for this case
             const allSuspects = JSON.parse(localStorage.getItem('viperCaseSuspects')) || {};
@@ -1333,6 +1342,7 @@
                     reports:         !!(caseReport && String(caseReport).trim()),
                     evidence:        hasArr(caseEvidence),
                     warrants:        hasArr(caseWarrants),
+                    forensics:       hasArr(caseForensicDevices),
                     suspects:        hasArr(caseSuspects)        || hasArr(_ls(`suspects_${caseId}`)),
                     victims:         hasArr(caseVictims)         || hasArr(_ls(`victims_${caseId}`)),
                     victimBusiness:  hasArr(_ls(`victimBusinesses_${caseId}`)),
@@ -1852,7 +1862,8 @@
                 snapchatWarrant: { label: 'Snapchat Warrant', icon: 'M12 2C8.5 2 6 4.5 6 8c0 1.5.3 3 .8 4.2-.5.3-1.3.5-2 .5-.4 0-.8.3-.8.7 0 .5.5.9 1.2 1.2.7.3 1.6.5 2.3.6-.1.5-.5 1-1.2 1.5-.7.4-1.6.7-2.3.9-.5.1-.8.4-.8.8 0 .8 1.7 1.4 3.5 1.7.1.4.3.8.6 1 .3.2.7.2 1.1.1.5-.1 1-.1 1.6 0 .6.1 1.2.4 1.9.9.7.5 1.4.7 2.1.7s1.4-.2 2.1-.7c.7-.5 1.3-.8 1.9-.9.6-.1 1.1-.1 1.6 0 .4.1.8.1 1.1-.1.3-.2.5-.6.6-1 1.8-.3 3.5-.9 3.5-1.7 0-.4-.3-.7-.8-.8-.7-.2-1.6-.5-2.3-.9-.7-.5-1.1-1-1.2-1.5.7-.1 1.6-.3 2.3-.6.7-.3 1.2-.7 1.2-1.2 0-.4-.4-.7-.8-.7-.7 0-1.5-.2-2-.5.5-1.2.8-2.7.8-4.2 0-3.5-2.5-6-6-6z' },
                 discordWarrant: { label: 'Discord Warrant', icon: 'M19.27 5.33C17.94 4.71 16.5 4.26 15 4a.09.09 0 00-.07.03c-.18.33-.39.76-.53 1.09a16.09 16.09 0 00-4.8 0c-.14-.34-.35-.76-.54-1.09-.01-.02-.04-.03-.07-.03-1.5.26-2.93.71-4.27 1.33-.01 0-.02.01-.03.02-2.72 4.07-3.47 8.03-3.1 11.95 0 .02.01.04.03.05 1.8 1.32 3.53 2.12 5.24 2.65.03.01.06 0 .07-.02.4-.55.76-1.13 1.07-1.74.02-.04 0-.08-.04-.09-.57-.22-1.11-.48-1.64-.78-.04-.02-.04-.08-.01-.11.11-.08.22-.17.33-.25.02-.02.05-.02.07-.01 3.44 1.57 7.15 1.57 10.55 0 .02-.01.05-.01.07.01.11.09.22.17.33.26.04.03.04.09-.01.11-.52.31-1.07.56-1.64.78-.04.01-.05.06-.04.09.32.61.68 1.19 1.07 1.74.03.01.06.02.09.01 1.72-.53 3.45-1.33 5.25-2.65.02-.01.03-.03.03-.05.44-4.53-.73-8.46-3.1-11.95-.01-.01-.02-.02-.04-.02zM8.52 14.91c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.84 2.12-1.89 2.12zm6.97 0c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.83 2.12-1.89 2.12z' },
                 datapilot: { label: 'Datapilot', icon: 'M9 17a4 4 0 01-2-7.5l1-3a4 4 0 017 0l1 3A4 4 0 0115 17H9zM12 12v9' },
-                cellebrite: { label: 'Cellebrite (Mobile Forensics)', icon: 'M11 2H9a2 2 0 00-2 2v16a2 2 0 002 2h6a2 2 0 002-2V4a2 2 0 00-2-2h-2M11 18h2' }
+                cellebrite: { label: 'Cellebrite (Mobile Forensics)', icon: 'M11 2H9a2 2 0 00-2 2v16a2 2 0 002 2h6a2 2 0 002-2V4a2 2 0 00-2-2h-2M11 18h2' },
+                forensics: { label: 'Device Exams', icon: 'M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25' }
             };
             
             // Initialize tabOrder if it doesn't exist
@@ -1997,6 +2008,8 @@
             allModules.snapchatWarrant = { label: 'Snapchat Warrant', icon: '👻' };
             allModules.discordWarrant = { label: 'Discord Warrant', icon: '💜' };
             allModules.datapilot = { label: 'Datapilot', icon: '📱' };
+            allModules.cellebrite = { label: 'Cellebrite (Mobile Forensics)', icon: '📱' };
+            allModules.forensics = { label: 'Device Exams', icon: '🔬' };
 
             const availableModules = Object.keys(allModules).filter(
                 module => !currentCase.modules.includes(module)
@@ -2084,7 +2097,8 @@
                 snapchatWarrant:'Snapchat Warrant',
                 discordWarrant:'Discord Warrant',
                 datapilot:'Datapilot',
-                cellebrite:'Cellebrite (Mobile Forensics)'
+                cellebrite:'Cellebrite (Mobile Forensics)',
+                forensics:'Device Exams'
             };
             const label = moduleConfig[moduleId] || moduleId;
             if (!await viperConfirm(`Remove "${label}" from this case?\n\nNote: Any data in this module will remain in storage and can be recovered by re-adding the module.`, {danger:true, okText:'Delete'})) return;
@@ -2142,6 +2156,7 @@
                 discordWarrant: { label: 'Discord Warrant', icon: '💜', type: 'data' },
                 datapilot: { label: 'Datapilot', icon: '📱', type: 'data' },
                 cellebrite: { label: 'Cellebrite (Mobile Forensics)', icon: '📱', type: 'data' },
+                forensics: { label: 'Device Exams', icon: '🔬', type: 'mixed' },
                 consentSearch: { label: 'Consent Search', icon: '✅', type: 'data' }
             };
 
@@ -2250,7 +2265,8 @@
                 'viperCaseWarrants', 'viperCaseSuspects', 'viperCaseVictims',
                 'viperCaseWitnesses', 'viperCaseVehicles', 'viperCaseFirearms',
                 'viperCaseNarcotics', 'viperCaseMoney', 'viperCaseMissingPersons',
-                'viperCaseCanvas', 'viperCaseProsecution', 'viperTraceImports'
+                'viperCaseCanvas', 'viperCaseProsecution', 'viperTraceImports',
+                'viperCaseForensicDevices'
             ];
             const sharedData = {};
             sharedKeys.forEach(k => {
@@ -2317,6 +2333,7 @@
                 case 'notes': return caseNotes.length;
                 case 'evidence': return caseEvidence.length;
                 case 'warrants': return caseWarrants.length;
+                case 'forensics': return (caseForensicDevices || []).length;
                 case 'vehicles': return caseVehicles ? caseVehicles.length : 0;
                 case 'firearms': return caseFirearms ? caseFirearms.length : 0;
                 case 'narcotics': return caseNarcotics ? caseNarcotics.length : 0;
@@ -4187,6 +4204,8 @@
                 contentDiv.innerHTML = renderEvidenceTab();
             } else if (tabId === 'warrants') {
                 contentDiv.innerHTML = renderWarrantsTab();
+            } else if (tabId === 'forensics') {
+                contentDiv.innerHTML = renderForensicsTab();
             } else if (tabId === 'suspects') {
                 contentDiv.innerHTML = renderSuspectsTab();
             } else if (tabId === 'victims') {
@@ -9805,6 +9824,825 @@
             localStorage.setItem('viperCaseWarrants', JSON.stringify(allWarrants));
         }
 
+        // ═════════════════════════════════════════════════════════════════
+        // DEVICE EXAMS (forensic devices) MODULE
+        // ═════════════════════════════════════════════════════════════════
+        // Storage: Pattern 1 (viperCaseForensicDevices keyed by caseNumber).
+        // Disk files (progress reports) live under
+        //   cases/{caseNumber}/Forensics/{deviceId}/{filename}
+        // and are encrypted under Field Security when active.
+        // ═════════════════════════════════════════════════════════════════
+
+        const FORENSIC_TOOLS = [
+            { value: 'cellebrite', label: 'Cellebrite' },
+            { value: 'datapilot',  label: 'DataPilot' },
+            { value: 'magnet',     label: 'Magnet AXIOM' },
+            { value: 'graykey',    label: 'GrayKey' },
+            { value: 'ftk',        label: 'FTK Imager' },
+            { value: 'oxygen',     label: 'Oxygen' },
+            { value: 'xry',        label: 'XRY' },
+            { value: 'other',      label: 'Other' }
+        ];
+        const FORENSIC_CATEGORIES = [
+            { value: 'phone',    label: 'Cell Phone' },
+            { value: 'computer', label: 'Computer' },
+            { value: 'tablet',   label: 'Tablet' },
+            { value: 'drive',    label: 'External Drive' },
+            { value: 'gps',      label: 'GPS' },
+            { value: 'iot',      label: 'IoT' },
+            { value: 'other',    label: 'Other' }
+        ];
+        const FORENSIC_EXTRACTIONS = [
+            'Full File System', 'Logical', 'Advanced Logical',
+            'Physical', 'File System', 'Chat Capture', 'Other'
+        ];
+        const FORENSIC_ACQ_TYPES = [
+            'Warrant', 'Consent', 'Search Incident to Arrest', 'Abandoned', 'Other'
+        ];
+        const FORENSIC_SUBJECT_ROLES = [
+            'Suspect', 'Victim', 'Witness', 'Lead', 'Support', 'Other'
+        ];
+        const FORENSIC_EXAMINER_ROLES = [
+            'Lead', 'Support', 'Observer'
+        ];
+        const FORENSIC_CRIME_TYPES = [
+            'Homicide', 'Sex Offense', 'Kidnapping', 'Shooting',
+            'Robbery', 'Theft', 'Fraud', 'Burglary', 'Assault', 'Other'
+        ];
+
+        function saveForensicsToStorage() {
+            const all = JSON.parse(localStorage.getItem('viperCaseForensicDevices')) || {};
+            all[currentCase.caseNumber] = caseForensicDevices;
+            localStorage.setItem('viperCaseForensicDevices', JSON.stringify(all));
+        }
+
+        // Build hybrid "Linked Import" picker: dropdown of existing Cellebrite/Datapilot/Evidence
+        // imports if any exist for this case, otherwise a free-text input.
+        // Each option also carries a prefill payload so picking an import auto-fills the form.
+        const _forensicLinkedMeta = new Map(); // value -> prefill object (reset per render)
+
+        function _forensicLinkedImportOptions() {
+            _forensicLinkedMeta.clear();
+            const out = [];
+
+            // Helper: best-effort split of "Make Model" → {make, model}
+            const _splitMakeModel = (s) => {
+                if (!s) return { make: '', model: '' };
+                const parts = String(s).trim().split(/\s+/);
+                if (parts.length === 1) return { make: '', model: parts[0] };
+                return { make: parts[0], model: parts.slice(1).join(' ') };
+            };
+
+            // ─── Cellebrite imports (localStorage index) ───
+            try {
+                const cb = JSON.parse(localStorage.getItem(`cellebriteImport_${currentCase.id}`) || '{}');
+                const cbImports = Array.isArray(cb.imports) ? cb.imports : [];
+                cbImports.forEach((imp, i) => {
+                    const label = imp.deviceLabel || imp.evidenceTag || imp.label || `import #${i+1}`;
+                    const value = `cellebrite:${imp.id || i}`;
+                    out.push({ value, label: `Cellebrite — ${label}` });
+                    const mm = _splitMakeModel(imp.deviceLabel || '');
+                    _forensicLinkedMeta.set(value, {
+                        tool: 'cellebrite',
+                        category: 'phone',                      // Cellebrite is almost always a phone — user can change
+                        extractionType: '',                     // lives in parsed manifest on disk; user can fill
+                        make: mm.make,
+                        model: mm.model,
+                        evidenceTag: imp.evidenceTag || '',
+                        acquisitionDate: imp.createdAt ? String(imp.createdAt).slice(0, 10) : '',
+                        notes: imp.evidenceTag ? `Linked to Cellebrite extraction (tag ${imp.evidenceTag}).` : 'Linked to Cellebrite extraction.'
+                    });
+                });
+            } catch (_) {}
+
+            // ─── DataPilot imports ───
+            try {
+                const dp = JSON.parse(localStorage.getItem(`datapilot_${currentCase.id}`) || '{}');
+                const dpImports = Array.isArray(dp.imports) ? dp.imports : (Array.isArray(dp) ? dp : []);
+                dpImports.forEach((imp, i) => {
+                    const di = imp.deviceInfo || {};
+                    const label = imp.label || imp.deviceName || imp.folderName || imp.fileName || `import #${i+1}`;
+                    const value = `datapilot:${imp.id || i}`;
+                    out.push({ value, label: `DataPilot — ${label}` });
+                    _forensicLinkedMeta.set(value, {
+                        tool: 'datapilot',
+                        category: 'phone',
+                        make: di.make || '',
+                        model: di.model || '',
+                        phoneNumber: di.phoneNumber || '',
+                        acquisitionDate: imp.importedAt ? String(imp.importedAt).slice(0, 10) : '',
+                        notes: imp.fileName ? `Linked to DataPilot import "${imp.fileName}".` : 'Linked to DataPilot import.'
+                    });
+                });
+            } catch (_) {}
+
+            // ─── Evidence items (shared object Pattern 1) ───
+            try {
+                const allEv = JSON.parse(localStorage.getItem('viperCaseEvidence') || '{}');
+                const evList = Array.isArray(allEv[currentCase.caseNumber]) ? allEv[currentCase.caseNumber] : [];
+                // Filter to device-bearing evidence types
+                const deviceTypes = new Set(['cellebrite', 'phone', 'device', 'computer', 'tablet', 'drive', 'usb', 'digital']);
+                evList.forEach((ev, i) => {
+                    const isDeviceLike = deviceTypes.has(String(ev.type || '').toLowerCase()) ||
+                                         /phone|device|computer|tablet|laptop|usb|drive|sd|tablet/i.test(ev.description || '');
+                    if (!isDeviceLike) return;
+                    const label = ev.tag ? `${ev.tag} — ${ev.description || ev.type || ''}` : (ev.description || ev.type || `item #${i+1}`);
+                    const value = `evidence:${ev.id || i}`;
+                    out.push({ value, label: `Evidence — ${label}` });
+                    // Map evidence.type → forensic category
+                    const t = String(ev.type || '').toLowerCase();
+                    const cat = t === 'cellebrite' || t === 'phone' ? 'phone'
+                              : t === 'computer' ? 'computer'
+                              : t === 'tablet' ? 'tablet'
+                              : t === 'drive' || t === 'usb' ? 'drive'
+                              : '';
+                    _forensicLinkedMeta.set(value, {
+                        tool: t === 'cellebrite' ? 'cellebrite' : '',
+                        category: cat,
+                        evidenceTag: ev.tag || '',
+                        notes: ev.description ? `Linked to Evidence "${ev.description}".` : 'Linked to Evidence item.'
+                    });
+                });
+            } catch (_) {}
+
+            return out;
+        }
+
+        // Apply prefill from a chosen linked import. Only fills fields the user
+        // hasn't typed in yet — never overwrites existing input.
+        function _forensicLinkedChange(sel) {
+            const manualBox = document.getElementById('fxLinkedText');
+            if (manualBox) {
+                if (sel.value === '__manual__') {
+                    manualBox.classList.remove('hidden');
+                    manualBox.focus();
+                } else {
+                    manualBox.classList.add('hidden');
+                    manualBox.value = '';
+                }
+            }
+
+            const meta = _forensicLinkedMeta.get(sel.value);
+            if (!meta) return;
+
+            const _fillIfEmpty = (id, val) => {
+                if (val == null || val === '') return;
+                const el = document.getElementById(id);
+                if (!el) return;
+                if (el.tagName === 'SELECT') {
+                    // Only set if the option exists and current value is empty
+                    if (!el.value && Array.from(el.options).some(o => o.value === val)) el.value = val;
+                } else if (el.tagName === 'TEXTAREA') {
+                    if (!el.value.trim()) el.value = val;
+                } else {
+                    if (!el.value.trim()) el.value = val;
+                }
+            };
+
+            _fillIfEmpty('fxTool',       meta.tool);
+            _fillIfEmpty('fxCategory',   meta.category);
+            _fillIfEmpty('fxExtraction', meta.extractionType);
+            _fillIfEmpty('fxMakeModel',  (meta.make || meta.model) ? `${meta.make||''} ${meta.model||''}`.trim() : '');
+            _fillIfEmpty('fxAcqDate',    meta.acquisitionDate);
+            _fillIfEmpty('fxImei',       meta.imei);
+            _fillIfEmpty('fxSerial',     meta.serial);
+
+            // Compose Notes: merge evidenceTag / phoneNumber / base note (don't clobber user input)
+            const noteParts = [];
+            if (meta.notes) noteParts.push(meta.notes);
+            if (meta.evidenceTag) noteParts.push(`Evidence tag: ${meta.evidenceTag}`);
+            if (meta.phoneNumber) noteParts.push(`Phone #: ${meta.phoneNumber}`);
+            _fillIfEmpty('fxNotes', noteParts.join('\n'));
+
+            if (typeof viperToast === 'function') {
+                viperToast('Prefilled fields from linked import — review and adjust as needed.', 'info');
+            }
+        }
+
+        function _esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
+
+        function _forensicToolLabel(v) { const m = FORENSIC_TOOLS.find(x=>x.value===v); return m ? m.label : (v || ''); }
+        function _forensicCatLabel(v)  { const m = FORENSIC_CATEGORIES.find(x=>x.value===v); return m ? m.label : (v || ''); }
+
+        function renderForensicsTab() {
+            const linkOpts = _forensicLinkedImportOptions();
+            const subjectSuggest = [
+                ...(caseSuspects || []),
+                ...(caseVictims || []),
+                ...(caseWitnesses || [])
+            ].map(p => p.name || p.fullName || `${p.firstName||''} ${p.lastName||''}`.trim()).filter(Boolean);
+            const subjectDatalist = Array.from(new Set(subjectSuggest));
+
+            return `
+                <div class="space-y-6">
+                    <!-- Header -->
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-2xl font-bold flex items-center">
+                            <svg class="w-6 h-6 mr-2 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25"/>
+                            </svg>
+                            Device Exams
+                        </h3>
+                        <div class="flex items-center space-x-3">
+                            <select id="forensicSortSelect" onchange="forensicSortBy = this.value; renderTabContent('forensics');" class="px-3 py-2 rounded-lg bg-viper-card/50 border border-gray-600 text-sm text-gray-300 focus:border-viper-cyan outline-none">
+                                <option value="acquisitionDate" ${forensicSortBy==='acquisitionDate'?'selected':''}>Sort: Acquisition Date</option>
+                                <option value="tool" ${forensicSortBy==='tool'?'selected':''}>Sort: Tool</option>
+                                <option value="category" ${forensicSortBy==='category'?'selected':''}>Sort: Category</option>
+                                <option value="reviewed" ${forensicSortBy==='reviewed'?'selected':''}>Sort: Reviewed</option>
+                                <option value="subject" ${forensicSortBy==='subject'?'selected':''}>Sort: Subject</option>
+                            </select>
+                            <button onclick="openAddForensicForm()" class="px-4 py-2 rounded-lg bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/30 hover:bg-viper-cyan/30 transition-colors text-sm font-medium">
+                                + Add Device
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Filters -->
+                    <div class="glass-card rounded-xl p-4 flex flex-wrap items-center gap-3">
+                        <span class="text-xs uppercase tracking-wide text-gray-500">Filter</span>
+                        <select id="forensicFilterTool" onchange="forensicFilter.tool = this.value; renderTabContent('forensics');" class="px-3 py-1.5 rounded bg-viper-dark border border-gray-600 text-xs text-gray-300 focus:border-viper-cyan outline-none">
+                            <option value="all" ${forensicFilter.tool==='all'?'selected':''}>All Tools</option>
+                            ${FORENSIC_TOOLS.map(t => `<option value="${t.value}" ${forensicFilter.tool===t.value?'selected':''}>${t.label}</option>`).join('')}
+                        </select>
+                        <select id="forensicFilterCat" onchange="forensicFilter.category = this.value; renderTabContent('forensics');" class="px-3 py-1.5 rounded bg-viper-dark border border-gray-600 text-xs text-gray-300 focus:border-viper-cyan outline-none">
+                            <option value="all" ${forensicFilter.category==='all'?'selected':''}>All Categories</option>
+                            ${FORENSIC_CATEGORIES.map(c => `<option value="${c.value}" ${forensicFilter.category===c.value?'selected':''}>${c.label}</option>`).join('')}
+                        </select>
+                        <select id="forensicFilterReviewed" onchange="forensicFilter.reviewed = this.value; renderTabContent('forensics');" class="px-3 py-1.5 rounded bg-viper-dark border border-gray-600 text-xs text-gray-300 focus:border-viper-cyan outline-none">
+                            <option value="all" ${forensicFilter.reviewed==='all'?'selected':''}>All Statuses</option>
+                            <option value="reviewed" ${forensicFilter.reviewed==='reviewed'?'selected':''}>Reviewed</option>
+                            <option value="pending" ${forensicFilter.reviewed==='pending'?'selected':''}>Pending Review</option>
+                        </select>
+                        <div class="ml-auto text-xs text-gray-400">
+                            ${caseForensicDevices.length} device${caseForensicDevices.length===1?'':'s'} total
+                            · ${caseForensicDevices.filter(d=>!d.reviewed).length} pending review
+                        </div>
+                    </div>
+
+                    <!-- Add/Edit Device Form -->
+                    <div id="forensicForm" class="hidden glass-card rounded-xl p-6 border-2 border-viper-cyan/30">
+                        <h4 class="text-lg font-bold mb-4" id="forensicFormTitle">Add New Device</h4>
+                        <form onsubmit="saveForensicDevice(event)">
+                            <div class="space-y-4">
+                                <!-- ═══ Quick Start: Linked Import (accented, top of form) ═══ -->
+                                <div class="rounded-xl p-4 border-2 border-viper-purple/40 bg-gradient-to-br from-viper-purple/10 via-viper-cyan/5 to-transparent shadow-[0_0_24px_-8px_rgba(168,85,247,0.35)]">
+                                    <div class="flex items-start gap-3">
+                                        <div class="flex-shrink-0 w-9 h-9 rounded-lg bg-viper-purple/20 border border-viper-purple/40 flex items-center justify-center">
+                                            <svg class="w-5 h-5 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                                            </svg>
+                                        </div>
+                                        <div class="flex-1 min-w-0">
+                                            <div class="flex items-center gap-2 mb-1">
+                                                <h5 class="text-sm font-bold text-viper-purple uppercase tracking-wider">Quick Start</h5>
+                                                <span class="text-[10px] px-1.5 py-0.5 rounded bg-viper-purple/20 text-viper-purple border border-viper-purple/40 font-semibold">Auto-Fill</span>
+                                            </div>
+                                            <p class="text-xs text-gray-300 mb-3">
+                                                ${linkOpts.length
+                                                    ? `Linking an existing import will <span class="text-viper-cyan font-medium">pre-populate</span> Tool, Category, Make/Model, IMEI, Serial, Acquisition Date, and Notes — saving you from typing it twice.`
+                                                    : `No Cellebrite, DataPilot, or Evidence items found for this case yet. Skip this step or type a manual reference below.`}
+                                            </p>
+                                            ${linkOpts.length ? `
+                                                <div class="flex gap-2">
+                                                    <select id="fxLinkedSelect" onchange="_forensicLinkedChange(this)" class="flex-1 px-3 py-2.5 bg-viper-dark/60 border-2 border-viper-purple/40 rounded-lg focus:border-viper-cyan outline-none text-white text-sm font-medium">
+                                                        <option value="">— Select an import to auto-fill —</option>
+                                                        ${linkOpts.map(o => `<option value="${_esc(o.value)}">${_esc(o.label)}</option>`).join('')}
+                                                        <option value="__manual__">Manual / Other (type below)</option>
+                                                    </select>
+                                                    <input type="text" id="fxLinkedText" placeholder="Manual reference" class="hidden flex-1 px-3 py-2.5 bg-viper-dark/60 border-2 border-viper-purple/40 rounded-lg focus:border-viper-cyan outline-none text-white text-sm">
+                                                </div>
+                                                <p class="text-[10px] text-gray-400 mt-2 italic flex items-center gap-1">
+                                                    <svg class="w-3 h-3 text-viper-cyan" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2h-1V9z" clip-rule="evenodd"/></svg>
+                                                    Auto-fill only writes to empty fields — your typed values are always preserved.
+                                                </p>
+                                            ` : `
+                                                <input type="text" id="fxLinkedText" placeholder="e.g., 'External Magnet export 2025-05-04' (optional)" class="w-full px-3 py-2.5 bg-viper-dark/60 border-2 border-viper-purple/40 rounded-lg focus:border-viper-cyan outline-none text-white text-sm">
+                                            `}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Row: crime type, acquisition type, acquisition date -->
+                                <div class="grid grid-cols-3 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">Crime Type</label>
+                                        <select id="fxCrimeType" class="w-full px-3 py-2.5 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white text-sm">
+                                            <option value="">Select…</option>
+                                            ${FORENSIC_CRIME_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">Acquisition Type *</label>
+                                        <select id="fxAcqType" required class="w-full px-3 py-2.5 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white text-sm">
+                                            <option value="">Select…</option>
+                                            ${FORENSIC_ACQ_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">Acquisition Date</label>
+                                        <input type="date" id="fxAcqDate" class="w-full px-3 py-2.5 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white text-sm">
+                                    </div>
+                                </div>
+
+                                <!-- Row: subject + role -->
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">Subject Name</label>
+                                        <input type="text" id="fxSubject" list="fxSubjectList" placeholder="Owner of the device" class="w-full px-3 py-2.5 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white text-sm">
+                                        <datalist id="fxSubjectList">
+                                            ${subjectDatalist.map(n => `<option value="${_esc(n)}">`).join('')}
+                                        </datalist>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">Subject Role</label>
+                                        <select id="fxSubjectRole" class="w-full px-3 py-2.5 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white text-sm">
+                                            <option value="">Select…</option>
+                                            ${FORENSIC_SUBJECT_ROLES.map(r => `<option value="${r}">${r}</option>`).join('')}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <!-- Row: tool + extraction + examiner + examiner role -->
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">Tool Used *</label>
+                                        <select id="fxTool" required class="w-full px-3 py-2.5 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white text-sm">
+                                            <option value="">Select…</option>
+                                            ${FORENSIC_TOOLS.map(t => `<option value="${t.value}">${t.label}</option>`).join('')}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">Extraction Type</label>
+                                        <select id="fxExtraction" class="w-full px-3 py-2.5 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white text-sm">
+                                            <option value="">Select…</option>
+                                            ${FORENSIC_EXTRACTIONS.map(e => `<option value="${e}">${e}</option>`).join('')}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">Examiner</label>
+                                        <input type="text" id="fxExaminer" placeholder="e.g., J. Gordon" class="w-full px-3 py-2.5 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white text-sm">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">Examiner Role</label>
+                                        <select id="fxExaminerRole" class="w-full px-3 py-2.5 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white text-sm">
+                                            <option value="">Select…</option>
+                                            ${FORENSIC_EXAMINER_ROLES.map(r => `<option value="${r}">${r}</option>`).join('')}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <!-- Row: category + make/model + model number -->
+                                <div class="grid grid-cols-3 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">Device Category *</label>
+                                        <select id="fxCategory" required class="w-full px-3 py-2.5 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white text-sm">
+                                            <option value="">Select…</option>
+                                            ${FORENSIC_CATEGORIES.map(c => `<option value="${c.value}">${c.label}</option>`).join('')}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">Make / Model *</label>
+                                        <input type="text" id="fxMakeModel" required placeholder="e.g., iPhone 13, Galaxy S22" class="w-full px-3 py-2.5 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white text-sm">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">Model Number</label>
+                                        <input type="text" id="fxModelNumber" placeholder="e.g., A2482, SM-S901U" class="w-full px-3 py-2.5 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white text-sm">
+                                    </div>
+                                </div>
+
+                                <!-- Row: IMEI + serial + storage -->
+                                <div class="grid grid-cols-3 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">IMEI / MEID</label>
+                                        <input type="text" id="fxImei" placeholder="e.g., 35 826558 426168 6" class="w-full px-3 py-2.5 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white text-sm font-mono">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">Serial Number</label>
+                                        <input type="text" id="fxSerial" placeholder="e.g., YFRX2K2" class="w-full px-3 py-2.5 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white text-sm font-mono">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">Storage Size</label>
+                                        <input type="text" id="fxStorage" placeholder="e.g., 270 GB, 128 GB" class="w-full px-3 py-2.5 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white text-sm">
+                                    </div>
+                                </div>
+
+                                <!-- Row: carrier + OS -->
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">Carrier</label>
+                                        <input type="text" id="fxCarrier" placeholder="e.g., Verizon, AT&T" class="w-full px-3 py-2.5 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white text-sm">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">OS Version</label>
+                                        <input type="text" id="fxOsVersion" placeholder="e.g., iOS 17.2, Android 14" class="w-full px-3 py-2.5 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white text-sm">
+                                    </div>
+                                </div>
+
+                                <!-- Notes -->
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Notes</label>
+                                    <textarea id="fxNotes" rows="2" placeholder="Examination notes, condition of device, anomalies…" class="w-full px-3 py-2.5 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white text-sm resize-none"></textarea>
+                                </div>
+
+                                <!-- Reviewed -->
+                                <div class="flex items-center gap-2">
+                                    <input type="checkbox" id="fxReviewed" class="w-4 h-4 rounded border-gray-600 text-viper-green focus:ring-viper-green">
+                                    <label for="fxReviewed" class="text-sm text-gray-300">Marked reviewed by examiner</label>
+                                </div>
+
+                                <!-- Report upload -->
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Upload Progress Report (PDF / HTML / ZIP)</label>
+                                    <input type="file" id="fxReportFile" accept=".pdf,.html,.htm,.zip" class="hidden" onchange="handleForensicReportSelect(event)">
+                                    <button type="button" onclick="document.getElementById('fxReportFile').click()" class="w-full px-4 py-3 bg-viper-card/50 border-2 border-dashed border-gray-600 rounded-lg hover:border-viper-cyan transition-colors flex items-center justify-center space-x-2 text-gray-400 hover:text-viper-cyan">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                                        </svg>
+                                        <span id="fxReportButtonText">Click to upload progress report</span>
+                                    </button>
+                                    <div id="fxReportInfo" class="hidden mt-2 p-3 bg-viper-cyan/10 border border-viper-cyan/30 rounded-lg flex items-center justify-between">
+                                        <div class="flex items-center space-x-2">
+                                            <svg class="w-5 h-5 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                            </svg>
+                                            <span id="fxReportName" class="text-sm text-viper-cyan"></span>
+                                        </div>
+                                        <button type="button" onclick="clearForensicReportFile()" class="text-gray-400 hover:text-red-400">
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="flex justify-end space-x-3 pt-4">
+                                    <button type="button" onclick="cancelForensicForm()" class="px-4 py-2 rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-700 transition-colors">Cancel</button>
+                                    <button type="submit" class="px-6 py-2 rounded-lg bg-gradient-to-r from-viper-cyan to-viper-purple font-medium hover:shadow-lg hover:shadow-viper-cyan/50 transition-all text-white">Save Device</button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Device list -->
+                    <div id="forensicListContainer">
+                        ${caseForensicDevices.length === 0 ? `
+                            <div class="glass-card rounded-xl p-12 text-center">
+                                <svg class="w-20 h-20 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25"/>
+                                </svg>
+                                <h3 class="text-xl font-bold text-gray-300 mb-2">No Devices Examined</h3>
+                                <p class="text-gray-400 mb-6">Track every device examined (phones, computers, drives), the tool used, and attach the progress report.</p>
+                            </div>
+                        ` : renderForensicItems()}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderForensicItems() {
+            // Filter
+            let list = caseForensicDevices.slice();
+            if (forensicFilter.tool !== 'all') list = list.filter(d => d.tool === forensicFilter.tool);
+            if (forensicFilter.category !== 'all') list = list.filter(d => d.deviceCategory === forensicFilter.category);
+            if (forensicFilter.reviewed === 'reviewed') list = list.filter(d => d.reviewed);
+            if (forensicFilter.reviewed === 'pending') list = list.filter(d => !d.reviewed);
+
+            // Sort
+            list.sort((a, b) => {
+                switch (forensicSortBy) {
+                    case 'tool':     return _forensicToolLabel(a.tool).localeCompare(_forensicToolLabel(b.tool));
+                    case 'category': return _forensicCatLabel(a.deviceCategory).localeCompare(_forensicCatLabel(b.deviceCategory));
+                    case 'reviewed': return (a.reviewed===b.reviewed) ? 0 : (a.reviewed ? 1 : -1); // pending first
+                    case 'subject':  return (a.subjectName||'zzz').localeCompare(b.subjectName||'zzz');
+                    case 'acquisitionDate':
+                    default: {
+                        const da = a.acquisitionDate ? new Date(a.acquisitionDate+'T00:00:00').getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+                        const db = b.acquisitionDate ? new Date(b.acquisitionDate+'T00:00:00').getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+                        return db - da; // newest first
+                    }
+                }
+            });
+
+            if (!list.length) {
+                return `
+                    <div class="glass-card rounded-xl p-8 text-center text-gray-400">
+                        No devices match the current filters · ${caseForensicDevices.length} total device(s) recorded.
+                        <div class="mt-3"><button onclick="forensicFilter={tool:'all',category:'all',reviewed:'all'};renderTabContent('forensics');" class="text-viper-cyan hover:underline text-sm">Reset filters</button></div>
+                    </div>
+                `;
+            }
+
+            return list.map(d => {
+                const toolLabel = _forensicToolLabel(d.tool);
+                const catLabel = _forensicCatLabel(d.deviceCategory);
+                const reviewedPill = d.reviewed
+                    ? `<span class="px-2 py-0.5 rounded text-xs bg-viper-green/20 text-viper-green border border-viper-green/40">✓ Reviewed</span>`
+                    : `<span class="px-2 py-0.5 rounded text-xs bg-viper-yellow/20 text-viper-yellow border border-viper-yellow/40">⏳ Pending Review</span>`;
+                const reportPill = d.hasReportFile
+                    ? `<button onclick="openForensicReport(${d.id})" class="px-2 py-0.5 rounded text-xs bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/40 hover:bg-viper-cyan/30" title="${_esc(d.reportFileName||'report')}">📎 Report</button>`
+                    : `<span class="px-2 py-0.5 rounded text-xs bg-gray-700/40 text-gray-400 border border-gray-600">No report</span>`;
+                return `
+                    <div class="glass-card rounded-xl p-5 mb-3 border ${d.reviewed?'border-viper-green/20':'border-viper-yellow/20'}">
+                        <div class="flex items-start justify-between gap-4">
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center flex-wrap gap-2 mb-2">
+                                    <span class="text-2xl">${d.deviceCategory==='phone'?'📱':d.deviceCategory==='computer'?'💻':d.deviceCategory==='tablet'?'📲':d.deviceCategory==='drive'?'💾':d.deviceCategory==='gps'?'🛰️':'🔬'}</span>
+                                    <h4 class="text-lg font-bold text-white truncate">${_esc(d.makeModel||'Unnamed device')}</h4>
+                                    ${d.modelNumber ? `<span class="text-xs text-gray-400 font-mono">${_esc(d.modelNumber)}</span>` : ''}
+                                    ${reviewedPill}
+                                    ${reportPill}
+                                </div>
+                                <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-2 text-xs text-gray-300">
+                                    <div><span class="text-gray-500">Tool</span><br/><span class="text-viper-cyan">${_esc(toolLabel)}</span></div>
+                                    <div><span class="text-gray-500">Category</span><br/>${_esc(catLabel)}</div>
+                                    <div><span class="text-gray-500">Acquisition</span><br/>${_esc(d.acquisitionType||'—')}${d.acquisitionDate?` · ${_esc(d.acquisitionDate)}`:''}</div>
+                                    <div><span class="text-gray-500">Extraction</span><br/>${_esc(d.extractionType||'—')}</div>
+                                    ${d.subjectName ? `<div><span class="text-gray-500">Subject</span><br/>${_esc(d.subjectName)}${d.subjectRole?` (${_esc(d.subjectRole)})`:''}</div>` : ''}
+                                    ${d.examinerName ? `<div><span class="text-gray-500">Examiner</span><br/>${_esc(d.examinerName)}${d.examinerRole?` (${_esc(d.examinerRole)})`:''}</div>` : ''}
+                                    ${d.imei ? `<div><span class="text-gray-500">IMEI / MEID</span><br/><span class="font-mono">${_esc(d.imei)}</span></div>` : ''}
+                                    ${d.serialNumber ? `<div><span class="text-gray-500">Serial</span><br/><span class="font-mono">${_esc(d.serialNumber)}</span></div>` : ''}
+                                    ${d.storageSize ? `<div><span class="text-gray-500">Storage</span><br/>${_esc(d.storageSize)}</div>` : ''}
+                                    ${d.carrier ? `<div><span class="text-gray-500">Carrier</span><br/>${_esc(d.carrier)}</div>` : ''}
+                                    ${d.osVersion ? `<div><span class="text-gray-500">OS</span><br/>${_esc(d.osVersion)}</div>` : ''}
+                                    ${d.crimeType ? `<div><span class="text-gray-500">Crime Type</span><br/>${_esc(d.crimeType)}</div>` : ''}
+                                </div>
+                                ${d.linkedImportRef ? `<div class="mt-2 text-xs text-gray-400">🔗 Linked Import: <span class="text-gray-200">${_esc(d.linkedImportRef)}</span></div>` : ''}
+                                ${d.notes ? `<div class="mt-3 text-sm text-gray-300 whitespace-pre-wrap">${_esc(d.notes)}</div>` : ''}
+                            </div>
+                            <div class="flex flex-col gap-2 shrink-0">
+                                <button onclick="toggleForensicReviewed(${d.id})" class="px-3 py-1 rounded text-xs ${d.reviewed?'bg-viper-yellow/20 text-viper-yellow border border-viper-yellow/40 hover:bg-viper-yellow/30':'bg-viper-green/20 text-viper-green border border-viper-green/40 hover:bg-viper-green/30'}">${d.reviewed?'Mark Pending':'Mark Reviewed'}</button>
+                                <button onclick="editForensicDevice(${d.id})" class="px-3 py-1 rounded text-xs bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/40 hover:bg-viper-cyan/30">Edit</button>
+                                <button onclick="deleteForensicDevice(${d.id})" class="px-3 py-1 rounded text-xs bg-red-500/20 text-red-400 border border-red-500/40 hover:bg-red-500/30">Delete</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function openAddForensicForm() {
+            editingForensicId = null;
+            forensicReportFile = null;
+            const form = document.getElementById('forensicForm');
+            const title = document.getElementById('forensicFormTitle');
+            if (!form) return;
+            form.classList.remove('hidden');
+            if (title) title.textContent = 'Add New Device';
+            ['fxCrimeType','fxAcqType','fxAcqDate','fxSubject','fxSubjectRole','fxTool','fxExtraction','fxExaminer','fxExaminerRole','fxCategory','fxMakeModel','fxModelNumber','fxImei','fxSerial','fxStorage','fxCarrier','fxOsVersion','fxNotes'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+            const rev = document.getElementById('fxReviewed'); if (rev) rev.checked = false;
+            const linkedSel = document.getElementById('fxLinkedSelect'); if (linkedSel) linkedSel.value = '';
+            const linkedText = document.getElementById('fxLinkedText'); if (linkedText) { linkedText.value = ''; if (document.getElementById('fxLinkedSelect')) linkedText.classList.add('hidden'); }
+            const info = document.getElementById('fxReportInfo'); if (info) info.classList.add('hidden');
+            const btnText = document.getElementById('fxReportButtonText'); if (btnText) btnText.textContent = 'Click to upload progress report';
+            form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        function cancelForensicForm() {
+            editingForensicId = null;
+            forensicReportFile = null;
+            const form = document.getElementById('forensicForm'); if (form) form.classList.add('hidden');
+        }
+
+        function handleForensicReportSelect(event) {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            forensicReportFile = file;
+            const info = document.getElementById('fxReportInfo');
+            const name = document.getElementById('fxReportName');
+            const btnText = document.getElementById('fxReportButtonText');
+            if (info) info.classList.remove('hidden');
+            if (name) name.textContent = file.name;
+            if (btnText) btnText.textContent = 'Replace file';
+        }
+
+        function clearForensicReportFile() {
+            forensicReportFile = null;
+            const info = document.getElementById('fxReportInfo'); if (info) info.classList.add('hidden');
+            const inp = document.getElementById('fxReportFile'); if (inp) inp.value = '';
+            const btnText = document.getElementById('fxReportButtonText'); if (btnText) btnText.textContent = 'Click to upload progress report';
+        }
+
+        async function saveForensicDevice(event) {
+            event.preventDefault();
+            const v = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+
+            // Resolve linked import field (hybrid)
+            const linkedSel = document.getElementById('fxLinkedSelect');
+            const linkedText = document.getElementById('fxLinkedText');
+            let linkedImportRef = '';
+            if (linkedSel) {
+                if (linkedSel.value === '__manual__') {
+                    linkedImportRef = linkedText ? linkedText.value.trim() : '';
+                } else {
+                    linkedImportRef = linkedSel.value;
+                }
+            } else if (linkedText) {
+                linkedImportRef = linkedText.value.trim();
+            }
+
+            const targetId = editingForensicId || Date.now();
+
+            // Save report file to disk if a new one was picked
+            let savedFilePath = null;
+            let savedFileName = null;
+            let savedFileType = null;
+            if (forensicReportFile) {
+                try {
+                    const arrayBuffer = await forensicReportFile.arrayBuffer();
+                    savedFilePath = await window.electronAPI.saveForensicsFile({
+                        caseNumber: currentCase.caseNumber,
+                        deviceId: targetId,
+                        fileName: forensicReportFile.name,
+                        fileData: Array.from(new Uint8Array(arrayBuffer))
+                    });
+                    savedFileName = forensicReportFile.name;
+                    const lower = savedFileName.toLowerCase();
+                    savedFileType = lower.endsWith('.pdf') ? 'pdf' : (lower.endsWith('.html') || lower.endsWith('.htm')) ? 'html' : lower.endsWith('.zip') ? 'zip' : 'other';
+                } catch (err) {
+                    viperToast('Failed to save progress report: ' + (err && err.message ? err.message : err), 'error');
+                    return;
+                }
+            }
+
+            const payload = {
+                crimeType: v('fxCrimeType'),
+                acquisitionType: v('fxAcqType'),
+                acquisitionDate: v('fxAcqDate'),
+                subjectName: v('fxSubject'),
+                subjectRole: v('fxSubjectRole'),
+                tool: v('fxTool'),
+                extractionType: v('fxExtraction'),
+                examinerName: v('fxExaminer'),
+                examinerRole: v('fxExaminerRole'),
+                deviceCategory: v('fxCategory'),
+                makeModel: v('fxMakeModel'),
+                modelNumber: v('fxModelNumber'),
+                imei: v('fxImei'),
+                serialNumber: v('fxSerial'),
+                storageSize: v('fxStorage'),
+                carrier: v('fxCarrier'),
+                osVersion: v('fxOsVersion'),
+                linkedImportRef,
+                notes: v('fxNotes'),
+                reviewed: !!(document.getElementById('fxReviewed') && document.getElementById('fxReviewed').checked)
+            };
+
+            if (editingForensicId) {
+                const d = caseForensicDevices.find(x => x.id === editingForensicId);
+                if (d) {
+                    const wasReviewed = !!d.reviewed;
+                    Object.assign(d, payload);
+                    d.lastModified = new Date().toISOString();
+                    if (payload.reviewed && !wasReviewed) { d.reviewedAt = d.lastModified; d.reviewedBy = payload.examinerName || ''; }
+                    if (!payload.reviewed) { d.reviewedAt = null; d.reviewedBy = null; }
+                    if (savedFilePath) {
+                        d.hasReportFile = true;
+                        d.reportFileName = savedFileName;
+                        d.reportFilePath = savedFilePath;
+                        d.reportFileType = savedFileType;
+                    }
+                    if (typeof audit === 'function') audit('forensic_device_updated', { case_number: currentCase.caseNumber, case_id: currentCase.id, id: d.id, tool: d.tool, category: d.deviceCategory });
+                }
+            } else {
+                const newDevice = Object.assign({
+                    id: targetId,
+                    caseNumber: currentCase.caseNumber,
+                    createdAt: new Date().toISOString(),
+                    lastModified: new Date().toISOString(),
+                    reviewedAt: payload.reviewed ? new Date().toISOString() : null,
+                    reviewedBy: payload.reviewed ? (payload.examinerName || '') : null,
+                    hasReportFile: !!savedFilePath,
+                    reportFileName: savedFileName,
+                    reportFilePath: savedFilePath,
+                    reportFileType: savedFileType
+                }, payload);
+                caseForensicDevices.push(newDevice);
+                if (typeof audit === 'function') audit('forensic_device_added', { case_number: currentCase.caseNumber, case_id: currentCase.id, id: newDevice.id, tool: newDevice.tool, category: newDevice.deviceCategory, subject: newDevice.subjectName, examiner: newDevice.examinerName });
+                if (savedFilePath && typeof audit === 'function') audit('forensic_report_attached', { case_number: currentCase.caseNumber, case_id: currentCase.id, id: newDevice.id, filename: savedFileName });
+            }
+
+            forensicReportFile = null;
+            editingForensicId = null;
+            saveForensicsToStorage();
+            renderTabContent('forensics');
+            if (typeof viperToast === 'function') viperToast(editingForensicId === null ? 'Device saved' : 'Device updated', 'success');
+        }
+
+        function editForensicDevice(id) {
+            const d = caseForensicDevices.find(x => x.id === id);
+            if (!d) return;
+            editingForensicId = id;
+            forensicReportFile = null;
+            const form = document.getElementById('forensicForm');
+            const title = document.getElementById('forensicFormTitle');
+            if (!form) { openAddForensicForm(); }
+            form.classList.remove('hidden');
+            if (title) title.textContent = 'Edit Device';
+            const set = (k, val) => { const el = document.getElementById(k); if (el) el.value = val || ''; };
+            set('fxCrimeType', d.crimeType);
+            set('fxAcqType', d.acquisitionType);
+            set('fxAcqDate', d.acquisitionDate);
+            set('fxSubject', d.subjectName);
+            set('fxSubjectRole', d.subjectRole);
+            set('fxTool', d.tool);
+            set('fxExtraction', d.extractionType);
+            set('fxExaminer', d.examinerName);
+            set('fxExaminerRole', d.examinerRole);
+            set('fxCategory', d.deviceCategory);
+            set('fxMakeModel', d.makeModel);
+            set('fxModelNumber', d.modelNumber);
+            set('fxImei', d.imei);
+            set('fxSerial', d.serialNumber);
+            set('fxStorage', d.storageSize);
+            set('fxCarrier', d.carrier);
+            set('fxOsVersion', d.osVersion);
+            set('fxNotes', d.notes);
+            const rev = document.getElementById('fxReviewed'); if (rev) rev.checked = !!d.reviewed;
+
+            // Linked import
+            const linkedSel = document.getElementById('fxLinkedSelect');
+            const linkedText = document.getElementById('fxLinkedText');
+            if (linkedSel) {
+                const known = Array.from(linkedSel.options).some(o => o.value === d.linkedImportRef);
+                if (known && d.linkedImportRef) {
+                    linkedSel.value = d.linkedImportRef;
+                    if (linkedText) { linkedText.classList.add('hidden'); linkedText.value = ''; }
+                } else if (d.linkedImportRef) {
+                    linkedSel.value = '__manual__';
+                    if (linkedText) { linkedText.classList.remove('hidden'); linkedText.value = d.linkedImportRef; }
+                } else {
+                    linkedSel.value = '';
+                    if (linkedText) { linkedText.classList.add('hidden'); linkedText.value = ''; }
+                }
+            } else if (linkedText) {
+                linkedText.value = d.linkedImportRef || '';
+            }
+
+            // Report file pill
+            const info = document.getElementById('fxReportInfo');
+            const name = document.getElementById('fxReportName');
+            const btnText = document.getElementById('fxReportButtonText');
+            if (d.hasReportFile) {
+                if (info) info.classList.remove('hidden');
+                if (name) name.textContent = d.reportFileName || 'report';
+                if (btnText) btnText.textContent = 'Replace file';
+            } else {
+                if (info) info.classList.add('hidden');
+                if (btnText) btnText.textContent = 'Click to upload progress report';
+            }
+            form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        async function deleteForensicDevice(id) {
+            const d = caseForensicDevices.find(x => x.id === id);
+            if (!d) return;
+            const ok = typeof viperConfirm === 'function'
+                ? await viperConfirm(`Delete device "${d.makeModel || 'Unnamed device'}"?\n\nThe progress-report file on disk will be left in place.`, { danger: true, okText: 'Delete' })
+                : confirm('Delete this device?');
+            if (!ok) return;
+            caseForensicDevices = caseForensicDevices.filter(x => x.id !== id);
+            saveForensicsToStorage();
+            if (typeof audit === 'function') audit('forensic_device_deleted', { case_number: currentCase.caseNumber, case_id: currentCase.id, id });
+            renderTabContent('forensics');
+        }
+
+        function toggleForensicReviewed(id) {
+            const d = caseForensicDevices.find(x => x.id === id);
+            if (!d) return;
+            d.reviewed = !d.reviewed;
+            d.reviewedAt = d.reviewed ? new Date().toISOString() : null;
+            d.reviewedBy = d.reviewed ? (d.examinerName || '') : null;
+            d.lastModified = new Date().toISOString();
+            saveForensicsToStorage();
+            if (typeof audit === 'function') audit('forensic_device_reviewed', { case_number: currentCase.caseNumber, case_id: currentCase.id, id, reviewed: d.reviewed, by: d.reviewedBy });
+            renderTabContent('forensics');
+        }
+
+        async function openForensicReport(id) {
+            const d = caseForensicDevices.find(x => x.id === id);
+            if (!d || !d.reportFilePath) return;
+            try {
+                const bytes = await window.electronAPI.readForensicsFile(d.reportFilePath);
+                const u8 = new Uint8Array(bytes);
+                const mime = d.reportFileType === 'pdf' ? 'application/pdf'
+                           : d.reportFileType === 'html' ? 'text/html'
+                           : d.reportFileType === 'zip' ? 'application/zip'
+                           : 'application/octet-stream';
+                const blob = new Blob([u8], { type: mime });
+                const url = URL.createObjectURL(blob);
+                if (d.reportFileType === 'pdf' || d.reportFileType === 'html') {
+                    window.open(url, '_blank', 'noopener');
+                } else {
+                    const a = document.createElement('a');
+                    a.href = url; a.download = d.reportFileName || 'report';
+                    document.body.appendChild(a); a.click(); a.remove();
+                }
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+            } catch (err) {
+                if (typeof viperToast === 'function') viperToast('Failed to open report: ' + (err && err.message ? err.message : err), 'error');
+            }
+        }
+
         // =====================================================
         // MOVE PERSON BETWEEN TABS
         // =====================================================
@@ -11328,7 +12166,7 @@
                                         <select class="ident-type bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-cyan focus:outline-none w-40">
                                             <option value="email" ${id.type === 'email' ? 'selected' : ''}>Email</option>
                                             <option value="phone" ${id.type === 'phone' ? 'selected' : ''}>Phone</option>
-                                            <option value="username" ${id.type === 'username' ? 'selected' : ''}>Username</option>
+                                            <option value="username" ${id.type === 'username' ? 'selected' : ''}>Username / User ID</option>
                                             <option value="ip" ${id.type === 'ip' ? 'selected' : ''}>IP Address</option>
                                             <option value="dl" ${id.type === 'dl' ? 'selected' : ''}>Driver's License</option>
                                             <option value="ssn" ${id.type === 'ssn' ? 'selected' : ''}>SSN</option>
@@ -11549,7 +12387,7 @@
                         <select name="type" id="ppIdentTypeSelect" onchange="document.getElementById('ppIdentPlatformRow').style.display = this.value === 'username' ? 'block' : 'none'" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                             <option value="email">Email</option>
                             <option value="phone">Phone</option>
-                            <option value="username">Username</option>
+                            <option value="username">Username / User ID</option>
                             <option value="ip">IP Address</option>
                             <option value="dl">Driver's License</option>
                             <option value="ssn">SSN</option>
@@ -11597,7 +12435,7 @@
                 <select class="ident-type bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-cyan focus:outline-none w-40">
                     <option value="email">Email</option>
                     <option value="phone">Phone</option>
-                    <option value="username">Username</option>
+                    <option value="username">Username / User ID</option>
                     <option value="ip">IP Address</option>
                     <option value="dl">Driver's License</option>
                     <option value="ssn">SSN</option>
@@ -11678,7 +12516,7 @@
                         <select name="type" id="identTypeSelect" onchange="document.getElementById('identPlatformRow').style.display = this.value === 'username' ? 'block' : 'none'" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                             <option value="email">Email</option>
                             <option value="phone">Phone</option>
-                            <option value="username">Username</option>
+                            <option value="username">Username / User ID</option>
                             <option value="ip">IP Address</option>
                             <option value="dl">Driver's License</option>
                             <option value="ssn">SSN</option>
@@ -26684,6 +27522,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 { id: 'firearms', label: 'Firearms', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' },
                 { id: 'evidence', label: 'Evidence', icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10' },
                 { id: 'warrants', label: 'Warrants', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
+                { id: 'forensics', label: 'Device Exams', icon: 'M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25' },
                 { id: 'reports', label: 'Reports', icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
                 { id: 'notes', label: 'Case Notes', icon: 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z' },
                 { id: 'prosecution', label: 'Prosecution', icon: 'M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3' },

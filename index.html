@@ -211,6 +211,19 @@
             'closed_with_arrest': { value: 0, monthly: 0, subtitle: 'All time', color: 'viper-green' },
             'transferred_cases':  { value: 0, monthly: 0, subtitle: 'All time', color: 'viper-purple' },
             'warrants_written':   { value: 0, monthly: 0, subtitle: 'All time', color: 'viper-orange' },
+            'devices_examined':       { value: 0, monthly: 0,    subtitle: 'All time',         color: 'viper-cyan'   },
+            'devices_pending_review': { value: 0, monthly: null, subtitle: 'Awaiting review', color: 'viper-yellow' },
+            'devices_tool_cellebrite':{ value: 0, monthly: 0,    subtitle: 'Cellebrite',       color: 'viper-cyan'   },
+            'devices_tool_datapilot': { value: 0, monthly: 0,    subtitle: 'DataPilot',        color: 'viper-purple' },
+            'devices_tool_magnet':    { value: 0, monthly: 0,    subtitle: 'Magnet AXIOM',     color: 'viper-green'  },
+            'devices_tool_graykey':   { value: 0, monthly: 0,    subtitle: 'GrayKey',          color: 'viper-orange' },
+            'devices_tool_ftk':       { value: 0, monthly: 0,    subtitle: 'FTK Imager',       color: 'viper-cyan'   },
+            'devices_tool_other':     { value: 0, monthly: 0,    subtitle: 'Other tools',      color: 'viper-purple' },
+            'devices_cat_phone':      { value: 0, monthly: 0,    subtitle: 'Cell Phones',      color: 'viper-cyan'   },
+            'devices_cat_computer':   { value: 0, monthly: 0,    subtitle: 'Computers',        color: 'viper-purple' },
+            'devices_cat_tablet':     { value: 0, monthly: 0,    subtitle: 'Tablets',          color: 'viper-green'  },
+            'devices_cat_drive':      { value: 0, monthly: 0,    subtitle: 'External Drives',  color: 'viper-orange' },
+            'devices_cat_other':      { value: 0, monthly: 0,    subtitle: 'Other devices',    color: 'viper-purple' },
         };
         
         const metricLabels = {
@@ -231,6 +244,19 @@
             'closed_with_arrest': 'Closed w/ Arrest',
             'transferred_cases': 'Transferred Cases',
             'warrants_written': 'Warrants Written',
+            'devices_examined': 'Devices Examined',
+            'devices_pending_review': 'Devices Pending Review',
+            'devices_tool_cellebrite': 'Devices · Cellebrite',
+            'devices_tool_datapilot': 'Devices · DataPilot',
+            'devices_tool_magnet': 'Devices · Magnet AXIOM',
+            'devices_tool_graykey': 'Devices · GrayKey',
+            'devices_tool_ftk': 'Devices · FTK Imager',
+            'devices_tool_other': 'Devices · Other Tool',
+            'devices_cat_phone': 'Devices · Cell Phones',
+            'devices_cat_computer': 'Devices · Computers',
+            'devices_cat_tablet': 'Devices · Tablets',
+            'devices_cat_drive': 'Devices · External Drives',
+            'devices_cat_other': 'Devices · Other Category',
         };
 
         // ═══ Custom Metrics → Dashboard integration ═════════════════════
@@ -476,6 +502,87 @@
             color: #00d9ff;
             border: 1px solid rgba(0, 217, 255, 0.3);
         }
+
+        /* ─── Active Investigations sticky table header (opaque, no bleed-through) ─── */
+        .inv-thead-solid th {
+            background-color: #1a2332;
+            background-image: linear-gradient(to right, rgba(0, 217, 255, 0.22), rgba(157, 78, 221, 0.22));
+            box-shadow: inset 0 -1px 0 0 rgba(0, 217, 255, 0.35);
+        }
+        body.light-mode .inv-thead-solid th {
+            background-color: #ffffff;
+            background-image: linear-gradient(to right, rgba(0, 217, 255, 0.12), rgba(157, 78, 221, 0.10));
+            box-shadow: inset 0 -1px 0 0 rgba(0, 217, 255, 0.45);
+        }
+
+        /* ─── Tasks Calendar ─── */
+        .cal-cell {
+            position: relative;
+            min-height: 56px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.025);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            padding: 4px 4px 6px 4px;
+            cursor: pointer;
+            transition: transform .15s ease, background .15s ease, border-color .15s ease, box-shadow .15s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .cal-cell:hover {
+            background: rgba(0, 217, 255, 0.06);
+            border-color: rgba(0, 217, 255, 0.25);
+            transform: translateY(-1px);
+        }
+        .cal-cell.is-outside { opacity: 0.35; }
+        .cal-cell.is-today {
+            box-shadow: 0 0 0 1.5px rgba(0, 217, 255, 0.55), 0 0 12px rgba(0, 217, 255, 0.15);
+            background: rgba(0, 217, 255, 0.07);
+        }
+        .cal-cell.is-selected {
+            background: rgba(0, 217, 255, 0.12);
+            border-color: rgba(0, 217, 255, 0.55);
+        }
+        .cal-cell.has-overdue { box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.4); }
+        .cal-cell .cal-daynum {
+            font-size: 11px;
+            font-weight: 600;
+            color: #cbd5e1;
+            line-height: 1;
+            padding-left: 2px;
+        }
+        .cal-cell.is-today .cal-daynum { color: #00d9ff; }
+        .cal-cell .cal-dots {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2px;
+            margin-top: auto;
+            padding: 0 2px 0 2px;
+        }
+        .cal-cell .cal-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 9999px;
+            box-shadow: 0 0 4px currentColor;
+        }
+        .cal-cell .cal-dot.high { background: #f87171; color: #f87171; }
+        .cal-cell .cal-dot.medium { background: #fb923c; color: #fb923c; }
+        .cal-cell .cal-dot.low { background: #4ade80; color: #4ade80; }
+        .cal-cell .cal-dot.court { background: #fbbf24; color: #fbbf24; }
+        .cal-cell .cal-dot.completed { opacity: 0.35; box-shadow: none; }
+        .cal-cell .cal-more {
+            font-size: 9px;
+            color: #94a3b8;
+            font-weight: 600;
+            margin-left: 2px;
+        }
+        body.light-mode .cal-cell {
+            background: #ffffff;
+            border-color: #e5e7eb;
+        }
+        body.light-mode .cal-cell:hover { background: rgba(0, 217, 255, 0.08); }
+        body.light-mode .cal-cell .cal-daynum { color: #334155; }
+        body.light-mode .cal-cell.is-today { background: rgba(0, 217, 255, 0.12); }
 
         /* Light Mode Styles */
         /* ═══════════════════════════════════════════
@@ -1039,8 +1146,8 @@
                 <!-- Active Investigations and Tasks -->
                 <div class="grid grid-cols-3 gap-6 relative" style="z-index: 1;">
                     <!-- Active Investigations -->
-                    <div class="col-span-2 glass-card rounded-xl p-6" style="position: relative; z-index: 1;">
-                        <div class="flex items-center justify-between mb-6">
+                    <div class="col-span-2 glass-card rounded-xl p-6 flex flex-col" style="position: relative; z-index: 1; max-height: 600px;">
+                        <div class="flex items-center justify-between mb-6 flex-shrink-0">
                             <h3 class="text-xl font-bold" id="investigationsTitle">Active Investigations</h3>
                             <div class="flex items-center space-x-2">
                                 <!-- Search bar -->
@@ -1075,9 +1182,9 @@
                         </div>
                         
                         <!-- Table -->
-                        <div class="overflow-y-auto" style="max-height: 320px;">
-                            <table class="w-full">
-                                <thead class="bg-gradient-to-r from-viper-cyan/20 to-viper-purple/20 border-b border-viper-cyan/30 sticky top-0">
+                        <div class="overflow-y-auto flex-1 pr-1" style="min-height:0; scrollbar-width:thin; scrollbar-color:#4a5568 transparent;">
+                            <table class="w-full border-separate" style="border-spacing:0;">
+                                <thead class="sticky top-0 z-20 inv-thead-solid">
                                     <tr id="investigationsTableHead" class="text-left text-xs text-viper-cyan"></tr>
                                 </thead>
                                 <tbody id="investigationsTableBody" class="text-sm">
@@ -1095,9 +1202,22 @@
                     <div class="glass-card rounded-xl p-6 flex flex-col" style="position: relative; z-index: 1; max-height: 600px;">
                         <div class="flex items-center justify-between mb-4">
                             <h3 class="text-xl font-bold">Tasks</h3>
-                            <button onclick="openAddTaskModal()" class="px-4 py-2 rounded-lg bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/30 hover:bg-viper-cyan/30 transition-colors text-xs font-medium">
-                                + Add Task
-                            </button>
+                            <div class="flex items-center gap-2">
+                                <!-- List / Calendar mode switch -->
+                                <div class="inline-flex items-center bg-viper-card/50 border border-white/5 rounded-lg p-0.5" role="group" aria-label="Tasks display mode">
+                                    <button onclick="setTaskMode('list')" id="taskModeListBtn" class="px-2.5 py-1.5 rounded-md text-xs font-medium transition-all view-toggle-active flex items-center gap-1.5" title="List view">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+                                        <span>List</span>
+                                    </button>
+                                    <button onclick="setTaskMode('calendar')" id="taskModeCalendarBtn" class="px-2.5 py-1.5 rounded-md text-xs font-medium transition-all text-gray-400 hover:text-white flex items-center gap-1.5" title="Calendar view">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                                        <span>Calendar</span>
+                                    </button>
+                                </div>
+                                <button onclick="openAddTaskModal()" class="px-4 py-2 rounded-lg bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/30 hover:bg-viper-cyan/30 transition-colors text-xs font-medium whitespace-nowrap">
+                                    + Add Task
+                                </button>
+                            </div>
                         </div>
                         
                         <!-- Task View Toggle -->
@@ -1144,6 +1264,46 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
                             </svg>
                             <p class="text-gray-400 text-sm" id="no-tasks-text">No tasks yet</p>
+                        </div>
+
+                        <!-- Calendar view -->
+                        <div id="tasks-calendar" class="hidden flex-1 flex flex-col" style="min-height:0;">
+                            <!-- Calendar header: prev / month label / next / today -->
+                            <div class="flex items-center justify-between mb-3 px-1">
+                                <button onclick="calNavMonth(-1)" class="p-1.5 rounded-md text-gray-400 hover:text-viper-cyan hover:bg-viper-cyan/10 transition-colors" title="Previous month" aria-label="Previous month">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                                </button>
+                                <div class="flex items-center gap-2">
+                                    <h4 id="calendarMonthLabel" class="text-sm font-semibold tracking-wide text-white">—</h4>
+                                    <button onclick="calNavToday()" class="px-2 py-0.5 rounded-md text-[10px] uppercase tracking-wider text-gray-400 hover:text-viper-cyan border border-white/5 hover:border-viper-cyan/40 transition-colors" title="Jump to today">Today</button>
+                                </div>
+                                <button onclick="calNavMonth(1)" class="p-1.5 rounded-md text-gray-400 hover:text-viper-cyan hover:bg-viper-cyan/10 transition-colors" title="Next month" aria-label="Next month">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                </button>
+                            </div>
+
+                            <!-- Weekday header -->
+                            <div class="grid grid-cols-7 gap-1 mb-1 px-1">
+                                <div class="text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 py-1">Sun</div>
+                                <div class="text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 py-1">Mon</div>
+                                <div class="text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 py-1">Tue</div>
+                                <div class="text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 py-1">Wed</div>
+                                <div class="text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 py-1">Thu</div>
+                                <div class="text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 py-1">Fri</div>
+                                <div class="text-center text-[10px] font-semibold uppercase tracking-wider text-gray-500 py-1">Sat</div>
+                            </div>
+
+                            <!-- Day grid -->
+                            <div id="calendarGrid" class="grid grid-cols-7 gap-1 px-1"></div>
+
+                            <!-- Legend -->
+                            <div class="flex items-center justify-center gap-3 mt-3 text-[10px] text-gray-400 px-1 flex-wrap">
+                                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-400"></span>High</span>
+                                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-orange-400"></span>Med</span>
+                                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-green-400"></span>Low</span>
+                                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-400"></span>Court</span>
+                                <span class="flex items-center gap-1 text-gray-500"><span class="inline-block w-2 h-2 rounded-full ring-1 ring-viper-cyan"></span>Today</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1327,6 +1487,16 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                                 </svg>
                                 <span class="text-sm font-medium">Warrants</span>
+                            </div>
+                        </label>
+
+                        <label class="flex items-center space-x-3 p-3 rounded-lg cursor-pointer hover:bg-viper-card/30 transition-colors border border-gray-700 hover:border-viper-cyan/30">
+                            <input type="checkbox" value="forensics" class="case-module w-4 h-4 rounded border-gray-600 text-viper-cyan focus:ring-viper-cyan">
+                            <div class="flex items-center space-x-2">
+                                <svg class="w-5 h-5 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25"/>
+                                </svg>
+                                <span class="text-sm font-medium">Device Exams</span>
                             </div>
                         </label>
                         
@@ -1584,6 +1754,28 @@
     </div>
     </div>
     
+    <!-- Calendar Day Detail Modal -->
+    <div id="calendarDayModal" class="modal" onclick="if(event.target===this) closeCalendarDayModal()">
+        <div class="modal-content glass-card rounded-2xl p-6 max-w-lg w-full mx-4 border-2 border-viper-cyan/30" style="max-height: 80vh; display: flex; flex-direction: column;">
+            <div class="flex items-center justify-between mb-4 flex-shrink-0">
+                <div>
+                    <h3 id="calendarDayModalTitle" class="text-xl font-bold text-viper-cyan">—</h3>
+                    <p id="calendarDayModalSub" class="text-xs text-gray-400 mt-0.5"></p>
+                </div>
+                <button onclick="closeCalendarDayModal()" class="text-gray-400 hover:text-white" aria-label="Close">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div id="calendarDayModalBody" class="space-y-3 overflow-y-auto pr-1" style="min-height:0; scrollbar-width:thin; scrollbar-color:#4a5568 transparent;"></div>
+            <div class="flex items-center justify-between mt-4 pt-4 border-t border-white/5 flex-shrink-0">
+                <button onclick="openAddTaskForDay()" class="text-xs px-3 py-1.5 rounded-lg bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/40 hover:bg-viper-cyan/30 transition-colors">+ Add Task to this day</button>
+                <button onclick="closeCalendarDayModal()" class="text-xs text-gray-400 hover:text-white">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Add Task Modal -->
     <div id="addTaskModal" class="modal">
         <div class="modal-content glass-card rounded-2xl p-8 max-w-2xl w-full mx-4 border-2 border-viper-cyan/30">
@@ -3389,6 +3581,20 @@
             const container = document.getElementById('tasks-container');
             const noTasksMsg = document.getElementById('no-tasks-message');
             const noTasksText = document.getElementById('no-tasks-text');
+            const calWrap = document.getElementById('tasks-calendar');
+
+            // Calendar mode: delegate, hide list elements
+            if (currentTaskMode === 'calendar') {
+                if (container) container.classList.add('hidden');
+                if (noTasksMsg) noTasksMsg.classList.add('hidden');
+                if (calWrap) calWrap.classList.remove('hidden');
+                renderTaskCalendar();
+                return;
+            }
+
+            // List mode: ensure list visible, calendar hidden
+            if (container) container.classList.remove('hidden');
+            if (calWrap) calWrap.classList.add('hidden');
             
             // Filter tasks based on current view
             let filteredTasks = tasks;
@@ -3503,6 +3709,223 @@
             }).join('');
         }
         
+        // ═══════════════════════════════════════════
+        // Tasks Calendar View
+        // ═══════════════════════════════════════════
+        let currentTaskMode = (localStorage.getItem('viperTaskMode') === 'calendar') ? 'calendar' : 'list';
+        let calendarCursor = new Date();         // month being viewed
+        calendarCursor.setDate(1);
+        let calendarSelectedDay = null;          // 'YYYY-MM-DD' or null
+
+        function setTaskMode(mode) {
+            if (mode !== 'list' && mode !== 'calendar') return;
+            currentTaskMode = mode;
+            try { localStorage.setItem('viperTaskMode', mode); } catch(_) {}
+
+            const listBtn = document.getElementById('taskModeListBtn');
+            const calBtn = document.getElementById('taskModeCalendarBtn');
+            if (mode === 'list') {
+                listBtn.classList.add('view-toggle-active');
+                listBtn.classList.remove('text-gray-400', 'hover:text-white');
+                calBtn.classList.remove('view-toggle-active');
+                calBtn.classList.add('text-gray-400', 'hover:text-white');
+            } else {
+                calBtn.classList.add('view-toggle-active');
+                calBtn.classList.remove('text-gray-400', 'hover:text-white');
+                listBtn.classList.remove('view-toggle-active');
+                listBtn.classList.add('text-gray-400', 'hover:text-white');
+            }
+            renderTasks();
+        }
+
+        function _calDateKey(d) {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${dd}`;
+        }
+
+        function _calFilteredTasks() {
+            // Honor existing All / Cases + Hide-completed filters
+            let list = tasks;
+            if (currentTaskView === 'cases') list = list.filter(t => t.caseId);
+            if (hideCompleted) list = list.filter(t => !t.completed);
+            return list;
+        }
+
+        function calNavMonth(delta) {
+            calendarCursor.setMonth(calendarCursor.getMonth() + delta);
+            renderTaskCalendar();
+        }
+
+        function calNavToday() {
+            calendarCursor = new Date();
+            calendarCursor.setDate(1);
+            calendarSelectedDay = _calDateKey(new Date());
+            renderTaskCalendar();
+            _openCalendarDayModal();
+        }
+
+        function renderTaskCalendar() {
+            const grid = document.getElementById('calendarGrid');
+            const label = document.getElementById('calendarMonthLabel');
+            if (!grid || !label) return;
+
+            const year = calendarCursor.getFullYear();
+            const month = calendarCursor.getMonth();
+            label.textContent = calendarCursor.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+            // Update stats from filtered tasks so the High/Med/Low counts stay live
+            const filtered = _calFilteredTasks();
+            updateTaskStats(filtered);
+            const completedLabel = document.getElementById('completedCountLabel');
+            if (completedLabel) {
+                const cc = tasks.filter(t => t.completed && (currentTaskView !== 'cases' || t.caseId)).length;
+                completedLabel.textContent = cc > 0 ? `${cc} completed` : '';
+            }
+
+            // Bucket tasks by date key
+            const byDay = new Map();
+            for (const t of filtered) {
+                if (!t.date) continue;
+                const key = t.date; // already YYYY-MM-DD from <input type=date>
+                if (!byDay.has(key)) byDay.set(key, []);
+                byDay.get(key).push(t);
+            }
+
+            // Build 6-row grid starting on Sunday
+            const firstOfMonth = new Date(year, month, 1);
+            const gridStart = new Date(firstOfMonth);
+            gridStart.setDate(1 - firstOfMonth.getDay()); // back up to Sunday
+
+            const todayKey = _calDateKey(new Date());
+            const cells = [];
+            for (let i = 0; i < 42; i++) {
+                const d = new Date(gridStart);
+                d.setDate(gridStart.getDate() + i);
+                const key = _calDateKey(d);
+                const outside = d.getMonth() !== month;
+                const isToday = key === todayKey;
+                const isSelected = key === calendarSelectedDay;
+                const dayTasks = byDay.get(key) || [];
+                const overdue = dayTasks.some(t => !t.completed && isOverdue(t.date, t.time));
+
+                // Dots: up to 4 visible, then +N
+                const sorted = [...dayTasks].sort((a, b) => {
+                    const order = { high: 0, court: 0, medium: 1, low: 2 };
+                    return (order[a.kind === 'court' ? 'court' : a.priority] ?? 1) - (order[b.kind === 'court' ? 'court' : b.priority] ?? 1);
+                });
+                const maxDots = 4;
+                const dotHtml = sorted.slice(0, maxDots).map(t => {
+                    const cls = t.kind === 'court' ? 'court' : (t.priority || 'medium');
+                    const completed = t.completed ? ' completed' : '';
+                    return `<span class="cal-dot ${cls}${completed}" title="${(t.title || '').replace(/"/g, '&quot;')}"></span>`;
+                }).join('');
+                const moreHtml = sorted.length > maxDots ? `<span class="cal-more">+${sorted.length - maxDots}</span>` : '';
+
+                const classes = [
+                    'cal-cell',
+                    outside ? 'is-outside' : '',
+                    isToday ? 'is-today' : '',
+                    isSelected ? 'is-selected' : '',
+                    overdue ? 'has-overdue' : ''
+                ].filter(Boolean).join(' ');
+
+                cells.push(`
+                    <div class="${classes}" data-day="${key}" onclick="_calCellClick('${key}')">
+                        <span class="cal-daynum">${d.getDate()}</span>
+                        <div class="cal-dots">${dotHtml}${moreHtml}</div>
+                    </div>
+                `);
+            }
+            grid.innerHTML = cells.join('');
+        }
+
+        function _calCellClick(key) {
+            calendarSelectedDay = key;
+            renderTaskCalendar();
+            _openCalendarDayModal();
+        }
+
+        function closeCalendarDayModal() {
+            const modal = document.getElementById('calendarDayModal');
+            if (modal) modal.classList.remove('show');
+            // Keep the calendar's selected-day highlight until user picks another
+        }
+
+        function openAddTaskForDay() {
+            // Pre-fill the date in the Add Task modal
+            closeCalendarDayModal();
+            openAddTaskModal();
+            const di = document.getElementById('taskDate');
+            if (di && calendarSelectedDay) di.value = calendarSelectedDay;
+        }
+
+        function _openCalendarDayModal() {
+            const modal = document.getElementById('calendarDayModal');
+            const title = document.getElementById('calendarDayModalTitle');
+            const sub = document.getElementById('calendarDayModalSub');
+            const body = document.getElementById('calendarDayModalBody');
+            if (!modal || !title || !body || !calendarSelectedDay) return;
+
+            const [y, m, d] = calendarSelectedDay.split('-').map(Number);
+            const dt = new Date(y, m - 1, d);
+            title.textContent = dt.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+            if (sub) sub.textContent = dt.toLocaleDateString('en-US', { year: 'numeric' });
+
+            const dayTasks = _calFilteredTasks().filter(t => t.date === calendarSelectedDay);
+
+            if (dayTasks.length === 0) {
+                body.innerHTML = `
+                    <div class="text-center py-8">
+                        <svg class="w-12 h-12 text-gray-600 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                        <p class="text-sm text-gray-400">No tasks scheduled for this day.</p>
+                    </div>
+                `;
+                modal.classList.add('show');
+                return;
+            }
+
+            // Sort: incomplete first by priority/time, then completed
+            const sorted = [...dayTasks].sort((a, b) => {
+                if (a.completed !== b.completed) return a.completed ? 1 : -1;
+                const order = { high: 0, medium: 1, low: 2 };
+                const pa = (a.kind === 'court') ? -1 : (order[a.priority] ?? 1);
+                const pb = (b.kind === 'court') ? -1 : (order[b.priority] ?? 1);
+                if (pa !== pb) return pa - pb;
+                return (a.time || '').localeCompare(b.time || '');
+            });
+
+            body.innerHTML = sorted.map(task => {
+                const colors = getTaskColors(task);
+                const overdue = isOverdue(task.date, task.time);
+                const label = getTaskLabel(task);
+                const safeTitle = (task.title || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+                const safeNotes = (task.notes || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+                return `
+                    <div class="bg-viper-card/50 rounded-lg p-3 border-l-4 border-${colors.border} ${task.completed ? 'opacity-60' : ''}">
+                        <div class="flex items-start gap-2">
+                            <input type="checkbox" ${task.completed ? 'checked' : ''} onchange="toggleTaskComplete(${task.id}); _openCalendarDayModal();" class="mt-1 w-4 h-4 rounded border-gray-600 text-viper-cyan focus:ring-viper-cyan focus:ring-offset-0">
+                            <div class="flex-1 min-w-0">
+                                <h4 class="text-sm font-semibold ${task.completed ? 'line-through text-gray-500' : 'text-white'}">${safeTitle}</h4>
+                                <div class="flex items-center flex-wrap gap-1.5 mt-1.5 text-[11px]">
+                                    <span class="px-2 py-0.5 rounded-full bg-${colors.badge} text-${colors.badgeText} border border-${colors.badgeBorder} font-medium">${label}</span>
+                                    ${task.time ? `<span class="flex items-center gap-0.5 ${overdue && !task.completed ? 'text-red-400 font-medium' : 'text-gray-300'}"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>${task.time}${overdue && !task.completed ? ' · OVERDUE' : ''}</span>` : ''}
+                                    ${task.caseId ? `<span class="flex items-center gap-0.5 text-viper-cyan"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>Case ${task.caseId}</span>` : ''}
+                                    ${task.hasFile ? `<span class="flex items-center gap-0.5 text-viper-purple" title="${(task.fileName||'').replace(/"/g,'&quot;')}"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>PDF</span>` : ''}
+                                </div>
+                                ${safeNotes ? `<p class="text-xs text-gray-400 mt-2 italic whitespace-pre-wrap">${safeNotes}</p>` : ''}
+                            </div>
+                            <button onclick="(async()=>{ await deleteTask(${task.id}); _openCalendarDayModal(); })()" class="text-gray-500 hover:text-red-400 transition-colors" title="Delete task">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            modal.classList.add('show');
+        }
+
         function toggleTaskComplete(taskId) {
             const task = tasks.find(t => t.id === taskId);
             if (task) {
@@ -3510,6 +3933,10 @@
                 task.completedAt = task.completed ? new Date().toISOString() : null;
                 localStorage.setItem('viperTasks', JSON.stringify(tasks));
                 renderTasks();
+                if (currentTaskMode === 'calendar' && calendarSelectedDay) {
+                    const m = document.getElementById('calendarDayModal');
+                    if (m && m.classList.contains('show')) _openCalendarDayModal();
+                }
             }
         }
         
@@ -3518,6 +3945,10 @@
                 tasks = tasks.filter(t => t.id !== taskId);
                 localStorage.setItem('viperTasks', JSON.stringify(tasks));
                 renderTasks();
+                if (currentTaskMode === 'calendar' && calendarSelectedDay) {
+                    const m = document.getElementById('calendarDayModal');
+                    if (m && m.classList.contains('show')) _openCalendarDayModal();
+                }
             }
         }
         
@@ -4786,6 +5217,67 @@
 
         // traceDashSearch/traceDashScanAll/renderTraceDashResults — moved to Resource Hub drawer
 
+        // ── Forensic Devices (Device Exams) → dashboard metrics ────────
+        // Single pass over viperCaseForensicDevices populates the 13 metric
+        // keys (examined + pending review + by-tool + by-category).
+        function _recomputeDeviceMetrics() {
+            const all = JSON.parse(localStorage.getItem('viperCaseForensicDevices') || '{}');
+            const now = new Date();
+            const curM = now.getMonth(), curY = now.getFullYear();
+            const inMonth = (iso) => {
+                if (!iso) return false;
+                const d = new Date(iso.length === 10 ? iso + 'T00:00:00' : iso);
+                if (isNaN(d.getTime())) return false;
+                return d.getMonth() === curM && d.getFullYear() === curY;
+            };
+
+            const toolKey = {
+                cellebrite: 'devices_tool_cellebrite',
+                datapilot:  'devices_tool_datapilot',
+                magnet:     'devices_tool_magnet',
+                graykey:    'devices_tool_graykey',
+                ftk:        'devices_tool_ftk',
+            };
+            const catKey = {
+                phone:    'devices_cat_phone',
+                computer: 'devices_cat_computer',
+                tablet:   'devices_cat_tablet',
+                drive:    'devices_cat_drive',
+            };
+
+            // reset
+            const keys = ['devices_examined','devices_pending_review',
+                'devices_tool_cellebrite','devices_tool_datapilot','devices_tool_magnet',
+                'devices_tool_graykey','devices_tool_ftk','devices_tool_other',
+                'devices_cat_phone','devices_cat_computer','devices_cat_tablet',
+                'devices_cat_drive','devices_cat_other'];
+            keys.forEach(k => {
+                if (dashboardMetrics[k]) {
+                    dashboardMetrics[k].value = 0;
+                    if (k !== 'devices_pending_review') dashboardMetrics[k].monthly = 0;
+                }
+            });
+
+            Object.values(all).forEach(arr => {
+                if (!Array.isArray(arr)) return;
+                arr.forEach(d => {
+                    const when = d.acquisitionDate || d.createdAt;
+                    const isM = inMonth(when);
+                    dashboardMetrics['devices_examined'].value++;
+                    if (isM) dashboardMetrics['devices_examined'].monthly++;
+                    if (!d.reviewed) dashboardMetrics['devices_pending_review'].value++;
+
+                    const tk = toolKey[d.tool] || 'devices_tool_other';
+                    dashboardMetrics[tk].value++;
+                    if (isM) dashboardMetrics[tk].monthly++;
+
+                    const ck = catKey[d.deviceCategory] || 'devices_cat_other';
+                    dashboardMetrics[ck].value++;
+                    if (isM) dashboardMetrics[ck].monthly++;
+                });
+            });
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             // Migrate existing data to central storage (one-time sync)
             migrateExistingDataToCentralStorage();
@@ -4797,6 +5289,9 @@
             // Update warrants written (lifetime + this month)
             dashboardMetrics['warrants_written'].value   = getTotalWarrantsWritten();
             dashboardMetrics['warrants_written'].monthly = getWarrantsWrittenThisMonth();
+
+            // Update forensic device metrics (lifetime + this month, all breakdowns)
+            _recomputeDeviceMetrics();
 
             // Update recovered vehicles
             dashboardMetrics['recovered_vehicles'].value   = getTotalRecoveredVehicles();
@@ -4847,7 +5342,8 @@
             // Restore hide-completed toggle state
             const hcToggle = document.getElementById('hideCompletedToggle');
             if (hcToggle) hcToggle.checked = hideCompleted;
-            renderTasks();
+            // Restore list/calendar mode (also calls renderTasks)
+            setTaskMode(currentTaskMode);
             
             // Show overdue warrant notification if any exist
             updateNotificationBadge();

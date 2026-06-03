@@ -3411,6 +3411,44 @@ ipcMain.handle('read-warrant-file', async (event, filePath) => {
   }
 });
 
+// --- Forensic Devices (Device Exams) IPCs ---
+// Store layout: cases/{caseNumber}/Forensics/{deviceId}/{filename}
+// Encrypted on write when Field Security is enabled + unlocked.
+ipcMain.handle('save-forensics-file', async (event, data) => {
+  try {
+    const { caseNumber, deviceId, fileName, fileData } = data;
+    const sanitize = (s) => String(s).replace(/[<>:"|?*\x00-\x1F]/g, '_');
+    const dir = path.join(casesDir, sanitize(caseNumber), 'Forensics', String(deviceId));
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, sanitize(fileName));
+    const buffer = Buffer.from(fileData);
+    if (security && security.isEnabled() && security.isUnlocked()) {
+      fs.writeFileSync(filePath, security.encryptBuffer(buffer));
+    } else {
+      fs.writeFileSync(filePath, buffer);
+    }
+    console.log(`Forensics report saved: ${filePath} (${buffer.length} bytes)`);
+    return filePath;
+  } catch (error) {
+    console.error('Failed to save forensics file:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('read-forensics-file', async (event, filePath) => {
+  try {
+    const raw = fs.readFileSync(filePath);
+    if (security && security.isUnlocked() && security.isEncryptedBuffer(raw)) {
+      const decrypted = security.decryptBuffer(raw);
+      return Array.from(new Uint8Array(decrypted));
+    }
+    return Array.from(new Uint8Array(raw));
+  } catch (error) {
+    console.error('Failed to read forensics file:', error);
+    throw error;
+  }
+});
+
 // --- Save Ops Plan file (photo or document) to disk ---
 // Storing Ops Plan photos inline as base64 in localStorage hits the 10MB
 // per-origin Chromium quota. Save them under

@@ -1546,6 +1546,15 @@
                                     <div><span class="text-sm font-medium text-white">Datapilot</span><div class="text-xs text-gray-500">Mobile Forensic CSV Parser + AI Insights</div></div>
                                 </div>
                             </label>
+                            <label class="flex items-center space-x-3 p-3 rounded-lg cursor-pointer hover:bg-viper-card/30 transition-colors border border-gray-700 hover:border-viper-orange/50">
+                                <input type="checkbox" value="cellebrite" class="case-module w-4 h-4 rounded border-gray-600 text-viper-orange focus:ring-viper-orange">
+                                <div class="flex items-center space-x-2">
+                                    <svg class="w-5 h-5 text-viper-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 2H9a2 2 0 00-2 2v16a2 2 0 002 2h6a2 2 0 002-2V4a2 2 0 00-2-2h-2M11 18h2"/>
+                                    </svg>
+                                    <div><span class="text-sm font-medium text-white">Cellebrite (Mobile Forensics)</span><div class="text-xs text-gray-500">Parse raw UFED .ufdx filesystem extractions</div></div>
+                                </div>
+                            </label>
                         </div>
                     </div>
                 </div>
@@ -2195,6 +2204,21 @@
             // Restore per-ID module data (Pattern 2)
             if (pkg.moduleData) {
                 Object.entries(pkg.moduleData).forEach(([key, val]) => {
+                    // Cellebrite imports are special: on-disk parsed/*.json + manifest
+                    // do NOT travel with .vcase (same rule as Evidence files). Mark
+                    // each import entry as 'orphaned' so the UI shows a re-import
+                    // banner instead of empty panes with stale counts.
+                    if (key === 'cellebriteImport' && val && Array.isArray(val.imports)) {
+                        val = {
+                            ...val,
+                            imports: val.imports.map(imp => ({
+                                ...imp,
+                                status: 'orphaned',
+                                _transferredFrom: pkg._exportedBy || 'another VIPER instance',
+                                _transferredAt: new Date().toISOString(),
+                            })),
+                        };
+                    }
                     localStorage.setItem(`${key}_${newId}`, JSON.stringify(val));
                 });
             }
@@ -2262,7 +2286,7 @@
                     'areacanvas', 'prosecution', 'narcotics', 'firearms',
                     'money', 'opsplan', 'rmsImports', 'oversightImport',
                     'canvasForms', 'cyberTips', 'timelineEvents', 'consentSearches',
-                    'googleWarrant', 'metaWarrant', 'kikWarrant', 'snapchatWarrant', 'discordWarrant', 'datapilot'
+                    'googleWarrant', 'metaWarrant', 'kikWarrant', 'snapchatWarrant', 'discordWarrant', 'datapilot', 'cellebriteImport'
                 ];
                 pattern2Keys.forEach(k => {
                     const val = backupData[`${k}_${oldId}`];
@@ -6199,7 +6223,7 @@
                     // 3. Clean localStorage — Pattern 2 (per-case keys by case.id)
                     const p2Prefixes = ['suspects_','victims_','victimBusinesses_','cargo_','witnesses_',
                         'involvedPersons_','recoveredVehicles_','missingpersons_','areacanvas_','prosecution_','narcotics_',
-                        'firearms_','money_','opsplan_','rmsImports_','oversightImport_','canvasForms_','cyberTips_','timelineEvents_','consentSearches_','googleWarrant_','metaWarrant_','kikWarrant_','snapchatWarrant_','discordWarrant_','datapilot_'];
+                        'firearms_','money_','opsplan_','rmsImports_','oversightImport_','canvasForms_','cyberTips_','timelineEvents_','consentSearches_','googleWarrant_','metaWarrant_','kikWarrant_','snapchatWarrant_','discordWarrant_','datapilot_','cellebriteImport_'];
                     for (const prefix of p2Prefixes) {
                         localStorage.removeItem(prefix + c.id);
                     }

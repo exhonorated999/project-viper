@@ -7392,3 +7392,19 @@ ${(report.sectionConfigs || []).map(renderSection).join('\n')}
 
 </body></html>`;
 }
+
+
+// ─── Cellebrite (Mobile Forensics) IPC ──────────────────────────────────
+// New module — v3.6.0+. Distinct from the legacy `select-cellebrite-folder`
+// CellebriteReader.exe launcher infra (lines 3970–4500).
+try {
+  const Cellebrite = require('./modules/cellebrite/cellebrite-main');
+  Cellebrite.registerIpc(ipcMain);
+  if (typeof Cellebrite.setSecurityManager === 'function') {
+    Cellebrite.setSecurityManager(security);
+  }
+  console.log('[Cellebrite] Mobile Forensics IPC registered (security wired:',
+    typeof Cellebrite.setSecurityManager === 'function', ')');
+} catch (e) {
+  console.error('[Cellebrite] Failed to register IPC handlers:', e);
+}

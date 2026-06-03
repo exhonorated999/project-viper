@@ -237,6 +237,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cellebriteClose: () => ipcRenderer.invoke('cellebrite-close'),
   onCellebriteEmbedClosed: (callback) => ipcRenderer.on('cellebrite-embed-closed', callback),
 
+  // Cellebrite (Mobile Forensics) — new v3.6.0 parser module
+  cellebritePickBundle: () => ipcRenderer.invoke('cellebrite-pick-bundle'),
+  cellebriteScanBundle: (data) => ipcRenderer.invoke('cellebrite-scan-bundle', data),
+  cellebriteImport: (data) => ipcRenderer.invoke('cellebrite-import', data),
+  cellebriteReadParsed: (data) => ipcRenderer.invoke('cellebrite-read-parsed', data),
+  cellebriteDeleteImport: (data) => ipcRenderer.invoke('cellebrite-delete-import', data),
+  cellebriteCancelImport: (data) => ipcRenderer.invoke('cellebrite-cancel-import', data),
+  cellebriteMediaRead: (data) => ipcRenderer.invoke('cellebrite-media-read', data),
+  onCellebriteImportProgress: (callback) => {
+    const handler = (_e, data) => callback(data);
+    ipcRenderer.on('cellebrite-import-progress', handler);
+    return () => ipcRenderer.removeListener('cellebrite-import-progress', handler);
+  },
+
   // Oversight Import
   selectOversightFile: () => ipcRenderer.invoke('select-oversight-file'),
   importOversightFile: (data) => ipcRenderer.invoke('import-oversight-file', data),

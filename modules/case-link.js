@@ -425,9 +425,26 @@
         } catch (_) {}
 
         const out = Array.from(related.values());
-        out.sort((a, b) => b.sharedPersons.length - a.sharedPersons.length ||
-                           String(b.caseNumber || '').localeCompare(String(a.caseNumber || '')));
-        return out;
+        // ── Suppress ignored (user-unlinked) cases ─────────────────────
+        // Filter AFTER manual-link merge so a user can still explicitly
+        // re-link two cases they previously ignored (manual wins).
+        let filtered = out;
+        try {
+            const ignored = getIgnoredLinks(caseId);
+            if (ignored.length) {
+                const ignoredIds = new Set(ignored.map(x => x.otherCaseId));
+                filtered = out.filter(r => {
+                    if (!ignoredIds.has(r.caseId)) return true;
+                    // If the only shared persons are MANUAL, keep — the user
+                    // re-linked it explicitly after ignoring. Otherwise drop.
+                    return r.sharedPersons.length > 0 &&
+                           r.sharedPersons.every(sp => sp.confidence === 'MANUAL');
+                });
+            }
+        } catch (_) {}
+        filtered.sort((a, b) => b.sharedPersons.length - a.sharedPersons.length ||
+                                String(b.caseNumber || '').localeCompare(String(a.caseNumber || '')));
+        return filtered;
     }
 
     function titleCase(s) {
@@ -506,6 +523,68 @@
         const b = getManualLinks(otherCaseId).filter(x => x.otherCaseId !== caseId);
         _writeManualLinks(caseId, a);
         _writeManualLinks(otherCaseId, b);
+        invalidateIndex();
+    }
+
+    // ---- Ignored (suppressed) auto-detected links --------------------------
+    /*
+     * Auto-detected links are computed live from shared persons. When the
+     * user explicitly says "these cases shouldn't be linked" (e.g. a person
+     * was imported into the wrong case via RMS) we suppress the link instead
+     * of deleting the underlying person record. Suppression is symmetric:
+     * written to both sides so it disappears from Related Cases on either
+     * case. Manual links are NOT affected by the ignore list.
+     *
+     *   viperIgnoredCaseLinks_<caseId> = [
+     *     { otherCaseId, otherCaseNumber, reason, addedAt }
+     *   ]
+     */
+    const IGNORED_LINKS_PREFIX = 'viperIgnoredCaseLinks_';
+
+    function getIgnoredLinks(caseId) {
+        if (!caseId) return [];
+        const arr = safeJSON(localStorage.getItem(IGNORED_LINKS_PREFIX + caseId), []);
+        return Array.isArray(arr) ? arr : [];
+    }
+
+    function _writeIgnoredLinks(caseId, list) {
+        try {
+            localStorage.setItem(IGNORED_LINKS_PREFIX + caseId, JSON.stringify(list || []));
+        } catch (_) {}
+    }
+
+    function isIgnoredLink(caseId, otherCaseId) {
+        if (!caseId || !otherCaseId) return false;
+        return getIgnoredLinks(caseId).some(x => x.otherCaseId === otherCaseId);
+    }
+
+    function addIgnoredLink(caseId, otherCaseId, otherCaseNumber, reason) {
+        if (!caseId || !otherCaseId || caseId === otherCaseId) return false;
+        const stamp = new Date().toISOString();
+        const writeOne = (selfId, otherId, otherNumber) => {
+            const list = getIgnoredLinks(selfId);
+            if (list.some(x => x.otherCaseId === otherId)) return false;
+            list.push({
+                otherCaseId: otherId,
+                otherCaseNumber: otherNumber || '',
+                reason: reason || '',
+                addedAt: stamp,
+            });
+            _writeIgnoredLinks(selfId, list);
+            return true;
+        };
+        const w1 = writeOne(caseId, otherCaseId, otherCaseNumber);
+        const w2 = writeOne(otherCaseId, caseId, ''); // reverse — caseNumber filled lazily on UI side
+        invalidateIndex();
+        return w1 || w2;
+    }
+
+    function removeIgnoredLink(caseId, otherCaseId) {
+        if (!caseId || !otherCaseId) return;
+        const a = getIgnoredLinks(caseId).filter(x => x.otherCaseId !== otherCaseId);
+        const b = getIgnoredLinks(otherCaseId).filter(x => x.otherCaseId !== caseId);
+        _writeIgnoredLinks(caseId, a);
+        _writeIgnoredLinks(otherCaseId, b);
         invalidateIndex();
     }
 
@@ -768,6 +847,11 @@
         getManualLinks,
         addManualLink,
         removeManualLink,
+        // Ignored (user-unlinked) auto-detected matches
+        getIgnoredLinks,
+        addIgnoredLink,
+        removeIgnoredLink,
+        isIgnoredLink,
         // Person finder
         findPersons,
         // Inline duplicate-person hints (A-4)

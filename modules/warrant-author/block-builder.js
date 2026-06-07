@@ -225,7 +225,10 @@
 
     blocks.push({ kind: 'spacer', size: 'md' });
 
-    // 7) Command + addendum routing
+    // 7) Command + addendum routing — always on its OWN page so the
+    //    provider routing list reads cleanly and is easy for the court
+    //    clerk to find when serving the warrant.
+    blocks.push({ kind: 'page-break' });
     blocks.push({
       kind: 'heading-2',
       text: 'YOU ARE THEREFORE COMMANDED to SEARCH:  (premises, vehicles, persons)',

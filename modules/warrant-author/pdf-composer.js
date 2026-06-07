@@ -37,7 +37,7 @@
   const FONT_FOOTER    = { face: 'times', style: 'normal', size: 9,  lh: 12 };
   // Running header (CA) — bold, 13pt, ~16pt line-height. Larger than body
   // so the state/county banner reads clearly on the printed page.
-  const FONT_RUN_HDR   = { face: 'times', style: 'bold',   size: 13, lh: 16 };
+  const FONT_RUN_HDR   = { face: 'times', style: 'bold',   size: 16, lh: 20 };
 
   function _setFont(doc, font) {
     doc.setFont(font.face, font.style);
@@ -310,13 +310,18 @@
 
     // When a CA running header is enabled, only push content start down if
     // the header extends past the normal top margin. Header sits at y=30
-    // and consumes (lines * lh) + small descender. For 2 lines at lh=16
-    // that's y=30..67 — fits inside the 72pt top margin with ~5pt buffer,
-    // so no extra reserve needed. Three or more lines do need a push.
+    // and consumes (lines * lh) at FONT_RUN_HDR (16pt, lh=20). User spec:
+    // leave one full body-line of breathing room (FONT_BODY.lh = 18pt)
+    // between the header and the first body line.
     let headerReserve = 0;
     if (runningHeader.enabled && Array.isArray(runningHeader.lines) && runningHeader.lines.length) {
-      const headerBottom = 30 + (runningHeader.lines.length * 16) + 5;
-      if (headerBottom > MARGIN) headerReserve = (headerBottom - MARGIN) + 8;
+      const HDR_TOP = 30;
+      const HDR_LH  = 20;
+      const headerBottom = HDR_TOP + (runningHeader.lines.length * HDR_LH) + 6;
+      const desiredContentTop = headerBottom + 18; // ~1 body line of gap
+      if (desiredContentTop > 72 /* MARGIN */) {
+        headerReserve = desiredContentTop - 72;
+      }
     }
     // When a CA running footer is enabled, reserve an extra footer line
     // so body content doesn't run into the DR#/CT# strip.

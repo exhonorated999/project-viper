@@ -9090,6 +9090,12 @@
         function renderWarrantAuthorTab() {
             const sub = _waCurrentSubtab || 'drafts';
             const caseId = currentCase && currentCase.id;
+            // Expose currentCase on window so submodules (warrant-author-ui,
+            // canvas, etc.) can look up caseNumber for disk-persist paths.
+            // currentCase is a module-local `let` so without this the
+            // submodule sees `window.currentCase === undefined` and can't
+            // build the `cases/{caseNumber}/` path.
+            try { window.currentCase = currentCase; } catch (_) {}
             return `
                 <div class="space-y-4">
                     <!-- Header -->

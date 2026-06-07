@@ -35,6 +35,9 @@
   const FONT_COVER_SUB = { face: 'times', style: 'normal', size: 14, lh: 22 };
   const FONT_META      = { face: 'times', style: 'normal', size: 11, lh: 16 };
   const FONT_FOOTER    = { face: 'times', style: 'normal', size: 9,  lh: 12 };
+  // Running header (CA) — bold, 13pt, ~16pt line-height. Larger than body
+  // so the state/county banner reads clearly on the printed page.
+  const FONT_RUN_HDR   = { face: 'times', style: 'bold',   size: 13, lh: 16 };
 
   function _setFont(doc, font) {
     doc.setFont(font.face, font.style);
@@ -210,13 +213,12 @@
     if (!lines.length) return;
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
-      _setFont(doc, FONT_BODY_BOLD);
-      // Header sits inside the top margin so content isn't pushed down.
-      // First line at y=36, second at y=50 (within 1" top margin of 72pt).
-      let hy = 32;
+      _setFont(doc, FONT_RUN_HDR);
+      // First line sits ~28pt from top; subsequent lines stack by line-height.
+      let hy = 30;
       for (const ln of lines) {
-        doc.text(_safeText(ln), PAGE_W / 2, hy + FONT_BODY_BOLD.size, { align: 'center' });
-        hy += 14;
+        doc.text(_safeText(ln), PAGE_W / 2, hy + FONT_RUN_HDR.size, { align: 'center' });
+        hy += FONT_RUN_HDR.lh;
       }
     }
   }
@@ -292,9 +294,10 @@
     }
 
     // When a CA running header is enabled, push content start down by the
-    // header reserve so the two header lines don't collide with the body.
+    // header reserve so the larger header lines don't collide with the body.
+    // FONT_RUN_HDR.lh (16pt) * N + 14pt breathing room.
     const headerReserve = (runningHeader.enabled && Array.isArray(runningHeader.lines) && runningHeader.lines.length)
-      ? (runningHeader.lines.length * 14 + 10)
+      ? (runningHeader.lines.length * 16 + 14)
       : 0;
     // When a CA running footer is enabled, reserve an extra footer line
     // so body content doesn't run into the DR#/CT# strip.

@@ -588,14 +588,32 @@
 
     // Running header/footer metadata for the composer to stamp on every page.
     // Mirrors the sample San Bernardino SW (header + revision tag + DR#/CT#).
+    // State must be SPELLED OUT in the header — this is a legal document, no
+    // abbreviations. Map common postal abbreviations → full state name.
+    const _STATE_FULL = {
+      AL: 'ALABAMA', AK: 'ALASKA', AZ: 'ARIZONA', AR: 'ARKANSAS',
+      CA: 'CALIFORNIA', CO: 'COLORADO', CT: 'CONNECTICUT', DE: 'DELAWARE',
+      FL: 'FLORIDA', GA: 'GEORGIA', HI: 'HAWAII', ID: 'IDAHO',
+      IL: 'ILLINOIS', IN: 'INDIANA', IA: 'IOWA', KS: 'KANSAS',
+      KY: 'KENTUCKY', LA: 'LOUISIANA', ME: 'MAINE', MD: 'MARYLAND',
+      MA: 'MASSACHUSETTS', MI: 'MICHIGAN', MN: 'MINNESOTA', MS: 'MISSISSIPPI',
+      MO: 'MISSOURI', MT: 'MONTANA', NE: 'NEBRASKA', NV: 'NEVADA',
+      NH: 'NEW HAMPSHIRE', NJ: 'NEW JERSEY', NM: 'NEW MEXICO', NY: 'NEW YORK',
+      NC: 'NORTH CAROLINA', ND: 'NORTH DAKOTA', OH: 'OHIO', OK: 'OKLAHOMA',
+      OR: 'OREGON', PA: 'PENNSYLVANIA', RI: 'RHODE ISLAND', SC: 'SOUTH CAROLINA',
+      SD: 'SOUTH DAKOTA', TN: 'TENNESSEE', TX: 'TEXAS', UT: 'UTAH',
+      VT: 'VERMONT', VA: 'VIRGINIA', WA: 'WASHINGTON', WV: 'WEST VIRGINIA',
+      WI: 'WISCONSIN', WY: 'WYOMING', DC: 'DISTRICT OF COLUMBIA',
+    };
     const county = _safe(agency.county) || _safe(draft.county) || '__________________';
-    const state  = _safe(agency.state)  || 'CALIFORNIA';
+    const rawState = (_safe(agency.state) || (isCa ? 'CA' : '')).toUpperCase();
+    const state = _STATE_FULL[rawState] || rawState || 'CALIFORNIA';
     const drNumber = _safe(draft.caseRef) || _safe(caseInfo.caseNumber) || '';
     const ctNumber = _safe(draft.ctNumber) || _safe(draft.swNumber) || '';
     const runningHeader = isCa ? {
       enabled: true,
       lines: [
-        `STATE of ${state.toUpperCase()}, COUNTY of ${county.toUpperCase()},`,
+        `STATE of ${state}, COUNTY of ${county.toUpperCase()},`,
         'SEARCH WARRANT and AFFIDAVIT',
       ],
     } : { enabled: false, lines: [] };

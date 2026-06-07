@@ -193,11 +193,12 @@ async function composeDocx({ blockStream, draft, agency } = {}) {
   let header;
   if (runningHeader.enabled && Array.isArray(runningHeader.lines) && runningHeader.lines.length) {
     // CA running header — two centered, bold lines (state/county + SEARCH WARRANT and AFFIDAVIT).
+    // size 28 = 14pt (legal-document scale; this is the page banner, not body text).
     header = new Header({
       children: runningHeader.lines.map((ln) => new Paragraph({
         alignment: AlignmentType.CENTER,
-        children: [_run(ln, { bold: true, size: 22 })],
-        spacing: { after: 0, line: 240 },
+        children: [_run(ln, { bold: true, size: 28 })],
+        spacing: { after: 0, line: 280 },
       })),
     });
   } else {

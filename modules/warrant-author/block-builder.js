@@ -236,7 +236,7 @@
     if (!addendumComposes.length) {
       blocks.push({
         kind: 'paragraph',
-        text: '(no addendums attached — add provider addendums on the Warrant Author screen)',
+        text: '(no provider addendums attached)',
         indent: true,
       });
     } else {
@@ -317,9 +317,9 @@
       blocks.push({
         kind: 'paragraph',
         text:
-          `[IDENTIFICATION AND EXPERTISE BOILERPLATE NOT YET SET — open Settings -> Warrant Author -> ` +
-          `Affiant Identification & Expertise and paste your career/training narrative. This text appears ` +
-          `unchanged on every California warrant authored by ${affFull}.]`,
+          `[Training & experience boilerplate not yet set — open Settings → Agency Profile → ` +
+          `Training & Experience Boilerplate and paste your career/training narrative. This text appears ` +
+          `unchanged on every California warrant signed by ${affFull}.]`,
       });
     }
     blocks.push({ kind: 'spacer', size: 'sm' });
@@ -331,9 +331,9 @@
       blocks.push({
         kind: 'paragraph',
         text:
-          '[PROBABLE CAUSE NARRATIVE NOT YET AUTHORED — write your case-specific probable cause on the ' +
-          'Warrant Author screen before serving. This narrative should describe what happened, what ' +
-          'evidence supports the search, and why each provider record is relevant.]',
+          '[Probable cause narrative not yet authored — author it before serving. This narrative ' +
+          'should describe what happened, what evidence supports the search, and why each provider ' +
+          'record is relevant.]',
       });
     } else {
       const paras = pc.split(/\r?\n\s*\r?\n/);
@@ -462,7 +462,7 @@
     if (!pc) {
       blocks.push({
         kind: 'paragraph',
-        text: '[PROBABLE CAUSE NARRATIVE NOT YET AUTHORED — author it on the Warrant Author screen before serving.]',
+        text: '[Probable cause narrative not yet authored — author it before serving.]',
       });
     } else {
       // Split on blank lines into separate paragraphs
@@ -577,12 +577,14 @@
       for (const b of _buildSignature(draft, agency)) blocks.push(b);
     }
 
-    // Optional compliance disclaimer
-    if (includeDisclaimer !== false) {
+    // Optional compliance disclaimer (suppressed for CA — the verbatim
+    // CA template already closes with the affiant declaration + judge
+    // signature; no further commentary belongs on a filed legal document).
+    if (includeDisclaimer !== false && !isCa) {
       blocks.push({ kind: 'spacer', size: 'md' });
       blocks.push({
         kind: 'footer-disclaimer',
-        text: 'Drafted with VIPER Warrant Author v1. Not a substitute for legal review.',
+        text: 'Draft document. Not a substitute for legal review.',
       });
     }
 
@@ -626,9 +628,9 @@
     } : { enabled: false, lines: [] };
     const runningFooter = isCa ? {
       enabled: true,
-      revision: 'SEARCH WARRANT and AFFIDAVIT — VIPER Warrant Author v1',
+      revision: 'SEARCH WARRANT and AFFIDAVIT',
       drNumber,
-      ctNumber,
+      ctNumber: '',
     } : { enabled: false };
 
     return {

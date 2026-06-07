@@ -1,0 +1,136 @@
+{
+  "id": "generic-us-multi-business-esp",
+  "name": "Generic US Multi-Business ESP (Federal SCA \u00a72703)",
+  "jurisdiction": "US-FEDERAL",
+  "version": 1,
+  "description": "Generic United States search warrant addendum template under the Stored Communications Act, 18 U.S.C. \u00a72703. Use when the target ESP / ISP / financial-service provider is outside California jurisdiction, or when a federal nexus dictates SCA framing. Provides a state-jurisdiction-neutral structure that conforms to the 18-block plan-\u00a75 schema.",
+  "compatibleProviderTypes": ["ESP", "Phone", "Internet", "Financial", "Other"],
+  "blocks": [
+    {
+      "key": "01-page-label",
+      "kind": "label",
+      "slot": "addendum.pageLabel"
+    },
+    {
+      "key": "02-search-command",
+      "kind": "constant",
+      "heading": "",
+      "text": "YOU ARE THEREFORE COMMANDED to SEARCH:"
+    },
+    {
+      "key": "03-business-identification",
+      "kind": "provider-block",
+      "heading": "",
+      "fields": ["legalEntity", "address", "custodianAttention", "email", "phone", "portalUrl"],
+      "requiredFields": ["legalEntity", "address"]
+    },
+    {
+      "key": "04-for-the-following",
+      "kind": "constant",
+      "heading": "",
+      "text": "For the FOLLOWING PROPERTY or PERSON(s):"
+    },
+    {
+      "key": "05-target-account",
+      "kind": "target-account",
+      "heading": "Target Account(s):"
+    },
+    {
+      "key": "06-date-range",
+      "kind": "date-range",
+      "heading": "Date Range:"
+    },
+    {
+      "key": "07-items-to-seize",
+      "kind": "items-to-seize",
+      "heading": "The following records, information, documents, and items are to be produced:"
+    },
+    {
+      "key": "08-sca-2703-authenticity",
+      "kind": "verbatim-paragraph",
+      "heading": "Stored Communications Act \u2014 Authentication of Records",
+      "text": "Pursuant to 18 U.S.C. \u00a72703 and Federal Rule of Evidence 902(11), the records, information, documents, and items produced in response to this warrant shall be accompanied by a certification of authenticity from the custodian of records or other qualified person. The certification shall state, under penalty of perjury, that: (a) the records were made at or near the time of the events described, by, or from information transmitted by, a person with knowledge of the events; (b) the records were kept in the course of a regularly conducted activity of the business; and (c) the records were made by the regularly conducted business activity as a regular practice. Such certification shall be sufficient to satisfy the authentication requirements of Federal Rule of Evidence 901."
+    },
+    {
+      "key": "09-sca-sealing",
+      "kind": "verbatim-paragraph",
+      "heading": "Sealing of Returned Records",
+      "text": "All records, information, documents, and items received in response to this warrant shall be maintained in a secure manner by the affiant and shall not be disclosed to any person other than the affiant, the issuing court, and law-enforcement personnel directly involved in this investigation, except by further order of the court or as otherwise required by law. The affiant shall maintain custody of the return until disposition of the underlying case or further order of this court."
+    },
+    {
+      "key": "10-it-is-further-ordered-verify",
+      "kind": "provider-slot-paragraph",
+      "heading": "",
+      "text": "IT IS FURTHER ORDERED that {{provider.legalEntity}} shall authenticate all records, information, documents, and items produced in response to this warrant by including the certification required by Federal Rule of Evidence 902(11). The records shall be delivered to the affiant in a form that preserves their evidentiary integrity."
+    },
+    {
+      "key": "11-ndo-header",
+      "kind": "constant",
+      "heading": "",
+      "text": "NON-DISCLOSURE ORDER (18 U.S.C. \u00a72705(b)):"
+    },
+    {
+      "key": "12-ndo-base",
+      "kind": "provider-slot-paragraph",
+      "heading": "",
+      "text": "Pursuant to 18 U.S.C. \u00a72705(b), the Court FINDS that there is reason to believe that notification of the existence of this warrant to the subscriber or customer would result in: (i) endangering the life or physical safety of an individual; (ii) flight from prosecution; (iii) destruction of or tampering with evidence; (iv) intimidation of potential witnesses; or (v) otherwise seriously jeopardizing an investigation or unduly delaying a trial. IT IS THEREFORE ORDERED that {{provider.legalEntity}}, its officers, employees, and agents shall not disclose the existence of this warrant, the records produced in response, or the investigation of which this warrant is a part, to the subscriber, customer, or any third party other than counsel for {{provider.legalEntity}}, for a period of one hundred eighty (180) days from the date of this order."
+    },
+    {
+      "key": "13-ndo-supporting",
+      "kind": "optional-paragraph",
+      "guardSlot": "addendum.ndoExtendedJustification",
+      "heading": "Information Supporting Non-Disclosure:",
+      "text": "{{addendum.ndoExtendedJustification}}"
+    },
+    {
+      "key": "14-appearing-reason",
+      "kind": "verbatim-paragraph",
+      "heading": "",
+      "text": "IT APPEARING that there is reason to believe that notification of the existence of this warrant would seriously jeopardize the investigation described in the affidavit submitted in support of this warrant, including by giving the subscriber or others an opportunity to destroy evidence, change patterns of behavior, intimidate witnesses, or flee prosecution, the Court FINDS that the non-disclosure order set forth above is justified under 18 U.S.C. \u00a72705(b)."
+    },
+    {
+      "key": "15-ordered-delay",
+      "kind": "provider-slot-paragraph",
+      "heading": "",
+      "text": "IT IS ORDERED that {{provider.legalEntity}} shall delay any notification to the subscriber, customer, or any third party of the existence of this warrant or the production of records in response thereto for a period of one hundred eighty (180) days from the date of this order. Any extension of this delay-of-notice period shall be sought by separate application to this Court pursuant to 18 U.S.C. \u00a72705(b)."
+    },
+    {
+      "key": "16-delay-notice",
+      "kind": "verbatim-paragraph",
+      "heading": "",
+      "text": "Pursuant to 18 U.S.C. \u00a72705(a), notice to the subscriber or customer may be delayed for a period not to exceed the period authorized above, subject to extension by further order of the Court upon a showing of continuing need."
+    },
+    {
+      "key": "17-order-to-send-header",
+      "kind": "constant",
+      "heading": "",
+      "text": "ORDER TO SEND INFORMATION:"
+    },
+    {
+      "key": "18-affiant-contact",
+      "kind": "affiant-contact",
+      "heading": "All responsive records, information, documents, and items shall be transmitted to the affiant at the address below:",
+      "fields": [
+        "affiantName",
+        "affiantBadgeId",
+        "affiantUnit",
+        "agencyName",
+        "agencyAddressLine1",
+        "agencyAddressCityStateZip",
+        "affiantPhone",
+        "affiantEmail"
+      ],
+      "labels": {
+        "affiantName": "Affiant",
+        "affiantBadgeId": "Badge / ID",
+        "affiantUnit": "Unit / Assignment",
+        "affiantPhone": "Phone",
+        "affiantEmail": "Email",
+        "agencyName": "Agency",
+        "agencyAddressLine1": "",
+        "agencyAddressCityStateZip": ""
+      },
+      "requiredFields": ["affiantName", "agencyName", "affiantEmail"]
+    }
+  ]
+}

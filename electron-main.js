@@ -7545,3 +7545,45 @@ try {
 } catch (e) {
   console.error('[Cellebrite] Failed to register IPC handlers:', e);
 }
+
+// ─── CargoNet (Theft Alert Ingest) IPC ──────────────────────────────────
+// Watches a user-configured Outlook drop folder for .eml files containing
+// CargoNet alerts. Parses, dedupes, archives, and broadcasts to renderer.
+try {
+  const CargoNet = require('./modules/cargonet/cargonet-main');
+  CargoNet.registerIpc(ipcMain);
+  if (typeof CargoNet.setSecurityManager === 'function') {
+    CargoNet.setSecurityManager(security);
+  }
+  if (typeof CargoNet.setMainWindow === 'function' && mainWindow) {
+    CargoNet.setMainWindow(mainWindow);
+  }
+  if (typeof CargoNet.startIfEnabled === 'function') {
+    CargoNet.startIfEnabled();
+  }
+  console.log('[CargoNet] Theft Alert ingest IPC registered (security wired:',
+    typeof CargoNet.setSecurityManager === 'function', ')');
+} catch (e) {
+  console.error('[CargoNet] Failed to register IPC handlers:', e);
+}
+
+// ─── Warrant Author (Multi-Business ESP Warrants) IPC ───────────────────
+// Standalone module — drafts ESP search warrants with one shared affidavit
+// and N per-provider addendums (Multi-Business pattern). Sibling of the
+// existing Warrants tab, NOT nested under it.
+// Plan: plans/2026-06-05_21-49-56__warrant-author-v1/plan.md
+try {
+  const WarrantAuthor = require('./modules/warrant-author/warrant-author-main');
+  WarrantAuthor.registerIpc(ipcMain);
+  if (typeof WarrantAuthor.setSecurityManager === 'function') {
+    WarrantAuthor.setSecurityManager(security);
+  }
+  if (typeof WarrantAuthor.setMainWindow === 'function' && mainWindow) {
+    WarrantAuthor.setMainWindow(mainWindow);
+  }
+  console.log('[WarrantAuthor] IPC registered (security wired:',
+    typeof WarrantAuthor.setSecurityManager === 'function',
+    ', mainWindow wired:', !!mainWindow, ')');
+} catch (e) {
+  console.error('[WarrantAuthor] Failed to register IPC handlers:', e);
+}

@@ -1806,6 +1806,68 @@
                     </div><!-- /customMetricsSectionBody -->
                 </div>
 
+                <!-- ═══ Document Authoring Section ═══ -->
+                <div class="glass-card rounded-xl p-6">
+                    <div class="flex justify-between items-center cursor-pointer" onclick="toggleDocumentAuthoringSection()">
+                        <h3 class="text-xl font-bold flex items-center gap-2">
+                            <svg class="w-6 h-6 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                            Document Authoring
+                        </h3>
+                        <svg id="documentAuthoringChevron" class="w-5 h-5 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </div>
+                    <p class="text-gray-400 text-sm mb-5">Author drafting modules for warrants, subpoenas, and other case documents. Generated drafts are aids — review with your DA / legal counsel before service.</p>
+
+                    <div id="documentAuthoringBody" class="hidden mt-5 space-y-4">
+
+                        <!-- Warrant Author Toggle -->
+                        <div class="p-4 bg-viper-dark/50 rounded-lg border border-gray-700/50">
+                            <div class="flex items-center justify-between">
+                                <div class="pr-4">
+                                    <h4 class="text-white font-semibold text-sm">Warrant Author <span class="ml-2 px-1.5 py-0.5 text-[10px] uppercase tracking-wider bg-viper-cyan/10 text-viper-cyan border border-viper-cyan/30 rounded">Beta</span></h4>
+                                    <p class="text-xs text-gray-400 mt-1">Enable the Warrant Author tab on cases. Drafts Multi-Business ESP search warrants (one affidavit + N per-provider addendums) using your case facts plus jurisdiction-specific boilerplate.</p>
+                                    <p class="text-[11px] text-amber-400/80 mt-1.5">⚠ Drafting aid only. All drafts must be reviewed by your DA / legal counsel before service.</p>
+                                </div>
+                                <button id="warrantAuthorToggleBtn" onclick="toggleWarrantAuthorEnabled()"
+                                    class="relative inline-flex items-center h-6 rounded-full w-11 transition-colors focus:outline-none bg-gray-700 shrink-0"
+                                    aria-label="Toggle Warrant Author">
+                                    <span id="warrantAuthorToggleIndicator" class="inline-block w-4 h-4 transform transition-transform bg-white rounded-full translate-x-1"></span>
+                                </button>
+                            </div>
+                        </div>
+
+                    </div><!-- /documentAuthoringBody -->
+                </div>
+
+                <!-- ═══ Warrant Author Compliance Modal (first-run) ═══ -->
+                <div id="warrantAuthorComplianceModal" class="hidden fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4">
+                    <div class="bg-viper-darker border border-viper-cyan/30 rounded-xl max-w-lg w-full p-6 shadow-2xl">
+                        <div class="flex items-start gap-3 mb-4">
+                            <div class="w-10 h-10 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shrink-0">
+                                <span class="text-xl">⚠</span>
+                            </div>
+                            <div>
+                                <h3 class="text-lg font-bold text-white">Warrant Author — Drafting Aid Only</h3>
+                                <p class="text-xs text-gray-400 mt-0.5">Please read before enabling.</p>
+                            </div>
+                        </div>
+                        <div class="text-sm text-gray-300 space-y-2 mb-5">
+                            <p>VIPER Warrant Author is a <strong class="text-white">drafting aid</strong>. It assembles search warrant affidavits and per-provider addendums from your case facts and configurable boilerplate.</p>
+                            <p>Every generated draft <strong class="text-amber-400">must be reviewed</strong> by your District Attorney's Office or legal counsel before it is signed, presented to a judge, or served on a provider.</p>
+                            <p class="text-xs text-gray-400">Probable cause, factual accuracy, jurisdictional language, and statutory citations remain your responsibility. VIPER does not provide legal advice.</p>
+                        </div>
+                        <div class="flex justify-end gap-2">
+                            <button onclick="dismissWarrantAuthorCompliance(false)"
+                                class="px-4 py-2 rounded-lg text-sm text-gray-300 hover:text-white hover:bg-gray-700/50 transition">Cancel</button>
+                            <button onclick="dismissWarrantAuthorCompliance(true)"
+                                class="px-4 py-2 rounded-lg text-sm bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/40 hover:bg-viper-cyan/30 transition font-medium">I understand — Enable</button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- ═══ Field Security Section ═══ -->
                 <div class="glass-card rounded-xl p-6" id="securitySection">
                     <div class="flex justify-between items-center cursor-pointer" onclick="toggleFieldSecurity()">
@@ -4371,6 +4433,65 @@
         }
     }
 
+    // ─── Document Authoring (Warrant Author) ─────────────────────────
+    function toggleDocumentAuthoringSection() {
+        const body = document.getElementById('documentAuthoringBody');
+        const chevron = document.getElementById('documentAuthoringChevron');
+        if (!body || !chevron) return;
+        const isHidden = body.classList.contains('hidden');
+        if (isHidden) {
+            body.classList.remove('hidden');
+            chevron.style.transform = 'rotate(180deg)';
+        } else {
+            body.classList.add('hidden');
+            chevron.style.transform = '';
+        }
+    }
+    function isWarrantAuthorEnabled() {
+        return localStorage.getItem('viperWarrantAuthorEnabled') === 'true';
+    }
+    function hasWarrantAuthorComplianceAck() {
+        return localStorage.getItem('viperWarrantAuthorComplianceAck') === 'true';
+    }
+    function toggleWarrantAuthorEnabled() {
+        const currentlyEnabled = isWarrantAuthorEnabled();
+        if (!currentlyEnabled) {
+            // First-run compliance gate: must acknowledge before enabling.
+            if (!hasWarrantAuthorComplianceAck()) {
+                const modal = document.getElementById('warrantAuthorComplianceModal');
+                if (modal) modal.classList.remove('hidden');
+                return;
+            }
+            localStorage.setItem('viperWarrantAuthorEnabled', 'true');
+        } else {
+            localStorage.setItem('viperWarrantAuthorEnabled', 'false');
+        }
+        refreshWarrantAuthorUI();
+    }
+    function dismissWarrantAuthorCompliance(accepted) {
+        const modal = document.getElementById('warrantAuthorComplianceModal');
+        if (modal) modal.classList.add('hidden');
+        if (accepted) {
+            localStorage.setItem('viperWarrantAuthorComplianceAck', 'true');
+            localStorage.setItem('viperWarrantAuthorComplianceAckAt', new Date().toISOString());
+            localStorage.setItem('viperWarrantAuthorEnabled', 'true');
+            refreshWarrantAuthorUI();
+        }
+    }
+    function refreshWarrantAuthorUI() {
+        const enabled = isWarrantAuthorEnabled();
+        const btn = document.getElementById('warrantAuthorToggleBtn');
+        const ind = document.getElementById('warrantAuthorToggleIndicator');
+        if (!btn || !ind) return;
+        if (enabled) {
+            btn.classList.remove('bg-gray-700'); btn.classList.add('bg-viper-cyan');
+            ind.classList.remove('translate-x-1'); ind.classList.add('translate-x-6');
+        } else {
+            btn.classList.add('bg-gray-700'); btn.classList.remove('bg-viper-cyan');
+            ind.classList.add('translate-x-1'); ind.classList.remove('translate-x-6');
+        }
+    }
+
     function toggleFieldSecurity() {
         const body = document.getElementById('fieldSecurityBody');
         const chevron = document.getElementById('fieldSecurityChevron');
@@ -4960,6 +5081,7 @@
         refreshPriorityUI();
         refreshCustomStatusUI();
         refreshCustomMetricsUI();
+        refreshWarrantAuthorUI();
         refreshSidebarAutoHideUI();
         // Audit log panel — load entries + restore Event Log toggle state
         try { initAuditLogPanel(); } catch (e) { console.warn('Audit panel init failed:', e); }

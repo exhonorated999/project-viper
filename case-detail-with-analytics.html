@@ -833,7 +833,10 @@
     <script src="modules/warrant-author/template-engine.js"></script>
     <script src="modules/warrant-author/templates-bundle.js"></script>
     <script src="modules/warrant-author/boilerplate-library.js"></script>
+    <script src="modules/warrant-author/case-pc-store.js"></script>
     <script src="modules/warrant-author/draft-store.js"></script>
+    <script src="modules/warrant-author/block-builder.js"></script>
+    <script src="modules/warrant-author/pdf-composer.js"></script>
     <script src="modules/warrant-author/warrant-author-ui.js"></script>
 </head>
 <body class="text-white">
@@ -9103,6 +9106,13 @@
                                 New Warrant
                             </button>
                         </div>
+                    </div>
+
+                    <!-- Case-level Probable Cause (shared across all warrants) -->
+                    <div id="waCasePcMount">
+                        ${window.WarrantAuthorUI && typeof window.WarrantAuthorUI.renderCasePc === 'function'
+                          ? window.WarrantAuthorUI.renderCasePc(caseId)
+                          : ''}
                     </div>
 
                     <!-- Subtab pill row -->

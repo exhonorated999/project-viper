@@ -131,6 +131,49 @@
     flex: 1;
 }
 
+/* ── Probable Cause textarea (case-level shared) ────────────────────────── */
+.wa-pc-textarea {
+    min-height: 22rem;       /* ~12 visible lines on first load */
+    max-height: 60rem;
+    height: 26rem;           /* default size — user can drag to grow */
+    resize: vertical;
+    line-height: 1.55;
+    tab-size: 4;
+    -moz-tab-size: 4;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+}
+.wa-pc-textarea:focus {
+    outline: none;
+    border-color: rgba(34, 211, 238, 0.55); /* viper-cyan */
+    box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.35);
+}
+
+/* ── Select / option contrast fix ───────────────────────────────────────── */
+/* Chromium renders <option> with its own background — force dark theme so
+   the dropdown list is readable on top of dark form controls. */
+#waNewDraftModal select,
+.wa-form select,
+.wa-row select,
+.wa-addendum-form select {
+    color: #f1f5f9;            /* slate-100 */
+    background-color: #0b1220; /* near-darker viper */
+}
+#waNewDraftModal select option,
+.wa-form select option,
+.wa-row select option,
+.wa-addendum-form select option {
+    color: #f1f5f9;
+    background-color: #0b1220;
+}
+#waNewDraftModal select option:checked,
+.wa-form select option:checked,
+.wa-row select option:checked,
+.wa-addendum-form select option:checked {
+    color: #ffffff;
+    background-color: #155e75; /* cyan-800 — clearly highlighted */
+}
+
 /* ── Form container ─────────────────────────────────────────────────────── */
 .wa-form {
     padding: 0.875rem;
@@ -219,16 +262,91 @@
 .wa-pv-item-desc { color: rgba(255, 255, 255, 0.65); }
 
 .wa-pv-issues {
-    padding: 0.5rem 0.875rem;
+    padding: 0;
     background: rgba(244, 63, 94, 0.08);
     border-bottom: 1px solid rgba(244, 63, 94, 0.25);
 }
+.wa-pv-issues-summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 0.5rem 0.875rem;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-size: 0.72rem;
+    color: rgb(253, 164, 175);
+    user-select: none;
+    transition: background-color .15s ease;
+}
+.wa-pv-issues-summary::-webkit-details-marker { display: none; }
+.wa-pv-issues-summary::marker { display: none; content: ''; }
+.wa-pv-issues-summary:hover { background: rgba(244, 63, 94, 0.12); }
+.wa-pv-issues-icon  { font-weight: 700; }
+.wa-pv-issues-text  { flex: 1; }
+.wa-pv-issues-hint  {
+    color: rgba(253, 164, 175, 0.55);
+    font-size: 0.65rem;
+    font-style: italic;
+}
+.wa-pv-issues[open] .wa-pv-issues-hint { display: none; }
+
+.wa-issue-list {
+    list-style: none;
+    margin: 0;
+    padding: 0.25rem 0.875rem 0.6rem;
+    border-top: 1px solid rgba(244, 63, 94, 0.18);
+    max-height: 18rem;
+    overflow-y: auto;
+}
+.wa-issue-row {
+    padding: 0.55rem 0;
+    border-bottom: 1px dashed rgba(244, 63, 94, 0.15);
+}
+.wa-issue-row:last-child { border-bottom: none; }
+.wa-issue-row-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.2rem;
+}
+.wa-issue-key {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.65rem;
+    color: rgb(253, 164, 175);
+    background: rgba(244, 63, 94, 0.14);
+    padding: 0.05rem 0.4rem;
+    border-radius: 0.25rem;
+}
+.wa-issue-label {
+    font-size: 0.75rem;
+    color: rgb(254, 226, 226);
+    font-weight: 600;
+}
+.wa-issue-what {
+    font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.78);
+    margin-left: 0.1rem;
+    margin-bottom: 0.15rem;
+    line-height: 1.4;
+}
+.wa-issue-where {
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.6);
+    margin-left: 0.1rem;
+    line-height: 1.4;
+}
+.wa-issue-where-label {
+    color: rgb(165, 243, 252);
+    font-weight: 600;
+    margin-right: 0.2rem;
+}
+
+/* legacy class kept for safety if any caller still emits it */
 .wa-pv-issue {
     font-size: 0.7rem;
     color: rgb(253, 164, 175);
-    margin-bottom: 0.15rem;
+    padding: 0.15rem 0.875rem;
 }
-.wa-pv-issue:last-child { margin-bottom: 0; }
 
 /* ── Highlight dangling placeholders inside preview text ───────────────── */
 .wa-pv-text {
@@ -237,4 +355,86 @@
 .wa-pv-block[data-kind="provider-block"] .wa-pv-text,
 .wa-pv-block[data-kind="affiant-contact"] .wa-pv-text {
     white-space: pre-line;
+}
+
+/* ── Case-level Probable Cause card (screen-level, above subtabs) ──────── */
+.wa-case-pc {
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.6), rgba(11, 18, 32, 0.85));
+    border: 1px solid rgba(71, 85, 105, 0.5); /* slate-600 */
+    border-radius: 0.75rem;
+    margin-bottom: 1rem;
+    overflow: hidden;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.wa-case-pc[open] {
+    border-color: rgba(34, 211, 238, 0.35); /* viper-cyan */
+    box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.10), 0 6px 18px -8px rgba(0, 0, 0, 0.45);
+}
+.wa-case-pc > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 0.75rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    user-select: none;
+}
+.wa-case-pc > summary::-webkit-details-marker { display: none; }
+.wa-case-pc > summary::marker { content: ''; }
+.wa-case-pc > summary:hover {
+    background-color: rgba(34, 211, 238, 0.04);
+}
+.wa-case-pc-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    color: #e2e8f0; /* slate-200 */
+}
+.wa-case-pc-chevron {
+    color: #94a3b8; /* slate-400 */
+    transition: transform 0.18s ease;
+    display: inline-block;
+}
+.wa-case-pc[open] .wa-case-pc-chevron {
+    transform: rotate(90deg);
+    color: #22d3ee; /* viper-cyan */
+}
+.wa-case-pc-stats {
+    font-size: 0.7rem;
+    color: #94a3b8;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+}
+.wa-case-pc-stats .pill-filled {
+    color: #34d399; /* emerald-400 */
+}
+.wa-case-pc-stats .pill-empty {
+    color: #fbbf24; /* amber-400 */
+}
+.wa-case-pc-body {
+    padding: 0 1rem 1rem 1rem;
+    border-top: 1px solid rgba(71, 85, 105, 0.4);
+}
+.wa-case-pc-banner {
+    margin: 0.75rem 0;
+    padding: 0.5rem 0.75rem;
+    background-color: rgba(251, 191, 36, 0.08);
+    border: 1px solid rgba(251, 191, 36, 0.25);
+    border-radius: 0.5rem;
+    color: #fcd34d; /* amber-300 */
+    font-size: 0.75rem;
+    line-height: 1.5;
+}
+.wa-case-pc-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 0.5rem;
+    font-size: 0.7rem;
+    color: #94a3b8;
+    font-family: ui-monospace, SFMono-Regular, monospace;
 }

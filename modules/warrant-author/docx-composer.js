@@ -150,7 +150,11 @@ function _renderBlock(b) {
       const align = (b.align === 'right')  ? AlignmentType.RIGHT
                   : (b.align === 'center') ? AlignmentType.CENTER
                   : AlignmentType.LEFT;
-      return [_para(b.text, { indent: b.indent ? 360 : 0, align })];
+      // after: 200 twips (~10pt) gives a clear visible gap between
+      // paragraphs — important on un-indented legal-document prose
+      // where "IT APPEARING", "IT IS ORDERED", etc. each open a new
+      // logical section the reader needs to find quickly.
+      return [_para(b.text, { indent: b.indent ? 360 : 0, align, after: 200 })];
     }
     case 'numbered': {
       const items = Array.isArray(b.items) ? b.items : [];

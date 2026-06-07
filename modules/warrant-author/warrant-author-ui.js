@@ -344,6 +344,18 @@ function _renderEditor(caseId, draftId) {
     </div>`;
   }
 
+  // Auto-sync caseRef from the running case the moment the editor opens.
+  // The Warrant Author is always launched from inside a case context, so a
+  // missing caseRef should never block the validator or the disk-persist
+  // path — it's structurally implicit. We only write if the case number is
+  // present AND draft.caseRef is blank, to avoid clobbering user-entered
+  // overrides.
+  const runningCaseNumber = (window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || '';
+  if (runningCaseNumber && !(draft.caseRef && String(draft.caseRef).trim())) {
+    draft.caseRef = runningCaseNumber;
+    try { ds.saveDraft(caseId, draft); } catch (_) {}
+  }
+
   const activeId = _state.activeAddendumId && draft.addendums.find(a => a.id === _state.activeAddendumId)
     ? _state.activeAddendumId
     : (draft.addendums[0] && draft.addendums[0].id) || null;
@@ -383,6 +395,9 @@ function _renderEditor(caseId, draftId) {
 
       <!-- draft-level fields -->
       ${_renderDraftHeader(caseId, draft)}
+
+      <!-- CA-specific face-page options: PC §1524 grounds + HOBBS + Night Search -->
+      ${_renderCaWarrantOptions(caseId, draft)}
 
       <!-- 2-pane: addendum form (left) + live preview (right) -->
       <div class="grid grid-cols-12 gap-4">
@@ -452,7 +467,101 @@ function _renderDraftHeader(caseId, draft) {
   `;
 }
 
-// ─── pre-flight validator panel ────────────────────────────────────────
+// ─── CA face-page options (PC §1524 grounds + HOBBS + Night Search) ─────
+//
+// The CA Multi-Business SW Face Page emits eight checkbox grounds plus
+// two procedural toggles (HOBBS sealing, night-search). The validator
+// requires at least one ground to be ticked. This panel surfaces those
+// fields directly in the editor — without it, the only way to satisfy
+// the validator would be hand-editing localStorage.
+//
+// Only renders when the active template is `ca-multi-business-esp`. The
+// generic US template uses a simpler affidavit cover and does not need
+// these fields.
+const _PC1524_GROUNDS = [
+  ['stolen',              'It was stolen or embezzled'],
+  ['felonyMeans',         'Used as the means of committing a felony'],
+  ['possessedWithIntent', 'Possessed with intent to use as means of committing a public offense'],
+  ['evidenceOfFelony',    'Tends to show a felony has been committed / committed by a particular person'],
+  ['sexualExploitation',  'Sexual exploitation of a child (PC §311.3 / §311.11)'],
+  ['arrestWarrant',       'There is a warrant to arrest the person'],
+  ['ecspMisdemeanor',     'ECSP records re: misdemeanor (PC §1524.3)'],
+  ['laborCode',           'Labor Code §3700.5 violation'],
+];
+
+function _renderCaWarrantOptions(caseId, draft) {
+  if (!draft || draft.template !== 'ca-multi-business-esp') return '';
+  const g = draft.pc1524Grounds || {};
+  const anyTicked = _PC1524_GROUNDS.some(([k]) => !!g[k]);
+
+  const groundsHtml = _PC1524_GROUNDS.map(([key, label]) => {
+    const checked = g[key] ? 'checked' : '';
+    return `
+      <label class="flex items-start gap-2 px-2 py-1.5 rounded hover:bg-slate-800/60 cursor-pointer">
+        <input type="checkbox" ${checked}
+               onchange="WarrantAuthorUI.bus.onPc1524GroundChange('${attr(caseId)}','${attr(draft.id)}','${attr(key)}',this.checked)"
+               class="mt-0.5 accent-viper-cyan flex-shrink-0">
+        <span class="text-xs text-slate-200 leading-snug">${esc(label)}</span>
+      </label>
+    `;
+  }).join('');
+
+  const hobbsRequested = draft.hobbsSealing === 'requested';
+  const nightRequested = draft.nightSearch === 'requested';
+
+  const statusColor = anyTicked ? 'text-emerald-400' : 'text-rose-400';
+  const statusIcon  = anyTicked ? '✓' : '⛔';
+  const statusText  = anyTicked
+    ? `${_PC1524_GROUNDS.filter(([k]) => !!g[k]).length} ground(s) selected`
+    : 'No grounds selected — generation blocked';
+
+  return `
+    <details class="bg-viper-dark/60 border border-slate-700 rounded-lg" ${anyTicked ? '' : 'open'}>
+      <summary class="px-3 py-2 cursor-pointer select-none flex items-center justify-between hover:bg-slate-800/40">
+        <span class="text-xs uppercase tracking-wider text-slate-300 font-medium">
+          CA Face Page · PC §1524 Grounds + Procedural Toggles
+        </span>
+        <span class="text-[11px] ${statusColor}">${statusIcon} ${esc(statusText)}</span>
+      </summary>
+      <div class="p-3 border-t border-slate-700 space-y-3">
+        <div>
+          <div class="text-[11px] uppercase tracking-wider text-slate-400 mb-1.5">
+            Penal Code §1524 grounds (check all that apply)
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-x-2 gap-y-0.5 bg-slate-900/40 rounded border border-slate-800 p-1.5">
+            ${groundsHtml}
+          </div>
+          <div class="text-[10px] text-slate-500 mt-1.5">
+            At least one ground must be ticked — these become <code class="text-slate-400">[X]</code> marks on the face page.
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800">
+          <label class="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-slate-800/40">
+            <input type="checkbox" ${hobbsRequested ? 'checked' : ''}
+                   onchange="WarrantAuthorUI.bus.onDraftToggleChange('${attr(caseId)}','${attr(draft.id)}','hobbsSealing',this.checked?'requested':'not-requested')"
+                   class="accent-viper-cyan flex-shrink-0">
+            <span class="text-xs text-slate-200">
+              <span class="font-medium">HOBBS Sealing</span>
+              <span class="block text-[10px] text-slate-500">If requested, articulate the basis in the PC narrative.</span>
+            </span>
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-slate-800/40">
+            <input type="checkbox" ${nightRequested ? 'checked' : ''}
+                   onchange="WarrantAuthorUI.bus.onDraftToggleChange('${attr(caseId)}','${attr(draft.id)}','nightSearch',this.checked?'requested':'not-requested')"
+                   class="accent-viper-cyan flex-shrink-0">
+            <span class="text-xs text-slate-200">
+              <span class="font-medium">Night Search</span>
+              <span class="block text-[10px] text-slate-500">PC §1533 — requires good cause in the PC narrative.</span>
+            </span>
+          </label>
+        </div>
+      </div>
+    </details>
+  `;
+}
+
+
 
 function _runValidator(caseId, draft) {
   const V = _validator();
@@ -1393,7 +1502,11 @@ const bus = {
   },
   onCreateDraftConfirm(caseId) {
     const ds = _store(); if (!ds) return;
-    const ref = (document.getElementById('waNewCaseRef') || {}).value || '';
+    let ref = (document.getElementById('waNewCaseRef') || {}).value || '';
+    // Fall back to the running case number if the user cleared the input.
+    if (!String(ref).trim()) {
+      ref = (window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || '';
+    }
     const tpl = (document.getElementById('waNewTemplate') || {}).value || 'ca-multi-business-esp';
     const agency = _loadAgencyProfile();
     const draft = ds.createDraft(caseId, {
@@ -1418,6 +1531,35 @@ const bus = {
     const ds = _store(); if (!ds) return;
     const d = ds.getDraft(caseId, draftId); if (!d) return;
     d[field] = value;
+    ds.saveDraft(caseId, d);
+    _rerender();
+  },
+  /**
+   * Toggle a draft field that takes 'requested' / 'not-requested' values
+   * (hobbsSealing, nightSearch). Called from CA face-page options.
+   */
+  onDraftToggleChange(caseId, draftId, field, value) {
+    const ds = _store(); if (!ds) return;
+    const d = ds.getDraft(caseId, draftId); if (!d) return;
+    d[field] = value;
+    ds.saveDraft(caseId, d);
+    _rerender();
+  },
+  /**
+   * Toggle one PC §1524 ground checkbox. Initializes the grounds object
+   * if missing (legacy drafts created before the schema was finalized).
+   */
+  onPc1524GroundChange(caseId, draftId, key, checked) {
+    const ds = _store(); if (!ds) return;
+    const d = ds.getDraft(caseId, draftId); if (!d) return;
+    if (!d.pc1524Grounds || typeof d.pc1524Grounds !== 'object') {
+      d.pc1524Grounds = {
+        stolen: false, felonyMeans: false, possessedWithIntent: false,
+        evidenceOfFelony: false, sexualExploitation: false,
+        arrestWarrant: false, ecspMisdemeanor: false, laborCode: false,
+      };
+    }
+    d.pc1524Grounds[key] = !!checked;
     ds.saveDraft(caseId, d);
     _rerender();
   },

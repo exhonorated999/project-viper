@@ -115,6 +115,145 @@
     return out;
   }
 
+  // ─── CA Multi-Business SW Face Page ──────────────────────────────────
+  // Mirrors the structure of the standard California Search Warrant face
+  // page (Multi SW Face Page.docx). Layout:
+  //   1) Affiant oath paragraph
+  //   2) HOBBS SEALING + NIGHT SEARCH check lines
+  //   3) Signature block ("Signature of Affiant")
+  //   4) Centered "(SEARCH WARRANT)" title
+  //   5) "THE PEOPLE OF THE STATE OF CALIFORNIA TO ANY SHERIFF…" intro
+  //   6) Eight PC §1524 grounds with check boxes
+  //   7) "YOU ARE THEREFORE COMMANDED to SEARCH" + per-addendum
+  //      "Page A for {Provider}" / "Page B for {Provider}" lines
+  //
+  // Checkboxes use ASCII `[X]` / `[ ]` so they render reliably in BOTH
+  // jsPDF (Times) and docx — neither needs a Unicode glyph fallback.
+  function _buildCaFacePage(draft, agency, caseInfo, addendumComposes) {
+    const blocks = [];
+    const aff = draft.affiantSnapshot || {};
+    const affName  = _safe(aff.affiantName)  || _safe(agency.affiantName)  || '________________';
+    const affRank  = _safe(aff.affiantRank)  || _safe(agency.affiantRank)  || 'Detective';
+    const affBadge = _safe(aff.affiantBadge) || _safe(agency.affiantBadge) || '';
+    const affTitle = `${affRank} ${affName}`.replace(/\s+/g, ' ').trim();
+    const county = (_safe(agency.county) || _safe(draft.county) || '__________________').toUpperCase();
+    const hobbsYes = draft.hobbsSealing === 'requested';
+    const nightYes = draft.nightSearch === 'requested';
+    const box = (on) => on ? '[X]' : '[ ]';
+
+    // 1) Affiant oath block (top of face page)
+    blocks.push({
+      kind: 'paragraph',
+      text:
+        `${affTitle} swears under oath that the facts expressed by him in the attached and incorporated Affidavit ` +
+        `are true and that based thereon he has probable cause to believe and does believe that the articles, ` +
+        `property, and persons described below are lawfully seizable pursuant to Penal Code Section 1524 et seq., ` +
+        `as indicated below, and are now located at the locations set forth below. Wherefore, Affiant requests ` +
+        `that this Search Warrant be issued. I declare that the information below is true and correct under ` +
+        `penalty of perjury of the laws of the State of California.`,
+    });
+    blocks.push({ kind: 'spacer', size: 'sm' });
+
+    // 2) HOBBS SEALING + NIGHT SEARCH check lines (centered like the docx)
+    blocks.push({
+      kind: 'cover-subheading',
+      text: `HOBBS SEALING REQUESTED:   ${box(hobbsYes)} YES    ${box(!hobbsYes)} NO`,
+    });
+    blocks.push({
+      kind: 'cover-subheading',
+      text: `NIGHT SEARCH REQUESTED:    ${box(nightYes)} YES    ${box(!nightYes)} NO`,
+    });
+    blocks.push({ kind: 'spacer', size: 'sm' });
+
+    // 3) Signature line for affiant
+    const sigLabel = '(Signature of Affiant)  ' + affTitle + (affBadge ? `, Badge #${affBadge}` : '');
+    blocks.push({ kind: 'signature', label: sigLabel });
+    blocks.push({ kind: 'spacer', size: 'md' });
+
+    // 4) Title
+    blocks.push({ kind: 'cover-heading', text: '( SEARCH WARRANT )' });
+    blocks.push({ kind: 'spacer', size: 'sm' });
+
+    // 5) People of the State of California intro
+    blocks.push({
+      kind: 'paragraph',
+      text:
+        `THE PEOPLE OF THE STATE OF CALIFORNIA TO ANY SHERIFF, POLICEMAN OR PEACE OFFICER IN THE COUNTY OF ` +
+        `${county}: proof by affidavit, under penalty of perjury, having been made before me by ${affTitle} ` +
+        `that there is probable cause to believe that the property or person described herein may be found at ` +
+        `the location(s) set forth herein and that it is lawfully seizable pursuant to Penal Code Section 1524 ` +
+        `et seq., as indicated below by "[X]"(s), in that:`,
+    });
+    blocks.push({ kind: 'spacer', size: 'sm' });
+
+    // 6) Eight PC §1524 grounds
+    const g = draft.pc1524Grounds || {};
+    const grounds = [
+      [g.stolen,              'It was stolen or embezzled;'],
+      [g.felonyMeans,         'It was used as the means of committing a felony;'],
+      [g.possessedWithIntent, 'It is possessed by a person with the intent to use it as means of committing a public offense or is possessed by another to whom he or she may have delivered it for the purpose of concealing it or preventing its discovery;'],
+      [g.evidenceOfFelony,    'It tends to show that a felony has been committed or that a particular person has committed a felony;'],
+      [g.sexualExploitation,  'It tends to show that sexual exploitation of a child, in violation of Penal Code Section 311.3, or possession of matter depicting sexual conduct of a person under the age of 18 years, in violation of Section 311.11, has occurred or is occurring;'],
+      [g.arrestWarrant,       'There is a warrant to arrest the person;'],
+      [g.ecspMisdemeanor,     'A provider of electronic communication service or remote computing service has records of evidence, as specified in Penal Code Section 1524.3, showing that property was stolen or embezzled constituting a misdemeanor, or that property or things are in possession of any person with intent to use them as a means of committing a misdemeanor public offense, or in the possession of another to whom he or she may have delivered them for the purpose of concealing them or preventing their discovery;'],
+      [g.laborCode,           'The property or things to be seized include an item or any evidence that tends to show a violation of Section 3700.5 of the Labor Code, or tends to show that a particular person has violated Section 3700.5 of the Labor Code;'],
+    ];
+    for (const [checked, text] of grounds) {
+      blocks.push({ kind: 'paragraph', text: `${box(!!checked)}  ${text}`, indent: true });
+    }
+
+    blocks.push({ kind: 'spacer', size: 'md' });
+
+    // 7) Command + addendum routing
+    blocks.push({
+      kind: 'heading-2',
+      text: 'YOU ARE THEREFORE COMMANDED to SEARCH:  (premises, vehicles, persons)',
+    });
+    blocks.push({ kind: 'paragraph', text: 'See attachment:' });
+
+    addendumComposes = Array.isArray(addendumComposes) ? addendumComposes : [];
+    if (!addendumComposes.length) {
+      blocks.push({
+        kind: 'paragraph',
+        text: '(no addendums attached — add provider addendums on the Warrant Author screen)',
+        indent: true,
+      });
+    } else {
+      addendumComposes.forEach((ac, i) => {
+        const letter = _abc(i);
+        const providerName = _safe(ac.providerName) || _safe(ac.providerKey) || '(Provider)';
+        blocks.push({
+          kind: 'paragraph',
+          text: `Page ${letter} for ${providerName}`,
+          indent: true,
+        });
+      });
+    }
+
+    // Footer meta strip — SW number + case ref + date, small + centered.
+    // The standard docx form does not include this, but it's invaluable
+    // when courts file-stamp face pages and need a unique identifier.
+    blocks.push({ kind: 'spacer', size: 'md' });
+    const sw = _safe(draft.swNumber).trim();
+    blocks.push({
+      kind: 'cover-meta',
+      label: 'Search Warrant Number',
+      value: sw ? sw : '________________________ (assigned by court)',
+    });
+    blocks.push({
+      kind: 'cover-meta',
+      label: 'Case Reference',
+      value: _safe(draft.caseRef) || _safe(caseInfo.caseNumber) || '(not assigned)',
+    });
+    blocks.push({
+      kind: 'cover-meta',
+      label: 'Date',
+      value: _todayStr(),
+    });
+
+    return blocks;
+  }
+
   /**
    * Build the cover page blocks (caption + affiant identity).
    */
@@ -261,8 +400,20 @@
 
     const blocks = [];
 
-    // 1) Cover
-    for (const b of _buildCover(draft, agency, caseInfo)) blocks.push(b);
+    // 1) Cover / Face Page (jurisdiction-aware)
+    //    CA template uses the official Multi-Business SW Face Page layout
+    //    (oath, HOBBS/NIGHT checkboxes, signature, "See attachment: Page A
+    //    for {Provider}" routing). All other templates fall through to the
+    //    generic affidavit cover.
+    const isCaFacePage = (
+      _safe(draft.template) === 'ca-multi-business-esp' ||
+      _safe(draft.jurisdiction).toUpperCase() === 'CA'
+    );
+    if (isCaFacePage) {
+      for (const b of _buildCaFacePage(draft, agency, caseInfo, addendumComposes)) blocks.push(b);
+    } else {
+      for (const b of _buildCover(draft, agency, caseInfo)) blocks.push(b);
+    }
 
     // 2) Probable Cause (case-level)
     for (const b of _buildProbableCause(pcNarrative)) blocks.push(b);
@@ -304,7 +455,7 @@
 
   const api = Object.freeze({
     build,
-    _internals: { _mapResolvedBlock, _abc, _buildCover, _buildProbableCause, _buildAddendum, _buildSignature },
+    _internals: { _mapResolvedBlock, _abc, _buildCover, _buildCaFacePage, _buildProbableCause, _buildAddendum, _buildSignature },
   });
 
   if (typeof module !== 'undefined' && module.exports) {

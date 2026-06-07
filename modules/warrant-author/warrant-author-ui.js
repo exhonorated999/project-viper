@@ -833,20 +833,23 @@ function _renderAddendumForm(caseId, draft, addendumId, harvest) {
       </label>
 
       <!-- Date range -->
+      <!-- IMPORTANT: date inputs only persist on `change` (after user
+           tabs out of the year segment), not on `input`. Persisting per
+           keystroke is what blocks the user from typing all 4 digits of
+           the year — Chromium's <input type="date"> can re-clamp the
+           segment between keystrokes once a save round-trips. -->
       <div class="grid grid-cols-2 gap-2">
         <label class="block text-xs">
           <span class="text-slate-400 uppercase tracking-wider">From</span>
           <input type="date" value="${attr(ad.dateRangeFrom)}"
-                 min="1900-01-01" max="2100-12-31"
-                 oninput="WarrantAuthorUI.bus.onAddendumFieldChange('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','dateRangeFrom',this.value)"
+                 onchange="WarrantAuthorUI.bus.onAddendumDateBlur('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','dateRangeFrom',this.value)"
                  onblur="WarrantAuthorUI.bus.onAddendumDateBlur('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','dateRangeFrom',this.value)"
                  class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
         </label>
         <label class="block text-xs">
           <span class="text-slate-400 uppercase tracking-wider">To</span>
           <input type="date" value="${attr(ad.dateRangeTo)}"
-                 min="1900-01-01" max="2100-12-31"
-                 oninput="WarrantAuthorUI.bus.onAddendumFieldChange('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','dateRangeTo',this.value)"
+                 onchange="WarrantAuthorUI.bus.onAddendumDateBlur('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','dateRangeTo',this.value)"
                  onblur="WarrantAuthorUI.bus.onAddendumDateBlur('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','dateRangeTo',this.value)"
                  class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
         </label>

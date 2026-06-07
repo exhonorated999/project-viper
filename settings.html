@@ -255,8 +255,10 @@
                 </div>
             </nav>
 
-            <!-- Media Player (fills remaining sidebar space) -->
-            <div id="mediaPlayerContainer" class="flex-1 min-h-0" style="display:none;"></div>
+            <!-- Media Player is now FLOATING (drag header to move, drag
+                 corner to resize, lock to pin in place).  Spacer keeps
+                 the user-profile box pinned to the bottom. -->
+            <div class="flex-1 min-h-0"></div>
             
             <!-- User Profile -->
             <div class="p-4 border-t border-viper-cyan/20 flex-shrink-0">
@@ -1411,6 +1413,114 @@
                                         </div>
                                     </details>
                                     <div id="genlogsCredentialsPanel" style="display:none;"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- CargoNet — Theft Alert Ingest -->
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-start gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+                                    <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                                    </svg>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <h4 class="text-white font-semibold text-sm">CargoNet — Theft Alert Ingest</h4>
+                                        <button id="cargonetToggleBtn" onclick="toggleCargonet()" class="relative w-11 h-6 rounded-full transition-colors bg-gray-600 flex-shrink-0">
+                                            <div id="cargonetToggleKnob" class="absolute w-4 h-4 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-gray-400 mt-1 leading-relaxed">Forward CargoNet Theft Alerts directly into VIPER instead of relying on email. When enabled, VIPER watches a local folder for <code class="text-amber-300/80">.eml</code> drops from Outlook, parses the alert (driver info, tractor, cargo, value, investigating agency, incident #), and queues it on the dashboard. One click converts an alert into a fully-populated case (suspects, vehicles, victim business, cargo).</p>
+                                    <span id="cargonetToggleLabel" class="text-xs text-gray-500 mt-1 block"></span>
+
+                                    <!-- Inbox folder + actions -->
+                                    <div class="mt-3 space-y-2">
+                                        <div>
+                                            <label class="block text-xs text-gray-400 mb-1">Inbox folder (Outlook rule destination)</label>
+                                            <div class="flex items-center gap-2">
+                                                <input id="cargonetInboxPath" type="text" readonly
+                                                       class="flex-1 px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-white text-xs font-mono truncate"
+                                                       placeholder="(loading...)">
+                                                <button onclick="pickCargonetFolder()" class="px-3 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/50 rounded-lg text-amber-300 text-xs font-medium transition whitespace-nowrap">Change…</button>
+                                                <button onclick="openCargonetFolder()" class="px-3 py-1.5 bg-viper-dark border border-gray-600 hover:border-amber-500/50 hover:text-amber-300 rounded-lg text-gray-300 text-xs font-medium transition whitespace-nowrap">Open Folder</button>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center gap-3 text-xs">
+                                            <div class="flex items-center gap-1.5">
+                                                <div id="cargonetStatusDot" class="w-2 h-2 rounded-full bg-red-500"></div>
+                                                <span id="cargonetStatusText" class="text-gray-400">Watcher inactive</span>
+                                            </div>
+                                            <span class="text-gray-600">·</span>
+                                            <span id="cargonetCounts" class="text-gray-400">0 alerts</span>
+                                            <button onclick="rescanCargonet()" class="ml-auto text-amber-400/80 hover:text-amber-300 text-xs underline">Rescan now</button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Collapsible Outlook rule instructions -->
+                                    <details class="mt-3" id="cargonetSetupDetails">
+                                        <summary class="cursor-pointer text-xs text-amber-400 hover:text-amber-300 select-none flex items-center gap-1.5 font-medium">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                            Outlook automation setup (one-time, ~3 minutes)
+                                        </summary>
+                                        <div class="mt-3 space-y-3 border-t border-gray-700/50 pt-3 text-xs text-gray-300 leading-relaxed">
+                                            <p class="text-gray-400">Pick <strong>Method A</strong> below — it's a built-in Windows tool that auto-saves every CargoNet alert into this folder the instant it lands in Outlook. No code, no admin, works on gov-tenant mailboxes (uses your local Outlook profile, never the cloud).</p>
+
+                                            <!-- METHOD A — Power Automate Desktop -->
+                                            <div class="bg-amber-500/5 border border-amber-500/40 rounded-lg p-3">
+                                                <div class="flex items-center gap-2 mb-2">
+                                                    <span class="px-1.5 py-0.5 text-[10px] font-bold bg-amber-500 text-black rounded uppercase tracking-wide">Recommended</span>
+                                                    <p class="font-semibold text-amber-300">Method A — Power Automate Desktop flow</p>
+                                                </div>
+                                                <p class="text-gray-400 mb-2">Free, pre-installed on Windows 11 (one-click install on Windows 10 from the Microsoft Store). Runs locally — no M365 license, no cloud connector, no admin rights.</p>
+                                                <ol class="list-decimal list-inside space-y-1.5 text-gray-300">
+                                                    <li>Press <kbd class="px-1.5 py-0.5 bg-gray-800 border border-gray-600 rounded text-amber-300/90">Win</kbd> → type <strong>Power Automate</strong> → open it (install from MS Store if missing).</li>
+                                                    <li>Click <strong>+ New flow</strong> → name it <code class="text-amber-300/80">CargoNet → VIPER</code> → <strong>Create</strong>.</li>
+                                                    <li>In the actions panel (left), search <code class="text-amber-300/80">outlook</code>. Drag <strong>Launch Outlook</strong> to the canvas → Save (default settings are fine).</li>
+                                                    <li>Search again and drag <strong>Retrieve email messages from Outlook</strong>. Configure:
+                                                        <ul class="list-disc list-inside ml-4 mt-1 text-gray-400">
+                                                            <li>Account: your mailbox</li>
+                                                            <li>Mail folder: <code class="text-amber-300/80">Inbox</code></li>
+                                                            <li>Retrieve: <em>Unread email messages only</em></li>
+                                                            <li>Mark as read: <strong>On</strong></li>
+                                                            <li>From: <code class="text-amber-300/80">no-reply@cargonet.com</code></li>
+                                                        </ul>
+                                                    </li>
+                                                    <li>Drag <strong>For each</strong> → iterate over <code class="text-amber-300/80">%RetrievedEmails%</code>.</li>
+                                                    <li>Inside the loop, drag <strong>Save Outlook email messages</strong>. Configure:
+                                                        <ul class="list-disc list-inside ml-4 mt-1 text-gray-400">
+                                                            <li>Save mode: <em>Save as file</em></li>
+                                                            <li>File format: <strong>EML</strong> <span class="text-gray-500">(if EML isn't listed, choose MSG — VIPER also parses .msg)</span></li>
+                                                            <li>Folder path: <span id="cargonetPADFolderHint" class="text-amber-300/80">(use the inbox folder shown above)</span></li>
+                                                            <li>Email message: <code class="text-amber-300/80">%CurrentItem%</code></li>
+                                                        </ul>
+                                                    </li>
+                                                    <li>Save the flow. Click <strong>… → Properties → Run when I sign in to Windows</strong> (sets it to auto-start).</li>
+                                                    <li>To trigger on a schedule: open the flow → <strong>Schedule flow</strong> → every <strong>2 minutes</strong> → Save.</li>
+                                                </ol>
+                                                <p class="mt-2 text-gray-500">That's it. CargoNet emails will land here within ~2 minutes of arrival, VIPER ingests them within 30 seconds, and the amber bell on the dashboard lights up.</p>
+                                                <button type="button" onclick="cargonetCopyPADFolder()" class="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded transition-colors">
+                                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                                                    Copy inbox folder path
+                                                </button>
+                                            </div>
+
+                                            <!-- METHOD B — Manual drag/drop fallback -->
+                                            <div class="bg-viper-dark/60 border border-gray-700 rounded-lg p-3">
+                                                <p class="font-semibold text-gray-300 mb-1">Method B — Manual drag-and-drop <span class="text-gray-500 font-normal">(fallback)</span></p>
+                                                <p class="text-gray-400">Open the CargoNet email in Outlook → drag it into the inbox folder shown above. Windows Explorer drops a <code class="text-amber-300/80">.msg</code> file that VIPER also parses. Useful for one-off alerts or testing.</p>
+                                            </div>
+
+                                            <!-- METHOD C — Email2 fallback -->
+                                            <div class="bg-viper-dark/60 border border-gray-700 rounded-lg p-3">
+                                                <p class="font-semibold text-gray-300 mb-1">Method C — CargoNet "Email2" forwarding <span class="text-gray-500 font-normal">(advanced)</span></p>
+                                                <p class="text-gray-400">If your agency runs an inbound mail-to-file service, paste that forwarding address into your CargoNet user profile's <em>Email2</em> field. Most users should stick with Method A.</p>
+                                            </div>
+
+                                            <p class="text-gray-500">VIPER watches this folder every 30 seconds and on filesystem-change events. Once parsed, the source file is moved into <code class="text-amber-300/80">archive/</code> beside the inbox so the same alert is never ingested twice.</p>
+                                        </div>
+                                    </details>
                                 </div>
                             </div>
                         </div>
@@ -3033,20 +3143,40 @@
     </script>
     <script src="/modules/security-ui.js"></script>
     <script>
-    // Media Player — BrowserView coordination + settings toggle
-    function reportBounds() {
-        const container = document.getElementById('mediaPlayerContainer');
-        if (!container) return;
-        const enabled = localStorage.getItem('mediaPlayerEnabled') === 'true';
-        container.style.display = enabled ? 'block' : 'none';
-        if (enabled) {
-            const r = container.getBoundingClientRect();
-            window.electronAPI.mediaSetBounds({ x: r.x, y: r.y, width: r.width, height: r.height });
-            window.electronAPI.mediaSetVisible(true);
-        } else {
-            window.electronAPI.mediaSetVisible(false);
-        }
+    // Media Player — floating BrowserView coordination.
+    //
+    // Position + size are now user-controlled via drag (header) / resize
+    // (corner handle) inside the BV itself.  This page just (1) tracks the
+    // enabled/disabled toggle UI and (2) persists any bounds the main
+    // process pushes back after a drag/resize.
+    const __MP_DEFAULT_BOUNDS = { x: 16, y: 360, width: 320, height: 420 };
+
+    function __mp_loadBounds() {
+        try {
+            const raw = localStorage.getItem('mediaPlayerBounds');
+            if (!raw) return null;
+            const b = JSON.parse(raw);
+            if (b && typeof b.x === 'number' && typeof b.y === 'number'
+                && typeof b.width === 'number' && typeof b.height === 'number') return b;
+        } catch (_) {}
+        return null;
     }
+    function __mp_saveBounds(b) {
+        try { localStorage.setItem('mediaPlayerBounds', JSON.stringify(b)); } catch (_) {}
+    }
+
+    function __mp_applyState() {
+        const enabled = localStorage.getItem('mediaPlayerEnabled') === 'true';
+        if (!enabled) {
+            window.electronAPI.mediaSetVisible(false);
+            return;
+        }
+        let b = __mp_loadBounds();
+        if (!b) { b = { ...__MP_DEFAULT_BOUNDS }; __mp_saveBounds(b); }
+        window.electronAPI.mediaSetBounds(b);
+        window.electronAPI.mediaSetVisible(true);
+    }
+    function reportBounds() { __mp_applyState(); }
 
     function toggleMediaPlayer() {
         const enabled = localStorage.getItem('mediaPlayerEnabled') !== 'true';
@@ -3070,15 +3200,21 @@
     updateMediaToggleUI(localStorage.getItem('mediaPlayerEnabled') === 'true');
     reportBounds();
 
-    window.addEventListener('resize', reportBounds);
-    window.electronAPI.onRequestMediaBounds(() => reportBounds());
+    window.electronAPI.onRequestMediaBounds && window.electronAPI.onRequestMediaBounds(() => reportBounds());
     window.electronAPI.onToggleMediaPlayer(() => {
         const next = localStorage.getItem('mediaPlayerEnabled') !== 'true';
         localStorage.setItem('mediaPlayerEnabled', String(next));
         updateMediaToggleUI(next);
         reportBounds();
     });
-    window.addEventListener('storage', (e) => { if (e.key === 'mediaPlayerEnabled') reportBounds(); });
+    window.addEventListener('storage', (e) => {
+        if (e.key === 'mediaPlayerEnabled' || e.key === 'mediaPlayerBounds') reportBounds();
+    });
+
+    // Persist bounds that the main process pushes back after drag/resize.
+    if (window.electronAPI.onMediaBoundsChanged) {
+        window.electronAPI.onMediaBoundsChanged((b) => { if (b) __mp_saveBounds(b); });
+    }
     </script>
 
     <!-- GenLogs API Service -->
@@ -3815,7 +3951,100 @@
     initIcacDataSystemSettings();
     initIcacCopsSettings();
     initGridcopSettings();
+    initCargonetSettings();
     initCallyoSettings();
+
+    /* ── CargoNet ─────────────────────────────────────────── */
+    async function refreshCargonetUI() {
+        if (!window.electronAPI || !window.electronAPI.cargonetGetStatus) return;
+        let st;
+        try { st = await window.electronAPI.cargonetGetStatus(); }
+        catch (e) { console.warn('[CargoNet] status failed', e); return; }
+
+        const enabled = !!st.enabled;
+        const btn  = document.getElementById('cargonetToggleBtn');
+        const knob = document.getElementById('cargonetToggleKnob');
+        const lbl  = document.getElementById('cargonetToggleLabel');
+        const path = document.getElementById('cargonetInboxPath');
+        const dot  = document.getElementById('cargonetStatusDot');
+        const stxt = document.getElementById('cargonetStatusText');
+        const cnt  = document.getElementById('cargonetCounts');
+
+        if (btn)  btn.className  = 'relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ' + (enabled ? 'bg-amber-500' : 'bg-gray-600');
+        if (knob) knob.className = 'absolute w-4 h-4 bg-white rounded-full top-1 transition-transform ' + (enabled ? 'translate-x-6' : 'translate-x-1');
+        if (lbl)  lbl.textContent = enabled ? 'Enabled — bell icon active on Dashboard' : 'Disabled';
+        if (path) path.value = st.inboxFolder || '';
+        // Sync Power Automate folder hint with current inbox path
+        const padHint = document.getElementById('cargonetPADFolderHint');
+        if (padHint) {
+            padHint.textContent = st.inboxFolder ? st.inboxFolder : '(use the inbox folder shown above)';
+            padHint.dataset.path = st.inboxFolder || '';
+        }
+        if (dot)  dot.style.background = (enabled && st.watching) ? '#10b981' : '#ef4444';
+        if (stxt) stxt.textContent = enabled ? (st.watching ? 'Watching folder' : 'Watcher idle') : 'Watcher inactive';
+        if (cnt) {
+            const n = st.totalCount || 0;
+            const u = st.unreadCount || 0;
+            cnt.textContent = `${n} alert${n === 1 ? '' : 's'}` + (u ? ` · ${u} unread` : '');
+        }
+    }
+
+    async function toggleCargonet() {
+        if (!window.electronAPI) return;
+        let st;
+        try { st = await window.electronAPI.cargonetGetStatus(); } catch (_) { st = { enabled: false }; }
+        try {
+            if (st.enabled) await window.electronAPI.cargonetStop();
+            else            await window.electronAPI.cargonetStart();
+        } catch (e) { console.warn('[CargoNet] toggle failed', e); }
+        refreshCargonetUI();
+    }
+
+    async function pickCargonetFolder() {
+        if (!window.electronAPI) return;
+        try { await window.electronAPI.cargonetPickFolder(); } catch (e) { console.warn(e); }
+        refreshCargonetUI();
+    }
+
+    async function openCargonetFolder() {
+        if (!window.electronAPI) return;
+        try { await window.electronAPI.cargonetOpenFolder(); } catch (e) { console.warn(e); }
+    }
+
+    async function rescanCargonet() {
+        if (!window.electronAPI) return;
+        try { await window.electronAPI.cargonetRescan(); } catch (e) { console.warn(e); }
+        refreshCargonetUI();
+    }
+
+    async function cargonetCopyPADFolder() {
+        const hint = document.getElementById('cargonetPADFolderHint');
+        const pathInput = document.getElementById('cargonetInboxPath');
+        const folder = (hint && hint.dataset && hint.dataset.path) || (pathInput && pathInput.value) || '';
+        if (!folder) {
+            try { window.viperToast && window.viperToast('Enable CargoNet first so the inbox folder is created.', 'warning'); } catch (_) {}
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(folder);
+            try { window.viperToast && window.viperToast('Inbox folder copied — paste into Power Automate "Folder path" field.', 'success'); } catch (_) {}
+        } catch (e) {
+            console.warn('[CargoNet] clipboard write failed', e);
+            try { window.viperToast && window.viperToast('Copy failed — folder: ' + folder, 'warning'); } catch (_) {}
+        }
+    }
+
+    function initCargonetSettings() {
+        refreshCargonetUI();
+        // Refresh once a minute in case the watcher ingested a new file while
+        // the user has the Settings page open.
+        if (!window._cargonetSettingsTimer) {
+            window._cargonetSettingsTimer = setInterval(refreshCargonetUI, 60 * 1000);
+        }
+        if (window.electronAPI && window.electronAPI.onCargonetNewAlert) {
+            window.electronAPI.onCargonetNewAlert(() => refreshCargonetUI());
+        }
+    }
 
     function toggleInvestigativeTools() {
         const body = document.getElementById('investToolsBody');

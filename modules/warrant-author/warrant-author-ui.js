@@ -46,6 +46,12 @@ const _state = {
   view: 'list',       // list | editor
   activeDraftId: null,
   activeAddendumId: null,
+  // CA Options panel open/closed state — persisted in memory only so the
+  // <details> doesn't snap shut every time _rerender rebuilds the DOM
+  // after a checkbox toggle. Defaults to open until the user collapses
+  // it manually. Reset to undefined on draft switch so each new draft
+  // starts with the panel visible.
+  caOptionsOpen: undefined,
 };
 
 function _selectDraft(caseId, draftId) {
@@ -54,6 +60,7 @@ function _selectDraft(caseId, draftId) {
   const d = _store() ? _store().getDraft(caseId, draftId) : null;
   _state.activeAddendumId = (d && d.addendums && d.addendums[0]) ? d.addendums[0].id : null;
   _state.view = 'editor';
+  _state.caOptionsOpen = undefined;  // each new draft starts with options panel open
 }
 
 function _backToList() {
@@ -527,8 +534,14 @@ function _renderCaWarrantOptions(caseId, draft) {
     ? `${_PC1524_GROUNDS.filter(([k]) => !!g[k]).length} ground(s) selected`
     : 'No grounds selected — generation blocked';
 
+  // Open/closed state survives _rerender so a checkbox tick does not
+  // collapse the card mid-selection. Default: open. Once the user
+  // collapses or expands it, _state.caOptionsOpen takes over.
+  const isOpen = (_state.caOptionsOpen === undefined) ? true : !!_state.caOptionsOpen;
+
   return `
-    <details class="bg-viper-dark/60 border border-slate-700 rounded-lg" ${anyTicked ? '' : 'open'}>
+    <details class="bg-viper-dark/60 border border-slate-700 rounded-lg" ${isOpen ? 'open' : ''}
+             ontoggle="WarrantAuthorUI.bus.onCaOptionsToggle(this.open)">
       <summary class="px-3 py-2 cursor-pointer select-none flex items-center justify-between hover:bg-slate-800/40">
         <span class="text-xs uppercase tracking-wider text-slate-300 font-medium">
           CA Face Page · PC §1524 Grounds + Procedural Toggles
@@ -1574,6 +1587,15 @@ const bus = {
     d.pc1524Grounds[key] = !!checked;
     ds.saveDraft(caseId, d);
     _rerender();
+  },
+  /**
+   * Persist the CA Options <details> open/closed state across
+   * re-renders. Fired by the native `ontoggle` event whenever the
+   * user manually clicks the summary chevron. NO re-render — toggling
+   * the chevron is a pure UI state change.
+   */
+  onCaOptionsToggle(open) {
+    _state.caOptionsOpen = !!open;
   },
   /**
    * Case-level shared probable cause edit. Fired on every keystroke.

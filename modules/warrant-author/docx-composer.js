@@ -185,35 +185,80 @@ async function composeDocx({ blockStream, draft, agency } = {}) {
   const ref = (_safe(draft.swNumber).trim()) || (_safe(draft.caseRef).trim()) || '(no SW#)';
   const affiantName = _safe(aff.affiantName) || _safe(agency.affiantName) || '';
 
-  // Header (right-aligned with case ref).
-  const header = new Header({
-    children: [
-      new Paragraph({
-        alignment: AlignmentType.RIGHT,
-        children: [_run(ref, { size: 18, italics: true })],
-        spacing: { after: 0, line: 240 },
-      }),
-    ],
-  });
+  // Running header/footer metadata from block-builder
+  const meta = blockStream.meta || {};
+  const runningHeader = meta.runningHeader || { enabled: false };
+  const runningFooter = meta.runningFooter || { enabled: false };
 
-  // Footer (page X of Y · affiant).
-  const footer = new Footer({
-    children: [
-      new Paragraph({
-        alignment: AlignmentType.RIGHT,
-        children: [
-          new TextRun({ text: 'Page ', font: 'Times New Roman', size: 18 }),
-          new TextRun({ children: [PageNumber.CURRENT], font: 'Times New Roman', size: 18 }),
-          new TextRun({ text: ' of ', font: 'Times New Roman', size: 18 }),
-          new TextRun({ children: [PageNumber.TOTAL_PAGES], font: 'Times New Roman', size: 18 }),
-          ...(affiantName ? [
-            new TextRun({ text: ` · ${affiantName}`, font: 'Times New Roman', size: 18 }),
-          ] : []),
-        ],
-        spacing: { line: 240 },
-      }),
-    ],
-  });
+  let header;
+  if (runningHeader.enabled && Array.isArray(runningHeader.lines) && runningHeader.lines.length) {
+    // CA running header — two centered, bold lines (state/county + SEARCH WARRANT and AFFIDAVIT).
+    header = new Header({
+      children: runningHeader.lines.map((ln) => new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [_run(ln, { bold: true, size: 22 })],
+        spacing: { after: 0, line: 240 },
+      })),
+    });
+  } else {
+    // Default header (right-aligned with case ref).
+    header = new Header({
+      children: [
+        new Paragraph({
+          alignment: AlignmentType.RIGHT,
+          children: [_run(ref, { size: 18, italics: true })],
+          spacing: { after: 0, line: 240 },
+        }),
+      ],
+    });
+  }
+
+  let footer;
+  if (runningFooter.enabled) {
+    // CA running footer — line 1: revision + page X of Y (right). Line 2: DR # / CT #, centered bold.
+    const drVal = _safe(runningFooter.drNumber) || '________________';
+    const ctVal = _safe(runningFooter.ctNumber) || '________________';
+    footer = new Footer({
+      children: [
+        new Paragraph({
+          children: [
+            _run(_safe(runningFooter.revision) || '', { size: 18, italics: true }),
+            new TextRun({ text: '\t', font: 'Times New Roman', size: 18 }),
+            new TextRun({ text: 'Page ', font: 'Times New Roman', size: 18 }),
+            new TextRun({ children: [PageNumber.CURRENT], font: 'Times New Roman', size: 18 }),
+            new TextRun({ text: ' of ', font: 'Times New Roman', size: 18 }),
+            new TextRun({ children: [PageNumber.TOTAL_PAGES], font: 'Times New Roman', size: 18 }),
+          ],
+          tabStops: [{ type: TabStopType.RIGHT, position: TabStopPosition.MAX }],
+          spacing: { line: 240 },
+        }),
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children: [_run(`DR # ${drVal}     CT # ${ctVal}`, { bold: true, size: 20 })],
+          spacing: { line: 240 },
+        }),
+      ],
+    });
+  } else {
+    // Default footer (page X of Y · affiant).
+    footer = new Footer({
+      children: [
+        new Paragraph({
+          alignment: AlignmentType.RIGHT,
+          children: [
+            new TextRun({ text: 'Page ', font: 'Times New Roman', size: 18 }),
+            new TextRun({ children: [PageNumber.CURRENT], font: 'Times New Roman', size: 18 }),
+            new TextRun({ text: ' of ', font: 'Times New Roman', size: 18 }),
+            new TextRun({ children: [PageNumber.TOTAL_PAGES], font: 'Times New Roman', size: 18 }),
+            ...(affiantName ? [
+              new TextRun({ text: ` · ${affiantName}`, font: 'Times New Roman', size: 18 }),
+            ] : []),
+          ],
+          spacing: { line: 240 },
+        }),
+      ],
+    });
+  }
 
   const doc = new Document({
     creator: 'VIPER Warrant Author',

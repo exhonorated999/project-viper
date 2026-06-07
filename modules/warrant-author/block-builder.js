@@ -255,6 +255,136 @@
   }
 
   /**
+   * CA Statement of Probable Cause — matches the sample
+   * "Multi Business SW.docx" verbatim. Renders after all addendums.
+   * Sections (in order):
+   *   - STATEMENT OF PROBABLE CAUSE (centered, bold heading)
+   *   - "Affiant declares under penalty of perjury..." opener
+   *   - IDENTIFICATION AND EXPERTISE OF AFFIANT: heading-2 + boilerplate
+   *   - (2) PROBABLE CAUSE: heading-2 + pcNarrative
+   *   - "It has been my experience..." closing
+   *   - AND TO SEIZE IT / THEM IF FOUND... order block
+   *   - HOBBS SEALING APPROVED + NIGHT SEARCH APPROVED check lines
+   *   - Judge signature + printed name lines
+   */
+  function _buildCaStatementOfProbableCause(draft, agency, caseInfo, pcNarrative) {
+    const blocks = [];
+    const aff = draft.affiantSnapshot || {};
+    const affFirst   = _safe(aff.affiantFirstName) || _safe(agency.affiantFirstName) || '';
+    const affLast    = _safe(aff.affiantLastName)  || _safe(agency.affiantLastName)  || '';
+    const affFull    = (affFirst || affLast)
+      ? `${affFirst} ${affLast}`.trim()
+      : (_safe(aff.affiantName) || _safe(agency.affiantName) || '________________');
+    const county     = _safe(agency.county) || _safe(draft.county) || '__________________';
+
+    // 1) STATEMENT OF PROBABLE CAUSE — page break so it lands cleanly on a new page
+    blocks.push({ kind: 'page-break' });
+    blocks.push({ kind: 'cover-heading', text: 'STATEMENT OF PROBABLE CAUSE' });
+    blocks.push({ kind: 'spacer', size: 'md' });
+
+    // 2) Affiant declaration opener (verbatim from sample)
+    blocks.push({
+      kind: 'paragraph',
+      text:
+        'Affiant declares under penalty of perjury that the following facts are true and that there ' +
+        'is probable cause to believe, and Affiant does believe, that the designated articles, property, ' +
+        'and persons are now in the described locations, including all rooms, buildings, and structures ' +
+        'used in connection with the premises and buildings adjoining them, the vehicles and the persons:',
+    });
+    blocks.push({ kind: 'spacer', size: 'sm' });
+
+    // 3) IDENTIFICATION AND EXPERTISE OF AFFIANT
+    blocks.push({ kind: 'heading-2', text: 'IDENTIFICATION AND EXPERTISE OF AFFIANT:' });
+    const trainingExperience = _safe(aff.trainingExperience)
+      || _safe(agency.trainingExperience)
+      || _safe(agency.affiantTrainingExperience)
+      || _safe(agency.identificationAndExpertise)
+      || '';
+    if (trainingExperience.trim()) {
+      const paras = trainingExperience.split(/\r?\n\s*\r?\n/);
+      for (const p of paras) {
+        const t = p.trim();
+        if (t) blocks.push({ kind: 'paragraph', text: t });
+      }
+    } else {
+      blocks.push({
+        kind: 'paragraph',
+        text:
+          `[IDENTIFICATION AND EXPERTISE BOILERPLATE NOT YET SET — open Settings -> Warrant Author -> ` +
+          `Affiant Identification & Expertise and paste your career/training narrative. This text appears ` +
+          `unchanged on every California warrant authored by ${affFull}.]`,
+      });
+    }
+    blocks.push({ kind: 'spacer', size: 'sm' });
+
+    // 4) (2) PROBABLE CAUSE — case-level narrative
+    blocks.push({ kind: 'heading-2', text: ' (2) PROBABLE CAUSE:' });
+    const pc = _safe(pcNarrative).trim();
+    if (!pc) {
+      blocks.push({
+        kind: 'paragraph',
+        text:
+          '[PROBABLE CAUSE NARRATIVE NOT YET AUTHORED — write your case-specific probable cause on the ' +
+          'Warrant Author screen before serving. This narrative should describe what happened, what ' +
+          'evidence supports the search, and why each provider record is relevant.]',
+      });
+    } else {
+      const paras = pc.split(/\r?\n\s*\r?\n/);
+      for (const p of paras) {
+        const t = p.trim();
+        if (t) blocks.push({ kind: 'paragraph', text: t });
+      }
+    }
+    blocks.push({ kind: 'spacer', size: 'md' });
+
+    // 5) "It has been my experience..." 10-day return clause (verbatim)
+    blocks.push({
+      kind: 'paragraph',
+      text:
+        'It has been my experience that it takes companies considerable time beyond the statutory ' +
+        '10-day search warrant return period to collect and provide materials sought in this search ' +
+        'warrant. Therefore, I request permission to return this Search Warrant within 10 days from ' +
+        'the date all materials are received from these companies.',
+    });
+    blocks.push({ kind: 'spacer', size: 'sm' });
+
+    // 6) AND TO SEIZE IT / THEM... judge order block (verbatim from sample)
+    blocks.push({
+      kind: 'paragraph',
+      text:
+        'AND TO SEIZE IT / THEM IF FOUND and bring it / them forthwith before me, or this court, ' +
+        'at the courthouse of this court. This Search Warrant and Affidavit and attached and ' +
+        'incorporated Affidavit were sworn to as true and subscribed before me on this ' +
+        '_________________________, at __________ A.M. / P.M. Wherefore, I find probable cause for ' +
+        'the issuance of this Search Warrant and do issue it.',
+    });
+    blocks.push({ kind: 'spacer', size: 'md' });
+
+    // 7) HOBBS / NIGHT APPROVED check lines — judge fills these in
+    blocks.push({
+      kind: 'cover-subheading',
+      text: 'HOBBS SEALING APPROVED:   [ ] YES    [ ] NO',
+    });
+    blocks.push({
+      kind: 'cover-subheading',
+      text: 'NIGHT SEARCH APPROVED:    [ ] YES    [ ] NO',
+    });
+    blocks.push({ kind: 'spacer', size: 'md' });
+
+    // 8) Judge signature lines (verbatim layout from sample)
+    blocks.push({ kind: 'signature', label: '(Signature of Judge)' });
+    blocks.push({ kind: 'spacer', size: 'sm' });
+    blocks.push({
+      kind: 'paragraph',
+      text: `Judge of the Superior Court of California, County of ${county}, Superior Court,`,
+    });
+    blocks.push({ kind: 'spacer', size: 'md' });
+    blocks.push({ kind: 'signature', label: '(Printed Name of Judge)' });
+
+    return blocks;
+  }
+
+  /**
    * Build the cover page blocks (caption + affiant identity).
    */
   function _buildCover(draft, agency, caseInfo) {
@@ -400,33 +530,47 @@
 
     const blocks = [];
 
+    // Detect California jurisdiction once — used to switch the document
+    // flow + emit running header/footer metadata for the composer.
+    const isCa = (
+      _safe(draft.template) === 'ca-multi-business-esp' ||
+      _safe(draft.jurisdiction).toUpperCase() === 'CA'
+    );
+
     // 1) Cover / Face Page (jurisdiction-aware)
     //    CA template uses the official Multi-Business SW Face Page layout
     //    (oath, HOBBS/NIGHT checkboxes, signature, "See attachment: Page A
     //    for {Provider}" routing). All other templates fall through to the
     //    generic affidavit cover.
-    const isCaFacePage = (
-      _safe(draft.template) === 'ca-multi-business-esp' ||
-      _safe(draft.jurisdiction).toUpperCase() === 'CA'
-    );
-    if (isCaFacePage) {
+    if (isCa) {
       for (const b of _buildCaFacePage(draft, agency, caseInfo, addendumComposes)) blocks.push(b);
     } else {
       for (const b of _buildCover(draft, agency, caseInfo)) blocks.push(b);
     }
 
-    // 2) Probable Cause (case-level)
-    for (const b of _buildProbableCause(pcNarrative)) blocks.push(b);
+    if (isCa) {
+      // 2-CA) Addendums FIRST (Pages A, B, C, ...) — per the sample warrant,
+      //       attachments are physically incorporated before the Statement of
+      //       Probable Cause body.
+      addendumComposes.forEach((ac, i) => {
+        for (const b of _buildAddendum(ac, i)) blocks.push(b);
+      });
+      // 3-CA) STATEMENT OF PROBABLE CAUSE body (verbatim CA closing) —
+      //       contains identification & expertise, the PC narrative, the
+      //       10-day return clause, HOBBS/NIGHT APPROVED checkboxes, and
+      //       the judge signature block. Replaces the generic
+      //       _buildProbableCause + _buildSignature pair.
+      for (const b of _buildCaStatementOfProbableCause(draft, agency, caseInfo, pcNarrative)) blocks.push(b);
+    } else {
+      // Generic (non-CA) flow: PC heading → addendums → affidavit signature
+      for (const b of _buildProbableCause(pcNarrative)) blocks.push(b);
+      addendumComposes.forEach((ac, i) => {
+        for (const b of _buildAddendum(ac, i)) blocks.push(b);
+      });
+      for (const b of _buildSignature(draft, agency)) blocks.push(b);
+    }
 
-    // 3) Addendums
-    addendumComposes.forEach((ac, i) => {
-      for (const b of _buildAddendum(ac, i)) blocks.push(b);
-    });
-
-    // 4) Signature
-    for (const b of _buildSignature(draft, agency)) blocks.push(b);
-
-    // 5) Optional compliance disclaimer
+    // Optional compliance disclaimer
     if (includeDisclaimer !== false) {
       blocks.push({ kind: 'spacer', size: 'md' });
       blocks.push({
@@ -442,8 +586,33 @@
       for (const d of cs) allDangling.push(`${ac.addendumId || ac.providerKey || '?'}/${d}`);
     }
 
+    // Running header/footer metadata for the composer to stamp on every page.
+    // Mirrors the sample San Bernardino SW (header + revision tag + DR#/CT#).
+    const county = _safe(agency.county) || _safe(draft.county) || '__________________';
+    const state  = _safe(agency.state)  || 'CALIFORNIA';
+    const drNumber = _safe(draft.caseRef) || _safe(caseInfo.caseNumber) || '';
+    const ctNumber = _safe(draft.ctNumber) || _safe(draft.swNumber) || '';
+    const runningHeader = isCa ? {
+      enabled: true,
+      lines: [
+        `STATE of ${state.toUpperCase()}, COUNTY of ${county.toUpperCase()},`,
+        'SEARCH WARRANT and AFFIDAVIT',
+      ],
+    } : { enabled: false, lines: [] };
+    const runningFooter = isCa ? {
+      enabled: true,
+      revision: 'SEARCH WARRANT and AFFIDAVIT — VIPER Warrant Author v1',
+      drNumber,
+      ctNumber,
+    } : { enabled: false };
+
     return {
       blocks,
+      meta: {
+        jurisdiction: isCa ? 'CA' : (_safe(draft.jurisdiction).toUpperCase() || ''),
+        runningHeader,
+        runningFooter,
+      },
       stats: {
         addendums: addendumComposes.length,
         totalBlocks: blocks.length,
@@ -455,7 +624,7 @@
 
   const api = Object.freeze({
     build,
-    _internals: { _mapResolvedBlock, _abc, _buildCover, _buildCaFacePage, _buildProbableCause, _buildAddendum, _buildSignature },
+    _internals: { _mapResolvedBlock, _abc, _buildCover, _buildCaFacePage, _buildProbableCause, _buildAddendum, _buildSignature, _buildCaStatementOfProbableCause },
   });
 
   if (typeof module !== 'undefined' && module.exports) {

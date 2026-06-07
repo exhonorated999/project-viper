@@ -66,21 +66,29 @@
 
   /**
    * State machine that flows blocks across pages.
+   * opts: { headerReserve, footerExtra } — both default 0.
+   *   headerReserve — extra pt added to top margin (for CA running header)
+   *   footerExtra   — extra pt subtracted from content bottom (for CA DR/CT footer)
    */
-  function _flowBlocks(doc, blocks) {
+  function _flowBlocks(doc, blocks, opts) {
+    opts = opts || {};
+    const headerReserve = Math.max(0, opts.headerReserve | 0);
+    const footerExtra   = Math.max(0, opts.footerExtra   | 0);
+    const contentTop    = MARGIN + headerReserve;
+    const contentBottom = CONTENT_BOTTOM - footerExtra;
     let pageIdx = 1;
-    let y = MARGIN;
+    let y = contentTop;
     const footerPlaceholders = []; // {pageIdx} so we can stamp page X of N
 
     function newPage() {
       footerPlaceholders.push({ pageIdx });
       doc.addPage();
       pageIdx += 1;
-      y = MARGIN;
+      y = contentTop;
     }
 
     function ensureRoom(needed) {
-      if (y + needed > CONTENT_BOTTOM) newPage();
+      if (y + needed > contentBottom) newPage();
     }
 
     function drawCentered(font, text) {
@@ -175,7 +183,7 @@
           break;
         case 'spacer':
           y += _spacerSize(b.size);
-          if (y > CONTENT_BOTTOM) newPage();
+          if (y > contentBottom) newPage();
           break;
         case 'footer-disclaimer':
           ensureRoom(FONT_ITALIC.lh * 2);
@@ -193,20 +201,65 @@
   }
 
   /**
-   * Stamp footer text onto every page after rendering content.
+   * Stamp the CA running header on every page (two centered, bold lines
+   * just inside the top margin — matches the official San Bernardino SW).
    */
-  function _stampFooters(doc, pageCount, { swNumber, caseRef, affiantName }) {
+  function _stampHeaders(doc, pageCount, runningHeader) {
+    if (!runningHeader || !runningHeader.enabled) return;
+    const lines = Array.isArray(runningHeader.lines) ? runningHeader.lines.filter(Boolean) : [];
+    if (!lines.length) return;
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      _setFont(doc, FONT_BODY_BOLD);
+      // Header sits inside the top margin so content isn't pushed down.
+      // First line at y=36, second at y=50 (within 1" top margin of 72pt).
+      let hy = 32;
+      for (const ln of lines) {
+        doc.text(_safeText(ln), PAGE_W / 2, hy + FONT_BODY_BOLD.size, { align: 'center' });
+        hy += 14;
+      }
+    }
+  }
+
+  /**
+   * Stamp footer text onto every page after rendering content.
+   *
+   * Default footer: "{affiant}                  Page X of N · {ref}"
+   * CA running footer (when supplied): two lines — revision tag on top,
+   * "DR # {drNumber}    CT # {ctNumber}" beneath. Matches the official
+   * San Bernardino SW footer block.
+   */
+  function _stampFooters(doc, pageCount, { swNumber, caseRef, affiantName, runningFooter }) {
     const ref = (swNumber && swNumber.trim()) || (caseRef && caseRef.trim()) || '(no SW#)';
     const aff = (affiantName && affiantName.trim()) || '';
+    const useCa = !!(runningFooter && runningFooter.enabled);
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
       _setFont(doc, FONT_FOOTER);
-      const footerY = PAGE_H - MARGIN + 18;
-      const pageLabel = `Page ${i} of ${pageCount}`;
-      const left  = aff ? `${aff}` : '';
-      const right = `${pageLabel} · ${ref}`;
-      doc.text(left, MARGIN, footerY);
-      doc.text(right, PAGE_W - MARGIN, footerY, { align: 'right' });
+      if (useCa) {
+        // Line 1: revision tag + page X of N
+        // Line 2: DR # ... CT # ...
+        const revision = _safeText(runningFooter.revision || '');
+        const dr = _safeText(runningFooter.drNumber || '');
+        const ct = _safeText(runningFooter.ctNumber || '');
+        const drCtLine = `DR # ${dr || '________________'}     CT # ${ct || '________________'}`;
+        const pageLabel = `Page ${i} of ${pageCount}`;
+        const footerY1 = PAGE_H - MARGIN + 14;
+        const footerY2 = footerY1 + 12;
+        // Top line: revision left, "Page X of N" right
+        doc.text(revision, MARGIN, footerY1);
+        doc.text(pageLabel, PAGE_W - MARGIN, footerY1, { align: 'right' });
+        // Bottom line: DR # / CT # — centered, bold
+        _setFont(doc, FONT_BODY_BOLD);
+        doc.text(drCtLine, PAGE_W / 2, footerY2, { align: 'center' });
+      } else {
+        const footerY = PAGE_H - MARGIN + 18;
+        const pageLabel = `Page ${i} of ${pageCount}`;
+        const left  = aff ? `${aff}` : '';
+        const right = `${pageLabel} · ${ref}`;
+        doc.text(left, MARGIN, footerY);
+        doc.text(right, PAGE_W - MARGIN, footerY, { align: 'right' });
+      }
     }
   }
 
@@ -227,6 +280,10 @@
     const doc = new jsPDF({ unit: 'pt', format: 'letter' });
 
     const blocks = (blockStream && Array.isArray(blockStream.blocks)) ? blockStream.blocks : [];
+    const meta = (blockStream && blockStream.meta) || {};
+    const runningHeader = meta.runningHeader || { enabled: false };
+    const runningFooter = meta.runningFooter || { enabled: false };
+
     if (!blocks.length) {
       _setFont(doc, FONT_BODY);
       doc.text('(empty document)', MARGIN, MARGIN + 12);
@@ -234,13 +291,23 @@
       return { arrayBuffer: ab, blob: doc.output('blob'), pageCount: 1 };
     }
 
-    const { pageCount } = _flowBlocks(doc, blocks);
+    // When a CA running header is enabled, push content start down by the
+    // header reserve so the two header lines don't collide with the body.
+    const headerReserve = (runningHeader.enabled && Array.isArray(runningHeader.lines) && runningHeader.lines.length)
+      ? (runningHeader.lines.length * 14 + 10)
+      : 0;
+    // When a CA running footer is enabled, reserve an extra footer line
+    // so body content doesn't run into the DR#/CT# strip.
+    const footerExtra = (runningFooter.enabled) ? 14 : 0;
+    const { pageCount } = _flowBlocks(doc, blocks, { headerReserve, footerExtra });
 
     const aff = (draft && draft.affiantSnapshot) || {};
+    _stampHeaders(doc, pageCount, runningHeader);
     _stampFooters(doc, pageCount, {
       swNumber: (draft && draft.swNumber) || '',
       caseRef:  (draft && draft.caseRef)  || '',
       affiantName: aff.affiantName || (agency && agency.affiantName) || '',
+      runningFooter,
     });
 
     const arrayBuffer = doc.output('arraybuffer');
@@ -250,7 +317,7 @@
 
   const api = Object.freeze({
     composePdf,
-    _internals: { _flowBlocks, _stampFooters, _safeText, PAGE_W, PAGE_H, MARGIN, CONTENT_W },
+    _internals: { _flowBlocks, _stampFooters, _stampHeaders, _safeText, PAGE_W, PAGE_H, MARGIN, CONTENT_W },
   });
 
   if (typeof module !== 'undefined' && module.exports) {

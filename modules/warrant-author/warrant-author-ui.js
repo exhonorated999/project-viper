@@ -1220,6 +1220,11 @@ function _showGenerateResultModal(caseId, draft, blockStream, issues, pdfResult,
       </div>
     </div>
   `;
+  // The overlay may have had `hidden` added by the validator confirm/block
+  // modal's resolve handler — strip it so the result modal is actually
+  // visible. Without this, hitting "Generate anyway" appears to do nothing
+  // and the Download / Preview / Open buttons are unreachable.
+  ov.classList.remove('hidden');
 }
 
 /**
@@ -1519,11 +1524,11 @@ function _rerender() {
 const bus = {
   onClickNewDraft(caseId) {
     const ov = document.getElementById('waModalOverlay');
-    if (ov) ov.innerHTML = _renderNewDraftModal(caseId);
+    if (ov) { ov.innerHTML = _renderNewDraftModal(caseId); ov.classList.remove('hidden'); }
   },
   onCloseNewDraftModal() {
     const ov = document.getElementById('waModalOverlay');
-    if (ov) ov.innerHTML = '';
+    if (ov) { ov.innerHTML = ''; ov.classList.add('hidden'); }
   },
   onCreateDraftConfirm(caseId) {
     const ds = _store(); if (!ds) return;
@@ -1888,7 +1893,7 @@ const bus = {
   },
   onCloseGenerateModal() {
     const ov = document.getElementById('waModalOverlay');
-    if (ov) ov.innerHTML = '';
+    if (ov) { ov.innerHTML = ''; ov.classList.add('hidden'); }
     _state._genPdfBlob = null;
     _state._genFilename = null;
     _state._genPageCount = null;

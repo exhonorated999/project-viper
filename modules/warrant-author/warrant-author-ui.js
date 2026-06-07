@@ -838,14 +838,16 @@ function _renderAddendumForm(caseId, draft, addendumId, harvest) {
           <span class="text-slate-400 uppercase tracking-wider">From</span>
           <input type="date" value="${attr(ad.dateRangeFrom)}"
                  min="1900-01-01" max="2100-12-31"
-                 onchange="WarrantAuthorUI.bus.onAddendumFieldChange('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','dateRangeFrom',this.value)"
+                 oninput="WarrantAuthorUI.bus.onAddendumFieldChange('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','dateRangeFrom',this.value)"
+                 onblur="WarrantAuthorUI.bus.onAddendumDateBlur('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','dateRangeFrom',this.value)"
                  class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
         </label>
         <label class="block text-xs">
           <span class="text-slate-400 uppercase tracking-wider">To</span>
           <input type="date" value="${attr(ad.dateRangeTo)}"
                  min="1900-01-01" max="2100-12-31"
-                 onchange="WarrantAuthorUI.bus.onAddendumFieldChange('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','dateRangeTo',this.value)"
+                 oninput="WarrantAuthorUI.bus.onAddendumFieldChange('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','dateRangeTo',this.value)"
+                 onblur="WarrantAuthorUI.bus.onAddendumDateBlur('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','dateRangeTo',this.value)"
                  class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
         </label>
       </div>
@@ -1711,9 +1713,27 @@ const bus = {
     const ds = _store(); if (!ds) return;
     // Normalize date fields — Chromium's <input type="date"> happily accepts
     // 2-digit years and stores them as literal years 25 / 0025 etc. Sanitize.
-    if (field === 'dateRangeFrom' || field === 'dateRangeTo') {
+    const isDateField = (field === 'dateRangeFrom' || field === 'dateRangeTo');
+    if (isDateField) {
       value = _normalizeDateValue(value);
     }
+    ds.updateAddendum(caseId, draftId, addendumId, { [field]: value });
+    // Skip rerender for date fields — Chromium fires `change` per segment
+    // commit (month → day → year), and a rerender mid-typing kills the
+    // input's focus, leaving the user unable to finish the year. Date
+    // fields don't drive any conditional rendering elsewhere in the
+    // editor, so it's safe to defer to the next natural rerender.
+    if (!isDateField) _rerender();
+  },
+  /**
+   * Final commit handler for date inputs, fired on blur. By the time the
+   * user has tabbed away or clicked elsewhere the year segment is fully
+   * typed — safe to normalize, persist, and rerender (so the validator
+   * panel picks up the new value).
+   */
+  onAddendumDateBlur(caseId, draftId, addendumId, field, value) {
+    const ds = _store(); if (!ds) return;
+    value = _normalizeDateValue(value);
     ds.updateAddendum(caseId, draftId, addendumId, { [field]: value });
     _rerender();
   },

@@ -146,7 +146,12 @@ function _renderBlock(b) {
     case 'cover-meta':       return [_coverMeta(b.label, b.value)];
     case 'heading-1':        return [_h1(b.text)];
     case 'heading-2':        return [_h2(b.text)];
-    case 'paragraph':        return [_para(b.text, { indent: b.indent ? 360 : 0 })];
+    case 'paragraph': {
+      const align = (b.align === 'right')  ? AlignmentType.RIGHT
+                  : (b.align === 'center') ? AlignmentType.CENTER
+                  : AlignmentType.LEFT;
+      return [_para(b.text, { indent: b.indent ? 360 : 0, align })];
+    }
     case 'numbered': {
       const items = Array.isArray(b.items) ? b.items : [];
       return items.map((it, i) => _numberedItem(it, i));

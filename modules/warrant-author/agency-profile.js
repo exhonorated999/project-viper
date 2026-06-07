@@ -27,6 +27,10 @@
 
 'use strict';
 
+// IIFE wrapper so top-level const/let don't pollute the renderer's shared
+// classic-script scope (would collide with provider-directory.js etc.).
+(function () {
+
 const SCHEMA_VERSION = 1;
 
 // ─── DEFAULTS ──────────────────────────────────────────────────────────────
@@ -225,3 +229,5 @@ if (typeof module !== 'undefined' && module.exports) {
 if (typeof window !== 'undefined') {
   window.WarrantAuthorAgencyProfile = api;
 }
+
+})();

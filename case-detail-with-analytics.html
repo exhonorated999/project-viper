@@ -2033,7 +2033,7 @@
             // Already-added warrantAuthor tabs on a case still render via moduleConfig + renderTabContent.
             try {
                 if (localStorage.getItem('viperWarrantAuthorEnabled') === 'true') {
-                    allModules.warrantAuthor = { label: 'Warrant Author', icon: '✍️' };
+                    allModules.warrantAuthor = { label: 'Warrant Author', icon: '✍️', beta: true };
                 }
             } catch (_) {}
 
@@ -2073,7 +2073,7 @@
                                             <input type="checkbox" value="${module}" class="module-checkbox w-5 h-5 rounded border-gray-600 text-viper-purple focus:ring-viper-purple">
                                             <div class="flex items-center space-x-2 flex-1">
                                                 <span class="text-2xl">${allModules[module].icon}</span>
-                                                <span class="text-sm font-medium text-white">${allModules[module].label}</span>
+                                                <span class="text-sm font-medium text-white">${allModules[module].label}${allModules[module].beta ? '<span class="ml-2 px-1.5 py-0.5 text-[9px] uppercase tracking-wider bg-viper-cyan/10 text-viper-cyan border border-viper-cyan/30 rounded align-middle">Beta</span>' : ''}</span>
                                             </div>
                                         </label>
                                     `).join('')}
@@ -27866,6 +27866,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         id: 'warrantAuthor',
                         label: 'Warrant Author',
                         icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
+                        beta: true,
                     });
                 }
             } catch (_) {}
@@ -27899,6 +27900,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
 
             function renderModuleCheckbox(module, hasDesc) {
+                const betaPill = module.beta
+                    ? '<span class="ml-2 px-1.5 py-0.5 text-[9px] uppercase tracking-wider bg-viper-cyan/10 text-viper-cyan border border-viper-cyan/30 rounded align-middle">Beta</span>'
+                    : '';
                 return `
                     <label class="flex items-center space-x-3 p-3 rounded-lg cursor-pointer hover:bg-viper-card/30 transition-colors border border-gray-700 hover:border-viper-cyan/30">
                         <input type="checkbox" value="${module.id}" class="add-module-checkbox w-4 h-4 rounded border-gray-600 text-viper-cyan focus:ring-viper-cyan flex-shrink-0">
@@ -27907,7 +27911,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${module.icon}"/>
                             </svg>
                             <div class="min-w-0">
-                                <span class="text-sm font-medium text-white">${module.label}</span>
+                                <span class="text-sm font-medium text-white">${module.label}${betaPill}</span>
                                 ${hasDesc && module.desc ? `<div class="text-xs text-gray-500 truncate">${module.desc}</div>` : ''}
                             </div>
                         </div>

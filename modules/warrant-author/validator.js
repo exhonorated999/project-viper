@@ -23,7 +23,6 @@
 // HARD ERRORS (block generation):
 //   AGENCY_PROFILE_INCOMPLETE — required agency-profile field missing
 //   DRAFT_NO_ADDENDUMS        — draft has zero addendums
-//   DRAFT_NO_CASE_REF         — draft.caseRef is empty
 //   ADDENDUM_NO_PROVIDER      — addendum.providerKey is empty
 //   ADDENDUM_NO_BUSINESS      — providerKey is custom-provider sentinel but
 //                               businessNameSnapshot is empty
@@ -36,7 +35,6 @@
 //
 // SOFT WARNINGS (panel only):
 //   AGENCY_AFFIANT_CONTACT_BLANK   — affiant email + phone both empty
-//   DRAFT_NO_SW_NUMBER             — court SW number not assigned yet
 //   ADDENDUM_DATE_RANGE_LONG       — range exceeds 365 days
 //   ADDENDUM_DATE_RANGE_FUTURE     — dateRangeTo > today
 //   ADDENDUM_ITEMS_EMPTY           — itemsToProduce array empty
@@ -52,6 +50,12 @@
 //   AGENCY_TRAINING_PLACEHOLDER    — trainingExperienceBoilerplate still
 //                                    starts with the shipped "REPLACE THIS"
 //                                    sentinel
+//
+// NOT VALIDATED (structurally implicit / out-of-band):
+//   draft.caseRef  — auto-filled from window.currentCase.caseNumber by
+//                    _renderEditor; never user-facing as a required field.
+//   draft.swNumber — assigned by the court after the judge signs (Mark
+//                    Served flow), not knowable at authoring time.
 //
 // All issues use a stable string `id` so the UI can dedupe and remember
 // "dismissed" toggles between renders.
@@ -189,23 +193,15 @@ function validateDraft(input) {
     }
 
     // ── 2. Draft-level checks ─────────────────────────────────────────
-    if (_isEmpty(draft.caseRef)) {
-        errors.push(_err(
-            'draft.caseRef.empty',
-            'DRAFT_NO_CASE_REF',
-            'Case reference is empty.',
-            { scope: 'draft', fieldPath: 'draft.caseRef' }
-        ));
-    }
-
-    if (_isEmpty(draft.swNumber)) {
-        warnings.push(_warn(
-            'draft.swNumber.empty',
-            'DRAFT_NO_SW_NUMBER',
-            'Court SW number not assigned yet — common to set after judge signs, but ship-blockers should know.',
-            { scope: 'draft', fieldPath: 'draft.swNumber' }
-        ));
-    }
+    // Note: caseRef + swNumber are intentionally NOT validated here.
+    //   • caseRef is structurally implicit — the Warrant Author is always
+    //     opened from a case context, and _renderEditor auto-fills
+    //     draft.caseRef from window.currentCase.caseNumber on every
+    //     paint. Asking the user to "fix" an empty field they never see
+    //     is friction, not safety.
+    //   • swNumber is assigned BY THE COURT after the judge signs, via
+    //     the Mark-Served flow. The affiant cannot know it at authoring
+    //     time. Warning about it at generate time is structurally wrong.
 
     const pcNarrative = _safeStr(input.pcNarrative || draft.probableCauseNarrative);
     if (_isEmpty(pcNarrative)) {

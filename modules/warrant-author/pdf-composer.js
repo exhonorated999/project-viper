@@ -308,12 +308,16 @@
       return { arrayBuffer: ab, blob: doc.output('blob'), pageCount: 1 };
     }
 
-    // When a CA running header is enabled, push content start down by the
-    // header reserve so the larger header lines don't collide with the body.
-    // FONT_RUN_HDR.lh (16pt) * N + 14pt breathing room.
-    const headerReserve = (runningHeader.enabled && Array.isArray(runningHeader.lines) && runningHeader.lines.length)
-      ? (runningHeader.lines.length * 16 + 14)
-      : 0;
+    // When a CA running header is enabled, only push content start down if
+    // the header extends past the normal top margin. Header sits at y=30
+    // and consumes (lines * lh) + small descender. For 2 lines at lh=16
+    // that's y=30..67 — fits inside the 72pt top margin with ~5pt buffer,
+    // so no extra reserve needed. Three or more lines do need a push.
+    let headerReserve = 0;
+    if (runningHeader.enabled && Array.isArray(runningHeader.lines) && runningHeader.lines.length) {
+      const headerBottom = 30 + (runningHeader.lines.length * 16) + 5;
+      if (headerBottom > MARGIN) headerReserve = (headerBottom - MARGIN) + 8;
+    }
     // When a CA running footer is enabled, reserve an extra footer line
     // so body content doesn't run into the DR#/CT# strip.
     const footerExtra = (runningFooter.enabled) ? 14 : 0;

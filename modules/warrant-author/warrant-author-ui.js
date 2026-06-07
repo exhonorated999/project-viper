@@ -27,6 +27,7 @@ function _pdir()     { return window.WarrantAuthorProviderDirectory || null; }
 function _items()    { return window.WarrantAuthorItemsTaxonomy || null; }
 function _engine()   { return window.WarrantAuthorTemplateEngine || null; }
 function _boiler()   { return window.WarrantAuthorBoilerplateLibrary || null; }
+function _validator(){ return window.WarrantAuthorValidator || null; }
 
 function _loadAgencyProfile() {
   try {
@@ -377,6 +378,9 @@ function _renderEditor(caseId, draftId) {
         </div>
       </div>
 
+      <!-- pre-flight validator panel -->
+      ${_renderValidatorPanel(caseId, draft)}
+
       <!-- draft-level fields -->
       ${_renderDraftHeader(caseId, draft)}
 
@@ -445,6 +449,118 @@ function _renderDraftHeader(caseId, draft) {
         <span class="text-slate-500">SW # and Judge captured when marked served</span>
       </div>
     </div>
+  `;
+}
+
+// ─── pre-flight validator panel ────────────────────────────────────────
+
+function _runValidator(caseId, draft) {
+  const V = _validator();
+  if (!V) return null;
+  const agencyProfile = _loadAgencyProfile();
+  const pdir = _pdir();
+  const providersMerged = pdir ? pdir.mergeProviders({
+    providerOverrides: _safeLS('viperWarrantAuthorProviderOverrides'),
+    customProviders:   _safeLS('viperWarrantAuthorCustomProviders'),
+    providerDeletions: _safeLS('viperWarrantAuthorProviderDeletions')
+  }) : [];
+  const pcStore = window.WarrantAuthorCasePcStore;
+  const pcNarrative = (pcStore && pcStore.getBody)
+    ? pcStore.getBody(caseId)
+    : (draft.probableCauseNarrative || '');
+  try {
+    return V.validateDraft({
+      draft,
+      agency: agencyProfile,
+      providers: providersMerged,
+      pcNarrative,
+    });
+  } catch (_e) {
+    return null;
+  }
+}
+
+function _renderValidatorPanel(caseId, draft) {
+  const result = _runValidator(caseId, draft);
+  if (!result) {
+    return `<div class="wa-validator wa-validator--unloaded">Validator not loaded.</div>`;
+  }
+  const { errors, warnings, ok, stats } = result;
+
+  let tone = 'ok';
+  let icon = '✓';
+  let title = 'Pre-flight: ready to generate';
+  if (errors.length) {
+    tone = 'fail';
+    icon = '⛔';
+    title = errors.length + ' hard error' + (errors.length === 1 ? '' : 's') +
+            ' — generation blocked';
+  } else if (warnings.length) {
+    tone = 'warn';
+    icon = '⚠';
+    title = warnings.length + ' warning' + (warnings.length === 1 ? '' : 's') +
+            ' — generation allowed';
+  }
+
+  const subtitle = `${stats.addendumCount} addendum${stats.addendumCount === 1 ? '' : 's'} · ` +
+                   `${errors.length} error${errors.length === 1 ? '' : 's'} · ` +
+                   `${warnings.length} warning${warnings.length === 1 ? '' : 's'}`;
+
+  const summarize = (issue) => {
+    // Use the long label; if scope=addendum, prepend a chip.
+    if (issue.scope === 'addendum' && issue.pageLabel) {
+      return `<span class="wa-vl-chip">Page ${esc(issue.pageLabel)}</span> ${esc(issue.label)}`;
+    }
+    if (issue.scope === 'agency') {
+      return `<span class="wa-vl-chip wa-vl-chip--agency">Agency</span> ${esc(issue.label)}`;
+    }
+    if (issue.scope === 'draft') {
+      return `<span class="wa-vl-chip wa-vl-chip--draft">Draft</span> ${esc(issue.label)}`;
+    }
+    if (issue.scope === 'compose') {
+      return `<span class="wa-vl-chip wa-vl-chip--compose">Page ${esc(issue.pageLabel || '?')}</span> ${esc(issue.label)}`;
+    }
+    return esc(issue.label);
+  };
+
+  const errorList = errors.length ? `
+    <details class="wa-validator-group wa-validator-group--err" open>
+      <summary>
+        <span class="wa-vg-icon">⛔</span>
+        <span class="wa-vg-title">${errors.length} hard error${errors.length === 1 ? '' : 's'}</span>
+      </summary>
+      <ul class="wa-validator-list">
+        ${errors.map(e => `<li data-code="${attr(e.code)}">${summarize(e)}</li>`).join('')}
+      </ul>
+    </details>
+  ` : '';
+
+  const warnList = warnings.length ? `
+    <details class="wa-validator-group wa-validator-group--warn"${errors.length ? '' : ' open'}>
+      <summary>
+        <span class="wa-vg-icon">⚠</span>
+        <span class="wa-vg-title">${warnings.length} warning${warnings.length === 1 ? '' : 's'}</span>
+      </summary>
+      <ul class="wa-validator-list">
+        ${warnings.map(w => `<li data-code="${attr(w.code)}">${summarize(w)}</li>`).join('')}
+      </ul>
+    </details>
+  ` : '';
+
+  const body = (errors.length || warnings.length)
+    ? `<div class="wa-validator-body">${errorList}${warnList}</div>`
+    : `<div class="wa-validator-body wa-validator-body--ok">All checks pass — safe to generate.</div>`;
+
+  return `
+    <details class="wa-validator wa-validator--${tone}"${errors.length ? ' open' : ''}>
+      <summary class="wa-validator-summary">
+        <span class="wa-validator-icon">${icon}</span>
+        <span class="wa-validator-title">${esc(title)}</span>
+        <span class="wa-validator-sub">${esc(subtitle)}</span>
+        <span class="wa-validator-chevron">▾</span>
+      </summary>
+      ${body}
+    </details>
   `;
 }
 
@@ -753,6 +869,106 @@ function _renderLivePreview(caseId, draft, activeId) {
 // preserves single \n as <br> while still escaping html
 function _safeMultilineHtml(text) {
   return esc(text).split(/\n/g).map(l => l).join('<br>');
+}
+
+/**
+ * Block modal: shown when validateDraft.errors is non-empty. User cannot
+ * proceed — they must close, fix the issues, and re-click Generate.
+ */
+function _showValidatorBlockModal(caseId, draft, vres) {
+  const ov = document.getElementById('waModalOverlay');
+  if (!ov) {
+    // No overlay → fall back to alert so the user is never silently blocked.
+    const lines = vres.errors.map(e => '• ' + e.label).join('\n');
+    alert('Cannot generate — ' + vres.errors.length + ' hard error(s):\n\n' + lines);
+    return;
+  }
+  const errBlocks = vres.errors.map(e => {
+    const chip = e.scope === 'agency'    ? '<span class="wa-vl-chip wa-vl-chip--agency">Agency</span>'
+              : e.scope === 'draft'     ? '<span class="wa-vl-chip wa-vl-chip--draft">Draft</span>'
+              : e.scope === 'compose'   ? `<span class="wa-vl-chip wa-vl-chip--compose">Page ${esc(e.pageLabel||'?')}</span>`
+              : e.pageLabel             ? `<span class="wa-vl-chip">Page ${esc(e.pageLabel)}</span>`
+              : '';
+    return `<li>${chip}${esc(e.label)}</li>`;
+  }).join('');
+  const warnBlocks = vres.warnings.length ? `
+      <details class="wa-validator-group wa-validator-group--warn mt-3">
+        <summary><span class="wa-vg-icon">⚠</span><span class="wa-vg-title">${vres.warnings.length} warning${vres.warnings.length===1?'':'s'} (also outstanding)</span></summary>
+        <ul class="wa-validator-list">
+          ${vres.warnings.map(w => `<li>${esc(w.label)}</li>`).join('')}
+        </ul>
+      </details>` : '';
+  ov.innerHTML = `
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onclick="event.target===this && WarrantAuthorUI.bus.onCloseValidatorModal()">
+      <div class="wa-modal" style="max-width:640px">
+        <div class="wa-modal-header">
+          <span class="text-rose-400">⛔</span>
+          <span>Cannot generate — ${vres.errors.length} hard error${vres.errors.length===1?'':'s'}</span>
+          <button class="ml-auto text-slate-400 hover:text-white" onclick="WarrantAuthorUI.bus.onCloseValidatorModal()">✕</button>
+        </div>
+        <div class="wa-modal-body">
+          <div class="text-sm text-slate-300 mb-3">
+            Fix the issues below, then click <span class="text-emerald-300">Generate PDF + DOCX</span> again.
+          </div>
+          <ul class="wa-validator-list">${errBlocks}</ul>
+          ${warnBlocks}
+        </div>
+        <div class="wa-modal-footer">
+          <button class="wa-btn-secondary" onclick="WarrantAuthorUI.bus.onCloseValidatorModal()">Close</button>
+        </div>
+      </div>
+    </div>
+  `;
+  ov.classList.remove('hidden');
+}
+
+/**
+ * Warning confirm — shown when validateDraft.ok but warnings exist.
+ * Returns a Promise<boolean>: true = proceed, false = cancel.
+ */
+function _confirmValidatorWarnings(vres) {
+  return new Promise((resolve) => {
+    const ov = document.getElementById('waModalOverlay');
+    if (!ov) {
+      const lines = vres.warnings.map(w => '• ' + w.label).join('\n');
+      resolve(window.confirm(
+        'Generation allowed but ' + vres.warnings.length +
+        ' warning(s) outstanding:\n\n' + lines +
+        '\n\nProceed anyway?'
+      ));
+      return;
+    }
+    _state._validatorResolve = resolve;
+    const list = vres.warnings.map(w => {
+      const chip = w.scope === 'agency' ? '<span class="wa-vl-chip wa-vl-chip--agency">Agency</span>'
+                : w.scope === 'draft'  ? '<span class="wa-vl-chip wa-vl-chip--draft">Draft</span>'
+                : w.pageLabel          ? `<span class="wa-vl-chip">Page ${esc(w.pageLabel)}</span>`
+                : '';
+      return `<li>${chip}${esc(w.label)}</li>`;
+    }).join('');
+    ov.innerHTML = `
+      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onclick="event.target===this && WarrantAuthorUI.bus.onResolveValidatorConfirm(false)">
+        <div class="wa-modal" style="max-width:640px">
+          <div class="wa-modal-header">
+            <span class="text-amber-300">⚠</span>
+            <span>${vres.warnings.length} warning${vres.warnings.length===1?'':'s'} — proceed with generation?</span>
+            <button class="ml-auto text-slate-400 hover:text-white" onclick="WarrantAuthorUI.bus.onResolveValidatorConfirm(false)">✕</button>
+          </div>
+          <div class="wa-modal-body">
+            <div class="text-sm text-slate-300 mb-3">
+              No hard errors. These warnings won't block generation, but review before serving on the providers.
+            </div>
+            <ul class="wa-validator-list">${list}</ul>
+          </div>
+          <div class="wa-modal-footer">
+            <button class="wa-btn-secondary" onclick="WarrantAuthorUI.bus.onResolveValidatorConfirm(false)">Cancel</button>
+            <button class="wa-btn-primary" onclick="WarrantAuthorUI.bus.onResolveValidatorConfirm(true)">Generate anyway</button>
+          </div>
+        </div>
+      </div>
+    `;
+    ov.classList.remove('hidden');
+  });
 }
 
 /**
@@ -1326,6 +1542,37 @@ const bus = {
     const tpl = engine.getTemplate(draft.template);
     if (!tpl) { alert("Template '" + draft.template + "' not registered."); return; }
 
+    // ── Pre-flight validation ────────────────────────────────────────
+    const V = _validator();
+    if (V) {
+      const agencyProfile = _loadAgencyProfile();
+      const pdir0 = _pdir();
+      const providers0 = pdir0 ? pdir0.mergeProviders({
+        providerOverrides: _safeLS('viperWarrantAuthorProviderOverrides'),
+        customProviders:   _safeLS('viperWarrantAuthorCustomProviders'),
+        providerDeletions: _safeLS('viperWarrantAuthorProviderDeletions')
+      }) : [];
+      const pcStore0 = window.WarrantAuthorCasePcStore;
+      const pcNarrative0 = (pcStore0 && pcStore0.getBody)
+        ? pcStore0.getBody(caseId)
+        : (draft.probableCauseNarrative || '');
+      const vres = V.validateDraft({
+        draft,
+        agency: agencyProfile,
+        providers: providers0,
+        pcNarrative: pcNarrative0,
+      });
+      if (!vres.ok) {
+        _showValidatorBlockModal(caseId, draft, vres);
+        return;
+      }
+      if (vres.warnings.length) {
+        const proceed = await _confirmValidatorWarnings(vres);
+        if (!proceed) return;
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────
+
     const pdir = _pdir();
     const items = _items();
     const providersMerged = pdir ? pdir.mergeProviders({
@@ -1456,6 +1703,25 @@ const bus = {
     _state._genFilename = null;
     _state._genPageCount = null;
     _state._genSave = null;
+  },
+  onCloseValidatorModal() {
+    const ov = document.getElementById('waModalOverlay');
+    if (ov) { ov.innerHTML = ''; ov.classList.add('hidden'); }
+    // If a confirm() promise is pending, resolve it as cancel.
+    if (typeof _state._validatorResolve === 'function') {
+      const r = _state._validatorResolve;
+      _state._validatorResolve = null;
+      r(false);
+    }
+  },
+  onResolveValidatorConfirm(proceed) {
+    const ov = document.getElementById('waModalOverlay');
+    if (ov) { ov.innerHTML = ''; ov.classList.add('hidden'); }
+    if (typeof _state._validatorResolve === 'function') {
+      const r = _state._validatorResolve;
+      _state._validatorResolve = null;
+      r(!!proceed);
+    }
   },
   onDownloadGeneratedPdf() {
     const blob = _state._genPdfBlob;

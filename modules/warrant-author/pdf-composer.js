@@ -172,14 +172,16 @@
           drawCentered(FONT_META, `${b.label}: ${b.value}`);
           break;
         case 'heading-1':
-          ensureRoom(FONT_H1.lh + 4);
-          y += 4; // little breathing room above
+          ensureRoom(FONT_H1.lh + 6);
+          y += 8; // breathing room above section heading
           drawLeft(FONT_H1, b.text);
+          y += 4;
           break;
         case 'heading-2':
-          ensureRoom(FONT_H2.lh + 2);
-          y += 2;
+          ensureRoom(FONT_H2.lh + 4);
+          y += 6;
           drawLeft(FONT_H2, b.text);
+          y += 2;
           break;
         case 'paragraph':
           if (b.align === 'right') {
@@ -189,7 +191,7 @@
           } else {
             drawLeft(FONT_BODY, b.text, b.indent ? 18 : 0);
           }
-          y += 4; // paragraph spacing
+          y += 12; // ~one body line gap between paragraphs (readability)
           break;
         case 'numbered':
           drawNumbered(Array.isArray(b.items) ? b.items : []);

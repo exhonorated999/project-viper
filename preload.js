@@ -271,6 +271,41 @@ contextBridge.exposeInMainWorld('electronAPI', {
   mediaSetVisible: (visible) => ipcRenderer.send('media-set-visible', visible),
   onToggleMediaPlayer: (callback) => ipcRenderer.on('toggle-media-player', callback),
   onRequestMediaBounds: (callback) => ipcRenderer.on('request-media-bounds', callback),
+  // Floating media player — main pushes updated bounds after drag/resize so
+  // each open window can persist the user-chosen position to localStorage.
+  onMediaBoundsChanged: (callback) => ipcRenderer.on('media-bounds-changed', (_e, b) => callback(b)),
+
+  // CargoNet Theft Alert ingest (folder watcher → parsed alerts)
+  cargonetGetStatus:    () => ipcRenderer.invoke('cargonet-get-status'),
+  cargonetStart:        () => ipcRenderer.invoke('cargonet-start'),
+  cargonetStop:         () => ipcRenderer.invoke('cargonet-stop'),
+  cargonetPickFolder:   () => ipcRenderer.invoke('cargonet-pick-folder'),
+  cargonetOpenFolder:   () => ipcRenderer.invoke('cargonet-open-folder'),
+  cargonetList:         () => ipcRenderer.invoke('cargonet-list'),
+  cargonetGet:          (id) => ipcRenderer.invoke('cargonet-get', id),
+  cargonetMarkRead:     (id) => ipcRenderer.invoke('cargonet-mark-read', id),
+  cargonetMarkAllRead:  () => ipcRenderer.invoke('cargonet-mark-all-read'),
+  cargonetDelete:       (id) => ipcRenderer.invoke('cargonet-delete', id),
+  cargonetRescan:       () => ipcRenderer.invoke('cargonet-rescan'),
+  onCargonetNewAlert:   (callback) => ipcRenderer.on('cargonet-new-alert', (_e, payload) => callback(payload)),
+
+  // Warrant Author (Multi-Business ESP Warrants)
+  // Drafts live on disk under cases/{caseNumber}/Warrants/Drafts/{warrantId}/
+  // manifest.json (VIPENC when Field Security enabled+unlocked).
+  warrantAuthorListDrafts:               (casePath) => ipcRenderer.invoke('warrant-author-list-drafts', { casePath }),
+  warrantAuthorGetDraft:                 (casePath, warrantId) => ipcRenderer.invoke('warrant-author-get-draft', { casePath, warrantId }),
+  warrantAuthorSaveDraft:                (casePath, warrantId, draft) => ipcRenderer.invoke('warrant-author-save-draft', { casePath, warrantId, draft }),
+  warrantAuthorDeleteDraft:              (casePath, warrantId) => ipcRenderer.invoke('warrant-author-delete-draft', { casePath, warrantId }),
+  warrantAuthorGenerate:                 (casePath, warrantId, formats) => ipcRenderer.invoke('warrant-author-generate', { casePath, warrantId, formats }),
+  warrantAuthorPickProviderDir:          () => ipcRenderer.invoke('warrant-author-pick-provider-dir'),
+  warrantAuthorReadProviderRegistry:     () => ipcRenderer.invoke('warrant-author-read-provider-registry'),
+  warrantAuthorMarkAddendumServed:       (casePath, warrantId, addendumId, servedAt) => ipcRenderer.invoke('warrant-author-mark-addendum-served', { casePath, warrantId, addendumId, servedAt }),
+  warrantAuthorMarkAddendumReturned:     (casePath, warrantId, addendumId, returnedAt, linkedReturnId) => ipcRenderer.invoke('warrant-author-mark-addendum-returned', { casePath, warrantId, addendumId, returnedAt, linkedReturnId }),
+  warrantAuthorListBoilerplate:          () => ipcRenderer.invoke('warrant-author-list-boilerplate'),
+  warrantAuthorSaveBoilerplate:          (paragraphs) => ipcRenderer.invoke('warrant-author-save-boilerplate', { paragraphs }),
+  warrantAuthorResetBoilerplate:         () => ipcRenderer.invoke('warrant-author-reset-boilerplate'),
+  warrantAuthorOpenDraftFolder:          (casePath, warrantId) => ipcRenderer.invoke('warrant-author-open-draft-folder', { casePath, warrantId }),
+  onWarrantAuthorChange:                 (callback) => ipcRenderer.on('warrant-author-change', (_e, payload) => callback(payload)),
 
   // Flock Safety LPR (persistent BrowserView)
   flockSetBounds: (bounds) => ipcRenderer.send('flock-set-bounds', bounds),

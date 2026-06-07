@@ -1,0 +1,60 @@
+/* modules/warrant-author/warrant-author-styles.css
+   Warrant Author renderer styles. Loaded by case-detail-with-analytics.html
+   when the standalone Warrant Author tab is opened.
+
+   P0: skeleton only. P3+ populates editor styles. */
+
+/* ── Subtab pill row (Warrant Author tab: Drafts | Outstanding | Returned) ── */
+.wa-subtab-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 0.75rem;
+}
+
+.wa-subtab-pill {
+    padding: 0.4rem 0.85rem;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.wa-subtab-pill:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.wa-subtab-pill.active {
+    background: rgba(34, 211, 238, 0.15);
+    color: rgb(103, 232, 249);
+    border-color: rgba(34, 211, 238, 0.4);
+}
+
+/* ── Empty-state cards ──────────────────────────────────────────── */
+.wa-empty {
+    border: 1px dashed rgba(255, 255, 255, 0.12);
+    border-radius: 0.75rem;
+    padding: 2.5rem 1.5rem;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.wa-empty-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.8);
+    margin-bottom: 0.4rem;
+}
+
+.wa-empty-body {
+    font-size: 0.875rem;
+    line-height: 1.5;
+    max-width: 28rem;
+    margin: 0 auto;
+}

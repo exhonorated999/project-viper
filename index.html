@@ -1502,6 +1502,17 @@
                             </div>
                         </label>
 
+                        <!-- Warrant Author — only visible when viperWarrantAuthorEnabled localStorage flag is "true" -->
+                        <label data-module-warrant-author class="flex items-center space-x-3 p-3 rounded-lg cursor-pointer hover:bg-viper-card/30 transition-colors border border-gray-700 hover:border-viper-orange/30" style="display:none;">
+                            <input type="checkbox" value="warrantAuthor" class="case-module w-4 h-4 rounded border-gray-600 text-viper-orange focus:ring-viper-orange">
+                            <div class="flex items-center space-x-2">
+                                <svg class="w-5 h-5 text-viper-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                                </svg>
+                                <span class="text-sm font-medium">Warrant Author <span class="ml-1 text-xs text-viper-purple">Multi-Business ESP</span></span>
+                            </div>
+                        </label>
+
                         <label class="flex items-center space-x-3 p-3 rounded-lg cursor-pointer hover:bg-viper-card/30 transition-colors border border-gray-700 hover:border-viper-cyan/30">
                             <input type="checkbox" value="forensics" class="case-module w-4 h-4 rounded border-gray-600 text-viper-cyan focus:ring-viper-cyan">
                             <div class="flex items-center space-x-2">
@@ -2778,6 +2789,13 @@
             }
             const priRow = document.getElementById('createCasePriorityRow');
             if (priRow) priRow.classList.toggle('hidden', localStorage.getItem('viperCasePriorityEnabled') !== 'true');
+            // Warrant Author feature toggle (P0): show/hide the warrantAuthor module checkbox
+            try {
+                const waEnabled = localStorage.getItem('viperWarrantAuthorEnabled') === 'true';
+                document.querySelectorAll('[data-module-warrant-author]').forEach(el => {
+                    el.style.display = waEnabled ? '' : 'none';
+                });
+            } catch (_) {}
             document.getElementById('createCaseModal').classList.add('show');
         }
         

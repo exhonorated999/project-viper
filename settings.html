@@ -8,6 +8,7 @@
     <script src="modules/viper-ui.js"></script>
     <script src="modules/viper-prefs.js"></script>
     <script src="modules/licensing.js"></script>
+    <script src="modules/warrant-author/agency-profile.js"></script>
     <script src="case-snapshot.js"></script>
     <script src="libs/tailwindcss.js"></script>
     <script>
@@ -1836,6 +1837,54 @@
                                     aria-label="Toggle Warrant Author">
                                     <span id="warrantAuthorToggleIndicator" class="inline-block w-4 h-4 transform transition-transform bg-white rounded-full translate-x-1"></span>
                                 </button>
+                            </div>
+                            <!-- Agency Profile completeness indicator (visible only when WA enabled) -->
+                            <div id="warrantAuthorProfileStatus" class="hidden mt-3 pt-3 border-t border-gray-700/40 flex items-center gap-2 text-xs">
+                                <span id="warrantAuthorProfileDot" class="w-2 h-2 rounded-full bg-rose-500 shrink-0"></span>
+                                <span id="warrantAuthorProfileText" class="text-gray-400">Agency profile status loading…</span>
+                                <button type="button" onclick="jumpToAgencyProfile()"
+                                    class="ml-auto px-2 py-1 text-viper-cyan hover:bg-viper-cyan/10 border border-viper-cyan/30 rounded transition">
+                                    Edit profile →
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- ─── Agency Profile (visible only when Warrant Author enabled) ─── -->
+                        <div id="agencyProfileSection" class="hidden p-4 bg-viper-dark/50 rounded-lg border border-gray-700/50">
+                            <div class="flex items-start justify-between mb-3 gap-3">
+                                <div>
+                                    <h4 class="text-white font-semibold text-sm flex items-center gap-2">
+                                        Agency Profile
+                                        <span id="agencyProfileCompletenessPill" class="px-2 py-0.5 text-[10px] uppercase tracking-wider rounded border bg-gray-700/40 text-gray-400 border-gray-600/40">Loading…</span>
+                                    </h4>
+                                    <p class="text-xs text-gray-400 mt-1">Used as boilerplate on every generated warrant. Required fields marked <span class="text-rose-400">*</span>. Your DA / legal counsel still reviews every draft.</p>
+                                </div>
+                                <div class="flex items-center gap-2 shrink-0">
+                                    <span id="agencyProfileDirtyBadge" class="hidden text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30">Unsaved</span>
+                                </div>
+                            </div>
+
+                            <!-- Field grid — populated by renderAgencyProfileFields() -->
+                            <div id="agencyProfileFields" class="space-y-5"></div>
+
+                            <!-- Footer actions (handlers wired in P1-3) -->
+                            <div class="flex flex-wrap justify-between items-center gap-3 mt-5 pt-4 border-t border-gray-700/50">
+                                <div class="flex items-center gap-2">
+                                    <button id="agencyProfileRestoreBtn" type="button" onclick="restoreAgencyProfileDefaults()"
+                                        class="px-3 py-1.5 text-xs text-gray-400 hover:text-white hover:bg-gray-700/40 border border-gray-700 rounded transition">
+                                        Restore Defaults
+                                    </button>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <button id="agencyProfileResetBtn" type="button" onclick="resetAgencyProfileForm()"
+                                        class="px-3 py-1.5 text-xs text-gray-400 hover:text-white hover:bg-gray-700/40 border border-gray-700 rounded transition">
+                                        Discard Changes
+                                    </button>
+                                    <button id="agencyProfileSaveBtn" type="button" onclick="saveAgencyProfile()"
+                                        class="px-4 py-1.5 text-xs font-semibold rounded bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/40 hover:bg-viper-cyan/30 transition">
+                                        Save Profile
+                                    </button>
+                                </div>
                             </div>
                         </div>
 
@@ -4490,6 +4539,314 @@
             btn.classList.add('bg-gray-700'); btn.classList.remove('bg-viper-cyan');
             ind.classList.add('translate-x-1'); ind.classList.remove('translate-x-6');
         }
+        // Show/hide Agency Profile section based on enabled state
+        const apSection = document.getElementById('agencyProfileSection');
+        if (apSection) {
+            if (enabled) apSection.classList.remove('hidden');
+            else apSection.classList.add('hidden');
+        }
+        // Show/hide profile-completeness indicator on the toggle row
+        const status = document.getElementById('warrantAuthorProfileStatus');
+        if (status) {
+            if (enabled) status.classList.remove('hidden');
+            else status.classList.add('hidden');
+        }
+        refreshAgencyProfileCompleteness();
+    }
+
+    // Refresh both the toggle-row completeness indicator AND the in-section
+    // header pill. Called on: load, after save, after restore-defaults, and
+    // when the WA toggle flips on.
+    function refreshAgencyProfileCompleteness() {
+        const api = window.WarrantAuthorAgencyProfile;
+        if (!api) return;
+        const profile = _loadAgencyProfile() || api.freshProfile();
+        const missing = api.findMissingRequired(profile);
+        const total = api.REQUIRED_FIELDS.length;
+        const filled = total - missing.length;
+        const complete = missing.length === 0;
+
+        // ── Toggle-row indicator ────────────────────────────────────────
+        const dot = document.getElementById('warrantAuthorProfileDot');
+        const txt = document.getElementById('warrantAuthorProfileText');
+        if (dot && txt) {
+            dot.classList.remove('bg-rose-500', 'bg-emerald-500', 'bg-amber-500');
+            if (complete) {
+                dot.classList.add('bg-emerald-500');
+                txt.className = 'text-emerald-400';
+                txt.textContent = `Agency profile complete (${total}/${total} required fields)`;
+            } else if (filled === 0) {
+                dot.classList.add('bg-rose-500');
+                txt.className = 'text-rose-400';
+                txt.textContent = `Agency profile not configured — ${total} required fields missing`;
+            } else {
+                dot.classList.add('bg-amber-500');
+                txt.className = 'text-amber-400';
+                txt.textContent = `Agency profile partial — ${filled}/${total} required fields filled`;
+            }
+        }
+
+        // ── In-section header pill ──────────────────────────────────────
+        const pill = document.getElementById('agencyProfileCompletenessPill');
+        if (pill) {
+            pill.className = 'px-2 py-0.5 text-[10px] uppercase tracking-wider rounded border';
+            if (complete) {
+                pill.classList.add('bg-emerald-500/10', 'text-emerald-400', 'border-emerald-500/30');
+                pill.textContent = `Complete · ${total}/${total}`;
+            } else if (filled === 0) {
+                pill.classList.add('bg-rose-500/10', 'text-rose-400', 'border-rose-500/30');
+                pill.textContent = `Incomplete · 0/${total}`;
+            } else {
+                pill.classList.add('bg-amber-500/10', 'text-amber-400', 'border-amber-500/30');
+                pill.textContent = `Partial · ${filled}/${total}`;
+            }
+        }
+    }
+
+    function jumpToAgencyProfile() {
+        // Make sure the Document Authoring collapsible is open
+        const body = document.getElementById('documentAuthoringBody');
+        const chevron = document.getElementById('documentAuthoringChevron');
+        if (body && body.classList.contains('hidden')) {
+            body.classList.remove('hidden');
+            if (chevron) chevron.style.transform = 'rotate(180deg)';
+        }
+        const section = document.getElementById('agencyProfileSection');
+        if (!section) return;
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // Brief outline flash so the user's eye lands on it
+        section.classList.add('ring-2', 'ring-viper-cyan');
+        setTimeout(() => section.classList.remove('ring-2', 'ring-viper-cyan'), 1500);
+        // Focus the first empty required field if any, else first field overall
+        setTimeout(() => {
+            const api = window.WarrantAuthorAgencyProfile;
+            if (!api) return;
+            const profile = _loadAgencyProfile() || api.freshProfile();
+            const missing = api.findMissingRequired(profile);
+            const focusKey = missing[0] || (api.FIELDS[0] && api.FIELDS[0].key);
+            if (!focusKey) return;
+            const el = document.querySelector(`#agencyProfileFields [data-agency-key="${focusKey}"]`);
+            if (el) el.focus();
+        }, 400);
+    }
+
+    // ─── Agency Profile (Warrant Author boilerplate) ─────────────────
+    // P1-2: UI scaffold + data-driven field rendering from agency-profile.js schema.
+    // P1-3: load/save to localStorage.viperAgencyProfile, dirty tracking,
+    //       Save/Reset/Restore-Defaults handlers, soft validation w/ red highlight.
+    // P1-4: completeness pill on the WA toggle row.
+    const AGENCY_PROFILE_KEY = 'viperAgencyProfile';
+    let _agencyProfileDirty = false;
+    let _agencyProfileToastTimer = null;
+
+    function _loadAgencyProfile() {
+        const api = window.WarrantAuthorAgencyProfile;
+        if (!api) return null;
+        try {
+            const raw = localStorage.getItem(AGENCY_PROFILE_KEY);
+            if (!raw) return api.freshProfile();
+            return api.normalize(JSON.parse(raw));
+        } catch (e) {
+            console.warn('[Agency Profile] load failed, using defaults:', e);
+            return api.freshProfile();
+        }
+    }
+    function _writeAgencyProfile(profile) {
+        const api = window.WarrantAuthorAgencyProfile;
+        if (!api) return false;
+        try {
+            localStorage.setItem(AGENCY_PROFILE_KEY, JSON.stringify(api.normalize(profile)));
+            return true;
+        } catch (e) {
+            console.warn('[Agency Profile] save failed:', e);
+            return false;
+        }
+    }
+    function _readAgencyProfileFromForm() {
+        const out = {};
+        document.querySelectorAll('#agencyProfileFields [data-agency-key]').forEach(el => {
+            const key = el.getAttribute('data-agency-key');
+            out[key] = (el.value || '').toString();
+        });
+        return out;
+    }
+    function _populateAgencyProfileForm(profile) {
+        if (!profile) return;
+        document.querySelectorAll('#agencyProfileFields [data-agency-key]').forEach(el => {
+            const key = el.getAttribute('data-agency-key');
+            if (Object.prototype.hasOwnProperty.call(profile, key)) {
+                el.value = profile[key] == null ? '' : String(profile[key]);
+            } else {
+                el.value = '';
+            }
+        });
+    }
+    function _agencyProfileSetDirty(dirty) {
+        _agencyProfileDirty = !!dirty;
+        const badge = document.getElementById('agencyProfileDirtyBadge');
+        if (badge) badge.classList.toggle('hidden', !dirty);
+        const saveBtn = document.getElementById('agencyProfileSaveBtn');
+        if (saveBtn) {
+            saveBtn.classList.toggle('ring-1', !!dirty);
+            saveBtn.classList.toggle('ring-viper-cyan', !!dirty);
+        }
+    }
+    function _wireAgencyProfileDirtyTracking() {
+        document.querySelectorAll('#agencyProfileFields [data-agency-key]').forEach(el => {
+            const handler = () => {
+                _agencyProfileSetDirty(true);
+                // clear any prior error highlight on edit
+                el.classList.remove('border-rose-500');
+                el.classList.add('border-gray-700');
+            };
+            el.addEventListener('input', handler);
+            el.addEventListener('change', handler);
+        });
+    }
+    function _highlightInvalidAgencyFields(missingKeys) {
+        const set = new Set(missingKeys || []);
+        document.querySelectorAll('#agencyProfileFields [data-agency-key]').forEach(el => {
+            const key = el.getAttribute('data-agency-key');
+            if (set.has(key)) {
+                el.classList.remove('border-gray-700');
+                el.classList.add('border-rose-500');
+            } else {
+                el.classList.remove('border-rose-500');
+                el.classList.add('border-gray-700');
+            }
+        });
+    }
+    function _agencyProfileToast(msg, kind) {
+        // kind: 'success' | 'warning' | 'error'
+        const host = document.getElementById('agencyProfileSection');
+        if (!host) return;
+        let toast = document.getElementById('agencyProfileToast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'agencyProfileToast';
+            toast.className = 'mt-3 px-3 py-2 rounded text-xs flex items-center gap-2 transition-opacity duration-200';
+            const footer = host.querySelector('div.flex.flex-wrap.justify-between');
+            if (footer && footer.parentNode) footer.parentNode.appendChild(toast);
+            else host.appendChild(toast);
+        }
+        const styles = {
+            success: { cls: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30', icon: '✓' },
+            warning: { cls: 'bg-amber-500/10 text-amber-400 border border-amber-500/30', icon: '⚠' },
+            error:   { cls: 'bg-rose-500/10 text-rose-400 border border-rose-500/30', icon: '✕' },
+        };
+        const s = styles[kind] || styles.success;
+        toast.className = 'mt-3 px-3 py-2 rounded text-xs flex items-center gap-2 transition-opacity duration-200 ' + s.cls;
+        toast.innerHTML = `<span class="text-base leading-none">${s.icon}</span><span>${_esc(msg)}</span>`;
+        toast.style.opacity = '1';
+        if (_agencyProfileToastTimer) clearTimeout(_agencyProfileToastTimer);
+        _agencyProfileToastTimer = setTimeout(() => {
+            toast.style.opacity = '0';
+            // Remove from layout after fade so it doesn't take vertical space
+            setTimeout(() => { if (toast) toast.remove(); }, 250);
+        }, 3000);
+    }
+
+    function renderAgencyProfileFields() {
+        const host = document.getElementById('agencyProfileFields');
+        if (!host) return;
+        const api = window.WarrantAuthorAgencyProfile;
+        if (!api) {
+            host.innerHTML = '<p class="text-xs text-rose-400">Agency Profile schema module failed to load. Reload the page.</p>';
+            return;
+        }
+        const required = new Set(api.REQUIRED_FIELDS);
+        const groupsHtml = api.FIELD_GROUPS.map(group => {
+            const fieldsInGroup = api.FIELDS.filter(f => f.group === group.id);
+            if (!fieldsInGroup.length) return '';
+            const fieldsHtml = fieldsInGroup.map(field => _renderAgencyProfileField(field, required.has(field.key))).join('');
+            // Textarea group renders single-column; everything else uses 2-column grid.
+            const isFullWidth = fieldsInGroup.some(f => f.type === 'textarea');
+            const gridCls = isFullWidth ? 'space-y-3' : 'grid grid-cols-1 sm:grid-cols-2 gap-3';
+            return `
+                <div>
+                    <div class="text-[11px] uppercase tracking-wider text-gray-500 font-semibold mb-2">${_esc(group.label)}</div>
+                    ${group.helper ? `<p class="text-xs text-gray-500 mb-2 -mt-1">${_esc(group.helper)}</p>` : ''}
+                    <div class="${gridCls}">${fieldsHtml}</div>
+                </div>
+            `;
+        }).join('');
+        host.innerHTML = groupsHtml;
+        // Populate values from storage and wire dirty tracking. Order matters:
+        // populate FIRST (would otherwise trip the input listener), THEN wire.
+        const stored = _loadAgencyProfile();
+        _populateAgencyProfileForm(stored);
+        _wireAgencyProfileDirtyTracking();
+        _agencyProfileSetDirty(false);
+        refreshAgencyProfileCompleteness();
+    }
+    function _renderAgencyProfileField(field, isRequired) {
+        const reqMark = isRequired ? ' <span class="text-rose-400">*</span>' : '';
+        const helper = field.helper ? `<p class="text-[11px] text-gray-500 mt-1">${_esc(field.helper)}</p>` : '';
+        const ph = field.placeholder ? ` placeholder="${_esc(field.placeholder)}"` : '';
+        const ml = field.maxlength ? ` maxlength="${Number(field.maxlength)}"` : '';
+        const inputId = `agencyProfile_${field.key}`;
+        let input = '';
+        if (field.type === 'textarea') {
+            input = `<textarea id="${inputId}" data-agency-key="${_esc(field.key)}" rows="6"${ph}${ml}
+                        class="w-full bg-viper-dark border border-gray-700 rounded px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-viper-cyan resize-y"></textarea>`;
+        } else if (field.type === 'select') {
+            const opts = (field.options || []).map(o => `<option value="${_esc(o.value)}">${_esc(o.label)}</option>`).join('');
+            input = `<select id="${inputId}" data-agency-key="${_esc(field.key)}"
+                        class="w-full bg-viper-dark border border-gray-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-viper-cyan">${opts}</select>`;
+        } else {
+            // text / email / tel / etc all render as input
+            const t = field.type || 'text';
+            input = `<input type="${_esc(t)}" id="${inputId}" data-agency-key="${_esc(field.key)}"${ph}${ml}
+                        class="w-full bg-viper-dark border border-gray-700 rounded px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-viper-cyan" />`;
+        }
+        return `
+            <label class="block ${field.type === 'textarea' ? '' : ''}">
+                <span class="block text-xs text-gray-300 mb-1">${_esc(field.label)}${reqMark}</span>
+                ${input}
+                ${helper}
+            </label>
+        `;
+    }
+    function _esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+    }
+    // P1-3 handlers (replacing P1-2 stubs).
+    function saveAgencyProfile() {
+        const api = window.WarrantAuthorAgencyProfile;
+        if (!api) { _agencyProfileToast('Schema module not loaded — reload page.', 'error'); return; }
+        const formData = _readAgencyProfileFromForm();
+        const normalized = api.normalize(formData);
+        const missing = api.findMissingRequired(normalized);
+        _highlightInvalidAgencyFields(missing);
+        const ok = _writeAgencyProfile(normalized);
+        if (!ok) { _agencyProfileToast('Save failed — see DevTools console.', 'error'); return; }
+        // Re-populate so any normalization (e.g. state → uppercase) reflects.
+        _populateAgencyProfileForm(normalized);
+        _agencyProfileSetDirty(false);
+        refreshAgencyProfileCompleteness();
+        if (missing.length === 0) {
+            _agencyProfileToast('Agency profile saved.', 'success');
+        } else {
+            const labels = missing.map(k => api.labelFor(k)).join(', ');
+            _agencyProfileToast(`Saved with ${missing.length} required field${missing.length === 1 ? '' : 's'} still missing: ${labels}`, 'warning');
+        }
+    }
+    function resetAgencyProfileForm() {
+        if (_agencyProfileDirty && !confirm('Discard unsaved changes to the Agency Profile?')) return;
+        const stored = _loadAgencyProfile();
+        _populateAgencyProfileForm(stored);
+        _highlightInvalidAgencyFields([]);
+        _agencyProfileSetDirty(false);
+        _agencyProfileToast('Reverted to last saved profile.', 'success');
+    }
+    function restoreAgencyProfileDefaults() {
+        if (!confirm('Restore the Agency Profile to shipped defaults?\n\nThis clears all identity fields. You will need to click Save Profile to persist.')) return;
+        const api = window.WarrantAuthorAgencyProfile;
+        if (!api) return;
+        _populateAgencyProfileForm(api.freshProfile());
+        _highlightInvalidAgencyFields([]);
+        _agencyProfileSetDirty(true);
+        _agencyProfileToast('Defaults restored — click Save Profile to persist.', 'warning');
     }
 
     function toggleFieldSecurity() {
@@ -5081,6 +5438,7 @@
         refreshPriorityUI();
         refreshCustomStatusUI();
         refreshCustomMetricsUI();
+        try { renderAgencyProfileFields(); } catch (e) { console.warn('Agency Profile render failed:', e); }
         refreshWarrantAuthorUI();
         refreshSidebarAutoHideUI();
         // Audit log panel — load entries + restore Event Log toggle state

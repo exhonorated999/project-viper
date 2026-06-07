@@ -872,7 +872,13 @@ function _renderAddendumForm(caseId, draft, addendumId, harvest) {
       <!-- Items to seize -->
       <div>
         <div class="flex items-center justify-between mb-1">
-          <span class="text-slate-400 uppercase tracking-wider text-xs">Items to Produce</span>
+          <span class="text-slate-400 uppercase tracking-wider text-xs flex items-center gap-1.5">
+            Items to Produce
+            <button type="button"
+                    onclick="WarrantAuthorUI.bus.onShowAddendumHelp()"
+                    title="What do these patterns and clauses mean?"
+                    class="inline-flex items-center justify-center w-4 h-4 rounded-full border border-viper-cyan/50 text-viper-cyan text-[10px] leading-none hover:bg-viper-cyan/20 hover:text-white">?</button>
+          </span>
           <select onchange="WarrantAuthorUI.bus.onApplyPattern('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}',this.value); this.selectedIndex=0;"
                   class="text-[11px] px-2 py-1 bg-viper-dark border border-slate-700 rounded text-slate-300">
             <option value="">Apply pattern…</option>
@@ -1127,6 +1133,141 @@ function _confirmValidatorWarnings(vres) {
     `;
     ov.classList.remove('hidden');
   });
+}
+
+/**
+ * Mount the addendum Help / Legend modal into #waModalOverlay.
+ * Explains the "Apply pattern…" dropdown (what each pattern key means
+ * + which providers it's for) and the four optional CalECPA clauses
+ * (NDO 90-day, NDO Info-Support, Delay §1546.2(a), §1546.1(d)(3)
+ * Sealing). Pure read-only — no draft state mutation.
+ */
+function _showAddendumHelpModal() {
+  const ov = document.getElementById('waModalOverlay');
+  if (!ov) return;
+
+  // ── Patterns: keep labels in sync with PATTERN_BUNDLES in items-taxonomy.js ─
+  const patterns = [
+    { key: 'A',                title: 'Social Media / ESP base',          providers: 'Snapchat, TikTok, Twitter / X, WhatsApp, Discord, Meta', what: 'Standard ESP set: subscriber info, account credentials, payment/billing, IP history, messages, media, location data, internet artifacts, device IDs, multimedia metadata.' },
+    { key: 'A+snaps',          title: 'Social Media + Snaps',             providers: 'Snapchat',                                                what: 'Pattern A with the Snapchat-specific "Snaps and Memories" item added.' },
+    { key: 'B',                title: 'ISP / Carrier base',               providers: 'Charter / Spectrum, Ultimate Internet, Zscaler',          what: 'Minimal ISP subscriber + connection records: subscriber info, payment/billing, IP history, device identification.' },
+    { key: 'B+telephony',      title: 'ISP + Telephony (VoIP)',           providers: 'TextNow',                                                 what: 'Pattern B plus account credentials, message content, and CDR for VoIP carriers.' },
+    { key: 'B+cdr+cell',       title: 'Full Telecom (CDR + Cell)',        providers: 'T-Mobile, Sprint, AT&T, Verizon',                         what: 'Pattern B plus call-detail records and cell-site / tower information.' },
+    { key: 'C',                title: 'Custom base',                      providers: 'Microsoft, Yahoo, fallback',                              what: 'Catch-all minimum: subscriber info, account credentials, payment/billing, IP history, messages, media, device identification.' },
+    { key: 'C+transactions',   title: 'Custom + Transactions',            providers: 'Venmo, PayPal, Cash App',                                 what: 'Pattern C plus transaction records and internet artifacts (no message content emphasis).' },
+    { key: 'mail+drive',       title: 'Mailbox + Cloud Drive',            providers: 'Google, Microsoft 365, Yahoo Mail',                       what: 'Full mailbox + cloud storage set: subscriber, credentials, payment/billing, IP history, messages, media, drive contents, location, devices, metadata.' },
+    { key: 'custom',           title: 'Custom (no preset)',               providers: '—',                                                       what: 'Start from a clean slate — tick only the boxes you actually need.' },
+  ];
+
+  const patternRows = patterns.map(p => `
+    <tr class="border-b border-slate-800/60">
+      <td class="py-1.5 pr-3 align-top">
+        <code class="text-viper-cyan font-mono text-[12px] whitespace-nowrap">${esc(p.key)}</code>
+      </td>
+      <td class="py-1.5 pr-3 align-top text-slate-200 text-[12px]">${esc(p.title)}</td>
+      <td class="py-1.5 pr-3 align-top text-slate-400 text-[11px]">${esc(p.providers)}</td>
+      <td class="py-1.5 align-top text-slate-300 text-[11px] leading-snug">${esc(p.what)}</td>
+    </tr>
+  `).join('');
+
+  // ── Optional clauses ──────────────────────────────────────────────
+  const clauses = [
+    {
+      name: 'NDO (90-day)',
+      what: 'Non-Disclosure Order under 18 U.S.C. §2705(b) / Cal. Pen. Code §1546.2(b).',
+      when: 'Use when notice to the subscriber would jeopardize the investigation — e.g., evidence destruction, witness intimidation, flight risk, or danger to a person.',
+      effect: 'Orders the provider not to notify the subscriber, user, or any third party (other than provider counsel) about the warrant or production for 90 days.'
+    },
+    {
+      name: 'NDO Info-Support',
+      what: 'Companion clause that articulates the factual basis for the NDO.',
+      when: 'Always check this when you check NDO (90-day). Without articulation, courts can deny or quash sealing.',
+      effect: 'Inserts the standard "court finds reason to believe…" findings paragraph that supports the non-disclosure order.'
+    },
+    {
+      name: 'Delay (§1546.2(a))',
+      what: 'CalECPA delay-of-notice. California-only.',
+      when: 'Use on California warrants when contemporaneous notice to the subscriber would jeopardize the investigation. NDO covers the provider; this covers your duty to notify the user.',
+      effect: 'Authorizes you to delay your statutory notice to the target/user by 90 days. Notice still has to be served within 3 days of the delay period expiring.'
+    },
+    {
+      name: '§1546.1(d)(3) Sealing',
+      what: 'CalECPA sealing of the warrant + affidavit. California-only.',
+      when: 'Use when the affidavit itself contains sensitive investigative detail (informants, techniques, ongoing surveillance) that should not be public.',
+      effect: 'Asks the magistrate to seal the warrant, affidavit, and returns from public inspection. Distinct from NDO — NDO binds the provider; sealing binds the court file.'
+    },
+  ];
+  const clauseRows = clauses.map(c => `
+    <div class="p-3 bg-slate-800/40 border border-slate-700 rounded">
+      <div class="text-viper-cyan font-semibold text-[13px] mb-1">${esc(c.name)}</div>
+      <div class="text-[11px] text-slate-200 mb-1"><span class="text-slate-400">What:</span> ${esc(c.what)}</div>
+      <div class="text-[11px] text-slate-200 mb-1"><span class="text-slate-400">When to use:</span> ${esc(c.when)}</div>
+      <div class="text-[11px] text-slate-200"><span class="text-slate-400">Effect:</span> ${esc(c.effect)}</div>
+    </div>
+  `).join('');
+
+  ov.innerHTML = `
+    <div class="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+         onclick="event.target===this && WarrantAuthorUI.bus.onCloseAddendumHelp()">
+      <div class="w-full max-w-4xl max-h-[90vh] bg-viper-dark border border-viper-cyan/30 rounded-xl shadow-2xl flex flex-col">
+        <div class="flex items-center justify-between p-4 border-b border-slate-700">
+          <h3 class="text-lg font-bold text-white flex items-center gap-2">
+            <span class="text-viper-cyan">?</span>
+            Addendum Help — Patterns &amp; Optional Clauses
+          </h3>
+          <button onclick="WarrantAuthorUI.bus.onCloseAddendumHelp()"
+                  class="text-slate-400 hover:text-white text-2xl leading-none">&times;</button>
+        </div>
+        <div class="flex-1 overflow-y-auto p-4 space-y-5">
+
+          <div>
+            <h4 class="text-sm font-semibold text-white mb-2">Apply pattern&hellip;</h4>
+            <p class="text-[12px] text-slate-300 mb-3 leading-relaxed">
+              A <span class="text-viper-cyan">pattern</span> is a pre-set bundle of "Items to Produce" tailored to a category of provider.
+              Pick a pattern that matches your provider and the checkboxes below populate automatically.
+              You can still tick or untick anything manually after applying.
+              <span class="text-slate-400">Selecting the provider at the top of the addendum already applies its default pattern — only use this dropdown to override or to start over.</span>
+            </p>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left">
+                <thead class="text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-700">
+                  <tr>
+                    <th class="py-1.5 pr-3 font-medium">Key</th>
+                    <th class="py-1.5 pr-3 font-medium">Pattern</th>
+                    <th class="py-1.5 pr-3 font-medium">Typical Providers</th>
+                    <th class="py-1.5 font-medium">What it includes</th>
+                  </tr>
+                </thead>
+                <tbody>${patternRows}</tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="border-t border-slate-800 pt-4">
+            <h4 class="text-sm font-semibold text-white mb-2">Optional Clauses</h4>
+            <p class="text-[12px] text-slate-300 mb-3 leading-relaxed">
+              These are independent toggles that add specific legal-authority paragraphs to the addendum. They can be combined.
+              The first two control disclosure to the subscriber by the <em>provider</em>; the last two are California-specific (CalECPA) and control your own notice duty and the court file.
+            </p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+              ${clauseRows}
+            </div>
+            <div class="mt-3 text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded p-2">
+              ⚠ Legal selection is your call. This guide is operational, not legal advice — confirm with your DA / prosecutor before serving.
+            </div>
+          </div>
+
+        </div>
+        <div class="flex items-center justify-end gap-2 p-3 border-t border-slate-700">
+          <button onclick="WarrantAuthorUI.bus.onCloseAddendumHelp()"
+                  class="px-3 py-1.5 bg-viper-cyan/15 hover:bg-viper-cyan/25 border border-viper-cyan/40 text-viper-cyan rounded text-sm font-medium">
+            Got it
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  ov.classList.remove('hidden');
 }
 
 /**
@@ -2005,6 +2146,15 @@ const bus = {
     _state._genFilename = null;
     _state._genPageCount = null;
     _state._genSave = null;
+  },
+  /** Show the addendum Help / Legend modal (patterns + clauses). */
+  onShowAddendumHelp() {
+    _showAddendumHelpModal();
+  },
+  /** Close the addendum Help modal. */
+  onCloseAddendumHelp() {
+    const ov = document.getElementById('waModalOverlay');
+    if (ov) { ov.innerHTML = ''; ov.classList.add('hidden'); }
   },
   onCloseValidatorModal() {
     const ov = document.getElementById('waModalOverlay');

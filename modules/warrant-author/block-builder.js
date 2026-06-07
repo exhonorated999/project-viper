@@ -300,7 +300,9 @@
 
     // 3) IDENTIFICATION AND EXPERTISE OF AFFIANT
     blocks.push({ kind: 'heading-2', text: 'IDENTIFICATION AND EXPERTISE OF AFFIANT:' });
-    const trainingExperience = _safe(aff.trainingExperience)
+    const trainingExperience = _safe(aff.trainingExperienceBoilerplate)
+      || _safe(aff.trainingExperience)
+      || _safe(agency.trainingExperienceBoilerplate)
       || _safe(agency.trainingExperience)
       || _safe(agency.affiantTrainingExperience)
       || _safe(agency.identificationAndExpertise)

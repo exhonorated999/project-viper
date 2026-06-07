@@ -503,6 +503,21 @@ app.whenReady().then(async () => {
     // Prevent media BrowserView from stealing focus when it loads
     mediaBrowserView.webContents.on('did-finish-load', () => {
       if (!mediaViewVisible) mainWindow.webContents.focus();
+      // Lock the media BrowserView's zoom factor to 1.0 so its content
+      // always fills the placeholder area exactly. Without this, an
+      // accidentally-applied zoom (Ctrl+scroll, OS-level scaling drift)
+      // can shrink media-player.html and leave visible gaps inside the
+      // BrowserView. Belt-and-suspenders: also disable Ctrl+scroll zoom.
+      try {
+        mediaBrowserView.webContents.setZoomFactor(1.0);
+        mediaBrowserView.webContents.setVisualZoomLevelLimits(1, 1);
+      } catch (_) {}
+    });
+
+    // Also enforce zoom=1.0 on every bounds update — covers the case where
+    // the BrowserView was created earlier and zoom drifted after load.
+    mediaBrowserView.webContents.on('zoom-changed', () => {
+      try { mediaBrowserView.webContents.setZoomFactor(1.0); } catch (_) {}
     });
 
     // Re-position media BrowserView on window resize
@@ -5045,6 +5060,90 @@ ipcMain.on('media-set-visible', (_event, visible) => {
     mediaBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
     try { mainWindow.removeBrowserView(mediaBrowserView); } catch (_) {}
   }
+});
+
+// --- Floating media player: drag / resize handlers ---
+// media-player.html (BV renderer) initiates drag/resize on mousedown.  Main
+// polls the cursor at 60fps via screen.getCursorScreenPoint() and updates the
+// BV's bounds in real time.  On end, the new bounds are broadcast to the
+// main window so it can persist them to localStorage.
+let _mediaDragInterval = null;
+let _mediaResizeInterval = null;
+let _mediaDragOffset = null;         // { x, y } — grab offset from BV top-left
+let _mediaResizeAnchor = null;       // { startBounds, startPoint }
+
+function _broadcastMediaBounds() {
+  if (lastMediaBounds && mainWindow && !mainWindow.isDestroyed()) {
+    try { mainWindow.webContents.send('media-bounds-changed', lastMediaBounds); } catch (_) {}
+  }
+}
+
+ipcMain.on('media-drag-start', (_e, offset) => {
+  if (!mediaBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  if (_mediaDragInterval) { clearInterval(_mediaDragInterval); _mediaDragInterval = null; }
+  _mediaDragOffset = {
+    x: Math.round((offset && offset.x) || 0),
+    y: Math.round((offset && offset.y) || 0),
+  };
+  const { screen } = require('electron');
+  _mediaDragInterval = setInterval(() => {
+    if (!mediaBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+    const p = screen.getCursorScreenPoint();
+    const cb = mainWindow.getContentBounds();
+    const cur = mediaBrowserView.getBounds();
+    const newB = {
+      x: Math.round(p.x - cb.x - _mediaDragOffset.x),
+      y: Math.round(p.y - cb.y - _mediaDragOffset.y),
+      width: cur.width,
+      height: cur.height,
+    };
+    // Clamp inside the window's content area
+    newB.x = Math.max(0, Math.min(newB.x, cb.width  - newB.width));
+    newB.y = Math.max(0, Math.min(newB.y, cb.height - newB.height));
+    try { mediaBrowserView.setBounds(newB); } catch (_) {}
+    lastMediaBounds = newB;
+  }, 16);
+});
+
+ipcMain.on('media-drag-end', () => {
+  if (_mediaDragInterval) { clearInterval(_mediaDragInterval); _mediaDragInterval = null; }
+  _mediaDragOffset = null;
+  _broadcastMediaBounds();
+});
+
+ipcMain.on('media-resize-start', () => {
+  if (!mediaBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  if (_mediaResizeInterval) { clearInterval(_mediaResizeInterval); _mediaResizeInterval = null; }
+  const { screen } = require('electron');
+  _mediaResizeAnchor = {
+    startBounds: { ...mediaBrowserView.getBounds() },
+    startPoint:  screen.getCursorScreenPoint(),
+  };
+  _mediaResizeInterval = setInterval(() => {
+    if (!mediaBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+    if (!_mediaResizeAnchor) return;
+    const p  = screen.getCursorScreenPoint();
+    const cb = mainWindow.getContentBounds();
+    const dx = p.x - _mediaResizeAnchor.startPoint.x;
+    const dy = p.y - _mediaResizeAnchor.startPoint.y;
+    const newB = {
+      x: _mediaResizeAnchor.startBounds.x,
+      y: _mediaResizeAnchor.startBounds.y,
+      width:  Math.max(220, _mediaResizeAnchor.startBounds.width  + dx),
+      height: Math.max(180, _mediaResizeAnchor.startBounds.height + dy),
+    };
+    // Clamp to window content area
+    if (newB.x + newB.width  > cb.width)  newB.width  = cb.width  - newB.x;
+    if (newB.y + newB.height > cb.height) newB.height = cb.height - newB.y;
+    try { mediaBrowserView.setBounds(newB); } catch (_) {}
+    lastMediaBounds = newB;
+  }, 16);
+});
+
+ipcMain.on('media-resize-end', () => {
+  if (_mediaResizeInterval) { clearInterval(_mediaResizeInterval); _mediaResizeInterval = null; }
+  _mediaResizeAnchor = null;
+  _broadcastMediaBounds();
 });
 
 // --- Flock Safety LPR: BrowserView positioning ---

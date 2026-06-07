@@ -363,6 +363,25 @@ function _renderEditor(caseId, draftId) {
     try { ds.saveDraft(caseId, draft); } catch (_) {}
   }
 
+  // Auto-migrate persisted date fields — fixes drafts saved before the
+  // onAddendumFieldChange normalizer existed, and any draft that was
+  // imported via .vcase. Without this, a year like `0025` survives every
+  // re-render and the user sees "date range is inverted" forever without
+  // understanding why. _normalizeDateValue clamps to [1900, 2100] and
+  // expands 2-digit years to 2000+.
+  let _dateMigrated = false;
+  (draft.addendums || []).forEach((ad) => {
+    if (ad.dateRangeFrom) {
+      const v = _normalizeDateValue(ad.dateRangeFrom);
+      if (v !== ad.dateRangeFrom) { ad.dateRangeFrom = v; _dateMigrated = true; }
+    }
+    if (ad.dateRangeTo) {
+      const v = _normalizeDateValue(ad.dateRangeTo);
+      if (v !== ad.dateRangeTo) { ad.dateRangeTo = v; _dateMigrated = true; }
+    }
+  });
+  if (_dateMigrated) { try { ds.saveDraft(caseId, draft); } catch (_) {} }
+
   const activeId = _state.activeAddendumId && draft.addendums.find(a => a.id === _state.activeAddendumId)
     ? _state.activeAddendumId
     : (draft.addendums[0] && draft.addendums[0].id) || null;

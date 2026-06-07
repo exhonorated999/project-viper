@@ -29,6 +29,9 @@
 //   ADDENDUM_NO_TARGETS       — addendum has zero non-empty target accounts
 //   ADDENDUM_NO_DATE_RANGE    — neither dateRange nor allDatesAvailable set
 //   ADDENDUM_INVERTED_RANGE   — dateRangeFrom > dateRangeTo
+//   ADDENDUM_BAD_YEAR         — year in From or To is < 1990 or > 2100
+//                               (typo guard — usually "25" entered without
+//                               the "20" prefix becomes year 25 / 0025)
 //   PC_NARRATIVE_EMPTY        — case PC narrative empty
 //   PC_1524_GROUNDS_NONE      — every §1524 ground checkbox unchecked
 //   COMPOSE_DANGLING_SLOTS    — engine reported unresolved {{slot}}s
@@ -79,6 +82,8 @@ const REQUIRED_AGENCY_FIELDS = Object.freeze([
 const MS_PER_DAY = 86400000;
 const NDO_CA_CAP_DAYS = 90;
 const DATE_RANGE_LONG_DAYS = 365;
+const DATE_YEAR_MIN = 1990;
+const DATE_YEAR_MAX = 2100;
 const TRAINING_PLACEHOLDER_PREFIX = 'REPLACE THIS';
 
 // ─── helpers ────────────────────────────────────────────────────────────
@@ -322,14 +327,44 @@ function validateDraft(input) {
         if (hasFrom && hasTo) {
             const from = _parseDate(ad.dateRangeFrom);
             const to   = _parseDate(ad.dateRangeTo);
+            // Year sanity — catches the "user typed 25 not 2025" trap
+            // BEFORE the inverted-range check (which is the downstream
+            // symptom and confuses the user about the real fix).
+            const yearOf = (s) => {
+                const m = String(s || '').match(/^(\d{1,4})-/);
+                return m ? parseInt(m[1], 10) : NaN;
+            };
+            const fy = yearOf(ad.dateRangeFrom);
+            const ty = yearOf(ad.dateRangeTo);
+            const badYears = [];
+            if (!isNaN(fy) && (fy < DATE_YEAR_MIN || fy > DATE_YEAR_MAX)) {
+                badYears.push('From year ' + String(fy).padStart(4, '0'));
+            }
+            if (!isNaN(ty) && (ty < DATE_YEAR_MIN || ty > DATE_YEAR_MAX)) {
+                badYears.push('To year ' + String(ty).padStart(4, '0'));
+            }
+            if (badYears.length) {
+                errors.push(_err(
+                    'ad.' + (ad.id || idx) + '.daterange.badyear',
+                    'ADDENDUM_BAD_YEAR',
+                    'Page ' + label + ': ' + badYears.join(', ') +
+                        ' — year must be between ' + DATE_YEAR_MIN + ' and ' + DATE_YEAR_MAX +
+                        ' (likely typo — re-enter with full 4-digit year).',
+                    Object.assign({}, ctx, { fieldPath: 'addendum.dateRangeFrom' })
+                ));
+            }
             if (from && to) {
                 if (from.getTime() > to.getTime()) {
-                    errors.push(_err(
-                        'ad.' + (ad.id || idx) + '.daterange.inverted',
-                        'ADDENDUM_INVERTED_RANGE',
-                        'Page ' + label + ': date range is inverted (From after To).',
-                        Object.assign({}, ctx, { fieldPath: 'addendum.dateRangeFrom' })
-                    ));
+                    // Skip the inverted error if a bad-year error already
+                    // explains the real problem — no need to double up.
+                    if (!badYears.length) {
+                        errors.push(_err(
+                            'ad.' + (ad.id || idx) + '.daterange.inverted',
+                            'ADDENDUM_INVERTED_RANGE',
+                            'Page ' + label + ': date range is inverted (From after To).',
+                            Object.assign({}, ctx, { fieldPath: 'addendum.dateRangeFrom' })
+                        ));
+                    }
                 } else {
                     const days = _daysBetween(from, to);
                     if (days > DATE_RANGE_LONG_DAYS) {
@@ -411,7 +446,7 @@ function validateDraft(input) {
 const _api = {
     validateDraft,
     REQUIRED_AGENCY_FIELDS,
-    constants: { NDO_CA_CAP_DAYS, DATE_RANGE_LONG_DAYS, TRAINING_PLACEHOLDER_PREFIX },
+    constants: { NDO_CA_CAP_DAYS, DATE_RANGE_LONG_DAYS, DATE_YEAR_MIN, DATE_YEAR_MAX, TRAINING_PLACEHOLDER_PREFIX },
 };
 
 if (typeof module !== 'undefined' && module.exports) {

@@ -833,25 +833,25 @@ function _renderAddendumForm(caseId, draft, addendumId, harvest) {
       </label>
 
       <!-- Date range -->
-      <!-- IMPORTANT: date inputs only persist on change (after user
-           tabs out of the year segment), not on input. Persisting per
-           keystroke is what blocks the user from typing all 4 digits of
-           the year - Chromium date inputs can re-clamp the segment
-           between keystrokes once a save round-trips. -->
+      <!-- Plain text inputs (not type="date") so Chromium's native date
+           segment editor doesn't fight us. User types MM/DD/YYYY; we
+           parse to ISO YYYY-MM-DD on blur via _usDateToIso. -->
       <div class="grid grid-cols-2 gap-2">
         <label class="block text-xs">
-          <span class="text-slate-400 uppercase tracking-wider">From</span>
-          <input type="date" value="${attr(ad.dateRangeFrom)}"
-                 onchange="WarrantAuthorUI.bus.onAddendumDateBlur('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','dateRangeFrom',this.value)"
+          <span class="text-slate-400 uppercase tracking-wider">From <span class="text-slate-500 normal-case">(MM/DD/YYYY)</span></span>
+          <input type="text" inputmode="numeric" autocomplete="off" maxlength="10"
+                 placeholder="MM/DD/YYYY"
+                 value="${attr(_isoToUsDate(ad.dateRangeFrom))}"
                  onblur="WarrantAuthorUI.bus.onAddendumDateBlur('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','dateRangeFrom',this.value)"
-                 class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
+                 class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm font-mono">
         </label>
         <label class="block text-xs">
-          <span class="text-slate-400 uppercase tracking-wider">To</span>
-          <input type="date" value="${attr(ad.dateRangeTo)}"
-                 onchange="WarrantAuthorUI.bus.onAddendumDateBlur('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','dateRangeTo',this.value)"
+          <span class="text-slate-400 uppercase tracking-wider">To <span class="text-slate-500 normal-case">(MM/DD/YYYY)</span></span>
+          <input type="text" inputmode="numeric" autocomplete="off" maxlength="10"
+                 placeholder="MM/DD/YYYY"
+                 value="${attr(_isoToUsDate(ad.dateRangeTo))}"
                  onblur="WarrantAuthorUI.bus.onAddendumDateBlur('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','dateRangeTo',this.value)"
-                 class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
+                 class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm font-mono">
         </label>
       </div>
 
@@ -1538,6 +1538,37 @@ function _normalizeDateValue(v) {
   return `${String(y).padStart(4, '0')}-${m[2]}-${m[3]}`;
 }
 
+/**
+ * Convert ISO date "YYYY-MM-DD" → display "MM/DD/YYYY". Used to seed the
+ * text inputs with persisted values without confusing the user.
+ */
+function _isoToUsDate(iso) {
+  if (!iso || typeof iso !== 'string') return '';
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return iso; // unknown shape — return as-is (lets user keep editing)
+  return `${m[2]}/${m[3]}/${m[1]}`;
+}
+
+/**
+ * Convert user-typed "MM/DD/YYYY" → ISO "YYYY-MM-DD". Returns '' if the
+ * input is empty; returns the original string if it doesn't parse (lets
+ * the validator surface the issue rather than silently dropping data).
+ * Accepts single-digit M / D and 2- or 4-digit years.
+ */
+function _usDateToIso(s) {
+  if (s == null) return '';
+  const trimmed = String(s).trim();
+  if (!trimmed) return '';
+  const m = trimmed.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  if (!m) return trimmed; // keep raw so user sees their typo + validator flags
+  let mo = parseInt(m[1], 10), d = parseInt(m[2], 10), y = parseInt(m[3], 10);
+  if (y < 100) y = 2000 + y;
+  if (y < 1900) y = 1900;
+  if (y > 2100) y = 2100;
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return trimmed;
+  return `${String(y).padStart(4,'0')}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
+
 function _safeLS(key) {
   try {
     const raw = localStorage.getItem(key);
@@ -1743,15 +1774,17 @@ const bus = {
     if (!isDateField) _rerender();
   },
   /**
-   * Persist handler for date inputs (change + blur). Saves raw value with
-   * NO normalization and NO rerender — both would interfere with the
-   * user finishing the year segment. Normalization happens at read time
-   * in the validator and warrant-generation paths.
+   * Persist handler for the MM/DD/YYYY text inputs. Parses to ISO
+   * YYYY-MM-DD on blur so downstream code (validator, generation) gets
+   * the canonical format. No rerender — the input value is already
+   * what the user typed; rerendering would reseed it from store via
+   * _isoToUsDate, which is fine but pointless mid-edit.
    */
   onAddendumDateBlur(caseId, draftId, addendumId, field, value) {
     const ds = _store(); if (!ds) return;
-    ds.updateAddendum(caseId, draftId, addendumId, { [field]: value });
-    // No _rerender() — see comment above.
+    const iso = _usDateToIso(value);
+    ds.updateAddendum(caseId, draftId, addendumId, { [field]: iso });
+    // No _rerender(): the surrounding form needs no DOM update on a date save.
   },
 
   /**

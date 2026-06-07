@@ -469,15 +469,21 @@ function _renderDraftHeader(caseId, draft) {
 
 // ─── CA face-page options (PC §1524 grounds + HOBBS + Night Search) ─────
 //
-// The CA Multi-Business SW Face Page emits eight checkbox grounds plus
-// two procedural toggles (HOBBS sealing, night-search). The validator
-// requires at least one ground to be ticked. This panel surfaces those
-// fields directly in the editor — without it, the only way to satisfy
-// the validator would be hand-editing localStorage.
+// The CA SW Face Page (oath, HOBBS/NIGHT checks, signature, "(SEARCH
+// WARRANT)" title, "People of CA…" block, 8 §1524 grounds) is the
+// universal skeleton for EVERY California search warrant — premises,
+// vehicle, person, electronics, ECSP records, etc. Only the "what to
+// search" portion at the bottom varies between warrant types; the
+// face page above it does not.
 //
-// Only renders when the active template is `ca-multi-business-esp`. The
-// generic US template uses a simpler affidavit cover and does not need
-// these fields.
+// Therefore this options panel is gated on jurisdiction === 'CA',
+// not on a specific template id. Adding a new CA warrant template
+// (e.g. ca-premises-sw, ca-vehicle-sw, ca-person-sw, ca-electronics-sw)
+// will automatically inherit this UI with zero changes here.
+//
+// The validator requires at least one §1524 ground to be ticked.
+// HOBBS sealing and night-search default to 'not-requested' and only
+// flip when the affiant articulates a basis in the PC narrative.
 const _PC1524_GROUNDS = [
   ['stolen',              'It was stolen or embezzled'],
   ['felonyMeans',         'Used as the means of committing a felony'],
@@ -490,7 +496,13 @@ const _PC1524_GROUNDS = [
 ];
 
 function _renderCaWarrantOptions(caseId, draft) {
-  if (!draft || draft.template !== 'ca-multi-business-esp') return '';
+  if (!draft) return '';
+  // Gate on jurisdiction so every future CA warrant template inherits
+  // this UI automatically. Fall back to template-id check for legacy
+  // drafts that pre-date the jurisdiction field being populated.
+  const jx = String(draft.jurisdiction || '').toUpperCase();
+  const isCa = jx === 'CA' || draft.template === 'ca-multi-business-esp';
+  if (!isCa) return '';
   const g = draft.pc1524Grounds || {};
   const anyTicked = _PC1524_GROUNDS.some(([k]) => !!g[k]);
 

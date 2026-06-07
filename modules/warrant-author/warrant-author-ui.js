@@ -229,18 +229,15 @@ function _renderNewDraftModal(caseId) {
         </div>
         <div class="space-y-3 text-sm">
           <label class="block">
-            <span class="text-slate-400 text-xs uppercase tracking-wider">SW Number (optional)</span>
-            <input id="waNewSwNumber" type="text" class="mt-1 w-full px-3 py-2 bg-viper-darker border border-slate-700 rounded text-white"
-                   placeholder="SW-2026-0001">
-          </label>
-          <label class="block">
-            <span class="text-slate-400 text-xs uppercase tracking-wider">Case Ref (optional)</span>
-            <input id="waNewCaseRef" type="text" class="mt-1 w-full px-3 py-2 bg-viper-darker border border-slate-700 rounded text-white"
-                   placeholder="${attr((window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || '')}">
+            <span class="text-slate-400 text-xs uppercase tracking-wider">Case Ref</span>
+            <input id="waNewCaseRef" type="text" class="mt-1 w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded text-white focus:border-viper-cyan focus:outline-none"
+                   value="${attr((window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || '')}"
+                   placeholder="e.g. 25-001234">
+            <span class="block text-[11px] text-slate-500 mt-1">Auto-populated from current case. Edit if you want a different label on this draft.</span>
           </label>
           <label class="block">
             <span class="text-slate-400 text-xs uppercase tracking-wider">Template</span>
-            <select id="waNewTemplate" class="mt-1 w-full px-3 py-2 bg-viper-darker border border-slate-700 rounded text-white">
+            <select id="waNewTemplate" class="mt-1 w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded text-white focus:border-viper-cyan focus:outline-none">
               <option value="ca-multi-business-esp" ${isCA ? 'selected' : ''}>CA — Multi-Business ESP (CalECPA §1546.1)</option>
               <option value="generic-us-multi-business-esp" ${!isCA ? 'selected' : ''}>US Generic — Multi-Business ESP (SCA §2703)</option>
             </select>
@@ -291,7 +288,7 @@ function _renderDraftsList(caseId) {
         <div class="flex-1 min-w-0 cursor-pointer" onclick="WarrantAuthorUI.bus.onOpenDraft('${attr(caseId)}','${attr(d.id)}')">
           <div class="flex items-center gap-2 mb-1">
             ${_statusBadge(d.status)}
-            <span class="text-white font-medium truncate">${esc(d.swNumber || '(no SW number)')}</span>
+            <span class="text-white font-medium truncate">${esc(d.swNumber || d.caseRef || 'Untitled draft')}</span>
             <span class="text-slate-500 text-xs">·</span>
             <span class="text-slate-400 text-xs">${esc(d.template === 'ca-multi-business-esp' ? 'CA' : 'US')}</span>
           </div>
@@ -364,11 +361,19 @@ function _renderEditor(caseId, draftId) {
             Drafts
           </button>
           <span class="text-slate-500">/</span>
-          <span class="text-white font-medium truncate">${esc(draft.swNumber || '(no SW number)')}</span>
+          <span class="text-white font-medium truncate">${esc(draft.swNumber || draft.caseRef || 'Untitled draft')}</span>
           ${_statusBadge(draft.status)}
         </div>
         <div class="flex items-center gap-2 text-xs">
-          <span class="text-slate-500">P6 stub — PDF/DOCX in P8/P9</span>
+          <button onclick="WarrantAuthorUI.bus.onGenerateWarrant('${attr(caseId)}','${attr(draft.id)}')"
+                  class="px-3 py-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 rounded text-sm font-medium flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+            Generate PDF + DOCX
+          </button>
+          <span class="text-slate-500">saves to case folder</span>
         </div>
       </div>
 
@@ -406,13 +411,18 @@ function _renderDraftHeader(caseId, draft) {
     { v: 'ca-multi-business-esp', label: 'CA — CalECPA §1546.1' },
     { v: 'generic-us-multi-business-esp', label: 'US Generic — SCA §2703' },
   ];
+  // Probable cause now lives on the Warrant Author screen header (above the
+  // subtab pills). Show a compact reference here pointing back up to it.
+  const pcStore = (typeof window !== 'undefined') ? window.WarrantAuthorCasePcStore : null;
+  const pcStats = pcStore ? pcStore.stats(caseId) : { chars: 0, words: 0, updatedAt: null };
+  const hasPc = pcStats.chars > 0;
   return `
-    <div class="grid grid-cols-2 gap-3 p-3 bg-viper-darker/60 border border-slate-700 rounded-lg">
+    <div class="grid grid-cols-2 gap-3 p-3 bg-viper-dark/60 border border-slate-700 rounded-lg">
       <label class="text-xs">
-        <span class="text-slate-400 uppercase tracking-wider">SW Number</span>
-        <input type="text" value="${attr(draft.swNumber)}"
-               onchange="WarrantAuthorUI.bus.onDraftFieldChange('${attr(caseId)}','${attr(draft.id)}','swNumber',this.value)"
-               class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm font-mono">
+        <span class="text-slate-400 uppercase tracking-wider">Court Name</span>
+        <input type="text" value="${attr(draft.courtName)}"
+               onchange="WarrantAuthorUI.bus.onDraftFieldChange('${attr(caseId)}','${attr(draft.id)}','courtName',this.value)"
+               class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
       </label>
       <label class="text-xs">
         <span class="text-slate-400 uppercase tracking-wider">Template</span>
@@ -421,25 +431,19 @@ function _renderDraftHeader(caseId, draft) {
           ${tplOpts.map(o => `<option value="${attr(o.v)}" ${o.v === draft.template ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
         </select>
       </label>
-      <label class="text-xs">
-        <span class="text-slate-400 uppercase tracking-wider">Court Name</span>
-        <input type="text" value="${attr(draft.courtName)}"
-               onchange="WarrantAuthorUI.bus.onDraftFieldChange('${attr(caseId)}','${attr(draft.id)}','courtName',this.value)"
-               class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
-      </label>
-      <label class="text-xs">
-        <span class="text-slate-400 uppercase tracking-wider">Judge (optional)</span>
-        <input type="text" value="${attr(draft.judgeName)}"
-               onchange="WarrantAuthorUI.bus.onDraftFieldChange('${attr(caseId)}','${attr(draft.id)}','judgeName',this.value)"
-               class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
-      </label>
-      <label class="text-xs col-span-2">
-        <span class="text-slate-400 uppercase tracking-wider">Probable Cause Narrative</span>
-        <textarea rows="3"
-                  onchange="WarrantAuthorUI.bus.onDraftFieldChange('${attr(caseId)}','${attr(draft.id)}','probableCauseNarrative',this.value)"
-                  class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm font-mono leading-snug"
-                  placeholder="Brief facts supporting probable cause (validator will surface this as a hard-error when empty).">${esc(draft.probableCauseNarrative)}</textarea>
-      </label>
+
+      <div class="col-span-2 text-[11px] text-slate-500 flex items-center justify-between border-t border-slate-700 pt-2 mt-1">
+        <span>
+          ⚖ Probable Cause:
+          ${hasPc
+            ? `<span class="text-emerald-400">✓ filled</span> · <span class="text-viper-cyan font-mono">${pcStats.words}</span> words ·
+               <span class="text-slate-400">edit at the top of this screen.</span>`
+            : `<span class="text-amber-400">empty</span> ·
+               <a onclick="document.querySelector('.wa-case-pc')?.setAttribute('open',''); document.getElementById('waCasePcTextarea')?.scrollIntoView({behavior:'smooth',block:'center'}); document.getElementById('waCasePcTextarea')?.focus();"
+                  class="text-viper-cyan hover:underline cursor-pointer">open the case PC section above to author it.</a>`}
+        </span>
+        <span class="text-slate-500">SW # and Judge captured when marked served</span>
+      </div>
     </div>
   `;
 }
@@ -564,12 +568,14 @@ function _renderAddendumForm(caseId, draft, addendumId, harvest) {
         <label class="block text-xs">
           <span class="text-slate-400 uppercase tracking-wider">From</span>
           <input type="date" value="${attr(ad.dateRangeFrom)}"
+                 min="1900-01-01" max="2100-12-31"
                  onchange="WarrantAuthorUI.bus.onAddendumFieldChange('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','dateRangeFrom',this.value)"
                  class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
         </label>
         <label class="block text-xs">
           <span class="text-slate-400 uppercase tracking-wider">To</span>
           <input type="date" value="${attr(ad.dateRangeTo)}"
+                 min="1900-01-01" max="2100-12-31"
                  onchange="WarrantAuthorUI.bus.onAddendumFieldChange('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','dateRangeTo',this.value)"
                  class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
         </label>
@@ -583,7 +589,7 @@ function _renderAddendumForm(caseId, draft, addendumId, harvest) {
                   class="text-[11px] text-viper-cyan hover:underline">+ Add Target</button>
         </div>
         <div class="space-y-1">${targetRows || '<div class="text-[11px] text-slate-500">No targets — add at least one.</div>'}</div>
-        ${autofill ? `<div class="mt-2 p-2 bg-viper-darker/40 border border-slate-700 rounded">
+        ${autofill ? `<div class="mt-2 p-2 bg-viper-dark/40 border border-slate-700 rounded">
           <div class="text-[10px] uppercase tracking-wider text-viper-orange mb-1">Auto-fill from case data</div>
           ${autofill}
         </div>` : ''}
@@ -599,7 +605,7 @@ function _renderAddendumForm(caseId, draft, addendumId, harvest) {
             ${patternKeys.map(p => `<option value="${attr(p)}">${esc(p)}</option>`).join('')}
           </select>
         </div>
-        <div class="max-h-40 overflow-y-auto pr-1 grid grid-cols-2 gap-1 p-2 bg-viper-darker/40 border border-slate-700 rounded">
+        <div class="max-h-40 overflow-y-auto pr-1 grid grid-cols-2 gap-1 p-2 bg-viper-dark/40 border border-slate-700 rounded">
           ${allItems.map(it => `
             <label class="flex items-start gap-2 text-[11px] text-slate-300 cursor-pointer hover:text-white">
               <input type="checkbox" ${checked.has(it.key) ? 'checked' : ''}
@@ -667,19 +673,36 @@ function _renderLivePreview(caseId, draft, activeId) {
     provider = merged.find(p => p.key === ad.providerKey) || null;
   }
 
-  // resolve items
+  // resolve items taxonomy API (the engine calls tax.resolveForProvider /
+  // resolvePattern internally — pass the API, NOT a pre-resolved array)
   const items = _items();
-  const itemKeys = (ad.itemsToProduce && ad.itemsToProduce.length)
-    ? ad.itemsToProduce
-    : (items && ad.providerKey ? items.resolvePatternKeys(items.defaultPatternFor(ad.providerKey)) : []);
-  const resolvedItems = items ? itemKeys.map(k => items.getItem(k)).filter(Boolean) : [];
+
+  // Adapt addendum shape to what the engine expects:
+  //   targets        ← targetAccounts (filter to non-empty)
+  //   dateRange      ← { start: dateRangeFrom, end: dateRangeTo, allAvailable }
+  //   itemsPattern   ← if user checked custom items, switch pattern to 'custom'
+  //                    and the engine resolution path will fall to the
+  //                    `addendum.itemsToProduce` override (handled below).
+  const adForEngine = Object.assign({}, ad, {
+    targets: Array.isArray(ad.targetAccounts)
+      ? ad.targetAccounts.filter(t => t && String(t.value || '').trim() !== '')
+      : [],
+    dateRange: {
+      start: ad.dateRangeFrom || '',
+      end:   ad.dateRangeTo   || '',
+      allAvailable: !!ad.allDatesAvailable,
+    },
+    // itemsToProduce is the array of checkbox-selected item keys —
+    // engine override path consumes this directly.
+    itemsToProduce: Array.isArray(ad.itemsToProduce) ? ad.itemsToProduce.slice() : [],
+  });
 
   const ctx = {
-    addendum: ad,
+    addendum: adForEngine,
     provider: provider || { key: ad.providerKey, name: ad.providerKey || '(no provider)' },
-    items: resolvedItems,
+    items, // taxonomy API module
     affiant: draft.affiantSnapshot || {},
-    agency: draft.affiantSnapshot || {},
+    agency:  draft.affiantSnapshot || {},
     draft,
   };
 
@@ -691,8 +714,12 @@ function _renderLivePreview(caseId, draft, activeId) {
   }
 
   const blocks = (result && result.blocks) || [];
-  const dangling = (result && result.danglingSlots) || [];
-  const missingItems = (result && result.missingItems) || [];
+  const danglingRaw = (result && result.danglingSlots) || [];
+  const missingRaw  = (result && result.missingItems);
+  // Coerce to arrays — template engine returns missingItems as a boolean
+  // flag, danglingSlots as an array. Be defensive for both shapes.
+  const dangling = Array.isArray(danglingRaw) ? danglingRaw : [];
+  const missingItems = Array.isArray(missingRaw) ? missingRaw : (missingRaw ? ['(see Items to Seize)'] : []);
 
   const html = blocks.map((b, i) => {
     if (b.omitted) return '';
@@ -712,12 +739,7 @@ function _renderLivePreview(caseId, draft, activeId) {
     </div>`;
   }).join('');
 
-  const issuesBar = (dangling.length || missingItems.length) ? `
-    <div class="wa-pv-issues">
-      ${dangling.length ? `<div class="wa-pv-issue">⚠ ${dangling.length} dangling slot${dangling.length===1?'':'s'}: <span class="font-mono text-[10px]">${esc(dangling.slice(0,6).join(', '))}${dangling.length>6 ? '…' : ''}</span></div>` : ''}
-      ${missingItems.length ? `<div class="wa-pv-issue">⚠ ${missingItems.length} unknown item${missingItems.length===1?'':'s'}: <span class="font-mono text-[10px]">${esc(missingItems.slice(0,6).join(', '))}</span></div>` : ''}
-    </div>
-  ` : '';
+  const issuesBar = (dangling.length || missingItems.length) ? _renderIssuesPanel(dangling, missingItems) : '';
 
   return `
     <div class="wa-preview">
@@ -731,6 +753,221 @@ function _renderLivePreview(caseId, draft, activeId) {
 // preserves single \n as <br> while still escaping html
 function _safeMultilineHtml(text) {
   return esc(text).split(/\n/g).map(l => l).join('<br>');
+}
+
+/**
+ * Mount the generate-result modal into #waModalOverlay.
+ * Shows PDF + DOCX status, page count, dangling-slot issues, and
+ * Open / Download actions.
+ */
+function _showGenerateResultModal(caseId, draft, blockStream, issues, pdfResult, saveResult) {
+  const ov = document.getElementById('waModalOverlay');
+  if (!ov) return;
+
+  const issuesHtml = (issues && issues.length) ? `
+    <div class="mb-3 p-2 bg-rose-500/10 border border-rose-500/30 rounded text-xs text-rose-200">
+      <div class="font-semibold mb-1">⚠ ${issues.length} addendum${issues.length===1?'':'s'} with dangling slots — review before serving</div>
+      <ul class="list-disc pl-5 space-y-0.5">
+        ${issues.map(i => `<li>${esc(i)}</li>`).join('')}
+      </ul>
+    </div>` : `
+    <div class="mb-3 p-2 bg-emerald-500/10 border border-emerald-500/30 rounded text-xs text-emerald-200">
+      ✓ All template slots resolved across every addendum.
+    </div>`;
+
+  const pcBanner = (blockStream && blockStream.stats && !blockStream.stats.pcAuthored) ? `
+    <div class="mb-3 p-2 bg-amber-500/10 border border-amber-500/30 rounded text-xs text-amber-200">
+      ⚠ Probable Cause narrative is empty — the document includes a placeholder where it should appear.
+    </div>` : '';
+
+  // Disk-save status block — only when running in Electron
+  let saveStatusHtml = '';
+  if (saveResult === null) {
+    saveStatusHtml = `
+      <div class="mb-3 p-2 bg-slate-700/30 border border-slate-600 rounded text-xs text-slate-300">
+        Running outside Electron — disk persistence skipped. Use Download to save the PDF locally.
+      </div>`;
+  } else if (saveResult && saveResult.success) {
+    const pdfKB  = saveResult.sizes && saveResult.sizes.pdf  ? ` (${Math.round(saveResult.sizes.pdf / 1024)} KB)` : '';
+    const docxKB = saveResult.sizes && saveResult.sizes.docx ? ` (${Math.round(saveResult.sizes.docx / 1024)} KB)` : '';
+    saveStatusHtml = `
+      <div class="mb-3 p-2 bg-emerald-500/10 border border-emerald-500/30 rounded text-xs text-emerald-200">
+        <div class="font-semibold mb-0.5">✓ Saved to case folder</div>
+        <ul class="ml-1 space-y-0.5">
+          ${saveResult.pdfPath  ? `<li>📄 <span class="font-mono text-emerald-100">warrant.pdf</span>${pdfKB}</li>`  : ''}
+          ${saveResult.docxPath ? `<li>📝 <span class="font-mono text-emerald-100">warrant.docx</span>${docxKB}</li>` : ''}
+        </ul>
+      </div>`;
+  } else if (saveResult) {
+    saveStatusHtml = `
+      <div class="mb-3 p-2 bg-rose-500/10 border border-rose-500/30 rounded text-xs text-rose-200">
+        ✗ Disk persistence failed: ${esc(saveResult.error || 'unknown error')}
+      </div>`;
+  }
+
+  const stats = (blockStream && blockStream.stats) || {};
+  const totalBlocks = stats.totalBlocks || 0;
+  const addendums   = stats.addendums   || 0;
+
+  const hasElectron = !!(window.electronAPI && saveResult && saveResult.success);
+
+  ov.innerHTML = `
+    <div class="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+      <div class="w-full max-w-2xl max-h-[90vh] bg-viper-dark border border-viper-cyan/30 rounded-xl shadow-2xl flex flex-col">
+        <div class="flex items-center justify-between p-4 border-b border-slate-700">
+          <h3 class="text-lg font-bold text-white">📄 Warrant Generated</h3>
+          <button onclick="WarrantAuthorUI.bus.onCloseGenerateModal()" class="text-slate-400 hover:text-white text-2xl leading-none">&times;</button>
+        </div>
+        <div class="flex-1 overflow-y-auto p-4 text-sm text-slate-200">
+          <div class="grid grid-cols-3 gap-3 mb-4 text-center">
+            <div class="bg-slate-800/60 border border-slate-700 rounded p-2">
+              <div class="text-[10px] uppercase tracking-wider text-slate-400">Pages</div>
+              <div class="text-2xl font-bold text-viper-cyan">${pdfResult.pageCount}</div>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-700 rounded p-2">
+              <div class="text-[10px] uppercase tracking-wider text-slate-400">Addendums</div>
+              <div class="text-2xl font-bold text-viper-cyan">${addendums}</div>
+            </div>
+            <div class="bg-slate-800/60 border border-slate-700 rounded p-2">
+              <div class="text-[10px] uppercase tracking-wider text-slate-400">Blocks</div>
+              <div class="text-2xl font-bold text-viper-cyan">${totalBlocks}</div>
+            </div>
+          </div>
+
+          ${saveStatusHtml}
+          ${pcBanner}
+          ${issuesHtml}
+
+          <div class="text-[11px] text-slate-500 mt-2">
+            Case Ref: <span class="text-slate-300 font-mono">${esc(draft.caseRef || '(none)')}</span> ·
+            Template: <span class="text-slate-300 font-mono">${esc(draft.template === 'ca-multi-business-esp' ? 'CA · CalECPA' : 'US · SCA §2703')}</span>
+          </div>
+        </div>
+        <div class="flex items-center justify-end gap-2 p-3 border-t border-slate-700 text-xs">
+          <button onclick="WarrantAuthorUI.bus.onPreviewGeneratedPdf()"
+                  class="px-3 py-1.5 bg-viper-cyan/15 hover:bg-viper-cyan/25 border border-viper-cyan/40 text-viper-cyan rounded text-sm font-medium"
+                  title="Open the generated PDF in a new tab">
+            👁 Preview PDF
+          </button>
+          <button onclick="WarrantAuthorUI.bus.onDownloadGeneratedPdf()"
+                  class="px-3 py-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 rounded text-sm font-medium">
+            ⬇ Download PDF
+          </button>
+          ${hasElectron && saveResult.docxPath ? `
+          <button onclick="WarrantAuthorUI.bus.onOpenGeneratedOnDisk('${attr(caseId)}','${attr(draft.id)}','docx')"
+                  class="px-3 py-1.5 bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/40 text-blue-300 rounded text-sm font-medium"
+                  title="Open the saved .docx in Word">
+            📝 Open DOCX
+          </button>` : ''}
+          ${hasElectron ? `
+          <button onclick="WarrantAuthorUI.bus.onOpenGeneratedFolder('${attr(caseId)}','${attr(draft.id)}')"
+                  class="px-3 py-1.5 bg-slate-700/40 hover:bg-slate-700/60 border border-slate-600 text-slate-200 rounded text-sm font-medium">
+            📂 Open Folder
+          </button>` : ''}
+          <button onclick="WarrantAuthorUI.bus.onCloseGenerateModal()"
+                  class="px-3 py-1.5 text-slate-300 hover:text-white text-sm">Close</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Map a template slot key (e.g. "addendum.targets") to user-facing guidance.
+ * Returned shape: { label, what, where } — all plain strings.
+ * Unknown slots fall through to a generic explanation so the panel still
+ * helps the user track them down via the slot key.
+ */
+function _slotGuidance(key) {
+  const K = String(key || '').toLowerCase();
+  const M = {
+    'addendum.pagelabel':              { label: 'Page label',           what: 'Auto-assigned (A, B, C…) — should never be blank.',                 where: 'Internal — report this as a bug if it persists.' },
+    'addendum.targets':                { label: 'Target accounts',      what: 'At least one account/identifier the warrant compels production for.', where: 'This addendum → Target Accounts. Use + Add Target or pull from the auto-fill chips.' },
+    'addendum.targetaccounts':         { label: 'Target accounts',      what: 'At least one account/identifier the warrant compels production for.', where: 'This addendum → Target Accounts. Use + Add Target or pull from the auto-fill chips.' },
+    'addendum.daterange':              { label: 'Date range (From / To)', what: 'Both From and To dates so the provider knows what window to produce.', where: 'This addendum → From / To. Years must be 4 digits.' },
+    'addendum.daterangefrom':          { label: 'Date range — From',    what: 'Earliest date the provider must produce records for.',               where: 'This addendum → From.' },
+    'addendum.daterangeto':            { label: 'Date range — To',      what: 'Latest date the provider must produce records for.',                 where: 'This addendum → To.' },
+    'addendum.providerkey':            { label: 'Provider',             what: 'Which business this addendum compels production from.',              where: 'This addendum → Provider dropdown at the top of the form.' },
+    'addendum.businessname':           { label: 'Provider legal entity',what: 'Full legal entity name of the provider.',                            where: 'This addendum → Provider dropdown auto-populates this. If blank, the provider directory entry is missing a legalEntity.' },
+    'addendum.ndoextendedjustification': { label: 'Extended NDO justification', what: 'Free-text justification when you check the NDO clause.',     where: 'This addendum → Optional Clauses → Non-Disclosure Order. Field appears when toggled on.' },
+
+    'provider.legalentity':            { label: 'Provider legal entity',what: 'Full legal entity name of the provider (e.g. "Snap Inc.").',         where: 'Provider Directory. Check Settings → Warrant Author → Providers if blank.' },
+    'provider.servicelocation':        { label: 'Provider service address', what: 'Mailing / service address for the provider.',                    where: 'Provider Directory entry for this provider.' },
+    'provider.warrantsemail':          { label: 'Provider warrants email', what: 'Address where warrant returns are sent.',                         where: 'Provider Directory entry for this provider.' },
+
+    'agency.name':                     { label: 'Agency name',          what: 'Full name of your agency (e.g. "Rancho Cucamonga PD").',             where: 'Settings → Warrant Author → Agency Profile.' },
+    'agency.address':                  { label: 'Agency address',       what: 'Mailing address of your agency.',                                    where: 'Settings → Warrant Author → Agency Profile.' },
+    'agency.state':                    { label: 'Agency state',         what: 'Two-letter state code — determines which template defaults to CA vs US.', where: 'Settings → Warrant Author → Agency Profile.' },
+    'agency.affiantname':              { label: 'Affiant name',         what: 'Officer / detective signing the affidavit.',                         where: 'Settings → Warrant Author → Agency Profile → Affiant.' },
+    'agency.affianttitle':             { label: 'Affiant title',        what: 'Rank / title (Detective, Officer, etc.).',                           where: 'Settings → Warrant Author → Agency Profile → Affiant.' },
+    'agency.affiantbadge':             { label: 'Affiant badge #',      what: 'Badge or serial number for the affiant.',                            where: 'Settings → Warrant Author → Agency Profile → Affiant.' },
+    'agency.affiantcontact':           { label: 'Affiant contact',      what: 'Phone / email for service of returns.',                              where: 'Settings → Warrant Author → Agency Profile → Affiant.' },
+
+    'draft.courtname':                 { label: 'Court name',           what: 'Court hearing the application.',                                     where: 'Editor header → Court Name.' },
+    'draft.probablecausenarrative':    { label: 'Probable cause narrative', what: 'Facts establishing probable cause.',                            where: 'Editor header → Probable Cause Narrative (shared across all warrants in this case).' },
+    'draft.swnumber':                  { label: 'SW number',            what: 'Court-assigned warrant number.',                                     where: 'Captured later when the draft is marked served.' },
+    'draft.judgename':                 { label: 'Judge',                what: 'Signing judge.',                                                     where: 'Captured later at submission.' },
+
+    'items.taxonomy':                  { label: 'Items-to-seize list',  what: 'At least one item must be selected for production.',                 where: 'This addendum → Items to Seize → check items or apply a Pattern.' },
+    'items.list':                      { label: 'Items-to-seize list',  what: 'At least one item must be selected for production.',                 where: 'This addendum → Items to Seize → check items or apply a Pattern.' },
+  };
+  if (M[K]) return M[K];
+  // Fallbacks by prefix
+  if (K.startsWith('addendum.'))  return { label: key, what: 'Addendum-level value referenced by the template.', where: 'This addendum form.' };
+  if (K.startsWith('provider.'))  return { label: key, what: 'Provider-level value referenced by the template.', where: 'Provider Directory.' };
+  if (K.startsWith('agency.'))    return { label: key, what: 'Agency-level value referenced by the template.',   where: 'Settings → Warrant Author → Agency Profile.' };
+  if (K.startsWith('draft.'))     return { label: key, what: 'Draft-level value referenced by the template.',    where: 'Editor header.' };
+  if (K.startsWith('items.'))     return { label: key, what: 'Items-taxonomy value referenced by the template.', where: 'This addendum → Items to Seize.' };
+  return { label: key, what: 'Slot referenced by the template but not present in context.', where: 'Check the template definition.' };
+}
+
+function _renderIssuesPanel(dangling, missingItems) {
+  // Coerce to arrays defensively — engine may return non-array shapes.
+  dangling = Array.isArray(dangling) ? dangling : (dangling ? [String(dangling)] : []);
+  missingItems = Array.isArray(missingItems) ? missingItems
+    : (missingItems ? ['(see Items to Seize)'] : []);
+
+  const danglingRows = dangling.map(k => {
+    const g = _slotGuidance(k);
+    return `
+      <li class="wa-issue-row">
+        <div class="wa-issue-row-head">
+          <span class="wa-issue-key">${esc(k)}</span>
+          <span class="wa-issue-label">${esc(g.label)}</span>
+        </div>
+        <div class="wa-issue-what">${esc(g.what)}</div>
+        <div class="wa-issue-where"><span class="wa-issue-where-label">Fix in:</span> ${esc(g.where)}</div>
+      </li>`;
+  }).join('');
+
+  const missingRows = missingItems.map(k => `
+    <li class="wa-issue-row">
+      <div class="wa-issue-row-head">
+        <span class="wa-issue-key">${esc(k)}</span>
+        <span class="wa-issue-label">Unknown item key</span>
+      </div>
+      <div class="wa-issue-what">The pattern referenced an item that isn't in the taxonomy.</div>
+      <div class="wa-issue-where"><span class="wa-issue-where-label">Fix in:</span> Either pick a different Pattern, or add this item key to the taxonomy in modules/warrant-author/items-taxonomy.js.</div>
+    </li>`).join('');
+
+  const summary = [
+    dangling.length ? `${dangling.length} dangling slot${dangling.length===1?'':'s'}` : '',
+    missingItems.length ? `${missingItems.length} unknown item${missingItems.length===1?'':'s'}` : '',
+  ].filter(Boolean).join(' · ');
+
+  return `
+    <details class="wa-pv-issues" open>
+      <summary class="wa-pv-issues-summary">
+        <span class="wa-pv-issues-icon">⚠</span>
+        <span class="wa-pv-issues-text">${esc(summary)}</span>
+        <span class="wa-pv-issues-hint">click for details</span>
+      </summary>
+      <ul class="wa-issue-list">
+        ${danglingRows}
+        ${missingRows}
+      </ul>
+    </details>
+  `;
 }
 
 // ─── Outstanding / Returned subtabs ─────────────────────────────────────
@@ -753,7 +990,7 @@ function _renderOutstanding(caseId) {
               <span class="text-viper-cyan font-mono text-xs">Page ${esc(addendum.pageLabel)}</span>
               <span class="text-white">${esc(addendum.providerKey)}</span>
               <span class="text-slate-500">·</span>
-              <span class="text-slate-400 text-xs">SW: ${esc(draft.swNumber || '—')}</span>
+              <span class="text-slate-400 text-xs">${esc(draft.swNumber || draft.caseRef || 'Untitled draft')}</span>
             </div>
             <div class="text-xs text-slate-400">
               Served ${esc(_shortDate(addendum.servedAt))} · ${(addendum.targetAccounts || []).length} target(s)
@@ -785,7 +1022,7 @@ function _renderReturned(caseId) {
               <span class="text-emerald-400 font-mono text-xs">Page ${esc(addendum.pageLabel)}</span>
               <span class="text-white">${esc(addendum.providerKey)}</span>
               <span class="text-slate-500">·</span>
-              <span class="text-slate-400 text-xs">SW: ${esc(draft.swNumber || '—')}</span>
+              <span class="text-slate-400 text-xs">${esc(draft.swNumber || draft.caseRef || 'Untitled draft')}</span>
             </div>
             <div class="text-xs text-slate-400">
               Returned ${esc(_shortDate(addendum.returnedAt))} · ${(addendum.linkedReturnIds || []).length} linked import(s)
@@ -812,6 +1049,64 @@ function renderSubtab(caseId, subtab) {
   return _renderDraftsList(caseId);
 }
 
+/**
+ * Render the case-level Probable Cause card that lives at the top of the
+ * Warrant Author screen (above the subtab pills). Always visible regardless
+ * of which subtab is active. Reads/writes case-pc-store; mirrors body into
+ * every draft on this case so the validator + template engine see it.
+ */
+function renderCasePc(caseId) {
+  if (!caseId) return '';
+  const pcStore = (typeof window !== 'undefined') ? window.WarrantAuthorCasePcStore : null;
+  if (!pcStore) return '';
+  // One-time migration: if any existing draft already has PC, lift it.
+  try {
+    const ds = _store();
+    const allDrafts = ds ? ds.listDrafts(caseId) : [];
+    pcStore.promoteFromDrafts(caseId, allDrafts);
+  } catch (_e) {}
+  const body  = pcStore.getBody(caseId);
+  const stats = pcStore.stats(caseId);
+  const updated = stats.updatedAt ? _shortDate(stats.updatedAt) : '—';
+  const collapsedAttr = body && body.trim().length > 0 ? '' : 'open';
+  return `
+    <details class="wa-case-pc" ${collapsedAttr}>
+      <summary>
+        <span class="wa-case-pc-title">
+          <span class="wa-case-pc-chevron">▶</span>
+          <span>⚖ Case Probable Cause</span>
+          ${body && body.trim().length > 0
+            ? '<span class="pill-filled text-[11px] font-mono">✓ authored</span>'
+            : '<span class="pill-empty text-[11px] font-mono">empty</span>'}
+        </span>
+        <span class="wa-case-pc-stats">
+          <span><span class="text-viper-cyan">${stats.words}</span> words</span>
+          <span><span class="text-viper-cyan">${stats.chars}</span> chars</span>
+          <span>updated ${esc(updated)}</span>
+        </span>
+      </summary>
+      <div class="wa-case-pc-body">
+        <div class="wa-case-pc-banner">
+          <strong>Shared across all warrants in this case</strong> — author here, then build onto it as the investigation progresses
+          (initial ESP/IP warrants → search-history → residence). Validator (P7) will flag empty PC as a hard error at submission.
+        </div>
+        <textarea id="waCasePcTextarea"
+                  oninput="WarrantAuthorUI.bus.onCasePcChange('${attr(caseId)}', this.value)"
+                  class="w-full px-3 py-2 bg-viper-dark border border-slate-700 rounded text-white text-sm font-mono leading-relaxed wa-pc-textarea"
+                  placeholder="Probable cause narrative for this case. Author here, then re-use across every warrant draft below.">${esc(body)}</textarea>
+        <div class="wa-case-pc-footer">
+          <span>
+            <span id="waPcWordCount" class="text-viper-cyan">${stats.words}</span> words ·
+            <span id="waPcCharCount" class="text-viper-cyan">${stats.chars}</span> chars ·
+            <span id="waPcRevCount" class="text-viper-cyan">${stats.revisionCount}</span> revision${stats.revisionCount === 1 ? '' : 's'}
+          </span>
+          <span>Last updated <span id="waPcUpdated">${esc(updated)}</span></span>
+        </div>
+      </div>
+    </details>
+  `;
+}
+
 // ─── small utilities ────────────────────────────────────────────────────
 
 function _shortDate(iso) {
@@ -824,6 +1119,29 @@ function _shortDate(iso) {
     if (sameDay) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     return d.toLocaleDateString();
   } catch (_) { return '—'; }
+}
+
+/**
+ * Normalize an <input type="date"> value (YYYY-MM-DD).
+ * Chromium accepts whatever year segment the user types — so "01/24/25"
+ * stores as `0025-01-24`. Expand:
+ *   - 2-digit years  → 2000+yy   (25  → 2025)
+ *   - 3-digit years  → 2000 + (y mod 100) (020 → 2020)
+ *   - clamp to [1900, 2100]
+ *   - leave plausible 4-digit years alone
+ * Returns the original string if it doesn't look like a date.
+ */
+function _normalizeDateValue(v) {
+  if (!v || typeof v !== 'string') return v;
+  const m = v.match(/^(\d{1,4})-(\d{2})-(\d{2})$/);
+  if (!m) return v;
+  let y = parseInt(m[1], 10);
+  if (isNaN(y)) return v;
+  if (y < 100) y = 2000 + y;
+  else if (y < 1000) y = 2000 + (y % 100);
+  if (y < 1900) y = 1900;
+  if (y > 2100) y = 2100;
+  return `${String(y).padStart(4, '0')}-${m[2]}-${m[3]}`;
 }
 
 function _safeLS(key) {
@@ -859,12 +1177,11 @@ const bus = {
   },
   onCreateDraftConfirm(caseId) {
     const ds = _store(); if (!ds) return;
-    const sw = (document.getElementById('waNewSwNumber') || {}).value || '';
     const ref = (document.getElementById('waNewCaseRef') || {}).value || '';
     const tpl = (document.getElementById('waNewTemplate') || {}).value || 'ca-multi-business-esp';
     const agency = _loadAgencyProfile();
     const draft = ds.createDraft(caseId, {
-      swNumber: sw, caseRef: ref, template: tpl,
+      swNumber: '', caseRef: ref, template: tpl,
       jurisdiction: tpl.startsWith('ca-') ? 'CA' : 'US',
       agencyProfile: agency
     });
@@ -887,6 +1204,42 @@ const bus = {
     d[field] = value;
     ds.saveDraft(caseId, d);
     _rerender();
+  },
+  /**
+   * Case-level shared probable cause edit. Fired on every keystroke.
+   * Writes to the case-PC store, mirrors into every draft on this case
+   * (so the validator + template engine still see it), and patches the
+   * footer stats in-place — does NOT rerender so the textarea keeps focus.
+   */
+  onCasePcChange(caseId, body) {
+    const pcStore = (typeof window !== 'undefined') ? window.WarrantAuthorCasePcStore : null;
+    if (!pcStore) return;
+    const rec = pcStore.setBody(caseId, body);
+    // Mirror into all drafts (one-way: case → drafts) for validator/template compat.
+    const ds = _store();
+    if (ds) {
+      try {
+        const drafts = ds.listDrafts(caseId) || [];
+        for (const d of drafts) {
+          if (d && d.probableCauseNarrative !== body) {
+            d.probableCauseNarrative = body;
+            ds.saveDraft(caseId, d);
+          }
+        }
+      } catch (_e) {}
+    }
+    // Patch footer stats in-place (no rerender so focus stays in textarea).
+    try {
+      const stats = pcStore.stats(caseId);
+      const w = document.getElementById('waPcWordCount');
+      const c = document.getElementById('waPcCharCount');
+      const r = document.getElementById('waPcRevCount');
+      const u = document.getElementById('waPcUpdated');
+      if (w) w.textContent = stats.words;
+      if (c) c.textContent = stats.chars;
+      if (r) r.textContent = stats.revisionCount;
+      if (u) u.textContent = stats.updatedAt ? _shortDate(stats.updatedAt) : '—';
+    } catch (_e) {}
   },
   onSelectAddendum(caseId, draftId, addendumId) {
     _state.activeDraftId = draftId;
@@ -940,9 +1293,208 @@ const bus = {
   },
   onAddendumFieldChange(caseId, draftId, addendumId, field, value) {
     const ds = _store(); if (!ds) return;
+    // Normalize date fields — Chromium's <input type="date"> happily accepts
+    // 2-digit years and stores them as literal years 25 / 0025 etc. Sanitize.
+    if (field === 'dateRangeFrom' || field === 'dateRangeTo') {
+      value = _normalizeDateValue(value);
+    }
     ds.updateAddendum(caseId, draftId, addendumId, { [field]: value });
     _rerender();
   },
+
+  /**
+  /**
+   * Generate a full PDF + DOCX warrant for ALL addendums in this draft.
+   *
+   * Pipeline:
+   *   1. Compose each addendum via template-engine (capture as addendumComposes[]).
+   *   2. Build a unified block stream via WarrantAuthorBlockBuilder.build().
+   *   3. Render PDF locally in the renderer via WarrantAuthorPdfComposer.composePdf().
+   *   4. Ship pdfBytes + blockStream + draft + agency to main via
+   *      electronAPI.warrantAuthorGenerate({...}) — main writes the PDF and
+   *      builds the DOCX via the `docx` package.
+   *   5. Show result modal with Open PDF / Open DOCX / Open Folder actions.
+   *
+   * If electronAPI is unavailable (browser preview / sandbox), falls back
+   * to in-browser PDF download via Blob URL (DOCX is skipped).
+   */
+  async onGenerateWarrant(caseId, draftId) {
+    const ds = _store(); if (!ds) return;
+    const draft = ds.getDraft(caseId, draftId); if (!draft) return;
+    const engine = _engine();
+    if (!engine) { alert('Template engine not loaded.'); return; }
+    const tpl = engine.getTemplate(draft.template);
+    if (!tpl) { alert("Template '" + draft.template + "' not registered."); return; }
+
+    const pdir = _pdir();
+    const items = _items();
+    const providersMerged = pdir ? pdir.mergeProviders({
+      providerOverrides: _safeLS('viperWarrantAuthorProviderOverrides'),
+      customProviders:   _safeLS('viperWarrantAuthorCustomProviders'),
+      providerDeletions: _safeLS('viperWarrantAuthorProviderDeletions')
+    }) : [];
+
+    const ads = Array.isArray(draft.addendums) ? draft.addendums : [];
+    if (!ads.length) { alert('Add at least one addendum before generating.'); return; }
+
+    // 1. Compose each addendum
+    const addendumComposes = [];
+    const issues = [];
+    for (const ad of ads) {
+      const provider = providersMerged.find(p => p.key === ad.providerKey) || { key: ad.providerKey, name: ad.providerKey || '(no provider)' };
+      const adForEngine = Object.assign({}, ad, {
+        targets: Array.isArray(ad.targetAccounts)
+          ? ad.targetAccounts.filter(t => t && String(t.value || '').trim() !== '')
+          : [],
+        dateRange: {
+          start: ad.dateRangeFrom || '',
+          end:   ad.dateRangeTo   || '',
+          allAvailable: !!ad.allDatesAvailable,
+        },
+        itemsToProduce: Array.isArray(ad.itemsToProduce) ? ad.itemsToProduce.slice() : [],
+      });
+      const ctx = {
+        addendum: adForEngine,
+        provider,
+        items,
+        affiant: draft.affiantSnapshot || {},
+        agency:  draft.affiantSnapshot || {},
+        draft,
+      };
+      let composed;
+      try {
+        composed = engine.compose(tpl, ctx);
+      } catch (e) {
+        composed = { blocks: [{ kind: 'paragraph', text: '(compose error: ' + e.message + ')' }], danglingSlots: ['engine.error'], missingItems: true };
+      }
+      const danglingArr = Array.isArray(composed.danglingSlots) ? composed.danglingSlots : [];
+      if (danglingArr.length) {
+        issues.push('Page ' + (ad.pageLabel || '?') + ' (' + (provider.name || ad.providerKey) + '): ' + danglingArr.join(', '));
+      }
+      addendumComposes.push({
+        addendumId:   ad.id,
+        providerKey:  provider.key,
+        providerName: provider.name || provider.key,
+        businessName: ad.businessName || '',
+        compose:      composed,
+      });
+    }
+
+    // 2. Build unified block stream
+    const builder = window.WarrantAuthorBlockBuilder;
+    if (!builder) { alert('Block builder not loaded.'); return; }
+    const agencyProfile = _safeLS('viperAgencyProfile') || {};
+    // Mirror affiant snapshot into agency for fallbacks
+    const agencyMerged = Object.assign({}, agencyProfile, draft.affiantSnapshot || {});
+    const pcStore = window.WarrantAuthorCasePcStore;
+    const pcNarrative = (pcStore && pcStore.getBody) ? pcStore.getBody(caseId) : (draft.probableCauseNarrative || '');
+    const caseInfo = {
+      caseNumber: (window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || draft.caseRef || '',
+      caseName:   (window.currentCase && window.currentCase.name) || '',
+    };
+    let blockStream;
+    try {
+      blockStream = builder.build({
+        draft, addendumComposes, agency: agencyMerged, caseInfo, pcNarrative, includeDisclaimer: true,
+      });
+    } catch (e) {
+      alert('Block builder failed: ' + e.message);
+      return;
+    }
+
+    // 3. Render PDF locally
+    const pdfComp = window.WarrantAuthorPdfComposer;
+    if (!pdfComp) { alert('PDF composer not loaded.'); return; }
+    let pdfResult;
+    try {
+      pdfResult = pdfComp.composePdf({ blockStream, draft, agency: agencyMerged });
+    } catch (e) {
+      alert('PDF render failed: ' + e.message);
+      return;
+    }
+
+    // 4. Persist to disk via IPC (PDF bytes + DOCX built in main)
+    let saveResult = null;
+    if (window.electronAPI && typeof window.electronAPI.warrantAuthorGenerate === 'function') {
+      const caseNumber = caseInfo.caseNumber;
+      const casePath   = caseNumber ? `cases/${caseNumber}` : null;
+      if (casePath) {
+        // Ensure draft is persisted to manifest first (idempotent — the
+        // generate handler patches generatedAt/pdfPath/docxPath onto it).
+        try {
+          await window.electronAPI.warrantAuthorSaveDraft(casePath, draft.id, draft);
+        } catch (_) {}
+        try {
+          saveResult = await window.electronAPI.warrantAuthorGenerate({
+            casePath,
+            warrantId: draft.id,
+            draft,
+            blockStream,
+            formats: ['pdf', 'docx'],
+            pdfBytes: pdfResult.arrayBuffer,
+            agency:   agencyMerged,
+          });
+        } catch (e) {
+          saveResult = { success: false, error: e.message };
+        }
+      } else {
+        saveResult = { success: false, error: 'No case number available — cannot persist to disk.' };
+      }
+    }
+
+    // 5. Show result modal
+    _state._genPdfBlob = pdfResult.blob;
+    _state._genFilename = (draft.caseRef || 'warrant') + '_' + (draft.template === 'ca-multi-business-esp' ? 'CA' : 'US');
+    _state._genPageCount = pdfResult.pageCount;
+    _state._genSave = saveResult;
+    _showGenerateResultModal(caseId, draft, blockStream, issues, pdfResult, saveResult);
+  },
+  onCloseGenerateModal() {
+    const ov = document.getElementById('waModalOverlay');
+    if (ov) ov.innerHTML = '';
+    _state._genPdfBlob = null;
+    _state._genFilename = null;
+    _state._genPageCount = null;
+    _state._genSave = null;
+  },
+  onDownloadGeneratedPdf() {
+    const blob = _state._genPdfBlob;
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
+    a.href = url;
+    a.download = (_state._genFilename || 'warrant') + '.pdf';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  },
+  onPreviewGeneratedPdf() {
+    const blob = _state._genPdfBlob;
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener');
+    // Note: we leak the URL on purpose so the new tab/preview window stays valid.
+  },
+  async onOpenGeneratedOnDisk(caseId, draftId, format) {
+    if (!window.electronAPI || typeof window.electronAPI.warrantAuthorOpenGenerated !== 'function') return;
+    const caseNumber = (window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || '';
+    if (!caseNumber) { alert('No case number available.'); return; }
+    const r = await window.electronAPI.warrantAuthorOpenGenerated(`cases/${caseNumber}`, draftId, format);
+    if (!r || !r.success) {
+      alert((r && r.error) || 'Open failed.');
+    }
+  },
+  async onOpenGeneratedFolder(caseId, draftId) {
+    if (!window.electronAPI || typeof window.electronAPI.warrantAuthorOpenDraftFolder !== 'function') return;
+    const caseNumber = (window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || '';
+    if (!caseNumber) { alert('No case number available.'); return; }
+    const r = await window.electronAPI.warrantAuthorOpenDraftFolder(`cases/${caseNumber}`, draftId);
+    if (!r || !r.success) {
+      alert((r && r.error) || 'Open folder failed.');
+    }
+  },
+
   onAddTarget(caseId, draftId, addendumId) {
     const ds = _store(); if (!ds) return;
     const d = ds.getDraft(caseId, draftId); if (!d) return;
@@ -1013,6 +1565,7 @@ const bus = {
 const api = Object.freeze({
   SCHEMA_VERSION,
   renderSubtab,
+  renderCasePc,
   harvestIdentifiers,
   // internal state surface for the host page
   _state,

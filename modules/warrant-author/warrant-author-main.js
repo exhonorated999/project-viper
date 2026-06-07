@@ -172,9 +172,109 @@ function registerIpc(ipcMain) {
         }
     });
 
-    // ── generate: build PDF + DOCX from draft (P0 stub — P9 implements) ──
-    ipcMain.handle('warrant-author-generate', async (_event, { casePath, warrantId, formats } = {}) => {
-        return { success: false, error: 'not-implemented (P9)' };
+    // ── generate: write PDF (renderer-built bytes) + DOCX (main-built) ───
+    // Renderer composes the PDF via jsPDF locally, then ships us the
+    // ArrayBuffer along with the structured block-stream so we can build
+    // the DOCX in main with the `docx` package.
+    //
+    // Payload:
+    //   { casePath, warrantId, draft, blockStream, formats,
+    //     pdfBytes: ArrayBuffer (optional — required if formats includes 'pdf'),
+    //     agency: {...} }
+    // Returns: { success, warrantId, pdfPath?, docxPath?, pageCount?, sizes }
+    ipcMain.handle('warrant-author-generate', async (_event, payload = {}) => {
+        const { casePath, warrantId, draft, blockStream, formats, pdfBytes, agency } = payload;
+        if (!casePath || !warrantId) return { success: false, error: 'casePath + warrantId required' };
+        if (!draft || typeof draft !== 'object') return { success: false, error: 'draft object required' };
+        const fmts = Array.isArray(formats) && formats.length ? formats : ['pdf', 'docx'];
+
+        const dir = _draftsDirFor(casePath, warrantId);
+        try { fs.mkdirSync(dir, { recursive: true }); }
+        catch (e) { return { success: false, error: `mkdir failed: ${e.message}` }; }
+
+        const result = { success: true, warrantId, sizes: {} };
+
+        // ── PDF ─────────────────────────────────────────────────────────
+        if (fmts.includes('pdf')) {
+            if (!pdfBytes) {
+                return { success: false, error: 'pdfBytes required when formats includes pdf' };
+            }
+            try {
+                let buf = Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes);
+                const pdfPath = path.join(dir, 'warrant.pdf');
+                if (_isSecActive()) {
+                    buf = _security.encryptBuffer(buf);
+                }
+                fs.writeFileSync(pdfPath, buf);
+                result.pdfPath = pdfPath;
+                result.sizes.pdf = buf.length;
+            } catch (e) {
+                console.error('[WarrantAuthor] PDF write failed:', e);
+                return { success: false, error: `PDF write failed: ${e.message}` };
+            }
+        }
+
+        // ── DOCX ────────────────────────────────────────────────────────
+        if (fmts.includes('docx')) {
+            try {
+                if (!blockStream || !Array.isArray(blockStream.blocks)) {
+                    return { success: false, error: 'blockStream.blocks required for DOCX generation' };
+                }
+                const docxComposer = require('./docx-composer');
+                let buf = await docxComposer.composeDocx({
+                    blockStream,
+                    draft,
+                    agency: agency || {},
+                });
+                const docxPath = path.join(dir, 'warrant.docx');
+                if (_isSecActive()) {
+                    buf = _security.encryptBuffer(buf);
+                }
+                fs.writeFileSync(docxPath, buf);
+                result.docxPath = docxPath;
+                result.sizes.docx = buf.length;
+            } catch (e) {
+                console.error('[WarrantAuthor] DOCX compose/write failed:', e);
+                return { success: false, error: `DOCX failed: ${e.message}` };
+            }
+        }
+
+        // Persist generation metadata onto manifest if present
+        try {
+            const mp = _manifestPath(casePath, warrantId);
+            if (fs.existsSync(mp)) {
+                const r = _secureReadJson(mp);
+                if (r.ok) {
+                    const m = r.data;
+                    m.generatedAt = new Date().toISOString();
+                    if (result.pdfPath)  m.pdfPath  = result.pdfPath;
+                    if (result.docxPath) m.docxPath = result.docxPath;
+                    m.updatedAt = m.generatedAt;
+                    _secureWriteJson(mp, m);
+                }
+            }
+        } catch (_e) { /* non-fatal */ }
+
+        _broadcast('warrant-author-change', { type: 'generate', warrantId });
+        return result;
+    });
+
+    // ── open-generated: shell open a generated file (PDF or DOCX) ────────
+    // Skips decryption — Field-Security-active files are encrypted on disk,
+    // so opening would fail; in that case we fall back to opening the dir.
+    ipcMain.handle('warrant-author-open-generated', async (_event, { casePath, warrantId, format } = {}) => {
+        if (!casePath || !warrantId) return { success: false, error: 'casePath + warrantId required' };
+        const fname = format === 'docx' ? 'warrant.docx' : 'warrant.pdf';
+        const fpath = path.join(_draftsDirFor(casePath, warrantId), fname);
+        if (!fs.existsSync(fpath)) return { success: false, error: 'file not found — generate first' };
+        // If Field Security is active, the file on disk is VIPENC-encrypted;
+        // opening it in a desktop viewer would fail. Open the folder instead.
+        if (_isSecActive()) {
+            try { await shell.openPath(_draftsDirFor(casePath, warrantId)); return { success: true, openedDir: true }; }
+            catch (e) { return { success: false, error: e.message }; }
+        }
+        try { await shell.openPath(fpath); return { success: true }; }
+        catch (e) { return { success: false, error: e.message }; }
     });
 
     // ── pick provider dir: dialog for importing custom provider JSON ─────

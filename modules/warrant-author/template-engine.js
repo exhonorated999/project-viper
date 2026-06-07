@@ -257,7 +257,10 @@ function _resolveDateRange(block, ctx) {
 
 function _resolveItemsToSeize(block, ctx) {
   // ctx.items = WarrantAuthorItemsTaxonomy API
-  // ctx.addendum.itemsPattern || provider.itemsPattern || default
+  // Precedence:
+  //   1. addendum.itemsToProduce  (explicit user-selected keys)
+  //   2. addendum.itemsPattern    (named pattern)
+  //   3. provider.itemsPattern    (default for provider)
   const tax = ctx.items;
   if (!tax || typeof tax.resolveForProvider !== 'function') {
     return {
@@ -270,9 +273,14 @@ function _resolveItemsToSeize(block, ctx) {
     };
   }
   const provider = ctx.provider || {};
+  const userKeys = (ctx.addendum && Array.isArray(ctx.addendum.itemsToProduce))
+    ? ctx.addendum.itemsToProduce.filter(Boolean)
+    : [];
   const overridePattern = ctx.addendum && ctx.addendum.itemsPattern;
   let list;
-  if (overridePattern && tax.isPattern(overridePattern) && overridePattern !== 'custom') {
+  if (userKeys.length && typeof tax.getItem === 'function') {
+    list = userKeys.map(k => tax.getItem(k)).filter(Boolean);
+  } else if (overridePattern && tax.isPattern(overridePattern) && overridePattern !== 'custom') {
     list = tax.resolvePattern(overridePattern);
   } else {
     list = tax.resolveForProvider(provider);

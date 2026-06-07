@@ -1542,6 +1542,20 @@ const bus = {
     const tpl = engine.getTemplate(draft.template);
     if (!tpl) { alert("Template '" + draft.template + "' not registered."); return; }
 
+    // ── Auto-sync caseRef from running case ──────────────────────────
+    // If the user opened the Warrant Author from a case page (the only
+    // supported entry point) but never typed anything in the Case Ref
+    // field, fall back to the running case's number. This (a) gives the
+    // validator's DRAFT_NO_CASE_REF check a hit, (b) gives the disk
+    // persistence layer a valid `cases/{caseRef}/` path, and (c) gets
+    // the right value printed in the cover meta strip and footers.
+    const runningCaseNumber = (window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || '';
+    if (runningCaseNumber && !(draft.caseRef && String(draft.caseRef).trim())) {
+      draft.caseRef = runningCaseNumber;
+      try { ds.saveDraft(caseId, draft); } catch (_) {}
+    }
+    // ─────────────────────────────────────────────────────────────────
+
     // ── Pre-flight validation ────────────────────────────────────────
     const V = _validator();
     if (V) {

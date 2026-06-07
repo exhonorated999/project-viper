@@ -826,6 +826,15 @@
     <script src="modules/cellebrite/cellebrite-coach.js"></script>
     <script src="modules/cellebrite/cellebrite-ui.js"></script>
     <script src="modules/cellebrite/cellebrite-module.js"></script>
+    <!-- Warrant Author renderer modules (P6) -->
+    <script src="modules/warrant-author/agency-profile.js"></script>
+    <script src="modules/warrant-author/provider-directory.js"></script>
+    <script src="modules/warrant-author/items-taxonomy.js"></script>
+    <script src="modules/warrant-author/template-engine.js"></script>
+    <script src="modules/warrant-author/templates-bundle.js"></script>
+    <script src="modules/warrant-author/boilerplate-library.js"></script>
+    <script src="modules/warrant-author/draft-store.js"></script>
+    <script src="modules/warrant-author/warrant-author-ui.js"></script>
 </head>
 <body class="text-white">
     <div class="flex h-screen overflow-hidden hex-pattern">
@@ -9076,6 +9085,7 @@
 
         function renderWarrantAuthorTab() {
             const sub = _waCurrentSubtab || 'drafts';
+            const caseId = currentCase && currentCase.id;
             return `
                 <div class="space-y-4">
                     <!-- Header -->
@@ -9088,7 +9098,7 @@
                             <span class="ml-3 text-xs px-2 py-0.5 bg-viper-purple/20 text-viper-purple rounded border border-viper-purple/30">Multi-Business ESP</span>
                         </h3>
                         <div class="flex items-center space-x-2">
-                            <button onclick="waNewDraft()" class="px-4 py-2 bg-viper-orange/20 hover:bg-viper-orange/30 border border-viper-orange rounded-lg text-viper-orange text-sm flex items-center gap-2" disabled title="Authoring UI lands in P6">
+                            <button onclick="waNewDraft()" class="px-4 py-2 bg-viper-orange/20 hover:bg-viper-orange/30 border border-viper-orange rounded-lg text-viper-orange text-sm flex items-center gap-2">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                                 New Warrant
                             </button>
@@ -9106,39 +9116,25 @@
                     <div id="waSubtabContent">
                         ${renderWarrantAuthorSubtab(sub)}
                     </div>
+
+                    <!-- Modal mount (P6 new-draft modal etc.) -->
+                    <div id="waModalOverlay"></div>
                 </div>
             `;
         }
 
         function renderWarrantAuthorSubtab(sub) {
-            if (sub === 'drafts') {
-                return `
-                    <div class="wa-empty">
-                        <div class="wa-empty-title">No drafts yet</div>
-                        <div class="wa-empty-body">
-                            Create a new Multi-Business ESP warrant to start drafting. One affidavit can serve multiple providers via per-business addendums.
-                            <br><br>
-                            <span class="text-viper-cyan">Authoring UI ships in Phase 6 of the warrant-author plan.</span>
-                        </div>
-                    </div>
-                `;
+            const caseId = currentCase && currentCase.id;
+            if (window.WarrantAuthorUI && typeof window.WarrantAuthorUI.renderSubtab === 'function') {
+                return window.WarrantAuthorUI.renderSubtab(caseId, sub);
             }
-            if (sub === 'outstanding') {
-                return `
-                    <div class="wa-empty">
-                        <div class="wa-empty-title">No outstanding addendums</div>
-                        <div class="wa-empty-body">
-                            Once a warrant is signed and served, each addendum awaiting provider response will appear here.
-                        </div>
-                    </div>
-                `;
-            }
-            // returned
+            // Fallback — module failed to load
             return `
                 <div class="wa-empty">
-                    <div class="wa-empty-title">No returns yet</div>
+                    <div class="wa-empty-title">Warrant Author module not loaded</div>
                     <div class="wa-empty-body">
-                        Returned warrant data shows up here once auto-linkage runs against your parsed returns (Phase 11). Until then, view returns under the existing per-provider warrant tabs.
+                        <span class="text-rose-300">⚠ window.WarrantAuthorUI is undefined.</span><br>
+                        Check the browser console for script load errors.
                     </div>
                 </div>
             `;
@@ -9156,13 +9152,22 @@
         }
 
         function waNewDraft() {
-            // P6 wires the editor. P0 stub just confirms the IPC surface is reachable.
-            showToast('Warrant Author editor lands in Phase 6', 'info');
+            const caseId = currentCase && currentCase.id;
+            if (window.WarrantAuthorUI && window.WarrantAuthorUI.bus) {
+                window.WarrantAuthorUI.bus.onClickNewDraft(caseId);
+            } else {
+                showToast('Warrant Author module not loaded', 'error');
+            }
         }
 
         function initWarrantAuthorTab() {
-            // P3+ will subscribe to warrant-author-change and reload drafts.
-            // P0 noop — empty states render with no IPC required.
+            // re-render on draft-store-change events fired from the UI bus
+            try {
+                window.addEventListener('warrant-author-change', () => {
+                    const root = document.getElementById('waSubtabContent');
+                    if (root) root.innerHTML = renderWarrantAuthorSubtab(_waCurrentSubtab || 'drafts');
+                });
+            } catch (_) {}
         }
 
         function renderWarrantsTab() {

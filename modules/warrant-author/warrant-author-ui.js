@@ -833,11 +833,11 @@ function _renderAddendumForm(caseId, draft, addendumId, harvest) {
       </label>
 
       <!-- Date range -->
-      <!-- IMPORTANT: date inputs only persist on `change` (after user
-           tabs out of the year segment), not on `input`. Persisting per
+      <!-- IMPORTANT: date inputs only persist on change (after user
+           tabs out of the year segment), not on input. Persisting per
            keystroke is what blocks the user from typing all 4 digits of
-           the year — Chromium's <input type="date"> can re-clamp the
-           segment between keystrokes once a save round-trips. -->
+           the year - Chromium date inputs can re-clamp the segment
+           between keystrokes once a save round-trips. -->
       <div class="grid grid-cols-2 gap-2">
         <label class="block text-xs">
           <span class="text-slate-400 uppercase tracking-wider">From</span>
@@ -1729,31 +1729,29 @@ const bus = {
   },
   onAddendumFieldChange(caseId, draftId, addendumId, field, value) {
     const ds = _store(); if (!ds) return;
-    // Normalize date fields — Chromium's <input type="date"> happily accepts
-    // 2-digit years and stores them as literal years 25 / 0025 etc. Sanitize.
     const isDateField = (field === 'dateRangeFrom' || field === 'dateRangeTo');
-    if (isDateField) {
-      value = _normalizeDateValue(value);
-    }
+    // DO NOT normalize date fields here — Chromium fires `change` between
+    // year-digit keystrokes. Normalizing partial input (e.g. "0002") would
+    // overwrite the user's typing with a coerced year. Validator + warrant
+    // generation normalize on read instead (see _normalizeDateValue calls
+    // in the validator section).
     ds.updateAddendum(caseId, draftId, addendumId, { [field]: value });
-    // Skip rerender for date fields — Chromium fires `change` per segment
-    // commit (month → day → year), and a rerender mid-typing kills the
-    // input's focus, leaving the user unable to finish the year. Date
-    // fields don't drive any conditional rendering elsewhere in the
-    // editor, so it's safe to defer to the next natural rerender.
+    // Skip rerender for date fields — rerender destroys the input DOM
+    // mid-typing and kills focus. Date fields don't drive any conditional
+    // rendering in this form, so deferring to the next natural rerender
+    // is safe.
     if (!isDateField) _rerender();
   },
   /**
-   * Final commit handler for date inputs, fired on blur. By the time the
-   * user has tabbed away or clicked elsewhere the year segment is fully
-   * typed — safe to normalize, persist, and rerender (so the validator
-   * panel picks up the new value).
+   * Persist handler for date inputs (change + blur). Saves raw value with
+   * NO normalization and NO rerender — both would interfere with the
+   * user finishing the year segment. Normalization happens at read time
+   * in the validator and warrant-generation paths.
    */
   onAddendumDateBlur(caseId, draftId, addendumId, field, value) {
     const ds = _store(); if (!ds) return;
-    value = _normalizeDateValue(value);
     ds.updateAddendum(caseId, draftId, addendumId, { [field]: value });
-    _rerender();
+    // No _rerender() — see comment above.
   },
 
   /**

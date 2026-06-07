@@ -114,6 +114,16 @@
       }
     }
 
+    function drawRight(font, text) {
+      _setFont(doc, font);
+      const lines = doc.splitTextToSize(_safeText(text), CONTENT_W);
+      for (const ln of lines) {
+        ensureRoom(font.lh);
+        doc.text(ln, PAGE_W - MARGIN, y + font.size, { align: 'right' });
+        y += font.lh;
+      }
+    }
+
     function drawNumbered(items) {
       _setFont(doc, FONT_BODY);
       const indent = 24;
@@ -172,7 +182,13 @@
           drawLeft(FONT_H2, b.text);
           break;
         case 'paragraph':
-          drawLeft(FONT_BODY, b.text, b.indent ? 18 : 0);
+          if (b.align === 'right') {
+            drawRight(FONT_BODY, b.text);
+          } else if (b.align === 'center') {
+            drawCentered(FONT_BODY, b.text);
+          } else {
+            drawLeft(FONT_BODY, b.text, b.indent ? 18 : 0);
+          }
           y += 4; // paragraph spacing
           break;
         case 'numbered':

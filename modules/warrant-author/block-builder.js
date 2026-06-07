@@ -101,10 +101,21 @@
         break;
       }
 
-      case 'affiant-contact':
+      case 'affiant-contact': {
         if (heading) out.push({ kind: 'heading-2', text: heading });
-        if (text) out.push({ kind: 'paragraph', text });
+        // Affiant contact resolves a multi-field block (Affiant / Agency /
+        // Phone / Email / Address). Render one paragraph per non-blank
+        // source line so it reads as a vertical list instead of a single
+        // run-on paragraph (composer otherwise reflows on `\n`).
+        if (text) {
+          const lines = text.split(/\r?\n/);
+          for (const ln of lines) {
+            const t = ln.trim();
+            if (t) out.push({ kind: 'paragraph', text: t });
+          }
+        }
         break;
+      }
 
       default:
         // Unknown kind — render as plain paragraph with heading fallback
@@ -140,6 +151,16 @@
     const hobbsYes = draft.hobbsSealing === 'requested';
     const nightYes = draft.nightSearch === 'requested';
     const box = (on) => on ? '[X]' : '[ ]';
+
+    // 0) SW NO. line — right-aligned at top of page 1, matches the
+    //    official Multi-Business SW face page layout. Court file-stamps
+    //    here, so it must NOT be at the end of the document.
+    const swRaw = _safe(draft.swNumber).trim();
+    const swLine = swRaw
+      ? `SW NO. ${swRaw}`
+      : 'SW NO. ______________________________';
+    blocks.push({ kind: 'paragraph', text: swLine, align: 'right' });
+    blocks.push({ kind: 'spacer', size: 'sm' });
 
     // 1) Affiant oath block (top of face page)
     blocks.push({
@@ -230,26 +251,10 @@
       });
     }
 
-    // Footer meta strip — SW number + case ref + date, small + centered.
-    // The standard docx form does not include this, but it's invaluable
-    // when courts file-stamp face pages and need a unique identifier.
-    blocks.push({ kind: 'spacer', size: 'md' });
-    const sw = _safe(draft.swNumber).trim();
-    blocks.push({
-      kind: 'cover-meta',
-      label: 'Search Warrant Number',
-      value: sw ? sw : '________________________ (assigned by court)',
-    });
-    blocks.push({
-      kind: 'cover-meta',
-      label: 'Case Reference',
-      value: _safe(draft.caseRef) || _safe(caseInfo.caseNumber) || '(not assigned)',
-    });
-    blocks.push({
-      kind: 'cover-meta',
-      label: 'Date',
-      value: _todayStr(),
-    });
+    // The official face page ENDS with the addendum routing. SW number
+    // already appears at the top (right-aligned). Case Reference and Date
+    // are carried by the running header/footer (DR # / CT #) so they don't
+    // need a duplicate centered strip here.
 
     return blocks;
   }

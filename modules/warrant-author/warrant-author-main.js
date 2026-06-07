@@ -184,15 +184,23 @@ function registerIpc(ipcMain) {
     // Returns: { success, warrantId, pdfPath?, docxPath?, pageCount?, sizes }
     ipcMain.handle('warrant-author-generate', async (_event, payload = {}) => {
         const { casePath, warrantId, draft, blockStream, formats, pdfBytes, agency } = payload;
-        if (!casePath || !warrantId) return { success: false, error: 'casePath + warrantId required' };
+        // warrantId still required for disk paths; casePath is optional —
+        // when absent we just compose DOCX in memory and return bytes so
+        // the renderer can offer a Download DOCX button even when the
+        // case is anonymous or window.currentCase wasn't exposed.
+        if (!warrantId) return { success: false, error: 'warrantId required' };
         if (!draft || typeof draft !== 'object') return { success: false, error: 'draft object required' };
         const fmts = Array.isArray(formats) && formats.length ? formats : ['pdf', 'docx'];
 
-        const dir = _draftsDirFor(casePath, warrantId);
-        try { fs.mkdirSync(dir, { recursive: true }); }
-        catch (e) { return { success: false, error: `mkdir failed: ${e.message}` }; }
+        const writeToDisk = !!casePath;
+        let dir = null;
+        if (writeToDisk) {
+            dir = _draftsDirFor(casePath, warrantId);
+            try { fs.mkdirSync(dir, { recursive: true }); }
+            catch (e) { return { success: false, error: `mkdir failed: ${e.message}` }; }
+        }
 
-        const result = { success: true, warrantId, sizes: {} };
+        const result = { success: true, warrantId, sizes: {}, diskWritten: writeToDisk };
 
         // ── PDF ─────────────────────────────────────────────────────────
         if (fmts.includes('pdf')) {
@@ -201,13 +209,16 @@ function registerIpc(ipcMain) {
             }
             try {
                 let buf = Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes);
-                const pdfPath = path.join(dir, 'warrant.pdf');
-                if (_isSecActive()) {
-                    buf = _security.encryptBuffer(buf);
+                if (writeToDisk) {
+                    const pdfPath = path.join(dir, 'warrant.pdf');
+                    let writeBuf = buf;
+                    if (_isSecActive()) writeBuf = _security.encryptBuffer(buf);
+                    fs.writeFileSync(pdfPath, writeBuf);
+                    result.pdfPath = pdfPath;
+                    result.sizes.pdf = writeBuf.length;
+                } else {
+                    result.sizes.pdf = buf.length;
                 }
-                fs.writeFileSync(pdfPath, buf);
-                result.pdfPath = pdfPath;
-                result.sizes.pdf = buf.length;
             } catch (e) {
                 console.error('[WarrantAuthor] PDF write failed:', e);
                 return { success: false, error: `PDF write failed: ${e.message}` };
@@ -221,41 +232,53 @@ function registerIpc(ipcMain) {
                     return { success: false, error: 'blockStream.blocks required for DOCX generation' };
                 }
                 const docxComposer = require('./docx-composer');
-                let buf = await docxComposer.composeDocx({
+                const plainBuf = await docxComposer.composeDocx({
                     blockStream,
                     draft,
                     agency: agency || {},
                 });
-                const docxPath = path.join(dir, 'warrant.docx');
-                if (_isSecActive()) {
-                    buf = _security.encryptBuffer(buf);
+                // Return the *plain* bytes to the renderer so it can offer
+                // a Download DOCX button independent of disk-persist
+                // success. Disk copy may be encrypted when Field Security
+                // is active.
+                result.docxBytes = plainBuf.buffer.slice(
+                    plainBuf.byteOffset,
+                    plainBuf.byteOffset + plainBuf.byteLength
+                );
+                if (writeToDisk) {
+                    let buf = plainBuf;
+                    const docxPath = path.join(dir, 'warrant.docx');
+                    if (_isSecActive()) buf = _security.encryptBuffer(buf);
+                    fs.writeFileSync(docxPath, buf);
+                    result.docxPath = docxPath;
+                    result.sizes.docx = buf.length;
+                } else {
+                    result.sizes.docx = plainBuf.length;
                 }
-                fs.writeFileSync(docxPath, buf);
-                result.docxPath = docxPath;
-                result.sizes.docx = buf.length;
             } catch (e) {
                 console.error('[WarrantAuthor] DOCX compose/write failed:', e);
                 return { success: false, error: `DOCX failed: ${e.message}` };
             }
         }
 
-        // Persist generation metadata onto manifest if present
-        try {
-            const mp = _manifestPath(casePath, warrantId);
-            if (fs.existsSync(mp)) {
-                const r = _secureReadJson(mp);
-                if (r.ok) {
-                    const m = r.data;
-                    m.generatedAt = new Date().toISOString();
-                    if (result.pdfPath)  m.pdfPath  = result.pdfPath;
-                    if (result.docxPath) m.docxPath = result.docxPath;
-                    m.updatedAt = m.generatedAt;
-                    _secureWriteJson(mp, m);
+        // Persist generation metadata onto manifest if present (disk mode only)
+        if (writeToDisk) {
+            try {
+                const mp = _manifestPath(casePath, warrantId);
+                if (fs.existsSync(mp)) {
+                    const r = _secureReadJson(mp);
+                    if (r.ok) {
+                        const m = r.data;
+                        m.generatedAt = new Date().toISOString();
+                        if (result.pdfPath)  m.pdfPath  = result.pdfPath;
+                        if (result.docxPath) m.docxPath = result.docxPath;
+                        m.updatedAt = m.generatedAt;
+                        _secureWriteJson(mp, m);
+                    }
                 }
-            }
-        } catch (_e) { /* non-fatal */ }
-
-        _broadcast('warrant-author-change', { type: 'generate', warrantId });
+            } catch (_e) { /* non-fatal */ }
+            _broadcast('warrant-author-change', { type: 'generate', warrantId });
+        }
         return result;
     });
 

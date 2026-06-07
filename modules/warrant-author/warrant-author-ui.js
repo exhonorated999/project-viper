@@ -1158,6 +1158,15 @@ function _showGenerateResultModal(caseId, draft, blockStream, issues, pdfResult,
       <div class="mb-3 p-2 bg-slate-700/30 border border-slate-600 rounded text-xs text-slate-300">
         Running outside Electron — disk persistence skipped. Use Download to save the PDF locally.
       </div>`;
+  } else if (saveResult && saveResult.success && saveResult.diskSkipped) {
+    // DOCX + PDF were composed in memory but never written to disk because
+    // window.currentCase.caseNumber wasn't available at generate time.
+    saveStatusHtml = `
+      <div class="mb-3 p-2 bg-amber-500/10 border border-amber-500/30 rounded text-xs text-amber-200">
+        <div class="font-semibold mb-0.5">⚠ Generated in memory only — not saved to case folder</div>
+        <div class="text-amber-100/80">${esc(saveResult.diskSkippedReason || 'No case number available.')}</div>
+        <div class="mt-1 text-amber-100/70">Use the Download buttons below to save the .pdf and .docx manually.</div>
+      </div>`;
   } else if (saveResult && saveResult.success) {
     const pdfKB  = saveResult.sizes && saveResult.sizes.pdf  ? ` (${Math.round(saveResult.sizes.pdf / 1024)} KB)` : '';
     const docxKB = saveResult.sizes && saveResult.sizes.docx ? ` (${Math.round(saveResult.sizes.docx / 1024)} KB)` : '';
@@ -1224,6 +1233,12 @@ function _showGenerateResultModal(caseId, draft, blockStream, issues, pdfResult,
                   class="px-3 py-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 rounded text-sm font-medium">
             ⬇ Download PDF
           </button>
+          ${_state._genDocxBlob ? `
+          <button onclick="WarrantAuthorUI.bus.onDownloadGeneratedDocx()"
+                  class="px-3 py-1.5 bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/40 text-blue-300 rounded text-sm font-medium"
+                  title="Download the .docx (works even when disk persistence is unavailable)">
+            ⬇ Download DOCX
+          </button>` : ''}
           ${hasElectron && saveResult.docxPath ? `
           <button onclick="WarrantAuthorUI.bus.onOpenGeneratedOnDisk('${attr(caseId)}','${attr(draft.id)}','docx')"
                   class="px-3 py-1.5 bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/40 text-blue-300 rounded text-sm font-medium"
@@ -1894,7 +1909,11 @@ const bus = {
       return;
     }
 
-    // 4. Persist to disk via IPC (PDF bytes + DOCX built in main)
+    // 4. Persist to disk via IPC (PDF bytes + DOCX built in main).
+    //    We ALWAYS call the IPC if available — even without a casePath —
+    //    so we get the DOCX bytes back for an in-browser Download DOCX
+    //    button. The main handler treats casePath as optional: when null
+    //    it just composes DOCX in memory and returns bytes.
     let saveResult = null;
     if (window.electronAPI && typeof window.electronAPI.warrantAuthorGenerate === 'function') {
       const caseNumber = caseInfo.caseNumber;
@@ -1905,21 +1924,26 @@ const bus = {
         try {
           await window.electronAPI.warrantAuthorSaveDraft(casePath, draft.id, draft);
         } catch (_) {}
-        try {
-          saveResult = await window.electronAPI.warrantAuthorGenerate({
-            casePath,
-            warrantId: draft.id,
-            draft,
-            blockStream,
-            formats: ['pdf', 'docx'],
-            pdfBytes: pdfResult.arrayBuffer,
-            agency:   agencyMerged,
-          });
-        } catch (e) {
-          saveResult = { success: false, error: e.message };
+      }
+      try {
+        saveResult = await window.electronAPI.warrantAuthorGenerate({
+          casePath,                              // may be null — main will skip disk
+          warrantId: draft.id,
+          draft,
+          blockStream,
+          formats: ['pdf', 'docx'],
+          pdfBytes: pdfResult.arrayBuffer,
+          agency:   agencyMerged,
+        });
+        // Decorate failure mode when no case number — UI still wants the
+        // DOCX/PDF blobs, but the disk-status banner should explain why
+        // nothing was saved to the case folder.
+        if (!casePath && saveResult && saveResult.success) {
+          saveResult.diskSkipped = true;
+          saveResult.diskSkippedReason = 'No case number available — DOCX/PDF available for manual download only.';
         }
-      } else {
-        saveResult = { success: false, error: 'No case number available — cannot persist to disk.' };
+      } catch (e) {
+        saveResult = { success: false, error: e.message };
       }
     }
 
@@ -1928,12 +1952,22 @@ const bus = {
     _state._genFilename = (draft.caseRef || 'warrant') + '_' + (draft.template === 'ca-multi-business-esp' ? 'CA' : 'US');
     _state._genPageCount = pdfResult.pageCount;
     _state._genSave = saveResult;
+    // Stash the DOCX bytes returned by main as a Blob, so the result modal
+    // can offer a Download DOCX button regardless of disk-persist outcome.
+    _state._genDocxBlob = null;
+    if (saveResult && saveResult.docxBytes) {
+      try {
+        const u8 = new Uint8Array(saveResult.docxBytes);
+        _state._genDocxBlob = new Blob([u8], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+      } catch (_) { _state._genDocxBlob = null; }
+    }
     _showGenerateResultModal(caseId, draft, blockStream, issues, pdfResult, saveResult);
   },
   onCloseGenerateModal() {
     const ov = document.getElementById('waModalOverlay');
     if (ov) { ov.innerHTML = ''; ov.classList.add('hidden'); }
     _state._genPdfBlob = null;
+    _state._genDocxBlob = null;
     _state._genFilename = null;
     _state._genPageCount = null;
     _state._genSave = null;
@@ -1964,6 +1998,18 @@ const bus = {
     const a   = document.createElement('a');
     a.href = url;
     a.download = (_state._genFilename || 'warrant') + '.pdf';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  },
+  onDownloadGeneratedDocx() {
+    const blob = _state._genDocxBlob;
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
+    a.href = url;
+    a.download = (_state._genFilename || 'warrant') + '.docx';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

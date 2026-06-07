@@ -221,9 +221,8 @@ async function composeDocx({ blockStream, draft, agency } = {}) {
 
   let footer;
   if (runningFooter.enabled) {
-    // CA running footer — line 1: revision + page X of Y (right). Line 2: DR # / CT #, centered bold.
+    // CA running footer — line 1: revision + page X of Y (right). Line 2: DR # — left-aligned bold.
     const drVal = _safe(runningFooter.drNumber) || '________________';
-    const ctVal = _safe(runningFooter.ctNumber) || '________________';
     footer = new Footer({
       children: [
         new Paragraph({
@@ -239,8 +238,8 @@ async function composeDocx({ blockStream, draft, agency } = {}) {
           spacing: { line: 240 },
         }),
         new Paragraph({
-          alignment: AlignmentType.CENTER,
-          children: [_run(`DR # ${drVal}     CT # ${ctVal}`, { bold: true, size: 20 })],
+          alignment: AlignmentType.LEFT,
+          children: [_run(`DR # ${drVal}`, { bold: true, size: 20 })],
           spacing: { line: 240 },
         }),
       ],
@@ -267,9 +266,9 @@ async function composeDocx({ blockStream, draft, agency } = {}) {
   }
 
   const doc = new Document({
-    creator: 'VIPER Warrant Author',
-    title: `Warrant Draft ${draft.id || ''}`,
-    description: 'Multi-Business ESP Search Warrant — drafted with VIPER Warrant Author v1',
+    creator: 'Affiant',
+    title: `Search Warrant Draft ${draft.id || ''}`,
+    description: 'Search Warrant and Affidavit',
     styles: {
       default: {
         document: {

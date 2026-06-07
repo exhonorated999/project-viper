@@ -244,7 +244,7 @@
    *
    * Default footer: "{affiant}                  Page X of N · {ref}"
    * CA running footer (when supplied): two lines — revision tag on top,
-   * "DR # {drNumber}    CT # {ctNumber}" beneath. Matches the official
+   * "DR # {drNumber}" on bottom (left-aligned). Matches the official
    * San Bernardino SW footer block.
    */
   function _stampFooters(doc, pageCount, { swNumber, caseRef, affiantName, runningFooter }) {
@@ -256,20 +256,19 @@
       _setFont(doc, FONT_FOOTER);
       if (useCa) {
         // Line 1: revision tag + page X of N
-        // Line 2: DR # ... CT # ...
+        // Line 2: DR # ... — left-aligned bold
         const revision = _safeText(runningFooter.revision || '');
         const dr = _safeText(runningFooter.drNumber || '');
-        const ct = _safeText(runningFooter.ctNumber || '');
-        const drCtLine = `DR # ${dr || '________________'}     CT # ${ct || '________________'}`;
+        const drLine = `DR # ${dr || '________________'}`;
         const pageLabel = `Page ${i} of ${pageCount}`;
         const footerY1 = PAGE_H - MARGIN + 14;
         const footerY2 = footerY1 + 12;
         // Top line: revision left, "Page X of N" right
         doc.text(revision, MARGIN, footerY1);
         doc.text(pageLabel, PAGE_W - MARGIN, footerY1, { align: 'right' });
-        // Bottom line: DR # / CT # — centered, bold
+        // Bottom line: DR # — left-aligned, bold
         _setFont(doc, FONT_BODY_BOLD);
-        doc.text(drCtLine, PAGE_W / 2, footerY2, { align: 'center' });
+        doc.text(drLine, MARGIN, footerY2);
       } else {
         const footerY = PAGE_H - MARGIN + 18;
         const pageLabel = `Page ${i} of ${pageCount}`;

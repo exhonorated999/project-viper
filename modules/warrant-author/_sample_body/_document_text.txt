@@ -1,0 +1,275 @@
+Back to Index
+SW NO. ______________________________
+
+
+Detective Brad Guith swears under oath that the facts expressed by him in the attached and incorporated Affidavit are true and that based thereon he has probable cause to believe and does believe that the articles, property, and persons described below are lawfully seizable pursuant to Penal Code Section 1524 et seq., as indicated below, and are now located at the locations set forth below.  Wherefore, Affiant requests that this Search Warrant be issued.
+
+HOBBS SEALING REQUESTED:     YES    NO
+______________________________________________________,NIGHT  SEARCH  REQUESTED:     YES    NO
+(Signature  of  Affiant)
+
+
+
+(SEARCH  WARRANT)
+
+
+THE PEOPLE OF THE STATE OF CALIFORNIA TO ANY SHERIFF, POLICEMAN OR PEACE OFFICER IN THE COUNTY OF SAN BERNARDINO: proof by affidavit, under penalty of perjury, having been made before me by Detective Brad Guith that there is probable cause to believe that the property or person described herein may be found at the location(s) set forth herein and that it is lawfully seizable pursuant to Penal Code Section 1524 et seq., as indicated below by “”(s), in that:
+
+It was stolen or embezzled;
+It was used as the means of committing a felony;
+It is possessed by a person with the intent to use it as means of committing a public offense or is possessed by another to whom he or she may have delivered it for the purpose of concealing it or preventing its discovery;
+It tends to show that a felony has been committed or that a particular person has committed a felony;
+It tends to show that sexual exploitation of a child, in violation of Penal Code Section 311.3, or possession of matter depicting sexual conduct of a person under the age of 18 years, in violation of Section 311.11, has occurred or is occurring;
+There is a warrant to arrest the person;
+A provider of electronic communication service or remote computing service has records of evidence, as specified in Penal Code Section 1524.3, showing that property was stolen or embezzled constituting a misdemeanor, or that property or things are in possession of any person with intent to use them as a means of committing a misdemeanor public offense, or in the possession of another to whom he or she may have delivered them for the purpose of concealing them or preventing their discovery;
+The property or things to be seized include an item or any evidence that tends to show a violation of Section 3700.5 of the Labor Code, or tends to show that a particular person has violated Section 3700.5 of the Labor Code;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+You are  Therefore  COMMANDED  to  SEARCH:  (premises, vehicles, persons)"Where"
+
+See attachment:
+
+Page A  for T-Mobile
+
+Page B  for Facebook, Inc. 
+
+Page C  for Charter Communications Inc
+
+Page D  for Hotmail.com
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Attachment: Page A
+
+You are  Therefore  COMMANDED  to  SEARCH:  
+The business known as:
+
+T-Mobile 
+4 Sylvan Way
+Parsippany, New Jersey 07054
+
+For the FOLLOWING PROPERTY  or  PERSON(s):
+
+Any and all information related to the following T-Mobile cellular telephone number and IP addresses: 
+
+714 589-0331
+2607:fb90:4c9d:7d0d:0:5:2d14:8201        (04-01-2019 09:00:29 UTC)
+2607:fb90:4c9d:7d0d:0:5:2d14:8201        (04-01-2019 09:00:40 UTC)
+2607:fb90:4c9d:7d0d:0:5:2d14:8201        (04-01-2019 09:00:54 UTC)
+
+
+Information shall include all basic subscriber identity information such as: first and last name; service address; billing address; subscriber identification; all screen names / usernames; assigned email addresses, email addresses provided by the subscriber; telephone number; date of birth; social security number; payment / billing and credit information to include credit card number and / or bank account number; account status; account creation / closed date and any complaints filed against the subscriber. Telephone numbers/persons listed on the account, make/model of handset, Electronic Serial Number  (ESN), International Mobile Equipment Identifier (IMEI), International Mobile Subscriber Identity (IMSI), Mobile Station Identifier (MSID), Mobile Identification Number (MIN), and Mobile Equipment Identifier (MEID).  Information shall include the duration start date / time to end date / time that the subscriber was assigned the Internet Protocol address 
+
+As well as:
+“What”
+The cellular phone records for the telephone number of 714 589-0331 during the time period of April 1, 2019 through August 6, 2019. Subscriber/Account Information, to include: Name, address, activation/suspension dates, payment method, account notes, account statements, additional telephone numbers/persons listed on the account, make/model of handset, Electronic Serial Number  (ESN), International Mobile Equipment Identifier (IMEI), International Mobile Subscriber Identity (IMSI), Mobile Station Identifier (MSID), Mobile Identification Number (MIN), and Mobile Equipment Identifier (MEID).
+
+
+
+
+
+
+Call Detail Records with Cellular Site Location, to include: cell site/sector, beginning and ending location for each call, Location Area Code (LAC), Cellular Identification (CID), Per Call Measurement Data (PCMD), Real Time-Tracking Tool (RTT), Historical Mobile Locator Tool (HMLT), switch information, latitude, longitude, orientation, azimuth, direction and strength of signal from the cellular tower.  IP Records or IPDR w/Cell-Site Records.  Historical GPS Location/NELOS Report.  As well as Timing Advance information.  For the time period of April 1, 2019 through April 5, 2019
+Per Cal Penal Code 1546.1 (d)(2), the warrant shall require that any information obtained through the execution of the warrant that is unrelated to the objective of the warrant shall be sealed and shall not be subject to further review, use, or disclosure except pursuant to a court order or to comply with discovery as required by Sections 1054.1 and 1054.7.  A court shall issue such an order upon a finding that there is probable cause to believe that the information is relevant to an active investigation, or review, use, or disclosure is required by state or federal law.
+Per Cal Penal Code 1546.1 (d)(3), the warrant shall comply with all other provisions of California and federal law, including any provisions prohibiting, limiting, or imposing additional requirements on the use of search warrants.  If directed to a service provider, the warrant shall be accompanied by an order requiring the service provider to verify the authenticity of electronic information that it produces by providing an affidavit that complies with the requirements set forth in Section 1561 of the Evidence Code.  Admission of that information into evidence shall be subject to Section 1562 of the Evidence Code.
+IT IS FURTHER ORDERED that T-Mobile, verify the authenticity of the electronic information that it produces as required under Penal Code Section 1546.1(d)(1).
+90 Day Non- Disclosure Order:
+Pursuant to Penal Code Section 1524, It is hereby ORDERED that no officer, agent, or employee of T-Mobile, or any other entity, reveal the existence of this warrant or any action or compliance taken pursuant to this warrant to any person or entity for 90 days following the receipt of the warrant unless reasonably necessary to comply with this warrant.  The 90 day Non-Disclosure may be extended by the court for an amount of time not to exceed 90 days.
+IT IS FURTHER ORDERED that the notification by the government otherwise required under Penal Code Section 1546.2 (a) be delayed for a period of ninety days.
+Order to Send Information:
+Google LLC, shall disclose responsive data, if any, by sending to:
+Attention:
+Detective Brad Guith 
+Fontana Police Department
+Internet Crimes Against Children’s Unit
+17005 Upland Ave, 
+Fontana, California 92335
+Email:  BGUITH@FONTNANA.ORG
+Detective Guith can be reached at office number (909) 350-7723, or email address bguith@fontana.org 
+
+
+Attachment: Page B
+
+You are  Therefore  COMMANDED  to  SEARCH:  
+The business known as:
+
+Facebook Security LE Response Team
+Facebook, Inc.
+1601 Willow Road
+Menlo Park, CA 94025
+
+For the FOLLOWING PROPERTY  or  PERSON(s):
+
+Any and all information related to the following Facebook, Inc subscriber for the following ESP User: 
+
+Screen/User Name: gordon.orante.1
+ESP User ID: 100026413552975
+Profile URL: http://www.facebook.com/gordon.orante.1
+
+ 1.Subscriber records including: Name, Date(s) of Birth, physical address(es), length of service, credit card information, e-mail address(es), login/logout IP address(es) for the Facebook accounts listed above.
+ 2. Messages, photos, videos, wall posts, and location information for the Facebook / Instagram account listed above.
+ 3. All communications content, including documents, email, text messages (SMS/MMS or chat), Facebook Messenger, notes, call history or voice mail. This data can include attachments, source and destination addresses, time and date information, connection logs, and images 
+ 4. All location data within the specified date(s). Location data may be found within the metadata contained in images and data associated with installed applications.
+ 5. All multimedia data, i.e. images, audio and video files, and associated metadata.
+ 6. All internet artifacts within the specified date(s), including cookies, bookmarks, search terms, and history.
+ 7. All financial information, to include bank and credit card account information, statements and records.
+ 8. Device identification, address book/contacts, associated wired/wireless devices, associated connected electronic devices, stored passwords, keyboard cache, user dictionaries, search history, and settings.
+ 9. For the dates between, April 1, 2019 through August 6, 2019.  
+
+
+Per Cal Penal Code 1546.1 (d)(2), the warrant shall require that any information obtained through the execution of the warrant that is unrelated to the objective of the warrant shall be sealed and shall not be subject to further review, use, or disclosure except pursuant to a court order or to comply with discovery as required by Sections 1054.1 and 1054.7.  A court shall issue such an order upon a finding that there is probable cause to believe that the information is relevant to an active investigation, or review, use, or disclosure is required by state or federal law.
+Per Cal Penal Code 1546.1 (d)(3), the warrant shall comply with all other provisions of California and federal law, including any provisions prohibiting, limiting, or imposing additional requirements on the use of search warrants.  If directed to a service provider, the warrant shall be accompanied by an order requiring the service provider to verify the authenticity of electronic information that it produces by providing an affidavit that complies with the requirements set forth in Section 1561 of the Evidence Code.  Admission of that information into evidence shall be subject to Section 1562 of the Evidence Code.
+IT IS FURTHER ORDERED that Facebook, Inc, verify the authenticity of the electronic information that it produces as required under Penal Code Section 1546.1(d)(1).
+90 Day Non- Disclosure Order:
+Pursuant to Penal Code Section 1524, It is hereby ORDERED that no officer, agent, or employee of Facebook, Inc, or any other entity, reveal the existence of this warrant or any action or compliance taken pursuant to this warrant to any person or entity for 90 days following the receipt of the warrant unless reasonably necessary to comply with this warrant.  The 90-day Non-Disclosure may be extended by the court for an amount of time not to exceed 90 days.
+IT IS FURTHER ORDERED that the notification by the government otherwise required under Penal Code Section 1546.2 (a) be delayed for a period of ninety days.
+Order to Send Information:
+Facebook, Inc, shall disclose responsive data, if any, by sending to:
+Attention:
+Detective Brad Guith Fontana Police Department
+Internet Crimes Against Children Unit
+17005 Upland Ave, 
+Fontana, California 92335
+Email:  BGUITH@FONTNANA.ORG
+Detective Guith can be reached at office number (909) 350-7723, or email address bguith@fontana.org 
+
+
+
+
+
+
+
+Attachment: Page C
+
+You are  Therefore  COMMANDED  to  SEARCH:  
+The business known as:
+
+Charter Communications, Inc 
+12405 Powerscourt Dr.
+St.Louis, MO  63131
+
+For the FOLLOWING PROPERTY  or  PERSON(s):
+
+Any and all information related to the following Charter Communications, Inc subscriber for the Internet Protocol (IP) address(es) between the dates of April 1, 2019 through August 6, 2019.
+
+2605:e000:b453:6c00:7513:90c2:377c:4165
+2605:e000:b453:6c00:608a:b47f:c2ef:0b72
+
+Information shall include all basic subscriber identity information such as: first and last name; service address; billing address; subscriber identification; all screen names / usernames; assigned email addresses, email addresses provided by the subscriber; telephone number; date of birth; social security number; payment / billing and credit information to include credit card number and / or bank account number; account status; account creation / closed date and any complaints filed against the subscriber. Information shall include the duration start date / time to end date / time that the subscriber was assigned the Internet Protocol address 
+
+
+Per Cal Penal Code 1546.1 (d)(2), the warrant shall require that any information obtained through the execution of the warrant that is unrelated to the objective of the warrant shall be sealed and shall not be subject to further review, use, or disclosure except pursuant to a court order or to comply with discovery as required by Sections 1054.1 and 1054.7.  A court shall issue such an order upon a finding that there is probable cause to believe that the information is relevant to an active investigation, or review, use, or disclosure is required by state or federal law.
+
+
+
+
+Per Cal Penal Code 1546.1 (d)(3), the warrant shall comply with all other provisions of California and federal law, including any provisions prohibiting, limiting, or imposing additional requirements on the use of search warrants.  If directed to a service provider, the warrant shall be accompanied by an order requiring the service provider to verify the authenticity of electronic information that it produces by providing an affidavit that complies with the requirements set forth in Section 1561 of the Evidence Code.  Admission of that information into evidence shall be subject to Section 1562 of the Evidence Code.
+IT IS FURTHER ORDERED that Google LLC, verify the authenticity of the electronic information that it produces as required under Penal Code Section 1546.1(d)(1).
+90 Day Non- Disclosure Order:
+Pursuant to Penal Code Section 1524, It is hereby ORDERED that no officer, agent, or employee of Google LLC, or any other entity, reveal the existence of this warrant or any action or compliance taken pursuant to this warrant to any person or entity for 90 days following the receipt of the warrant unless reasonably necessary to comply with this warrant.  The 90 day Non-Disclosure may be extended by the court for an amount of time not to exceed 90 days.
+IT IS FURTHER ORDERED that the notification by the government otherwise required under Penal Code Section 1546.2 (a) be delayed for a period of ninety days.
+Order to Send Information:
+Charter Communications, Inc, shall disclose responsive data, if any, by sending to:
+Attention: 
+Detective Brad Guith 
+Fontana Police Department
+Internet Crimes Against Children’s Unit
+17005 Upland Ave, 
+Fontana, California 92335
+Email:  BGUITH@FONTNANA.ORG
+Detective Guith can be reached at office number (909) 350-7723, or email address bguith@fontana.org
+
+
+
+
+
+
+
+
+
+
+
+
+STATEMENT OF  PROBABLE  CAUSE
+
+
+Affiant declares under penalty of perjury that the following facts are true and that there is probable cause to believe, and Affiant does believe, that the designated articles, property, and persons are now in the described locations, including all rooms, buildings, and structures used in connection with the premises and buildings adjoining them, the vehicles and the persons:
+
+IDENTIFICATION AND EXPERTISE OF AFFIANT:
+Your affiant, Bradley Guith, has been a sworn police officer since May, 1996 with the Los Angeles Police Department.  Your affiant changed employment to the Fontana Police Department in 2001.  Your affiant is currently assigned to the Fontana Police Department Investigations Unit as a Crimes Against Property Detective.  Your affiant has participated in over 1000 various investigations and arrests including, but not limited to:  forgery, fraud, grand and petty theft, burglary, receiving and possession of stolen property, illegal narcotics offenses (sales, transportation, and possession), criminal street gang enforcement, weapons and firearms offenses, assault, aggravated assault, domestic violence, sexual exploitation of minors, child abuse, rape, robbery, and homicide.
+
+Your affiant has attended a basic P.O.S.T. academy at the Los Angeles Police Academy, where your affiant received approximately 960 hours of instruction.  Your affiant received training while at the police academy in crimes including, but not limited to:  various narcotics offenses, weapons and firearms offenses, domestic violence, child abuse, sexual exploitation of minors, theft, vehicle theft, burglary, fraud, identity theft, robbery, assault, aggravated assault and homicide.  After graduating the academy, your affiant held positions at the Los Angeles Police Department as a Patrol Officer, Bicycle Officer, and Traffic Accident Investigator.  In 2001, your affiant left the Los Angeles Police Department and joined the Fontana Police Department.  During your affiant’s time at the Fontana Police Department he has been a Patrol Officer, Field Training Officer, Firearms Instructor, Emergency Vehicle Operation Instructor (E.V.O.C), a Driving Simulator Instructor, a Driving Safety Instructor, a Force Options Simulator Instructor, and a Community Emergency Response Team Instructor (C.E.R.T).  Your affiant is currently a Police Corporal working as a Detective assigned to the Internet Crimes Against Children (ICAC) Task Force in the Investigations Unit.
+
+ (2) PROBABLE CAUSE:
+PC
+
+
+
+It has been my experience that it takes companies considerable time beyond the statutory 10-day search warrant return period to collect and provide materials sought in this search warrant.  Therefore, I request permission to return this Search Warrant within 10 days from the date all materials are received from these companies.
+
+
+AND TO SEIZE IT / THEM IF FOUND  and bring it / them forthwith before me, or this court, at the courthouse of this court.  This Search Warrant and Affidavit and attached and incorporated Affidavit were sworn to as true and subscribed before me on this _________________________, at __________ A.M. / P.M.  Wherefore, I find probable cause for the issuance of this Search Warrant and do issue it.
+
+HOBBS  SEALING  APPROVED:       YES        NO 
+______________________________________________________,NIGHT  SEARCH  APPROVED:         YES        NO
+(Signature of  Judge)
+CA Countys
+Judge of the Superior Court of California, County of San Bernardino, Superior Court, 
+
+
+______________________________________________________Back to Index
+(Printed Name of Judge)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

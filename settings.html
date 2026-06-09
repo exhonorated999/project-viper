@@ -1810,20 +1810,20 @@
                     </div><!-- /customMetricsSectionBody -->
                 </div>
 
-                <!-- ═══ Document Authoring Section ═══ -->
+                <!-- ═══ Warrant Authoring Section ═══ -->
                 <div class="glass-card rounded-xl p-6">
                     <div class="flex justify-between items-center cursor-pointer" onclick="toggleDocumentAuthoringSection()">
                         <h3 class="text-xl font-bold flex items-center gap-2">
                             <svg class="w-6 h-6 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                             </svg>
-                            Document Authoring
+                            Warrant Authoring
                         </h3>
                         <svg id="documentAuthoringChevron" class="w-5 h-5 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
                         </svg>
                     </div>
-                    <p class="text-gray-400 text-sm mb-5">Author drafting modules for warrants, subpoenas, and other case documents. Generated drafts are aids — review with your DA / legal counsel before service.</p>
+                    <p class="text-gray-400 text-sm mb-5">Author drafting modules for search warrants and related court documents. Generated drafts are aids — review with your DA / legal counsel before service.</p>
 
                     <div id="documentAuthoringBody" class="hidden mt-5 space-y-4">
 
@@ -1840,6 +1840,20 @@
                                     aria-label="Toggle Warrant Author">
                                     <span id="warrantAuthorToggleIndicator" class="inline-block w-4 h-4 transform transition-transform bg-white rounded-full translate-x-1"></span>
                                 </button>
+                            </div>
+                            <!-- State / jurisdiction template selector (visible only when WA enabled) -->
+                            <div id="warrantAuthorStateRow" class="hidden mt-3 pt-3 border-t border-gray-700/40">
+                                <div class="flex items-center gap-3 flex-wrap">
+                                    <div class="min-w-0">
+                                        <label for="warrantAuthorStateSelect" class="block text-[11px] uppercase tracking-wider text-gray-500">State Warrant Template</label>
+                                        <p class="text-[11px] text-gray-400 mt-0.5">Selects the jurisdiction-specific boilerplate, statutory grounds, and face-page format used for every draft.</p>
+                                    </div>
+                                    <select id="warrantAuthorStateSelect" onchange="setWarrantAuthorState(this.value)"
+                                        class="ml-auto px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-sm text-white focus:border-viper-cyan outline-none">
+                                        <option value="CA">California (CA)</option>
+                                        <option value="VA">Virginia (VA) — DC-338/DC-339 ESP · Beta</option>
+                                    </select>
+                                </div>
                             </div>
                             <!-- Agency Profile completeness indicator (visible only when WA enabled) -->
                             <div id="warrantAuthorProfileStatus" class="hidden mt-3 pt-3 border-t border-gray-700/40 flex items-center gap-2 text-xs">
@@ -4597,6 +4611,24 @@
     function hasWarrantAuthorComplianceAck() {
         return localStorage.getItem('viperWarrantAuthorComplianceAck') === 'true';
     }
+    // ─── State / jurisdiction selector ──────────────────────────────
+    // Persisted as 'viperWarrantAuthorState'. Default 'CA'. Drives which
+    // jurisdiction-specific boilerplate the block-builder applies.
+    const _WARRANT_AUTHOR_SUPPORTED_STATES = ['CA', 'VA'];
+    function getWarrantAuthorState() {
+        const v = (localStorage.getItem('viperWarrantAuthorState') || 'CA').toUpperCase();
+        return _WARRANT_AUTHOR_SUPPORTED_STATES.includes(v) ? v : 'CA';
+    }
+    function setWarrantAuthorState(state) {
+        const v = String(state || 'CA').toUpperCase();
+        if (!_WARRANT_AUTHOR_SUPPORTED_STATES.includes(v)) {
+            // Disabled options shouldn't reach here, but guard anyway.
+            return;
+        }
+        localStorage.setItem('viperWarrantAuthorState', v);
+        const sel = document.getElementById('warrantAuthorStateSelect');
+        if (sel && sel.value !== v) sel.value = v;
+    }
     function toggleWarrantAuthorEnabled() {
         const currentlyEnabled = isWarrantAuthorEnabled();
         if (!currentlyEnabled) {
@@ -4651,6 +4683,16 @@
         if (status) {
             if (enabled) status.classList.remove('hidden');
             else status.classList.add('hidden');
+        }
+        // Show/hide state-template selector row + sync current value
+        const stateRow = document.getElementById('warrantAuthorStateRow');
+        const stateSel = document.getElementById('warrantAuthorStateSelect');
+        if (stateRow) {
+            if (enabled) stateRow.classList.remove('hidden');
+            else stateRow.classList.add('hidden');
+        }
+        if (stateSel) {
+            stateSel.value = getWarrantAuthorState();
         }
         refreshAgencyProfileCompleteness();
     }

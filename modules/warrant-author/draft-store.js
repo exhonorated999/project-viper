@@ -52,11 +52,14 @@ function _loadRaw(caseId) {
   }
 }
 
-function _save(caseId, data) {
+function _save(caseId, data, opts) {
   if (!caseId) return false;
+  const silent = !!(opts && opts.silent);
   try {
     localStorage.setItem(_storageKey(caseId), JSON.stringify(data));
-    try { window.dispatchEvent(new CustomEvent('warrant-author-change', { detail: { caseId } })); } catch (_) {}
+    if (!silent) {
+      try { window.dispatchEvent(new CustomEvent('warrant-author-change', { detail: { caseId } })); } catch (_) {}
+    }
     return true;
   } catch (e) {
     console.error('[WarrantAuthor] draft-store save failed:', e);
@@ -120,16 +123,74 @@ function newAddendum(overrides) {
 
 // ─── factory: new draft ─────────────────────────────────────────────────
 
+// Supported draft.type values. Residential is the v1 California combined
+// SW + Affidavit + SOPC face-page format (CSAM / Narcotics / Persons /
+// Property). ESP is the legacy multi-business addendum flow.
+const DRAFT_TYPES = Object.freeze(['multi-business-esp', 'residential']);
+
+function isResidentialType(t) {
+  return t === 'residential';
+}
+
+function _defaultTemplateFor(type, jurisdiction) {
+  if (type === 'residential') {
+    return jurisdiction === 'CA' ? 'ca-residential' : 'ca-residential';
+  }
+  return jurisdiction === 'CA' ? 'ca-multi-business-esp' : 'generic-us-multi-business-esp';
+}
+
+// Crime-type defaults. Kept tiny here — full preset content (T&E paragraph,
+// items-to-seize blocks, default optional clauses, SOPC scaffold, default
+// PC 1524 grounds toggles) lives in crime-presets.js and is materialised
+// by the UI when the user picks a crime. The factory only seeds the
+// always-safe blank shell.
+function _residentialShell(opts, agency) {
+  const crimeType = (opts.crimeType && typeof opts.crimeType === 'string')
+    ? opts.crimeType : '';
+  return {
+    crimeType,                          // 'csam' | 'narcotics' | 'persons' | 'property' | ''
+    crimePresetId: crimeType || '',     // tracks preset origin; user can edit fields after
+    offenses: [],                       // [{ code: 'PC 311.11', label: '...' }]
+    premises: {
+      address: '',
+      legalDescription: '',
+      includeScopeBoilerplate: true,
+    },
+    suspects: [],                       // [{ name, dob, cdl, descriptors }]
+    itemsToSeize: {
+      mode: 'preset',                   // 'preset' | 'custom'
+      blocks: [],                       // [{ id, label, body }]
+    },
+    trainingExperience: {
+      mode: 'profile',                  // 'profile' (use agency profile T&E) | 'inline'
+      inlineBody: '',                   // populated from crime preset on first selection
+    },
+    sopc: {
+      sections: [],                     // [{ heading, body }] — user narrative
+    },
+    optionalClauses: {
+      offsiteComputerSearch: false,
+      authorityToDuplicate: false,
+      returnExtension: false,
+      nightService: { enabled: false, justification: '' },
+      hobbsSealing: { enabled: false, justification: '' },
+      statutoryGroundsRecap: true,
+    },
+    itemsIncorporatedByReference: true,
+    executedAt: { city: agency.city || '', date: '', time: '', timeAmPm: 'PM' },
+  };
+}
+
 function newDraft(opts) {
   opts = opts || {};
   const agency = (opts.agencyProfile && typeof opts.agencyProfile === 'object') ? opts.agencyProfile : {};
   const jurisdiction = opts.jurisdiction || agency.state || 'CA';
-  const template = opts.template ||
-    (jurisdiction === 'CA' ? 'ca-multi-business-esp' : 'generic-us-multi-business-esp');
+  const type = DRAFT_TYPES.includes(opts.type) ? opts.type : 'multi-business-esp';
+  const template = opts.template || _defaultTemplateFor(type, jurisdiction);
   const now = _nowIso();
-  return {
+  const base = {
     id: _draftId(),
-    type: opts.type || 'multi-business-esp',
+    type,
     template,
     jurisdiction,
     status: 'draft',
@@ -155,6 +216,10 @@ function newDraft(opts) {
     createdAt: now,
     updatedAt: now
   };
+  if (type === 'residential') {
+    base.residential = _residentialShell(opts, agency);
+  }
+  return base;
 }
 
 function _snapshotAgency(profile) {
@@ -184,7 +249,7 @@ function createDraft(caseId, opts) {
   return draft;
 }
 
-function saveDraft(caseId, draft) {
+function saveDraft(caseId, draft, opts) {
   if (!caseId || !draft || !draft.id) return false;
   const data = _loadRaw(caseId);
   const idx = data.drafts.findIndex(d => d.id === draft.id);
@@ -193,7 +258,7 @@ function saveDraft(caseId, draft) {
   recomputeStatus(draft);
   if (idx === -1) data.drafts.unshift(draft);
   else data.drafts[idx] = draft;
-  return _save(caseId, data);
+  return _save(caseId, data, opts);
 }
 
 function deleteDraft(caseId, draftId) {
@@ -237,8 +302,18 @@ function updateAddendum(caseId, draftId, addendumId, patch) {
 // ─── status recomputation ───────────────────────────────────────────────
 
 function recomputeStatus(draft) {
-  if (!draft || !Array.isArray(draft.addendums)) return draft;
+  if (!draft) return draft;
   if (draft.status === 'quashed') return draft;
+
+  // Residential drafts have no addendums — status stays draft until the
+  // composer marks it finalized. Service / return semantics are tracked
+  // on the parent case warrants module, not on the residential draft.
+  if (draft.type === 'residential') {
+    if (draft.status !== 'finalized') draft.status = 'draft';
+    return draft;
+  }
+
+  if (!Array.isArray(draft.addendums)) return draft;
 
   const ads = draft.addendums;
   if (!ads.length) { draft.status = 'draft'; return draft; }
@@ -292,6 +367,8 @@ function inflightCount(caseId) {
   let n = 0;
   for (const d of drafts) {
     if (d.status === 'quashed' || d.status === 'fully-returned') continue;
+    // Residential drafts contribute 1 each (no addendum fanout).
+    if (d.type === 'residential') { n += 1; continue; }
     n += 1 + (Array.isArray(d.addendums) ? d.addendums.length : 0);
   }
   return n;
@@ -302,6 +379,8 @@ function inflightCount(caseId) {
 const api = Object.freeze({
   SCHEMA_VERSION,
   STORAGE_PREFIX,
+  DRAFT_TYPES,
+  isResidentialType,
   // factories
   newDraft, newAddendum,
   // CRUD

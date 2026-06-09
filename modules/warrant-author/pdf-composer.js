@@ -107,6 +107,30 @@
     function drawLeft(font, text, indent = 0) {
       _setFont(doc, font);
       const lines = doc.splitTextToSize(_safeText(text), CONTENT_W - indent);
+      // Paragraph-level pagination rules (judges dislike split sentences):
+      //   • Short paragraphs (≤ 3 lines): keep entirely together — break
+      //     the page first if it won't all fit on the current page.
+      //   • Longer paragraphs: enforce widow/orphan ≥ 2 lines on each
+      //     side of any break. If we can't honour that on the current
+      //     page (fewer than 2 lines would fit, OR splitting here would
+      //     orphan < 2 lines on the next page), break the page first.
+      const widowOrphanMin = 2;
+      if (font === FONT_BODY) {
+        const totalH = lines.length * font.lh;
+        const remaining = contentBottom - y;
+        if (totalH > remaining) {
+          if (lines.length <= 3) {
+            // Short paragraph — keep together by starting a new page
+            newPage();
+          } else {
+            const linesNowFit = Math.floor(remaining / font.lh);
+            const linesLeftover = lines.length - linesNowFit;
+            if (linesNowFit < widowOrphanMin || linesLeftover < widowOrphanMin) {
+              newPage();
+            }
+          }
+        }
+      }
       for (const ln of lines) {
         ensureRoom(font.lh);
         doc.text(ln, MARGIN + indent, y + font.size);
@@ -157,7 +181,66 @@
     // First page footer placeholder
     footerPlaceholders.push({ pageIdx: 1 });
 
-    for (const b of blocks) {
+    /**
+     * Approximate height (pt) a block will consume when rendered.
+     * Used by keepWithNext look-ahead to decide if a chain of blocks
+     * should be pushed to the next page as a unit (e.g. judge review
+     * chain: "Reviewed by..." + signature + court line + spacer +
+     * "(Printed Name of Judge)" — we never want the last signature to
+     * orphan alone on its own page).
+     */
+    function _measureBlock(b) {
+      if (!b) return 0;
+      switch (b.kind) {
+        case 'paragraph': {
+          _setFont(doc, FONT_BODY);
+          const indent = b.indent ? 18 : 0;
+          const lines = doc.splitTextToSize(_safeText(b.text), CONTENT_W - indent);
+          return (lines.length * FONT_BODY.lh) + 12;
+        }
+        case 'cover-heading':    return FONT_COVER_H.lh;
+        case 'cover-subheading': return FONT_COVER_SUB.lh;
+        case 'cover-meta':       return FONT_META.lh;
+        case 'heading-1':        return FONT_H1.lh + 12;
+        case 'heading-2':        return FONT_H2.lh + 8;
+        case 'signature':        return 22 + FONT_BODY.lh + 6;
+        case 'spacer':           return _spacerSize(b.size);
+        case 'page-break':       return 0;
+        default:                 return FONT_BODY.lh;
+      }
+    }
+
+    /**
+     * Sum heights of `blocks[startIdx]` and any consecutive blocks
+     * carrying `keepWithNext: true` (chain ends at the first block
+     * WITHOUT the flag — that final block is part of the group too).
+     * Returns 0 when the start block isn't part of a keep chain.
+     */
+    function _chainHeight(startIdx) {
+      const start = blocks[startIdx];
+      if (!start || !start.keepWithNext) return 0;
+      let total = 0;
+      for (let i = startIdx; i < blocks.length; i++) {
+        total += _measureBlock(blocks[i]);
+        if (!blocks[i].keepWithNext) break;
+      }
+      return total;
+    }
+
+    for (let bi = 0; bi < blocks.length; bi++) {
+      const b = blocks[bi];
+
+      // keepWithNext look-ahead: if the chain starting here won't fit
+      // on the current page, force a page break BEFORE the chain begins.
+      // Avoids orphaned trailing signatures (e.g. lone "(Printed Name
+      // of Judge)" stranded on its own page).
+      if (b.keepWithNext) {
+        const chainH = _chainHeight(bi);
+        if (chainH > 0 && (y + chainH) > contentBottom) {
+          newPage();
+        }
+      }
+
       switch (b.kind) {
         case 'cover-heading':
           ensureRoom(FONT_COVER_H.lh);

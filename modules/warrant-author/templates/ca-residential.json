@@ -1,0 +1,197 @@
+{
+  "id": "ca-residential",
+  "name": "California Residential Search Warrant",
+  "jurisdiction": "CA",
+  "version": 1,
+  "type": "residential",
+  "description": "California combined Search Warrant + Affidavit + Statement of Probable Cause for a residence (San Bernardino County combined format). Selects a crime-type preset (CSAM, Narcotics, Persons Crimes, Property Crimes) which drives default PC \u00a71524 grounds, items-to-seize blocks, training & experience prose, default optional clauses (Hobbs sealing, night service, offsite computer search, authority to duplicate, return extension), and SOPC narrative scaffolding. Premises legal description, suspect identification, and SOPC narrative are author-supplied. Agency / affiant / court / county / judge default from the Warrant Author agency profile (Settings).",
+  "supportedCrimePresets": ["csam", "narcotics", "persons", "property"],
+  "blocks": [
+    {
+      "key": "01-warrant-face-label",
+      "kind": "label",
+      "slot": "face.pageLabel",
+      "text": "SEARCH WARRANT"
+    },
+    {
+      "key": "02-people-opener",
+      "kind": "constant",
+      "heading": "",
+      "text": "THE PEOPLE OF THE STATE OF CALIFORNIA, TO ANY PEACE OFFICER IN {{agency.county}} COUNTY:"
+    },
+    {
+      "key": "03-affiant-attestation",
+      "kind": "verbatim-paragraph",
+      "heading": "",
+      "text": "Proof, by affidavit, having been this day made before me by {{affiant.rank}} {{affiant.name}} of {{agency.name}}, that there is probable cause to believe that the property and things described in this warrant are located at the premises set forth below, and that the property and things are (1) stolen or embezzled; (2) used as the means of committing a felony; (3) in the possession of a person with the intent to use it as a means of committing a public offense, or in the possession of another to whom he or she may have delivered it for the purpose of concealing it or preventing its discovery; (4) constitute evidence which tends to show that a felony has been committed, or that a particular person has committed a felony; (5) tend to show that sexual exploitation of a child, in violation of Penal Code Section 311.3, or possession of matter depicting sexual conduct of a person under the age of 18 years, in violation of Penal Code Section 311.11, has occurred or is occurring; (6) when the property or things to be seized consists of evidence that tends to show a violation of Section 3700.5 of the Labor Code, or that tends to show that a particular person has violated Section 3700.5 of the Labor Code; or (7) when the property or things to be seized include a firearm or any other deadly weapon at the scene of, or at the premises occupied or under the control of the person arrested in connection with, a domestic violence incident."
+    },
+    {
+      "key": "04-pc1524-grounds",
+      "kind": "pc1524-grounds",
+      "heading": "Grounds (Penal Code \u00a71524):",
+      "slot": "residential.pc1524Grounds"
+    },
+    {
+      "key": "05-search-command-header",
+      "kind": "constant",
+      "heading": "",
+      "text": "YOU ARE THEREFORE COMMANDED to SEARCH:"
+    },
+    {
+      "key": "06-premises-legal",
+      "kind": "premises-legal",
+      "heading": "DESCRIPTION OF PROPERTY TO BE SEARCHED",
+      "slot": "residential.premises",
+      "fields": ["address", "legalDescription"],
+      "requiredFields": ["address", "legalDescription"]
+    },
+    {
+      "key": "07-suspect-identification",
+      "kind": "suspect-identification",
+      "heading": "INCLUDING THE PERSON OF:",
+      "slot": "residential.suspects",
+      "fields": ["name", "aliases", "dob", "descriptors", "address"]
+    },
+    {
+      "key": "08-seize-header",
+      "kind": "constant",
+      "heading": "",
+      "text": "AND TO SEIZE THE FOLLOWING PROPERTY AND THINGS:"
+    },
+    {
+      "key": "09-items-to-seize",
+      "kind": "items-to-seize-blocks",
+      "heading": "DESCRIPTION OF PROPERTY TO BE SEIZED",
+      "slot": "residential.itemsToSeize"
+    },
+    {
+      "key": "10-night-service-face",
+      "kind": "optional-checkbox",
+      "heading": "",
+      "slot": "residential.optionalClauses.nightService.enabled",
+      "text": "Good cause having been shown, this warrant may be served at any time of the day or night pursuant to Penal Code \u00a71533."
+    },
+    {
+      "key": "11-hobbs-sealing-face",
+      "kind": "optional-checkbox",
+      "heading": "",
+      "slot": "residential.optionalClauses.hobbsSealing.enabled",
+      "text": "The affidavit in support of this warrant is ORDERED SEALED pursuant to People v. Hobbs (1994) 7 Cal.4th 948 and Evidence Code \u00a71041, on the grounds set forth in the affidavit."
+    },
+    {
+      "key": "12-magistrate-boilerplate",
+      "kind": "verbatim-paragraph",
+      "heading": "",
+      "text": "GIVEN UNDER MY HAND, and dated this _____ day of ____________, 20___, at _____ a.m./p.m.\n\n_____________________________________\nJUDGE OF THE SUPERIOR COURT\n{{agency.county}} County, California"
+    },
+    {
+      "key": "13-affidavit-header",
+      "kind": "section-break",
+      "heading": "AFFIDAVIT / STATEMENT OF PROBABLE CAUSE",
+      "text": ""
+    },
+    {
+      "key": "14-affiant-declaration",
+      "kind": "verbatim-paragraph",
+      "heading": "",
+      "text": "I, {{affiant.rank}} {{affiant.name}}, Badge No. {{affiant.badge}}, being first duly sworn, depose and say: that I am a peace officer employed by {{agency.name}}, currently assigned to {{agency.unit}}, and that the facts set forth in this affidavit are true to the best of my knowledge and belief, except for those matters stated on information and belief, and as to those matters, I believe them to be true."
+    },
+    {
+      "key": "15-training-experience",
+      "kind": "training-experience",
+      "heading": "IDENTIFICATION AND EXPERIENCE OF AFFIANT",
+      "slot": "residential.trainingExperience"
+    },
+    {
+      "key": "16-probable-cause",
+      "kind": "sopc-sections",
+      "heading": "STATEMENT OF PROBABLE CAUSE",
+      "slot": "residential.sopc.sections"
+    },
+    {
+      "key": "17-property-to-search-recap",
+      "kind": "premises-legal-recap",
+      "heading": "DESCRIPTION OF PROPERTY TO BE SEARCHED",
+      "slot": "residential.premises"
+    },
+    {
+      "key": "18-property-to-seize-recap",
+      "kind": "items-to-seize-recap",
+      "heading": "DESCRIPTION OF PROPERTY TO BE SEIZED",
+      "slot": "residential.itemsToSeize"
+    },
+    {
+      "key": "19-offsite-computer",
+      "kind": "optional-clause",
+      "heading": "OFFSITE EXAMINATION OF DIGITAL DEVICES",
+      "slot": "residential.optionalClauses.offsiteComputerSearch",
+      "text": "Your affiant requests the authority to seize and remove from the premises any digital storage devices (including but not limited to computers, mobile telephones, tablets, external hard drives, USB storage media, optical media, and memory cards) for offsite forensic examination at a secure law enforcement facility. The examination of digital devices is a technical process that often requires specialized equipment, training, and significant time, and cannot be reasonably or safely conducted at the scene. Forensic examination will be limited to data falling within the scope of items to be seized as described in this warrant."
+    },
+    {
+      "key": "20-authority-to-duplicate",
+      "kind": "optional-clause",
+      "heading": "AUTHORITY TO DUPLICATE",
+      "slot": "residential.optionalClauses.authorityToDuplicate",
+      "text": "Your affiant requests authority to make exact bit-for-bit forensic duplicates of any digital storage media seized pursuant to this warrant, and to retain such duplicates as evidence and for further examination, even after the original media may be returned or otherwise disposed of pursuant to law."
+    },
+    {
+      "key": "21-return-extension",
+      "kind": "optional-clause",
+      "heading": "REQUEST FOR EXTENSION OF TIME FOR RETURN",
+      "slot": "residential.optionalClauses.returnExtension",
+      "text": "Your affiant requests that the time for return of this warrant pursuant to Penal Code \u00a71534 be extended to permit completion of forensic examination of any digital storage media seized. Forensic examination of digital media often requires extended time due to encryption, volume of data, queue at the forensic laboratory, and the technical complexity of the analysis."
+    },
+    {
+      "key": "22-night-service-justification",
+      "kind": "optional-clause-with-justification",
+      "heading": "REQUEST FOR NIGHT SERVICE (Penal Code \u00a71533)",
+      "slot": "residential.optionalClauses.nightService",
+      "fields": ["enabled", "justification"]
+    },
+    {
+      "key": "23-hobbs-sealing-justification",
+      "kind": "optional-clause-with-justification",
+      "heading": "REQUEST TO SEAL AFFIDAVIT (People v. Hobbs)",
+      "slot": "residential.optionalClauses.hobbsSealing",
+      "fields": ["enabled", "justification"]
+    },
+    {
+      "key": "24-statutory-grounds-recap",
+      "kind": "optional-clause",
+      "heading": "STATUTORY GROUNDS",
+      "slot": "residential.optionalClauses.statutoryGroundsRecap",
+      "text": "The property and things sought to be seized as described in this warrant constitute evidence of the violation(s) of California law identified in the caption of this affidavit. Issuance of this warrant is authorized under Penal Code \u00a71524 on the grounds specified on the face of the warrant."
+    },
+    {
+      "key": "25-executed-at",
+      "kind": "executed-at",
+      "heading": "",
+      "slot": "residential.executedAt",
+      "fields": ["city", "date", "timeAmPm"]
+    },
+    {
+      "key": "26-affiant-signature",
+      "kind": "affiant-contact",
+      "heading": "",
+      "fields": [
+        "affiantName",
+        "affiantBadgeId",
+        "affiantUnit",
+        "agencyName",
+        "agencyAddressLine1",
+        "agencyAddressCityStateZip",
+        "affiantPhone",
+        "affiantEmail"
+      ],
+      "labels": {
+        "affiantName": "Affiant",
+        "affiantBadgeId": "Badge / ID",
+        "affiantUnit": "Unit / Assignment",
+        "affiantPhone": "Phone",
+        "affiantEmail": "Email",
+        "agencyName": "Agency"
+      },
+      "requiredFields": ["affiantName", "agencyName"]
+    }
+  ]
+}

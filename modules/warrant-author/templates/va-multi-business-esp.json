@@ -1,0 +1,156 @@
+{
+  "id": "va-multi-business-esp",
+  "name": "Virginia Multi-Business ESP (DC-338 / DC-339)",
+  "jurisdiction": "VA",
+  "version": 1,
+  "description": "Virginia search warrant addendum template for Electronic Service Providers under Va. Code §§ 19.2-53, 19.2-54, 19.2-56, 19.2-70.3. Companion to DC-338 (Affidavit) and DC-339 (Search Warrant). NDO / delay-of-notice clauses cite 18 U.S.C. § 2705 (federal SCA) because Virginia has no state-law equivalent — this is the standard practice for warrants served on out-of-state ESPs (Snapchat, Google, Meta, etc.). Sealing is by court motion under Va. Code §§ 17.1-208 / 19.2-265.01.",
+  "compatibleProviderTypes": [
+    "ESP",
+    "Phone",
+    "Internet",
+    "Financial",
+    "Other"
+  ],
+  "blocks": [
+    {
+      "key": "01-page-label",
+      "kind": "label",
+      "slot": "addendum.pageLabel"
+    },
+    {
+      "key": "02-search-command",
+      "kind": "constant",
+      "heading": "",
+      "text": "YOU ARE THEREFORE COMMANDED to SEARCH:"
+    },
+    {
+      "key": "03-business-identification",
+      "kind": "provider-block",
+      "heading": "",
+      "fields": [
+        "legalEntity",
+        "address",
+        "custodianAttention",
+        "email",
+        "phone",
+        "portalUrl"
+      ],
+      "requiredFields": [
+        "legalEntity",
+        "address"
+      ]
+    },
+    {
+      "key": "04-foreign-corp-recital",
+      "kind": "verbatim-paragraph",
+      "heading": "Foreign Corporation — Va. Code § 19.2-70.3",
+      "text": "{{provider.legalEntity}} is a foreign corporation that provides electronic communication service or remote computing service to residents of the Commonwealth of Virginia. Pursuant to Va. Code § 19.2-70.3, this Court has authority to compel production of records held by {{provider.legalEntity}} relating to a subscriber or customer located within, or whose communications were transmitted to or from, the Commonwealth of Virginia."
+    },
+    {
+      "key": "05-for-the-following",
+      "kind": "constant",
+      "heading": "",
+      "text": "For the FOLLOWING PROPERTY or PERSON(s):"
+    },
+    {
+      "key": "06-target-account",
+      "kind": "target-account",
+      "heading": "Target Account(s):"
+    },
+    {
+      "key": "07-date-range",
+      "kind": "date-range",
+      "heading": "Date Range:"
+    },
+    {
+      "key": "08-items-to-seize",
+      "kind": "items-to-seize",
+      "heading": "The following records, information, documents, and items are to be produced:"
+    },
+    {
+      "key": "09-authenticity",
+      "kind": "verbatim-paragraph",
+      "heading": "Authentication of Records — Va. Code § 8.01-390.3 / FRE 902(11)",
+      "text": "Pursuant to Va. Code § 8.01-390.3 and Federal Rule of Evidence 902(11), the records, information, documents, and items produced in response to this warrant shall be accompanied by a certification of authenticity from the custodian of records or other qualified person. The certification shall state, under penalty of perjury, that: (a) the records were made at or near the time of the events described, by, or from information transmitted by, a person with knowledge; (b) the records were kept in the course of a regularly conducted activity of the business; and (c) the records were made by the regularly conducted business activity as a regular practice."
+    },
+    {
+      "key": "10-it-is-further-ordered-verify",
+      "kind": "provider-slot-paragraph",
+      "heading": "",
+      "text": "IT IS FURTHER ORDERED that {{provider.legalEntity}} shall authenticate all records, information, documents, and items produced in response to this warrant by including the certification required by Va. Code § 8.01-390.3 and Federal Rule of Evidence 902(11). The records shall be delivered to the affiant in a form that preserves their evidentiary integrity."
+    },
+    {
+      "key": "11-ndo-header",
+      "kind": "constant",
+      "heading": "",
+      "text": "NON-DISCLOSURE ORDER (18 U.S.C. § 2705(b)):"
+    },
+    {
+      "key": "12-ndo-base",
+      "kind": "provider-slot-paragraph",
+      "heading": "",
+      "text": "Pursuant to 18 U.S.C. § 2705(b), the Court FINDS that there is reason to believe that notification of the existence of this warrant to the subscriber or customer would result in: (i) endangering the life or physical safety of an individual; (ii) flight from prosecution; (iii) destruction of or tampering with evidence; (iv) intimidation of potential witnesses; or (v) otherwise seriously jeopardizing an investigation or unduly delaying a trial. IT IS THEREFORE ORDERED that {{provider.legalEntity}}, its officers, employees, and agents shall not disclose the existence of this warrant, the records produced in response, or the investigation of which this warrant is a part, to the subscriber, customer, or any third party other than counsel for {{provider.legalEntity}}, for a period of ninety (90) days from the date of this order."
+    },
+    {
+      "key": "13-ndo-supporting",
+      "kind": "optional-paragraph",
+      "guardSlot": "addendum.ndoExtendedJustification",
+      "heading": "Information Supporting Non-Disclosure:",
+      "text": "{{addendum.ndoExtendedJustification}}"
+    },
+    {
+      "key": "14-appearing-reason",
+      "kind": "verbatim-paragraph",
+      "heading": "",
+      "text": "IT APPEARING that there is reason to believe that notification of the existence of this warrant would seriously jeopardize the investigation described in the affidavit submitted in support of this warrant, including by giving the subscriber or others an opportunity to destroy evidence, change patterns of behavior, intimidate witnesses, or flee prosecution, the Court FINDS that the non-disclosure order set forth above is justified under 18 U.S.C. § 2705(b)."
+    },
+    {
+      "key": "15-ordered-delay",
+      "kind": "provider-slot-paragraph",
+      "heading": "",
+      "text": "IT IS ORDERED that {{provider.legalEntity}} shall delay any notification to the subscriber, customer, or any third party of the existence of this warrant or the production of records in response thereto for a period of ninety (90) days from the date of this order. Any extension of this delay-of-notice period shall be sought by separate application to this Court pursuant to 18 U.S.C. § 2705(b)."
+    },
+    {
+      "key": "16-delay-notice",
+      "kind": "verbatim-paragraph",
+      "heading": "",
+      "text": "Pursuant to 18 U.S.C. § 2705(a), notice to the subscriber or customer may be delayed for a period not to exceed the period authorized above, subject to extension by further order of the Court upon a showing of continuing need."
+    },
+    {
+      "key": "17-order-to-send-header",
+      "kind": "constant",
+      "heading": "",
+      "text": "ORDER TO SEND INFORMATION:"
+    },
+    {
+      "key": "18-affiant-contact",
+      "kind": "affiant-contact",
+      "heading": "All responsive records, information, documents, and items shall be transmitted to the affiant at the address below:",
+      "fields": [
+        "affiantName",
+        "affiantBadgeId",
+        "affiantUnit",
+        "agencyName",
+        "agencyAddressLine1",
+        "agencyAddressCityStateZip",
+        "affiantPhone",
+        "affiantEmail"
+      ],
+      "labels": {
+        "affiantName": "Affiant",
+        "affiantBadgeId": "Badge / ID",
+        "affiantUnit": "Unit / Assignment",
+        "affiantPhone": "Phone",
+        "affiantEmail": "Email",
+        "agencyName": "Agency",
+        "agencyAddressLine1": "",
+        "agencyAddressCityStateZip": ""
+      },
+      "requiredFields": [
+        "affiantName",
+        "agencyName",
+        "affiantEmail"
+      ]
+    }
+  ]
+}

@@ -83,6 +83,65 @@ function _broadcast(channel, payload) {
     }
 }
 
+// ─── VA form overlay merge (DC-338 + DC-339 + attachments) ────────────
+// When draft.template === 'va-multi-business-esp', the renderer-supplied
+// PDF (jsPDF output) contains only the Attachments — A (production
+// schedule), B (statement of material facts), and optionally C (training
+// & experience appendix). We prepend the overlay-filled DC-338 +
+// DC-339 official forms via pdf-lib's copyPages, producing the final
+// merged deliverable. Lazy-loads pdf-lib + va-form-overlay so a require
+// failure here doesn't taint the whole IPC surface.
+async function _mergeVaPdfs(jspdfBuf, draft, agency, addendumComposes) {
+    let pdfLib, overlay;
+    try { pdfLib = require('pdf-lib'); }
+    catch (e) { return { ok: false, error: `pdf-lib not available: ${e.message}` }; }
+    try { overlay = require('./va-form-overlay'); }
+    catch (e) { return { ok: false, error: `va-form-overlay not available: ${e.message}` }; }
+
+    let dc338Bytes, dc339Bytes, warnings = [];
+    try {
+        const result = await overlay.fillVaForms({
+            draft,
+            agency: agency || {},
+            addendumComposes: Array.isArray(addendumComposes) ? addendumComposes : [],
+        });
+        dc338Bytes = result.dc338Bytes;
+        dc339Bytes = result.dc339Bytes;
+        warnings = result.warnings || [];
+    } catch (e) {
+        return { ok: false, error: `overlay fill failed: ${e.message}` };
+    }
+
+    try {
+        const merged = await pdfLib.PDFDocument.create();
+        const dc338Doc = await pdfLib.PDFDocument.load(dc338Bytes);
+        const dc339Doc = await pdfLib.PDFDocument.load(dc339Bytes);
+        const attachDoc = await pdfLib.PDFDocument.load(jspdfBuf);
+
+        const dc338Pages = await merged.copyPages(dc338Doc, dc338Doc.getPageIndices());
+        dc338Pages.forEach(p => merged.addPage(p));
+        const dc339Pages = await merged.copyPages(dc339Doc, dc339Doc.getPageIndices());
+        dc339Pages.forEach(p => merged.addPage(p));
+        const attachPages = await merged.copyPages(attachDoc, attachDoc.getPageIndices());
+        attachPages.forEach(p => merged.addPage(p));
+
+        const mergedBytes = await merged.save();
+        return {
+            ok: true,
+            bytes: Buffer.from(mergedBytes),
+            warnings,
+            pageCount: merged.getPageCount(),
+            sectionPageCounts: {
+                dc338: dc338Doc.getPageCount(),
+                dc339: dc339Doc.getPageCount(),
+                attachments: attachDoc.getPageCount(),
+            },
+        };
+    } catch (e) {
+        return { ok: false, error: `pdf-lib merge failed: ${e.message}` };
+    }
+}
+
 // ─── IPC handlers (P0: stubs only — P1 implements) ────────────────────
 function registerIpc(ipcMain) {
 
@@ -209,6 +268,40 @@ function registerIpc(ipcMain) {
             }
             try {
                 let buf = Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes);
+
+                // ── VA form-overlay merge ────────────────────────────────
+                // When the draft is the Virginia template, the renderer-
+                // supplied jsPDF buffer contains ATTACHMENTS ONLY. We
+                // prepend the overlay-filled DC-338 + DC-339 official
+                // forms to produce the final deliverable. The merged
+                // bytes also feed the disk write AND get returned to the
+                // renderer so Preview/Download buttons see the same
+                // document the user gets on disk.
+                if (draft && draft.template === 'va-multi-business-esp') {
+                    const mergeRes = await _mergeVaPdfs(buf, draft, agency || {}, []);
+                    if (mergeRes.ok) {
+                        buf = mergeRes.bytes;
+                        result.vaOverlay = {
+                            merged: true,
+                            warnings: mergeRes.warnings,
+                            sectionPageCounts: mergeRes.sectionPageCounts,
+                        };
+                    } else {
+                        console.error('[WarrantAuthor] VA overlay merge failed:', mergeRes.error);
+                        result.vaOverlay = { merged: false, error: mergeRes.error };
+                        // Non-fatal — fall back to attachments-only PDF so
+                        // the user still gets SOMETHING. The result modal
+                        // can surface vaOverlay.error as a warning banner.
+                    }
+                }
+
+                // Return the (possibly merged) PDF bytes to the renderer
+                // so Preview/Download use the canonical deliverable.
+                result.pdfBytes = buf.buffer.slice(
+                    buf.byteOffset,
+                    buf.byteOffset + buf.byteLength
+                );
+
                 if (writeToDisk) {
                     const pdfPath = path.join(dir, 'warrant.pdf');
                     let writeBuf = buf;
@@ -398,5 +491,5 @@ module.exports = {
     registerIpc,
     setSecurityManager,
     setMainWindow,
-    _internals: { genWarrantId, _secureReadJson, _secureWriteJson, _draftsDirFor, _manifestPath },
+    _internals: { genWarrantId, _secureReadJson, _secureWriteJson, _draftsDirFor, _manifestPath, _mergeVaPdfs },
 };

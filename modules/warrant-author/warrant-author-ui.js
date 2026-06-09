@@ -52,6 +52,12 @@ const _state = {
   // it manually. Reset to undefined on draft switch so each new draft
   // starts with the panel visible.
   caOptionsOpen: undefined,
+  // VA Options panel open/closed state — same pattern as caOptionsOpen,
+  // applies to the VA-specific options panel (item 5, night service,
+  // knowledge basis, target accounts, advanced DC-339).
+  vaOptionsOpen: undefined,
+  // VA advanced DC-339 inner <details> open/closed state.
+  vaAdvancedDc339Open: undefined,
 };
 
 function _selectDraft(caseId, draftId) {
@@ -61,6 +67,8 @@ function _selectDraft(caseId, draftId) {
   _state.activeAddendumId = (d && d.addendums && d.addendums[0]) ? d.addendums[0].id : null;
   _state.view = 'editor';
   _state.caOptionsOpen = undefined;  // each new draft starts with options panel open
+  _state.vaOptionsOpen = undefined;
+  _state.vaAdvancedDc339Open = undefined;
 }
 
 function _backToList() {
@@ -77,6 +85,300 @@ function esc(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 function attr(s) { return esc(s); }
+
+// ─── dot-path / blob helpers (residential editor) ───────────────────────
+
+/**
+ * Set a value on a deeply nested object by dot-path. Numeric segments are
+ * treated as array indices (e.g. 'residential.suspects.0.name').
+ * Creates intermediate objects/arrays as needed.
+ */
+function _setByPath(root, path, value) {
+  if (!root || typeof root !== 'object' || !path) return;
+  const parts = String(path).split('.');
+  let cur = root;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const key = parts[i];
+    const nextIsIndex = /^\d+$/.test(parts[i + 1]);
+    if (cur[key] === undefined || cur[key] === null) {
+      cur[key] = nextIsIndex ? [] : {};
+    }
+    cur = cur[key];
+  }
+  const last = parts[parts.length - 1];
+  cur[last] = value;
+}
+function _getByPath(root, path) {
+  if (!root || !path) return undefined;
+  const parts = String(path).split('.');
+  let cur = root;
+  for (let i = 0; i < parts.length; i++) {
+    if (cur == null) return undefined;
+    cur = cur[parts[i]];
+  }
+  return cur;
+}
+
+/** Returns a sensible blank row to append to a residential list. */
+function _blankRowFor(listPath) {
+  if (listPath === 'residential.offenses')          return { code: '', label: '' };
+  if (listPath === 'residential.suspects')          return { name: '', aliases: '', dob: '', descriptors: '', address: '' };
+  if (listPath === 'residential.itemsToSeize.blocks') return { id: 'custom-' + Date.now().toString(36), label: '', body: '' };
+  if (listPath === 'residential.sopc.sections')     return { heading: '', body: '' };
+  return {};
+}
+
+/** Render the residential validator result panel (legacy bottom-mount
+ *  variant — still used by `onResidentialValidate` for back-compat).
+ *  The active editor uses `_renderResidentialValidatorPanel` instead,
+ *  which mirrors the ESP validator-panel look (collapsible banner +
+ *  scope chips + auto-runs on every render).
+ */
+function _renderResidentialValidation(result) {
+  if (!result) return '';
+  const errs = Array.isArray(result.errors) ? result.errors : [];
+  const warns = Array.isArray(result.warnings) ? result.warnings : [];
+  if (result.ok && warns.length === 0) {
+    return `<div class="bg-emerald-500/10 border border-emerald-500/40 rounded p-3 text-sm text-emerald-200">
+      ✓ Validator passed — draft ready for export.
+    </div>`;
+  }
+  const errLines = errs.map(e =>
+    `<li class="text-rose-200"><span class="font-mono text-rose-400">●</span> ${esc(e.label || e.message || String(e))}</li>`
+  ).join('');
+  const warnLines = warns.map(w =>
+    `<li class="text-amber-200"><span class="font-mono text-amber-400">○</span> ${esc(w.label || w.message || String(w))}</li>`
+  ).join('');
+  return `
+    <div class="bg-slate-800/50 border border-slate-600 rounded p-3 text-sm space-y-2">
+      ${errs.length ? `<div><div class="text-rose-300 font-semibold mb-1">${errs.length} error${errs.length === 1 ? '' : 's'} blocking export:</div><ul class="space-y-1 pl-2">${errLines}</ul></div>` : ''}
+      ${warns.length ? `<div><div class="text-amber-300 font-semibold mb-1">${warns.length} warning${warns.length === 1 ? '' : 's'}:</div><ul class="space-y-1 pl-2">${warnLines}</ul></div>` : ''}
+    </div>
+  `;
+}
+
+/**
+ * Auto-runs the residential validator and renders the result panel
+ * using the same `wa-validator*` CSS the ESP panel uses. Returns
+ * markup ready to be injected at the top of the editor.
+ *
+ * Pulls the case-level Case Probable Cause narrative and passes it
+ * along so PC_NARRATIVE_EMPTY fires correctly.
+ */
+function _renderResidentialValidatorPanel(caseId, draft) {
+  const v = (typeof window !== 'undefined') ? window.WarrantAuthorValidator : null;
+  if (!v || typeof v.validateResidential !== 'function') {
+    return `<div class="wa-validator wa-validator--unloaded">Validator not loaded.</div>`;
+  }
+  const agency = _loadAgencyProfile();
+  const agencyMerged = Object.assign({}, agency, draft.affiantSnapshot || {});
+  const pcStore = (typeof window !== 'undefined') ? window.WarrantAuthorCasePcStore : null;
+  const pcNarrative = (pcStore && pcStore.getBody)
+    ? pcStore.getBody(caseId)
+    : (draft.probableCauseNarrative || '');
+  let result;
+  try {
+    result = v.validateResidential({ draft, agency: agencyMerged, pcNarrative });
+  } catch (_e) {
+    return `<div class="wa-validator wa-validator--unloaded">Validator threw: ${esc(_e && _e.message || String(_e))}</div>`;
+  }
+  const { errors, warnings } = result;
+  const stats = result.stats || {};
+
+  let tone = 'ok';
+  let icon = '✓';
+  let title = 'Pre-flight: ready to generate';
+  if (errors.length) {
+    tone = 'fail'; icon = '⛔';
+    title = errors.length + ' hard error' + (errors.length === 1 ? '' : 's') +
+            ' — generation blocked';
+  } else if (warnings.length) {
+    tone = 'warn'; icon = '⚠';
+    title = warnings.length + ' warning' + (warnings.length === 1 ? '' : 's') +
+            ' — generation allowed';
+  }
+
+  const sub = `${stats.offenseCount || 0} offense${stats.offenseCount === 1 ? '' : 's'} · ` +
+              `${stats.itemBlockCount || 0} item block${stats.itemBlockCount === 1 ? '' : 's'} · ` +
+              `${errors.length} error${errors.length === 1 ? '' : 's'} · ` +
+              `${warnings.length} warning${warnings.length === 1 ? '' : 's'}`;
+
+  const chip = (issue) => {
+    const sc = issue.scope || '';
+    if (sc === 'agency')      return `<span class="wa-vl-chip wa-vl-chip--agency">Agency</span>`;
+    if (sc === 'residential') return `<span class="wa-vl-chip wa-vl-chip--draft">Premises</span>`;
+    if (sc === 'case')        return `<span class="wa-vl-chip wa-vl-chip--compose">Case PC</span>`;
+    if (sc === 'draft')       return `<span class="wa-vl-chip wa-vl-chip--draft">Draft</span>`;
+    return '';
+  };
+  const renderIssue = (issue) => {
+    const label = issue.label || issue.message || issue.code || String(issue);
+    const code  = issue.code  ? `<span class="text-[10px] font-mono text-slate-500 ml-2">[${esc(issue.code)}]</span>` : '';
+    return `<li data-code="${attr(issue.code || '')}">${chip(issue)} ${esc(label)}${code}</li>`;
+  };
+
+  const errorList = errors.length ? `
+    <details class="wa-validator-group wa-validator-group--err" open>
+      <summary>
+        <span class="wa-vg-icon">⛔</span>
+        <span class="wa-vg-title">${errors.length} hard error${errors.length === 1 ? '' : 's'}</span>
+      </summary>
+      <ul class="wa-validator-list">
+        ${errors.map(renderIssue).join('')}
+      </ul>
+    </details>
+  ` : '';
+
+  const warnList = warnings.length ? `
+    <details class="wa-validator-group wa-validator-group--warn"${errors.length ? '' : ' open'}>
+      <summary>
+        <span class="wa-vg-icon">⚠</span>
+        <span class="wa-vg-title">${warnings.length} warning${warnings.length === 1 ? '' : 's'}</span>
+      </summary>
+      <ul class="wa-validator-list">
+        ${warnings.map(renderIssue).join('')}
+      </ul>
+    </details>
+  ` : '';
+
+  const body = (errors.length || warnings.length)
+    ? `<div class="wa-validator-body">${errorList}${warnList}</div>`
+    : `<div class="wa-validator-body wa-validator-body--ok">All checks pass — safe to generate.</div>`;
+
+  return `
+    <details class="wa-validator wa-validator--${tone}"${errors.length ? ' open' : ''}>
+      <summary class="wa-validator-summary">
+        <span class="wa-validator-icon">${icon}</span>
+        <span class="wa-validator-title">${esc(title)}</span>
+        <span class="wa-validator-sub">${esc(sub)}</span>
+        <span class="wa-validator-chevron">▾</span>
+      </summary>
+      ${body}
+    </details>
+  `;
+}
+
+/**
+ * Render a block-stream as readable HTML for the right-side Live
+ * Preview pane. Mirrors the look of the ESP preview but works on the
+ * residential block kinds emitted by `_buildCaResidential`. Pure CSS,
+ * no jsPDF needed — this is just a visual approximation so the user
+ * can confirm the document shape before exporting.
+ */
+function _residentialBlocksToHtml(blocks) {
+  if (!Array.isArray(blocks) || !blocks.length) {
+    return '<div class="wa-lp-empty">No blocks emitted yet — fill in premises + offenses to start the preview.</div>';
+  }
+  const out = [];
+  let pageIdx = 1;
+  for (const b of blocks) {
+    if (!b || typeof b !== 'object') continue;
+    const k = b.kind || '';
+    const text = (b.text != null) ? String(b.text) : '';
+    if (k === 'page-break') {
+      pageIdx += 1;
+      out.push(`<div class="wa-lp-pagebreak">— Page ${pageIdx} —</div>`);
+    } else if (k === 'cover-heading') {
+      out.push(`<div class="wa-lp-coverhead">${esc(text)}</div>`);
+    } else if (k === 'cover-subheading' || k === 'cover-meta') {
+      out.push(`<div class="wa-lp-covermeta">${esc(text)}</div>`);
+    } else if (k === 'heading-1') {
+      out.push(`<div class="wa-lp-h1">${esc(text)}</div>`);
+    } else if (k === 'heading-2') {
+      out.push(`<div class="wa-lp-h2">${esc(text)}</div>`);
+    } else if (k === 'paragraph') {
+      out.push(`<div class="wa-lp-p${b.indent ? ' wa-lp-p--indent' : ''}">${esc(text)}</div>`);
+    } else if (k === 'numbered') {
+      out.push(`<div class="wa-lp-num">${esc(text)}</div>`);
+    } else if (k === 'signature') {
+      out.push(`<div class="wa-lp-sig">
+        <div class="wa-lp-sig-line">_______________________________________</div>
+        <div class="wa-lp-sig-label">${esc(b.label || '')}</div>
+      </div>`);
+    } else if (k === 'spacer') {
+      out.push(`<div class="wa-lp-spacer wa-lp-spacer--${esc(b.size || 'md')}"></div>`);
+    } else if (k === 'footer-disclaimer') {
+      out.push(`<div class="wa-lp-disclaimer">${esc(text)}</div>`);
+    }
+    // unknown kinds silently skipped
+  }
+  return out.join('');
+}
+
+/**
+ * Build & render the right-side Live Preview pane for a residential
+ * draft. Pulls the case-level Case PC narrative and runs the same
+ * `_buildCaResidential` path the export uses — so what the user sees
+ * is what the PDF/DOCX will contain.
+ */
+function _renderResidentialLivePreview(caseId, draft) {
+  const builder = (typeof window !== 'undefined') ? window.WarrantAuthorBlockBuilder : null;
+  if (!builder || typeof builder.build !== 'function') {
+    return `<div class="wa-lp-shell"><div class="wa-lp-empty">Block builder not loaded.</div></div>`;
+  }
+  const agency = _loadAgencyProfile();
+  const agencyMerged = Object.assign({}, agency, draft.affiantSnapshot || {});
+  const caseInfo = {
+    caseNumber: (typeof window !== 'undefined' && window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || draft.caseRef || '',
+    caseName:   (typeof window !== 'undefined' && window.currentCase && window.currentCase.name) || '',
+  };
+  const pcStore = (typeof window !== 'undefined') ? window.WarrantAuthorCasePcStore : null;
+  const pcNarrative = (pcStore && pcStore.getBody)
+    ? pcStore.getBody(caseId)
+    : (draft.probableCauseNarrative || '');
+  let stream;
+  try {
+    stream = builder.build({
+      draft,
+      addendumComposes: [],
+      agency: agencyMerged,
+      caseInfo,
+      pcNarrative,
+      includeDisclaimer: false,
+    });
+  } catch (e) {
+    return `<div class="wa-lp-shell"><div class="wa-lp-empty">Preview build failed: ${esc(e && e.message || String(e))}</div></div>`;
+  }
+  const meta = (stream && stream.meta) || {};
+  const headerLines = (meta.runningHeader && Array.isArray(meta.runningHeader.lines))
+    ? meta.runningHeader.lines : [];
+  const footerLine = (meta.runningFooter && meta.runningFooter.drNumber) ? ('DR # ' + meta.runningFooter.drNumber) : '';
+  const headerHtml = headerLines.length
+    ? `<div class="wa-lp-runheader">${headerLines.map(l => `<div>${esc(l)}</div>`).join('')}</div>`
+    : '';
+  const footerHtml = footerLine
+    ? `<div class="wa-lp-runfooter">${esc(footerLine)}</div>`
+    : '';
+  return `
+    <div class="wa-lp-shell">
+      <div class="wa-lp-title">LIVE PREVIEW — CA RESIDENTIAL SEARCH WARRANT</div>
+      <div class="wa-lp-page">
+        ${headerHtml}
+        <div class="wa-lp-body">${_residentialBlocksToHtml((stream && stream.blocks) || [])}</div>
+        ${footerHtml}
+      </div>
+    </div>
+  `;
+}
+
+/** Trigger download of a Blob with the given filename. Browser-side only. */
+function _downloadBlob(blob, filename, mimeType) {
+  try {
+    let b = blob;
+    if (!(b instanceof Blob)) {
+      b = new Blob([blob], { type: mimeType || 'application/octet-stream' });
+    }
+    const url = URL.createObjectURL(b);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+  } catch (e) {
+    console.error('[WarrantAuthor] download failed:', e);
+  }
+}
 
 // ─── status pill ────────────────────────────────────────────────────────
 
@@ -224,10 +526,31 @@ function harvestIdentifiers(caseId) {
 
 // ─── new-draft modal HTML ───────────────────────────────────────────────
 
+function _readWarrantAuthorState() {
+  // Settings dropdown wins over agency.state; falls back to agency.state, then 'CA'.
+  try {
+    const s = (localStorage.getItem('viperWarrantAuthorState') || '').toUpperCase();
+    if (s === 'CA' || s === 'VA') return s;
+  } catch (_e) { /* localStorage unavailable */ }
+  const agency = _loadAgencyProfile();
+  const as = (agency && agency.state) ? String(agency.state).toUpperCase() : '';
+  if (as === 'CA' || as === 'VA') return as;
+  return 'CA';
+}
+
 function _renderNewDraftModal(caseId) {
   const agency = _loadAgencyProfile();
-  const jurisdiction = agency && agency.state ? agency.state : 'CA';
+  const jurisdiction = _readWarrantAuthorState();
   const isCA = jurisdiction === 'CA';
+  const isVA = jurisdiction === 'VA';
+  // Crime presets are optional — module may not yet be loaded in some embeds.
+  const crimePresets = (typeof window !== 'undefined' && window.WarrantAuthorCrimePresets
+                         && typeof window.WarrantAuthorCrimePresets.listForPicker === 'function')
+    ? window.WarrantAuthorCrimePresets.listForPicker()
+    : [];
+  const crimeOptions = crimePresets.map(p =>
+    `<option value="${attr(p.id)}">${esc(p.label)}</option>`
+  ).join('');
   return `
     <div id="waNewDraftModal" class="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 backdrop-blur-sm">
       <div class="w-full max-w-lg bg-viper-dark border border-viper-cyan/30 rounded-xl shadow-2xl p-6">
@@ -244,12 +567,31 @@ function _renderNewDraftModal(caseId) {
             <span class="block text-[11px] text-slate-500 mt-1">Auto-populated from current case. Edit if you want a different label on this draft.</span>
           </label>
           <label class="block">
+            <span class="text-slate-400 text-xs uppercase tracking-wider">Warrant Type</span>
+            <select id="waNewType"
+                    onchange="WarrantAuthorUI.bus.onNewDraftTypeChange(this.value)"
+                    class="mt-1 w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded text-white focus:border-viper-cyan focus:outline-none">
+              <option value="multi-business-esp" selected>Multi-Business ESP (records from providers)</option>
+              <option value="residential">Residential Search Warrant</option>
+            </select>
+            <span class="block text-[11px] text-slate-500 mt-1">Pick the document the magistrate will sign. Template &amp; defaults populate from this choice.</span>
+          </label>
+          <label class="block">
             <span class="text-slate-400 text-xs uppercase tracking-wider">Template</span>
             <select id="waNewTemplate" class="mt-1 w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded text-white focus:border-viper-cyan focus:outline-none">
               <option value="ca-multi-business-esp" ${isCA ? 'selected' : ''}>CA — Multi-Business ESP (CalECPA §1546.1)</option>
-              <option value="generic-us-multi-business-esp" ${!isCA ? 'selected' : ''}>US Generic — Multi-Business ESP (SCA §2703)</option>
+              <option value="va-multi-business-esp" ${isVA ? 'selected' : ''}>VA — Multi-Business ESP (DC-338/DC-339, §19.2-53) · Beta</option>
+              <option value="generic-us-multi-business-esp" ${(!isCA && !isVA) ? 'selected' : ''}>US Generic — Multi-Business ESP (SCA §2703)</option>
             </select>
-            <span class="block text-[11px] text-slate-500 mt-1">Default derived from Agency Profile state = <code>${attr(jurisdiction)}</code>.</span>
+            <span class="block text-[11px] text-slate-500 mt-1">Default derived from Warrant Authoring state = <code>${attr(jurisdiction)}</code>. Change in Settings → Warrant Authoring.</span>
+          </label>
+          <label class="block hidden" id="waNewCrimeWrap">
+            <span class="text-slate-400 text-xs uppercase tracking-wider">Crime Type</span>
+            <select id="waNewCrime" class="mt-1 w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded text-white focus:border-viper-cyan focus:outline-none">
+              <option value="">— Select crime category —</option>
+              ${crimeOptions}
+            </select>
+            <span class="block text-[11px] text-slate-500 mt-1">Seeds PC §1524 grounds, items to seize, T&amp;E paragraph, default optional clauses, and SOPC scaffolding. All fields remain editable after creation.</span>
           </label>
         </div>
         <div class="mt-5 flex items-center justify-end gap-2">
@@ -288,9 +630,20 @@ function _renderDraftsList(caseId) {
   }
 
   const rows = drafts.map(d => {
+    const isResidential = d.type === 'residential';
     const adCount = Array.isArray(d.addendums) ? d.addendums.length : 0;
     const updated = _shortDate(d.updatedAt);
-    const providers = (d.addendums || []).map(a => a.providerKey || 'unset').filter(Boolean).slice(0, 4).join(', ') || '—';
+    const providers = isResidential
+      ? ((d.residential && d.residential.premises && d.residential.premises.address) || '— no premises set')
+      : ((d.addendums || []).map(a => a.providerKey || 'unset').filter(Boolean).slice(0, 4).join(', ') || '—');
+    const juris = (d.template && d.template.startsWith('ca-')) ? 'CA' : 'US';
+    const typeBadge = isResidential
+      ? '<span class="ml-1 px-1.5 py-0 bg-viper-orange/20 text-viper-orange border border-viper-orange/40 rounded text-[10px] font-mono uppercase">Residential</span>'
+      : '<span class="ml-1 px-1.5 py-0 bg-viper-purple/20 text-viper-purple border border-viper-purple/40 rounded text-[10px] font-mono uppercase">ESP</span>';
+    const subline = isResidential
+      ? `<span class="truncate">${esc(providers)}</span>`
+      : `<span><span class="text-viper-cyan font-mono">${adCount}</span> addendum${adCount === 1 ? '' : 's'}</span>
+         <span class="truncate">${esc(providers)}</span>`;
     return `
       <div class="wa-draft-row">
         <div class="flex-1 min-w-0 cursor-pointer" onclick="WarrantAuthorUI.bus.onOpenDraft('${attr(caseId)}','${attr(d.id)}')">
@@ -298,11 +651,11 @@ function _renderDraftsList(caseId) {
             ${_statusBadge(d.status)}
             <span class="text-white font-medium truncate">${esc(d.swNumber || d.caseRef || 'Untitled draft')}</span>
             <span class="text-slate-500 text-xs">·</span>
-            <span class="text-slate-400 text-xs">${esc(d.template === 'ca-multi-business-esp' ? 'CA' : 'US')}</span>
+            <span class="text-slate-400 text-xs">${esc(juris)}</span>
+            ${typeBadge}
           </div>
           <div class="flex items-center gap-3 text-xs text-slate-400">
-            <span><span class="text-viper-cyan font-mono">${adCount}</span> addendum${adCount === 1 ? '' : 's'}</span>
-            <span class="truncate">${esc(providers)}</span>
+            ${subline}
             <span class="ml-auto text-slate-500">updated ${esc(updated)}</span>
           </div>
         </div>
@@ -337,7 +690,506 @@ function _renderDraftsList(caseId) {
   `;
 }
 
-// ─── 2-pane editor ──────────────────────────────────────────────────────
+// ─── Residential editor (Phase R2 — interactive form) ─────────────────
+//
+// Full editor for type='residential' drafts. Single-pane scrollable form
+// with sections: identification → crime/offenses → PC §1524 grounds →
+// premises → suspects → items-to-seize → T&E → SOPC → optional clauses →
+// executed-at → export.
+//
+// Save pattern:
+//   - text inputs / selects / checkboxes: onchange → save + rerender
+//   - long textareas (SOPC body, items body, justifications, premises
+//     legal, T&E inline body): oninput → silent save (no rerender) so the
+//     caret doesn't jump. Structural ops (add/remove rows) trigger
+//     rerender via bus.
+function _renderResidentialEditor(caseId, draft) {
+  const r = draft.residential || {};
+  const presetId = r.crimePresetId || '';
+  const presetAPI = (typeof window !== 'undefined') ? window.WarrantAuthorCrimePresets : null;
+  const presetPick = (presetAPI && typeof presetAPI.listForPicker === 'function')
+    ? presetAPI.listForPicker() : [];
+  let presetLabel = '— (no preset)';
+  if (presetId && presetAPI && presetAPI.get) {
+    const pinfo = presetAPI.get(presetId);
+    if (pinfo) presetLabel = pinfo.label;
+  }
+
+  const dId = attr(draft.id);
+  const cId = attr(caseId);
+
+  // Helpers ----------------------------------------------------------
+  const setField = (path) =>
+    `WarrantAuthorUI.bus.onResidentialFieldSet('${cId}','${dId}','${path}', this.value)`;
+  const setBool = (path) =>
+    `WarrantAuthorUI.bus.onResidentialFieldSet('${cId}','${dId}','${path}', this.checked)`;
+  const setTextSilent = (path) =>
+    `WarrantAuthorUI.bus.onResidentialTextInput('${cId}','${dId}','${path}', this.value)`;
+  const listAdd = (path) =>
+    `WarrantAuthorUI.bus.onResidentialListAdd('${cId}','${dId}','${path}')`;
+  const listRemove = (path, idx) =>
+    `WarrantAuthorUI.bus.onResidentialListRemove('${cId}','${dId}','${path}',${idx})`;
+
+  // Top toolbar -----------------------------------------------------
+  const presetOptions = presetPick
+    .map(p => `<option value="${attr(p.id)}" ${p.id === presetId ? 'selected' : ''}>${esc(p.label)}</option>`)
+    .join('');
+
+  // Offenses -------------------------------------------------------
+  const offenses = Array.isArray(r.offenses) ? r.offenses : [];
+  const offensesRows = offenses.map((o, i) => `
+    <div class="grid grid-cols-12 gap-2 mb-2">
+      <input type="text" class="col-span-3 px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm font-mono focus:border-viper-cyan outline-none"
+             placeholder="Code (e.g. PC 311.11)"
+             value="${attr(o.code || '')}"
+             onchange="${setField('residential.offenses.' + i + '.code')}">
+      <input type="text" class="col-span-8 px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none"
+             placeholder="Description"
+             value="${attr(o.label || '')}"
+             onchange="${setField('residential.offenses.' + i + '.label')}">
+      <button onclick="${listRemove('residential.offenses', i)}"
+              class="col-span-1 px-2 py-1 text-rose-300 hover:text-rose-200 text-sm" title="Remove">✕</button>
+    </div>
+  `).join('');
+
+  // PC §1524 grounds ----------------------------------------------
+  const G = draft.pc1524Grounds || {};
+  const groundsList = [
+    ['stolen',              '(1) Stolen or embezzled'],
+    ['felonyMeans',         '(2) Used as means of committing a felony'],
+    ['possessedWithIntent', '(3) Possessed with intent to use as means of a public offense'],
+    ['evidenceOfFelony',    '(4) Tends to show a felony was committed / by a particular person'],
+    ['sexualExploitation',  '(5) Tends to show PC 311.3 / 311.11 (sexual exploitation of minor / CSAM)'],
+    ['arrestWarrant',       '(6) Subject of outstanding arrest warrant'],
+    ['ecspMisdemeanor',     '(7) Evidence of misdemeanor served on ECSP (PC §1546)'],
+    ['laborCode',           '(7) Tends to show Labor Code §3700.5 violation'],
+  ];
+  const groundsHtml = groundsList.map(([k, label]) => `
+    <label class="flex items-start gap-2 text-sm py-1">
+      <input type="checkbox" ${G[k] ? 'checked' : ''}
+             onchange="WarrantAuthorUI.bus.onPc1524GroundChange('${cId}','${dId}','${k}', this.checked)"
+             class="mt-0.5 accent-viper-cyan">
+      <span class="text-slate-200">${esc(label)}</span>
+    </label>
+  `).join('');
+
+  // Premises -------------------------------------------------------
+  const p = r.premises || { address: '', legalDescription: '' };
+
+  // Suspects -------------------------------------------------------
+  const suspects = Array.isArray(r.suspects) ? r.suspects : [];
+  const suspectsHtml = suspects.length
+    ? suspects.map((s, i) => `
+        <div class="bg-viper-dark/70 border border-slate-700 rounded p-3 mb-3">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs text-slate-400 uppercase tracking-wider">Suspect ${i + 1}</span>
+            <button onclick="${listRemove('residential.suspects', i)}" class="text-rose-300 hover:text-rose-200 text-sm">✕ Remove</button>
+          </div>
+          <div class="grid grid-cols-2 gap-2 mb-2">
+            <label class="block">
+              <span class="text-[11px] uppercase text-slate-500">Name</span>
+              <input type="text" value="${attr(s.name || '')}" placeholder="LASTNAME, FIRSTNAME"
+                     onchange="${setField('residential.suspects.' + i + '.name')}"
+                     class="mt-0.5 w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none">
+            </label>
+            <label class="block">
+              <span class="text-[11px] uppercase text-slate-500">Aliases</span>
+              <input type="text" value="${attr(s.aliases || '')}" placeholder="AKA ..."
+                     onchange="${setField('residential.suspects.' + i + '.aliases')}"
+                     class="mt-0.5 w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none">
+            </label>
+            <label class="block">
+              <span class="text-[11px] uppercase text-slate-500">DOB</span>
+              <input type="text" value="${attr(s.dob || '')}" placeholder="MM/DD/YYYY"
+                     onchange="${setField('residential.suspects.' + i + '.dob')}"
+                     class="mt-0.5 w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm font-mono focus:border-viper-cyan outline-none">
+            </label>
+            <label class="block">
+              <span class="text-[11px] uppercase text-slate-500">Descriptors</span>
+              <input type="text" value="${attr(s.descriptors || '')}" placeholder="WMA, 5'10\", 180 lbs, brn/brn"
+                     onchange="${setField('residential.suspects.' + i + '.descriptors')}"
+                     class="mt-0.5 w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none">
+            </label>
+            <label class="block col-span-2">
+              <span class="text-[11px] uppercase text-slate-500">Address</span>
+              <input type="text" value="${attr(s.address || '')}" placeholder="Residence address"
+                     onchange="${setField('residential.suspects.' + i + '.address')}"
+                     class="mt-0.5 w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none">
+            </label>
+          </div>
+        </div>
+      `).join('')
+    : '<div class="text-slate-500 text-sm italic mb-2">No suspects added yet.</div>';
+
+  // Items to seize ------------------------------------------------
+  const items = (r.itemsToSeize && Array.isArray(r.itemsToSeize.blocks)) ? r.itemsToSeize.blocks : [];
+  const itemsHtml = items.length
+    ? items.map((b, i) => `
+        <div class="bg-viper-dark/70 border border-slate-700 rounded p-3 mb-3">
+          <div class="flex items-center justify-between mb-2">
+            <input type="text" value="${attr(b.label || '')}" placeholder="Block label (e.g. Electronic Devices)"
+                   onchange="${setField('residential.itemsToSeize.blocks.' + i + '.label')}"
+                   class="flex-1 px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm font-mono focus:border-viper-cyan outline-none">
+            <button onclick="${listRemove('residential.itemsToSeize.blocks', i)}" class="ml-2 text-rose-300 hover:text-rose-200 text-sm">✕</button>
+          </div>
+          <textarea rows="6"
+                    oninput="${setTextSilent('residential.itemsToSeize.blocks.' + i + '.body')}"
+                    placeholder="Describe the property to be seized..."
+                    class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none">${esc(b.body || '')}</textarea>
+        </div>
+      `).join('')
+    : '<div class="text-slate-500 text-sm italic mb-2">No items-to-seize blocks. Click "+ Add block" or "Re-seed from preset" above.</div>';
+
+  // T&E -----------------------------------------------------------
+  const te = r.trainingExperience || { mode: 'profile', inlineBody: '' };
+  const teMode = te.mode === 'inline' ? 'inline' : 'profile';
+  const _agencyForTe = _loadAgencyProfile();
+  const teProfileBody = (_agencyForTe && typeof _agencyForTe.trainingExperienceBoilerplate === 'string')
+    ? _agencyForTe.trainingExperienceBoilerplate.trim()
+    : '';
+
+  // SOPC ----------------------------------------------------------
+  const sopc = (r.sopc && Array.isArray(r.sopc.sections)) ? r.sopc.sections : [];
+  const sopcHtml = sopc.length
+    ? sopc.map((s, i) => `
+        <div class="bg-viper-dark/70 border border-slate-700 rounded p-3 mb-3">
+          <div class="flex items-center justify-between mb-2">
+            <input type="text" value="${attr(s.heading || '')}" placeholder="Section heading"
+                   onchange="${setField('residential.sopc.sections.' + i + '.heading')}"
+                   class="flex-1 px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm font-mono focus:border-viper-cyan outline-none">
+            <button onclick="${listRemove('residential.sopc.sections', i)}" class="ml-2 text-rose-300 hover:text-rose-200 text-sm">✕</button>
+          </div>
+          <textarea rows="6"
+                    oninput="${setTextSilent('residential.sopc.sections.' + i + '.body')}"
+                    placeholder="Narrative for this SOPC section..."
+                    class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none">${esc(s.body || '')}</textarea>
+        </div>
+      `).join('')
+    : '<div class="text-slate-500 text-sm italic mb-2">No SOPC sections yet. The preset usually seeds a scaffold — use "+ Add section" or re-seed.</div>';
+
+  // Optional clauses ----------------------------------------------
+  const opt = r.optionalClauses || {};
+  const ns = opt.nightService || { enabled: false, justification: '' };
+  const hb = opt.hobbsSealing || { enabled: false, justification: '' };
+
+  // Executed at --------------------------------------------------
+  const ex = r.executedAt || { city: '', date: '', time: '', timeAmPm: 'PM' };
+
+  return `
+    <div class="wa-editor space-y-4">
+      <!-- toolbar -->
+      <div class="flex items-center justify-between border-b border-slate-700 pb-3">
+        <div class="flex items-center gap-3 min-w-0">
+          <button onclick="WarrantAuthorUI.bus.onBackToList('${cId}')"
+                  class="text-slate-400 hover:text-white text-sm flex items-center gap-1">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+            Drafts
+          </button>
+          <span class="text-slate-500">/</span>
+          <span class="text-white font-medium truncate">${esc(draft.swNumber || draft.caseRef || 'Untitled residential draft')}</span>
+          <span class="ml-2 px-2 py-0.5 bg-viper-orange/20 text-viper-orange border border-viper-orange/40 rounded text-[11px] font-mono uppercase tracking-wider">Residential</span>
+          ${presetId
+            ? `<span class="px-2 py-0.5 bg-viper-purple/20 text-viper-purple border border-viper-purple/40 rounded text-[11px] font-mono">${esc(presetLabel)}</span>`
+            : ''}
+          ${_statusBadge(draft.status)}
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <button onclick="WarrantAuthorUI.bus.onResidentialGenerate('${cId}','${dId}')"
+                  class="px-3 py-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 rounded text-sm font-medium flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+            Generate PDF + DOCX
+          </button>
+          <span class="text-slate-500">saves to case folder</span>
+        </div>
+      </div>
+
+      <!-- Validator panel — auto-runs on every render. Click the chevron
+           to expand/collapse the error & warning lists. Mirrors the
+           ESP validator panel pattern (top of editor, scope chips,
+           collapsible groups). -->
+      ${_renderResidentialValidatorPanel(caseId, draft)}
+
+      <!-- Two-column layout: form fields on the left, live preview on
+           the right. The preview re-runs the same _buildCaResidential
+           path the export uses, so what the user sees is what the
+           PDF/DOCX will contain. -->
+      <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-4">
+        <div class="space-y-4 min-w-0">
+
+      <!-- Identification (case ref + court + county) -->
+      <!-- NOTE: SW Number and Judge are assigned by the court at filing time -->
+      <!-- and intentionally omitted from the author module. -->
+      <details class="wa-section" open>
+        <summary class="wa-section-summary">Identification</summary>
+        <div class="wa-section-body grid grid-cols-2 gap-3 pt-2">
+          <label class="block col-span-2">
+            <span class="text-[11px] uppercase text-slate-500">Case Ref</span>
+            <input type="text" value="${attr(draft.caseRef || '')}"
+                   onchange="WarrantAuthorUI.bus.onDraftFieldChange('${cId}','${dId}','caseRef',this.value)"
+                   class="mt-0.5 w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none">
+          </label>
+          <label class="block">
+            <span class="text-[11px] uppercase text-slate-500">Court</span>
+            <input type="text" value="${attr(draft.courtName || '')}"
+                   onchange="WarrantAuthorUI.bus.onDraftFieldChange('${cId}','${dId}','courtName',this.value)"
+                   class="mt-0.5 w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none">
+          </label>
+          <label class="block">
+            <span class="text-[11px] uppercase text-slate-500">County</span>
+            <input type="text" value="${attr(draft.county || '')}"
+                   onchange="WarrantAuthorUI.bus.onDraftFieldChange('${cId}','${dId}','county',this.value)"
+                   class="mt-0.5 w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none">
+          </label>
+        </div>
+      </details>
+
+      <!-- Crime Type + Offenses -->
+      <details class="wa-section" open>
+        <summary class="wa-section-summary">Crime Type &amp; Offenses</summary>
+        <div class="wa-section-body pt-2">
+          <div class="flex items-center gap-2 mb-3">
+            <label class="text-[11px] uppercase text-slate-500">Crime preset:</label>
+            <select onchange="WarrantAuthorUI.bus.onResidentialPresetChange('${cId}','${dId}', this.value)"
+                    class="px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none">
+              <option value="">— Custom (no preset) —</option>
+              ${presetOptions}
+            </select>
+            <button onclick="WarrantAuthorUI.bus.onResidentialReseed('${cId}','${dId}')"
+                    class="ml-auto px-2 py-1 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 rounded text-amber-200 text-xs">
+              ↺ Re-seed offenses / grounds / items / T&amp;E / SOPC from current preset
+            </button>
+          </div>
+          <div class="mb-2 text-xs text-slate-400">Offenses charged (these flow into the document caption):</div>
+          ${offensesRows}
+          <button onclick="${listAdd('residential.offenses')}"
+                  class="px-2 py-1 text-xs bg-slate-700/50 hover:bg-slate-700 border border-slate-600 rounded text-slate-200">
+            + Add offense
+          </button>
+        </div>
+      </details>
+
+      <!-- PC §1524 Grounds -->
+      <details class="wa-section" open>
+        <summary class="wa-section-summary">PC §1524 Grounds</summary>
+        <div class="wa-section-body pt-2">
+          <div class="text-xs text-slate-400 mb-2">Check the statutory grounds that authorize this search.</div>
+          ${groundsHtml}
+        </div>
+      </details>
+
+      <!-- Premises -->
+      <details class="wa-section" open>
+        <summary class="wa-section-summary">Premises (Property to be Searched)</summary>
+        <div class="wa-section-body pt-2 space-y-3">
+          <label class="block">
+            <span class="text-[11px] uppercase text-slate-500">Street Address</span>
+            <input type="text" value="${attr(p.address || '')}"
+                   onchange="${setField('residential.premises.address')}"
+                   placeholder="1234 Main St, Anytown, CA 92410"
+                   class="mt-0.5 w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none">
+          </label>
+          <label class="block">
+            <span class="text-[11px] uppercase text-slate-500">Legal Description</span>
+            <textarea rows="6"
+                      oninput="${setTextSilent('residential.premises.legalDescription')}"
+                      placeholder="Describe the residence with particularity: lot/block, paint color, roof, fences, outbuildings, vehicles, mailbox, attached garage, etc."
+                      class="mt-0.5 w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none">${esc(p.legalDescription || '')}</textarea>
+            <span class="block text-[11px] text-slate-500 mt-1">This is the "legal" — the description an officer would use to identify the residence on arrival. Include APN, color, distinguishing features, vehicles, and curtilage you intend to search.</span>
+          </label>
+          <label class="flex items-center gap-2 text-sm text-slate-200">
+            <input type="checkbox" ${p.includeScopeBoilerplate !== false ? 'checked' : ''}
+                   onchange="${setBool('residential.premises.includeScopeBoilerplate')}"
+                   class="accent-viper-cyan">
+            Include scope boilerplate (all rooms, attached structures, vehicles, persons on premises, etc.)
+          </label>
+        </div>
+      </details>
+
+      <!-- Suspects -->
+      <details class="wa-section" open>
+        <summary class="wa-section-summary">Suspect(s) / Persons Identified</summary>
+        <div class="wa-section-body pt-2">
+          ${suspectsHtml}
+          <button onclick="${listAdd('residential.suspects')}"
+                  class="px-2 py-1 text-xs bg-slate-700/50 hover:bg-slate-700 border border-slate-600 rounded text-slate-200">
+            + Add suspect
+          </button>
+        </div>
+      </details>
+
+      <!-- Items to seize -->
+      <details class="wa-section" open>
+        <summary class="wa-section-summary">Items to Seize (Property to be Seized)</summary>
+        <div class="wa-section-body pt-2">
+          ${itemsHtml}
+          <button onclick="${listAdd('residential.itemsToSeize.blocks')}"
+                  class="px-2 py-1 text-xs bg-slate-700/50 hover:bg-slate-700 border border-slate-600 rounded text-slate-200">
+            + Add block
+          </button>
+        </div>
+      </details>
+
+      <!-- Training & Experience -->
+      <details class="wa-section">
+        <summary class="wa-section-summary">Training &amp; Experience</summary>
+        <div class="wa-section-body pt-2 space-y-2">
+          <div class="flex items-center gap-3 text-sm text-slate-200 mb-2">
+            <label class="flex items-center gap-1">
+              <input type="radio" name="te-mode-${dId}" ${teMode === 'profile' ? 'checked' : ''}
+                     onchange="${setField('residential.trainingExperience.mode')}" value="profile"
+                     class="accent-viper-cyan">
+              <span>Use Agency Profile T&amp;E (settings)</span>
+            </label>
+            <label class="flex items-center gap-1">
+              <input type="radio" name="te-mode-${dId}" ${teMode === 'inline' ? 'checked' : ''}
+                     onchange="${setField('residential.trainingExperience.mode')}" value="inline"
+                     class="accent-viper-cyan">
+              <span>Override with inline text below (recommended for crime-specialized prose)</span>
+            </label>
+          </div>
+          ${teMode === 'profile'
+            ? (teProfileBody
+                ? `<div class="rounded border border-slate-700 bg-viper-dark/60 p-3 max-h-[260px] overflow-y-auto whitespace-pre-wrap text-sm text-slate-200 leading-relaxed">${esc(teProfileBody)}</div>
+                   <span class="block text-[11px] text-slate-500">Auto-populated from Settings → Warrant Author → Agency Profile → <em>Training &amp; Experience Boilerplate</em>. Read-only — edit it in Settings to update for every warrant, or switch to inline below to override for this draft only.</span>`
+                : `<div class="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                     ⚠ No Training &amp; Experience boilerplate is set in the Agency Profile. Open <strong>Settings → Warrant Author → Agency Profile</strong> and fill in <em>Training &amp; Experience Boilerplate</em>, or switch this draft to inline mode.
+                   </div>`)
+            : `<textarea rows="10"
+                    oninput="${setTextSilent('residential.trainingExperience.inlineBody')}"
+                    placeholder="Crime-specific T&E paragraph (CSAM victimology, narcotics indicia, robbery/violent crime experience, property-crime patterns, etc.)..."
+                    class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none">${esc(te.inlineBody || '')}</textarea>
+              <span class="block text-[11px] text-slate-500">Inline mode — this body is rendered verbatim under the IDENTIFICATION AND EXPERIENCE OF AFFIANT heading and replaces the Agency Profile T&amp;E for this draft. Crime presets seed this when first selected.</span>`}
+        </div>
+      </details>
+
+      <!-- SOPC removed — Statement of Probable Cause is now sourced from
+           the case-level Case Probable Cause narrative (shared across all
+           warrants in this case). See top of Warrant Author for the
+           authoritative editor; this draft will pull from it at export. -->
+      <details class="wa-section" open>
+        <summary class="wa-section-summary">Statement of Probable Cause</summary>
+        <div class="wa-section-body pt-2">
+          <div class="rounded border border-viper-cyan/30 bg-viper-cyan/5 px-3 py-2 text-xs text-slate-300">
+            ⚖ <span class="text-viper-cyan font-medium">Sourced from Case Probable Cause</span> —
+            the narrative authored in the <em>Case Probable Cause</em> panel at the top of
+            Warrant Author is rendered verbatim under this heading on export. Edit it
+            there so every warrant in this case stays in sync; nothing to author per-draft.
+          </div>
+        </div>
+      </details>
+
+      <!-- Optional clauses -->
+      <details class="wa-section">
+        <summary class="wa-section-summary">Optional Clauses</summary>
+        <div class="wa-section-body pt-2 space-y-3">
+          <label class="flex items-start gap-2 text-sm">
+            <input type="checkbox" ${opt.offsiteComputerSearch ? 'checked' : ''}
+                   onchange="${setBool('residential.optionalClauses.offsiteComputerSearch')}"
+                   class="mt-0.5 accent-viper-cyan">
+            <span class="text-slate-200">Offsite examination of digital devices (forensic lab analysis off-scene)</span>
+          </label>
+          <label class="flex items-start gap-2 text-sm">
+            <input type="checkbox" ${opt.authorityToDuplicate ? 'checked' : ''}
+                   onchange="${setBool('residential.optionalClauses.authorityToDuplicate')}"
+                   class="mt-0.5 accent-viper-cyan">
+            <span class="text-slate-200">Authority to make bit-for-bit forensic duplicates of seized media</span>
+          </label>
+          <label class="flex items-start gap-2 text-sm">
+            <input type="checkbox" ${opt.returnExtension ? 'checked' : ''}
+                   onchange="${setBool('residential.optionalClauses.returnExtension')}"
+                   class="mt-0.5 accent-viper-cyan">
+            <span class="text-slate-200">Request extension of return time (PC §1534) for forensic examination</span>
+          </label>
+          <label class="flex items-start gap-2 text-sm">
+            <input type="checkbox" ${opt.statutoryGroundsRecap ? 'checked' : ''}
+                   onchange="${setBool('residential.optionalClauses.statutoryGroundsRecap')}"
+                   class="mt-0.5 accent-viper-cyan">
+            <span class="text-slate-200">Include statutory grounds recap at end of affidavit</span>
+          </label>
+
+          <!-- Night service -->
+          <div class="bg-viper-dark/70 border border-slate-700 rounded p-3">
+            <label class="flex items-start gap-2 text-sm mb-2">
+              <input type="checkbox" ${ns.enabled ? 'checked' : ''}
+                     onchange="${setBool('residential.optionalClauses.nightService.enabled')}"
+                     class="mt-0.5 accent-viper-cyan">
+              <span class="text-slate-200 font-semibold">Night service (PC §1533 — service between 10pm–7am)</span>
+            </label>
+            <textarea rows="4"
+                      oninput="${setTextSilent('residential.optionalClauses.nightService.justification')}"
+                      placeholder="Good-cause justification for night service..."
+                      class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none">${esc(ns.justification || '')}</textarea>
+          </div>
+
+          <!-- Hobbs sealing -->
+          <div class="bg-viper-dark/70 border border-slate-700 rounded p-3">
+            <label class="flex items-start gap-2 text-sm mb-2">
+              <input type="checkbox" ${hb.enabled ? 'checked' : ''}
+                     onchange="${setBool('residential.optionalClauses.hobbsSealing.enabled')}"
+                     class="mt-0.5 accent-viper-cyan">
+              <span class="text-slate-200 font-semibold">Hobbs sealing (People v. Hobbs / Evidence Code §1041 — protect CI)</span>
+            </label>
+            <textarea rows="4"
+                      oninput="${setTextSilent('residential.optionalClauses.hobbsSealing.justification')}"
+                      placeholder="Justification for sealing the affidavit (CI identity, ongoing investigation, etc.)..."
+                      class="w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none">${esc(hb.justification || '')}</textarea>
+          </div>
+        </div>
+      </details>
+
+      <!-- Executed at -->
+      <details class="wa-section">
+        <summary class="wa-section-summary">Executed At</summary>
+        <div class="wa-section-body pt-2 grid grid-cols-4 gap-3">
+          <label class="block">
+            <span class="text-[11px] uppercase text-slate-500">City</span>
+            <input type="text" value="${attr(ex.city || '')}"
+                   oninput="${setTextSilent('residential.executedAt.city')}"
+                   class="mt-0.5 w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none">
+          </label>
+          <label class="block">
+            <span class="text-[11px] uppercase text-slate-500">Date</span>
+            <input type="date" value="${attr(ex.date || '')}"
+                   oninput="${setTextSilent('residential.executedAt.date')}"
+                   onchange="${setTextSilent('residential.executedAt.date')}"
+                   class="mt-0.5 w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none">
+          </label>
+          <label class="block">
+            <span class="text-[11px] uppercase text-slate-500">Time</span>
+            <input type="time" value="${attr(ex.time || '')}"
+                   oninput="${setTextSilent('residential.executedAt.time')}"
+                   onchange="${setTextSilent('residential.executedAt.time')}"
+                   class="mt-0.5 w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none">
+          </label>
+          <label class="block">
+            <span class="text-[11px] uppercase text-slate-500">AM/PM</span>
+            <select onchange="${setField('residential.executedAt.timeAmPm')}"
+                    class="mt-0.5 w-full px-2 py-1 bg-viper-dark border border-gray-600 rounded text-white text-sm focus:border-viper-cyan outline-none">
+              <option value="AM" ${ex.timeAmPm === 'AM' ? 'selected' : ''}>AM</option>
+              <option value="PM" ${ex.timeAmPm !== 'AM' ? 'selected' : ''}>PM</option>
+            </select>
+          </label>
+        </div>
+      </details>
+
+      <!-- Validator results mount (legacy — kept for back-compat with the
+           old standalone Validate button. The active panel is the one
+           injected by _renderResidentialValidatorPanel at the top of
+           the editor and auto-runs on every render. -->
+      <div id="waResidentialValidation-${dId}"></div>
+        </div><!-- /left column (form fields) -->
+
+        <!-- Right column: Live Preview -->
+        <aside class="wa-lp-col min-w-0">
+          ${_renderResidentialLivePreview(caseId, draft)}
+        </aside>
+      </div><!-- /two-column grid -->
+    </div>
+  `;
+}
 
 function _renderEditor(caseId, draftId) {
   const ds = _store();
@@ -349,6 +1201,15 @@ function _renderEditor(caseId, draftId) {
         <button onclick="WarrantAuthorUI.bus.onBackToList('${attr(caseId)}')" class="text-viper-cyan underline">← Back to drafts</button>
       </div>
     </div>`;
+  }
+
+  // Residential drafts render via a dedicated editor pane (Phase R2).
+  // For now show a read-only summary of what the new-draft flow seeded so
+  // the author can confirm the right preset + grounds + items + T&E + SOPC
+  // landed on the draft, then keep working in the case until the full
+  // residential editor ships.
+  if (draft.type === 'residential') {
+    return _renderResidentialEditor(caseId, draft);
   }
 
   // Auto-sync caseRef from the running case the moment the editor opens.
@@ -425,6 +1286,9 @@ function _renderEditor(caseId, draftId) {
       <!-- CA-specific face-page options: PC §1524 grounds + HOBBS + Night Search -->
       ${_renderCaWarrantOptions(caseId, draft)}
 
+      <!-- VA-specific face-page options: item 5, night service, knowledge, target accounts, advanced DC-339 -->
+      ${_renderVaWarrantOptions(caseId, draft)}
+
       <!-- 2-pane: addendum form (left) + live preview (right) -->
       <div class="grid grid-cols-12 gap-4">
         <!-- addendum list rail -->
@@ -454,6 +1318,7 @@ function _renderEditor(caseId, draftId) {
 function _renderDraftHeader(caseId, draft) {
   const tplOpts = [
     { v: 'ca-multi-business-esp', label: 'CA — CalECPA §1546.1' },
+    { v: 'va-multi-business-esp', label: 'VA — DC-338/DC-339 (§19.2-53)' },
     { v: 'generic-us-multi-business-esp', label: 'US Generic — SCA §2703' },
   ];
   // Probable cause now lives on the Warrant Author screen header (above the
@@ -605,7 +1470,389 @@ function _renderCaWarrantOptions(caseId, draft) {
   `;
 }
 
+// ─── VA face-page options (DC-338 / DC-339) ──────────────────────────────
+//
+// Mirrors the CA options panel pattern: a single <details> block that
+// houses every VA-template-specific knob that doesn't fit elsewhere.
+// Fields surface on DC-338 / DC-339 via the va-form-overlay module:
+//
+//   draft.va.item5.evidence              → CB08 (item 5 "constitutes evidence")
+//   draft.va.item5.person                → CB15 (item 5 "is the person to be arrested")
+//   draft.va.nightService.requested      → CB10 (DC-338 item 6 toggle)
+//   draft.va.nightService.justification  → Text6 (DC-338 item 6 narrative)
+//   draft.va.knowledge.personal          → CB12 (DC-338 item 7 personal knowledge)
+//   draft.va.knowledge.hearsay           → CB13 (DC-338 item 7 hearsay basis)
+//   draft.va.knowledge.reliability       → credibility narrative (Att. B)
+//   draft.va.targetAccounts[]            → {provider, identifier} → DC-339 "undefined"
+//   draft.va.advancedDc339.caption       → DC-339 "v./In re" caption override
+//   draft.va.advancedDc339.captionLine2  → DC-339 "undefined_2" continuation
+//   draft.va.advancedDc339.supplementalPageCount → DC-339 "undefined_3"
+//
+// Per-item DC-338 grounds (CB01-CB07) are deterministic for the ESP
+// template — the overlay applies safe defaults (CB01,03,05,06,07 ticked;
+// CB02,04 unticked). Power users can override via draft.va.grounds.cNN
+// but the routine ESP workflow never touches them.
 
+function _renderVaWarrantOptions(caseId, draft) {
+  if (!draft) return '';
+  const jx = String(draft.jurisdiction || '').toUpperCase();
+  const isVa = jx === 'VA' || draft.template === 'va-multi-business-esp';
+  if (!isVa) return '';
+
+  const va = (draft.va && typeof draft.va === 'object') ? draft.va : {};
+  const item5 = (va.item5 && typeof va.item5 === 'object') ? va.item5 : {};
+  // ESP template default: evidence box ticked when neither sub-option set.
+  const item5Evidence = (item5.evidence === undefined && item5.person === undefined && draft.template === 'va-multi-business-esp')
+    ? true : !!item5.evidence;
+  const item5Person   = !!item5.person;
+
+  const ns = (va.nightService && typeof va.nightService === 'object') ? va.nightService : {};
+  const nightRequested = !!ns.requested;
+  const nightJustification = String(ns.justification || '');
+
+  const k = (va.knowledge && typeof va.knowledge === 'object') ? va.knowledge : {};
+  const knowledgePersonal = !!k.personal;
+  const knowledgeHearsay  = !!k.hearsay;
+  const knowledgeReliability = String(k.reliability || '');
+
+  const targetAccounts = Array.isArray(va.targetAccounts) ? va.targetAccounts : [];
+
+  const adv = (va.advancedDc339 && typeof va.advancedDc339 === 'object') ? va.advancedDc339 : {};
+  const advCaption       = String(adv.caption || '');
+  const advCaptionLine2  = String(adv.captionLine2 || '');
+  const advSuppPages     = String(adv.supplementalPageCount || '');
+
+  // Case Particulars — feeds DC-338 Text1..Text5 + DC-339 search location.
+  // Each blank field falls back to "See Attachment {letter}" per ESP convention:
+  //   Items 1-3 (Text1..Text4) → Attachment A (Production Schedule + identifiers)
+  //   Item 4   (Text5)         → Attachment B (Statement of Material Facts / PC)
+  //   Item 7   (Text9)         → Attachment C (Training & Experience Statement)
+  const codeSection         = String(va.codeSection || '');
+  const offenseDescription  = String(va.offenseDescription || '');
+  const placeDescription    = String(va.placeDescription || '');
+  const thingsToSearchFor   = String(va.thingsToSearchFor || '');
+  const foreignCorpFacts    = String(va.foreignCorpFacts || '');
+  const probableCauseSummary = String(va.probableCauseSummary || '');
+
+  const cId = attr(caseId), dId = attr(draft.id);
+
+  // status: how many populated facets
+  const particularsFilled = [codeSection, offenseDescription, placeDescription, thingsToSearchFor, foreignCorpFacts, probableCauseSummary]
+    .some(s => String(s || '').trim() !== '');
+  const facets = [
+    particularsFilled,
+    item5Evidence || item5Person,
+    nightRequested && nightJustification.length > 0,
+    knowledgePersonal || knowledgeHearsay,
+    targetAccounts.some(t => t && String(t.identifier || '').trim() !== ''),
+  ];
+  const filledFacets = facets.filter(Boolean).length;
+  const statusColor = filledFacets >= 3 ? 'text-emerald-400' : 'text-amber-400';
+  const statusIcon  = filledFacets >= 3 ? '✓' : '⚠';
+  const statusText  = `${filledFacets}/5 facets populated`;
+
+  const isOpen = (_state.vaOptionsOpen === undefined) ? true : !!_state.vaOptionsOpen;
+  const advOpen = (_state.vaAdvancedDc339Open === undefined) ? false : !!_state.vaAdvancedDc339Open;
+
+  // Case Particulars — DC-338 Text1..Text5 + DC-339 search-location
+  const _attPill = (letter, color) => `<span class="ml-1 inline-flex items-center px-1.5 py-px rounded text-[9px] font-semibold uppercase tracking-wider ${color}">Att ${letter}</span>`;
+  const caseParticularsHtml = `
+    <div>
+      <div class="text-[11px] uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-2">
+        Case Particulars
+        <span class="text-[10px] normal-case tracking-normal text-slate-500">— blank fields fall back to "See Attachment X"</span>
+      </div>
+      <div class="bg-slate-900/40 rounded border border-slate-800 p-2.5 space-y-2.5">
+
+        <div class="grid grid-cols-3 gap-2">
+          <div>
+            <label class="block text-[10px] uppercase tracking-wider text-slate-400 mb-1">
+              Va. Code §
+            </label>
+            <input type="text" value="${attr(codeSection)}"
+                   placeholder='e.g. "18.2-374.1"'
+                   oninput="WarrantAuthorUI.bus.onVaTextInput('${cId}','${dId}','va.codeSection', this.value)"
+                   class="w-full bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:border-viper-cyan focus:outline-none">
+          </div>
+          <div class="col-span-2">
+            <label class="block text-[10px] uppercase tracking-wider text-slate-400 mb-1 flex items-center">
+              Offense description (DC-338 Item 1)
+              ${_attPill('A', 'bg-cyan-900/50 text-cyan-300 border border-cyan-700/50')}
+            </label>
+            <input type="text" value="${attr(offenseDescription)}"
+                   placeholder='e.g. "Possession of child sexual abuse material"'
+                   oninput="WarrantAuthorUI.bus.onVaTextInput('${cId}','${dId}','va.offenseDescription', this.value)"
+                   class="w-full bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:border-viper-cyan focus:outline-none">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-[10px] uppercase tracking-wider text-slate-400 mb-1 flex items-center">
+            Place / person / thing to be searched (DC-338 Item 2 + DC-339 search location)
+            ${_attPill('A', 'bg-cyan-900/50 text-cyan-300 border border-cyan-700/50')}
+          </label>
+          <textarea rows="2"
+                    placeholder='Leave blank to auto-render target accounts. Otherwise enter explicit description.'
+                    oninput="WarrantAuthorUI.bus.onVaTextInput('${cId}','${dId}','va.placeDescription', this.value)"
+                    class="w-full bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:border-viper-cyan focus:outline-none resize-none">${esc(placeDescription)}</textarea>
+        </div>
+
+        <div>
+          <label class="block text-[10px] uppercase tracking-wider text-slate-400 mb-1 flex items-center">
+            Things or persons to search for (DC-338 Item 3)
+            ${_attPill('A', 'bg-cyan-900/50 text-cyan-300 border border-cyan-700/50')}
+          </label>
+          <textarea rows="2"
+                    placeholder='Leave blank for "See Attachment A". Otherwise short summary of records sought.'
+                    oninput="WarrantAuthorUI.bus.onVaTextInput('${cId}','${dId}','va.thingsToSearchFor', this.value)"
+                    class="w-full bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:border-viper-cyan focus:outline-none resize-none">${esc(thingsToSearchFor)}</textarea>
+        </div>
+
+        <div>
+          <label class="block text-[10px] uppercase tracking-wider text-slate-400 mb-1 flex items-center">
+            Foreign-corp facts (DC-338 Item 3 sub-box)
+            ${_attPill('A', 'bg-cyan-900/50 text-cyan-300 border border-cyan-700/50')}
+          </label>
+          <textarea rows="2"
+                    placeholder='Material facts that the provider transacts business in VA. Leave blank for "See Attachment A".'
+                    oninput="WarrantAuthorUI.bus.onVaTextInput('${cId}','${dId}','va.foreignCorpFacts', this.value)"
+                    class="w-full bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:border-viper-cyan focus:outline-none resize-none">${esc(foreignCorpFacts)}</textarea>
+        </div>
+
+        <div>
+          <label class="block text-[10px] uppercase tracking-wider text-slate-400 mb-1 flex items-center">
+            Probable-cause summary (DC-338 Item 4)
+            ${_attPill('B', 'bg-purple-900/50 text-purple-300 border border-purple-700/50')}
+          </label>
+          <textarea rows="2"
+                    placeholder='Short PC summary. Full narrative goes on Attachment B. Leave blank for "See Attachment B".'
+                    oninput="WarrantAuthorUI.bus.onVaTextInput('${cId}','${dId}','va.probableCauseSummary', this.value)"
+                    class="w-full bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:border-viper-cyan focus:outline-none resize-none">${esc(probableCauseSummary)}</textarea>
+        </div>
+
+        <div class="text-[10px] text-slate-500 pt-1 border-t border-slate-800/60">
+          <span class="font-medium text-slate-400">Training &amp; Experience</span> (DC-338 Item 7)
+          ${_attPill('C', 'bg-amber-900/50 text-amber-300 border border-amber-700/50')}
+          — pulled from Agency Settings → Affiant Training. Auto-attaches as its own appendix for ESP warrants.
+        </div>
+
+      </div>
+    </div>
+  `;
+
+  // Item 5 sub-options
+  const item5Html = `
+    <div>
+      <div class="text-[11px] uppercase tracking-wider text-slate-400 mb-1.5">
+        DC-338 Item 5 — Object, thing or person to be searched for
+      </div>
+      <div class="bg-slate-900/40 rounded border border-slate-800 p-1.5 space-y-0.5">
+        <label class="flex items-start gap-2 px-2 py-1.5 rounded hover:bg-slate-800/60 cursor-pointer">
+          <input type="checkbox" ${item5Evidence ? 'checked' : ''}
+                 onchange="WarrantAuthorUI.bus.onVaFieldSet('${cId}','${dId}','va.item5.evidence', this.checked)"
+                 class="mt-0.5 accent-viper-cyan flex-shrink-0">
+          <span class="text-xs text-slate-200 leading-snug">
+            <span class="font-medium">constitutes evidence</span> of the commission of such offense
+            <span class="block text-[10px] text-slate-500">CB08 — typical for ESP / records production warrants</span>
+          </span>
+        </label>
+        <label class="flex items-start gap-2 px-2 py-1.5 rounded hover:bg-slate-800/60 cursor-pointer">
+          <input type="checkbox" ${item5Person ? 'checked' : ''}
+                 onchange="WarrantAuthorUI.bus.onVaFieldSet('${cId}','${dId}','va.item5.person', this.checked)"
+                 class="mt-0.5 accent-viper-cyan flex-shrink-0">
+          <span class="text-xs text-slate-200 leading-snug">
+            <span class="font-medium">is the person to be arrested</span> for whom a warrant or process for arrest has been issued
+            <span class="block text-[10px] text-slate-500">CB15 — uncommon for ESP; tick only if searching for a person</span>
+          </span>
+        </label>
+      </div>
+    </div>
+  `;
+
+  // Night Service (item 6)
+  const nightHtml = `
+    <div class="pt-2 border-t border-slate-800">
+      <label class="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-slate-800/40">
+        <input type="checkbox" ${nightRequested ? 'checked' : ''}
+               onchange="WarrantAuthorUI.bus.onVaFieldSet('${cId}','${dId}','va.nightService.requested', this.checked)"
+               class="accent-viper-cyan flex-shrink-0">
+        <span class="text-xs text-slate-200">
+          <span class="font-medium">Night-Service Authorization</span> — DC-338 item 6 (CB10)
+          <span class="block text-[10px] text-slate-500">Authorize execution outside 8:00 a.m. – 5:00 p.m. window.</span>
+        </span>
+      </label>
+      ${nightRequested ? `
+        <div class="pl-7 pr-2 pt-1">
+          <label class="block text-[10px] uppercase tracking-wider text-slate-400 mb-1">
+            Good-cause justification (Text6)
+          </label>
+          <textarea
+            oninput="WarrantAuthorUI.bus.onVaTextInput('${cId}','${dId}','va.nightService.justification', this.value)"
+            placeholder="Articulate why night execution is necessary…"
+            rows="3"
+            class="w-full bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:border-viper-cyan focus:outline-none resize-y">${esc(nightJustification)}</textarea>
+        </div>
+      ` : ''}
+    </div>
+  `;
+
+  // Knowledge Basis (item 7)
+  const knowledgeHtml = `
+    <div class="pt-2 border-t border-slate-800">
+      <div class="text-[11px] uppercase tracking-wider text-slate-400 mb-1.5">
+        DC-338 Item 7 — Knowledge basis (check all that apply)
+      </div>
+      <div class="bg-slate-900/40 rounded border border-slate-800 p-1.5 space-y-0.5">
+        <label class="flex items-start gap-2 px-2 py-1.5 rounded hover:bg-slate-800/60 cursor-pointer">
+          <input type="checkbox" ${knowledgePersonal ? 'checked' : ''}
+                 onchange="WarrantAuthorUI.bus.onVaFieldSet('${cId}','${dId}','va.knowledge.personal', this.checked)"
+                 class="mt-0.5 accent-viper-cyan flex-shrink-0">
+          <span class="text-xs text-slate-200 leading-snug">
+            <span class="font-medium">I have personal knowledge</span> of the facts set forth in this affidavit
+            <span class="block text-[10px] text-slate-500">CB12</span>
+          </span>
+        </label>
+        <label class="flex items-start gap-2 px-2 py-1.5 rounded hover:bg-slate-800/60 cursor-pointer">
+          <input type="checkbox" ${knowledgeHearsay ? 'checked' : ''}
+                 onchange="WarrantAuthorUI.bus.onVaFieldSet('${cId}','${dId}','va.knowledge.hearsay', this.checked)"
+                 class="mt-0.5 accent-viper-cyan flex-shrink-0">
+          <span class="text-xs text-slate-200 leading-snug">
+            <span class="font-medium">I was advised of the facts</span> in whole or in part by one or more other person(s)
+            <span class="block text-[10px] text-slate-500">CB13 — requires credibility/reliability statement below</span>
+          </span>
+        </label>
+      </div>
+      ${knowledgeHearsay ? `
+        <div class="pt-1.5">
+          <label class="block text-[10px] uppercase tracking-wider text-slate-400 mb-1">
+            Credibility / reliability of source(s)
+          </label>
+          <textarea
+            oninput="WarrantAuthorUI.bus.onVaTextInput('${cId}','${dId}','va.knowledge.reliability', this.value)"
+            placeholder="e.g. The reporting party is a sworn officer with the Chesapeake Police Department who personally observed…"
+            rows="3"
+            class="w-full bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:border-viper-cyan focus:outline-none resize-y">${esc(knowledgeReliability)}</textarea>
+          <div class="text-[10px] text-slate-500 mt-1">
+            Appended to the Att. B narrative — DC-338 has no dedicated field for this.
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+
+  // Target Accounts (DC-339 caption)
+  const targetRowsHtml = targetAccounts.length === 0
+    ? `<div class="text-[10px] text-slate-500 italic px-2 py-2 bg-slate-900/30 rounded border border-slate-800">
+         No target accounts. Without explicit entries, the overlay falls back to the first addendum's provider + business name.
+       </div>`
+    : targetAccounts.map((t, i) => {
+        const prov  = String(t && t.provider   || '');
+        const ident = String(t && t.identifier || '');
+        return `
+          <div class="flex items-start gap-1.5 bg-slate-900/40 rounded border border-slate-800 p-1.5">
+            <div class="flex-1 grid grid-cols-2 gap-1.5">
+              <input type="text" value="${attr(prov)}"
+                     placeholder="Provider (Snapchat / Google / Meta…)"
+                     oninput="WarrantAuthorUI.bus.onVaFieldSet('${cId}','${dId}','va.targetAccounts.${i}.provider', this.value)"
+                     class="bg-slate-900/60 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 focus:border-viper-cyan focus:outline-none">
+              <input type="text" value="${attr(ident)}"
+                     placeholder='Identifier (e.g. "Wally1234" or user@gmail.com)'
+                     oninput="WarrantAuthorUI.bus.onVaFieldSet('${cId}','${dId}','va.targetAccounts.${i}.identifier', this.value)"
+                     class="bg-slate-900/60 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 focus:border-viper-cyan focus:outline-none">
+            </div>
+            <button type="button"
+                    onclick="WarrantAuthorUI.bus.onVaTargetAccountRemove('${cId}','${dId}',${i})"
+                    class="text-[10px] text-rose-400 hover:text-rose-300 px-2 py-1 rounded hover:bg-rose-500/10 flex-shrink-0"
+                    title="Remove">✕</button>
+          </div>
+        `;
+      }).join('');
+
+  const targetsHtml = `
+    <div class="pt-2 border-t border-slate-800">
+      <div class="flex items-center justify-between mb-1.5">
+        <div class="text-[11px] uppercase tracking-wider text-slate-400">
+          DC-339 Target Accounts (caption — "v./In re")
+        </div>
+        <button type="button"
+                onclick="WarrantAuthorUI.bus.onVaTargetAccountAdd('${cId}','${dId}')"
+                class="text-[10px] text-viper-cyan hover:text-cyan-300 px-2 py-0.5 rounded hover:bg-cyan-500/10">
+          + Add Account
+        </button>
+      </div>
+      <div class="space-y-1.5">
+        ${targetRowsHtml}
+      </div>
+      <div class="text-[10px] text-slate-500 mt-1">
+        Format on the warrant: <code class="text-slate-400">{Provider} Account "{identifier}"</code>.
+        Multiple entries are joined with "; "; entries 1 and 2 land in DC-339 fields "undefined" and "undefined_2" respectively.
+      </div>
+    </div>
+  `;
+
+  // Advanced DC-339 (collapsible inside the VA panel)
+  const advancedHtml = `
+    <details class="pt-2 border-t border-slate-800 group" ${advOpen ? 'open' : ''}
+             ontoggle="WarrantAuthorUI.bus.onVaAdvancedDc339Toggle(this.open)">
+      <summary class="cursor-pointer select-none text-[11px] uppercase tracking-wider text-slate-400 hover:text-slate-300 flex items-center gap-1.5">
+        <span class="group-open:rotate-90 inline-block transition-transform">▶</span>
+        Advanced DC-339 Overrides
+      </summary>
+      <div class="pt-2 space-y-2">
+        <div>
+          <label class="block text-[10px] uppercase tracking-wider text-slate-400 mb-1">
+            Caption override (overrides auto-computed v./In re line)
+          </label>
+          <input type="text" value="${attr(advCaption)}"
+                 placeholder='e.g. Snapchat Account "Wally1234"'
+                 oninput="WarrantAuthorUI.bus.onVaFieldSet('${cId}','${dId}','va.advancedDc339.caption', this.value)"
+                 class="w-full bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:border-viper-cyan focus:outline-none">
+        </div>
+        <div>
+          <label class="block text-[10px] uppercase tracking-wider text-slate-400 mb-1">
+            Caption continuation (DC-339 "undefined_2")
+          </label>
+          <input type="text" value="${attr(advCaptionLine2)}"
+                 placeholder="(optional — right-column continuation)"
+                 oninput="WarrantAuthorUI.bus.onVaFieldSet('${cId}','${dId}','va.advancedDc339.captionLine2', this.value)"
+                 class="w-full bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:border-viper-cyan focus:outline-none">
+        </div>
+        <div>
+          <label class="block text-[10px] uppercase tracking-wider text-slate-400 mb-1">
+            Supplemental sheet — number of pages (DC-339 "undefined_3")
+          </label>
+          <input type="text" value="${attr(advSuppPages)}"
+                 placeholder='e.g. "2"'
+                 oninput="WarrantAuthorUI.bus.onVaFieldSet('${cId}','${dId}','va.advancedDc339.supplementalPageCount', this.value)"
+                 class="w-32 bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:border-viper-cyan focus:outline-none">
+          <div class="text-[10px] text-slate-500 mt-1">
+            When set, an "X" is overlaid on the printed "Supplemental sheet attached and incorporated by reference" checkbox.
+          </div>
+        </div>
+      </div>
+    </details>
+  `;
+
+  return `
+    <details class="bg-viper-dark/60 border border-slate-700 rounded-lg" ${isOpen ? 'open' : ''}
+             ontoggle="WarrantAuthorUI.bus.onVaOptionsToggle(this.open)">
+      <summary class="px-3 py-2 cursor-pointer select-none flex items-center justify-between hover:bg-slate-800/40">
+        <span class="text-xs uppercase tracking-wider text-slate-300 font-medium">
+          VA Face Page · DC-338 / DC-339 Form Fields
+        </span>
+        <span class="text-[11px] ${statusColor}">${statusIcon} ${esc(statusText)}</span>
+      </summary>
+      <div class="p-3 border-t border-slate-700 space-y-3">
+        ${caseParticularsHtml}
+        ${item5Html}
+        ${nightHtml}
+        ${knowledgeHtml}
+        ${targetsHtml}
+        ${advancedHtml}
+      </div>
+    </details>
+  `;
+}
 
 function _runValidator(caseId, draft) {
   const V = _validator();
@@ -897,30 +2144,65 @@ function _renderAddendumForm(caseId, draft, addendumId, harvest) {
         </div>
       </div>
 
-      <!-- Optional clauses -->
+      <!-- Optional clauses (jurisdiction-aware labels; same underlying flags) -->
+      ${_renderAddendumOptionalClauses(caseId, draft, ad)}
+    </div>
+  `;
+}
+
+/**
+ * Renders the 4 optional-clause checkboxes for an addendum. Labels swap
+ * by draft.jurisdiction so VA users see SCA citations (18 U.S.C. § 2705)
+ * instead of CalECPA (§ 1546.x). The underlying flag names
+ * (`includeNonDisclosure`, `includeNonDisclosureInfoSupport`,
+ * `includeDelay1546_2a`, `includeCalecpaSealing`) are kept stable so the
+ * draft store / block-builder paths are unchanged — only the rendered
+ * label + tooltip vary.
+ *
+ * Citation notes:
+ *  • CA → CalECPA Penal Code §§ 1546.2(b), 1546.2(a), 1546.1(d)(3)
+ *  • VA → No state-law equivalent; standard practice for warrants
+ *    served on nationwide ESPs is the federal SCA at 18 U.S.C. § 2705(b)
+ *    (NDO) and § 2705(a) (delay-of-notice). Court-file sealing in VA is
+ *    by motion under Va. Code §§ 17.1-208 / 19.2-265.01.
+ */
+function _renderAddendumOptionalClauses(caseId, draft, ad) {
+  const jx = (draft.jurisdiction || '').toUpperCase();
+  const isVa = jx === 'VA' || draft.template === 'va-multi-business-esp';
+  const labels = isVa ? {
+    ndo:       { text: 'NDO (90-day) — §2705(b)',  tip: 'Non-Disclosure Order under 18 U.S.C. § 2705(b) (federal SCA). Virginia has no state-law NDO statute; § 2705(b) is the standard citation for warrants served on out-of-state ESPs.' },
+    ndoInfo:   { text: 'NDO Info-Support',          tip: 'Factual articulation supporting the § 2705(b) NDO finding. Check this whenever NDO is checked.' },
+    delay:     { text: 'Delay-of-Notice — §2705(a)', tip: 'Order delaying notice to the subscriber under 18 U.S.C. § 2705(a). Covers the affiant\'s duty to notify the user; the NDO covers the provider.' },
+    sealing:   { text: 'Court Sealing (motion)',    tip: 'Request to seal the warrant, affidavit, and returns from public inspection. In Virginia this is handled by motion under Va. Code §§ 17.1-208 / 19.2-265.01.' },
+  } : {
+    ndo:       { text: 'NDO (90-day)',              tip: 'Non-Disclosure Order under Cal. Pen. Code § 1546.2(b).' },
+    ndoInfo:   { text: 'NDO Info-Support',          tip: 'Companion clause that articulates the factual basis for the NDO. Always check this when you check NDO.' },
+    delay:     { text: 'Delay (§1546.2(a))',        tip: 'Use when contemporaneous notice to the subscriber would jeopardize the investigation. NDO covers the provider; this covers your duty to notify the user.' },
+    sealing:   { text: '§1546.1(d)(3) Sealing',     tip: 'Asks the magistrate to seal the warrant, affidavit, and returns from public inspection. Distinct from NDO — NDO binds the provider; sealing binds the court file.' },
+  };
+  return `
       <div class="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800">
-        <label class="flex items-center gap-2 text-xs text-slate-300">
+        <label class="flex items-center gap-2 text-xs text-slate-300" title="${attr(labels.ndo.tip)}">
           <input type="checkbox" ${ad.includeNonDisclosure ? 'checked' : ''}
                  onchange="WarrantAuthorUI.bus.onAddendumFieldChange('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','includeNonDisclosure',this.checked)">
-          NDO (90-day)
+          ${esc(labels.ndo.text)}
         </label>
-        <label class="flex items-center gap-2 text-xs text-slate-300">
+        <label class="flex items-center gap-2 text-xs text-slate-300" title="${attr(labels.ndoInfo.tip)}">
           <input type="checkbox" ${ad.includeNonDisclosureInfoSupport ? 'checked' : ''}
                  onchange="WarrantAuthorUI.bus.onAddendumFieldChange('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','includeNonDisclosureInfoSupport',this.checked)">
-          NDO Info-Support
+          ${esc(labels.ndoInfo.text)}
         </label>
-        <label class="flex items-center gap-2 text-xs text-slate-300">
+        <label class="flex items-center gap-2 text-xs text-slate-300" title="${attr(labels.delay.tip)}">
           <input type="checkbox" ${ad.includeDelay1546_2a ? 'checked' : ''}
                  onchange="WarrantAuthorUI.bus.onAddendumFieldChange('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','includeDelay1546_2a',this.checked)">
-          Delay (§1546.2(a))
+          ${esc(labels.delay.text)}
         </label>
-        <label class="flex items-center gap-2 text-xs text-slate-300">
+        <label class="flex items-center gap-2 text-xs text-slate-300" title="${attr(labels.sealing.tip)}">
           <input type="checkbox" ${ad.includeCalecpaSealing ? 'checked' : ''}
                  onchange="WarrantAuthorUI.bus.onAddendumFieldChange('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','includeCalecpaSealing',this.checked)">
-          §1546.1(d)(3) Sealing
+          ${esc(labels.sealing.text)}
         </label>
       </div>
-    </div>
   `;
 }
 
@@ -1023,7 +2305,11 @@ function _renderLivePreview(caseId, draft, activeId) {
 
   return `
     <div class="wa-preview">
-      <div class="wa-pv-title">Live Preview — ${esc(draft.template === 'ca-multi-business-esp' ? 'CA template' : 'US template')} · Page ${esc(ad.pageLabel)}</div>
+      <div class="wa-pv-title">Live Preview — ${esc(
+        draft.template === 'ca-multi-business-esp' ? 'CA template'
+        : draft.template === 'va-multi-business-esp' ? 'VA template'
+        : 'US template'
+      )} · Page ${esc(ad.pageLabel)}</div>
       ${issuesBar}
       <div class="wa-pv-body">${html || '<div class="text-slate-500 text-sm">No blocks rendered.</div>'}</div>
     </div>
@@ -1364,7 +2650,13 @@ function _showGenerateResultModal(caseId, draft, blockStream, issues, pdfResult,
 
           <div class="text-[11px] text-slate-500 mt-2">
             Case Ref: <span class="text-slate-300 font-mono">${esc(draft.caseRef || '(none)')}</span> ·
-            Template: <span class="text-slate-300 font-mono">${esc(draft.template === 'ca-multi-business-esp' ? 'CA · CalECPA' : 'US · SCA §2703')}</span>
+            Template: <span class="text-slate-300 font-mono">${esc(
+              draft.template === 'ca-multi-business-esp'  ? 'CA · CalECPA' :
+              draft.template === 'va-multi-business-esp'  ? 'VA · DC-338/DC-339' :
+              draft.template === 'ca-residential-sw'      ? 'CA · Residential SW' :
+              draft.template === 'ca-residential'         ? 'CA · Residential SW' :
+              'US · SCA §2703'
+            )}</span>
           </div>
         </div>
         <div class="flex items-center justify-end gap-2 p-3 border-t border-slate-700 text-xs">
@@ -1741,6 +3033,32 @@ const bus = {
     const ov = document.getElementById('waModalOverlay');
     if (ov) { ov.innerHTML = ''; ov.classList.add('hidden'); }
   },
+  /**
+   * Handle Warrant Type dropdown changes in the New Draft modal: swap the
+   * Template options and show/hide the Crime Type picker. Residential is
+   * CA-only in v1; ESP supports CA + VA + US Generic templates.
+   */
+  onNewDraftTypeChange(type) {
+    const tplSel = document.getElementById('waNewTemplate');
+    const crimeWrap = document.getElementById('waNewCrimeWrap');
+    if (!tplSel) return;
+    if (type === 'residential') {
+      // Residential is CA-only — Phase 1 of VA only added ESP. Surface a
+      // hint so VA-state users understand why they're being pushed to CA.
+      tplSel.innerHTML = '<option value="ca-residential" selected>CA — Residential Search Warrant (combined SW + Affidavit + SOPC)</option>';
+      if (crimeWrap) crimeWrap.classList.remove('hidden');
+    } else {
+      const state = _readWarrantAuthorState();
+      const isCA = state === 'CA';
+      const isVA = state === 'VA';
+      tplSel.innerHTML = `
+        <option value="ca-multi-business-esp" ${isCA ? 'selected' : ''}>CA — Multi-Business ESP (CalECPA §1546.1)</option>
+        <option value="va-multi-business-esp" ${isVA ? 'selected' : ''}>VA — Multi-Business ESP (DC-338/DC-339, §19.2-53) · Beta</option>
+        <option value="generic-us-multi-business-esp" ${(!isCA && !isVA) ? 'selected' : ''}>US Generic — Multi-Business ESP (SCA §2703)</option>
+      `;
+      if (crimeWrap) crimeWrap.classList.add('hidden');
+    }
+  },
   onCreateDraftConfirm(caseId) {
     const ds = _store(); if (!ds) return;
     let ref = (document.getElementById('waNewCaseRef') || {}).value || '';
@@ -1748,13 +3066,44 @@ const bus = {
     if (!String(ref).trim()) {
       ref = (window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || '';
     }
-    const tpl = (document.getElementById('waNewTemplate') || {}).value || 'ca-multi-business-esp';
+    const type = (document.getElementById('waNewType') || {}).value || 'multi-business-esp';
+    const tpl = (document.getElementById('waNewTemplate') || {}).value
+              || (type === 'residential' ? 'ca-residential' : 'ca-multi-business-esp');
+    const crimeId = (document.getElementById('waNewCrime') || {}).value || '';
     const agency = _loadAgencyProfile();
     const draft = ds.createDraft(caseId, {
       swNumber: '', caseRef: ref, template: tpl,
-      jurisdiction: tpl.startsWith('ca-') ? 'CA' : 'US',
-      agencyProfile: agency
+      type,
+      jurisdiction: tpl.startsWith('ca-') ? 'CA'
+                  : tpl.startsWith('va-') ? 'VA'
+                  : 'US',
+      agencyProfile: agency,
+      crimeType: type === 'residential' ? crimeId : ''
     });
+    // Residential + crime preset selected → overlay the preset onto the
+    // empty shell that newDraft() created. Done here (not in the factory)
+    // so the factory stays preset-agnostic and easy to unit-test.
+    if (draft && type === 'residential' && crimeId
+        && window.WarrantAuthorCrimePresets
+        && typeof window.WarrantAuthorCrimePresets.buildResidentialFromPreset === 'function') {
+      try {
+        const filled = window.WarrantAuthorCrimePresets.buildResidentialFromPreset(crimeId);
+        // Preserve premises/suspects/executedAt city if newDraft already set them.
+        if (filled) {
+          if (draft.residential && draft.residential.executedAt && draft.residential.executedAt.city) {
+            filled.executedAt = Object.assign({}, filled.executedAt, { city: draft.residential.executedAt.city });
+          }
+          draft.residential = filled;
+        }
+        // Overlay default PC §1524 grounds from the preset.
+        if (typeof window.WarrantAuthorCrimePresets.pc1524GroundsFor === 'function') {
+          draft.pc1524Grounds = window.WarrantAuthorCrimePresets.pc1524GroundsFor(crimeId);
+        }
+        ds.saveDraft(caseId, draft, { silent: true });
+      } catch (e) {
+        console.error('[WarrantAuthor] residential preset overlay failed:', e);
+      }
+    }
     bus.onCloseNewDraftModal();
     _selectDraft(caseId, draft.id);
     _rerender();
@@ -1772,7 +3121,16 @@ const bus = {
     const ds = _store(); if (!ds) return;
     const d = ds.getDraft(caseId, draftId); if (!d) return;
     d[field] = value;
-    ds.saveDraft(caseId, d);
+    // Keep jurisdiction in sync when the user swaps templates from the
+    // draft header dropdown. Otherwise the optional-clause labels on
+    // existing addendums won't refresh (they read draft.jurisdiction).
+    if (field === 'template') {
+      const v = String(value || '');
+      if (v.startsWith('ca-'))      d.jurisdiction = 'CA';
+      else if (v.startsWith('va-')) d.jurisdiction = 'VA';
+      else                          d.jurisdiction = 'US';
+    }
+    ds.saveDraft(caseId, d, { silent: true });
     _rerender();
   },
   /**
@@ -1783,7 +3141,7 @@ const bus = {
     const ds = _store(); if (!ds) return;
     const d = ds.getDraft(caseId, draftId); if (!d) return;
     d[field] = value;
-    ds.saveDraft(caseId, d);
+    ds.saveDraft(caseId, d, { silent: true });
     _rerender();
   },
   /**
@@ -1801,9 +3159,416 @@ const bus = {
       };
     }
     d.pc1524Grounds[key] = !!checked;
-    ds.saveDraft(caseId, d);
+    ds.saveDraft(caseId, d, { silent: true });
     _rerender();
   },
+
+  /**
+   * Set a single residential field by dot-path.
+   *   path = 'residential.premises.address'
+   *   path = 'residential.suspects.0.name'
+   *   path = 'residential.optionalClauses.nightService.enabled'
+   * Coerces boolean values for checkbox use. Rerenders after save.
+   */
+  onResidentialFieldSet(caseId, draftId, path, value) {
+    const ds = _store(); if (!ds) return;
+    const d = ds.getDraft(caseId, draftId); if (!d) return;
+    _setByPath(d, path, value);
+    ds.saveDraft(caseId, d, { silent: true });
+    _rerender();
+  },
+
+  /**
+   * Silent setter for long textareas (premises legal, items body,
+   * SOPC body, T&E inline, justification text). Persists without
+   * triggering re-render so the caret never jumps mid-typing.
+   *
+   * Also passes {silent: true} to saveDraft so the draft-store does
+   * NOT dispatch the `warrant-author-change` window event — that
+   * event is wired to wipe and re-render the entire warrant subtab
+   * (case-detail-with-analytics.html), which would steal focus from
+   * the textarea on every keystroke.
+   */
+  onResidentialTextInput(caseId, draftId, path, value) {
+    const ds = _store(); if (!ds) return;
+    const d = ds.getDraft(caseId, draftId); if (!d) return;
+    _setByPath(d, path, value);
+    ds.saveDraft(caseId, d, { silent: true });
+    // intentionally no _rerender()
+  },
+
+  /**
+   * Append a blank row to a residential list (offenses, suspects,
+   * items.blocks, sopc.sections). Rerenders.
+   */
+  onResidentialListAdd(caseId, draftId, listPath) {
+    const ds = _store(); if (!ds) return;
+    const d = ds.getDraft(caseId, draftId); if (!d) return;
+    const arr = _getByPath(d, listPath);
+    if (!Array.isArray(arr)) return;
+    arr.push(_blankRowFor(listPath));
+    ds.saveDraft(caseId, d, { silent: true });
+    _rerender();
+  },
+  onResidentialListRemove(caseId, draftId, listPath, idx) {
+    const ds = _store(); if (!ds) return;
+    const d = ds.getDraft(caseId, draftId); if (!d) return;
+    const arr = _getByPath(d, listPath);
+    if (!Array.isArray(arr)) return;
+    if (idx < 0 || idx >= arr.length) return;
+    arr.splice(idx, 1);
+    ds.saveDraft(caseId, d, { silent: true });
+    _rerender();
+  },
+
+  /**
+   * Change the active crime preset (without overwriting current edits).
+   * Only updates draft.residential.crimeType / crimePresetId. To
+   * actually overlay items/T&E/SOPC, the user must click Re-seed.
+   */
+  onResidentialPresetChange(caseId, draftId, presetId) {
+    const ds = _store(); if (!ds) return;
+    const d = ds.getDraft(caseId, draftId); if (!d || !d.residential) return;
+    d.residential.crimeType = presetId || '';
+    d.residential.crimePresetId = presetId || '';
+    ds.saveDraft(caseId, d, { silent: true });
+    _rerender();
+  },
+
+  /**
+   * Overlay the current crime preset onto the residential substructure.
+   * WARNING: replaces offenses, items-to-seize, T&E inline body, SOPC
+   * sections, optional-clause defaults, and PC §1524 grounds.
+   * Premises / suspects / SW number / executedAt are preserved.
+   */
+  onResidentialReseed(caseId, draftId) {
+    const ds = _store(); if (!ds) return;
+    const d = ds.getDraft(caseId, draftId); if (!d || !d.residential) return;
+    const presetId = d.residential.crimePresetId || d.residential.crimeType;
+    if (!presetId) {
+      if (typeof window.showToast === 'function') window.showToast('Pick a crime preset first', 'warn');
+      return;
+    }
+    if (!window.WarrantAuthorCrimePresets || !window.WarrantAuthorCrimePresets.buildResidentialFromPreset) return;
+    if (!confirm('Re-seed offenses, PC §1524 grounds, items to seize, training & experience, optional-clause defaults, and SOPC scaffold from the "' + presetId + '" preset?\n\nPremises, suspects, SW number, and executed-at are preserved.')) return;
+    const filled = window.WarrantAuthorCrimePresets.buildResidentialFromPreset(presetId);
+    if (!filled) return;
+    // Preserve user-entered fields.
+    const preserve = {
+      premises: d.residential.premises,
+      suspects: d.residential.suspects,
+      executedAt: d.residential.executedAt,
+      itemsIncorporatedByReference: d.residential.itemsIncorporatedByReference,
+    };
+    d.residential = Object.assign(filled, preserve);
+    if (window.WarrantAuthorCrimePresets.pc1524GroundsFor) {
+      d.pc1524Grounds = window.WarrantAuthorCrimePresets.pc1524GroundsFor(presetId);
+    }
+    ds.saveDraft(caseId, d, { silent: true });
+    if (typeof window.showToast === 'function') window.showToast('Re-seeded from ' + presetId + ' preset', 'success');
+    _rerender();
+  },
+
+  /**
+   * Run residential validator and render results into the mount div.
+   * Pulls the case-level Case Probable Cause narrative and passes it
+   * along — validator uses it to enforce the PC_NARRATIVE_EMPTY hard
+   * blocker (residential SOPC is sourced from the shared case PC).
+   */
+  onResidentialValidate(caseId, draftId) {
+    const v = (typeof window !== 'undefined') ? window.WarrantAuthorValidator : null;
+    if (!v || typeof v.validateResidential !== 'function') {
+      if (typeof window.showToast === 'function') window.showToast('Residential validator not loaded', 'error');
+      return;
+    }
+    const ds = _store(); const d = ds ? ds.getDraft(caseId, draftId) : null;
+    if (!d) return;
+    const agency = _loadAgencyProfile();
+    const agencyMerged = Object.assign({}, agency, d.affiantSnapshot || {});
+    const pcStoreV = (typeof window !== 'undefined') ? window.WarrantAuthorCasePcStore : null;
+    const pcNarrativeV = (pcStoreV && pcStoreV.getBody)
+      ? pcStoreV.getBody(caseId)
+      : (d.probableCauseNarrative || '');
+    const result = v.validateResidential({
+      draft: d,
+      agency: agencyMerged,
+      pcNarrative: pcNarrativeV,
+    });
+    const mount = document.getElementById('waResidentialValidation-' + draftId);
+    if (!mount) return;
+    mount.innerHTML = _renderResidentialValidation(result);
+  },
+
+  /**
+   * Export residential draft to .docx. Builds the block stream via
+   * WarrantAuthorBlockBuilder (residential branch) and hands it to the
+   * `warrant-author-generate` IPC with formats=['docx'] + writeToDisk=
+   * false. Main runs docx-composer.composeDocx which already speaks the
+   * canonical block kinds. The returned docxBytes are wrapped in a Blob
+   * and pushed through the browser download trigger.
+   */
+  async onResidentialExportDocx(caseId, draftId) {
+    const ds = _store(); const d = ds ? ds.getDraft(caseId, draftId) : null;
+    if (!d) return;
+    const builder = (typeof window !== 'undefined') ? window.WarrantAuthorBlockBuilder : null;
+    if (!builder || typeof builder.build !== 'function') {
+      if (typeof window.showToast === 'function') window.showToast('Block builder not loaded', 'error');
+      return;
+    }
+    const api = (typeof window !== 'undefined') ? window.electronAPI : null;
+    if (!api || typeof api.warrantAuthorGenerate !== 'function') {
+      if (typeof window.showToast === 'function') window.showToast('Warrant Author IPC unavailable', 'error');
+      return;
+    }
+    const agency = _loadAgencyProfile();
+    const agencyMerged = Object.assign({}, agency, d.affiantSnapshot || {});
+    const caseInfo = {
+      caseNumber: (window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || d.caseRef || '',
+      caseName:   (window.currentCase && window.currentCase.name) || '',
+    };
+
+    // Case-level Probable Cause — shared across all warrants in this
+    // case. Residential SOPC section is sourced from this narrative.
+    const pcStoreDocx = (typeof window !== 'undefined') ? window.WarrantAuthorCasePcStore : null;
+    const pcNarrativeDocx = (pcStoreDocx && pcStoreDocx.getBody)
+      ? pcStoreDocx.getBody(caseId)
+      : (d.probableCauseNarrative || '');
+
+    let blockStream;
+    try {
+      blockStream = builder.build({
+        draft: d,
+        addendumComposes: [],
+        agency: agencyMerged,
+        caseInfo,
+        pcNarrative: pcNarrativeDocx,
+        includeDisclaimer: false,
+      });
+    } catch (e) {
+      console.error('[WarrantAuthor] residential block build failed:', e);
+      if (typeof window.showToast === 'function') window.showToast('Block build failed: ' + e.message, 'error');
+      return;
+    }
+
+    let result;
+    try {
+      result = await api.warrantAuthorGenerate({
+        casePath: null,                  // skip disk; pure in-memory compose
+        warrantId: d.id,
+        draft: d,
+        blockStream,
+        formats: ['docx'],
+        agency: agencyMerged,
+      });
+    } catch (e) {
+      console.error('[WarrantAuthor] residential DOCX IPC failed:', e);
+      if (typeof window.showToast === 'function') window.showToast('DOCX IPC failed: ' + e.message, 'error');
+      return;
+    }
+    if (!result || !result.success || !result.docxBytes) {
+      const msg = (result && result.error) || 'main process returned no DOCX bytes';
+      if (typeof window.showToast === 'function') window.showToast('DOCX export failed: ' + msg, 'error');
+      return;
+    }
+    try {
+      const u8 = new Uint8Array(result.docxBytes);
+      const blob = new Blob([u8], {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+      const filename = (d.swNumber || d.caseRef || 'residential-sw') + '.docx';
+      _downloadBlob(blob, filename,
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      if (typeof window.showToast === 'function') window.showToast('DOCX downloaded — ' + filename, 'success');
+    } catch (e) {
+      console.error('[WarrantAuthor] residential DOCX download failed:', e);
+      if (typeof window.showToast === 'function') window.showToast('Download failed: ' + e.message, 'error');
+    }
+  },
+  /**
+   * Export residential draft to .pdf. Builds the block stream via
+   * WarrantAuthorBlockBuilder (residential branch) and renders locally
+   * via WarrantAuthorPdfComposer.composePdf — same renderer-side jsPDF
+   * pipeline ESP uses. Saves via _downloadBlob.
+   */
+  onResidentialExportPdf(caseId, draftId) {
+    const ds = _store(); const d = ds ? ds.getDraft(caseId, draftId) : null;
+    if (!d) return;
+    const builder = (typeof window !== 'undefined') ? window.WarrantAuthorBlockBuilder : null;
+    if (!builder || typeof builder.build !== 'function') {
+      if (typeof window.showToast === 'function') window.showToast('Block builder not loaded', 'error');
+      return;
+    }
+    const pdfComp = (typeof window !== 'undefined') ? window.WarrantAuthorPdfComposer : null;
+    if (!pdfComp || typeof pdfComp.composePdf !== 'function') {
+      if (typeof window.showToast === 'function') window.showToast('PDF composer not loaded', 'error');
+      return;
+    }
+    const agency = _loadAgencyProfile();
+    const agencyMerged = Object.assign({}, agency, d.affiantSnapshot || {});
+    const caseInfo = {
+      caseNumber: (window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || d.caseRef || '',
+      caseName:   (window.currentCase && window.currentCase.name) || '',
+    };
+
+    // Case-level Probable Cause — shared across all warrants in this
+    // case. Residential SOPC section is sourced from this narrative.
+    const pcStorePdf = (typeof window !== 'undefined') ? window.WarrantAuthorCasePcStore : null;
+    const pcNarrativePdf = (pcStorePdf && pcStorePdf.getBody)
+      ? pcStorePdf.getBody(caseId)
+      : (d.probableCauseNarrative || '');
+
+    let blockStream, pdfResult;
+    try {
+      blockStream = builder.build({
+        draft: d,
+        addendumComposes: [],
+        agency: agencyMerged,
+        caseInfo,
+        pcNarrative: pcNarrativePdf,
+        includeDisclaimer: false,
+      });
+    } catch (e) {
+      console.error('[WarrantAuthor] residential block build failed:', e);
+      if (typeof window.showToast === 'function') window.showToast('Block build failed: ' + e.message, 'error');
+      return;
+    }
+    try {
+      pdfResult = pdfComp.composePdf({ blockStream, draft: d, agency: agencyMerged });
+    } catch (e) {
+      console.error('[WarrantAuthor] residential PDF compose failed:', e);
+      if (typeof window.showToast === 'function') window.showToast('PDF compose failed: ' + e.message, 'error');
+      return;
+    }
+    try {
+      const filename = (d.swNumber || d.caseRef || 'residential-sw') + '.pdf';
+      _downloadBlob(pdfResult.blob, filename, 'application/pdf');
+      if (typeof window.showToast === 'function') {
+        window.showToast('PDF downloaded — ' + filename + ' (' + pdfResult.pageCount + ' page' + (pdfResult.pageCount === 1 ? '' : 's') + ')', 'success');
+      }
+    } catch (e) {
+      console.error('[WarrantAuthor] residential PDF download failed:', e);
+      if (typeof window.showToast === 'function') window.showToast('Download failed: ' + e.message, 'error');
+    }
+  },
+
+  /**
+   * Standardized residential warrant generation — mirrors
+   * onGenerateWarrant (ESP) so the user gets the SAME flow:
+   *   1. validator pre-flight (block on errors; confirm on warnings)
+   *   2. build block stream via _buildCaResidential (no addendums)
+   *   3. compose PDF locally (jsPDF)
+   *   4. IPC main-process: compose DOCX + write both to case folder
+   *   5. show the "Warrant Generated" result modal with stats +
+   *      preview/download/open buttons — reuses _showGenerateResultModal.
+   */
+  async onResidentialGenerate(caseId, draftId) {
+    const ds = _store(); if (!ds) return;
+    const draft = ds.getDraft(caseId, draftId); if (!draft) return;
+
+    // ── Auto-sync caseRef from running case ──────────────────────────
+    const runningCaseNumber = (window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || '';
+    if (runningCaseNumber && !(draft.caseRef && String(draft.caseRef).trim())) {
+      draft.caseRef = runningCaseNumber;
+      try { ds.saveDraft(caseId, draft, { silent: true }); } catch (_) {}
+    }
+
+    // ── Pre-flight validation (residential) ──────────────────────────
+    const V = _validator();
+    if (V && typeof V.validateResidential === 'function') {
+      const agencyProfile = _loadAgencyProfile();
+      const agencyMerged0 = Object.assign({}, agencyProfile, draft.affiantSnapshot || {});
+      const pcStore0 = window.WarrantAuthorCasePcStore;
+      const pcNarrative0 = (pcStore0 && pcStore0.getBody)
+        ? pcStore0.getBody(caseId)
+        : (draft.probableCauseNarrative || '');
+      let vres;
+      try {
+        vres = V.validateResidential({ draft, agency: agencyMerged0, pcNarrative: pcNarrative0 });
+      } catch (_e) { vres = null; }
+      if (vres && !vres.ok) {
+        _showValidatorBlockModal(caseId, draft, vres);
+        return;
+      }
+      if (vres && vres.warnings && vres.warnings.length) {
+        const proceed = await _confirmValidatorWarnings(vres);
+        if (!proceed) return;
+      }
+    }
+
+    // ── Build block stream ───────────────────────────────────────────
+    const builder = window.WarrantAuthorBlockBuilder;
+    if (!builder) { alert('Block builder not loaded.'); return; }
+    const agencyProfile = _loadAgencyProfile();
+    const agencyMerged = Object.assign({}, agencyProfile, draft.affiantSnapshot || {});
+    const pcStore = window.WarrantAuthorCasePcStore;
+    const pcNarrative = (pcStore && pcStore.getBody) ? pcStore.getBody(caseId) : (draft.probableCauseNarrative || '');
+    const caseInfo = {
+      caseNumber: (window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || draft.caseRef || '',
+      caseName:   (window.currentCase && window.currentCase.name) || '',
+    };
+    let blockStream;
+    try {
+      blockStream = builder.build({
+        draft, addendumComposes: [], agency: agencyMerged, caseInfo, pcNarrative, includeDisclaimer: true,
+      });
+    } catch (e) {
+      alert('Block builder failed: ' + e.message);
+      return;
+    }
+
+    // ── Render PDF locally ───────────────────────────────────────────
+    const pdfComp = window.WarrantAuthorPdfComposer;
+    if (!pdfComp) { alert('PDF composer not loaded.'); return; }
+    let pdfResult;
+    try {
+      pdfResult = pdfComp.composePdf({ blockStream, draft, agency: agencyMerged });
+    } catch (e) {
+      alert('PDF render failed: ' + e.message);
+      return;
+    }
+
+    // ── Persist to disk via IPC (PDF bytes + DOCX built in main) ─────
+    let saveResult = null;
+    if (window.electronAPI && typeof window.electronAPI.warrantAuthorGenerate === 'function') {
+      const caseNumber = caseInfo.caseNumber;
+      const casePath   = caseNumber ? `cases/${caseNumber}` : null;
+      if (casePath) {
+        try { await window.electronAPI.warrantAuthorSaveDraft(casePath, draft.id, draft); } catch (_) {}
+      }
+      try {
+        saveResult = await window.electronAPI.warrantAuthorGenerate({
+          casePath,
+          warrantId: draft.id,
+          draft,
+          blockStream,
+          formats: ['pdf', 'docx'],
+          pdfBytes: pdfResult.arrayBuffer,
+          agency:   agencyMerged,
+        });
+        if (!casePath && saveResult && saveResult.success) {
+          saveResult.diskSkipped = true;
+          saveResult.diskSkippedReason = 'No case number available — DOCX/PDF available for manual download only.';
+        }
+      } catch (e) {
+        saveResult = { success: false, error: e.message };
+      }
+    }
+
+    // ── Show result modal (same modal ESP uses) ──────────────────────
+    _state._genPdfBlob = pdfResult.blob;
+    _state._genFilename = (draft.caseRef || 'residential-sw') + '_residential';
+    _state._genPageCount = pdfResult.pageCount;
+    _state._genSave = saveResult;
+    _state._genDocxBlob = null;
+    if (saveResult && saveResult.docxBytes) {
+      try {
+        const u8 = new Uint8Array(saveResult.docxBytes);
+        _state._genDocxBlob = new Blob([u8], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+      } catch (_) { _state._genDocxBlob = null; }
+    }
+    _showGenerateResultModal(caseId, draft, blockStream, [], pdfResult, saveResult);
+  },
+
   /**
    * Persist the CA Options <details> open/closed state across
    * re-renders. Fired by the native `ontoggle` event whenever the
@@ -1812,6 +3577,58 @@ const bus = {
    */
   onCaOptionsToggle(open) {
     _state.caOptionsOpen = !!open;
+  },
+
+  // ─── VA face-page handlers ───────────────────────────────────────────
+  // Generic "set dot-path under draft.va" setter. Coerces null/undefined
+  // out (treats them as deletion), creates nested objects on demand, and
+  // re-renders so dependent UI (textareas that appear when a checkbox
+  // ticks on) shows up immediately. PREFIX-LOCKED to 'va.' to avoid the
+  // handler being abused as a generic anywhere-writer.
+  onVaFieldSet(caseId, draftId, path, value) {
+    if (typeof path !== 'string' || path.indexOf('va.') !== 0) return;
+    const ds = _store(); if (!ds) return;
+    const d = ds.getDraft(caseId, draftId); if (!d) return;
+    if (!d.va || typeof d.va !== 'object') d.va = {};
+    _setByPath(d, path, value);
+    ds.saveDraft(caseId, d, { silent: true });
+    _rerender();
+  },
+  // Silent setter for VA textareas (night-service justification,
+  // reliability narrative). Persists without _rerender so caret holds
+  // position mid-typing. Same prefix-lock as onVaFieldSet.
+  onVaTextInput(caseId, draftId, path, value) {
+    if (typeof path !== 'string' || path.indexOf('va.') !== 0) return;
+    const ds = _store(); if (!ds) return;
+    const d = ds.getDraft(caseId, draftId); if (!d) return;
+    if (!d.va || typeof d.va !== 'object') d.va = {};
+    _setByPath(d, path, value);
+    ds.saveDraft(caseId, d, { silent: true });
+    // intentionally no _rerender()
+  },
+  onVaTargetAccountAdd(caseId, draftId) {
+    const ds = _store(); if (!ds) return;
+    const d = ds.getDraft(caseId, draftId); if (!d) return;
+    if (!d.va || typeof d.va !== 'object') d.va = {};
+    if (!Array.isArray(d.va.targetAccounts)) d.va.targetAccounts = [];
+    d.va.targetAccounts.push({ provider: '', identifier: '' });
+    ds.saveDraft(caseId, d, { silent: true });
+    _rerender();
+  },
+  onVaTargetAccountRemove(caseId, draftId, idx) {
+    const ds = _store(); if (!ds) return;
+    const d = ds.getDraft(caseId, draftId); if (!d) return;
+    if (!d.va || !Array.isArray(d.va.targetAccounts)) return;
+    if (idx < 0 || idx >= d.va.targetAccounts.length) return;
+    d.va.targetAccounts.splice(idx, 1);
+    ds.saveDraft(caseId, d, { silent: true });
+    _rerender();
+  },
+  onVaOptionsToggle(open) {
+    _state.vaOptionsOpen = !!open;
+  },
+  onVaAdvancedDc339Toggle(open) {
+    _state.vaAdvancedDc339Open = !!open;
   },
   /**
    * Case-level shared probable cause edit. Fired on every keystroke.
@@ -1831,7 +3648,7 @@ const bus = {
         for (const d of drafts) {
           if (d && d.probableCauseNarrative !== body) {
             d.probableCauseNarrative = body;
-            ds.saveDraft(caseId, d);
+            ds.saveDraft(caseId, d, { silent: true });
           }
         }
       } catch (_e) {}
@@ -1896,7 +3713,7 @@ const bus = {
       const items = _items();
       if (items) ad.itemsToProduce = items.resolvePatternKeys(items.defaultPatternFor(providerKey));
     }
-    ds.saveDraft(caseId, d);
+    ds.saveDraft(caseId, d, { silent: true });
     _rerender();
   },
   onAddendumFieldChange(caseId, draftId, addendumId, field, value) {
@@ -2124,7 +3941,11 @@ const bus = {
 
     // 5. Show result modal
     _state._genPdfBlob = pdfResult.blob;
-    _state._genFilename = (draft.caseRef || 'warrant') + '_' + (draft.template === 'ca-multi-business-esp' ? 'CA' : 'US');
+    _state._genFilename = (draft.caseRef || 'warrant') + '_' + (
+      draft.template === 'ca-multi-business-esp' ? 'CA'
+      : draft.template === 'va-multi-business-esp' ? 'VA'
+      : 'US'
+    );
     _state._genPageCount = pdfResult.pageCount;
     _state._genSave = saveResult;
     // Stash the DOCX bytes returned by main as a Blob, so the result modal
@@ -2135,6 +3956,22 @@ const bus = {
         const u8 = new Uint8Array(saveResult.docxBytes);
         _state._genDocxBlob = new Blob([u8], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
       } catch (_) { _state._genDocxBlob = null; }
+    }
+    // VA template: main returns the MERGED PDF (DC-338 + DC-339 + attachments).
+    // Swap _genPdfBlob from the renderer-built jsPDF (attachments only) to
+    // the merged deliverable so Preview/Download show the user the same
+    // document that lands on disk.
+    if (saveResult && saveResult.pdfBytes) {
+      try {
+        const u8 = new Uint8Array(saveResult.pdfBytes);
+        _state._genPdfBlob = new Blob([u8], { type: 'application/pdf' });
+        // Update jsPDF result page count to reflect the merged document
+        // so the result modal banner shows the true total.
+        if (saveResult.vaOverlay && saveResult.vaOverlay.sectionPageCounts) {
+          const sp = saveResult.vaOverlay.sectionPageCounts;
+          _state._genPageCount = (sp.dc338 || 0) + (sp.dc339 || 0) + (sp.attachments || 0);
+        }
+      } catch (_) { /* keep jsPDF blob as fallback */ }
     }
     _showGenerateResultModal(caseId, draft, blockStream, issues, pdfResult, saveResult);
   },
@@ -2231,7 +4068,7 @@ const bus = {
     const ad = d.addendums.find(a => a.id === addendumId); if (!ad) return;
     ad.targetAccounts = ad.targetAccounts || [];
     ad.targetAccounts.push({ type: 'email', value: '' });
-    ds.saveDraft(caseId, d);
+    ds.saveDraft(caseId, d, { silent: true });
     _rerender();
   },
   onRemoveTarget(caseId, draftId, addendumId, idx) {
@@ -2239,7 +4076,7 @@ const bus = {
     const d = ds.getDraft(caseId, draftId); if (!d) return;
     const ad = d.addendums.find(a => a.id === addendumId); if (!ad) return;
     ad.targetAccounts = (ad.targetAccounts || []).filter((_, i) => i !== idx);
-    ds.saveDraft(caseId, d);
+    ds.saveDraft(caseId, d, { silent: true });
     _rerender();
   },
   onTargetFieldChange(caseId, draftId, addendumId, idx, field, value) {
@@ -2248,7 +4085,7 @@ const bus = {
     const ad = d.addendums.find(a => a.id === addendumId); if (!ad) return;
     if (!ad.targetAccounts[idx]) return;
     ad.targetAccounts[idx][field] = value;
-    ds.saveDraft(caseId, d);
+    ds.saveDraft(caseId, d, { silent: true });
     _rerender();
   },
   onAutofillTarget(caseId, draftId, addendumId, type, value) {
@@ -2262,7 +4099,7 @@ const bus = {
       return;
     }
     ad.targetAccounts.push({ type, value });
-    ds.saveDraft(caseId, d);
+    ds.saveDraft(caseId, d, { silent: true });
     _rerender();
   },
   onApplyPattern(caseId, draftId, addendumId, patternKey) {
@@ -2275,7 +4112,7 @@ const bus = {
     const ad = d.addendums.find(a => a.id === addendumId); if (!ad) return;
     ad.itemsToProduce = keys.slice();
     ad.itemsPattern = patternKey;
-    ds.saveDraft(caseId, d);
+    ds.saveDraft(caseId, d, { silent: true });
     _rerender();
   },
   onToggleItem(caseId, draftId, addendumId, itemKey, checked) {
@@ -2285,7 +4122,7 @@ const bus = {
     const set = new Set(ad.itemsToProduce || []);
     if (checked) set.add(itemKey); else set.delete(itemKey);
     ad.itemsToProduce = Array.from(set);
-    ds.saveDraft(caseId, d);
+    ds.saveDraft(caseId, d, { silent: true });
     _rerender();
   },
 };

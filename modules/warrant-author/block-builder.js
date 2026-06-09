@@ -1107,29 +1107,26 @@
     blocks.push({ kind: 'paragraph', text: `(Signature of Affiant) ${affTitle}${affBadge ? `, Badge #${affBadge}` : ''}` });
 
     // ─── Attachment C — Training & Experience Statement ───────────────────
-    // For VA Multi-Business ESP we ALWAYS emit Att C when training content
-    // exists. The DC-338 Text9 field always points to "See Attachment C"
-    // for ESP, mirrored in va-form-overlay.js. The 400-char inline
-    // threshold is reserved for non-ESP VA templates that may keep T&E
-    // inline if it fits.
-    const VA_TEXT9_INLINE_MAX = 400;
-    const va = (draft.va && typeof draft.va === 'object') ? draft.va : {};
+    // Attachment C contains ONLY the affiant's Training & Experience
+    // boilerplate (agency.affiantTraining). Case-specific reliability
+    // facts (va.knowledge.reliability) live INLINE in DC-338 Item 7 / Text9
+    // and are NOT duplicated here.
+    //
+    // For VA Multi-Business ESP we always emit Att C when training content
+    // exists. For other VA templates Att C only emits when training
+    // exceeds the inline threshold (kept for backward compat).
+    const VA_TRAINING_INLINE_MAX = 400;
     const trainingBody = _safe(agency.affiantTraining) || _safe(agency.trainingExperienceBoilerplate);
-    const reliability = (va.knowledge && va.knowledge.hearsay === true)
-      ? _safe(va.knowledge.reliability) : '';
-    let trainingCombined = trainingBody && reliability
-      ? `${trainingBody}\n\nBasis for Hearsay Facts: ${reliability}`
-      : (trainingBody || reliability || '');
     const isEspTemplate = String(draft.template || '') === 'va-multi-business-esp';
-    const shouldEmitAttC = trainingCombined.length > 0 &&
-      (isEspTemplate || trainingCombined.length > VA_TEXT9_INLINE_MAX);
+    const shouldEmitAttC = trainingBody.length > 0 &&
+      (isEspTemplate || trainingBody.length > VA_TRAINING_INLINE_MAX);
     if (shouldEmitAttC) {
       blocks.push({ kind: 'page-break' });
       blocks.push({ kind: 'heading-1', text: 'ATTACHMENT C — TRAINING & EXPERIENCE STATEMENT' });
       blocks.push({ kind: 'spacer', size: 'sm' });
       // Split on blank-line paragraph boundaries so the PDF/DOCX layout
       // renders multi-paragraph training boilerplate cleanly.
-      const paragraphs = String(trainingCombined).split(/\n\s*\n/);
+      const paragraphs = String(trainingBody).split(/\n\s*\n/);
       for (const para of paragraphs) {
         const text = String(para || '').trim();
         if (text) blocks.push({ kind: 'paragraph', text });

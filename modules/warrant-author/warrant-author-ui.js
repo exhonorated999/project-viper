@@ -1733,7 +1733,7 @@ function _renderVaWarrantOptions(caseId, draft) {
             rows="3"
             class="w-full bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:border-viper-cyan focus:outline-none resize-y">${esc(knowledgeReliability)}</textarea>
           <div class="text-[10px] text-slate-500 mt-1">
-            Appended to the Att. B narrative — DC-338 has no dedicated field for this.
+            Goes inline into the DC-338 Item 7 reliability text area (Text9). Long statements overflow to Att C.
           </div>
         </div>
       ` : ''}

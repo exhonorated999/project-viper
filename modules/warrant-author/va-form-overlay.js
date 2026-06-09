@@ -591,45 +591,38 @@ function _buildText1OffenseNarrative(va, draft, agency) {
 const _TEXT9_INLINE_MAX = 400;
 
 function _buildText9TrainingAndReliability(va, agency, opts, draft) {
-  // Combine affiant training-experience boilerplate with reliability facts
-  // (if hearsay box is ticked) so the form's free-text capacity is used.
+  // DC-338 Item 7 — credibility / reliability text area.
   //
-  // For VA Multi-Business ESP: T&E always lives on Attachment C — return
-  // "See Attachment C" whenever there is ANY training content, so the form
-  // box is short and the long boilerplate gets a proper appendix.
+  // This box holds CASE-SPECIFIC reliability/credibility facts about the
+  // hearsay sources cited in the affidavit (per the form's instruction
+  // "...may be determined from the following facts"). It is NOT for the
+  // affiant's general Training & Experience boilerplate — that lives on
+  // Attachment C and ONLY on Attachment C.
   //
-  // For other VA templates: if total content exceeds _TEXT9_INLINE_MAX, we
-  // emit a pointer and flag overflow; otherwise render inline.
-  const training = _safe(agency.affiantTraining) || _safe(agency.trainingExperienceBoilerplate);
+  // Behavior:
+  //   - If user provided draft.va.knowledge.reliability → render inline.
+  //   - If reliability exceeds inline cap → pointer + flag overflow to Att C
+  //     (rare; allows extremely long source attestations to spill into
+  //     the appendix rather than truncating).
+  //   - Otherwise → empty (let the affiant fill by hand at execution).
+  //
+  // NOTE: agency.affiantTraining is DELIBERATELY ignored here. Training
+  // is appended exclusively to Attachment C via block-builder._buildVaEsp.
+  void agency; void draft; // retained in signature for API stability
   const k = (va.knowledge && typeof va.knowledge === 'object') ? va.knowledge : {};
-  const reliability = (k.hearsay === true) ? _safe(k.reliability) : '';
-  const isEsp = String((draft && draft.template) || '') === 'va-multi-business-esp';
+  const reliability = _safe(k.reliability);
 
-  let combined = '';
-  if (training && reliability) {
-    combined = `${training}\n\nBasis for Hearsay Facts: ${reliability}`;
-  } else {
-    combined = training || reliability || '';
-  }
+  if (!reliability) return '';
 
-  // ESP: always offload T&E to Att C when any content exists.
-  if (isEsp && combined.length > 0) {
+  if (reliability.length > _TEXT9_INLINE_MAX) {
     if (opts && typeof opts === 'object') {
       opts.overflowed = true;
-      opts.overflowText = combined;
+      opts.overflowText = reliability;
     }
-    return 'See Attachment C';
+    return 'See Attachment C — Reliability Statement';
   }
 
-  if (combined.length > _TEXT9_INLINE_MAX) {
-    if (opts && typeof opts === 'object') {
-      opts.overflowed = true;
-      opts.overflowText = combined;
-    }
-    return 'See Attachment C';
-  }
-
-  return combined;
+  return reliability;
 }
 
 function _buildTargetAccountCaption(va, addendumComposes) {

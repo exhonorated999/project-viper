@@ -2447,6 +2447,20 @@
             const dataTabs = selectedTabs.filter(tab => tab.type === 'data');
             const fileTabs = selectedTabs.filter(tab => tab.type === 'files');
 
+            // ── CSAM-sensitive evidence check ──
+            // If any evidence is flagged csamSensitive (e.g. NCMEC CyberTip),
+            // and the user is exporting files, prompt whether to include or
+            // exclude the media payload. Many jurisdictions prohibit sharing.
+            const csamItems = (caseEvidence || []).filter(e => e && e.csamSensitive);
+            _daExportExcludeCsam = false;
+            _daExportCsamTags = [];
+            if (csamItems.length > 0 && fileTabs.length > 0) {
+                const choice = await promptCsamExclusion(csamItems);
+                if (choice === 'cancel') return;
+                _daExportExcludeCsam = (choice === 'exclude');
+                _daExportCsamTags = csamItems.map(e => e.tag).filter(Boolean);
+            }
+
             closeExportCaseModal();
 
             // Show progress indicator
@@ -2466,6 +2480,57 @@
             } finally {
                 hideExportProgress();
             }
+        }
+
+        // CSAM-exclusion state for the in-flight DA export. Read by the two
+        // saveDAExport call sites (generateCaseReportPDF + bundleFilesOnly).
+        let _daExportExcludeCsam = false;
+        let _daExportCsamTags = [];
+
+        // Returns 'exclude' | 'include' | 'cancel'
+        function promptCsamExclusion(csamItems) {
+            return new Promise((resolve) => {
+                const list = csamItems.map(e => {
+                    const mode = (e.ncmec && e.ncmec.uploadMode) ? e.ncmec.uploadMode.toUpperCase() : 'FILES';
+                    const tag = e.tag || `(no tag, id ${e.id})`;
+                    return `<li class="text-sm text-red-200">⚠ <strong>${tag}</strong> <span class="text-xs text-gray-400">(${mode}, ${(e.fileCount || (e.files && e.files.length) || 0)} files)</span></li>`;
+                }).join('');
+                const html = `
+                    <div id="csamPromptModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]">
+                        <div class="glass-card rounded-xl p-6 max-w-lg w-full mx-4 border-2 border-red-500/40">
+                            <div class="flex items-start gap-3 mb-4">
+                                <div class="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0">
+                                    <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0L3.16 16.25A2 2 0 005 19z"/>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 class="text-lg font-bold text-red-300">CSAM-Sensitive Evidence Detected</h3>
+                                    <p class="text-xs text-gray-400 mt-1">This case contains evidence flagged as potentially CSAM (NCMEC CyberTip). Many DA offices and jurisdictions prohibit transmitting these files outside law-enforcement chain-of-custody.</p>
+                                </div>
+                            </div>
+                            <ul class="space-y-1 mb-4 pl-2 border-l-2 border-red-400/40">${list}</ul>
+                            <p class="text-xs text-gray-300 mb-4">How should the DA export handle the media for these items?</p>
+                            <div class="space-y-2">
+                                <button id="csamPromptExclude" class="w-full px-4 py-3 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-400 text-red-200 font-medium text-left">
+                                    ✓ Exclude CSAM media <span class="text-xs text-red-300/70">(recommended — PDF report still lists the item)</span>
+                                </button>
+                                <button id="csamPromptInclude" class="w-full px-4 py-3 rounded-lg bg-viper-card/60 hover:bg-viper-card border border-gray-600 text-gray-200 font-medium text-left">
+                                    Include CSAM media <span class="text-xs text-gray-400">(only if your DA is authorized to receive it)</span>
+                                </button>
+                                <button id="csamPromptCancel" class="w-full px-4 py-2 rounded-lg text-gray-400 hover:text-white text-sm">
+                                    Cancel export
+                                </button>
+                            </div>
+                        </div>
+                    </div>`;
+                document.body.insertAdjacentHTML('beforeend', html);
+                const modal = document.getElementById('csamPromptModal');
+                const cleanup = (val) => { if (modal) modal.remove(); resolve(val); };
+                document.getElementById('csamPromptExclude').onclick = () => cleanup('exclude');
+                document.getElementById('csamPromptInclude').onclick = () => cleanup('include');
+                document.getElementById('csamPromptCancel').onclick = () => cleanup('cancel');
+            });
         }
 
         function showExportProgress() {
@@ -3509,7 +3574,16 @@
                         need(18);
                         fieldBold(`${i + 1}. ${ev.description || 'Evidence item'}`, '');
                         fieldBold('   Type', ev.type); fieldBold('   Collected', formatDate(ev.collectionDate));
-                        fieldBold('   Location', ev.location); gap();
+                        fieldBold('   Location', ev.location);
+                        // Annotate CSAM-flagged items that were excluded from the bundle
+                        if (ev.csamSensitive) {
+                            if (_daExportExcludeCsam) {
+                                fieldBold('   ⚠ Notice', 'CSAM media EXCLUDED from this DA package per jurisdictional policy. Item recorded for chain-of-custody; obtain media through law-enforcement channels.');
+                            } else {
+                                fieldBold('   ⚠ CSAM', 'NCMEC CyberTip — media INCLUDED in this DA package. Handle per agency CSAM policy.');
+                            }
+                        }
+                        gap();
                     });
                 } else emptyMsg('No evidence files recorded.');
                 gap(4);
@@ -3622,9 +3696,14 @@
                         fileName,
                         pdfBytes: Array.from(new Uint8Array(pdfBytes)),
                         caseNumber: currentCase.caseNumber,
+                        excludeCsam: !!_daExportExcludeCsam,
+                        csamTags: Array.isArray(_daExportCsamTags) ? _daExportCsamTags : [],
                     });
                     if (savedPath) {
-                        viperToast(`DA Export saved to:\n${savedPath}\n\nIncludes PDF report and all evidence files.`, 'success');
+                        const csamNote = _daExportExcludeCsam && _daExportCsamTags.length
+                            ? `\n\n⚠ CSAM media EXCLUDED for ${_daExportCsamTags.length} item(s): ${_daExportCsamTags.join(', ')}`
+                            : '';
+                        viperToast(`DA Export saved to:\n${savedPath}\n\nIncludes PDF report and all evidence files.${csamNote}`, 'success');
                     }
                 } catch (e) {
                     console.error('DA export IPC failed, falling back to PDF download:', e);
@@ -4161,8 +4240,15 @@
                     fileName: `${currentCase.caseNumber}_Evidence_${new Date().toISOString().split('T')[0]}.zip`,
                     pdfBytes: [],
                     caseNumber: currentCase.caseNumber,
+                    excludeCsam: !!_daExportExcludeCsam,
+                    csamTags: Array.isArray(_daExportCsamTags) ? _daExportCsamTags : [],
                 });
-                if (savedPath) viperToast(`Evidence files saved to:\n${savedPath}`, 'success');
+                if (savedPath) {
+                    const csamNote = _daExportExcludeCsam && _daExportCsamTags.length
+                        ? `\n⚠ CSAM media EXCLUDED for ${_daExportCsamTags.length} item(s)`
+                        : '';
+                    viperToast(`Evidence files saved to:\n${savedPath}${csamNote}`, 'success');
+                }
             } catch (e) { viperToast('Error bundling files: ' + e.message, 'error'); }
         }
 
@@ -6706,6 +6792,7 @@
                                             <option value="cellebrite">Cellebrite Report (Reader.exe)</option>
                                             <option value="cellebriteExtraction">Cellebrite Extraction (.ufdx)</option>
                                             <option value="datapilot">Datapilot Extraction</option>
+                                            <option value="ncmecCybertip">NCMEC CyberTip</option>
                                             <option value="other">Other</option>
                                         </select>
                                     </div>
@@ -6794,6 +6881,41 @@
                                                 </div>
                                             </div>
                                         </div>
+                                    </div>
+                                    <!-- NCMEC CyberTip picker (shown when NCMEC CyberTip selected) -->
+                                    <div id="ncmecUploadUI" class="hidden">
+                                        <div class="p-3 mb-3 bg-red-500/10 border border-red-500/40 rounded-lg">
+                                            <div class="flex items-start gap-2">
+                                                <svg class="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0L3.16 16.25A2 2 0 005 19z"/>
+                                                </svg>
+                                                <div class="text-xs text-red-200">
+                                                    <strong class="text-red-300">⚠ CSAM-sensitive evidence.</strong>
+                                                    NCMEC CyberTip uploads are flagged as containing potential CSAM. On <strong>Export for DA</strong>, you will be prompted to exclude the media payload — many jurisdictions prohibit sharing these files outside law enforcement chain-of-custody.
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="grid grid-cols-3 gap-3">
+                                            <button type="button" onclick="selectNcmecUpload('zip')" class="px-3 py-3 bg-viper-card/50 border-2 border-dashed border-red-400/40 rounded-lg hover:border-red-400 transition-colors flex flex-col items-center gap-1 text-gray-400 hover:text-red-300">
+                                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/>
+                                                </svg>
+                                                <span class="text-xs font-medium">ZIP Archive</span>
+                                            </button>
+                                            <button type="button" onclick="selectNcmecUpload('folder')" class="px-3 py-3 bg-viper-card/50 border-2 border-dashed border-red-400/40 rounded-lg hover:border-red-400 transition-colors flex flex-col items-center gap-1 text-gray-400 hover:text-red-300">
+                                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                                                </svg>
+                                                <span class="text-xs font-medium">Unzipped Folder</span>
+                                            </button>
+                                            <button type="button" onclick="selectNcmecUpload('pdf')" class="px-3 py-3 bg-viper-card/50 border-2 border-dashed border-red-400/40 rounded-lg hover:border-red-400 transition-colors flex flex-col items-center gap-1 text-gray-400 hover:text-red-300">
+                                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                                </svg>
+                                                <span class="text-xs font-medium">Single PDF</span>
+                                            </button>
+                                        </div>
+                                        <p class="text-xs text-red-300/70 mt-2">📂 ZIP = the full CyberTip export · Folder = already-unzipped CyberTip directory · PDF = the standalone CyberTip report</p>
                                     </div>
                                     <div id="evidenceFilesInfo" class="hidden mt-3 p-4 bg-viper-cyan/10 border border-viper-cyan/30 rounded-lg">
                                         <div class="flex items-start justify-between mb-2">
@@ -6948,9 +7070,14 @@
                 phone: '📱',
                 cellebrite: '📱',
                 datapilot: '📲',
+                ncmecCybertip: '⚠️',
                 other: '📎'
             };
-            
+
+            const typeLabels = {
+                ncmecCybertip: 'NCMEC CyberTip',
+            };
+
             return caseEvidence.map(item => {
                 // IDs may be numeric (legacy) or string (Datapilot bundle pushes).
                 // We must produce a JS literal that is safe inside a
@@ -6961,13 +7088,13 @@
                     ? String(item.id)
                     : "'" + String(item.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
                 return `
-                <div class="glass-card rounded-lg p-3 hover:border-viper-cyan/50 transition-all cursor-pointer" onclick="viewEvidenceInline(${idLit})">
+                <div class="glass-card rounded-lg p-3 hover:border-viper-cyan/50 transition-all cursor-pointer ${item.csamSensitive ? 'border border-red-400/40' : ''}" onclick="viewEvidenceInline(${idLit})">
                     <div class="flex items-center justify-between mb-2">
                         <div class="flex items-center space-x-2 flex-1">
                             <span class="text-xl">${typeIcons[item.type] || '📎'}</span>
                             <div class="flex-1 min-w-0">
-                                <h4 class="text-sm font-bold truncate">${item.tag || 'Evidence Item'}</h4>
-                                <p class="text-xs text-gray-400">${item.type}</p>
+                                <h4 class="text-sm font-bold truncate">${item.tag || 'Evidence Item'}${item.csamSensitive ? ' <span class="text-[10px] px-1.5 py-0.5 ml-1 rounded bg-red-500/20 text-red-300 border border-red-400/40">CSAM</span>' : ''}</h4>
+                                <p class="text-xs text-gray-400">${typeLabels[item.type] || item.type}</p>
                             </div>
                         </div>
                         <div class="flex items-center space-x-1">
@@ -7027,6 +7154,7 @@
             const celUI = document.getElementById('cellebriteUploadUI');
             const celxUI = document.getElementById('cellebriteExtractionUploadUI');
             const dpUI  = document.getElementById('datapilotUploadUI');
+            const ncUI  = document.getElementById('ncmecUploadUI');
             const hint = document.getElementById('standardUploadHint');
             const hideStd = () => { stdUI.classList.add('hidden'); if (hint) hint.classList.add('hidden'); };
             const showStd = () => { stdUI.classList.remove('hidden'); if (hint) hint.classList.remove('hidden'); };
@@ -7036,21 +7164,31 @@
                 celUI.classList.remove('hidden');
                 if (celxUI) celxUI.classList.add('hidden');
                 if (dpUI) dpUI.classList.add('hidden');
+                if (ncUI) ncUI.classList.add('hidden');
             } else if (val === 'cellebriteExtraction') {
                 hideStd();
                 celUI.classList.add('hidden');
                 if (celxUI) celxUI.classList.remove('hidden');
                 if (dpUI) dpUI.classList.add('hidden');
+                if (ncUI) ncUI.classList.add('hidden');
             } else if (val === 'datapilot') {
                 hideStd();
                 celUI.classList.add('hidden');
                 if (celxUI) celxUI.classList.add('hidden');
                 if (dpUI) dpUI.classList.remove('hidden');
+                if (ncUI) ncUI.classList.add('hidden');
+            } else if (val === 'ncmecCybertip') {
+                hideStd();
+                celUI.classList.add('hidden');
+                if (celxUI) celxUI.classList.add('hidden');
+                if (dpUI) dpUI.classList.add('hidden');
+                if (ncUI) ncUI.classList.remove('hidden');
             } else {
                 showStd();
                 celUI.classList.add('hidden');
                 if (celxUI) celxUI.classList.add('hidden');
                 if (dpUI) dpUI.classList.add('hidden');
+                if (ncUI) ncUI.classList.add('hidden');
             }
         }
 
@@ -7358,9 +7496,62 @@
                 document.getElementById('evidenceFilesInfo').classList.remove('hidden');
             }
         }
+
+        // NCMEC CyberTip — three pick modes routed through the same evidence
+        // IPC. ZIP/PDF pop a file picker with a specific filter; folder pops
+        // a directory picker that recursively collects all files.
+        async function selectNcmecUpload(mode) {
+            if (!window.electronAPI || !window.electronAPI.selectEvidenceFiles) {
+                viperToast('Native dialog IPC unavailable — restart VIPER', 'error');
+                return;
+            }
+            let req;
+            if (mode === 'zip') {
+                req = { mode: 'files-single', title: 'Select NCMEC CyberTip ZIP',
+                        filters: [{ name: 'CyberTip ZIP', extensions: ['zip'] }] };
+            } else if (mode === 'pdf') {
+                req = { mode: 'files-single', title: 'Select NCMEC CyberTip PDF',
+                        filters: [{ name: 'CyberTip PDF', extensions: ['pdf'] }] };
+            } else if (mode === 'folder') {
+                req = { mode: 'folder', title: 'Select NCMEC CyberTip Folder (unzipped)' };
+            } else {
+                return;
+            }
+            const result = await window.electronAPI.selectEvidenceFiles(req);
+            if (!result) return;
+
+            nativeEvidenceFiles = result.files;
+            evidenceFiles = [];
+            ncmecUploadMode = mode;
+            ncmecSourceName = result.folderName || (result.files[0] && result.files[0].name) || `cybertip_${Date.now()}`;
+
+            const count = result.files.length;
+            const totalSize = result.files.reduce((s, f) => s + f.size, 0);
+            const modeLabel = mode === 'zip' ? '📦 ZIP'
+                            : mode === 'pdf' ? '📄 PDF'
+                            : '📁 Folder';
+            const label = `${modeLabel} — ${ncmecSourceName} (${count} file${count !== 1 ? 's' : ''}, ${formatFileSize(totalSize)})`;
+
+            const infoDiv = document.getElementById('evidenceFilesInfo');
+            const countEl = document.getElementById('evidenceFileCount');
+            const listEl = document.getElementById('evidenceFilesList');
+            countEl.textContent = label;
+            countEl.className = 'text-sm font-medium text-red-300';
+            listEl.innerHTML = result.files.slice(0, 20).map(f =>
+                `<div class="truncate text-red-200/70">⚠ ${f.relativePath}</div>`
+            ).join('') + (count > 20 ? `<div class="text-gray-500">… and ${count - 20} more</div>` : '');
+            // Tint info container red for CSAM
+            infoDiv.className = 'mt-3 p-4 bg-red-500/10 border border-red-500/30 rounded-lg';
+            infoDiv.classList.remove('hidden');
+        }
         
         // Native file paths selected via Electron dialog (bypasses browser file input)
         let nativeEvidenceFiles = null;
+
+        // NCMEC CyberTip upload state — separate so its CSAM flag survives
+        // even if user briefly toggles the type dropdown around.
+        let ncmecUploadMode = null;       // 'zip' | 'folder' | 'pdf'
+        let ncmecSourceName = null;       // e.g. "CT_98765.zip"
 
         async function selectEvidenceViaDialog(mode) {
             const result = await window.electronAPI.selectEvidenceFiles({ mode });
@@ -7392,6 +7583,8 @@
             cellebriteScanResult = null;
             datapilotFolderPath = null;
             datapilotScanResult = null;
+            ncmecUploadMode = null;
+            ncmecSourceName = null;
             document.getElementById('evidenceFilesInfo').classList.add('hidden');
             // Reset info styling
             const infoDiv = document.getElementById('evidenceFilesInfo');
@@ -7780,6 +7973,14 @@
                             files: files,
                             createdAt: new Date().toISOString()
                         };
+                        // Stamp CSAM-sensitive metadata for NCMEC CyberTip uploads
+                        if (type === 'ncmecCybertip') {
+                            newEvidence.csamSensitive = true;
+                            newEvidence.ncmec = {
+                                uploadMode: ncmecUploadMode || 'files',
+                                sourceName: ncmecSourceName || null,
+                            };
+                        }
                         caseEvidence.push(newEvidence);
                         const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
                         allEvidence[currentCase.caseNumber] = caseEvidence;
@@ -7798,6 +7999,8 @@
                         document.getElementById('uploadSuccessModal').classList.add('show');
                         evidenceFiles = [];
                         nativeEvidenceFiles = null;
+                        ncmecUploadMode = null;
+                        ncmecSourceName = null;
                         cancelEvidenceForm();
                         setTimeout(() => closeUploadSuccessModal(), 2000);
                     } catch (error) {

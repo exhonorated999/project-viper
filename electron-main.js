@@ -2144,7 +2144,7 @@ ipcMain.handle('save-case-export', async (event, { fileName, data }) => {
 });
 
 // --- Export DA Package (ZIP with PDF + evidence files) ---
-ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber }) => {
+ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber, excludeCsam, csamTags }) => {
   const result = await dialog.showSaveDialog(mainWindow, {
     title: 'Save DA Export Package',
     defaultPath: fileName,
@@ -2152,6 +2152,14 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber 
   });
   restoreFocus();
   if (result.canceled || !result.filePath) return null;
+
+  // Normalize CSAM-exclusion inputs from the renderer.
+  const csamExclude = !!excludeCsam;
+  const csamSkipSet = new Set(
+    (Array.isArray(csamTags) ? csamTags : [])
+      .filter(t => typeof t === 'string' && t.length > 0)
+  );
+  const csamSkippedLog = [];
 
   const archiver = (() => {
     try { return require('archiver'); } catch { return null; }
@@ -2198,7 +2206,11 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber 
   };
   const sanitizeArchiveRel = (relPath) => relPath.split('/').map(shortenComponent).join('/');
 
-  const addTreeToArchive = (baseDir, archivePrefix, archive) => {
+  const addTreeToArchive = (baseDir, archivePrefix, archive, opts = {}) => {
+    // opts.skipTopLevelDirs: Set<string> — names of immediate subdirectories
+    //   of baseDir that should be omitted entirely (e.g. CSAM-flagged
+    //   evidence folders when DA export is set to exclude CSAM).
+    const skipTopLevelDirs = opts.skipTopLevelDirs instanceof Set ? opts.skipTopLevelDirs : null;
     if (!fs.existsSync(baseDir)) return;
     const walk = (dir, rel) => {
       let entries;
@@ -2207,6 +2219,11 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber 
       for (const entry of entries) {
         const full = path.join(dir, entry.name);
         const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+        // Top-level CSAM exclusion — drop the whole evidence-tag subfolder.
+        if (entry.isDirectory() && !rel && skipTopLevelDirs && skipTopLevelDirs.has(entry.name)) {
+          csamSkippedLog.push(`${archivePrefix}/${entry.name}/`);
+          continue;
+        }
         if (entry.isDirectory()) {
           walk(full, relPath);
           continue;
@@ -2276,8 +2293,9 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber 
     const settle = (fn, val) => { if (!settled) { settled = true; fn(val); } };
 
     output.on('close', () => {
-      console.log(`[save-da-export] DONE — wrote ${archive.pointer()} bytes; files ok=${okCount} skipped=${skipCount} errors=${errCount}; logical input bytes=${totalBytes}`);
+      console.log(`[save-da-export] DONE — wrote ${archive.pointer()} bytes; files ok=${okCount} skipped=${skipCount} errors=${errCount}; csam-folders-skipped=${csamSkippedLog.length}; logical input bytes=${totalBytes}`);
       if (log.length) console.log('[save-da-export] log:\n' + log.slice(0, 40).join('\n'));
+      if (csamSkippedLog.length) console.log('[save-da-export] CSAM-excluded folders:\n' + csamSkippedLog.join('\n'));
       settle(resolve, result.filePath);
     });
     output.on('error', (err) => {
@@ -2299,8 +2317,13 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber 
       // 1. PDF report goes at archive root
       archive.append(Buffer.from(pdfBytes), { name: `${caseNumber}_DA_Report.pdf` });
 
-      // 2. Evidence (streamed from disk)
-      addTreeToArchive(path.join(casesDir, caseNumber, 'Evidence'), 'Evidence', archive);
+      // 2. Evidence (streamed from disk) — skip CSAM-flagged subfolders if requested
+      addTreeToArchive(
+        path.join(casesDir, caseNumber, 'Evidence'),
+        'Evidence',
+        archive,
+        { skipTopLevelDirs: csamExclude ? csamSkipSet : null }
+      );
 
       // 3. Warrants (streamed from disk)
       addTreeToArchive(path.join(casesDir, caseNumber, 'Warrants'), 'Warrants', archive);
@@ -2314,8 +2337,18 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber 
         generatedAt: new Date().toISOString(),
         viperVersion: app.getVersion ? app.getVersion() : 'unknown',
         securityUnlocked: !!(security && security.isUnlocked()),
-        counts: { added: okCount, skipped: skipCount, errors: errCount, renamed: renameLog.length },
+        counts: { added: okCount, skipped: skipCount, errors: errCount, renamed: renameLog.length, csamFoldersSkipped: csamSkippedLog.length },
         logicalBytes: totalBytes,
+        csamPolicy: {
+          excludeCsam: csamExclude,
+          requestedCsamTags: Array.from(csamSkipSet),
+          csamFoldersSkipped: csamSkippedLog,
+          note: csamExclude
+            ? 'CSAM-sensitive evidence folders were excluded from this DA export package by the exporting officer. Item descriptions remain in the PDF report; the media payload was deliberately withheld and must be obtained through law-enforcement channels.'
+            : (csamSkipSet.size > 0
+                ? 'CSAM-sensitive evidence was present in this case but the exporting officer chose to INCLUDE it in this package.'
+                : 'No CSAM-flagged evidence in this case.'),
+        },
         notes: renameLog.length
           ? 'Some filenames were shortened to satisfy Windows MAX_PATH (260 chars) on extraction. See renameMap for original → archived.'
           : undefined,
@@ -2997,16 +3030,21 @@ ipcMain.handle('audit-log-write', async (event, payload) => {
   }
 });
 // --- Select evidence files or folder via native dialog ---
-ipcMain.handle('select-evidence-files', async (event, { mode }) => {
+ipcMain.handle('select-evidence-files', async (event, { mode, filters: customFilters, title: customTitle } = {}) => {
   // mode: 'files' or 'folder'
   const props = mode === 'folder'
     ? ['openDirectory']
     : ['openFile', 'multiSelections'];
-  const result = await dialog.showOpenDialog(mainWindow, {
-    title: mode === 'folder' ? 'Select Evidence Folder' : 'Select Evidence Files',
+  // For single-file modes (e.g., NCMEC PDF / ZIP picks) the caller can suppress multi-selection
+  if (mode === 'files-single') {
+    props.splice(0, props.length, 'openFile');
+  }
+  const dialogOpts = {
+    title: customTitle || (mode === 'folder' ? 'Select Evidence Folder' : 'Select Evidence Files'),
     properties: props,
-    filters: mode === 'folder' ? [] : [{ name: 'All Files', extensions: ['*'] }]
-  });
+    filters: mode === 'folder' ? [] : (customFilters || [{ name: 'All Files', extensions: ['*'] }]),
+  };
+  const result = await dialog.showOpenDialog(mainWindow, dialogOpts);
   restoreFocus();
   if (result.canceled || !result.filePaths.length) return null;
 

@@ -604,3 +604,181 @@
     font-weight: 600;
 }
 .wa-btn-primary:hover { background: rgba(16, 185, 129, 0.35); }
+
+/* ── Residential editor (Phase R2): collapsible <details> sections ── */
+.wa-editor details.wa-section {
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 0.5rem;
+    padding: 0.6rem 0.85rem;
+}
+.wa-editor details.wa-section + details.wa-section {
+    margin-top: 0.5rem;
+}
+.wa-editor details.wa-section > summary.wa-section-summary {
+    cursor: pointer;
+    list-style: none;
+    color: rgba(255, 255, 255, 0.92);
+    font-weight: 600;
+    font-size: 0.95rem;
+    padding: 0.15rem 0;
+    user-select: none;
+}
+.wa-editor details.wa-section > summary.wa-section-summary::-webkit-details-marker {
+    display: none;
+}
+.wa-editor details.wa-section > summary.wa-section-summary::before {
+    content: '▶';
+    color: rgba(56, 189, 248, 0.6);
+    font-size: 0.7rem;
+    margin-right: 0.5rem;
+    display: inline-block;
+    transition: transform 0.15s ease;
+}
+.wa-editor details[open].wa-section > summary.wa-section-summary::before {
+    transform: rotate(90deg);
+}
+.wa-editor details.wa-section > .wa-section-body {
+    padding-top: 0.5rem;
+    color: rgba(226, 232, 240, 0.95);
+}
+
+
+/* ── Residential Live Preview panel ── */
+.wa-lp-col {
+    /* Right column of the residential 2-col layout. Made sticky so the
+       preview tracks the form as the user scrolls. */
+    position: sticky;
+    top: 8px;
+    align-self: flex-start;
+    max-height: calc(100vh - 96px);
+    overflow: auto;
+}
+.wa-lp-shell {
+    border: 1px solid #334155;
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.55);
+    overflow: hidden;
+}
+.wa-lp-title {
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: #94a3b8;
+    background: rgba(15, 23, 42, 0.75);
+    border-bottom: 1px solid #334155;
+    text-transform: uppercase;
+}
+.wa-lp-page {
+    /* Paper-like preview surface. Slightly off-white text on a tinted
+       slab so it reads "document-like" without breaking dark theme. */
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 14px 18px 18px;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+}
+.wa-lp-runheader {
+    text-align: center;
+    border-bottom: 1px dashed rgba(148, 163, 184, 0.35);
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    font-size: 10px;
+    color: #94a3b8;
+    letter-spacing: 0.04em;
+}
+.wa-lp-runheader > div { line-height: 1.35; }
+.wa-lp-runfooter {
+    margin-top: 12px;
+    padding-top: 6px;
+    border-top: 1px dashed rgba(148, 163, 184, 0.35);
+    font-size: 10px;
+    color: #94a3b8;
+    text-align: right;
+    letter-spacing: 0.04em;
+}
+.wa-lp-body { white-space: normal; }
+.wa-lp-coverhead {
+    text-align: center;
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 0.08em;
+    margin: 6px 0;
+    color: #f8fafc;
+}
+.wa-lp-covermeta {
+    text-align: center;
+    color: #cbd5e1;
+    font-size: 11px;
+    margin-bottom: 6px;
+}
+.wa-lp-h1 {
+    font-weight: 700;
+    color: #f8fafc;
+    margin: 10px 0 4px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.wa-lp-h2 {
+    font-weight: 600;
+    color: #e2e8f0;
+    margin: 8px 0 3px;
+    font-size: 12px;
+}
+.wa-lp-p {
+    color: #cbd5e1;
+    margin: 4px 0;
+    text-align: justify;
+}
+.wa-lp-p--indent { padding-left: 18px; }
+.wa-lp-num {
+    color: #cbd5e1;
+    margin: 3px 0;
+    padding-left: 22px;
+    text-indent: -22px;
+}
+.wa-lp-sig {
+    margin: 14px 0 4px;
+}
+.wa-lp-sig-line { color: #64748b; }
+.wa-lp-sig-label {
+    font-size: 10px;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding-left: 2px;
+}
+.wa-lp-spacer { display: block; }
+.wa-lp-spacer--sm { height: 4px; }
+.wa-lp-spacer--md { height: 8px; }
+.wa-lp-spacer--lg { height: 14px; }
+.wa-lp-pagebreak {
+    text-align: center;
+    color: #64748b;
+    font-size: 10px;
+    margin: 12px 0;
+    border-top: 1px dashed #334155;
+    padding-top: 4px;
+    letter-spacing: 0.08em;
+}
+.wa-lp-disclaimer {
+    color: #94a3b8;
+    font-size: 10px;
+    font-style: italic;
+    margin-top: 10px;
+    text-align: center;
+}
+.wa-lp-empty {
+    padding: 16px;
+    color: #64748b;
+    font-size: 12px;
+    text-align: center;
+    font-style: italic;
+}
+
+/* Scope chip used in residential validator (Case PC scope) — reuses
+   the same purple as ESP compose chip. */
+.wa-vl-chip--compose { background: rgba(168, 85, 247, 0.18); color: #c4b5fd; }

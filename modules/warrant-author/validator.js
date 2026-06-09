@@ -218,16 +218,40 @@ function validateDraft(input) {
         ));
     }
 
-    // §1524 grounds — at least one ticked
-    const grounds = (draft.pc1524Grounds && typeof draft.pc1524Grounds === 'object') ? draft.pc1524Grounds : {};
-    const anyGround = Object.values(grounds).some(v => v === true);
-    if (!anyGround) {
-        errors.push(_err(
-            'draft.pc1524.none',
-            'PC_1524_GROUNDS_NONE',
-            'No §1524 grounds checkbox is ticked.',
-            { scope: 'draft', fieldPath: 'draft.pc1524Grounds' }
-        ));
+    // §1524 grounds — at least one ticked.
+    // CA-only: PC §1524 is a California Penal Code provision. Virginia
+    // search-warrant grounds are governed by Va. Code §§ 19.2-53 / 19.2-54
+    // (handled via the DC-338 form's item-1-through-7 checkboxes in the
+    // VA block builder, not via draft.pc1524Grounds). Generic-US drafts
+    // also skip this check — the underlying federal SCA does not have a
+    // numbered-grounds taxonomy.
+    //
+    // Routing: explicit draft.jurisdiction wins. Otherwise we sniff the
+    // template prefix. A draft with BOTH fields empty is treated as
+    // legacy CA — the validator predates the multi-jurisdiction field
+    // and existing CA drafts must keep firing this check.
+    const _jx = String(draft.jurisdiction || '').toUpperCase();
+    const _tpl = String(draft.template || '');
+    let _isCaJurisdiction;
+    if (_jx) {
+        _isCaJurisdiction = (_jx === 'CA');
+    } else if (_tpl) {
+        _isCaJurisdiction = _tpl.startsWith('ca-');
+    } else {
+        // Fully empty draft → legacy default = CA.
+        _isCaJurisdiction = true;
+    }
+    if (_isCaJurisdiction) {
+        const grounds = (draft.pc1524Grounds && typeof draft.pc1524Grounds === 'object') ? draft.pc1524Grounds : {};
+        const anyGround = Object.values(grounds).some(v => v === true);
+        if (!anyGround) {
+            errors.push(_err(
+                'draft.pc1524.none',
+                'PC_1524_GROUNDS_NONE',
+                'No §1524 grounds checkbox is ticked.',
+                { scope: 'draft', fieldPath: 'draft.pc1524Grounds' }
+            ));
+        }
     }
 
     // Hobbs articulation warning
@@ -441,10 +465,317 @@ function validateDraft(input) {
     };
 }
 
+// ─── residential validator ──────────────────────────────────────────────
+//
+// validateResidential({ draft, agency, pcNarrative, today }) → same shape
+// as validateDraft: { errors, warnings, ok, stats }
+//
+// Residential drafts do NOT use addendums / providers — instead they
+// describe a single premises with offenses, items-to-seize blocks, and
+// optional clauses. The Statement of Probable Cause is sourced from
+// the CASE-LEVEL `pcNarrative` (shared across all warrants in the case)
+// — NOT from a per-draft SOPC array. The legacy `draft.residential.sopc`
+// substructure is retained for back-compat but ignored.
+//
+// HARD ERRORS:
+//   AGENCY_PROFILE_INCOMPLETE             — same fields as ESP
+//   RESIDENTIAL_NO_PREMISES_ADDRESS       — premises.address blank
+//   RESIDENTIAL_NO_LEGAL_DESCRIPTION      — premises.legalDescription blank
+//   RESIDENTIAL_NO_OFFENSES               — offenses array has no usable row
+//   RESIDENTIAL_NO_ITEMS_TO_SEIZE         — itemsToSeize.blocks has no usable block
+//   PC_NARRATIVE_EMPTY                    — case-level pcNarrative blank
+//                                           (Case Probable Cause not authored)
+//   PC_1524_GROUNDS_NONE                  — every §1524 toggle false
+//   RESIDENTIAL_NIGHT_NO_JUSTIFICATION    — nightService.enabled but
+//                                           justification blank
+//   RESIDENTIAL_HOBBS_NO_JUSTIFICATION    — hobbsSealing.enabled but
+//                                           justification blank
+//   RESIDENTIAL_TE_INLINE_EMPTY           — trainingExperience.mode='inline'
+//                                           but inlineBody blank/placeholder
+//
+// SOFT WARNINGS:
+//   AGENCY_AFFIANT_CONTACT_BLANK          — same as ESP
+//   AGENCY_TRAINING_PLACEHOLDER           — same as ESP (only relevant when
+//                                           T&E mode='profile')
+//   RESIDENTIAL_NO_SUSPECTS               — no suspect rows (informational)
+//   RESIDENTIAL_OFFENSE_ROW_PARTIAL       — at least one row has code w/o
+//                                           label or label w/o code
+//   RESIDENTIAL_ITEM_BLOCK_BLANK_BODY     — block has label but blank body
+//   RESIDENTIAL_EXECUTED_AT_BLANK         — executedAt.city or .date blank
+//                                           (court/date stamp incomplete)
+//   RESIDENTIAL_NO_CRIME_TYPE             — crimeType empty (no preset
+//                                           applied — likely manual setup)
+
+function _hasOffense(o) {
+    if (!o || typeof o !== 'object') return false;
+    return !_isEmpty(o.code) || !_isEmpty(o.label);
+}
+function _hasItemBlock(b) {
+    if (!b || typeof b !== 'object') return false;
+    return !_isEmpty(b.label) || !_isEmpty(b.body);
+}
+
+function validateResidential(input) {
+    input = input || {};
+    const draft  = input.draft  || {};
+    const agency = input.agency || {};
+    const errors = [];
+    const warnings = [];
+
+    const res = (draft.residential && typeof draft.residential === 'object')
+        ? draft.residential : {};
+    const premises  = (res.premises  && typeof res.premises  === 'object') ? res.premises  : {};
+    const offenses  = Array.isArray(res.offenses) ? res.offenses : [];
+    const suspects  = Array.isArray(res.suspects) ? res.suspects : [];
+    const itemsObj  = (res.itemsToSeize && typeof res.itemsToSeize === 'object') ? res.itemsToSeize : {};
+    const itemBlocks = Array.isArray(itemsObj.blocks) ? itemsObj.blocks : [];
+    const te        = (res.trainingExperience && typeof res.trainingExperience === 'object') ? res.trainingExperience : {};
+    const opts      = (res.optionalClauses && typeof res.optionalClauses === 'object') ? res.optionalClauses : {};
+    const execAt    = (res.executedAt && typeof res.executedAt === 'object') ? res.executedAt : {};
+
+    // Case-level Probable Cause — sourced from the Case Probable Cause
+    // panel (shared across all warrants in the case). Caller passes it
+    // in via `input.pcNarrative`; fall back to legacy draft field for
+    // back-compat with older drafts.
+    const pcNarrative = (typeof input.pcNarrative === 'string' && input.pcNarrative)
+        ? input.pcNarrative
+        : (typeof draft.probableCauseNarrative === 'string' ? draft.probableCauseNarrative : '');
+
+    // ── 1. Agency profile completeness ─────────────────────────────────
+    const missingAgency = [];
+    for (const f of REQUIRED_AGENCY_FIELDS) {
+        if (_isEmpty(agency[f.key])) missingAgency.push(f);
+    }
+    if (missingAgency.length) {
+        errors.push(_err(
+            'agency.profile.incomplete',
+            'AGENCY_PROFILE_INCOMPLETE',
+            'Agency profile missing ' + missingAgency.length + ' required field' +
+              (missingAgency.length === 1 ? '' : 's') + ' — open Settings → Warrant Author → Agency Profile.',
+            { scope: 'agency', missing: missingAgency.map(f => f.key), detail: missingAgency.map(f => f.label).join(', ') }
+        ));
+    }
+
+    // training placeholder warning (only relevant when residential uses
+    // the agency profile T&E; if mode='inline' the user supplies their own)
+    if (te.mode !== 'inline' &&
+        typeof agency.trainingExperienceBoilerplate === 'string' &&
+        agency.trainingExperienceBoilerplate.trim().startsWith(TRAINING_PLACEHOLDER_PREFIX)) {
+        warnings.push(_warn(
+            'agency.training.placeholder',
+            'AGENCY_TRAINING_PLACEHOLDER',
+            'Training & Experience boilerplate still contains the shipped REPLACE THIS placeholder.',
+            { scope: 'agency', fieldPath: 'agency.trainingExperienceBoilerplate' }
+        ));
+    }
+
+    // affiant contact (soft)
+    if (_isEmpty(agency.affiantEmail) && _isEmpty(agency.affiantPhone)) {
+        warnings.push(_warn(
+            'agency.affiant.contact.blank',
+            'AGENCY_AFFIANT_CONTACT_BLANK',
+            'Affiant has no contact email or phone in Agency Profile — providers cannot reach you.',
+            { scope: 'agency' }
+        ));
+    }
+
+    // ── 2. Premises ────────────────────────────────────────────────────
+    if (_isEmpty(premises.address)) {
+        errors.push(_err(
+            'res.premises.address.empty',
+            'RESIDENTIAL_NO_PREMISES_ADDRESS',
+            'Premises address is empty — the warrant must identify the location to be searched.',
+            { scope: 'residential', fieldPath: 'draft.residential.premises.address' }
+        ));
+    }
+    if (_isEmpty(premises.legalDescription)) {
+        errors.push(_err(
+            'res.premises.legal.empty',
+            'RESIDENTIAL_NO_LEGAL_DESCRIPTION',
+            'Premises legal description is empty — required for particularity (4th Amendment / PC §1525).',
+            { scope: 'residential', fieldPath: 'draft.residential.premises.legalDescription' }
+        ));
+    }
+
+    // ── 3. Crime type / offenses ──────────────────────────────────────
+    if (_isEmpty(res.crimeType)) {
+        warnings.push(_warn(
+            'res.crimetype.empty',
+            'RESIDENTIAL_NO_CRIME_TYPE',
+            'No crime-type preset applied — items-to-seize and training & experience blocks were not auto-populated.',
+            { scope: 'residential', fieldPath: 'draft.residential.crimeType' }
+        ));
+    }
+
+    const usableOffenses = offenses.filter(_hasOffense);
+    if (usableOffenses.length === 0) {
+        errors.push(_err(
+            'res.offenses.empty',
+            'RESIDENTIAL_NO_OFFENSES',
+            'No offenses listed — at least one PC/HS/VC offense is required.',
+            { scope: 'residential', fieldPath: 'draft.residential.offenses' }
+        ));
+    } else {
+        // partial rows (code without label, or label without code)
+        const partial = usableOffenses.filter(o => _isEmpty(o.code) || _isEmpty(o.label));
+        if (partial.length) {
+            warnings.push(_warn(
+                'res.offenses.partial',
+                'RESIDENTIAL_OFFENSE_ROW_PARTIAL',
+                partial.length + ' offense row' + (partial.length === 1 ? '' : 's') +
+                  ' missing either a code or a label.',
+                { scope: 'residential', fieldPath: 'draft.residential.offenses', count: partial.length }
+            ));
+        }
+    }
+
+    // ── 4. PC §1524 grounds (CA-only) ─────────────────────────────────
+    // Skip for non-CA jurisdictions. Virginia residential warrants (if
+    // ever supported) use Va. Code §§ 19.2-53 / 19.2-54 grounds — a
+    // different taxonomy keyed off the DC-338 face page, not pc1524Grounds.
+    // Empty jurisdiction + empty template → legacy CA default.
+    const _resJx = String(draft.jurisdiction || '').toUpperCase();
+    const _resTpl = String(draft.template || '');
+    let _resIsCa;
+    if (_resJx) {
+        _resIsCa = (_resJx === 'CA');
+    } else if (_resTpl) {
+        _resIsCa = _resTpl.startsWith('ca-');
+    } else {
+        _resIsCa = true;
+    }
+    if (_resIsCa) {
+        const grounds = (draft.pc1524Grounds && typeof draft.pc1524Grounds === 'object') ? draft.pc1524Grounds : {};
+        const anyGround = Object.values(grounds).some(v => v === true);
+        if (!anyGround) {
+            errors.push(_err(
+                'draft.pc1524.none',
+                'PC_1524_GROUNDS_NONE',
+                'No §1524 grounds checkbox is ticked.',
+                { scope: 'draft', fieldPath: 'draft.pc1524Grounds' }
+            ));
+        }
+    }
+
+    // ── 5. Items to seize ──────────────────────────────────────────────
+    const usableBlocks = itemBlocks.filter(_hasItemBlock);
+    if (usableBlocks.length === 0) {
+        errors.push(_err(
+            'res.items.empty',
+            'RESIDENTIAL_NO_ITEMS_TO_SEIZE',
+            'No items-to-seize blocks — the warrant must describe the things to be seized with particularity.',
+            { scope: 'residential', fieldPath: 'draft.residential.itemsToSeize.blocks' }
+        ));
+    } else {
+        const blankBody = usableBlocks.filter(b => !_isEmpty(b.label) && _isEmpty(b.body));
+        if (blankBody.length) {
+            warnings.push(_warn(
+                'res.items.blankbody',
+                'RESIDENTIAL_ITEM_BLOCK_BLANK_BODY',
+                blankBody.length + ' items-to-seize block' + (blankBody.length === 1 ? '' : 's') +
+                  ' have a label but no body text.',
+                { scope: 'residential', fieldPath: 'draft.residential.itemsToSeize.blocks', count: blankBody.length }
+            ));
+        }
+    }
+
+    // ── 6. Training & Experience ───────────────────────────────────────
+    if (te.mode === 'inline') {
+        const body = _safeStr(te.inlineBody).trim();
+        if (_isEmpty(body)) {
+            errors.push(_err(
+                'res.te.inline.empty',
+                'RESIDENTIAL_TE_INLINE_EMPTY',
+                'Training & Experience set to inline but the inline body is empty.',
+                { scope: 'residential', fieldPath: 'draft.residential.trainingExperience.inlineBody' }
+            ));
+        } else if (body.startsWith(TRAINING_PLACEHOLDER_PREFIX)) {
+            warnings.push(_warn(
+                'res.te.inline.placeholder',
+                'AGENCY_TRAINING_PLACEHOLDER',
+                'Inline Training & Experience still starts with the shipped REPLACE THIS placeholder.',
+                { scope: 'residential', fieldPath: 'draft.residential.trainingExperience.inlineBody' }
+            ));
+        }
+    }
+
+    // ── 7. Statement of Probable Cause (sourced from case-level PC) ────
+    //
+    // Residential SOPC is rendered from the shared Case Probable Cause
+    // narrative — not from a per-draft sopc.sections array. So validate
+    // the case-level pcNarrative here. Empty PC is a hard blocker.
+    if (_isEmpty(pcNarrative)) {
+        errors.push(_err(
+            'res.pc.empty',
+            'PC_NARRATIVE_EMPTY',
+            'Case Probable Cause narrative is empty — author it in the Case Probable Cause panel before submission.',
+            { scope: 'case', fieldPath: 'caseProbableCause.body' }
+        ));
+    }
+
+    // ── 8. Optional clauses — justifications ───────────────────────────
+    const night = (opts.nightService && typeof opts.nightService === 'object') ? opts.nightService : {};
+    if (night.enabled && _isEmpty(night.justification)) {
+        errors.push(_err(
+            'res.night.no.justification',
+            'RESIDENTIAL_NIGHT_NO_JUSTIFICATION',
+            'Night service requested but the justification is blank (PC §1533 requires good cause).',
+            { scope: 'residential', fieldPath: 'draft.residential.optionalClauses.nightService.justification' }
+        ));
+    }
+    const hobbs = (opts.hobbsSealing && typeof opts.hobbsSealing === 'object') ? opts.hobbsSealing : {};
+    if (hobbs.enabled && _isEmpty(hobbs.justification)) {
+        errors.push(_err(
+            'res.hobbs.no.justification',
+            'RESIDENTIAL_HOBBS_NO_JUSTIFICATION',
+            'Hobbs sealing requested but the justification is blank.',
+            { scope: 'residential', fieldPath: 'draft.residential.optionalClauses.hobbsSealing.justification' }
+        ));
+    }
+
+    // ── 9. Suspects (soft) ─────────────────────────────────────────────
+    const namedSuspects = suspects.filter(s => s && !_isEmpty(s.name));
+    if (namedSuspects.length === 0) {
+        warnings.push(_warn(
+            'res.suspects.empty',
+            'RESIDENTIAL_NO_SUSPECTS',
+            'No named suspects — premises-only warrants are valid, but most residential SWs name at least one resident.',
+            { scope: 'residential', fieldPath: 'draft.residential.suspects' }
+        ));
+    }
+
+    // ── 10. Executed-at (soft) ─────────────────────────────────────────
+    if (_isEmpty(execAt.city) || _isEmpty(execAt.date)) {
+        warnings.push(_warn(
+            'res.executedat.blank',
+            'RESIDENTIAL_EXECUTED_AT_BLANK',
+            'Executed-at city or date is blank — fill in before printing the affiant declaration.',
+            { scope: 'residential', fieldPath: 'draft.residential.executedAt' }
+        ));
+    }
+
+    // ── Summary ────────────────────────────────────────────────────────
+    return {
+        errors,
+        warnings,
+        ok: errors.length === 0,
+        stats: {
+            offenseCount:   usableOffenses.length,
+            suspectCount:   namedSuspects.length,
+            itemBlockCount: usableBlocks.length,
+            pcNarrativeChars: _isEmpty(pcNarrative) ? 0 : String(pcNarrative).trim().length,
+            errorCount:    errors.length,
+            warningCount:  warnings.length,
+            hardBlockers:  Array.from(new Set(errors.map(e => e.code))),
+        },
+    };
+}
+
 // ─── exports ────────────────────────────────────────────────────────────
 
 const _api = {
     validateDraft,
+    validateResidential,
     REQUIRED_AGENCY_FIELDS,
     constants: { NDO_CA_CAP_DAYS, DATE_RANGE_LONG_DAYS, DATE_YEAR_MIN, DATE_YEAR_MAX, TRAINING_PLACEHOLDER_PREFIX },
 };

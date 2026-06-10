@@ -55,14 +55,43 @@ function _loadRaw(caseId) {
 function _save(caseId, data, opts) {
   if (!caseId) return false;
   const silent = !!(opts && opts.silent);
+  let serialized;
   try {
-    localStorage.setItem(_storageKey(caseId), JSON.stringify(data));
+    serialized = JSON.stringify(data);
+  } catch (e) {
+    console.error('[WarrantAuthor] draft-store: JSON.stringify failed (circular ref?):', e);
+    return false;
+  }
+  // Hotfix v3.8.3: catch oversized payloads before they push localStorage near quota.
+  // Chromium's per-origin cap is typically 5–10 MB; a partial flush at the quota edge
+  // is what corrupts the value and bricks the case page on next load.
+  const WARN_BYTES = 4 * 1024 * 1024; // 4 MB
+  if (serialized.length > WARN_BYTES) {
+    try {
+      console.warn(
+        '[WarrantAuthor] draft-store: payload is',
+        Math.round(serialized.length / 1024),
+        'KB for caseId=', caseId,
+        '— approaching localStorage quota; consider exporting and pruning drafts.'
+      );
+    } catch (_) {}
+  }
+  try {
+    localStorage.setItem(_storageKey(caseId), serialized);
     if (!silent) {
       try { window.dispatchEvent(new CustomEvent('warrant-author-change', { detail: { caseId } })); } catch (_) {}
     }
     return true;
   } catch (e) {
     console.error('[WarrantAuthor] draft-store save failed:', e);
+    // Do NOT leave a half-written value behind: removeItem so next load returns
+    // the empty fallback instead of a partially-written record that throws on parse.
+    try { localStorage.removeItem(_storageKey(caseId)); } catch (_) {}
+    try {
+      window.dispatchEvent(new CustomEvent('warrant-author-save-error', {
+        detail: { caseId, error: (e && e.message) || String(e), bytes: serialized.length },
+      }));
+    } catch (_) {}
     return false;
   }
 }

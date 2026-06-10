@@ -1131,9 +1131,30 @@
             }
         }
 
+        // ---------------------------------------------------------------------
+        // Defensive localStorage parse helper (v3.8.3 hotfix)
+        // Wraps JSON.parse(localStorage.getItem(...)) so that corrupted/truncated
+        // values (e.g. from a Chromium LevelDB partial flush after a crash) cannot
+        // throw SyntaxError during DOMContentLoaded and brick the case page.
+        // Returns `fallback` on null/empty/invalid JSON, with a single warning.
+        // ---------------------------------------------------------------------
+        function _lsParse(key, fallback) {
+            try {
+                const raw = localStorage.getItem(key);
+                if (raw === null || raw === undefined || raw === '') return fallback;
+                const parsed = JSON.parse(raw);
+                return (parsed === null || parsed === undefined) ? fallback : parsed;
+            } catch (e) {
+                try {
+                    console.warn('[VIPER] _lsParse: corrupted localStorage key', key, '-', (e && e.message) || e);
+                } catch (_) {}
+                return fallback;
+            }
+        }
+
         // User Information Display
         function updateUserDisplay() {
-            const userInfo = JSON.parse(localStorage.getItem('viperUserInfo')) || {};
+            const userInfo = _lsParse('viperUserInfo', {});
             const nameElement = document.getElementById('userDisplayName');
             const rankElement = document.getElementById('userRank');
             const avatarElement = document.getElementById('userAvatar');
@@ -1172,7 +1193,7 @@
                 if (localStorage.getItem(migrationKey)) return;
 
                 // 3. Dump RMS imports to text files
-                const rmsImports = JSON.parse(localStorage.getItem(`rmsImports_${currentCase.id}`) || '[]');
+                const rmsImports = _lsParse(`rmsImports_${currentCase.id}`, []);
                 if (rmsImports.length > 0 && window.electronAPI.saveCaseTextFile) {
                     for (let i = 0; i < rmsImports.length; i++) {
                         const r = rmsImports[i];
@@ -1239,7 +1260,7 @@
 
         function loadCase() {
             const params = new URLSearchParams(window.location.search);
-            const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            const cases = _lsParse('viperCases', []);
 
             // Support loading by case number from URL (for pop-out windows)
             if (params.get('case')) {
@@ -1265,21 +1286,21 @@
             } catch (_) { /* swallow */ }
             
             // Load tasks for this case
-            const allTasks = JSON.parse(localStorage.getItem('viperTasks')) || [];
+            const allTasks = _lsParse('viperTasks', []);
             caseTasks = allTasks.filter(t => t.caseId === currentCase.caseNumber);
             
             // Load notes for this case
-            const allNotes = JSON.parse(localStorage.getItem('viperCaseNotes')) || {};
+            const allNotes = _lsParse('viperCaseNotes', {});
             caseNotes = allNotes[currentCase.caseNumber] || [];
             
             // Load report for this case
-            const allReports = JSON.parse(localStorage.getItem('viperCaseReports')) || {};
+            const allReports = _lsParse('viperCaseReports', {});
             const reportData = allReports[currentCase.caseNumber] || { content: '', lastSaved: null };
             caseReport = reportData.content;
             reportLastSaved = reportData.lastSaved;
             
             // Load evidence for this case
-            const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
+            const allEvidence = _lsParse('viperCaseEvidence', {});
             caseEvidence = allEvidence[currentCase.caseNumber] || [];
 
             // Expose a refresh helper so external modules (e.g. Datapilot) can
@@ -1288,7 +1309,7 @@
             // the page is reloaded because `caseEvidence` is `let`-scoped.
             window.refreshCaseEvidenceFromStorage = function() {
                 try {
-                    const ae = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
+                    const ae = _lsParse('viperCaseEvidence', {});
                     caseEvidence = ae[currentCase.caseNumber] || [];
                     if (typeof currentTab !== 'undefined' && currentTab === 'evidence' && typeof renderTabContent === 'function') {
                         renderTabContent('evidence');
@@ -1298,43 +1319,43 @@
             };
             
             // Load warrants for this case
-            const allWarrants = JSON.parse(localStorage.getItem('viperCaseWarrants')) || {};
+            const allWarrants = _lsParse('viperCaseWarrants', {});
             caseWarrants = allWarrants[currentCase.caseNumber] || [];
 
             // Load forensic devices for this case
-            const allForensic = JSON.parse(localStorage.getItem('viperCaseForensicDevices')) || {};
+            const allForensic = _lsParse('viperCaseForensicDevices', {});
             caseForensicDevices = allForensic[currentCase.caseNumber] || [];
             
             // Load suspects for this case
-            const allSuspects = JSON.parse(localStorage.getItem('viperCaseSuspects')) || {};
+            const allSuspects = _lsParse('viperCaseSuspects', {});
             caseSuspects = allSuspects[currentCase.caseNumber] || [];
             
             // Load additional tab data
-            const allVictims = JSON.parse(localStorage.getItem('viperCaseVictims')) || {};
+            const allVictims = _lsParse('viperCaseVictims', {});
             caseVictims = allVictims[currentCase.caseNumber] || [];
             
-            const allWitnesses = JSON.parse(localStorage.getItem('viperCaseWitnesses')) || {};
+            const allWitnesses = _lsParse('viperCaseWitnesses', {});
             caseWitnesses = allWitnesses[currentCase.caseNumber] || [];
             
-            const allVehicles = JSON.parse(localStorage.getItem('viperCaseVehicles')) || {};
+            const allVehicles = _lsParse('viperCaseVehicles', {});
             caseVehicles = allVehicles[currentCase.caseNumber] || [];
             
-            const allFirearms = JSON.parse(localStorage.getItem('viperCaseFirearms')) || {};
+            const allFirearms = _lsParse('viperCaseFirearms', {});
             caseFirearms = allFirearms[currentCase.caseNumber] || [];
             
-            const allNarcotics = JSON.parse(localStorage.getItem('viperCaseNarcotics')) || {};
+            const allNarcotics = _lsParse('viperCaseNarcotics', {});
             caseNarcotics = allNarcotics[currentCase.caseNumber] || [];
             
-            const allMoney = JSON.parse(localStorage.getItem('viperCaseMoney')) || {};
+            const allMoney = _lsParse('viperCaseMoney', {});
             caseMoney = allMoney[currentCase.caseNumber] || [];
             
-            const allMissingPersons = JSON.parse(localStorage.getItem('viperCaseMissingPersons')) || {};
+            const allMissingPersons = _lsParse('viperCaseMissingPersons', {});
             caseMissingPersons = allMissingPersons[currentCase.caseNumber] || [];
             
-            const allCanvasEntries = JSON.parse(localStorage.getItem('viperCaseCanvas')) || {};
+            const allCanvasEntries = _lsParse('viperCaseCanvas', {});
             caseCanvasEntries = allCanvasEntries[currentCase.caseNumber] || [];
             
-            const allProsecution = JSON.parse(localStorage.getItem('viperCaseProsecution')) || {};
+            const allProsecution = _lsParse('viperCaseProsecution', {});
             caseProsecution = allProsecution[currentCase.caseNumber] || [];
             
             // Load timeline events (Pattern 2)
@@ -1352,7 +1373,7 @@
                 const caseId = currentCase.id;
                 const caseNum = currentCase.caseNumber;
                 const hasArr = (v) => Array.isArray(v) && v.length > 0;
-                const _ls = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (_) { return null; } };
+                const _ls = (k) => { try { return _lsParse(k, null); } catch (_) { return null; } };
 
                 // Map of moduleId → "does this case have data for it?"
                 const dataChecks = {
@@ -1400,7 +1421,7 @@
                             if (!currentCase.tabOrder.includes(modId)) currentCase.tabOrder.push(modId);
                         }
                     }
-                    const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+                    const cases = _lsParse('viperCases', []);
                     const ci = cases.findIndex(c => c.id === currentCase.id);
                     if (ci >= 0) {
                         cases[ci].modules = currentCase.modules;
@@ -1428,7 +1449,7 @@
         }
 
         function saveCaseTasks() {
-            const allTasks = JSON.parse(localStorage.getItem('viperTasks')) || [];
+            const allTasks = _lsParse('viperTasks', []);
             // Remove old tasks for this case
             const otherTasks = allTasks.filter(t => t.caseId !== currentCase.caseNumber);
             // Add current tasks
@@ -1476,7 +1497,7 @@
                     const suspectPersons = report.personsInvolved.filter(p =>
                         /SUSPECT|ARRESTED|DEFENDANT/i.test(p.involvement || ''));
                     if (suspectPersons.length > 0) {
-                        const existing = JSON.parse(localStorage.getItem(`suspects_${currentCase.id}`) || '[]');
+                        const existing = _lsParse(`suspects_${currentCase.id}`, []);
                         for (const p of suspectPersons) {
                             const phones = _rmsSplitPhones(p.phone);
                             const phoneIdentifiers = phones.map(v => ({ type: 'phone', value: v, provider: '' }));
@@ -1517,7 +1538,7 @@
                     const victimPersons = report.personsInvolved.filter(p =>
                         /VICTIM/i.test(p.involvement || '') && !/VICTIM'S|PARENT|GUARDIAN/i.test(p.involvement || ''));
                     if (victimPersons.length > 0) {
-                        const existing = JSON.parse(localStorage.getItem(`victims_${currentCase.id}`) || '[]');
+                        const existing = _lsParse(`victims_${currentCase.id}`, []);
                         for (const p of victimPersons) {
                             const phones = _rmsSplitPhones(p.phone);
                             existing.push({
@@ -1554,7 +1575,7 @@
                     const witnessPersons = report.personsInvolved.filter(p =>
                         /WITNESS/i.test(p.involvement || ''));
                     if (witnessPersons.length > 0) {
-                        const existing = JSON.parse(localStorage.getItem(`witnesses_${currentCase.id}`) || '[]');
+                        const existing = _lsParse(`witnesses_${currentCase.id}`, []);
                         for (const p of witnessPersons) {
                             const phones = _rmsSplitPhones(p.phone);
                             existing.push({
@@ -1599,7 +1620,7 @@
                         return true;
                     });
                     if (involvedRouted.length > 0) {
-                        const existing = JSON.parse(localStorage.getItem(`involvedPersons_${currentCase.id}`) || '[]');
+                        const existing = _lsParse(`involvedPersons_${currentCase.id}`, []);
                         for (const p of involvedRouted) {
                             const phones = _rmsSplitPhones(p.phone);
                             existing.push({
@@ -1635,7 +1656,7 @@
                         if (!caseModules.includes('involvedPersons')) {
                             caseModules.push('involvedPersons');
                             currentCase.modules = caseModules;
-                            const cases = JSON.parse(localStorage.getItem('viperCases') || '[]');
+                            const cases = _lsParse('viperCases', []);
                             const ci = cases.findIndex(c => c.id === currentCase.id);
                             if (ci >= 0) { cases[ci].modules = caseModules; localStorage.setItem('viperCases', JSON.stringify(cases)); }
                         }
@@ -1644,7 +1665,7 @@
 
                 // 5. Route vehicles
                 if (report.vehicles && report.vehicles.length > 0) {
-                    const existing = JSON.parse(localStorage.getItem(`recoveredVehicles_${currentCase.id}`) || '[]');
+                    const existing = _lsParse(`recoveredVehicles_${currentCase.id}`, []);
                     for (const v of report.vehicles) {
                         const makeModel = [v.year, v.make, v.model || v.type].filter(Boolean).join(' ').trim();
                         existing.push({
@@ -1685,7 +1706,7 @@
         }
 
         function loadCaseTasks() {
-            const allTasks = JSON.parse(localStorage.getItem('viperTasks')) || [];
+            const allTasks = _lsParse('viperTasks', []);
             caseTasks = allTasks.filter(t => t.caseId === currentCase.caseNumber);
         }
 
@@ -1709,7 +1730,7 @@
                 localStorage.setItem('currentCase', JSON.stringify(currentCase));
 
                 // Save the case to viperCases array
-                const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+                const cases = _lsParse('viperCases', []);
                 const caseIndex = cases.findIndex(c => c.id === currentCase.id);
                 
                 if (caseIndex !== -1) {
@@ -1817,7 +1838,7 @@
             let config = statusConfig[currentCase.status];
             if (!config) {
                 // Check custom statuses
-                const customs = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
+                const customs = _lsParse('viperCustomStatuses', []);
                 const cs = customs.find(s => s.id === currentCase.status);
                 const customColor = (cs && cs.color) || null;
                 if (customColor) {
@@ -2299,12 +2320,12 @@
             ];
             const sharedData = {};
             sharedKeys.forEach(k => {
-                const all = JSON.parse(localStorage.getItem(k) || '{}');
+                const all = _lsParse(k, {});
                 if (all[caseNum] !== undefined) sharedData[k] = all[caseNum];
             });
 
             // Collect tasks for this case
-            const allTasks = JSON.parse(localStorage.getItem('viperTasks') || '[]');
+            const allTasks = _lsParse('viperTasks', []);
             const caseTasks = allTasks.filter(t => t.caseId === caseNum);
 
             const pkg = {
@@ -2356,7 +2377,7 @@
                 case 'victims': return caseVictims ? caseVictims.length : 0;
                 case 'witnesses': return caseWitnesses ? caseWitnesses.length : 0;
                 case 'involvedPersons': {
-                    const ip = JSON.parse(localStorage.getItem(`involvedPersons_${currentCase.id}`) || '[]');
+                    const ip = _lsParse(`involvedPersons_${currentCase.id}`, []);
                     return ip.length;
                 }
                 case 'notes': return caseNotes.length;
@@ -2373,58 +2394,58 @@
                 case 'victimBusiness': return caseVictimBusinesses ? caseVictimBusinesses.length : 0;
                 case 'cargo': return caseCargo ? caseCargo.length : 0;
                 case 'traceImport': {
-                    const ti = JSON.parse(localStorage.getItem('viperTraceImports') || '{}');
+                    const ti = _lsParse('viperTraceImports', {});
                     const arr = ti[currentCase.caseNumber];
                     return Array.isArray(arr) ? arr.length : 0;
                 }
                 case 'rmsImport': {
-                    const ri = JSON.parse(localStorage.getItem(`rmsImports_${currentCase.id}`) || '[]');
+                    const ri = _lsParse(`rmsImports_${currentCase.id}`, []);
                     return ri.length;
                 }
                 case 'oversightImport': {
-                    const oi = JSON.parse(localStorage.getItem(`oversightImport_${currentCase.id}`) || '[]');
+                    const oi = _lsParse(`oversightImport_${currentCase.id}`, []);
                     return oi.length;
                 }
                 case 'cyberTips': {
-                    const ct = JSON.parse(localStorage.getItem(`cyberTips_${currentCase.id}`) || '[]');
+                    const ct = _lsParse(`cyberTips_${currentCase.id}`, []);
                     return ct.length;
                 }
                 case 'consentSearch': {
-                    const csItems = JSON.parse(localStorage.getItem(`consentSearches_${currentCase.id}`) || '[]');
+                    const csItems = _lsParse(`consentSearches_${currentCase.id}`, []);
                     return csItems.length;
                 }
                 case 'googleWarrant': {
-                    const gwData = JSON.parse(localStorage.getItem(`googleWarrant_${currentCase.id}`) || '{"imports":[]}');
+                    const gwData = _lsParse(`googleWarrant_${currentCase.id}`, {"imports": []});
                     return (gwData.imports || []).length;
                 }
                 case 'metaWarrant': {
-                    const mwData = JSON.parse(localStorage.getItem(`metaWarrant_${currentCase.id}`) || '{"imports":[]}');
+                    const mwData = _lsParse(`metaWarrant_${currentCase.id}`, {"imports": []});
                     return (mwData.imports || []).length;
                 }
                 case 'kikWarrant': {
-                    const kkData = JSON.parse(localStorage.getItem(`kikWarrant_${currentCase.id}`) || '{"imports":[]}');
+                    const kkData = _lsParse(`kikWarrant_${currentCase.id}`, {"imports": []});
                     return (kkData.imports || []).length;
                 }
                 case 'snapchatWarrant': {
-                    const swData = JSON.parse(localStorage.getItem(`snapchatWarrant_${currentCase.id}`) || '{"imports":[]}');
+                    const swData = _lsParse(`snapchatWarrant_${currentCase.id}`, {"imports": []});
                     return (swData.imports || []).length;
                 }
                 case 'discordWarrant': {
-                    const dwData = JSON.parse(localStorage.getItem(`discordWarrant_${currentCase.id}`) || '{"imports":[]}');
+                    const dwData = _lsParse(`discordWarrant_${currentCase.id}`, {"imports": []});
                     return (dwData.imports || []).length;
                 }
                 case 'datapilot': {
-                    const dpData = JSON.parse(localStorage.getItem(`datapilot_${currentCase.id}`) || '{"imports":[]}');
+                    const dpData = _lsParse(`datapilot_${currentCase.id}`, {"imports": []});
                     return (dpData.imports || []).length;
                 }
                 case 'cellebrite': {
-                    const cbData = JSON.parse(localStorage.getItem(`cellebriteImport_${currentCase.id}`) || '{"imports":[]}');
+                    const cbData = _lsParse(`cellebriteImport_${currentCase.id}`, {"imports": []});
                     return (cbData.imports || []).length;
                 }
                 case 'warrantAuthor': {
                     // Index lives in localStorage; full draft bodies live on disk under cases/{caseNumber}/Warrants/Drafts/.
                     // P0 returns 0 unless an index has been written. P10 populates this from manifest.json lifecycle.
-                    const waData = JSON.parse(localStorage.getItem(`warrantAuthor_${currentCase.id}`) || '{"drafts":[]}');
+                    const waData = _lsParse(`warrantAuthor_${currentCase.id}`, {"drafts": []});
                     return (waData.drafts || []).length;
                 }
                 default: return 0;
@@ -2923,7 +2944,7 @@
                 // pattern silently dropped all tab data when legacy var was [].
                 const _readItems = (p2Key, legacyArr) => {
                     try {
-                        const p2 = JSON.parse(localStorage.getItem(`${p2Key}_${caseId}`) || '[]');
+                        const p2 = _lsParse(`${p2Key}_${caseId}`, []);
                         if (Array.isArray(p2) && p2.length) return p2;
                     } catch (_) {}
                     return Array.isArray(legacyArr) && legacyArr.length ? legacyArr : [];
@@ -3227,11 +3248,11 @@
                     // New shape: single object on disk (per-case key OR global by case number)
                     let p = null;
                     try {
-                        p = JSON.parse(localStorage.getItem(`prosecution_${caseId}`) || 'null');
+                        p = _lsParse(`prosecution_${caseId}`, null);
                     } catch (_) { p = null; }
                     if (!p) {
                         try {
-                            const all = JSON.parse(localStorage.getItem('viperCaseProsecution') || '{}');
+                            const all = _lsParse('viperCaseProsecution', {});
                             p = all[caseNum] || null;
                         } catch (_) { p = null; }
                     }
@@ -3352,7 +3373,7 @@
                     break;
                 }
                 case 'reports': {
-                    const rd = JSON.parse(localStorage.getItem('viperCaseReports') || '{}');
+                    const rd = _lsParse('viperCaseReports', {});
                     const rpt = rd[caseNum];
                     if (rpt && rpt.content) {
                         const div = document.createElement('div'); div.innerHTML = rpt.content;
@@ -3361,8 +3382,8 @@
                     break;
                 }
                 case 'opsplan': {
-                    const od = JSON.parse(localStorage.getItem(`opsplan_${caseId}`) || 'null')
-                            || (JSON.parse(localStorage.getItem('viperCaseOPSPlans') || '{}'))[caseNum];
+                    const od = _lsParse(`opsplan_${caseId}`, null)
+                            || (_lsParse('viperCaseOPSPlans', {}))[caseNum];
                     if (!od) { emptyMsg('No operational plan recorded.'); break; }
                     // v2 format
                     if (od._version === 2) {
@@ -3399,7 +3420,7 @@
                     break;
                 }
                 case 'traceImport': {
-                    const imports = (JSON.parse(localStorage.getItem('viperTraceImports') || '{}'))[caseNum] || [];
+                    const imports = (_lsParse('viperTraceImports', {}))[caseNum] || [];
                     if (!imports.length) { emptyMsg('No TRACE imports.'); break; }
                     imports.forEach((imp, i) => {
                         const c = imp.case || {};
@@ -3416,7 +3437,7 @@
                     break;
                 }
                 case 'rmsImport': {
-                    const imports = JSON.parse(localStorage.getItem(`rmsImports_${caseId}`) || '[]');
+                    const imports = _lsParse(`rmsImports_${caseId}`, []);
                     if (!imports.length) { emptyMsg('No RMS imports.'); break; }
                     imports.forEach((imp, i) => {
                         itemHeading(`RMS Report ${i+1}: ${imp.reportNumber || imp.fileName || 'Unknown'}`);
@@ -3433,7 +3454,7 @@
                     break;
                 }
                 case 'cyberTips': {
-                    const ctData = JSON.parse(localStorage.getItem(`cyberTips_${caseId}`) || '[]');
+                    const ctData = _lsParse(`cyberTips_${caseId}`, []);
                     if (!ctData.length) { emptyMsg('No CyberTip imports.'); break; }
                     ctData.forEach((ct, i) => {
                         itemHeading(`CyberTip ${i+1}: CT# ${ct.reportNumber || ct.fileName}`);
@@ -3457,7 +3478,7 @@
                     break;
                 }
                 case 'oversightImport': {
-                    const oiData = JSON.parse(localStorage.getItem(`oversightImport_${caseId}`) || '[]');
+                    const oiData = _lsParse(`oversightImport_${caseId}`, []);
                     if (!oiData.length) { emptyMsg('No Oversight imports.'); break; }
                     oiData.forEach((imp, idx) => {
                         if (imp.offenders) imp.offenders.forEach((o, oi) => {
@@ -3517,7 +3538,7 @@
             }
 
             // ========== CASE TIMELINE (summary in main body) ==========
-            const _tlEvents = JSON.parse(localStorage.getItem(`timelineEvents_${currentCase.id}`) || '[]');
+            const _tlEvents = _lsParse(`timelineEvents_${currentCase.id}`, []);
             const _tlSorted = [..._tlEvents].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
             const _tlLaneLabels = (typeof TIMELINE_LANES !== 'undefined') ? TIMELINE_LANES : {};
             function _tlFmt(ts) {
@@ -4160,7 +4181,7 @@
                     break;
 
                 case 'reports':
-                    const reportData = JSON.parse(localStorage.getItem('viperCaseReports') || '{}');
+                    const reportData = _lsParse('viperCaseReports', {});
                     const report = reportData[currentCase.caseNumber];
                     if (report && report.content) {
                         // Strip HTML and add to PDF
@@ -4175,8 +4196,8 @@
                     break;
 
                 case 'opsplan':
-                    const opsDataRaw = JSON.parse(localStorage.getItem(`opsplan_${currentCase.id}`) || 'null')
-                                    || (JSON.parse(localStorage.getItem('viperCaseOPSPlans') || '{}'))[currentCase.caseNumber];
+                    const opsDataRaw = _lsParse(`opsplan_${currentCase.id}`, null)
+                                    || (_lsParse('viperCaseOPSPlans', {}))[currentCase.caseNumber];
                     if (opsDataRaw) {
                         doc.setFont(undefined, 'bold');
                         doc.text('Operation Plan', margin, yPos);
@@ -4274,7 +4295,7 @@
             currentCase.lastModified = new Date().toISOString();
 
             // Save to localStorage
-            const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            const cases = _lsParse('viperCases', []);
             const caseIndex = cases.findIndex(c => c.id === currentCase.id);
             if (caseIndex !== -1) {
                 cases[caseIndex] = currentCase;
@@ -4657,7 +4678,7 @@
             // the reverse-side (we stored '' for otherCaseNumber back then).
             let lookup = {};
             try {
-                const cases = JSON.parse(localStorage.getItem('viperCases') || '[]');
+                const cases = _lsParse('viperCases', []);
                 cases.forEach(c => { if (c && c.id) lookup[c.id] = c.caseNumber; });
             } catch (_) {}
 
@@ -5132,8 +5153,8 @@
 
                     <!-- Financial Summary (cargo + victim business) -->
                     ${(() => {
-                        const cCargo = JSON.parse(localStorage.getItem('cargo_' + currentCase.id) || '[]');
-                        const cVB = JSON.parse(localStorage.getItem('victimBusinesses_' + currentCase.id) || '[]');
+                        const cCargo = _lsParse('cargo_' + currentCase.id, []);
+                        const cVB = _lsParse('victimBusinesses_' + currentCase.id, []);
                         const cargoTotal = cCargo.reduce((s, c) => s + cargoLineTotal(c), 0);
                         const cargoRecov = cCargo.filter(c => c.recovered).reduce((s, c) => s + cargoLineTotal(c), 0);
                         const vbLoss = cVB.reduce((s, v) => s + (parseFloat(v.lossAmount) || 0), 0);
@@ -5989,7 +6010,7 @@
                     });
                 }
 
-                const allNotes = JSON.parse(localStorage.getItem('viperCaseNotes')) || {};
+                const allNotes = _lsParse('viperCaseNotes', {});
                 allNotes[currentCase.caseNumber] = caseNotes;
                 localStorage.setItem('viperCaseNotes', JSON.stringify(allNotes));
                 console.log('[saveNote] saved. caseNotes count:', caseNotes.length);
@@ -6005,7 +6026,7 @@
                         if (Array.isArray(currentCase.tabOrder) && !currentCase.tabOrder.includes('notes')) {
                             currentCase.tabOrder.push('notes');
                         }
-                        const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+                        const cases = _lsParse('viperCases', []);
                         const ci = cases.findIndex(c => c.id === currentCase.id);
                         if (ci >= 0) {
                             cases[ci].modules = currentCase.modules;
@@ -6035,7 +6056,7 @@
             caseNotes = caseNotes.filter(n => n.id !== noteId);
             
             // Save to localStorage
-            const allNotes = JSON.parse(localStorage.getItem('viperCaseNotes')) || {};
+            const allNotes = _lsParse('viperCaseNotes', {});
             allNotes[currentCase.caseNumber] = caseNotes;
             localStorage.setItem('viperCaseNotes', JSON.stringify(allNotes));
             
@@ -6599,7 +6620,7 @@
             reportLastSaved = new Date().toISOString();
             
             // Save to localStorage
-            const allReports = JSON.parse(localStorage.getItem('viperCaseReports')) || {};
+            const allReports = _lsParse('viperCaseReports', {});
             allReports[currentCase.caseNumber] = {
                 content: caseReport,
                 lastSaved: reportLastSaved
@@ -7739,7 +7760,7 @@
                 }
                 
                 // Save to localStorage
-                const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
+                const allEvidence = _lsParse('viperCaseEvidence', {});
                 allEvidence[currentCase.caseNumber] = caseEvidence;
                 localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
                 
@@ -7784,7 +7805,7 @@
                         };
 
                         caseEvidence.push(newEvidence);
-                        const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
+                        const allEvidence = _lsParse('viperCaseEvidence', {});
                         allEvidence[currentCase.caseNumber] = caseEvidence;
                         localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
                         audit('evidence_added', {
@@ -7899,7 +7920,7 @@
                         };
 
                         caseEvidence.push(newEvidence);
-                        const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
+                        const allEvidence = _lsParse('viperCaseEvidence', {});
                         allEvidence[currentCase.caseNumber] = caseEvidence;
                         localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
                         audit('evidence_added', {
@@ -7982,7 +8003,7 @@
                             };
                         }
                         caseEvidence.push(newEvidence);
-                        const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
+                        const allEvidence = _lsParse('viperCaseEvidence', {});
                         allEvidence[currentCase.caseNumber] = caseEvidence;
                         localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
                         audit('evidence_added', {
@@ -8107,7 +8128,7 @@
                 // Save to localStorage with error handling
                 try {
                     console.log('Saving to localStorage...');
-                    const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
+                    const allEvidence = _lsParse('viperCaseEvidence', {});
                     allEvidence[currentCase.caseNumber] = caseEvidence;
                     
                     const jsonString = JSON.stringify(allEvidence);
@@ -8178,7 +8199,7 @@
             const ev = caseEvidence.find(e => e.id === evidenceId);
             caseEvidence = caseEvidence.filter(e => e.id !== evidenceId);
 
-            const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
+            const allEvidence = _lsParse('viperCaseEvidence', {});
             allEvidence[currentCase.caseNumber] = caseEvidence;
             localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
             audit('evidence_deleted', {
@@ -8323,7 +8344,7 @@
             if (!currentCase.modules.includes('datapilot')) {
                 currentCase.modules.push('datapilot');
                 try {
-                    const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+                    const cases = _lsParse('viperCases', []);
                     const idx = cases.findIndex(c => c.id === currentCase.id);
                     if (idx !== -1) {
                         cases[idx].modules = currentCase.modules;
@@ -10021,7 +10042,7 @@
 
                 // Also add to Evidence tab so files are browsable there
                 try {
-                    const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
+                    const allEvidence = _lsParse('viperCaseEvidence', {});
                     const caseEv = allEvidence[currentCase.caseNumber] || [];
                     const tag = `Warrant Production - ${warrant.issuedTo || 'Warrant #' + warrantId}`;
                     // Check if an evidence entry already exists for this warrant production
@@ -10087,7 +10108,7 @@
                         });
                         // Mirror to evidence tab
                         try {
-                            const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence')) || {};
+                            const allEvidence = _lsParse('viperCaseEvidence', {});
                             const caseEv = allEvidence[currentCase.caseNumber] || [];
                             const tag = `Warrant Production - ${warrant.issuedTo || 'Warrant #' + warrantId}`;
                             const existingIdx = caseEv.findIndex(e => e.warrantId === warrantId && e.type === 'document');
@@ -10335,7 +10356,7 @@
         }
         
         function saveWarrantsToStorage() {
-            const allWarrants = JSON.parse(localStorage.getItem('viperCaseWarrants')) || {};
+            const allWarrants = _lsParse('viperCaseWarrants', {});
             allWarrants[currentCase.caseNumber] = caseWarrants;
             localStorage.setItem('viperCaseWarrants', JSON.stringify(allWarrants));
         }
@@ -10387,7 +10408,7 @@
         ];
 
         function saveForensicsToStorage() {
-            const all = JSON.parse(localStorage.getItem('viperCaseForensicDevices')) || {};
+            const all = _lsParse('viperCaseForensicDevices', {});
             all[currentCase.caseNumber] = caseForensicDevices;
             localStorage.setItem('viperCaseForensicDevices', JSON.stringify(all));
         }
@@ -10411,7 +10432,7 @@
 
             // ─── Cellebrite imports (localStorage index) ───
             try {
-                const cb = JSON.parse(localStorage.getItem(`cellebriteImport_${currentCase.id}`) || '{}');
+                const cb = _lsParse(`cellebriteImport_${currentCase.id}`, {});
                 const cbImports = Array.isArray(cb.imports) ? cb.imports : [];
                 cbImports.forEach((imp, i) => {
                     const label = imp.deviceLabel || imp.evidenceTag || imp.label || `import #${i+1}`;
@@ -10433,7 +10454,7 @@
 
             // ─── DataPilot imports ───
             try {
-                const dp = JSON.parse(localStorage.getItem(`datapilot_${currentCase.id}`) || '{}');
+                const dp = _lsParse(`datapilot_${currentCase.id}`, {});
                 const dpImports = Array.isArray(dp.imports) ? dp.imports : (Array.isArray(dp) ? dp : []);
                 dpImports.forEach((imp, i) => {
                     const di = imp.deviceInfo || {};
@@ -10454,7 +10475,7 @@
 
             // ─── Evidence items (shared object Pattern 1) ───
             try {
-                const allEv = JSON.parse(localStorage.getItem('viperCaseEvidence') || '{}');
+                const allEv = _lsParse('viperCaseEvidence', {});
                 const evList = Array.isArray(allEv[currentCase.caseNumber]) ? allEv[currentCase.caseNumber] : [];
                 // Filter to device-bearing evidence types
                 const deviceTypes = new Set(['cellebrite', 'phone', 'device', 'computer', 'tablet', 'drive', 'usb', 'digital']);
@@ -11316,7 +11337,7 @@
                 if (!currentCase.tabOrder.includes(destTab)) {
                     currentCase.tabOrder.push(destTab);
                 }
-                const cases = JSON.parse(localStorage.getItem('viperCases') || '[]');
+                const cases = _lsParse('viperCases', []);
                 const ci = cases.findIndex(c => c.id === currentCase.id);
                 if (ci >= 0) { cases[ci].modules = caseModules; cases[ci].tabOrder = currentCase.tabOrder; localStorage.setItem('viperCases', JSON.stringify(cases)); }
             }
@@ -12837,7 +12858,7 @@
         function _ppLoadAndGet(kind, index) {
             const meta = _ppGetList(kind);
             if (!meta) return null;
-            const records = JSON.parse(localStorage.getItem(meta.storageKey) || '[]');
+            const records = _lsParse(meta.storageKey, []);
             const target = records[index];
             if (!target) return null;
             return { meta, records, target };
@@ -13472,7 +13493,7 @@
         function generatePDFHTML(suspectsToExport) {
             const pdfWindow = window.open('', '_blank');
             const userName = localStorage.getItem('viper_customer_name') || 'Unknown Detective';
-            const userInfo = JSON.parse(localStorage.getItem('viperUserInfo')) || {};
+            const userInfo = _lsParse('viperUserInfo', {});
             const badge = userInfo.badgeNumber || '';
             const agency = localStorage.getItem('viper_agency') || userInfo.agencyName || '';
             
@@ -14653,7 +14674,7 @@
         
         function generateVictimPDFHTML(victimsToExport) {
             const pdfWindow = window.open('', '_blank');
-            const currentUser = JSON.parse(localStorage.getItem('viperCurrentUser')) || { username: 'Unknown Detective' };
+            const currentUser = _lsParse('viperCurrentUser', null) || { username: 'Unknown Detective' };
             
             const html = `
                 <!DOCTYPE html>
@@ -16584,7 +16605,7 @@
         
         function generateWitnessPDFHTML(witnessesToExport) {
             const pdfWindow = window.open('', '_blank');
-            const currentUser = JSON.parse(localStorage.getItem('viperCurrentUser')) || { username: 'Unknown Detective' };
+            const currentUser = _lsParse('viperCurrentUser', null) || { username: 'Unknown Detective' };
             
             const html = `
                 <!DOCTYPE html>
@@ -17863,7 +17884,7 @@
         
         function generateRecoveredVehiclePDFHTML(vehiclesToExport) {
             const pdfWindow = window.open('', '_blank');
-            const currentUser = JSON.parse(localStorage.getItem('viperCurrentUser')) || { username: 'Unknown Detective' };
+            const currentUser = _lsParse('viperCurrentUser', null) || { username: 'Unknown Detective' };
             
             const html = `
                 <!DOCTYPE html>
@@ -19715,7 +19736,7 @@
             const person = missingPersons[index];
             
             // Load saved agency info if available
-            const savedAgencyInfo = JSON.parse(localStorage.getItem('viperAgencyInfo') || '{}');
+            const savedAgencyInfo = _lsParse('viperAgencyInfo', {});
             
             // Show agency info modal first
             const modal = document.createElement('div');
@@ -22248,7 +22269,7 @@
 
         function ensureCanvasFormsLoaded() {
             if (!_canvasFormsLoaded && currentCase) {
-                activeCanvasForms = JSON.parse(localStorage.getItem(`canvasForms_${currentCase.id}`) || '[]');
+                activeCanvasForms = _lsParse(`canvasForms_${currentCase.id}`, []);
                 _canvasFormsLoaded = true;
             }
         }
@@ -22691,7 +22712,7 @@
         function saveProsecutionData() {
             localStorage.setItem(`prosecution_${currentCase.id}`, JSON.stringify(prosecutionData));
             // Also sync to global so dashboard widgets / exports can read by case number
-            const all = JSON.parse(localStorage.getItem('viperCaseProsecution') || '{}');
+            const all = _lsParse('viperCaseProsecution', {});
             all[currentCase.caseNumber] = prosecutionData;
             localStorage.setItem('viperCaseProsecution', JSON.stringify(all));
             _syncProsecutionTasks();
@@ -22704,7 +22725,7 @@
         // disturbing user-created tasks.
         function _syncProsecutionTasks() {
             try {
-                const tasks = JSON.parse(localStorage.getItem('viperTasks') || '[]');
+                const tasks = _lsParse('viperTasks', []);
                 const caseRef = currentCase.caseNumber;
                 const liveIds = new Set(prosecutionData.courtDates.map(d => d.id).filter(Boolean));
 
@@ -23161,7 +23182,7 @@
         }
 
         function _offenseInLibrary(value) {
-            const offenses = JSON.parse(localStorage.getItem('viperOffenseReference') || '[]');
+            const offenses = _lsParse('viperOffenseReference', []);
             return offenses.some(o => `${o.code} - ${o.description}` === value);
         }
 
@@ -23285,7 +23306,7 @@
             localStorage.setItem(`narcotics_${currentCase.id}`, JSON.stringify(narcotics));
             
             // Also save to central storage for dashboard calculations
-            const allNarcotics = JSON.parse(localStorage.getItem('viperCaseNarcotics')) || {};
+            const allNarcotics = _lsParse('viperCaseNarcotics', {});
             allNarcotics[currentCase.caseNumber] = narcotics;
             localStorage.setItem('viperCaseNarcotics', JSON.stringify(allNarcotics));
         }
@@ -23749,7 +23770,7 @@
             localStorage.setItem(`firearms_${currentCase.id}`, JSON.stringify(firearms));
             
             // Also save to central storage for dashboard calculations
-            const allFirearms = JSON.parse(localStorage.getItem('viperCaseFirearms')) || {};
+            const allFirearms = _lsParse('viperCaseFirearms', {});
             allFirearms[currentCase.caseNumber] = firearms;
             localStorage.setItem('viperCaseFirearms', JSON.stringify(allFirearms));
         }
@@ -24197,7 +24218,7 @@
             localStorage.setItem(`money_${currentCase.id}`, JSON.stringify(moneySeized));
             
             // Also save to central storage for dashboard calculations
-            const allMoney = JSON.parse(localStorage.getItem('viperCaseMoney')) || {};
+            const allMoney = _lsParse('viperCaseMoney', {});
             allMoney[currentCase.caseNumber] = moneySeized;
             localStorage.setItem('viperCaseMoney', JSON.stringify(allMoney));
         }
@@ -25096,7 +25117,7 @@
                 console.error('IPC not available — must run inside the Electron app.');
                 return;
             }
-            const allCases = JSON.parse(localStorage.getItem('viperCases') || '[]');
+            const allCases = _lsParse('viperCases', []);
             // Map case.id -> case.caseNumber for save paths.
             const idToCaseNumber = {};
             for (const c of allCases) idToCaseNumber[c.id] = c.caseNumber || String(c.id);
@@ -25123,7 +25144,7 @@
                     const caseNumber = idToCaseNumber[caseId];
                     if (!caseNumber) continue;
                     let arr;
-                    try { arr = JSON.parse(localStorage.getItem(key) || '[]'); }
+                    try { arr = _lsParse(key, []); }
                     catch (_) { continue; }
                     if (!Array.isArray(arr) || !arr.length) continue;
                     before[key] = (localStorage.getItem(key) || '').length;
@@ -25175,12 +25196,12 @@
         };
 
         function getOpsTemplates() {
-            return JSON.parse(localStorage.getItem('viperOpsTemplates') || '{}');
+            return _lsParse('viperOpsTemplates', {});
         }
 
         function getSuspectSummary() {
             const key1 = `suspects_${currentCase.id}`;
-            const suspects = JSON.parse(localStorage.getItem(key1) || '[]');
+            const suspects = _lsParse(key1, []);
             return suspects;
         }
 
@@ -25453,7 +25474,7 @@
         let consentSearches = [];
 
         function loadConsentSearches() {
-            consentSearches = JSON.parse(localStorage.getItem(`consentSearches_${currentCase.id}`) || '[]');
+            consentSearches = _lsParse(`consentSearches_${currentCase.id}`, []);
         }
 
         function saveConsentSearches() {
@@ -26325,7 +26346,7 @@
 
             const suspects = includeSuspects ? getSuspectSummary() : [];
             const userName = localStorage.getItem('viper_customer_name') || 'Unknown';
-            const userInfo = JSON.parse(localStorage.getItem('viperUserInfo')) || {};
+            const userInfo = _lsParse('viperUserInfo', {});
             const badge = userInfo.badgeNumber || '';
             const agency = localStorage.getItem('viper_agency') || userInfo.agencyName || '';
             const deptBadge = await _readDeptBadgeDataUrl();
@@ -26838,7 +26859,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 // so we cannot reuse it here.
                 const dmvKeysMerged = new Set();
                 const _readPersonArr = (key) => {
-                    try { return JSON.parse(localStorage.getItem(`${key}_${currentCase.id}`) || '[]'); }
+                    try { return _lsParse(`${key}_${currentCase.id}`, []); }
                     catch (_) { return []; }
                 };
                 const collectDmvFromArray = (arr, kindLabel) => {
@@ -27737,12 +27758,12 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         }
 
         function loadNetworkIntelligenceData() {
-            const allData = JSON.parse(localStorage.getItem('viperCaseNetworkIntelligence')) || {};
+            const allData = _lsParse('viperCaseNetworkIntelligence', {});
             return allData[currentCase.id] || { queries: [] };
         }
 
         function saveNetworkIntelligenceData(data) {
-            const allData = JSON.parse(localStorage.getItem('viperCaseNetworkIntelligence')) || {};
+            const allData = _lsParse('viperCaseNetworkIntelligence', {});
             allData[currentCase.id] = data;
             localStorage.setItem('viperCaseNetworkIntelligence', JSON.stringify(allData));
         }
@@ -28256,7 +28277,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         const _OFFENSE_TYPES = ['Felony', 'Misdemeanor', 'Wobbler', 'Infraction', 'Non-Criminal'];
 
         function _offenseLibraryOptionsHtml(currentValue) {
-            const offenses = JSON.parse(localStorage.getItem('viperOffenseReference') || '[]');
+            const offenses = _lsParse('viperOffenseReference', []);
             let html = '<option value="">— Select from Offense Library —</option>';
             if (offenses.length > 0) {
                 const grouped = {};
@@ -28293,7 +28314,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         function _offenseRowHtml(idx, value, type) {
             const isPrimary = idx === 0;
             const label = isPrimary ? 'Primary Offense' : `Offense ${idx + 1}`;
-            const offenses = JSON.parse(localStorage.getItem('viperOffenseReference') || '[]');
+            const offenses = _lsParse('viperOffenseReference', []);
             const inLibrary = offenses.some(o => `${o.code} - ${o.description}` === value);
             const showInput = !!(value && !inLibrary);
             const escVal = (value || '').replace(/"/g, '&quot;');
@@ -28492,7 +28513,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             // Stored as YYYY-MM-DD so the dashboard/All Cases renderers
             // (which append 'T00:00' before parsing) can read it.
             const inactiveStatuses = ['closed', 'closed-arrest', 'transferred', 'inactive'];
-            const customStatuses = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
+            const customStatuses = _lsParse('viperCustomStatuses', []);
             customStatuses.forEach(s => { if (s.category !== 'active') inactiveStatuses.push(s.id); });
             if (inactiveStatuses.includes(newStatus) && !inactiveStatuses.includes(oldStatus)) {
                 currentCase.dateClosed = new Date().toISOString().split('T')[0];
@@ -28522,7 +28543,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             // Custom statuses with category 'active' are NOT inactive.
             // Stored as YYYY-MM-DD (see note above).
             const inactiveStatuses = ['closed', 'closed-arrest', 'transferred', 'inactive'];
-            const customStatuses = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
+            const customStatuses = _lsParse('viperCustomStatuses', []);
             customStatuses.forEach(s => { if (s.category !== 'active') inactiveStatuses.push(s.id); });
             if (inactiveStatuses.includes(newStatus) && !inactiveStatuses.includes(oldStatus)) {
                 currentCase.dateClosed = new Date().toISOString().split('T')[0];
@@ -28530,7 +28551,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 currentCase.dateClosed = null;
             }
             
-            const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            const cases = _lsParse('viperCases', []);
             const index = cases.findIndex(c => c.id === currentCase.id);
             cases[index] = currentCase;
             localStorage.setItem('viperCases', JSON.stringify(cases));
@@ -28550,7 +28571,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 `<option value="${s.value}" ${currentStatus === s.value ? 'selected' : ''}>${s.label}</option>`
             ).join('');
             if (localStorage.getItem('viperCustomStatusesEnabled') === 'true') {
-                const customs = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]');
+                const customs = _lsParse('viperCustomStatuses', []);
                 if (customs.length) {
                     html += '<option disabled>──────────</option>';
                     customs.forEach(s => {
@@ -28565,7 +28586,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         function updateCasePriority(level) {
             currentCase.priority = level || 0;
             currentCase.lastModified = new Date().toISOString();
-            const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            const cases = _lsParse('viperCases', []);
             const index = cases.findIndex(c => c.id === currentCase.id);
             cases[index] = currentCase;
             localStorage.setItem('viperCases', JSON.stringify(cases));
@@ -28588,7 +28609,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         };
 
         function loadTimelineEvents() {
-            timelineEvents = JSON.parse(localStorage.getItem(`timelineEvents_${currentCase.id}`) || '[]');
+            timelineEvents = _lsParse(`timelineEvents_${currentCase.id}`, []);
         }
 
         function saveTimelineEvents() {
@@ -28616,7 +28637,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
 
             // --- Warrants ---
-            const allWarrants = JSON.parse(localStorage.getItem('viperCaseWarrants') || '{}');
+            const allWarrants = _lsParse('viperCaseWarrants', {});
             const warrants = allWarrants[currentCase.caseNumber] || [];
             for (const w of warrants) {
                 if (w.dateSigned) {
@@ -28655,7 +28676,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
 
             // --- RMS Imports ---
-            const rms = JSON.parse(localStorage.getItem(`rmsImports_${currentCase.id}`) || '[]');
+            const rms = _lsParse(`rmsImports_${currentCase.id}`, []);
             // Helper: normalize MM-DD-YYYY or MM/DD/YYYY or "Friday - MM/DD/YYYY ..." → ISO
             function _rmsDateToISO(raw) {
                 if (!raw) return null;
@@ -28716,7 +28737,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
 
             // --- Evidence ---
-            const allEvidence = JSON.parse(localStorage.getItem('viperCaseEvidence') || '{}');
+            const allEvidence = _lsParse('viperCaseEvidence', {});
             const evidence = allEvidence[currentCase.caseNumber] || [];
             for (const ev of evidence) {
                 // Prefer createdAt; fall back to deriving from ev.id (Date.now() at creation)
@@ -28739,7 +28760,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
 
             // --- Case Notes ---
-            const allNotes = JSON.parse(localStorage.getItem('viperCaseNotes') || '{}');
+            const allNotes = _lsParse('viperCaseNotes', {});
             const notes = allNotes[currentCase.caseNumber] || [];
             for (const n of notes) {
                 if (n.createdAt) {
@@ -28756,7 +28777,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
 
             // --- Area Canvas ---
-            const canvas = JSON.parse(localStorage.getItem(`areacanvas_${currentCase.id}`) || '[]');
+            const canvas = _lsParse(`areacanvas_${currentCase.id}`, []);
             for (const c of canvas) {
                 if (c.timestamp) {
                     auto.push({
@@ -28772,7 +28793,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
 
             // --- TRACE Imports ---
-            const allTrace = JSON.parse(localStorage.getItem('viperTraceImports') || '{}');
+            const allTrace = _lsParse('viperTraceImports', {});
             const traceImports = allTrace[currentCase.caseNumber] || [];
             for (let ti = 0; ti < traceImports.length; ti++) {
                 const imp = traceImports[ti];
@@ -28792,7 +28813,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
 
             // --- Oversight Imports ---
-            const oversightImports = JSON.parse(localStorage.getItem(`oversightImport_${currentCase.id}`) || '[]');
+            const oversightImports = _lsParse(`oversightImport_${currentCase.id}`, []);
             for (const oi of oversightImports) {
                 if (oi.importedAt) {
                     const offenderName = oi.offenders?.[0]?.name || '';
@@ -28809,7 +28830,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
 
             // --- Consent Searches ---
-            const consentSearches = JSON.parse(localStorage.getItem(`consentSearches_${currentCase.id}`) || '[]');
+            const consentSearches = _lsParse(`consentSearches_${currentCase.id}`, []);
             for (const cs of consentSearches) {
                 if (cs.dateTime) {
                     const granted = cs.consentGiven !== false;
@@ -28855,10 +28876,10 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         // ═══ Custom Metrics (Case Overview Card) ═══
         function getCustomMetricDefs() {
             if (localStorage.getItem('viperCustomMetricsEnabled') !== 'true') return [];
-            try { return JSON.parse(localStorage.getItem('viperCustomMetrics') || '[]'); } catch { return []; }
+            try { return _lsParse('viperCustomMetrics', []); } catch { return []; }
         }
         function getCaseMetrics(caseId) {
-            try { return JSON.parse(localStorage.getItem('caseMetrics_' + caseId) || '{}'); } catch { return {}; }
+            try { return _lsParse('caseMetrics_' + caseId, {}); } catch { return {}; }
         }
         function saveCaseMetricVal(metricId, value) {
             if (!currentCase) return;
@@ -32139,7 +32160,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         let currentRmsView = null;
 
         function getRmsImports() {
-            return JSON.parse(localStorage.getItem(`rmsImports_${currentCase.id}`) || '[]');
+            return _lsParse(`rmsImports_${currentCase.id}`, []);
         }
         function saveRmsImports(data) {
             localStorage.setItem(`rmsImports_${currentCase.id}`, JSON.stringify(data));
@@ -32157,7 +32178,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
         function _rmsRemoveRoutedPerson(tabKey, name, source) {
             const k = `${tabKey}_${currentCase.id}`;
-            const arr = JSON.parse(localStorage.getItem(k) || '[]');
+            const arr = _lsParse(k, []);
             const cleanName = (name || '').trim();
             const cleanSrc = (source || '').trim();
             const filtered = arr.filter(x => !(
@@ -32243,7 +32264,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 return;
             }
 
-            const existing = JSON.parse(localStorage.getItem(`${tabKey}_${currentCase.id}`) || '[]');
+            const existing = _lsParse(`${tabKey}_${currentCase.id}`, []);
             existing.push(entry);
             localStorage.setItem(`${tabKey}_${currentCase.id}`, JSON.stringify(existing));
 
@@ -32253,7 +32274,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 if (!caseModules.includes(moduleId)) {
                     caseModules.push(moduleId);
                     currentCase.modules = caseModules;
-                    const cases = JSON.parse(localStorage.getItem('viperCases') || '[]');
+                    const cases = _lsParse('viperCases', []);
                     const ci = cases.findIndex(c => c.id === currentCase.id);
                     if (ci >= 0) { cases[ci].modules = caseModules; localStorage.setItem('viperCases', JSON.stringify(cases)); }
                 }
@@ -34273,7 +34294,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const suspectPersons = report.personsInvolved.filter(p =>
                 /SUSPECT|ARRESTED|DEFENDANT/i.test(p.involvement || ''));
             if (suspectPersons.length > 0) {
-                const existing = JSON.parse(localStorage.getItem(`suspects_${caseId}`) || '[]');
+                const existing = _lsParse(`suspects_${caseId}`, []);
                 for (const p of suspectPersons) {
                     // Skip if already imported from same source with same name
                     if (existing.some(e => e.rmsSource === src && e.name === (p.name || ''))) continue;
@@ -34300,7 +34321,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const victimPersons = report.personsInvolved.filter(p =>
                 /VICTIM/i.test(p.involvement || '') && !/VICTIM'S|PARENT|GUARDIAN/i.test(p.involvement || ''));
             if (victimPersons.length > 0) {
-                const existing = JSON.parse(localStorage.getItem(`victims_${caseId}`) || '[]');
+                const existing = _lsParse(`victims_${caseId}`, []);
                 for (const p of victimPersons) {
                     if (existing.some(e => e.rmsSource === src && e.name === (p.name || ''))) continue;
                     const phones = _rmsSplitPhones(p.phone);
@@ -34324,7 +34345,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const witnessPersons = report.personsInvolved.filter(p =>
                 /WITNESS/i.test(p.involvement || ''));
             if (witnessPersons.length > 0) {
-                const existing = JSON.parse(localStorage.getItem(`witnesses_${caseId}`) || '[]');
+                const existing = _lsParse(`witnesses_${caseId}`, []);
                 for (const p of witnessPersons) {
                     if (existing.some(e => e.rmsSource === src && e.name === (p.name || ''))) continue;
                     const phones = _rmsSplitPhones(p.phone);
@@ -34354,7 +34375,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 return true;
             });
             if (involvedRouted.length > 0) {
-                const existing = JSON.parse(localStorage.getItem(`involvedPersons_${caseId}`) || '[]');
+                const existing = _lsParse(`involvedPersons_${caseId}`, []);
                 for (const p of involvedRouted) {
                     if (existing.some(e => e.rmsSource === src && e.name === (p.name || ''))) continue;
                     const phones = _rmsSplitPhones(p.phone);
@@ -34380,7 +34401,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 if (!caseModules.includes('involvedPersons')) {
                     caseModules.push('involvedPersons');
                     currentCase.modules = caseModules;
-                    const cases = JSON.parse(localStorage.getItem('viperCases') || '[]');
+                    const cases = _lsParse('viperCases', []);
                     const ci = cases.findIndex(c => c.id === currentCase.id);
                     if (ci >= 0) { cases[ci].modules = caseModules; localStorage.setItem('viperCases', JSON.stringify(cases)); }
                 }
@@ -34388,7 +34409,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
             // Vehicles
             if (report.vehicles && report.vehicles.length > 0) {
-                const existing = JSON.parse(localStorage.getItem(`recoveredVehicles_${caseId}`) || '[]');
+                const existing = _lsParse(`recoveredVehicles_${caseId}`, []);
                 for (const v of report.vehicles) {
                     const makeModel = [v.year, v.make, v.model || v.type].filter(Boolean).join(' ').trim();
                     if (existing.some(e => e.rmsSource === src && e.makeModel === makeModel)) continue;
@@ -34752,7 +34773,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         /* ========== Oversight Import Module ========== */
 
         function getOversightImports() {
-            return JSON.parse(localStorage.getItem(`oversightImport_${currentCase.id}`) || '[]');
+            return _lsParse(`oversightImport_${currentCase.id}`, []);
         }
 
         function saveOversightImports(data) {
@@ -35011,7 +35032,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         let currentCyberTipView = null;
 
         function getCyberTips() {
-            return JSON.parse(localStorage.getItem(`cyberTips_${currentCase.id}`) || '[]');
+            return _lsParse(`cyberTips_${currentCase.id}`, []);
         }
         function saveCyberTips(data) {
             localStorage.setItem(`cyberTips_${currentCase.id}`, JSON.stringify(data));
@@ -35282,7 +35303,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
             // Load records for target type
             const storageKey = ctSendStorageKey(targetType);
-            const records = JSON.parse(localStorage.getItem(storageKey) || '[]');
+            const records = _lsParse(storageKey, []);
             const picker = document.getElementById('ctSendTargetPicker');
             if (!picker) return;
 
@@ -35341,7 +35362,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             if (!checked.length) { showToast('Nothing selected to send', 'error'); return; }
 
             const storageKey = ctSendStorageKey(p.targetType);
-            const records = JSON.parse(localStorage.getItem(storageKey) || '[]');
+            const records = _lsParse(storageKey, []);
             const target = records[p.targetIdx];
             if (!target) { showToast('Target person not found (was it deleted?)', 'error'); return; }
             if (!Array.isArray(target.identifiers)) target.identifiers = [];
@@ -36027,12 +36048,12 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         }
 
         function getTraceImports() {
-            const all = JSON.parse(localStorage.getItem('viperTraceImports')) || {};
+            const all = _lsParse('viperTraceImports', {});
             return all[currentCase.caseNumber] || [];
         }
 
         function saveTraceImports(imports) {
-            const all = JSON.parse(localStorage.getItem('viperTraceImports')) || {};
+            const all = _lsParse('viperTraceImports', {});
             all[currentCase.caseNumber] = imports;
             localStorage.setItem('viperTraceImports', JSON.stringify(all));
         }
@@ -37345,12 +37366,12 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         if (!caseId) return;
 
         // Collect tokens from TRACE imports (Pattern 1 storage)
-        const traceImports = JSON.parse(localStorage.getItem('viperTraceImports') || '{}');
+        const traceImports = _lsParse('viperTraceImports', {});
         const caseNum = currentCase.caseNumber || '';
         const caseTraceData = traceImports[caseNum] || [];
 
         // Also check Pattern 2 rmsImports
-        const rmsImports = JSON.parse(localStorage.getItem(`rmsImports_${caseId}`) || '[]');
+        const rmsImports = _lsParse(`rmsImports_${caseId}`, []);
 
         let allTokens = [];
         const reason = `TRACE import scan — Case #${caseNum}`;
@@ -37400,10 +37421,10 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         if (!caseId) return;
 
         // Get cargo items from the current case
-        const cargoData = JSON.parse(localStorage.getItem(`cargo_${caseId}`) || '[]');
+        const cargoData = _lsParse(`cargo_${caseId}`, []);
         // Also get suspects and recovered vehicles
-        const suspects = JSON.parse(localStorage.getItem(`suspects_${caseId}`) || '[]');
-        const vehicles = JSON.parse(localStorage.getItem(`recoveredVehicles_${caseId}`) || '[]');
+        const suspects = _lsParse(`suspects_${caseId}`, []);
+        const vehicles = _lsParse(`recoveredVehicles_${caseId}`, []);
 
         let allTokens = [];
         const cargoTokens = await TraceSearch.extractCargoTokens(cargoData);
@@ -37451,7 +37472,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         const resultsEl = document.getElementById('traceSearchResults');
         resultsEl.innerHTML = '<div class="text-center py-8"><div class="gl-skeleton" style="height:60px;margin-bottom:8px;border-radius:8px;"></div><div class="gl-skeleton" style="height:60px;border-radius:8px;"></div></div>';
 
-        const traceImports = JSON.parse(localStorage.getItem('viperTraceImports') || '{}');
+        const traceImports = _lsParse('viperTraceImports', {});
         let allTokens = [];
         let importCount = 0;
         let caseCount = 0;
@@ -37467,13 +37488,13 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         }
 
         // Also scan cargo, suspects, vehicles from all cases
-        const cases = JSON.parse(localStorage.getItem('viperCases') || '[]');
+        const cases = _lsParse('viperCases', []);
         for (const c of cases) {
-            const cargo = JSON.parse(localStorage.getItem(`cargo_${c.id}`) || '[]');
+            const cargo = _lsParse(`cargo_${c.id}`, []);
             if (cargo.length) allTokens = allTokens.concat(await TraceSearch.extractCargoTokens(cargo));
-            const suspects = JSON.parse(localStorage.getItem(`suspects_${c.id}`) || '[]');
+            const suspects = _lsParse(`suspects_${c.id}`, []);
             if (suspects.length) allTokens = allTokens.concat(await TraceSearch.extractSuspectTokens(suspects));
-            const vehicles = JSON.parse(localStorage.getItem(`recoveredVehicles_${c.id}`) || '[]');
+            const vehicles = _lsParse(`recoveredVehicles_${c.id}`, []);
             if (vehicles.length) allTokens = allTokens.concat(await TraceSearch.extractVehicleTokens(vehicles));
         }
 

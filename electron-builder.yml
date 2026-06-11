@@ -89,7 +89,18 @@ nsis:
   shortcutName: V.I.P.E.R.
   installerIcon: build/icon.ico
   uninstallerIcon: build/icon.ico
-  runAfterFinish: true
+  # ─────────────────────────────────────────────────────────────────────
+  # runAfterFinish: false (v3.8.4)
+  # Previously true. When the post-install auto-launch crashed for any
+  # reason (e.g. a corrupted localStorage value from the previous version
+  # killing the renderer), the failed launch was reported by Windows as
+  # an installer crash even though the install itself had succeeded.
+  # Decoupling install success from first-launch success makes the
+  # failure mode clearer: the user sees a clean "install complete" and
+  # launches from the Start Menu, where any crash is unambiguously an
+  # app issue rather than an installer issue.
+  # ─────────────────────────────────────────────────────────────────────
+  runAfterFinish: false
   # ─────────────────────────────────────────────────────────────────────
   # DATA PRESERVATION POLICY — DO NOT CHANGE TO true.
   #

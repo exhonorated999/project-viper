@@ -1145,12 +1145,53 @@
                 const parsed = JSON.parse(raw);
                 return (parsed === null || parsed === undefined) ? fallback : parsed;
             } catch (e) {
+                // Quarantine the corrupted value so it can't keep killing the page
+                // on subsequent loads. Rename to __corrupted__<key>__<timestamp>
+                // so the data can still be recovered manually if needed.
                 try {
-                    console.warn('[VIPER] _lsParse: corrupted localStorage key', key, '-', (e && e.message) || e);
+                    const raw = localStorage.getItem(key);
+                    if (raw !== null && raw !== undefined) {
+                        const quarantineKey = '__corrupted__' + key + '__' + Date.now();
+                        try { localStorage.setItem(quarantineKey, raw); } catch (_) {}
+                        try { localStorage.removeItem(key); } catch (_) {}
+                        console.warn('[VIPER] _lsParse: quarantined corrupted key', key, '->', quarantineKey, '-', (e && e.message) || e);
+                    } else {
+                        console.warn('[VIPER] _lsParse: corrupted localStorage key', key, '-', (e && e.message) || e);
+                    }
                 } catch (_) {}
                 return fallback;
             }
         }
+
+        // ---------------------------------------------------------------------
+        // Renderer-global crash safety net (v3.8.4)
+        // If anything still slips past _lsParse and throws an uncaught
+        // SyntaxError from JSON.parse, surface it without killing the page.
+        // ---------------------------------------------------------------------
+        window.addEventListener('error', function (ev) {
+            try {
+                const msg = (ev && ev.message) || '';
+                const err = ev && ev.error;
+                const isParseErr = (err && err.name === 'SyntaxError') ||
+                                   /JSON|Unexpected (token|end)/i.test(msg);
+                if (isParseErr) {
+                    console.error('[VIPER] Uncaught JSON parse error suppressed to keep renderer alive:', msg);
+                    if (ev.preventDefault) ev.preventDefault();
+                    return true;
+                }
+            } catch (_) {}
+        });
+        window.addEventListener('unhandledrejection', function (ev) {
+            try {
+                const reason = ev && ev.reason;
+                const msg = (reason && (reason.message || String(reason))) || '';
+                if ((reason && reason.name === 'SyntaxError') ||
+                    /JSON|Unexpected (token|end)/i.test(msg)) {
+                    console.error('[VIPER] Unhandled JSON parse rejection suppressed:', msg);
+                    if (ev.preventDefault) ev.preventDefault();
+                }
+            } catch (_) {}
+        });
 
         // User Information Display
         function updateUserDisplay() {
@@ -2305,8 +2346,15 @@
             ];
             const moduleData = {};
             moduleKeys.forEach(k => {
-                const raw = localStorage.getItem(`${k}_${caseId}`);
-                if (raw) moduleData[k] = JSON.parse(raw);
+                // Per-key try/catch so a single corrupted module key cannot
+                // tank the entire export. Falls back to undefined (omitted
+                // from the export) and logs which key failed for support.
+                try {
+                    const raw = localStorage.getItem(`${k}_${caseId}`);
+                    if (raw) moduleData[k] = JSON.parse(raw);
+                } catch (e) {
+                    console.warn('[VIPER] exportCasePackage: skipping corrupted module key', k, '-', (e && e.message) || e);
+                }
             });
 
             // Collect shared-object data keyed by caseNumber (Pattern 1)
@@ -11363,8 +11411,7 @@
         let suspects = [];
         
         function loadSuspects() {
-            const stored = localStorage.getItem(`suspects_${currentCase.id}`);
-            suspects = stored ? JSON.parse(stored) : [];
+            suspects = _lsParse(`suspects_${currentCase.id}`, []);
         }
         
         function saveSuspects() {
@@ -13832,8 +13879,7 @@
         let currentVictimView = null;
         
         function loadVictims() {
-            const stored = localStorage.getItem(`victims_${currentCase.id}`);
-            victims = stored ? JSON.parse(stored) : [];
+            victims = _lsParse(`victims_${currentCase.id}`, []);
         }
         
         function saveVictims() {
@@ -14990,8 +15036,7 @@
         let currentVBView = null;
 
         function loadVictimBusinesses() {
-            const stored = localStorage.getItem(`victimBusinesses_${currentCase.id}`);
-            victimBusinesses = stored ? JSON.parse(stored) : [];
+            victimBusinesses = _lsParse(`victimBusinesses_${currentCase.id}`, []);
             caseVictimBusinesses = victimBusinesses;
         }
         function saveVictimBusinesses() {
@@ -15157,8 +15202,7 @@
         let currentCargoView = null;
 
         function loadCargo() {
-            const stored = localStorage.getItem(`cargo_${currentCase.id}`);
-            cargoItems = stored ? JSON.parse(stored) : [];
+            cargoItems = _lsParse(`cargo_${currentCase.id}`, []);
             caseCargo = cargoItems;
         }
         function saveCargo() {
@@ -16043,8 +16087,7 @@
         let currentWitnessView = null;
         
         function loadWitnesses() {
-            const stored = localStorage.getItem(`witnesses_${currentCase.id}`);
-            witnesses = stored ? JSON.parse(stored) : [];
+            witnesses = _lsParse(`witnesses_${currentCase.id}`, []);
         }
         
         function saveWitnesses() {
@@ -16871,8 +16914,7 @@
         let currentInvolvedPersonView = null;
 
         function loadInvolvedPersons() {
-            const stored = localStorage.getItem(`involvedPersons_${currentCase.id}`);
-            involvedPersons = stored ? JSON.parse(stored) : [];
+            involvedPersons = _lsParse(`involvedPersons_${currentCase.id}`, []);
         }
 
         function saveInvolvedPersons() {
@@ -17527,8 +17569,7 @@
         let currentRecoveredVehicleView = null;
         
         function loadRecoveredVehicles() {
-            const stored = localStorage.getItem(`recoveredVehicles_${currentCase.id}`);
-            recoveredVehicles = stored ? JSON.parse(stored) : [];
+            recoveredVehicles = _lsParse(`recoveredVehicles_${currentCase.id}`, []);
         }
         
         function saveRecoveredVehicles() {
@@ -18105,8 +18146,7 @@
         let currentMissingPersonView = null;
 
         function loadMissingPersons() {
-            const stored = localStorage.getItem(`missingpersons_${currentCase.id}`);
-            missingPersons = stored ? JSON.parse(stored) : [];
+            missingPersons = _lsParse(`missingpersons_${currentCase.id}`, []);
         }
 
         function saveMissingPersons() {
@@ -20838,8 +20878,7 @@
         let currentCanvasView = null;
 
         function loadCanvasData() {
-            const stored = localStorage.getItem(`areacanvas_${currentCase.id}`);
-            canvasData = stored ? JSON.parse(stored) : [];
+            canvasData = _lsParse(`areacanvas_${currentCase.id}`, []);
         }
 
         function saveCanvasData() {
@@ -22662,8 +22701,7 @@
         let prosecutionData = null;
 
         function loadProsecutionData() {
-            const stored = localStorage.getItem(`prosecution_${currentCase.id}`);
-            const raw = stored ? JSON.parse(stored) : {};
+            const raw = _lsParse(`prosecution_${currentCase.id}`, {});
 
             // Defaults — covers brand-new cases AND missing fields on legacy records
             prosecutionData = {
@@ -23297,8 +23335,7 @@
         let currentNarcoticView = null;
 
         function loadNarcotics() {
-            const stored = localStorage.getItem(`narcotics_${currentCase.id}`);
-            narcotics = stored ? JSON.parse(stored) : [];
+            narcotics = _lsParse(`narcotics_${currentCase.id}`, []);
         }
 
         function saveNarcotics() {
@@ -23761,8 +23798,7 @@
         let currentFirearmView = null;
 
         function loadFirearms() {
-            const stored = localStorage.getItem(`firearms_${currentCase.id}`);
-            firearms = stored ? JSON.parse(stored) : [];
+            firearms = _lsParse(`firearms_${currentCase.id}`, []);
         }
 
         function saveFirearms() {
@@ -24209,8 +24245,7 @@
         let currentMoneyView = null;
 
         function loadMoneySeized() {
-            const stored = localStorage.getItem(`money_${currentCase.id}`);
-            moneySeized = stored ? JSON.parse(stored) : [];
+            moneySeized = _lsParse(`money_${currentCase.id}`, []);
         }
 
         function saveMoneySeized() {
@@ -24657,8 +24692,7 @@
         let opsPlanData = null; // The active generated plan
 
         function loadOpsPlans() {
-            const stored = localStorage.getItem(`opsplan_${currentCase.id}`);
-            const parsed = stored ? JSON.parse(stored) : null;
+            const parsed = _lsParse(`opsplan_${currentCase.id}`, null);
             // Migration: old format was array of uploaded files
             if (Array.isArray(parsed)) {
                 opsPlans = parsed;

@@ -313,7 +313,7 @@
             </div>
 
             <!-- Settings Content -->
-            <div class="p-8 space-y-6">
+            <div class="p-8 pb-24 space-y-6">
 
                 <!-- License & Status Section -->
                 <div class="glass-card rounded-xl p-6">
@@ -554,15 +554,29 @@
                         Storage Locations
                     </h3>
 
+                    <p id="storagePortableNotice" class="hidden text-xs text-amber-400 bg-amber-900/20 border border-amber-700/40 rounded px-3 py-2 mb-4">
+                        Portable mode is active — paths are locked to the USB drive and cannot be overridden.
+                    </p>
+
                     <div class="space-y-4">
                         <!-- Case Files -->
                         <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
                             <div class="flex items-center gap-2 mb-1">
                                 <svg class="w-4 h-4 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
                                 <span class="text-sm font-medium text-white">Case Files Directory</span>
+                                <span id="caseFilesBadge" class="hidden ml-auto text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/40">Custom</span>
                             </div>
-                            <p class="text-xs text-gray-500 mb-2">Where case folders and evidence are stored on disk</p>
-                            <code id="caseFilesPath" class="block text-xs text-viper-cyan font-mono bg-viper-dark rounded px-3 py-2 border border-gray-700 select-all">Detecting...</code>
+                            <p class="text-xs text-gray-500 mb-2">Where case folders and evidence are stored on disk. Move to an external drive if C: is filling up.</p>
+                            <code id="caseFilesPath" class="block text-xs text-viper-cyan font-mono bg-viper-dark rounded px-3 py-2 border border-gray-700 select-all break-all">Detecting...</code>
+                            <div class="flex flex-wrap items-center gap-2 mt-3">
+                                <button id="changeCasesBtn" type="button" class="text-xs px-3 py-1.5 rounded bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/40 hover:bg-viper-cyan/30 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                                    Change location…
+                                </button>
+                                <button id="resetCasesBtn" type="button" class="hidden text-xs px-3 py-1.5 rounded text-gray-300 border border-gray-600 hover:bg-gray-700/40 transition">
+                                    Reset to default
+                                </button>
+                                <span id="caseFilesDefaultHint" class="hidden text-[11px] text-gray-500 ml-1">Default: <span class="font-mono text-gray-400"></span></span>
+                            </div>
                         </div>
 
                         <!-- Application Data -->
@@ -570,10 +584,93 @@
                             <div class="flex items-center gap-2 mb-1">
                                 <svg class="w-4 h-4 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
                                 <span class="text-sm font-medium text-white">Application Data</span>
+                                <span id="appDataBadge" class="hidden ml-auto text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-viper-green/20 text-viper-green border border-viper-green/40">Custom</span>
                             </div>
-                            <p class="text-xs text-gray-500 mb-2">Case data and settings stored in browser localStorage</p>
-                            <code id="appDataPath" class="block text-xs text-viper-green font-mono bg-viper-dark rounded px-3 py-2 border border-gray-700 select-all">Detecting...</code>
+                            <p class="text-xs text-gray-500 mb-2">Case data, settings, and security vault. Changing this directory requires a restart.</p>
+                            <code id="appDataPath" class="block text-xs text-viper-green font-mono bg-viper-dark rounded px-3 py-2 border border-gray-700 select-all break-all">Detecting...</code>
+                            <div class="flex flex-wrap items-center gap-2 mt-3">
+                                <button id="changeAppDataBtn" type="button" class="text-xs px-3 py-1.5 rounded bg-viper-green/20 text-viper-green border border-viper-green/40 hover:bg-viper-green/30 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                                    Change location…
+                                </button>
+                                <button id="resetAppDataBtn" type="button" class="hidden text-xs px-3 py-1.5 rounded text-gray-300 border border-gray-600 hover:bg-gray-700/40 transition">
+                                    Reset to default
+                                </button>
+                                <span id="appDataDefaultHint" class="hidden text-[11px] text-gray-500 ml-1">Default: <span class="font-mono text-gray-400"></span></span>
+                            </div>
+                            <p class="text-[11px] text-emerald-400/80 mt-2">✓ VIPER can carry your license, settings, and security vault to the new location — you'll be asked how to migrate before the change is applied.</p>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Cases migration dialog (Copy / Move / Leave) -->
+                <div id="casesMigrateDialog" class="hidden fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div class="glass-card rounded-xl p-6 max-w-lg w-full border border-viper-cyan/40">
+                        <h3 class="text-lg font-bold mb-2 text-white">Move existing cases?</h3>
+                        <p class="text-sm text-gray-400 mb-1">You have case folders at:</p>
+                        <code id="migrateFromPath" class="block text-xs text-gray-300 font-mono bg-viper-dark rounded px-3 py-2 border border-gray-700 mb-3 break-all"></code>
+                        <p class="text-sm text-gray-400 mb-1">New location will be:</p>
+                        <code id="migrateToPath" class="block text-xs text-viper-cyan font-mono bg-viper-dark rounded px-3 py-2 border border-gray-700 mb-4 break-all"></code>
+                        <p class="text-xs text-gray-500 mb-4">What should happen to the case folders currently at the old location?</p>
+                        <div class="flex flex-col gap-2">
+                            <button id="migrateCopyBtn" type="button" class="text-left px-4 py-3 rounded bg-viper-cyan/10 border border-viper-cyan/40 hover:bg-viper-cyan/20 transition">
+                                <div class="text-sm font-medium text-white">Copy to new location</div>
+                                <div class="text-xs text-gray-400">Duplicates folders; originals stay where they are. Safest option.</div>
+                            </button>
+                            <button id="migrateMoveBtn" type="button" class="text-left px-4 py-3 rounded bg-viper-green/10 border border-viper-green/40 hover:bg-viper-green/20 transition">
+                                <div class="text-sm font-medium text-white">Move to new location</div>
+                                <div class="text-xs text-gray-400">Copies, then deletes originals once the copy succeeds.</div>
+                            </button>
+                            <button id="migrateLeaveBtn" type="button" class="text-left px-4 py-3 rounded bg-gray-700/30 border border-gray-600 hover:bg-gray-700/50 transition">
+                                <div class="text-sm font-medium text-white">Leave behind</div>
+                                <div class="text-xs text-gray-400">New cases go to the new location; existing folders stay at the old path.</div>
+                            </button>
+                            <button id="migrateCancelBtn" type="button" class="text-xs text-gray-400 hover:text-white mt-2">
+                                Cancel
+                            </button>
+                        </div>
+                        <p id="migrateStatus" class="text-xs text-gray-400 mt-3 hidden"></p>
+                    </div>
+                </div>
+
+                <!-- Restart prompt after userData change -->
+                <div id="restartPromptDialog" class="hidden fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div class="glass-card rounded-xl p-6 max-w-md w-full border border-amber-500/40">
+                        <h3 class="text-lg font-bold mb-2 text-white">Restart required</h3>
+                        <p class="text-sm text-gray-300 mb-4">Application data location was updated. VIPER needs to restart for the change to take effect.</p>
+                        <div class="flex justify-end gap-2">
+                            <button id="restartLaterBtn" type="button" class="text-xs px-4 py-2 rounded text-gray-300 border border-gray-600 hover:bg-gray-700/40 transition">Later</button>
+                            <button id="restartNowBtn" type="button" class="text-xs px-4 py-2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition">Restart now</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Migration progress modal -->
+                <div id="migrateProgressDialog" class="hidden fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div class="glass-card rounded-xl p-6 max-w-lg w-full border border-viper-cyan/40">
+                        <div class="flex items-center gap-3 mb-3">
+                            <svg class="w-6 h-6 text-viper-cyan animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <circle cx="12" cy="12" r="9" stroke-width="2" stroke-dasharray="40" stroke-linecap="round"/>
+                            </svg>
+                            <h3 id="migrateProgressTitle" class="text-lg font-bold text-white">Moving case folders…</h3>
+                        </div>
+                        <p id="migrateProgressSummary" class="text-xs text-gray-400 mb-4">Preparing…</p>
+
+                        <!-- Progress bar -->
+                        <div class="w-full bg-viper-dark rounded-full h-2.5 overflow-hidden border border-gray-700">
+                            <div id="migrateProgressBar" class="bg-gradient-to-r from-viper-cyan to-viper-green h-full transition-all duration-200 ease-out" style="width: 0%"></div>
+                        </div>
+                        <div class="flex justify-between text-[11px] text-gray-500 mt-1.5">
+                            <span id="migrateProgressCount">0 / 0</span>
+                            <span id="migrateProgressPercent">0%</span>
+                        </div>
+
+                        <!-- Current file -->
+                        <div class="mt-4 bg-viper-dark/60 rounded px-3 py-2 border border-gray-700/50">
+                            <div class="text-[10px] uppercase tracking-wider text-gray-500 mb-0.5">Currently <span id="migrateProgressVerb">copying</span></div>
+                            <code id="migrateProgressName" class="text-xs text-viper-cyan font-mono break-all">—</code>
+                        </div>
+
+                        <p class="text-[11px] text-gray-500 mt-4">Please do not close VIPER until the operation completes. Large case folders may take several minutes on external drives.</p>
                     </div>
                 </div>
 
@@ -2422,11 +2519,21 @@
                     </h3>
 
                     <div class="space-y-4">
+                        <!-- License-locked notice (shown only when a paid license is active) -->
+                        <div id="telemetryLicensedNotice" class="hidden bg-emerald-900/20 border border-emerald-700/40 rounded-lg p-3 text-xs text-emerald-300 flex items-start gap-2">
+                            <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                            <div>
+                                <strong class="text-emerald-200">Telemetry is permanently disabled.</strong>
+                                You have an active paid license — VIPER no longer sends any usage data, regardless of the toggle below.
+                            </div>
+                        </div>
+
                         <!-- Consent toggle -->
                         <div class="flex items-center justify-between bg-viper-dark rounded-lg p-4">
                             <div>
                                 <div class="text-sm font-medium text-white">Anonymous Usage Stats</div>
                                 <div class="text-xs text-gray-400 mt-1">Help us improve V.I.P.E.R. by sharing anonymous usage data during your demo period.</div>
+                                <div class="text-[11px] text-gray-500 mt-1">Automatically and permanently disabled once you activate a paid license.</div>
                             </div>
                             <label class="relative inline-flex items-center cursor-pointer">
                                 <input type="checkbox" id="telemetryConsentToggle" class="sr-only peer" onchange="toggleTelemetryConsent(this.checked)">
@@ -2542,6 +2649,31 @@
                 var idEl = document.getElementById('telemetryInstallId');
                 if (idEl && window.ViperTelemetry) {
                     idEl.textContent = window.ViperTelemetry.getInstallId() || '—';
+                }
+
+                // Detect paid license — telemetry SDK auto-gates in this case,
+                // so the UI should make the lock explicit.
+                var notice = document.getElementById('telemetryLicensedNotice');
+                var isLicensed = false;
+                try {
+                    if (window.ViperLicensing && typeof window.ViperLicensing.getLicenseStatus === 'function') {
+                        var st = window.ViperLicensing.getLicenseStatus();
+                        // status === 'licensed' OR 'expired' (paid license that lapsed) — both gate telemetry off
+                        isLicensed = !!(st && (st.status === 'licensed' || st.status === 'expired'));
+                    } else {
+                        // Fallback: presence of a license_key with non-demo type
+                        var lk = localStorage.getItem('viper_license_key');
+                        var lt = localStorage.getItem('viper_license_type');
+                        isLicensed = !!(lk && lt && lt !== 'demo');
+                    }
+                } catch (_) {}
+
+                if (notice) notice.classList.toggle('hidden', !isLicensed);
+                if (toggle) {
+                    toggle.disabled = isLicensed;
+                    var label = toggle.closest('label');
+                    if (label) label.classList.toggle('opacity-50', isLicensed);
+                    if (label) label.classList.toggle('cursor-not-allowed', isLicensed);
                 }
             } catch (_) {}
         }
@@ -2663,22 +2795,8 @@
             try {
                 const settings = await invoke('get_settings') || {};
 
-                // Resolve storage paths from Electron main process
-                let caseFilesDir = '';
-                let appDataDir = '';
-
-                if (window.electronAPI && window.electronAPI.getStoragePaths) {
-                    try {
-                        const paths = await window.electronAPI.getStoragePaths();
-                        caseFilesDir = paths.casesDir || '';
-                        appDataDir = paths.userData || paths.appDir || '';
-                    } catch (e) {
-                        console.warn('Could not get storage paths:', e);
-                    }
-                }
-
-                document.getElementById('caseFilesPath').textContent = caseFilesDir || 'Browser localStorage (no file system access)';
-                document.getElementById('appDataPath').textContent = appDataDir || 'Browser localStorage — ' + window.location.origin;
+                // Resolve storage paths and render the Storage Locations card (with Change/Reset)
+                await refreshStorageLocationsUI();
 
                 // Load last backup date
                 const lastBackup = settings.last_backup_date || localStorage.getItem('viperLastBackupDate');
@@ -2705,6 +2823,383 @@
                 console.error('Error loading settings:', error);
             }
         }
+
+        // ── Storage Locations: state + handlers ─────────────────────
+        let _storageState = {
+            casesDir: '',
+            userData: '',
+            isPortable: false,
+            casesOverride: null,
+            userDataOverride: null,
+            defaultCasesPath: '',
+            defaultUserDataPath: ''
+        };
+
+        async function refreshStorageLocationsUI() {
+            const haveAPI = !!(window.electronAPI && window.electronAPI.getStoragePaths);
+            if (!haveAPI) {
+                document.getElementById('caseFilesPath').textContent = 'Browser localStorage (no file system access)';
+                document.getElementById('appDataPath').textContent = 'Browser localStorage — ' + window.location.origin;
+                ['changeCasesBtn','changeAppDataBtn','resetCasesBtn','resetAppDataBtn'].forEach(id => {
+                    const el = document.getElementById(id); if (el) el.disabled = true;
+                });
+                return;
+            }
+            try {
+                const paths = await window.electronAPI.getStoragePaths();
+                _storageState.casesDir = paths.casesDir || '';
+                _storageState.userData = paths.userData || paths.appDir || '';
+                _storageState.isPortable = !!paths.isPortable;
+            } catch (e) {
+                console.warn('getStoragePaths failed:', e);
+            }
+            try {
+                if (window.electronAPI.getStorageOverrides) {
+                    const ov = await window.electronAPI.getStorageOverrides();
+                    _storageState.casesOverride = ov.casesOverride;
+                    _storageState.userDataOverride = ov.userDataOverride;
+                    _storageState.defaultCasesPath = ov.defaults?.casesPath || '';
+                    _storageState.defaultUserDataPath = ov.defaults?.userDataPath || '';
+                }
+            } catch (e) {
+                console.warn('getStorageOverrides failed:', e);
+            }
+
+            document.getElementById('caseFilesPath').textContent = _storageState.casesDir || '(unknown)';
+            document.getElementById('appDataPath').textContent = _storageState.userData || '(unknown)';
+
+            // Portable lockdown
+            const portableNotice = document.getElementById('storagePortableNotice');
+            const changeC = document.getElementById('changeCasesBtn');
+            const changeA = document.getElementById('changeAppDataBtn');
+            if (_storageState.isPortable) {
+                portableNotice.classList.remove('hidden');
+                changeC.disabled = true;
+                changeA.disabled = true;
+            } else {
+                portableNotice.classList.add('hidden');
+                changeC.disabled = false;
+                changeA.disabled = false;
+            }
+
+            // Badges + Reset buttons + Default hints
+            const casesBadge = document.getElementById('caseFilesBadge');
+            const resetC = document.getElementById('resetCasesBtn');
+            const casesHint = document.getElementById('caseFilesDefaultHint');
+            if (_storageState.casesOverride && !_storageState.isPortable) {
+                casesBadge.classList.remove('hidden');
+                resetC.classList.remove('hidden');
+                casesHint.classList.remove('hidden');
+                casesHint.querySelector('span').textContent = _storageState.defaultCasesPath;
+            } else {
+                casesBadge.classList.add('hidden');
+                resetC.classList.add('hidden');
+                casesHint.classList.add('hidden');
+            }
+
+            const appBadge = document.getElementById('appDataBadge');
+            const resetA = document.getElementById('resetAppDataBtn');
+            const appHint = document.getElementById('appDataDefaultHint');
+            if (_storageState.userDataOverride && !_storageState.isPortable) {
+                appBadge.classList.remove('hidden');
+                resetA.classList.remove('hidden');
+                appHint.classList.remove('hidden');
+                appHint.querySelector('span').textContent = _storageState.defaultUserDataPath;
+            } else {
+                appBadge.classList.add('hidden');
+                resetA.classList.add('hidden');
+                appHint.classList.add('hidden');
+            }
+        }
+
+        function _showMigrateDialog(fromPath, toPath) {
+            return new Promise((resolve) => {
+                const dlg = document.getElementById('casesMigrateDialog');
+                document.getElementById('migrateFromPath').textContent = fromPath;
+                document.getElementById('migrateToPath').textContent = toPath;
+                const status = document.getElementById('migrateStatus');
+                status.classList.add('hidden');
+                status.textContent = '';
+
+                const buttons = ['migrateCopyBtn','migrateMoveBtn','migrateLeaveBtn','migrateCancelBtn'];
+                const cleanup = () => {
+                    buttons.forEach(id => {
+                        const el = document.getElementById(id);
+                        el.replaceWith(el.cloneNode(true)); // remove listeners
+                    });
+                    dlg.classList.add('hidden');
+                };
+                const bind = (id, choice) => {
+                    document.getElementById(id).addEventListener('click', () => {
+                        cleanup();
+                        resolve(choice);
+                    }, { once: true });
+                };
+                bind('migrateCopyBtn',   'copy');
+                bind('migrateMoveBtn',   'move');
+                bind('migrateLeaveBtn',  'leave');
+                bind('migrateCancelBtn', null);
+                dlg.classList.remove('hidden');
+            });
+        }
+
+        // If the user picks a drive root (e.g. "D:\"), auto-append a sensible
+        // subfolder so VIPER's data isn't dumped at the drive root.
+        // kind: 'cases' → "VIPER Cases"; 'userData' → "VIPER"
+        function _normalizeStorageTarget(rawPath, kind) {
+            if (!rawPath || typeof rawPath !== 'string') return rawPath;
+            const trimmed = rawPath.trim();
+            // Windows drive root: "D:", "D:\", "D:/"
+            const isDriveRoot = /^[A-Za-z]:[\\\/]?$/.test(trimmed);
+            // Unix root: "/"
+            const isUnixRoot = trimmed === '/';
+            if (!isDriveRoot && !isUnixRoot) return trimmed;
+
+            const sub = kind === 'cases' ? 'VIPER Cases' : 'VIPER';
+            if (isUnixRoot) return '/' + sub;
+            // Windows: ensure trailing backslash before appending
+            const letter = trimmed[0].toUpperCase();
+            return `${letter}:\\${sub}`;
+        }
+
+        function _showRestartPrompt() {
+            return new Promise((resolve) => {
+                const dlg = document.getElementById('restartPromptDialog');
+                const cleanup = () => {
+                    document.getElementById('restartNowBtn').replaceWith(document.getElementById('restartNowBtn').cloneNode(true));
+                    document.getElementById('restartLaterBtn').replaceWith(document.getElementById('restartLaterBtn').cloneNode(true));
+                    dlg.classList.add('hidden');
+                };
+                document.getElementById('restartNowBtn').addEventListener('click', () => { cleanup(); resolve(true); }, { once: true });
+                document.getElementById('restartLaterBtn').addEventListener('click', () => { cleanup(); resolve(false); }, { once: true });
+                dlg.classList.remove('hidden');
+            });
+        }
+
+        // ── Migration progress modal helpers ────────────────────────
+        function _migrateProgressOpen(mode) {
+            const dlg = document.getElementById('migrateProgressDialog');
+            const verb = mode === 'move' ? 'Moving' : 'Copying';
+            document.getElementById('migrateProgressTitle').textContent = `${verb} case folders…`;
+            document.getElementById('migrateProgressSummary').textContent = 'Preparing…';
+            document.getElementById('migrateProgressBar').style.width = '0%';
+            document.getElementById('migrateProgressCount').textContent = '0 / 0';
+            document.getElementById('migrateProgressPercent').textContent = '0%';
+            document.getElementById('migrateProgressVerb').textContent = mode === 'move' ? 'moving' : 'copying';
+            document.getElementById('migrateProgressName').textContent = '—';
+            dlg.classList.remove('hidden');
+        }
+        function _migrateProgressUpdate(p) {
+            if (!p) return;
+            const total = p.total || 0;
+            const current = p.current || 0;
+            const pct = total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0;
+
+            const bar = document.getElementById('migrateProgressBar');
+            const count = document.getElementById('migrateProgressCount');
+            const percent = document.getElementById('migrateProgressPercent');
+            const verb = document.getElementById('migrateProgressVerb');
+            const name = document.getElementById('migrateProgressName');
+            const summary = document.getElementById('migrateProgressSummary');
+
+            if (p.phase === 'start') {
+                if (summary) summary.textContent = `Found ${total} item${total === 1 ? '' : 's'} to ${p.mode === 'move' ? 'move' : 'copy'}.`;
+                if (count) count.textContent = `0 / ${total}`;
+            } else if (p.phase === 'copy') {
+                if (verb) verb.textContent = p.mode === 'move' ? 'moving' : 'copying';
+                if (name) name.textContent = p.name || '—';
+                if (count) count.textContent = `${current} / ${total}`;
+                if (percent) percent.textContent = pct + '%';
+                if (bar) bar.style.width = pct + '%';
+            } else if (p.phase === 'delete') {
+                if (verb) verb.textContent = 'cleaning up old copy of';
+                if (name) name.textContent = p.name || '—';
+            } else if (p.phase === 'item-done' || p.phase === 'skip' || p.phase === 'error') {
+                if (count) count.textContent = `${current} / ${total}`;
+                if (percent) percent.textContent = pct + '%';
+                if (bar) bar.style.width = pct + '%';
+            } else if (p.phase === 'done') {
+                if (bar) bar.style.width = '100%';
+                if (percent) percent.textContent = '100%';
+                if (count) count.textContent = `${total} / ${total}`;
+                if (summary) summary.textContent = `Finished — ${p.migrated || 0} folder(s) processed${p.errors ? `, ${p.errors} issue(s)` : ''}.`;
+                if (name) name.textContent = '—';
+            }
+        }
+        function _migrateProgressClose() {
+            document.getElementById('migrateProgressDialog').classList.add('hidden');
+        }
+
+        async function _handleChangeCases() {
+            if (_storageState.isPortable) return;
+            const pick = await window.electronAPI.chooseDirectory({
+                title: 'Choose new Case Files directory',
+                defaultPath: _storageState.casesDir
+            });
+            if (pick.canceled || !pick.path) return;
+            const rawPath = pick.path;
+            const newPath = _normalizeStorageTarget(rawPath, 'cases');
+            const wasNormalized = (newPath !== rawPath.trim());
+            const oldPath = _storageState.casesDir;
+            if (newPath === oldPath) { showNotification('Same path selected — no change', 'info'); return; }
+            if (wasNormalized) {
+                showNotification(`Using "${newPath}" (auto-created from drive root)`, 'info');
+            }
+
+            // Ask migration intent
+            const choice = await _showMigrateDialog(oldPath, newPath);
+            if (choice === null) return; // cancel
+
+            if (choice === 'copy' || choice === 'move') {
+                // Subscribe to progress events BEFORE invoking, then show the modal
+                let unsubscribe = null;
+                if (window.electronAPI.onMigrateProgress) {
+                    unsubscribe = window.electronAPI.onMigrateProgress(_migrateProgressUpdate);
+                }
+                _migrateProgressOpen(choice);
+
+                let mig;
+                try {
+                    mig = await window.electronAPI.migrateCases({ fromPath: oldPath, toPath: newPath, mode: choice });
+                } finally {
+                    if (typeof unsubscribe === 'function') unsubscribe();
+                }
+
+                // Brief delay so the user can see the 100% bar before it closes
+                await new Promise(r => setTimeout(r, 450));
+                _migrateProgressClose();
+
+                if (!mig || !mig.success) {
+                    const msg = (mig && (mig.error || (mig.errors && mig.errors.join('; ')))) || 'Migration failed';
+                    showNotification('Migration completed with issues: ' + msg, 'warning');
+                } else {
+                    showNotification(`${mig.migrated} case folder(s) ${choice === 'copy' ? 'copied' : 'moved'}.`, 'success');
+                }
+            }
+
+            const res = await window.electronAPI.setCasesPath(newPath);
+            if (!res.success) {
+                showNotification('Could not save new path: ' + (res.error || 'unknown error'), 'error');
+                return;
+            }
+            showNotification('Case Files directory updated.', 'success');
+            await refreshStorageLocationsUI();
+        }
+
+        async function _handleResetCases() {
+            if (_storageState.isPortable) return;
+            if (!confirm('Reset Case Files directory to its default location?\n\nExisting cases at the current location will NOT be moved.')) return;
+            const res = await window.electronAPI.resetStoragePath('cases');
+            if (!res.success) {
+                showNotification('Reset failed: ' + (res.error || 'unknown error'), 'error');
+                return;
+            }
+            showNotification('Case Files directory reset to default.', 'success');
+            await refreshStorageLocationsUI();
+        }
+
+        async function _handleChangeAppData() {
+            if (_storageState.isPortable) return;
+            const pick = await window.electronAPI.chooseDirectory({
+                title: 'Choose new Application Data directory',
+                defaultPath: _storageState.userData
+            });
+            if (pick.canceled || !pick.path) return;
+            const rawPath = pick.path;
+            const newPath = _normalizeStorageTarget(rawPath, 'userData');
+            const wasNormalized = (newPath !== rawPath.trim());
+            const oldPath = _storageState.userData;
+            if (newPath === oldPath) { showNotification('Same path selected — no change', 'info'); return; }
+            if (wasNormalized) {
+                showNotification(`Using "${newPath}" (auto-created from drive root)`, 'info');
+            }
+
+            // Ask migration intent for app data (license, settings, security vault)
+            const choice = await _showMigrateDialog(oldPath, newPath);
+            if (choice === null) return; // cancel
+
+            if (choice === 'copy' || choice === 'move') {
+                // Subscribe to userdata progress events, then show modal
+                let unsubscribe = null;
+                if (window.electronAPI.onMigrateUserDataProgress) {
+                    unsubscribe = window.electronAPI.onMigrateUserDataProgress(_migrateProgressUpdate);
+                }
+                _migrateProgressOpen(choice);
+                // Override the title — we're moving app data, not cases
+                document.getElementById('migrateProgressTitle').textContent =
+                    (choice === 'move' ? 'Moving' : 'Copying') + ' application data…';
+
+                let mig;
+                try {
+                    mig = await window.electronAPI.migrateUserData({ toPath: newPath, mode: choice });
+                } finally {
+                    if (typeof unsubscribe === 'function') unsubscribe();
+                }
+
+                await new Promise(r => setTimeout(r, 450));
+                _migrateProgressClose();
+
+                if (!mig || !mig.success) {
+                    const msg = (mig && mig.error) || 'Migration failed';
+                    showNotification('Could not migrate app data: ' + msg + '. Aborting.', 'error');
+                    return;
+                }
+                if (mig.errors && mig.errors.length) {
+                    // Non-fatal — usually leveldb files locked by the running app.
+                    // The new userData will recover from logs on next start.
+                    console.warn('userData migration partial:', mig.errors);
+                    showNotification(`${mig.migrated} item(s) migrated, ${mig.errors.length} skipped (locked). Restart will reconcile.`, 'warning');
+                } else {
+                    showNotification(`${mig.migrated} item(s) migrated.`, 'success');
+                }
+            }
+
+            const res = await window.electronAPI.setUserDataPath(newPath);
+            if (!res.success) {
+                showNotification('Could not save new path: ' + (res.error || 'unknown error'), 'error');
+                return;
+            }
+            const wantRestart = await _showRestartPrompt();
+            if (wantRestart) {
+                await window.electronAPI.restartApp();
+            } else {
+                showNotification('Application Data location saved. Restart VIPER to apply.', 'warning');
+                await refreshStorageLocationsUI();
+            }
+        }
+
+        async function _handleResetAppData() {
+            if (_storageState.isPortable) return;
+            if (!confirm('Reset Application Data location to its default?\n\nVIPER will need to restart for the change to take effect.')) return;
+            const res = await window.electronAPI.resetStoragePath('userData');
+            if (!res.success) {
+                showNotification('Reset failed: ' + (res.error || 'unknown error'), 'error');
+                return;
+            }
+            if (res.restartRequired) {
+                const wantRestart = await _showRestartPrompt();
+                if (wantRestart) {
+                    await window.electronAPI.restartApp();
+                    return;
+                }
+                showNotification('Reset saved. Restart VIPER to apply.', 'warning');
+            } else {
+                showNotification('Application Data already at default.', 'info');
+            }
+            await refreshStorageLocationsUI();
+        }
+
+        // Bind once on DOM ready
+        document.addEventListener('DOMContentLoaded', () => {
+            const bind = (id, fn) => {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener('click', fn);
+            };
+            bind('changeCasesBtn',   _handleChangeCases);
+            bind('resetCasesBtn',    _handleResetCases);
+            bind('changeAppDataBtn', _handleChangeAppData);
+            bind('resetAppDataBtn',  _handleResetAppData);
+        });
 
         async function loadStorageInfo() {
             try {

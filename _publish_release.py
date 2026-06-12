@@ -1,5 +1,5 @@
 """
-Create GitHub Release v3.8.5 and upload installer artifacts.
+Create GitHub Release v3.8.6 and upload installer artifacts.
 Reads GH_TOKEN from OS keyring; never prints the token.
 """
 import os
@@ -11,59 +11,82 @@ import urllib.parse
 
 REPO_OWNER = "exhonorated999"
 REPO_NAME = "project-viper"
-TAG = "v3.8.5"
-RELEASE_NAME = "v3.8.5 - Opt-in demo telemetry"
-RELEASE_BODY = """## v3.8.5 — Opt-in demo telemetry (sales-pipeline visibility)
+TAG = "v3.8.6"
+RELEASE_NAME = "v3.8.6 - User-configurable storage locations"
+RELEASE_BODY = """## v3.8.6 — Choose where VIPER stores your data
 
 ### What's new
-Demo installs can now optionally report **anonymous usage signals** to
-help us understand which features matter to evaluators and follow up
-with the right context. This is **opt-in, disclosed, demo-only, and
-fully offline-tolerant** — it does not change anything for licensed
-users.
+You can now redirect VIPER's case files and application data to any
+drive you want — useful when C: is filling up, or when an agency
+prefers all case material on a dedicated investigations volume.
 
-### What gets reported (only with consent, only during demo)
-- `install_open` — install + version identifier on first launch
-- `module_open` — which module tab was opened (e.g. `suspects`, `recovered_vehicles`)
-- `session_end` — session length + module visit counts
+Open **Settings → Storage Locations** to configure.
 
-### What is NEVER reported
-- Case content, names, addresses, narratives, photos, evidence, contacts
-- Anything the user types into a case
-- Anything from licensed (non-demo) installs
+### Case Files Directory
+- Click **Change location…** and pick any folder (or a drive root —
+  VIPER auto-creates a `VIPER Cases` subfolder so nothing dumps at root)
+- A dialog asks how to handle existing cases:
+  - **Copy** — duplicate folders to the new location, originals stay
+  - **Move** — copy then remove originals once the copy succeeds
+  - **Leave behind** — only new cases go to the new location
+- A progress modal animates per-folder with a live counter,
+  current-folder name, and gradient progress bar (no more "is it
+  frozen?" anxiety on large copies)
+- "Reset to default" link reverts the override at any time
 
-### Privacy architecture
-- **Three-way gate:** license-status = `demo` AND api_key present AND consent accepted
-- **Opt-in:** first-launch consent dialog with clear "No thanks" option
-- **Outbound-only:** the desktop app makes HTTPS POSTs to our dashboard.
-  No inbound listener, no new attack surface
-- **Offline-tolerant:** events queue to localStorage (200-event cap, 64KB
-  payload cap) and flush on next launch. Telemetry failure NEVER blocks
-  the app
-- **License upgrade:** the moment a paid license activates, telemetry
-  silently stops without any rebuild
+### Application Data (license, settings, security vault)
+- Same Change location… flow — pick a folder, then choose Copy/Move/Leave
+- VIPER carries your **license, registered email, security vault,
+  WiGLE credentials, and all settings** to the new directory before
+  restart (LevelDB locks are tolerated — Electron recovers from the
+  journal on next launch)
+- "Restart required" prompt appears after the migration completes
 
-### Implementation
-- `modules/telemetry.js` — SDK with queued POSTs, `fetch(keepalive)` on
-  unload, X-API-Key auth, dedup via client_seq
-- `modules/telemetry-consent.js` — first-launch consent modal
-- Hooks in `index.html`, `case-detail-with-analytics.html`, `settings.html`
-- `preload.js` — exposes `platform` to the renderer for the SDK
+### Drive-root safety
+- Picking a drive root (e.g. `D:\\`) is auto-normalized to
+  `D:\\VIPER Cases` (cases) or `D:\\VIPER` (app data) before any
+  data is written
+- Normalization also runs on every launch — legacy configs that
+  pointed at a drive root get auto-corrected and re-saved
+
+### Portable mode still wins
+- USB / portable installs ignore overrides — data stays self-contained
+  on the stick. The Storage Locations panel shows an amber notice
+  explaining the lockdown.
+
+### Telemetry section polish
+- "Anonymous Usage Stats" now explicitly notes that telemetry is
+  **automatically and permanently disabled** once a paid license is
+  activated. A green confirmation banner appears in the section the
+  moment a license is detected, and the toggle is locked off.
+- Fixed bottom of Telemetry section being cut off behind the floating
+  search widget — Settings content now has extra bottom padding.
+
+### Architecture notes (for reviewers)
+- New bootstrap config at
+  `%APPDATA%\\viper-electron-config\\storage.json`. This path is
+  derived from `app.getPath('appData')` which is **not** affected by
+  `app.setPath('userData', …)` — so the override is always readable
+  on next launch.
+- Three-way priority: portable mode > user override > default.
+- Migration uses `fs.promises.cp` (async, libuv threadpool) so the
+  renderer event loop stays responsive and the progress modal animates
+  smoothly even during multi-GB copies.
 
 ### Artifacts
-- `V.I.P.E.R-3.8.5-Setup.exe` — NSIS installer (per-user, no UAC)
-- `V.I.P.E.R-3.8.5-Portable.exe` — extract-and-run, no install
-- `V.I.P.E.R-3.8.5.msi` — MSI for SCCM / Intune / PDQ / GPO deployment
+- `V.I.P.E.R-3.8.6-Setup.exe` — NSIS installer (per-user, no UAC)
+- `V.I.P.E.R-3.8.6-Portable.exe` — extract-and-run, no install
+- `V.I.P.E.R-3.8.6.msi` — MSI for SCCM / Intune / PDQ / GPO deployment
 - `latest.yml` — electron-updater manifest
 """
 
 # Build output on this machine
 _DIST = r"C:\Users\JUSTI\Workspace\VIPER\dist"
 ARTIFACTS = [
-    os.path.join(_DIST, "V.I.P.E.R-3.8.5-Setup.exe"),
-    os.path.join(_DIST, "V.I.P.E.R-3.8.5-Setup.exe.blockmap"),
-    os.path.join(_DIST, "V.I.P.E.R-3.8.5-Portable.exe"),
-    os.path.join(_DIST, "V.I.P.E.R-3.8.5.msi"),
+    os.path.join(_DIST, "V.I.P.E.R-3.8.6-Setup.exe"),
+    os.path.join(_DIST, "V.I.P.E.R-3.8.6-Setup.exe.blockmap"),
+    os.path.join(_DIST, "V.I.P.E.R-3.8.6-Portable.exe"),
+    os.path.join(_DIST, "V.I.P.E.R-3.8.6.msi"),
     os.path.join(_DIST, "latest.yml"),
 ]
 

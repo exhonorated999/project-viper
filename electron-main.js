@@ -97,6 +97,68 @@ const iconPath = app.isPackaged
   ? path.join(__dirname, '..', 'app.asar.unpacked', 'build', 'icon.ico')
   : path.join(__dirname, 'build', 'icon.ico');
 
+// ── Storage location overrides (bootstrap config) ────────────────────
+// Users can redirect their Case Files directory and/or Electron userData
+// (localStorage, security vault, cookies) to another drive — e.g. an
+// external HDD when C: is filling up. The override is stored in a fixed
+// bootstrap file that is NEVER affected by app.setPath() — we anchor it
+// to the OS-default appData so it's always readable on next launch.
+//
+// File: %APPDATA%\viper-electron-config\storage.json
+// Schema: { casesPath?: string, userDataPath?: string }
+//
+// Priority order:  portable mode  >  user override  >  default
+const STORAGE_CONFIG_DIR = path.join(app.getPath('appData'), 'viper-electron-config');
+const STORAGE_CONFIG_FILE = path.join(STORAGE_CONFIG_DIR, 'storage.json');
+
+function _normalizeStorageTargetBootstrap(rawPath, kind) {
+  if (!rawPath || typeof rawPath !== 'string') return rawPath;
+  const trimmed = rawPath.trim();
+  const isDriveRoot = /^[A-Za-z]:[\\\/]?$/.test(trimmed);
+  const isUnixRoot = trimmed === '/';
+  if (!isDriveRoot && !isUnixRoot) return trimmed;
+  const sub = kind === 'cases' ? 'VIPER Cases' : 'VIPER';
+  if (isUnixRoot) return '/' + sub;
+  return `${trimmed[0].toUpperCase()}:\\${sub}`;
+}
+
+function _readStorageOverrides() {
+  try {
+    if (!fs.existsSync(STORAGE_CONFIG_FILE)) return {};
+    const raw = fs.readFileSync(STORAGE_CONFIG_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    const out = {};
+    if (parsed && typeof parsed.casesPath === 'string' && parsed.casesPath.trim()) {
+      out.casesPath = _normalizeStorageTargetBootstrap(parsed.casesPath, 'cases');
+    }
+    if (parsed && typeof parsed.userDataPath === 'string' && parsed.userDataPath.trim()) {
+      out.userDataPath = _normalizeStorageTargetBootstrap(parsed.userDataPath, 'userData');
+    }
+    // Persist any normalization so the next read is already clean
+    if ((out.casesPath && out.casesPath !== parsed.casesPath) ||
+        (out.userDataPath && out.userDataPath !== parsed.userDataPath)) {
+      try { fs.writeFileSync(STORAGE_CONFIG_FILE, JSON.stringify(out, null, 2), 'utf8'); } catch (_) {}
+    }
+    return out;
+  } catch (e) {
+    console.warn('storage overrides unreadable, ignoring:', e.message);
+    return {};
+  }
+}
+
+function _writeStorageOverrides(next) {
+  try {
+    if (!fs.existsSync(STORAGE_CONFIG_DIR)) fs.mkdirSync(STORAGE_CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(STORAGE_CONFIG_FILE, JSON.stringify(next, null, 2), 'utf8');
+    return true;
+  } catch (e) {
+    console.error('storage overrides write failed:', e.message);
+    return false;
+  }
+}
+
+const storageOverrides = _readStorageOverrides();
+
 // ── Portable mode detection ──────────────────────────────────────────
 // If the app is NOT installed under C:\Program Files, treat it as a portable
 // USB / portable install. All user data (localStorage, security vault, cases)
@@ -109,18 +171,54 @@ const isPortable = app.isPackaged && (
   !exeDir.toLowerCase().startsWith(systemDrive)
 );
 
-let casesDir;   // writable directory for case data
+// Track the default (no-override) paths so the UI can show them & offer reset
+const defaultUserDataPath = app.getPath('userData');
+const defaultCasesDir = isPortable
+  ? path.join(exeDir, 'cases')
+  : (app.isPackaged ? path.join(defaultUserDataPath, 'cases') : path.join(__dirname, 'cases'));
+
+let casesDir;            // writable directory for case data (reassignable)
+let userDataOverridden = false;
+let casesOverridden = false;
+
 if (isPortable) {
+  // Portable mode wins over user overrides — the USB stick must stay self-contained
   const portableData = path.join(exeDir, 'userdata');
   if (!fs.existsSync(portableData)) fs.mkdirSync(portableData, { recursive: true });
   app.setPath('userData', portableData);   // redirects localStorage, cookies, etc.
   casesDir = path.join(exeDir, 'cases');
   console.log('PORTABLE MODE — data stored on USB:', portableData);
 } else {
-  // Desktop install: cases next to the app in dev, or under userData in production
-  casesDir = app.isPackaged
-    ? path.join(app.getPath('userData'), 'cases')
-    : path.join(__dirname, 'cases');
+  // Desktop install: honor user overrides if present
+  if (storageOverrides.userDataPath) {
+    try {
+      if (!fs.existsSync(storageOverrides.userDataPath)) {
+        fs.mkdirSync(storageOverrides.userDataPath, { recursive: true });
+      }
+      app.setPath('userData', storageOverrides.userDataPath);
+      userDataOverridden = true;
+      console.log('USER OVERRIDE — userData redirected to:', storageOverrides.userDataPath);
+    } catch (e) {
+      console.error('userData override failed, using default:', e.message);
+    }
+  }
+  if (storageOverrides.casesPath) {
+    try {
+      if (!fs.existsSync(storageOverrides.casesPath)) {
+        fs.mkdirSync(storageOverrides.casesPath, { recursive: true });
+      }
+      casesDir = storageOverrides.casesPath;
+      casesOverridden = true;
+      console.log('USER OVERRIDE — cases redirected to:', storageOverrides.casesPath);
+    } catch (e) {
+      console.error('cases override failed, using default:', e.message);
+    }
+  }
+  if (!casesDir) {
+    casesDir = app.isPackaged
+      ? path.join(app.getPath('userData'), 'cases')
+      : path.join(__dirname, 'cases');
+  }
 }
 if (!fs.existsSync(casesDir)) fs.mkdirSync(casesDir, { recursive: true });
 
@@ -1193,6 +1291,74 @@ app.on('will-quit', () => {
   }
 });
 
+// --- Migrate the userData directory contents to a new location ---
+// mode: 'copy' | 'move' | 'leave'
+// Copies the live userData tree (localStorage/leveldb, security vault,
+// case snapshots, etc.) so the user keeps their license & settings.
+// LevelDB files may be locked while Electron runs — we skip locked
+// files rather than failing; the user is told to restart promptly.
+ipcMain.handle('migrate-userdata', async (event, { toPath, mode } = {}) => {
+  try {
+    if (isPortable) return { success: false, error: 'Cannot migrate in portable mode' };
+    if (!toPath) return { success: false, error: 'Missing destination' };
+    if (mode === 'leave') return { success: true, migrated: 0, mode: 'leave' };
+    if (mode !== 'copy' && mode !== 'move') return { success: false, error: 'Invalid mode' };
+
+    const fromPath = app.getPath('userData');
+    if (!fs.existsSync(fromPath)) return { success: true, migrated: 0, note: 'source missing' };
+    if (path.resolve(fromPath) === path.resolve(toPath)) {
+      return { success: true, migrated: 0, note: 'same path' };
+    }
+
+    fs.mkdirSync(toPath, { recursive: true });
+    const entries = fs.readdirSync(fromPath, { withFileTypes: true });
+    const total = entries.length;
+    let migrated = 0;
+    const errors = [];
+
+    const sender = event && event.sender;
+    const sendProgress = (payload) => {
+      try {
+        if (sender && !sender.isDestroyed()) sender.send('migrate-userdata-progress', payload);
+      } catch (_) { /* ignore */ }
+    };
+
+    sendProgress({ phase: 'start', total, mode });
+
+    for (let i = 0; i < entries.length; i++) {
+      const ent = entries[i];
+      const src = path.join(fromPath, ent.name);
+      const dst = path.join(toPath, ent.name);
+
+      sendProgress({ phase: 'copy', current: i, total, name: ent.name, mode });
+
+      try {
+        if (fs.existsSync(dst)) {
+          // Overwrite for userData migration — we WANT new userData to look
+          // exactly like the old one. cpSync supports force via { force: true }.
+          await fs.promises.rm(dst, { recursive: true, force: true });
+        }
+        await fs.promises.cp(src, dst, { recursive: true, errorOnExist: false });
+        migrated++;
+        if (mode === 'move') {
+          sendProgress({ phase: 'delete', current: i + 1, total, name: ent.name, mode });
+          await fs.promises.rm(src, { recursive: true, force: true });
+        }
+        sendProgress({ phase: 'item-done', current: i + 1, total, name: ent.name, mode });
+      } catch (err) {
+        // LevelDB / IndexedDB locked files end up here — non-fatal
+        errors.push(`${ent.name}: ${err.message}`);
+        sendProgress({ phase: 'error', current: i + 1, total, name: ent.name, error: err.message, mode });
+      }
+    }
+
+    sendProgress({ phase: 'done', total, migrated, errors: errors.length });
+    return { success: true, migrated, errors, mode };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 // --- Storage paths for Settings page ---
 ipcMain.handle('get-storage-paths', async () => {
   return {
@@ -1201,6 +1367,182 @@ ipcMain.handle('get-storage-paths', async () => {
     userData: app.getPath('userData'),
     isPortable: isPortable
   };
+});
+
+// --- Storage override details (for the "Change Location" UI) ---
+ipcMain.handle('get-storage-overrides', async () => {
+  return {
+    casesOverride: casesOverridden ? casesDir : null,
+    userDataOverride: userDataOverridden ? app.getPath('userData') : null,
+    defaults: {
+      casesPath: defaultCasesDir,
+      userDataPath: defaultUserDataPath
+    },
+    isPortable: isPortable,
+    configFile: STORAGE_CONFIG_FILE
+  };
+});
+
+// --- Show a folder picker; returns selected absolute path or null ---
+ipcMain.handle('choose-directory', async (_e, { title, defaultPath } = {}) => {
+  try {
+    const res = await dialog.showOpenDialog(mainWindow || undefined, {
+      title: title || 'Choose folder',
+      defaultPath: defaultPath || undefined,
+      properties: ['openDirectory', 'createDirectory']
+    });
+    if (res.canceled || !res.filePaths || !res.filePaths[0]) return { canceled: true };
+    return { canceled: false, path: res.filePaths[0] };
+  } catch (err) {
+    return { canceled: true, error: err.message };
+  }
+});
+
+// --- Helper: validate that a directory is writable ---
+function _canWriteToDir(p) {
+  try {
+    if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+    const probe = path.join(p, '.viper-write-probe-' + Date.now());
+    fs.writeFileSync(probe, 'ok', 'utf8');
+    fs.unlinkSync(probe);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+// --- Helper: if user passed a drive root (e.g. "D:\"), append a sensible
+// subfolder so VIPER data isn't dumped at the root.
+function _normalizeStorageTarget(rawPath, kind) {
+  if (!rawPath || typeof rawPath !== 'string') return rawPath;
+  const trimmed = rawPath.trim();
+  const isDriveRoot = /^[A-Za-z]:[\\\/]?$/.test(trimmed);
+  const isUnixRoot = trimmed === '/';
+  if (!isDriveRoot && !isUnixRoot) return trimmed;
+  const sub = kind === 'cases' ? 'VIPER Cases' : 'VIPER';
+  if (isUnixRoot) return '/' + sub;
+  return `${trimmed[0].toUpperCase()}:\\${sub}`;
+}
+
+// --- Migrate case folders from one directory to another ---
+// mode: 'copy' | 'move' | 'leave'  (leave is a no-op, kept for symmetry)
+// Emits 'migrate-cases-progress' events to the calling sender so the UI
+// can animate progress (fs.cpSync would block the renderer).
+ipcMain.handle('migrate-cases', async (event, { fromPath, toPath, mode } = {}) => {
+  try {
+    if (!fromPath || !toPath) return { success: false, error: 'Missing paths' };
+    if (mode === 'leave') return { success: true, migrated: 0, mode: 'leave' };
+    if (mode !== 'copy' && mode !== 'move') return { success: false, error: 'Invalid mode' };
+
+    if (!fs.existsSync(fromPath)) return { success: true, migrated: 0, note: 'source missing' };
+    if (path.resolve(fromPath) === path.resolve(toPath)) {
+      return { success: true, migrated: 0, note: 'same path' };
+    }
+
+    fs.mkdirSync(toPath, { recursive: true });
+    const entries = fs.readdirSync(fromPath, { withFileTypes: true });
+    const total = entries.length;
+    let migrated = 0;
+    const errors = [];
+
+    const sender = event && event.sender;
+    const sendProgress = (payload) => {
+      try {
+        if (sender && !sender.isDestroyed()) sender.send('migrate-cases-progress', payload);
+      } catch (_) { /* ignore — never block migration on UI events */ }
+    };
+
+    sendProgress({ phase: 'start', total, mode });
+
+    for (let i = 0; i < entries.length; i++) {
+      const ent = entries[i];
+      const src = path.join(fromPath, ent.name);
+      const dst = path.join(toPath, ent.name);
+
+      sendProgress({ phase: 'copy', current: i, total, name: ent.name, mode });
+
+      try {
+        if (fs.existsSync(dst)) {
+          errors.push(`${ent.name}: already exists at destination, skipped`);
+          sendProgress({ phase: 'skip', current: i + 1, total, name: ent.name, mode });
+          continue;
+        }
+        // fs.promises.cp uses the libuv threadpool — renderer stays responsive.
+        // Cross-drive safe (unlike fs.rename).
+        await fs.promises.cp(src, dst, { recursive: true, errorOnExist: false });
+        migrated++;
+        if (mode === 'move') {
+          sendProgress({ phase: 'delete', current: i + 1, total, name: ent.name, mode });
+          await fs.promises.rm(src, { recursive: true, force: true });
+        }
+        sendProgress({ phase: 'item-done', current: i + 1, total, name: ent.name, mode });
+      } catch (err) {
+        errors.push(`${ent.name}: ${err.message}`);
+        sendProgress({ phase: 'error', current: i + 1, total, name: ent.name, error: err.message, mode });
+      }
+    }
+
+    sendProgress({ phase: 'done', total, migrated, errors: errors.length });
+    return { success: errors.length === 0, migrated, errors, mode };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// --- Set Case Files directory override ---
+// Writes config, reassigns runtime casesDir so subsequent IPC calls use it.
+// Migration of existing cases is done by a separate migrate-cases call BEFORE this.
+ipcMain.handle('set-cases-path', async (_e, newPath) => {
+  if (isPortable) return { success: false, error: 'Cannot override in portable mode' };
+  if (!newPath || typeof newPath !== 'string') return { success: false, error: 'Invalid path' };
+  newPath = _normalizeStorageTarget(newPath, 'cases');
+  if (!_canWriteToDir(newPath)) return { success: false, error: 'Path is not writable' };
+  const cfg = _readStorageOverrides();
+  cfg.casesPath = newPath;
+  if (!_writeStorageOverrides(cfg)) return { success: false, error: 'Failed to save config' };
+  casesDir = newPath;
+  casesOverridden = true;
+  return { success: true, newPath, restartRequired: false };
+});
+
+// --- Set userData override (requires restart) ---
+ipcMain.handle('set-userdata-path', async (_e, newPath) => {
+  if (isPortable) return { success: false, error: 'Cannot override in portable mode' };
+  if (!newPath || typeof newPath !== 'string') return { success: false, error: 'Invalid path' };
+  newPath = _normalizeStorageTarget(newPath, 'userData');
+  if (!_canWriteToDir(newPath)) return { success: false, error: 'Path is not writable' };
+  const cfg = _readStorageOverrides();
+  cfg.userDataPath = newPath;
+  if (!_writeStorageOverrides(cfg)) return { success: false, error: 'Failed to save config' };
+  return { success: true, newPath, restartRequired: true };
+});
+
+// --- Reset an override back to the default ---
+// which: 'cases' | 'userData'
+ipcMain.handle('reset-storage-path', async (_e, which) => {
+  if (isPortable) return { success: false, error: 'Cannot override in portable mode' };
+  const cfg = _readStorageOverrides();
+  let restartRequired = false;
+  if (which === 'cases') {
+    delete cfg.casesPath;
+    if (!_writeStorageOverrides(cfg)) return { success: false, error: 'Failed to save config' };
+    casesDir = defaultCasesDir;
+    if (!fs.existsSync(casesDir)) fs.mkdirSync(casesDir, { recursive: true });
+    casesOverridden = false;
+    return { success: true, newPath: casesDir, restartRequired: false };
+  } else if (which === 'userData') {
+    delete cfg.userDataPath;
+    if (!_writeStorageOverrides(cfg)) return { success: false, error: 'Failed to save config' };
+    restartRequired = userDataOverridden;
+    return { success: true, newPath: defaultUserDataPath, restartRequired };
+  }
+  return { success: false, error: 'Unknown target' };
+});
+
+// --- Restart the app (used after userData change) ---
+ipcMain.handle('restart-app', async () => {
+  app.relaunch();
+  app.exit(0);
 });
 
 // --- Create case folder on disk ---

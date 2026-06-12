@@ -17,6 +17,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Storage paths
   getStoragePaths: () => ipcRenderer.invoke('get-storage-paths'),
+
+  // Storage location overrides (Settings → Storage Locations)
+  getStorageOverrides: () => ipcRenderer.invoke('get-storage-overrides'),
+  chooseDirectory: (opts) => ipcRenderer.invoke('choose-directory', opts || {}),
+  setCasesPath: (newPath) => ipcRenderer.invoke('set-cases-path', newPath),
+  setUserDataPath: (newPath) => ipcRenderer.invoke('set-userdata-path', newPath),
+  resetStoragePath: (which) => ipcRenderer.invoke('reset-storage-path', which),
+  migrateCases: (opts) => ipcRenderer.invoke('migrate-cases', opts),
+  onMigrateProgress: (cb) => {
+    const handler = (_e, payload) => { try { cb(payload); } catch (_) {} };
+    ipcRenderer.on('migrate-cases-progress', handler);
+    return () => ipcRenderer.removeListener('migrate-cases-progress', handler);
+  },
+  migrateUserData: (opts) => ipcRenderer.invoke('migrate-userdata', opts),
+  onMigrateUserDataProgress: (cb) => {
+    const handler = (_e, payload) => { try { cb(payload); } catch (_) {} };
+    ipcRenderer.on('migrate-userdata-progress', handler);
+    return () => ipcRenderer.removeListener('migrate-userdata-progress', handler);
+  },
+  restartApp: () => ipcRenderer.invoke('restart-app'),
+
   deleteCaseFolder: (caseNumber) => ipcRenderer.invoke('delete-case-folder', caseNumber),
   createCaseFolder: (caseNumber) => ipcRenderer.invoke('create-case-folder', caseNumber),
   caseFolderExists: (caseNumber) => ipcRenderer.invoke('case-folder-exists', caseNumber),

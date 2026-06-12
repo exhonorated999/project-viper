@@ -8,6 +8,8 @@
     <script src="modules/viper-ui.js"></script>
     <script src="modules/viper-prefs.js"></script>
     <script src="modules/licensing.js"></script>
+    <script src="modules/telemetry.js"></script>
+    <script src="modules/telemetry-consent.js"></script>
     <script src="modules/genlogs-api.js"></script>
     <script src="modules/trace-search-api.js"></script>
     <script src="modules/case-link.js"></script>
@@ -5418,6 +5420,26 @@
             document.addEventListener('mousedown', (e) => {
                 if (e.target.matches('input, textarea, button, select, [contenteditable]')) window.focus();
             }, true);
+
+            // Telemetry init + lifecycle
+            try {
+                ViperTelemetryConsent.maybeShow({
+                    onDecision: function () {
+                        ViperTelemetry.init({
+                            apiBase: "https://intellect-unified-dashboard-production.up.railway.app",
+                            getApiKey: function () { return localStorage.getItem("viper_api_key"); },
+                            getStatus: function () { return window.ViperLicensing.getLicenseStatus(); },
+                            getAppVersion: async function () { return await window.electronAPI.getAppVersion(); },
+                            getPlatform: function () { return (window.electronAPI && window.electronAPI.platform) || "unknown"; },
+                        });
+                        ViperTelemetry.appOpen();
+                        window.__viper_session_start = Date.now();
+                        window.addEventListener("beforeunload", function () {
+                            ViperTelemetry.sessionEnd(Math.floor((Date.now() - window.__viper_session_start) / 1000));
+                        });
+                    },
+                });
+            } catch (_) {}
         });
 
         // User Information Display

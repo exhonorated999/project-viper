@@ -5,6 +5,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   // App info
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  platform: process.platform,  // 'win32' | 'darwin' | 'linux' — for telemetry & UA-aware code
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
 
   // Resolve a real filesystem path from a dropped File (Electron 32+ safe).

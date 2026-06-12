@@ -8,6 +8,8 @@
     <script src="modules/viper-ui.js"></script>
     <script src="modules/viper-prefs.js"></script>
     <script src="modules/licensing.js"></script>
+    <script src="modules/telemetry.js"></script>
+    <script src="modules/telemetry-consent.js"></script>
     <script src="modules/warrant-author/agency-profile.js"></script>
     <script src="modules/warrant-author/provider-directory.js"></script>
     <script src="modules/warrant-author/items-taxonomy.js"></script>
@@ -2409,6 +2411,59 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Telemetry Section -->
+                <div class="glass-card rounded-xl p-6" id="telemetrySection">
+                    <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
+                        <svg class="w-6 h-6 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                        </svg>
+                        Telemetry
+                    </h3>
+
+                    <div class="space-y-4">
+                        <!-- Consent toggle -->
+                        <div class="flex items-center justify-between bg-viper-dark rounded-lg p-4">
+                            <div>
+                                <div class="text-sm font-medium text-white">Anonymous Usage Stats</div>
+                                <div class="text-xs text-gray-400 mt-1">Help us improve V.I.P.E.R. by sharing anonymous usage data during your demo period.</div>
+                            </div>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="telemetryConsentToggle" class="sr-only peer" onchange="toggleTelemetryConsent(this.checked)">
+                                <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-viper-cyan/40 peer-checked:border-viper-cyan/50 border border-gray-600"></div>
+                            </label>
+                        </div>
+
+                        <!-- What we send / don't send -->
+                        <div class="bg-viper-dark rounded-lg p-4 space-y-2">
+                            <p class="text-xs text-viper-cyan"><strong class="text-viper-cyan">What we send:</strong> app version, which modules you open, session length, day of demo (1–60), and your registered email so we can support you.</p>
+                            <p class="text-xs text-red-400"><strong class="text-red-400">What we never send:</strong> case content, suspect/victim names, file contents, screenshots, keystrokes, IP addresses, or anything from your case files.</p>
+                        </div>
+
+                        <!-- Install ID -->
+                        <div class="bg-viper-dark rounded-lg p-4">
+                            <div class="text-sm text-gray-400 mb-1">Install ID</div>
+                            <div class="flex items-center gap-2">
+                                <code class="text-sm text-viper-cyan font-mono flex-1 break-all" id="telemetryInstallId">—</code>
+                                <button onclick="copyInstallId()" class="px-3 py-1 text-xs rounded-lg bg-viper-card border border-gray-600 text-gray-300 hover:border-viper-cyan hover:text-viper-cyan transition-colors">Copy</button>
+                            </div>
+                            <div class="text-xs text-gray-500 mt-1">Share this ID with support if requested.</div>
+                        </div>
+
+                        <!-- Actions -->
+                        <div class="flex flex-wrap gap-3">
+                            <button onclick="clearTelemetryQueue()" class="px-4 py-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-sm transition-colors flex items-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                Clear Queue
+                            </button>
+                            <button onclick="testTelemetryConnection()" class="px-4 py-2 rounded-lg bg-viper-cyan/10 hover:bg-viper-cyan/20 border border-viper-cyan/30 text-viper-cyan text-sm transition-colors flex items-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                                Test Connection
+                            </button>
+                            <span id="telemetryTestResult" class="text-xs self-center text-gray-400"></span>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -2424,6 +2479,27 @@
             await loadStorageInfo();
             loadUserProfile();
             loadSecurityState();
+            loadTelemetryState();
+
+            // Telemetry init + lifecycle
+            try {
+                ViperTelemetryConsent.maybeShow({
+                    onDecision: function () {
+                        ViperTelemetry.init({
+                            apiBase: "https://intellect-unified-dashboard-production.up.railway.app",
+                            getApiKey: function () { return localStorage.getItem("viper_api_key"); },
+                            getStatus: function () { return window.ViperLicensing.getLicenseStatus(); },
+                            getAppVersion: async function () { return await window.electronAPI.getAppVersion(); },
+                            getPlatform: function () { return (window.electronAPI && window.electronAPI.platform) || "unknown"; },
+                        });
+                        ViperTelemetry.appOpen();
+                        window.__viper_session_start = Date.now();
+                        window.addEventListener("beforeunload", function () {
+                            ViperTelemetry.sessionEnd(Math.floor((Date.now() - window.__viper_session_start) / 1000));
+                        });
+                    },
+                });
+            } catch (_) {}
 
             // Electron/Chromium focus fix: native <select> dropdowns steal focus
             document.addEventListener('change', (e) => {
@@ -2454,6 +2530,73 @@
 
             const initials = name !== '—' ? name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : '--';
             document.getElementById('profileInitials').textContent = initials;
+        }
+
+        // ── Telemetry helpers ──────────────────────────────────────────────
+        function loadTelemetryState() {
+            try {
+                var toggle = document.getElementById('telemetryConsentToggle');
+                if (toggle) {
+                    toggle.checked = localStorage.getItem('viper_telemetry_consent') === 'granted';
+                }
+                var idEl = document.getElementById('telemetryInstallId');
+                if (idEl && window.ViperTelemetry) {
+                    idEl.textContent = window.ViperTelemetry.getInstallId() || '—';
+                }
+            } catch (_) {}
+        }
+
+        function toggleTelemetryConsent(checked) {
+            try {
+                localStorage.setItem('viper_telemetry_consent', checked ? 'granted' : 'denied');
+            } catch (_) {}
+        }
+
+        function clearTelemetryQueue() {
+            try {
+                if (window.ViperTelemetry) window.ViperTelemetry.clearQueue();
+                var result = document.getElementById('telemetryTestResult');
+                if (result) { result.textContent = 'Queue cleared'; result.style.color = '#00ff88'; }
+                setTimeout(function () { if (result) result.textContent = ''; }, 3000);
+            } catch (_) {}
+        }
+
+        function testTelemetryConnection() {
+            var result = document.getElementById('telemetryTestResult');
+            if (result) { result.textContent = 'Testing…'; result.style.color = '#9ca3af'; }
+            try {
+                if (!window.ViperTelemetry) {
+                    if (result) { result.textContent = 'SDK not loaded'; result.style.color = '#f87171'; }
+                    return;
+                }
+                window.ViperTelemetry.testConnection().then(function (r) {
+                    if (!result) return;
+                    if (r.ok) {
+                        result.textContent = 'Connected (HTTP ' + r.status + ')';
+                        result.style.color = '#00ff88';
+                    } else {
+                        result.textContent = 'Failed (HTTP ' + (r.status || 0) + ')';
+                        result.style.color = '#f87171';
+                    }
+                    setTimeout(function () { result.textContent = ''; }, 5000);
+                }).catch(function () {
+                    if (result) { result.textContent = 'Network error'; result.style.color = '#f87171'; }
+                });
+            } catch (_) {
+                if (result) { result.textContent = 'Error'; result.style.color = '#f87171'; }
+            }
+        }
+
+        function copyInstallId() {
+            try {
+                var id = document.getElementById('telemetryInstallId');
+                if (id && id.textContent && id.textContent !== '—') {
+                    navigator.clipboard.writeText(id.textContent);
+                    var result = document.getElementById('telemetryTestResult');
+                    if (result) { result.textContent = 'Copied!'; result.style.color = '#00ff88'; }
+                    setTimeout(function () { if (result) result.textContent = ''; }, 2000);
+                }
+            } catch (_) {}
         }
 
         function toggleProfileEdit() {

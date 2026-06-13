@@ -5578,27 +5578,28 @@
         refreshAgencyProfileCompleteness();
     }
     // ─── Colorado Courts list editor ────────────────────────────────────
-    // Renders inside the auto-generated "Colorado-Specific" group container.
-    // Persists immediately via WarrantAuthorAgencyProfile helpers; does NOT
-    // participate in the form's dirty-tracking / Save Profile button (the
-    // text DA fields above DO use the Save flow — separate concerns).
+    // Renders inside the auto-generated "Administrative Defaults" group
+    // container (alongside Default Court Name — the courts list is the
+    // per-jurisdiction extension of that single field). Persists immediately
+    // via WarrantAuthorAgencyProfile helpers; does NOT participate in the
+    // form's dirty-tracking / Save Profile button.
     function _renderCoCourtsEditor(profileHost) {
         const api = window.WarrantAuthorAgencyProfile;
         if (!api || !profileHost) return;
-        // Find the rendered "Colorado-Specific" group container. The group
-        // builder emits a <div> wrapper per group; we identify it by the
-        // group's UPPERCASE label string in the heading. Fall back to
+        // Find the rendered "Administrative Defaults" group container. The
+        // group builder emits a <div> wrapper per group; we identify it by
+        // the group's UPPERCASE label string in the heading. Fall back to
         // appending at the end if we can't find it.
-        let coBlock = null;
+        let defaultsBlock = null;
         profileHost.querySelectorAll('div > div.text-\\[11px\\]').forEach(label => {
             const txt = (label.textContent || '').trim();
-            // FIELD_GROUPS uses label "Colorado-Specific" (CSS uppercases it).
-            if (/^colorado-specific$/i.test(txt)) coBlock = label.parentElement;
+            // FIELD_GROUPS uses label "Administrative Defaults" (CSS uppercases it).
+            if (/^administrative defaults$/i.test(txt)) defaultsBlock = label.parentElement;
         });
         const editorHost = document.createElement('div');
         editorHost.id = 'coCourtsEditor';
         editorHost.className = 'mt-4 pt-3 border-t border-gray-700/40';
-        if (coBlock) coBlock.appendChild(editorHost);
+        if (defaultsBlock) defaultsBlock.appendChild(editorHost);
         else profileHost.appendChild(editorHost);
         _paintCoCourtsEditor();
     }

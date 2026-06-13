@@ -157,6 +157,7 @@ function validateDraft(input) {
     const providers = Array.isArray(input.providers) ? input.providers : null;
     const today    = input.today instanceof Date ? input.today : new Date();
     const composeResults = Array.isArray(input.composeResults) ? input.composeResults : [];
+    const caseCtx  = (input.caseCtx && typeof input.caseCtx === 'object') ? input.caseCtx : {};
 
     const errors = [];
     const warnings = [];
@@ -259,25 +260,31 @@ function validateDraft(input) {
         }
     }
 
-    // ── CO-specific checks (court selection + DA name) ──────────────────
+    // ── CO-specific checks (court + DA name) ─────────────────────────────
     if (_isCoJurisdiction) {
-        // 1) A court must be selected. The agency profile holds the list
-        //    of CO courts; the draft holds the chosen id (coCourtId).
-        const coCourtId = String(draft.coCourtId || '').trim();
-        const apCourts = Array.isArray(agency.coCourts) ? agency.coCourts : [];
-        if (!apCourts.length) {
-            errors.push(_err(
-                'draft.coCourt.profileEmpty',
-                'CO_COURT_PROFILE_EMPTY',
-                'Agency profile has no Colorado courts on file. Add at least one under Settings → Agency Profile → Colorado Courts before generating.',
-                { scope: 'agency', fieldPath: 'agency.coCourts' }
-            ));
-        } else if (!coCourtId || !apCourts.find(c => c.id === coCourtId)) {
-            errors.push(_err(
-                'draft.coCourt.unselected',
-                'CO_COURT_UNSELECTED',
-                'No Colorado court selected on this draft. Pick one from the dropdown in the draft header.',
-                { scope: 'draft', fieldPath: 'draft.coCourtId' }
+        // The Colorado Courts list under Agency Profile is OPTIONAL — it
+        // exists purely so multi-district agencies can pick from a dropdown
+        // (label + JD + county auto-fill the caption / oath / signature
+        // blocks). Single-court agencies just fill the "Court Name" field
+        // in the draft header. Therefore: NEVER block generation on an
+        // empty coCourts list, and NEVER require a coCourtId selection.
+        //
+        // What we DO require is that *some* court name is set somewhere —
+        // either via a picked coCourtId, the draft.courtName text field,
+        // or the agency.defaultCourtName fallback. Otherwise the caption
+        // line ("COUNTY/DISTRICT COURT, COLORADO") prints as a placeholder.
+        const coCourtId  = String(draft.coCourtId || '').trim();
+        const apCourts   = Array.isArray(agency.coCourts) ? agency.coCourts : [];
+        const pickedCourt = coCourtId ? apCourts.find(c => c.id === coCourtId) : null;
+        const draftCourtName = String(draft.courtName || '').trim();
+        const defaultCourtName = String(agency.defaultCourtName || '').trim();
+        const haveCourtName = !!(pickedCourt || draftCourtName || defaultCourtName);
+        if (!haveCourtName) {
+            warnings.push(_warn(
+                'draft.coCourt.unnamed',
+                'CO_COURT_UNNAMED',
+                'No court name on this draft. Fill "Court Name" in the draft header, or pick a court from the Colorado Courts list under Settings → Agency Profile.',
+                { scope: 'draft', fieldPath: 'draft.courtName' }
             ));
         }
         // 2) DA name warning — the "APPROVED AS TO FORM" block reads
@@ -293,20 +300,26 @@ function validateDraft(input) {
         }
         // 3) Offense description + date — used by CO templates'
         //    "*These records will be searched for evidence pertaining..." line.
-        if (!String(draft.offenseDescription || '').trim()) {
+        //    These now live at the case level (Case Probable Cause panel,
+        //    case-pc-store) so they auto-populate across every warrant in
+        //    the case. Caller passes them via input.caseCtx; we also
+        //    accept the legacy draft fields for back-compat.
+        const resolvedOffenseDesc = String(caseCtx.offenseDescription || draft.offenseDescription || '').trim();
+        const resolvedOffenseDate = String(caseCtx.offenseDate        || draft.offenseDate        || '').trim();
+        if (!resolvedOffenseDesc) {
             warnings.push(_warn(
                 'draft.offenseDescription.empty',
                 'CO_OFFENSE_DESCRIPTION_EMPTY',
-                'No offense description on draft — the CO warrant will print "[case offense]" as a placeholder.',
-                { scope: 'draft', fieldPath: 'draft.offenseDescription' }
+                'No offense description on the case — the CO warrant will print "[case offense]" as a placeholder. Set it in the Case Probable Cause panel.',
+                { scope: 'case', fieldPath: 'case.offenseDescription' }
             ));
         }
-        if (!String(draft.offenseDate || '').trim()) {
+        if (!resolvedOffenseDate) {
             warnings.push(_warn(
                 'draft.offenseDate.empty',
                 'CO_OFFENSE_DATE_EMPTY',
-                'No offense date on draft — the CO warrant will print "[offense date]" as a placeholder.',
-                { scope: 'draft', fieldPath: 'draft.offenseDate' }
+                'No offense date on the case — the CO warrant will print "[offense date]" as a placeholder. Set it in the Case Probable Cause panel.',
+                { scope: 'case', fieldPath: 'case.offenseDate' }
             ));
         }
     }

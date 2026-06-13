@@ -139,7 +139,6 @@ const FIELDS = Object.freeze([
 
   // Defaults block
   { key: 'defaultCourtName',   label: 'Default Court Name',  group: 'defaults', type: 'text',     placeholder: 'Superior Court of California, County of San Bernardino', helper: 'Pre-fills the affidavit caption; editable per draft.' },
-  { key: 'defaultJudgeName',   label: 'Default Judge Name',  group: 'defaults', type: 'text',     placeholder: '(optional)',                               helper: 'Optional. Most agencies leave blank and add per warrant.' },
 
   // Colorado-specific block (DA approval-as-to-form line)
   { key: 'daName',             label: 'District Attorney Name',        group: 'colorado', type: 'text', placeholder: 'Brian Mason',                          helper: 'Appears on the CO "APPROVED AS TO FORM" block.' },

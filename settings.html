@@ -1951,6 +1951,7 @@
                                         class="ml-auto px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-sm text-white focus:border-viper-cyan outline-none">
                                         <option value="CA">California (CA)</option>
                                         <option value="VA">Virginia (VA) — DC-338/DC-339 ESP · Beta</option>
+                                        <option value="CO">Colorado (CO) — Multi-Business ESP · Beta</option>
                                     </select>
                                 </div>
                             </div>
@@ -5252,7 +5253,7 @@
     // ─── State / jurisdiction selector ──────────────────────────────
     // Persisted as 'viperWarrantAuthorState'. Default 'CA'. Drives which
     // jurisdiction-specific boilerplate the block-builder applies.
-    const _WARRANT_AUTHOR_SUPPORTED_STATES = ['CA', 'VA'];
+    const _WARRANT_AUTHOR_SUPPORTED_STATES = ['CA', 'VA', 'CO'];
     function getWarrantAuthorState() {
         const v = (localStorage.getItem('viperWarrantAuthorState') || 'CA').toUpperCase();
         return _WARRANT_AUTHOR_SUPPORTED_STATES.includes(v) ? v : 'CA';
@@ -5449,6 +5450,16 @@
             const key = el.getAttribute('data-agency-key');
             out[key] = (el.value || '').toString();
         });
+        // Non-scalar fields are managed by their own list editors and persist
+        // immediately to localStorage — but Save Profile would otherwise wipe
+        // them because they have no [data-agency-key] inputs. Merge them in
+        // from the stored profile so normalize() preserves them.
+        try {
+            const stored = _loadAgencyProfile();
+            if (stored && Array.isArray(stored.coCourts)) {
+                out.coCourts = stored.coCourts;
+            }
+        } catch (_) { /* non-fatal */ }
         return out;
     }
     function _populateAgencyProfileForm(profile) {
@@ -5552,6 +5563,12 @@
             `;
         }).join('');
         host.innerHTML = groupsHtml;
+        // Inject the CO Courts list editor inside the "Colorado-Specific"
+        // group. The DA name/title/deputy-line fields auto-render above via
+        // the FIELD_GROUPS loop; the courts list is an array of objects so
+        // it needs its own list editor (mirrors the Provider Directory
+        // pattern — immediate persist, no Save-button staging).
+        _renderCoCourtsEditor(host);
         // Populate values from storage and wire dirty tracking. Order matters:
         // populate FIRST (would otherwise trip the input listener), THEN wire.
         const stored = _loadAgencyProfile();
@@ -5560,6 +5577,221 @@
         _agencyProfileSetDirty(false);
         refreshAgencyProfileCompleteness();
     }
+    // ─── Colorado Courts list editor ────────────────────────────────────
+    // Renders inside the auto-generated "Colorado-Specific" group container.
+    // Persists immediately via WarrantAuthorAgencyProfile helpers; does NOT
+    // participate in the form's dirty-tracking / Save Profile button (the
+    // text DA fields above DO use the Save flow — separate concerns).
+    function _renderCoCourtsEditor(profileHost) {
+        const api = window.WarrantAuthorAgencyProfile;
+        if (!api || !profileHost) return;
+        // Find the rendered "Colorado-Specific" group container. The group
+        // builder emits a <div> wrapper per group; we identify it by the
+        // group's UPPERCASE label string in the heading. Fall back to
+        // appending at the end if we can't find it.
+        let coBlock = null;
+        profileHost.querySelectorAll('div > div.text-\\[11px\\]').forEach(label => {
+            const txt = (label.textContent || '').trim();
+            // FIELD_GROUPS uses label "Colorado-Specific" (CSS uppercases it).
+            if (/^colorado-specific$/i.test(txt)) coBlock = label.parentElement;
+        });
+        const editorHost = document.createElement('div');
+        editorHost.id = 'coCourtsEditor';
+        editorHost.className = 'mt-4 pt-3 border-t border-gray-700/40';
+        if (coBlock) coBlock.appendChild(editorHost);
+        else profileHost.appendChild(editorHost);
+        _paintCoCourtsEditor();
+    }
+    function _paintCoCourtsEditor() {
+        const host = document.getElementById('coCourtsEditor');
+        const api = window.WarrantAuthorAgencyProfile;
+        if (!host || !api) return;
+        const profile = _loadAgencyProfile() || api.freshProfile();
+        const courts = Array.isArray(profile.coCourts) ? profile.coCourts : [];
+        const rowsHtml = courts.map(c => {
+            const star = c.isDefault
+                ? '<span class="text-amber-300" title="Default">★</span>'
+                : `<button type="button" onclick="setCoCourtDefaultRow('${_esc(c.id)}')"
+                        class="text-gray-500 hover:text-amber-300 transition" title="Set as default">☆</button>`;
+            return `
+                <tr class="border-b border-gray-800 last:border-0">
+                    <td class="py-2 pr-2 align-top text-center w-6">${star}</td>
+                    <td class="py-2 pr-2 align-top">
+                        <div class="text-sm text-white">${_esc(c.label || '(no label)')}</div>
+                        <div class="text-[11px] text-gray-500 mt-0.5">${_esc(c.county || '')}${c.county && c.judicialDistrict ? ' — ' : ''}${_esc(c.judicialDistrict || '')}${c.judicialDistrict ? ' JD' : ''}</div>
+                    </td>
+                    <td class="py-2 pr-2 align-top text-xs text-gray-400">${_esc(c.courtName || '')}</td>
+                    <td class="py-2 align-top text-right whitespace-nowrap">
+                        <button type="button" onclick="editCoCourtRow('${_esc(c.id)}')"
+                            class="px-2 py-1 text-[11px] text-gray-300 hover:text-white hover:bg-gray-700/40 border border-gray-700 rounded transition">Edit</button>
+                        <button type="button" onclick="deleteCoCourtRow('${_esc(c.id)}')"
+                            class="ml-1 px-2 py-1 text-[11px] text-rose-400 hover:bg-rose-500/10 border border-rose-500/30 rounded transition">Delete</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+        const tableHtml = courts.length
+            ? `<div class="overflow-x-auto rounded border border-gray-700/50 bg-viper-dark/40">
+                 <table class="w-full text-left">
+                   <thead>
+                     <tr class="border-b border-gray-700/60 text-[10px] uppercase tracking-wider text-gray-500">
+                       <th class="py-2 pr-2 pl-2 w-6"></th>
+                       <th class="py-2 pr-2">Court</th>
+                       <th class="py-2 pr-2">Court Name</th>
+                       <th class="py-2 pr-2 text-right">Actions</th>
+                     </tr>
+                   </thead>
+                   <tbody>${rowsHtml}</tbody>
+                 </table>
+               </div>`
+            : `<p class="text-xs text-gray-500 italic px-1 py-3">
+                 No courts yet — add the courts whose jurisdiction you file in.
+                 Agencies that straddle two or more Judicial Districts should add
+                 each one separately and pick the right court per warrant.
+               </p>`;
+        host.innerHTML = `
+            <div class="flex items-center justify-between mb-2">
+                <h5 class="text-xs uppercase tracking-wider text-gray-400 font-semibold">Colorado Courts</h5>
+                <button type="button" id="coCourtsAddToggleBtn" onclick="toggleAddCoCourtForm()"
+                    class="px-2 py-1 text-[11px] font-semibold rounded bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/40 hover:bg-viper-cyan/30 transition">
+                    + Add Court
+                </button>
+            </div>
+            ${tableHtml}
+            <div id="coCourtsAddForm" class="hidden mt-3 p-3 rounded border border-viper-cyan/30 bg-viper-cyan/5">
+                <div class="text-[11px] uppercase tracking-wider text-viper-cyan font-semibold mb-2" id="coCourtsAddFormTitle">Add Court</div>
+                <input type="hidden" id="coCourtsEditId" value="" />
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <label class="block">
+                        <span class="block text-[11px] text-gray-300 mb-1">Display Label <span class="text-rose-400">*</span></span>
+                        <input type="text" id="coCourtLabel" placeholder="Adams Co. — 17th JD"
+                            class="w-full bg-viper-dark border border-gray-700 rounded px-2 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-viper-cyan" />
+                    </label>
+                    <label class="block">
+                        <span class="block text-[11px] text-gray-300 mb-1">Court Name</span>
+                        <input type="text" id="coCourtCourtName" value="COUNTY/DISTRICT COURT" placeholder="COUNTY/DISTRICT COURT"
+                            class="w-full bg-viper-dark border border-gray-700 rounded px-2 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-viper-cyan" />
+                    </label>
+                    <label class="block">
+                        <span class="block text-[11px] text-gray-300 mb-1">Judicial District <span class="text-rose-400">*</span></span>
+                        <input type="text" id="coCourtJudicialDistrict" placeholder="17th"
+                            class="w-full bg-viper-dark border border-gray-700 rounded px-2 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-viper-cyan" />
+                    </label>
+                    <label class="block">
+                        <span class="block text-[11px] text-gray-300 mb-1">County <span class="text-rose-400">*</span></span>
+                        <input type="text" id="coCourtCounty" placeholder="Adams"
+                            class="w-full bg-viper-dark border border-gray-700 rounded px-2 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-viper-cyan" />
+                    </label>
+                </div>
+                <label class="flex items-center gap-2 mt-2 text-xs text-gray-300 cursor-pointer">
+                    <input type="checkbox" id="coCourtIsDefault" class="rounded border-gray-700 bg-viper-dark text-viper-cyan focus:ring-viper-cyan focus:ring-offset-0" />
+                    <span>Set as default court for new CO warrants</span>
+                </label>
+                <div class="flex justify-end gap-2 mt-3">
+                    <button type="button" onclick="cancelAddCoCourt()"
+                        class="px-3 py-1.5 text-xs text-gray-400 hover:text-white hover:bg-gray-700/40 border border-gray-700 rounded transition">Cancel</button>
+                    <button type="button" id="coCourtsSaveBtn" onclick="saveAddCoCourt()"
+                        class="px-3 py-1.5 text-xs font-semibold rounded bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/40 hover:bg-viper-cyan/30 transition">Add Court</button>
+                </div>
+            </div>
+        `;
+    }
+    function toggleAddCoCourtForm() {
+        const form = document.getElementById('coCourtsAddForm');
+        if (!form) return;
+        const isHidden = form.classList.contains('hidden');
+        if (isHidden) {
+            // Reset to "add" mode
+            document.getElementById('coCourtsEditId').value = '';
+            document.getElementById('coCourtsAddFormTitle').textContent = 'Add Court';
+            document.getElementById('coCourtsSaveBtn').textContent = 'Add Court';
+            document.getElementById('coCourtLabel').value = '';
+            document.getElementById('coCourtCourtName').value = 'COUNTY/DISTRICT COURT';
+            document.getElementById('coCourtJudicialDistrict').value = '';
+            document.getElementById('coCourtCounty').value = '';
+            document.getElementById('coCourtIsDefault').checked = false;
+            form.classList.remove('hidden');
+            setTimeout(() => { const f = document.getElementById('coCourtLabel'); if (f) f.focus(); }, 0);
+        } else {
+            form.classList.add('hidden');
+        }
+    }
+    function cancelAddCoCourt() {
+        const form = document.getElementById('coCourtsAddForm');
+        if (form) form.classList.add('hidden');
+    }
+    function editCoCourtRow(id) {
+        const api = window.WarrantAuthorAgencyProfile;
+        if (!api) return;
+        const profile = _loadAgencyProfile() || api.freshProfile();
+        const court = (profile.coCourts || []).find(c => c.id === id);
+        if (!court) return;
+        // Open the form prefilled.
+        const form = document.getElementById('coCourtsAddForm');
+        if (!form) return;
+        document.getElementById('coCourtsEditId').value = court.id;
+        document.getElementById('coCourtsAddFormTitle').textContent = 'Edit Court';
+        document.getElementById('coCourtsSaveBtn').textContent = 'Save Changes';
+        document.getElementById('coCourtLabel').value = court.label || '';
+        document.getElementById('coCourtCourtName').value = court.courtName || 'COUNTY/DISTRICT COURT';
+        document.getElementById('coCourtJudicialDistrict').value = court.judicialDistrict || '';
+        document.getElementById('coCourtCounty').value = court.county || '';
+        document.getElementById('coCourtIsDefault').checked = !!court.isDefault;
+        document.getElementById('coCourtIsDefault').disabled = !!court.isDefault; // can't un-default in-place
+        form.classList.remove('hidden');
+        setTimeout(() => { const f = document.getElementById('coCourtLabel'); if (f) f.focus(); }, 0);
+    }
+    function saveAddCoCourt() {
+        const api = window.WarrantAuthorAgencyProfile;
+        if (!api) return;
+        const editId = (document.getElementById('coCourtsEditId').value || '').trim();
+        const label = (document.getElementById('coCourtLabel').value || '').trim();
+        const courtName = (document.getElementById('coCourtCourtName').value || '').trim() || 'COUNTY/DISTRICT COURT';
+        const judicialDistrict = (document.getElementById('coCourtJudicialDistrict').value || '').trim();
+        const county = (document.getElementById('coCourtCounty').value || '').trim();
+        const isDefault = !!document.getElementById('coCourtIsDefault').checked;
+        if (!label || !judicialDistrict || !county) {
+            _agencyProfileToast('Label, Judicial District, and County are required.', 'error');
+            return;
+        }
+        let profile = _loadAgencyProfile() || api.freshProfile();
+        if (editId) {
+            profile = api.updateCoCourt(profile, editId, { label, courtName, judicialDistrict, county });
+            if (isDefault) profile = api.setCoCourtDefault(profile, editId);
+        } else {
+            profile = api.addCoCourt(profile, { label, courtName, judicialDistrict, county, isDefault });
+        }
+        const ok = _writeAgencyProfile(profile);
+        if (!ok) { _agencyProfileToast('Save failed — see DevTools console.', 'error'); return; }
+        document.getElementById('coCourtIsDefault').disabled = false;
+        _paintCoCourtsEditor();
+        _agencyProfileToast(editId ? 'Court updated.' : 'Court added.', 'success');
+        refreshAgencyProfileCompleteness();
+    }
+    function deleteCoCourtRow(id) {
+        const api = window.WarrantAuthorAgencyProfile;
+        if (!api) return;
+        const profile = _loadAgencyProfile() || api.freshProfile();
+        const court = (profile.coCourts || []).find(c => c.id === id);
+        if (!court) return;
+        if (!confirm(`Delete court "${court.label}"?\n\nThis cannot be undone.`)) return;
+        const updated = api.deleteCoCourt(profile, id);
+        const ok = _writeAgencyProfile(updated);
+        if (!ok) { _agencyProfileToast('Delete failed — see DevTools console.', 'error'); return; }
+        _paintCoCourtsEditor();
+        _agencyProfileToast('Court deleted.', 'success');
+    }
+    function setCoCourtDefaultRow(id) {
+        const api = window.WarrantAuthorAgencyProfile;
+        if (!api) return;
+        const profile = _loadAgencyProfile() || api.freshProfile();
+        const updated = api.setCoCourtDefault(profile, id);
+        const ok = _writeAgencyProfile(updated);
+        if (!ok) { _agencyProfileToast('Update failed — see DevTools console.', 'error'); return; }
+        _paintCoCourtsEditor();
+        _agencyProfileToast('Default court updated.', 'success');
+    }
+
     function _renderAgencyProfileField(field, isRequired) {
         const reqMark = isRequired ? ' <span class="text-rose-400">*</span>' : '';
         const helper = field.helper ? `<p class="text-[11px] text-gray-500 mt-1">${_esc(field.helper)}</p>` : '';

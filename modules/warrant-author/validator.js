@@ -224,7 +224,8 @@ function validateDraft(input) {
     // (handled via the DC-338 form's item-1-through-7 checkboxes in the
     // VA block builder, not via draft.pc1524Grounds). Generic-US drafts
     // also skip this check — the underlying federal SCA does not have a
-    // numbered-grounds taxonomy.
+    // numbered-grounds taxonomy.  Colorado warrants cite C.R.S. §16-3-301
+    // and §19-2.5-205 (not PC §1524) so they ALSO skip this check.
     //
     // Routing: explicit draft.jurisdiction wins. Otherwise we sniff the
     // template prefix. A draft with BOTH fields empty is treated as
@@ -233,13 +234,17 @@ function validateDraft(input) {
     const _jx = String(draft.jurisdiction || '').toUpperCase();
     const _tpl = String(draft.template || '');
     let _isCaJurisdiction;
+    let _isCoJurisdiction;
     if (_jx) {
         _isCaJurisdiction = (_jx === 'CA');
+        _isCoJurisdiction = (_jx === 'CO');
     } else if (_tpl) {
         _isCaJurisdiction = _tpl.startsWith('ca-');
+        _isCoJurisdiction = _tpl.startsWith('co-');
     } else {
         // Fully empty draft → legacy default = CA.
         _isCaJurisdiction = true;
+        _isCoJurisdiction = false;
     }
     if (_isCaJurisdiction) {
         const grounds = (draft.pc1524Grounds && typeof draft.pc1524Grounds === 'object') ? draft.pc1524Grounds : {};
@@ -250,6 +255,58 @@ function validateDraft(input) {
                 'PC_1524_GROUNDS_NONE',
                 'No §1524 grounds checkbox is ticked.',
                 { scope: 'draft', fieldPath: 'draft.pc1524Grounds' }
+            ));
+        }
+    }
+
+    // ── CO-specific checks (court selection + DA name) ──────────────────
+    if (_isCoJurisdiction) {
+        // 1) A court must be selected. The agency profile holds the list
+        //    of CO courts; the draft holds the chosen id (coCourtId).
+        const coCourtId = String(draft.coCourtId || '').trim();
+        const apCourts = Array.isArray(agency.coCourts) ? agency.coCourts : [];
+        if (!apCourts.length) {
+            errors.push(_err(
+                'draft.coCourt.profileEmpty',
+                'CO_COURT_PROFILE_EMPTY',
+                'Agency profile has no Colorado courts on file. Add at least one under Settings → Agency Profile → Colorado Courts before generating.',
+                { scope: 'agency', fieldPath: 'agency.coCourts' }
+            ));
+        } else if (!coCourtId || !apCourts.find(c => c.id === coCourtId)) {
+            errors.push(_err(
+                'draft.coCourt.unselected',
+                'CO_COURT_UNSELECTED',
+                'No Colorado court selected on this draft. Pick one from the dropdown in the draft header.',
+                { scope: 'draft', fieldPath: 'draft.coCourtId' }
+            ));
+        }
+        // 2) DA name warning — the "APPROVED AS TO FORM" block reads
+        //    awkwardly with "[District Attorney Name]" as a placeholder.
+        const daName = String(agency.daName || '').trim();
+        if (!daName) {
+            warnings.push(_warn(
+                'agency.daName.empty',
+                'CO_DA_NAME_EMPTY',
+                'No District Attorney name on file — the CO "APPROVED AS TO FORM" block will print a [placeholder]. Set it under Settings → Agency Profile → Colorado-Specific.',
+                { scope: 'agency', fieldPath: 'agency.daName' }
+            ));
+        }
+        // 3) Offense description + date — used by CO templates'
+        //    "*These records will be searched for evidence pertaining..." line.
+        if (!String(draft.offenseDescription || '').trim()) {
+            warnings.push(_warn(
+                'draft.offenseDescription.empty',
+                'CO_OFFENSE_DESCRIPTION_EMPTY',
+                'No offense description on draft — the CO warrant will print "[case offense]" as a placeholder.',
+                { scope: 'draft', fieldPath: 'draft.offenseDescription' }
+            ));
+        }
+        if (!String(draft.offenseDate || '').trim()) {
+            warnings.push(_warn(
+                'draft.offenseDate.empty',
+                'CO_OFFENSE_DATE_EMPTY',
+                'No offense date on draft — the CO warrant will print "[offense date]" as a placeholder.',
+                { scope: 'draft', fieldPath: 'draft.offenseDate' }
             ));
         }
     }

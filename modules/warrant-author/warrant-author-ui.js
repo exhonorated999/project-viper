@@ -38,6 +38,51 @@ function _loadAgencyProfile() {
   } catch (_) { return {}; }
 }
 
+// ─── CO-specific compose-ctx helpers ────────────────────────────────────
+// Resolve the per-draft Colorado court + case info needed by the CO
+// template's co-caption / co-affiant-signature / co-judge-* / co-da-*
+// block resolvers. Harmless on other templates — non-CO resolvers
+// simply ignore ctx.court and ctx.case.
+function _resolveCoCourtForDraft(draft) {
+  try {
+    const ap = _agency();
+    if (!ap) return null;
+    // Prefer the per-draft snapshot's courts list (frozen at draft
+    // creation). Fall back to the live profile so a court added AFTER
+    // the draft was created is still selectable.
+    const snapshot = (draft && draft.affiantSnapshot) || {};
+    const snapList = Array.isArray(snapshot.coCourts) ? snapshot.coCourts : [];
+    if (draft && draft.coCourtId) {
+      const snapMatch = snapList.find(c => c.id === draft.coCourtId);
+      if (snapMatch) {
+        return {
+          name: snapMatch.courtName || 'COUNTY/DISTRICT COURT',
+          judicialDistrict: snapMatch.judicialDistrict || '',
+          county: snapMatch.county || '',
+        };
+      }
+    }
+    const profile = ap.normalize(_loadAgencyProfile());
+    const court = ap.getCoCourtById(profile, draft && draft.coCourtId);
+    if (!court) return null;
+    return {
+      name: court.courtName || 'COUNTY/DISTRICT COURT',
+      judicialDistrict: court.judicialDistrict || '',
+      county: court.county || '',
+    };
+  } catch (_) { return null; }
+}
+function _resolveCaseCtxForDraft(draft) {
+  if (!draft) return {};
+  // Pull what we have from the draft / case ref. Falls back to placeholders
+  // the template engine will mark as dangling (visible in validator).
+  return {
+    number: draft.caseRef || draft.caseNumber || '',
+    offenseDescription: draft.offenseDescription || '',
+    offenseDate: draft.offenseDate || '',
+  };
+}
+
 // ─── ephemeral renderer state (not persisted) ───────────────────────────
 
 const _state = {
@@ -1319,8 +1364,44 @@ function _renderDraftHeader(caseId, draft) {
   const tplOpts = [
     { v: 'ca-multi-business-esp', label: 'CA — CalECPA §1546.1' },
     { v: 'va-multi-business-esp', label: 'VA — DC-338/DC-339 (§19.2-53)' },
+    { v: 'co-multi-business-esp', label: 'CO — Affidavit + Search Warrant (§16-3-301)' },
     { v: 'generic-us-multi-business-esp', label: 'US Generic — SCA §2703' },
   ];
+  // Colorado: the agency profile carries a user-maintained list of courts
+  // (many CO agencies straddle two or more Judicial Districts). When the
+  // CO template is selected, render a court picker that drives the
+  // caption + judge-oath + judge-signature blocks. Courts are managed
+  // in Settings → Warrant Author → Colorado Courts.
+  let coCourts = [];
+  let coDefaultId = '';
+  if (typeof window !== 'undefined' && window.WarrantAuthorAgencyProfile) {
+    try {
+      const raw = localStorage.getItem('viperAgencyProfile');
+      const profile = window.WarrantAuthorAgencyProfile.normalize(raw ? JSON.parse(raw) : {});
+      coCourts = Array.isArray(profile.coCourts) ? profile.coCourts : [];
+      const def = coCourts.find(c => c.isDefault) || coCourts[0];
+      coDefaultId = def ? def.id : '';
+    } catch (_) { /* non-fatal */ }
+  }
+  const isCoTemplate = String(draft.template || '') === 'co-multi-business-esp';
+  const courtPickerHtml = isCoTemplate ? `
+      <label class="text-xs col-span-2">
+        <span class="text-slate-400 uppercase tracking-wider">Colorado Court</span>
+        ${coCourts.length === 0
+          ? `<div class="mt-1 px-3 py-2 bg-amber-500/10 border border-amber-500/30 rounded text-amber-300 text-xs">
+              No Colorado courts on file. Add at least one under
+              <a class="underline cursor-pointer" onclick="(window.openSettings ? openSettings() : (location.href='settings.html'))">Settings → Agency Profile → Colorado Courts</a>.
+            </div>`
+          : `<select onchange="WarrantAuthorUI.bus.onDraftFieldChange('${attr(caseId)}','${attr(draft.id)}','coCourtId',this.value)"
+                     class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
+              ${coCourts.map(c => {
+                const sel = (draft.coCourtId || coDefaultId) === c.id ? 'selected' : '';
+                return `<option value="${attr(c.id)}" ${sel}>${esc(c.label)} (${esc(c.judicialDistrict || '')} JD, ${esc(c.county || '')})</option>`;
+              }).join('')}
+             </select>`
+        }
+      </label>
+    ` : '';
   // Probable cause now lives on the Warrant Author screen header (above the
   // subtab pills). Show a compact reference here pointing back up to it.
   const pcStore = (typeof window !== 'undefined') ? window.WarrantAuthorCasePcStore : null;
@@ -1341,6 +1422,7 @@ function _renderDraftHeader(caseId, draft) {
           ${tplOpts.map(o => `<option value="${attr(o.v)}" ${o.v === draft.template ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
         </select>
       </label>
+      ${courtPickerHtml}
 
       <div class="col-span-2 text-[11px] text-slate-500 flex items-center justify-between border-t border-slate-700 pt-2 mt-1">
         <span>
@@ -2266,6 +2348,11 @@ function _renderLivePreview(caseId, draft, activeId) {
     affiant: draft.affiantSnapshot || {},
     agency:  draft.affiantSnapshot || {},
     draft,
+    // Colorado template needs court (selected per-draft from agency.coCourts)
+    // + case info (case number, offense). The block-builder reads these
+    // from the resolved blocks emitted by the CO resolvers.
+    court: _resolveCoCourtForDraft(draft),
+    case: _resolveCaseCtxForDraft(draft),
   };
 
   let result;
@@ -2288,7 +2375,34 @@ function _renderLivePreview(caseId, draft, activeId) {
     const heading = b.heading ? `<div class="wa-pv-heading">${esc(b.heading)}</div>` : '';
     let body = '';
     if (b.kind === 'items-to-seize' && Array.isArray(b.items)) {
-      body = `<ol class="wa-pv-list">${b.items.map(it => `<li><span class="wa-pv-item-label">${esc(it.label || it.key)}</span>${it.description ? ` — <span class="wa-pv-item-desc">${esc(it.description)}</span>` : ''}</li>`).join('')}</ol>`;
+      if (b.style === 'semicolons') {
+        // CO semicolon-terminated list — render as semicolon paragraphs
+        // so the preview matches the exported DOCX faithfully.
+        body = `<div class="wa-pv-text">${b.items.map((it, idx) => {
+          const txt = (it.description || it.label || it.key || '').trim().replace(/[.;]?\s*$/, '');
+          const sep = (idx === b.items.length - 1) ? '.' : ';';
+          return esc(txt + sep);
+        }).join('<br>')}</div>`;
+      } else {
+        body = `<ol class="wa-pv-list">${b.items.map(it => `<li><span class="wa-pv-item-label">${esc(it.label || it.key)}</span>${it.description ? ` — <span class="wa-pv-item-desc">${esc(it.description)}</span>` : ''}</li>`).join('')}</ol>`;
+      }
+    } else if (b.kind === 'co-caption') {
+      const captionLine = `${(b.courtName || 'COUNTY/DISTRICT COURT')}, ${b.judicialDistrict ? b.judicialDistrict + ' JUDICIAL DISTRICT, ' : ''}COLORADO`.toUpperCase();
+      body = `<div class="wa-pv-text text-center font-semibold">${esc(captionLine)}</div>
+              <div class="wa-pv-text text-center text-slate-400">Case No. ${esc(b.caseNumber || '[case number]')}</div>
+              ${b.documentTitle ? `<div class="wa-pv-text text-center font-bold mt-1">${esc(b.documentTitle)}</div>` : ''}`;
+    } else if (b.kind === 'co-provider-block') {
+      body = `<div class="wa-pv-text">${_safeMultilineHtml(b.text || '')}</div>`;
+    } else if (b.kind === 'co-affiant-signature') {
+      body = `<div class="wa-pv-text">Subscribed and Sworn to in the ${esc(b.judicialDistrict || '_______')} Judicial District, Colorado<br><br>______________________________<br><span class="text-slate-400">Signature of Affiant</span></div>`;
+    } else if (b.kind === 'co-judge-oath-affidavit') {
+      body = `<div class="wa-pv-text">Subscribed under oath before me on this ___ day of __________, 20__ in the ${esc(b.judicialDistrict || '_______')} Judicial District, CO<br><br>______________________________<br><span class="text-slate-400">Signature of Judge</span><br><br>______________________________<br><span class="text-slate-400">Printed Name of Judge</span></div>`;
+    } else if (b.kind === 'co-judge-signature') {
+      body = `<div class="wa-pv-text">Date<br>In the ${esc(b.judicialDistrict || '_______')} Judicial District, Colorado<br><br>______________________________<br><span class="text-slate-400">Signature of Judge</span><br><br>______________________________<br><span class="text-slate-400">Printed Name of Judge</span></div>`;
+    } else if (b.kind === 'co-da-approval') {
+      body = `<div class="wa-pv-text">APPROVED AS TO FORM:<br>${esc(b.daName || '[District Attorney Name]')}<br>${esc(b.daTitle || 'District Attorney')}<br>By /s<br>${esc(b.daDeputyLine || '[Chief][Senior] Deputy District Attorney')}</div>`;
+    } else if (b.kind === 'page-break') {
+      body = `<div class="wa-pv-text text-center text-amber-400 italic border-t border-b border-dashed border-amber-500/40 py-1 my-1">— Page Break —</div>`;
     } else if (b.text) {
       body = `<div class="wa-pv-text">${_safeMultilineHtml(b.text)}</div>`;
     } else {
@@ -2308,6 +2422,7 @@ function _renderLivePreview(caseId, draft, activeId) {
       <div class="wa-pv-title">Live Preview — ${esc(
         draft.template === 'ca-multi-business-esp' ? 'CA template'
         : draft.template === 'va-multi-business-esp' ? 'VA template'
+        : draft.template === 'co-multi-business-esp' ? 'CO template'
         : 'US template'
       )} · Page ${esc(ad.pageLabel)}</div>
       ${issuesBar}
@@ -3128,6 +3243,7 @@ const bus = {
       const v = String(value || '');
       if (v.startsWith('ca-'))      d.jurisdiction = 'CA';
       else if (v.startsWith('va-')) d.jurisdiction = 'VA';
+      else if (v.startsWith('co-')) d.jurisdiction = 'CO';
       else                          d.jurisdiction = 'US';
     }
     ds.saveDraft(caseId, d, { silent: true });
@@ -3848,6 +3964,10 @@ const bus = {
         affiant: draft.affiantSnapshot || {},
         agency:  draft.affiantSnapshot || {},
         draft,
+        // CO template needs court + case ctx; harmless on other templates
+        // because non-CO resolvers ignore them.
+        court: _resolveCoCourtForDraft(draft),
+        case: _resolveCaseCtxForDraft(draft),
       };
       let composed;
       try {

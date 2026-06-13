@@ -278,6 +278,9 @@ const FIELDS = Object.freeze([
   { key: 'email',              label: 'Service Email',        group: 'contact',  type: 'email',    placeholder: 'lawenforcement@example.com',            required: false, helper: 'Primary law-enforcement contact email.' },
   { key: 'phone',              label: 'Service Phone',        group: 'contact',  type: 'text',     placeholder: '(909) 555-1212',                        required: false, helper: 'LE response team phone.' },
   { key: 'portalUrl',          label: 'Portal URL',           group: 'contact',  type: 'url',      placeholder: 'https://example.com/le-portal',         required: false, helper: 'Submission portal (Meta, LERS, etc.).' },
+  // ── Colorado-specific (used only by co-multi-business-esp template) ────
+  { key: 'coRegisteredAgent',        label: 'CO Registered Agent',         group: 'colorado', type: 'text',     placeholder: 'CT Corporation System',                 required: false, helper: 'Out-of-state ESP\u2019s Colorado registered agent (printed on the CO warrant under "Registered Agent:"). Optional on non-CO warrants.' },
+  { key: 'coRegisteredAgentAddress', label: 'CO Registered Agent Address', group: 'colorado', type: 'textarea', placeholder: '7700 E. Arapahoe Rd. Suite 220\nCentennial, CO 80112', required: false, helper: 'Full CO address (street + city/state/ZIP). Multi-line accepted.' },
   { key: 'esp',                label: 'CalECPA §1546(d) ESP', group: 'legal',    type: 'checkbox',                                                       required: false, helper: 'Drives §1546.1(d)(2) sealing + §1546.1(d)(3) authenticity clauses.' },
   { key: 'nre',                label: 'Non-Records (NRE)',    group: 'legal',    type: 'checkbox',                                                       required: false, helper: 'Provider can produce items beyond stored records (live data, etc.).' },
   { key: 'itemsPattern',       label: 'Items Pattern',        group: 'legal',    type: 'select',   options: ITEMS_PATTERNS,                              required: false, helper: 'Pre-selects the items-to-seize bundle when authoring.' },
@@ -287,6 +290,7 @@ const FIELDS = Object.freeze([
 const FIELD_GROUPS = Object.freeze([
   { id: 'identity', label: 'Identity',         helper: 'Display + legal entity name printed on the warrant.' },
   { id: 'contact',  label: 'Service Contact',  helper: 'Where the warrant is served and returns are received.' },
+  { id: 'colorado', label: 'Colorado',         helper: 'Used only by the CO Multi-Business ESP template. Out-of-state ESPs are typically required to have a Colorado registered agent.' },
   { id: 'legal',    label: 'Legal Classification', helper: 'Drives which CalECPA clauses are included on this addendum.' },
   { id: 'notes',    label: 'Notes',            helper: 'Internal-only — never printed on the warrant.' },
 ]);
@@ -312,6 +316,7 @@ function normalizeProvider(raw) {
   const out = {
     key: '', name: '', legalEntity: '', address: '', custodianAttention: '',
     email: '', phone: '', portalUrl: '', providerType: 'Other',
+    coRegisteredAgent: '', coRegisteredAgentAddress: '',
     esp: false, nre: false, itemsPattern: '', notes: '',
   };
   for (const f of FIELDS) {
@@ -319,6 +324,9 @@ function normalizeProvider(raw) {
       const v = raw[f.key];
       if (f.type === 'checkbox') {
         out[f.key] = v === true || v === 'true' || v === 1 || v === '1';
+      } else if (f.type === 'textarea') {
+        // Preserve embedded newlines; only trim outer whitespace.
+        out[f.key] = (v == null ? '' : String(v)).replace(/\r\n/g, '\n').replace(/^\s+|\s+$/g, '');
       } else {
         out[f.key] = (v == null ? '' : String(v)).trim();
       }

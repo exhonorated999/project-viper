@@ -59,6 +59,17 @@
     discordWarrant:    "unknown",
     cellebrite:        "unknown",
     settings:          "settings",
+
+    // ── Page-level surfaces (v3.8.7) ──
+    // These are emitted from page-load hooks in index.html / settings.html
+    // so that the dashboard heatmap reflects real user navigation, not
+    // just app_open / session_end.
+    dashboard:         "dashboard",
+    cases_list:        "cases_list",
+    offense_reference: "offense_reference",
+    cargonet:          "cargonet",
+    audit_log:         "audit_log",
+    resource_hub:      "resource_hub",
   };
 
   /* ── Allowed event names ───────────────────────────────────────────── */

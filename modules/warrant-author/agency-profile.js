@@ -70,6 +70,26 @@ const DEFAULTS = Object.freeze({
   defaultCourtName: '',       // e.g. "Superior Court of California, County of San Bernardino"
   defaultJudgeName: '',       // optional — most agencies leave blank
 
+  // ── Colorado-specific: multi-court support ──────────────────────────────
+  // Many CO agencies straddle two or more Judicial Districts (e.g. Adams
+  // County straddles the 17th JD and Denver-area courts). The user maintains
+  // their own list of courts here and picks one per warrant in the
+  // warrant-author module's CO court dropdown.
+  //
+  // Each entry shape:
+  //   { id: 'crt_xxx', label: 'Adams Co. — 17th JD',
+  //     courtName: 'COUNTY/DISTRICT COURT', judicialDistrict: '17th',
+  //     county: 'Adams', isDefault: false }
+  // List is ALWAYS user-added (empty by default — no presets shipped).
+  coCourts: [],
+
+  // ── Colorado-specific: District Attorney "Approved as to Form" block ────
+  // Appears at the foot of the CO Search Warrant / Order page in every
+  // sample exemplar. Both fields editable per draft if needed.
+  daName: '',                  // e.g. "Brian Mason"
+  daTitle: 'District Attorney',// rarely changes
+  daDeputyLine: '[Chief][Senior] Deputy District Attorney', // bracketed pick-list
+
   // NOTE: Hobbs sealing + night-search are per-warrant selections, NOT
   // agency defaults. They live on the warrant authoring form (P3+) as
   // checkboxes the affiant ticks per case. Do not re-add them here.
@@ -119,7 +139,11 @@ const FIELDS = Object.freeze([
 
   // Defaults block
   { key: 'defaultCourtName',   label: 'Default Court Name',  group: 'defaults', type: 'text',     placeholder: 'Superior Court of California, County of San Bernardino', helper: 'Pre-fills the affidavit caption; editable per draft.' },
-  { key: 'defaultJudgeName',   label: 'Default Judge Name',  group: 'defaults', type: 'text',     placeholder: '(optional)',                               helper: 'Optional. Most agencies leave blank and add per warrant.' },
+
+  // Colorado-specific block (DA approval-as-to-form line)
+  { key: 'daName',             label: 'District Attorney Name',        group: 'colorado', type: 'text', placeholder: 'Brian Mason',                          helper: 'Appears on the CO "APPROVED AS TO FORM" block.' },
+  { key: 'daTitle',            label: 'DA Title',                       group: 'colorado', type: 'text', placeholder: 'District Attorney',                    helper: 'Almost always "District Attorney".' },
+  { key: 'daDeputyLine',       label: 'Deputy DA Line',                 group: 'colorado', type: 'text', placeholder: '[Chief][Senior] Deputy District Attorney', helper: 'Bracketed pick-list shown beneath the DA signature.' },
 
   // Training & experience block (textarea, full-width)
   { key: 'trainingExperienceBoilerplate', label: 'Training & Experience Boilerplate', group: 'training', type: 'textarea', rows: 10,
@@ -131,6 +155,7 @@ const FIELD_GROUPS = Object.freeze([
   { id: 'agency',   label: 'Agency Identity',   helper: 'Identifies your agency on the warrant caption + cover page.' },
   { id: 'affiant',  label: 'Affiant Identity',  helper: 'Identifies you (the affiant) on the affidavit + signature block.' },
   { id: 'defaults', label: 'Administrative Defaults', helper: 'Pre-fill these on every new draft. You can override per-warrant.' },
+  { id: 'colorado', label: 'Colorado-Specific',  helper: 'Used only by the CO Multi-Business ESP template. Add your courts and DA below.' },
   { id: 'training', label: 'Training & Experience', helper: 'Re-usable boilerplate paragraph. Verbatim prose — review with your DA.' },
 ]);
 
@@ -158,8 +183,120 @@ function normalize(raw) {
   }
   // state code normalisation — uppercase, max 2 chars
   if (typeof out.state === 'string') out.state = out.state.trim().toUpperCase().slice(0, 2);
+  // Colorado courts list — array of {id, label, courtName, judicialDistrict,
+  // county, isDefault}. Drop unknown keys and coerce strings; force exactly
+  // one isDefault if any entries exist.
+  if (Array.isArray(raw.coCourts)) {
+    const cleaned = [];
+    for (const c of raw.coCourts) {
+      if (!c || typeof c !== 'object') continue;
+      const id = String(c.id || '').trim();
+      cleaned.push({
+        id: id || _newCourtId(),
+        label: String(c.label || '').trim(),
+        courtName: String(c.courtName || 'COUNTY/DISTRICT COURT').trim(),
+        judicialDistrict: String(c.judicialDistrict || '').trim(),
+        county: String(c.county || '').trim(),
+        isDefault: !!c.isDefault,
+      });
+    }
+    // At most one default. If zero are flagged but the list is non-empty,
+    // promote the first entry so the dropdown always has a sane default.
+    let defaultIdx = cleaned.findIndex(c => c.isDefault);
+    if (defaultIdx === -1 && cleaned.length) {
+      cleaned[0].isDefault = true;
+      defaultIdx = 0;
+    }
+    cleaned.forEach((c, i) => { c.isDefault = (i === defaultIdx); });
+    out.coCourts = cleaned;
+  } else {
+    out.coCourts = [];
+  }
   out._schemaVersion = SCHEMA_VERSION;
   return out;
+}
+
+// ─── Colorado courts: pure mutation helpers ────────────────────────────────
+// Return a NEW profile object — callers persist it themselves.
+
+function _newCourtId() {
+  // Short opaque id; collisions are practically impossible at agency scale.
+  return 'crt_' + Math.random().toString(36).slice(2, 10);
+}
+
+/**
+ * Insert a new CO court entry. If it's the first entry OR the user marks
+ * it default, it becomes the sole default and demotes any prior default.
+ */
+function addCoCourt(profile, court) {
+  const p = normalize(profile);
+  const entry = {
+    id: _newCourtId(),
+    label: String((court && court.label) || '').trim(),
+    courtName: String((court && court.courtName) || 'COUNTY/DISTRICT COURT').trim(),
+    judicialDistrict: String((court && court.judicialDistrict) || '').trim(),
+    county: String((court && court.county) || '').trim(),
+    isDefault: !!(court && court.isDefault),
+  };
+  const list = p.coCourts.slice();
+  if (entry.isDefault || list.length === 0) {
+    list.forEach(c => { c.isDefault = false; });
+    entry.isDefault = true;
+  }
+  list.push(entry);
+  p.coCourts = list;
+  return p;
+}
+
+/** Update fields on an existing court by id. */
+function updateCoCourt(profile, id, patch) {
+  const p = normalize(profile);
+  const list = p.coCourts.slice();
+  const idx = list.findIndex(c => c.id === id);
+  if (idx === -1) return p;
+  const current = list[idx];
+  list[idx] = Object.assign({}, current, {
+    label: patch && 'label' in patch ? String(patch.label || '').trim() : current.label,
+    courtName: patch && 'courtName' in patch ? String(patch.courtName || 'COUNTY/DISTRICT COURT').trim() : current.courtName,
+    judicialDistrict: patch && 'judicialDistrict' in patch ? String(patch.judicialDistrict || '').trim() : current.judicialDistrict,
+    county: patch && 'county' in patch ? String(patch.county || '').trim() : current.county,
+  });
+  p.coCourts = list;
+  return p;
+}
+
+/** Delete a court by id. Promotes another entry to default if needed. */
+function deleteCoCourt(profile, id) {
+  const p = normalize(profile);
+  const wasDefault = !!(p.coCourts.find(c => c.id === id) || {}).isDefault;
+  const list = p.coCourts.filter(c => c.id !== id);
+  if (wasDefault && list.length) list[0].isDefault = true;
+  p.coCourts = list;
+  return p;
+}
+
+/** Flip the default flag to the given id, demoting all others. */
+function setCoCourtDefault(profile, id) {
+  const p = normalize(profile);
+  const list = p.coCourts.map(c => Object.assign({}, c, { isDefault: c.id === id }));
+  p.coCourts = list;
+  return p;
+}
+
+/** Returns the default court entry, or null. */
+function getDefaultCoCourt(profile) {
+  const p = normalize(profile);
+  return p.coCourts.find(c => c.isDefault) || (p.coCourts[0] || null);
+}
+
+/** Look up a court by id, falling back to the default. */
+function getCoCourtById(profile, id) {
+  const p = normalize(profile);
+  if (id) {
+    const match = p.coCourts.find(c => c.id === id);
+    if (match) return match;
+  }
+  return getDefaultCoCourt(p);
 }
 
 /**
@@ -221,6 +358,13 @@ const api = Object.freeze({
   isComplete,
   completenessRatio,
   labelFor,
+  // Colorado multi-court helpers
+  addCoCourt,
+  updateCoCourt,
+  deleteCoCourt,
+  setCoCourtDefault,
+  getDefaultCoCourt,
+  getCoCourtById,
 });
 
 if (typeof module !== 'undefined' && module.exports) {

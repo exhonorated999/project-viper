@@ -165,7 +165,10 @@ function _defaultTemplateFor(type, jurisdiction) {
   if (type === 'residential') {
     return jurisdiction === 'CA' ? 'ca-residential' : 'ca-residential';
   }
-  return jurisdiction === 'CA' ? 'ca-multi-business-esp' : 'generic-us-multi-business-esp';
+  if (jurisdiction === 'CA') return 'ca-multi-business-esp';
+  if (jurisdiction === 'VA') return 'va-multi-business-esp';
+  if (jurisdiction === 'CO') return 'co-multi-business-esp';
+  return 'generic-us-multi-business-esp';
 }
 
 // Crime-type defaults. Kept tiny here — full preset content (T&E paragraph,
@@ -238,6 +241,15 @@ function newDraft(opts) {
     nightSearch: agency.nightSearchDefault || 'not-requested',
     probableCauseNarrative: '',
     tenDayExtensionRequested: false,
+    // CO-specific: the selected court id from agency.coCourts. Auto-
+    // populated with the default court (if any) at draft creation; the
+    // affiant can swap in the warrant-author UI dropdown per warrant.
+    coCourtId: (() => {
+      if (jurisdiction !== 'CO') return '';
+      const courts = Array.isArray(agency.coCourts) ? agency.coCourts : [];
+      const def = courts.find(c => c.isDefault) || courts[0];
+      return def ? def.id : '';
+    })(),
     addendums: [],
     pdfPath: '',
     docxPath: '',

@@ -1,12 +1,14 @@
 {
   "name": "viper-electron",
-  "version": "3.8.6",
+  "version": "3.8.7",
   "description": "VIPER with Network Intelligence - Electron Desktop App",
   "main": "electron-main.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
+    "dev:diagnostic": "set VIPER_DIAGNOSTIC_MODE=1 && electron . --dev",
     "package": "electron-builder --win",
+    "package:diagnostic": "electron-builder --win portable --config electron-builder-diagnostic.yml",
     "postinstall": "electron-rebuild -f -w better-sqlite3 || electron-builder install-app-deps"
   },
   "keywords": [

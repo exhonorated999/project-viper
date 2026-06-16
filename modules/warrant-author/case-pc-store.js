@@ -57,11 +57,31 @@
     return rec && typeof rec.body === 'string' ? rec.body : '';
   }
 
+  /**
+   * Returns the case-level offense description (string, may be '').
+   * Used by CO templates (`{{case.offenseDescription}}`) and any future
+   * jurisdictions that need a single offense identifier across every
+   * warrant in the case. UI lives in the Case Probable Cause panel.
+   */
+  function getOffenseDescription(caseId) {
+    const rec = _safeRead(caseId);
+    return rec && typeof rec.offenseDescription === 'string' ? rec.offenseDescription : '';
+  }
+
+  /**
+   * Returns the case-level offense date (ISO YYYY-MM-DD or '').
+   * Used by CO templates (`{{case.offenseDate}}`).
+   */
+  function getOffenseDate(caseId) {
+    const rec = _safeRead(caseId);
+    return rec && typeof rec.offenseDate === 'string' ? rec.offenseDate : '';
+  }
+
   /** Returns the full record { version, body, updatedAt, history } or a fresh empty one. */
   function getRecord(caseId) {
     const rec = _safeRead(caseId);
     if (rec) return rec;
-    return { version: SCHEMA_VERSION, body: '', updatedAt: null, history: [] };
+    return { version: SCHEMA_VERSION, body: '', offenseDescription: '', offenseDate: '', updatedAt: null, history: [] };
   }
 
   /**
@@ -77,6 +97,8 @@
     const rec = {
       version: SCHEMA_VERSION,
       body: next,
+      offenseDescription: cur.offenseDescription || '',
+      offenseDate: cur.offenseDate || '',
       updatedAt: _now(),
       history: Array.isArray(cur.history) ? cur.history.slice() : []
     };
@@ -90,6 +112,35 @@
       });
       if (rec.history.length > MAX_HISTORY) rec.history.length = MAX_HISTORY;
     }
+    _safeWrite(caseId, rec);
+    return rec;
+  }
+
+  /**
+   * Set the case-level offense description. Lightweight — no history
+   * entry (these are short scalar fields, not the narrative). Returns
+   * the updated record.
+   */
+  function setOffenseDescription(caseId, value) {
+    const cur = getRecord(caseId);
+    const rec = Object.assign({}, cur, {
+      offenseDescription: String(value == null ? '' : value),
+      updatedAt: _now(),
+    });
+    _safeWrite(caseId, rec);
+    return rec;
+  }
+
+  /**
+   * Set the case-level offense date. Accepts ISO YYYY-MM-DD or ''.
+   * Returns the updated record.
+   */
+  function setOffenseDate(caseId, value) {
+    const cur = getRecord(caseId);
+    const rec = Object.assign({}, cur, {
+      offenseDate: String(value == null ? '' : value),
+      updatedAt: _now(),
+    });
     _safeWrite(caseId, rec);
     return rec;
   }
@@ -132,6 +183,10 @@
     getBody,
     getRecord,
     setBody,
+    getOffenseDescription,
+    setOffenseDescription,
+    getOffenseDate,
+    setOffenseDate,
     promoteFromDrafts,
     stats
   };

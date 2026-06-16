@@ -2463,9 +2463,9 @@ function _renderLivePreview(caseId, draft, activeId) {
     } else if (b.kind === 'co-provider-block') {
       body = `<div class="wa-pv-text">${_safeMultilineHtml(b.text || '')}</div>`;
     } else if (b.kind === 'co-affiant-signature') {
-      body = `<div class="wa-pv-text">Subscribed and Sworn to in the ${esc(b.judicialDistrict || '_______')} Judicial District, Colorado<br><br>______________________________<br><span class="text-slate-400">Signature of Affiant</span></div>`;
+      body = `<div class="wa-pv-text">Subscribed and Sworn to in the ${esc(b.judicialDistrict || '_______')} Judicial District of Colorado<br><br>______________________________<br><span class="text-slate-400">Signature of Affiant</span></div>`;
     } else if (b.kind === 'co-judge-oath-affidavit') {
-      body = `<div class="wa-pv-text">Subscribed under oath before me on this ___ day of __________, 20__ in the ${esc(b.judicialDistrict || '_______')} Judicial District, CO<br><br>______________________________<br><span class="text-slate-400">Signature of Judge</span><br><br>______________________________<br><span class="text-slate-400">Printed Name of Judge</span></div>`;
+      body = `<div class="wa-pv-text">Subscribed under oath before me on this ___ day of __________, 20__ in the ${esc(b.judicialDistrict || '_______')} Judicial District of Colorado<br><br>______________________________<br><span class="text-slate-400">Signature of Judge</span><br><br>______________________________<br><span class="text-slate-400">Printed Name of Judge</span></div>`;
     } else if (b.kind === 'co-judge-signature') {
       body = `<div class="wa-pv-text">Date<br>In the ${esc(b.judicialDistrict || '_______')} Judicial District, Colorado<br><br>______________________________<br><span class="text-slate-400">Signature of Judge</span><br><br>______________________________<br><span class="text-slate-400">Printed Name of Judge</span></div>`;
     } else if (b.kind === 'co-da-approval') {

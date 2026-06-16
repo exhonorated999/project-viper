@@ -170,7 +170,7 @@
         out.push({ kind: 'spacer', size: 'md' });
         out.push({
           kind: 'paragraph',
-          text: `Subscribed and Sworn to in the ${jd ? jd : '_______'} Judicial District, Colorado`,
+          text: `Subscribed and Sworn to in the ${jd ? jd : '_______'} Judicial District of Colorado`,
         });
         out.push({ kind: 'spacer', size: 'sm' });
         out.push({ kind: 'signature', label: 'Signature of Affiant' });
@@ -182,7 +182,7 @@
         out.push({ kind: 'spacer', size: 'md' });
         out.push({
           kind: 'paragraph',
-          text: `Subscribed under oath before me on this _____ day of ________________, 20____ in the ${jd ? jd : '_______'} Judicial District, CO`,
+          text: `Subscribed under oath before me on this _____ day of ________________, 20____ in the ${jd ? jd : '_______'} Judicial District of Colorado`,
         });
         out.push({ kind: 'spacer', size: 'sm' });
         out.push({ kind: 'signature', label: 'Signature of Judge' });

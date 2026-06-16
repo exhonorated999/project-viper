@@ -93,7 +93,7 @@
     {
       "key": "18-ndo-request",
       "kind": "verbatim-paragraph",
-      "text": "FURTHER, pursuant to 18 U.S.C. §2705(b) and 18 U.S.C. §2705(b)(1)-(5), and Crim. P. 41 and §16-3-304(2), Your Affiant requests that business entity be ordered NOT to disclose the existence of this search warrant and court order to the subscriber for a period of one year from receipt of the requested records, as such disclosure would seriously jeopardize the investigation by giving the subscriber an opportunity to destroy evidence, change patterns of behavior, intimidate witnesses, flee from prosecution, or otherwise impede the investigation."
+      "text": "FURTHER, pursuant to 18 U.S.C. §2705(b) and 18 U.S.C. §2705(b)(1)-(5), and Crim. P. 41 and §16-3-304(2), Your Affiant requests that business entity be ordered NOT to disclose the existence of this search warrant and court order to the subscriber for a period of one year from receipt of the requested documents, unless otherwise ordered by a court of competent jurisdiction. Based on the information set forth in this affidavit, notification of the warrant may have an adverse result, as defined in 18 USC §2705(b)(1)-(5), i.e., disclosure may endanger the life or physical safety of an individual; allow flight from prosecution; allow destruction of or tampering with evidence; allow intimidation of potential witnesses; and/or would otherwise seriously jeopardize an investigation or unduly delay a trial."
     },
     {
       "key": "19-no-adverse-action-request",
@@ -189,12 +189,12 @@
     {
       "key": "37-attestation-of-accuracy",
       "kind": "verbatim-paragraph",
-      "text": "The business entity shall also provide a notarized attestation of accuracy that the records produced represent complete and accurate copies of all records identified in this order that are in the actual or constructive possession or control of the business entity, signed by a custodian of records or other person with personal knowledge of the records produced."
+      "text": "The business entity shall also provide a notarized attestation of accuracy that the records produced represent complete and accurate copies of all records identified in this order that are in the actual or constructive possession or control of the business entity, signed by a custodian of records or other person with personal knowledge of the records produced. If the business entity does not produce all records identified in this order, it shall identify the records not produced. Failure to comply with this order shall support a finding of contempt of court."
     },
     {
       "key": "38-return-and-inventory",
       "kind": "verbatim-paragraph",
-      "text": "Upon receiving the records from the business entity, the peace officer named herein shall file a return and inventory with the court indicating the records that have been received and the date and time of receipt."
+      "text": "Upon receiving the records from the business entity, the peace officer named herein shall file a return and inventory with the court indicating the records that have been received and the date and time upon which the records were received. The peace officer named herein may also file the original of the attestation of accuracy with the court."
     },
     {
       "key": "39-it-is-further-ordered-header",

@@ -2263,6 +2263,100 @@
                             </div>
                         </details>
 
+                        <!-- ═══ Recover Lost Encrypted Data (v3.8.7) ═══ -->
+                        <details class="mb-4 group" id="secRecoveryPanel">
+                            <summary class="cursor-pointer text-sm text-amber-400/80 hover:text-amber-400 transition-colors flex items-center gap-2">
+                                <svg class="w-4 h-4 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86A2.07 2.07 0 0021 16.93L13.93 4a2.07 2.07 0 00-3.86 0L3 16.93A2.07 2.07 0 005.07 19z"/></svg>
+                                Recover Lost Encrypted Data
+                            </summary>
+                            <div class="mt-3 ml-6 space-y-3">
+                                <div class="bg-amber-400/5 border border-amber-400/20 rounded-lg p-3 text-xs text-amber-200/90 space-y-1">
+                                    <p class="font-medium">When to use this</p>
+                                    <p class="text-amber-200/70">Use only if your case files appear empty/locked after a disable→re-enable cycle, or after restoring a backup where Field Security keys no longer match. You'll need the <code class="bg-viper-dark px-1 rounded">security.json</code> from before the break, plus the password OR recovery key that paired with it.</p>
+                                </div>
+
+                                <!-- Step 1: Pick config file -->
+                                <div class="space-y-2">
+                                    <label class="text-xs text-gray-400 block">Original <code>security.json</code></label>
+                                    <div class="flex gap-2">
+                                        <input id="secRecCfgPath" type="text" readonly placeholder="Click Browse or Search to select…"
+                                            class="flex-1 bg-viper-dark border border-gray-700 rounded-lg px-3 py-2 text-white text-xs placeholder-gray-600">
+                                        <button onclick="recBrowseConfig()" class="px-3 py-2 bg-viper-cyan/10 border border-viper-cyan/30 text-viper-cyan rounded-lg text-xs hover:bg-viper-cyan/20 transition-colors">
+                                            Browse…
+                                        </button>
+                                        <button onclick="recSearchConfig()" id="secRecSearchBtn" class="px-3 py-2 bg-amber-400/10 border border-amber-400/30 text-amber-400 rounded-lg text-xs hover:bg-amber-400/20 transition-colors" title="Walk a folder tree looking for security.json and shadow backups">
+                                            Search PC…
+                                        </button>
+                                    </div>
+                                    <!-- Search results list (hidden until first search) -->
+                                    <div id="secRecSearchResults" class="hidden bg-viper-dark border border-gray-700 rounded-lg max-h-48 overflow-auto">
+                                        <div id="secRecSearchHeader" class="text-xs text-gray-400 px-3 py-2 border-b border-gray-700/50 sticky top-0 bg-viper-dark"></div>
+                                        <div id="secRecSearchList" class="divide-y divide-gray-800"></div>
+                                    </div>
+                                </div>
+
+                                <!-- Step 2: Credential kind + value -->
+                                <div class="space-y-2">
+                                    <label class="text-xs text-gray-400 block">Credential</label>
+                                    <div class="flex gap-2">
+                                        <select id="secRecCredKind" class="bg-viper-dark border border-gray-700 rounded-lg px-3 py-2 text-white text-xs focus:border-viper-cyan focus:outline-none">
+                                            <option value="password">Password</option>
+                                            <option value="recovery">Recovery Key</option>
+                                        </select>
+                                        <input id="secRecCredValue" type="password" placeholder="Enter password or VIPER-XXXX-..."
+                                            class="flex-1 bg-viper-dark border border-gray-700 rounded-lg px-3 py-2 text-white text-xs placeholder-gray-600 focus:border-viper-cyan focus:outline-none">
+                                    </div>
+                                    <p class="text-xs text-gray-500">The credential is sent to the main process and never logged or stored. It is cleared from memory when this panel is closed.</p>
+                                </div>
+
+                                <!-- Step 3: Working dir for pre-flight backup -->
+                                <div class="space-y-2">
+                                    <label class="text-xs text-gray-400 block">Pre-flight backup directory</label>
+                                    <div class="flex gap-2">
+                                        <input id="secRecWorkDir" type="text" readonly placeholder="Click Browse to select…"
+                                            class="flex-1 bg-viper-dark border border-gray-700 rounded-lg px-3 py-2 text-white text-xs placeholder-gray-600">
+                                        <button onclick="recBrowseWorkDir()" class="px-3 py-2 bg-viper-cyan/10 border border-viper-cyan/30 text-viper-cyan rounded-lg text-xs hover:bg-viper-cyan/20 transition-colors">
+                                            Browse…
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-gray-500">Every encrypted file is mirrored here as VIPENC bytes <em>before</em> any decrypt runs. Requires ~1.5× the scanned size free.</p>
+                                </div>
+
+                                <!-- Step 4: Validate / Run -->
+                                <div class="flex flex-wrap gap-2 pt-1">
+                                    <button onclick="recValidate()" id="secRecValidateBtn"
+                                        class="px-4 py-2 bg-viper-cyan/10 border border-viper-cyan/30 text-viper-cyan rounded-lg text-xs font-medium hover:bg-viper-cyan/20 transition-colors">
+                                        1. Validate Credentials
+                                    </button>
+                                    <button onclick="recScan()" id="secRecScanBtn" disabled
+                                        class="px-4 py-2 bg-viper-cyan/10 border border-viper-cyan/30 text-viper-cyan rounded-lg text-xs font-medium hover:bg-viper-cyan/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                                        2. Scan Disk
+                                    </button>
+                                    <button onclick="recRunFull()" id="secRecRunBtn" disabled
+                                        class="px-4 py-2 bg-amber-400/10 border border-amber-400/30 text-amber-400 rounded-lg text-xs font-medium hover:bg-amber-400/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                                        3. Pre-flight Backup + Decrypt
+                                    </button>
+                                    <button onclick="recDispose()" id="secRecResetBtn"
+                                        class="px-4 py-2 bg-gray-700/30 border border-gray-700/50 text-gray-400 rounded-lg text-xs font-medium hover:bg-gray-700/50 transition-colors">
+                                        Reset
+                                    </button>
+                                </div>
+
+                                <!-- Status / progress pane -->
+                                <div id="secRecStatus" class="hidden bg-viper-dark rounded-lg p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap max-h-64 overflow-auto"></div>
+                                <div id="secRecProgress" class="hidden">
+                                    <div class="flex justify-between text-xs text-gray-400 mb-1">
+                                        <span id="secRecProgressPhase">…</span>
+                                        <span id="secRecProgressCount">0 / 0</span>
+                                    </div>
+                                    <div class="h-1.5 bg-viper-dark rounded-full overflow-hidden">
+                                        <div id="secRecProgressBar" class="h-full bg-viper-cyan transition-all" style="width:0%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
+
                         <!-- Disable Security -->
                         <div class="pt-4 border-t border-gray-700/50">
                             <button onclick="doDisableSecurity()" class="text-red-400/60 hover:text-red-400 text-xs transition-colors">
@@ -3350,21 +3444,421 @@
             }
         }
 
+        // Typed-confirmation modal — user must type a specific phrase
+        // to proceed.  Used for destructive ops where viperConfirm's
+        // one-click yes/no isn't enough friction.  Returns Promise<bool>.
+        function viperTypedConfirm({ title, html, requireType, okText = 'Confirm', danger = true }) {
+            return new Promise(resolve => {
+                const backdrop = document.createElement('div');
+                backdrop.className = 'viper-confirm-backdrop';
+                backdrop.style.zIndex = '9999';
+                backdrop.innerHTML = `
+                    <div class="viper-confirm-box" style="max-width:520px">
+                        <p style="font-weight:600;font-size:14px;margin-bottom:6px;color:${danger ? '#f87171' : '#06b6d4'}">${title}</p>
+                        <div style="font-size:12.5px;color:#d1d5db;margin-bottom:10px;line-height:1.45">${html}</div>
+                        <div style="font-size:11.5px;color:#9ca3af;margin-bottom:4px">Type <code style="color:#fbbf24;background:#1f2937;padding:1px 5px;border-radius:3px">${requireType}</code> to confirm:</div>
+                        <input type="text" id="_vtc_input" autocomplete="off" spellcheck="false"
+                            style="width:100%;background:#0f1014;border:1px solid #374151;border-radius:6px;padding:8px;color:#fff;font-size:13px;font-family:ui-monospace,monospace;letter-spacing:1px"/>
+                        <div class="viper-confirm-btns" style="margin-top:12px">
+                            <button class="vc-cancel">Cancel</button>
+                            <button class="${danger ? 'vc-danger' : 'vc-ok'}" id="_vtc_ok" disabled>${okText}</button>
+                        </div>
+                    </div>`;
+                const cancelBtn = backdrop.querySelector('.vc-cancel');
+                const okBtn = backdrop.querySelector('#_vtc_ok');
+                const input = backdrop.querySelector('#_vtc_input');
+                function close(val) { backdrop.style.opacity='0'; setTimeout(()=>backdrop.remove(),150); resolve(val); }
+                input.addEventListener('input', () => {
+                    okBtn.disabled = input.value.trim() !== requireType;
+                });
+                cancelBtn.onclick = () => close(false);
+                okBtn.onclick = () => close(true);
+                backdrop.onclick = (e) => { if (e.target === backdrop) close(false); };
+                document.addEventListener('keydown', function handler(e) {
+                    if (e.key === 'Escape') { document.removeEventListener('keydown', handler); close(false); }
+                    if (e.key === 'Enter' && !okBtn.disabled) { document.removeEventListener('keydown', handler); close(true); }
+                });
+                document.body.appendChild(backdrop);
+                setTimeout(()=>input.focus(),50);
+            });
+        }
+
+        function _fmtBytes(n) {
+            if (!n || n < 1024) return (n||0) + ' B';
+            if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+            if (n < 1024*1024*1024) return (n/(1024*1024)).toFixed(1) + ' MB';
+            return (n/(1024*1024*1024)).toFixed(2) + ' GB';
+        }
+
         async function doDisableSecurity() {
-            if (!await viperConfirm('This will disable encryption and decrypt your vault. Your case data will be stored unencrypted. Continue?')) return;
+            // STAGE 1 — pre-scan disk so the user sees the exact blast
+            // radius before they confirm.  Without this scan the user
+            // sees "Continue?" with no concrete numbers, which is what
+            // bit the original affected user.
+            let summary = null;
             try {
+                showNotification('Scanning disk for encrypted files…', 'info');
+                summary = await window.electronAPI.securityScanEncryptedSummary();
+            } catch (e) {
+                summary = { success: false, error: e.message };
+            }
+
+            const fileCount = (summary && summary.success) ? summary.totalFiles : null;
+            const byteCount = (summary && summary.success) ? summary.totalBytes : 0;
+            const rootsLines = (summary && summary.success && Array.isArray(summary.byRoot))
+                ? summary.byRoot.map(r => `&nbsp;&nbsp;<code>${r.root}</code> — ${r.files} file(s), ${_fmtBytes(r.bytes)}`).join('<br>')
+                : '<span style="color:#9ca3af">(scan failed — proceed with caution)</span>';
+
+            // STAGE 2 — show typed-confirmation modal w/ exact counts.
+            const warnHtml = `
+                <p style="margin-bottom:8px">Field Security is currently <strong style="color:#f87171">protecting your case data</strong>. Disabling will:</p>
+                <ul style="margin-left:18px;list-style:disc;margin-bottom:10px">
+                    <li>Walk every encrypted file on disk and rewrite it as plaintext</li>
+                    <li>Permanently turn off encryption until you re-enable</li>
+                    <li>Take several minutes for large case loads (no abort once started)</li>
+                </ul>
+                <div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:10px">
+                    <div style="font-size:11px;color:#fbbf24;margin-bottom:4px;font-weight:600">Pre-scan results</div>
+                    <div style="font-size:12px">${fileCount !== null
+                        ? `<strong style="color:#fbbf24">${fileCount.toLocaleString()}</strong> encrypted file(s) found, total <strong>${_fmtBytes(byteCount)}</strong><br><br>${rootsLines}`
+                        : rootsLines}</div>
+                </div>
+                <p style="color:#fca5a5;font-size:12px;font-weight:600">⚠ Strongly recommended: take a full backup of <code>userdata/</code> and <code>cases/</code> first.</p>`;
+            const ok = await viperTypedConfirm({
+                title: 'Disable Field Security?',
+                html: warnHtml,
+                requireType: 'DISABLE',
+                okText: 'Decrypt All & Disable',
+                danger: true
+            });
+            if (!ok) return;
+
+            // STAGE 3 — run the disable with per-file progress.
+            let off = null;
+            try {
+                const showProgress = (p) => {
+                    try {
+                        const box = document.getElementById('secRecStatus');
+                        if (!box) return;
+                        box.classList.remove('hidden');
+                        const tail = `[disable] ${p.phase} ${p.current||0}/${p.total||0} ${p.path||''}\n`;
+                        box.textContent = (box.textContent + tail).split('\n').slice(-200).join('\n');
+                        box.scrollTop = box.scrollHeight;
+                    } catch (_) {}
+                };
+                if (window.electronAPI.securityDisableOnProgress) {
+                    off = window.electronAPI.securityDisableOnProgress(showProgress);
+                }
+
+                showNotification('Decrypting files — do not close VIPER…', 'info');
                 const result = await window.electronAPI.securityDisable();
                 if (result.success) {
                     document.getElementById('secEnabled').classList.add('hidden');
                     document.getElementById('secDisabled').classList.remove('hidden');
-                    showNotification('Field Security disabled', 'success');
+                    const r = result.report || {};
+                    const dec = (r.decrypted || []).length;
+                    const failed = (r.failed || []).length;
+                    if (failed > 0) {
+                        showNotification(`Disabled — ${dec} decrypted, ${failed} failed. See Audit Log.`, 'warning');
+                    } else {
+                        showNotification(`Field Security disabled (${dec} files decrypted)`, 'success');
+                    }
                 } else {
                     showNotification('Failed: ' + (result.error || 'Unknown error'), 'error');
                 }
             } catch (e) {
                 showNotification('Failed: ' + e.message, 'error');
+            } finally {
+                try { if (off) off(); } catch (_) {}
             }
         }
+
+        // ═════════════════════════════════════════════════════════════
+        // Field Security Recovery (v3.8.7)
+        // ═════════════════════════════════════════════════════════════
+        // Recovers VIPENC-encrypted files using an externally-supplied
+        // security.json + the password OR recovery key that paired with
+        // it.  Workflow: Validate → Scan → Pre-flight backup + Decrypt.
+        let _secRecSessionId = null;
+        let _secRecOffProgress = null;
+        let _secRecScanResult = null;
+
+        function _recLog(line) {
+            const box = document.getElementById('secRecStatus');
+            if (!box) return;
+            box.classList.remove('hidden');
+            box.textContent = (box.textContent + line + '\n').split('\n').slice(-200).join('\n');
+            box.scrollTop = box.scrollHeight;
+        }
+        function _recProg(phase, current, total) {
+            const wrap = document.getElementById('secRecProgress');
+            if (!wrap) return;
+            wrap.classList.remove('hidden');
+            document.getElementById('secRecProgressPhase').textContent = phase;
+            document.getElementById('secRecProgressCount').textContent = `${current||0} / ${total||0}`;
+            const pct = total ? Math.max(0, Math.min(100, Math.round((current/total)*100))) : 0;
+            document.getElementById('secRecProgressBar').style.width = pct + '%';
+        }
+        function _recAttachProgress() {
+            if (_secRecOffProgress) return;
+            if (!window.electronAPI.securityRecoveryOnProgress) return;
+            _secRecOffProgress = window.electronAPI.securityRecoveryOnProgress((p) => {
+                _recProg(p.phase, p.current, p.total);
+                if (p.path) _recLog(`  ${p.phase} ${p.current}/${p.total} ${p.path}`);
+            });
+        }
+        function _recDetachProgress() {
+            try { if (_secRecOffProgress) _secRecOffProgress(); } catch (_) {}
+            _secRecOffProgress = null;
+        }
+
+        async function recBrowseConfig() {
+            try {
+                const p = await window.electronAPI.securityRecoveryPickConfig();
+                if (p) document.getElementById('secRecCfgPath').value = p;
+            } catch (e) { showNotification('Browse failed: ' + e.message, 'error'); }
+        }
+        async function recBrowseWorkDir() {
+            try {
+                const p = await window.electronAPI.securityRecoveryPickWorkingDir();
+                if (p) document.getElementById('secRecWorkDir').value = p;
+            } catch (e) { showNotification('Browse failed: ' + e.message, 'error'); }
+        }
+
+        async function recValidate() {
+            const cfg = document.getElementById('secRecCfgPath').value.trim();
+            const kind = document.getElementById('secRecCredKind').value;
+            const cred = document.getElementById('secRecCredValue').value;
+            if (!cfg)  return showNotification('Pick a security.json first', 'warning');
+            if (!cred) return showNotification('Enter a password or recovery key', 'warning');
+
+            // Dispose any previous session first
+            if (_secRecSessionId) {
+                try { await window.electronAPI.securityRecoveryDispose({ sessionId: _secRecSessionId }); } catch (_) {}
+                _secRecSessionId = null;
+            }
+
+            _recLog(`Validating ${kind} against ${cfg}…`);
+            try {
+                const r = await window.electronAPI.securityRecoveryCreateSession({
+                    configPath: cfg,
+                    credential: cred,
+                    credentialKind: kind
+                });
+                if (!r.success) {
+                    _recLog(`  ✗ ${r.error}`);
+                    showNotification('Credentials rejected: ' + r.error, 'error');
+                    return;
+                }
+                _secRecSessionId = r.sessionId;
+                _recLog(`  ✓ Master key derived (session ${r.sessionId.slice(0,8)}…)`);
+                showNotification('Credentials valid', 'success');
+                document.getElementById('secRecScanBtn').disabled = false;
+            } catch (e) {
+                _recLog(`  ✗ ${e.message}`);
+                showNotification('Validate failed: ' + e.message, 'error');
+            }
+        }
+
+        async function recScan() {
+            if (!_secRecSessionId) return showNotification('Validate credentials first', 'warning');
+            _recLog('Scanning userdata/ and cases/ for VIPENC blobs…');
+            _recAttachProgress();
+            try {
+                const r = await window.electronAPI.securityRecoveryScan({ sessionId: _secRecSessionId });
+                if (!r.success) {
+                    _recLog(`  ✗ ${r.error}`);
+                    return showNotification('Scan failed: ' + r.error, 'error');
+                }
+                _secRecScanResult = r;
+                _recLog(`  → ${r.totalFiles} encrypted files, ${Math.round((r.totalBytes||0)/1024/1024)} MB across ${(r.roots||[]).length} root(s)`);
+                for (const root of (r.roots||[])) {
+                    const stats = r.byRoot && r.byRoot[root];
+                    if (stats) _recLog(`    ${root}: ${stats.files} files / ${Math.round((stats.bytes||0)/1024/1024)} MB`);
+                }
+                if (r.totalFiles === 0) {
+                    showNotification('No VIPENC files found — nothing to recover', 'info');
+                } else {
+                    document.getElementById('secRecRunBtn').disabled = false;
+                    showNotification(`Found ${r.totalFiles} encrypted files`, 'success');
+                }
+            } catch (e) {
+                _recLog(`  ✗ ${e.message}`);
+                showNotification('Scan failed: ' + e.message, 'error');
+            }
+        }
+
+        async function recRunFull() {
+            if (!_secRecSessionId) return showNotification('Validate credentials first', 'warning');
+            if (!_secRecScanResult) return showNotification('Run scan first', 'warning');
+            const workingDir = document.getElementById('secRecWorkDir').value.trim();
+            if (!workingDir) return showNotification('Pick a working directory for pre-flight backup', 'warning');
+
+            const sz = Math.round(_secRecScanResult.totalBytes / 1024 / 1024);
+            const confirmMsg =
+                `This will:\n\n` +
+                `  1. Copy all ${_secRecScanResult.totalFiles} encrypted files (${sz} MB) into:\n` +
+                `       ${workingDir}\n\n` +
+                `  2. Decrypt each original in place via atomic-rename.\n\n` +
+                `Requires ~${Math.ceil(sz * 1.5)} MB free on the working drive.\n\n` +
+                `Continue?`;
+            if (!await viperConfirm(confirmMsg)) return;
+
+            _recAttachProgress();
+            document.getElementById('secRecRunBtn').disabled = true;
+            try {
+                _recLog(`Pre-flight backup → ${workingDir}`);
+                const pf = await window.electronAPI.securityRecoveryPreflight({
+                    sessionId: _secRecSessionId,
+                    workingDir
+                });
+                if (!pf.success) {
+                    _recLog(`  ✗ Pre-flight failed: ${pf.error}`);
+                    showNotification('Pre-flight failed: ' + pf.error, 'error');
+                    return;
+                }
+                _recLog(`  ✓ Backup written to ${pf.backupDir} (${pf.copiedFiles} files)`);
+
+                _recLog('Decrypting…');
+                const dr = await window.electronAPI.securityRecoveryDecryptAll({
+                    sessionId: _secRecSessionId
+                });
+                if (!dr.success) {
+                    _recLog(`  ✗ Decrypt failed: ${dr.error}`);
+                    return showNotification('Decrypt failed: ' + dr.error, 'error');
+                }
+                const rep = dr.report || {};
+                _recLog(`  ✓ Decrypted ${rep.decrypted.length}`);
+                if (rep.skipped.length) _recLog(`  • Skipped (already plain): ${rep.skipped.length}`);
+                if (rep.failed.length) {
+                    _recLog(`  ✗ Failed: ${rep.failed.length}`);
+                    for (const f of rep.failed.slice(0, 10)) _recLog(`     ${f.path}  —  ${f.error}`);
+                }
+                if (rep.failed.length === 0) {
+                    showNotification(`Recovery complete: ${rep.decrypted.length} files decrypted`, 'success');
+                } else {
+                    showNotification(`Recovery finished with ${rep.failed.length} failure(s) — see status pane`, 'warning');
+                }
+            } catch (e) {
+                _recLog(`  ✗ ${e.message}`);
+                showNotification('Recovery failed: ' + e.message, 'error');
+            } finally {
+                _recDetachProgress();
+                document.getElementById('secRecRunBtn').disabled = false;
+            }
+        }
+
+        // Search this PC for security.json + shadow backups.  Walks
+        // a folder tree the user picks (default: SystemDrive root).
+        // Defensive: max 90s / 200 hits / depth 8, skips system dirs.
+        let _secRecSearchOff = null;
+        async function recSearchConfig() {
+            try {
+                const root = await window.electronAPI.securityRecoveryPickSearchRoot();
+                if (!root) return;
+
+                const list = document.getElementById('secRecSearchList');
+                const header = document.getElementById('secRecSearchHeader');
+                const wrap = document.getElementById('secRecSearchResults');
+                const searchBtn = document.getElementById('secRecSearchBtn');
+                list.innerHTML = '';
+                wrap.classList.remove('hidden');
+                searchBtn.disabled = true;
+                searchBtn.textContent = 'Searching…';
+                header.textContent = `Scanning ${root} — this may take up to 90 seconds.`;
+                _recLog(`Search: walking ${root} for security.json…`);
+
+                // Live progress: dirs scanned + hit count
+                try { if (_secRecSearchOff) _secRecSearchOff(); } catch (_) {}
+                _secRecSearchOff = window.electronAPI.securityRecoverySearchOnProgress((p) => {
+                    try {
+                        header.textContent = `Scanning… ${p.dirsScanned} folders · ${p.hits} hit(s)`;
+                    } catch (_) {}
+                });
+
+                const r = await window.electronAPI.securityRecoverySearchConfig({ root });
+                try { if (_secRecSearchOff) _secRecSearchOff(); } catch (_) {}
+                _secRecSearchOff = null;
+                searchBtn.disabled = false;
+                searchBtn.textContent = 'Search PC…';
+
+                if (!r.success) {
+                    header.textContent = `Search failed: ${r.error || 'unknown'}`;
+                    _recLog(`Search FAILED: ${r.error}`);
+                    return;
+                }
+                const truncated = r.stats && r.stats.truncated;
+                const elapsedS = Math.round((r.stats?.elapsedMs || 0)/1000);
+                header.textContent = `${r.hits.length} hit(s) · ${r.stats?.dirsScanned||0} folders · ${elapsedS}s${truncated ? ' · TRUNCATED (limit reached)' : ''}`;
+                _recLog(`Search done: ${r.hits.length} hit(s), ${r.stats?.dirsScanned||0} folders in ${elapsedS}s${truncated ? ' (truncated)' : ''}`);
+
+                if (!r.hits.length) {
+                    list.innerHTML = '<div class="px-3 py-4 text-xs text-gray-500 italic">No security.json or shadow backups found under this folder.</div>';
+                    return;
+                }
+                // Sort: prefer current security.json over .bak.*, newest mtime first
+                r.hits.sort((a, b) => {
+                    if (a.isBackup !== b.isBackup) return a.isBackup ? 1 : -1;
+                    return (b.mtime || '').localeCompare(a.mtime || '');
+                });
+                list.innerHTML = r.hits.map((h, idx) => {
+                    const kb = (h.size / 1024).toFixed(2);
+                    const when = (h.mtime || '').replace('T', ' ').slice(0, 19);
+                    const tag = h.isBackup
+                        ? '<span class="px-1.5 py-0.5 bg-amber-400/15 text-amber-400 rounded text-[10px] font-medium">SHADOW</span>'
+                        : '<span class="px-1.5 py-0.5 bg-viper-cyan/15 text-viper-cyan rounded text-[10px] font-medium">CURRENT</span>';
+                    const safePath = h.path.replace(/'/g, "\\'");
+                    return `
+                        <button onclick="recPickSearchHit('${safePath}', ${idx})" class="w-full text-left px-3 py-2 hover:bg-gray-800/60 transition-colors flex items-start gap-2">
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 mb-0.5">${tag}<span class="text-xs text-gray-300 truncate" title="${h.path}">${h.path}</span></div>
+                                <div class="text-[11px] text-gray-500">${kb} KB · modified ${when}</div>
+                            </div>
+                            <span class="text-viper-cyan text-xs opacity-60 group-hover:opacity-100">Pick →</span>
+                        </button>
+                    `;
+                }).join('');
+            } catch (e) {
+                _recLog(`Search FAILED: ${e.message}`);
+                showNotification('Search failed: ' + e.message, 'error');
+                try { document.getElementById('secRecSearchBtn').disabled = false; document.getElementById('secRecSearchBtn').textContent = 'Search PC…'; } catch (_) {}
+            }
+        }
+
+        // Click handler for a single search hit
+        function recPickSearchHit(filePath, idx) {
+            try {
+                document.getElementById('secRecCfgPath').value = filePath;
+                _recLog(`Picked: ${filePath}`);
+                showNotification('Selected security.json — now enter your credential and click Validate.', 'success');
+            } catch (e) {
+                showNotification('Pick failed: ' + e.message, 'error');
+            }
+        }
+
+        async function recDispose() {
+            _recDetachProgress();
+            if (_secRecSessionId) {
+                try { await window.electronAPI.securityRecoveryDispose({ sessionId: _secRecSessionId }); } catch (_) {}
+                _secRecSessionId = null;
+            }
+            _secRecScanResult = null;
+            try {
+                document.getElementById('secRecCredValue').value = '';
+                document.getElementById('secRecScanBtn').disabled = true;
+                document.getElementById('secRecRunBtn').disabled = true;
+                const st = document.getElementById('secRecStatus'); if (st) { st.textContent = ''; st.classList.add('hidden'); }
+                const pr = document.getElementById('secRecProgress'); if (pr) pr.classList.add('hidden');
+            } catch (_) {}
+        }
+
+        // Auto-dispose recovery session when the panel collapses
+        try {
+            const panel = document.getElementById('secRecoveryPanel');
+            if (panel) panel.addEventListener('toggle', () => {
+                if (!panel.open) recDispose();
+            });
+        } catch (_) {}
 
         // Directory selection removed — paths are now auto-detected and read-only
 

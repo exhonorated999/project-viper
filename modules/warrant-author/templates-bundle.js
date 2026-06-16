@@ -516,6 +516,243 @@
       { "key": "26-affiant-signature", "kind": "affiant-contact", "heading": "", "fields": ["affiantName", "affiantBadgeId", "affiantUnit", "agencyName", "agencyAddressLine1", "agencyAddressCityStateZip", "affiantPhone", "affiantEmail"], "labels": { "affiantName": "Affiant", "affiantBadgeId": "Badge / ID", "affiantUnit": "Unit / Assignment", "affiantPhone": "Phone", "affiantEmail": "Email", "agencyName": "Agency" }, "requiredFields": ["affiantName", "agencyName"] }
     ]
   }
+,
+  {
+    "id": "co-multi-business-esp",
+    "name": "Colorado Multi-Business ESP (Affidavit + Search Warrant)",
+    "jurisdiction": "CO",
+    "version": 1,
+    "description": "Colorado combined Affidavit + Search Warrant and Court Order template for Electronic Service Providers under 18 U.S.C. \u00a72703, CRIM. P. 41, and C.R.S. \u00a716-3-301, \u00a716-3-301.1, \u00a719-2.5-205. NDO under 18 U.S.C. \u00a7\u00a7 2703(b)(1)(A) and 2705(b)(1)-(5) and Crim. P. 41 and \u00a716-3-304(2). The single output document is two pages \u2014 the Affidavit page, then a hard page break, then the Search Warrant and Court Order page. Court caption (COUNTY/DISTRICT COURT, [N]th JUDICIAL DISTRICT, COLORADO) is selected per-warrant from the agency profile's CO Courts list. DA 'Approved as to Form' block prints the agency profile's daName / daTitle / daDeputyLine.",
+    "compatibleProviderTypes": [
+      "ESP",
+      "Phone",
+      "Internet",
+      "Financial",
+      "Other"
+    ],
+    "supportsMultipleProviders": true,
+    "blocks": [
+      {
+        "key": "01-affidavit-caption",
+        "kind": "co-caption",
+        "documentTitle": "AFFIDAVIT IN SUPPORT OF SEARCH WARRANT AND COURT ORDER FOR PRODUCTION OF RECORDS PURSUANT TO 18 U.S.C. \u00a72703, CRIM. P. 41, AND C.R.S. \u00a716-3-301, \u00a716-3-301.1, \u00a719-2.5-205"
+      },
+      {
+        "key": "02-affiant-intro",
+        "kind": "verbatim-paragraph",
+        "text": "I, {{agency.affiantRank}} {{agency.affiantName}}, {{agency.affiantBadge}}, state under oath that I have reason to believe that at the place or business entity known or described as:"
+      },
+      {
+        "key": "03-provider-block",
+        "kind": "co-provider-block"
+      },
+      {
+        "key": "04-now-located",
+        "kind": "constant",
+        "text": "There is now located the following described records, which are in the active or constructive possession of the business entity:"
+      },
+      {
+        "key": "05-records-lead-in",
+        "kind": "verbatim-paragraph",
+        "text": "The following records pertaining to the account(s) associated with any one or more of the following identifiers:"
+      },
+      {
+        "key": "06-target-account",
+        "kind": "target-account"
+      },
+      {
+        "key": "07-date-range-line",
+        "kind": "verbatim-paragraph",
+        "text": "From the period of {{addendum.dateRange.start}} to {{addendum.dateRange.end}}:"
+      },
+      {
+        "key": "08-items-to-seize",
+        "kind": "items-to-seize",
+        "style": "semicolons"
+      },
+      {
+        "key": "09-evidence-pertaining",
+        "kind": "verbatim-paragraph",
+        "text": "*These records will be searched for evidence pertaining the {{case.offenseDescription}} that occurred on {{case.offenseDate}}."
+      },
+      {
+        "key": "10-statutory-grounds",
+        "kind": "verbatim-paragraph",
+        "text": "For which a search warrant and court order for production of records may be issued upon one or more of the grounds set forth in 18 U.S.C. \u00a72703, C.R.S. \u00a716-3-301, \u00a716-3-301.1, \u00a719-2.5-205, and Crim. P. 41, namely that this property is stolen or embezzled, or is designed or intended for use as a means of committing a criminal offense, or which is or has been used as a means of committing a criminal offense, or the possession of which is illegal, or which would be material evidence in a subsequent criminal prosecution in this State or another state, or in any other state's court action upon a criminal investigation here or elsewhere."
+      },
+      {
+        "key": "11-facts-header",
+        "kind": "constant",
+        "text": "The facts tending to establish the grounds for issuance of a Search Warrant are as follows:"
+      },
+      {
+        "key": "12-background-of-affiant",
+        "kind": "verbatim-paragraph",
+        "text": "{{agency.trainingExperienceBoilerplate}}"
+      },
+      {
+        "key": "13-probable-cause",
+        "kind": "verbatim-paragraph",
+        "text": "{{addendum.probableCause}}"
+      },
+      {
+        "key": "14-date-range-basis-header",
+        "kind": "constant",
+        "text": "Basis for the Date Range Requested"
+      },
+      {
+        "key": "15-date-range-basis",
+        "kind": "verbatim-paragraph",
+        "text": "Your affiant recognizes the need to balance the request for records identified as relevant to this investigation with the need for personal privacy. Your affiant has determined that the above listed date range for the records requested is appropriate for the facts of this particular case. The basis for the date range is as follows: {{addendum.dateRangeBasis}}"
+      },
+      {
+        "key": "16-pc-conclusion",
+        "kind": "verbatim-paragraph",
+        "text": "Based on these facts, Your Affiant believes there exists probable cause to believe that there is material evidence now located in the above-described account that is crucial to the investigation of this case and the offenses described above, and a search warrant is requested pursuant to 18 U.S.C. \u00a72703, the Colorado Rules of Criminal Procedure Rule 41, C.R.S. \u00a716-3-301, \u00a716-3-301.1, and \u00a719-2.5-205."
+      },
+      {
+        "key": "17-further-requests-header",
+        "kind": "constant",
+        "text": "Further requests:"
+      },
+      {
+        "key": "18-ndo-request",
+        "kind": "verbatim-paragraph",
+        "text": "FURTHER, pursuant to 18 U.S.C. \u00a72705(b) and 18 U.S.C. \u00a72705(b)(1)-(5), and Crim. P. 41 and \u00a716-3-304(2), Your Affiant requests that business entity be ordered NOT to disclose the existence of this search warrant and court order to the subscriber for a period of one year from receipt of the requested documents, unless otherwise ordered by a court of competent jurisdiction. Based on the information set forth in this affidavit, notification of the warrant may have an adverse result, as defined in 18 USC \u00a72705(b)(1)-(5), i.e., disclosure may endanger the life or physical safety of an individual; allow flight from prosecution; allow destruction of or tampering with evidence; allow intimidation of potential witnesses; and/or would otherwise seriously jeopardize an investigation or unduly delay a trial."
+      },
+      {
+        "key": "19-no-adverse-action-request",
+        "kind": "verbatim-paragraph",
+        "text": "FURTHER, so as not to disrupt this ongoing investigation, Your Affiant also requests that this Court order business entity NOT to take adverse action against the subject account, such as disabling or terminating the account, because of this warrant."
+      },
+      {
+        "key": "20-penalty-declaration",
+        "kind": "verbatim-paragraph",
+        "text": "Your Affiant declares under penalty of perjury that the foregoing is true and correct to the best of Your Affiant's knowledge and belief, and that this declaration was executed on the date listed below."
+      },
+      {
+        "key": "21-affiant-signature",
+        "kind": "co-affiant-signature"
+      },
+      {
+        "key": "22-judge-oath-affidavit",
+        "kind": "co-judge-oath-affidavit"
+      },
+      {
+        "key": "23-page-break",
+        "kind": "page-break"
+      },
+      {
+        "key": "24-warrant-caption",
+        "kind": "co-caption",
+        "documentTitle": "SEARCH WARRANT AND COURT ORDER FOR PRODUCTION OF RECORDS PURSUANT TO 18 U.S.C. \u00a72703, CRIM. P. 41, AND C.R.S. \u00a716-3-301, \u00a716-3-301.1 AND \u00a719-2.5-205"
+      },
+      {
+        "key": "25-warrant-intro",
+        "kind": "verbatim-paragraph",
+        "text": "The Court, upon review of an affidavit filed by {{agency.affiantRank}} {{agency.affiantName}}, {{agency.affiantBadge}}, which is incorporated by reference, in support of the issuance of this order, hereby orders the production of the following records, for which there is probable cause to believe are in the actual or constructive possession or control of the business entity known or described as:"
+      },
+      {
+        "key": "26-provider-block-warrant",
+        "kind": "co-provider-block"
+      },
+      {
+        "key": "27-warrant-pc-finding",
+        "kind": "verbatim-paragraph",
+        "text": "This Court also finds that there is probable cause to issue this search warrant and court order for production of the following described records or information pursuant to the provisions of 18 U.S.C. \u00a72703, the Colorado Rules of Criminal Procedure Rule 41, C.R.S. \u00a716-3-301, \u00a716-3-301.1, and \u00a719-2.5-205, namely that this property is stolen or embezzled, or is designed or intended for use as a means of committing a criminal offense, or which is or has been used as a means of committing a criminal offense, or the possession of which is illegal, or which would be material evidence in a subsequent criminal prosecution in this State or another state, or in any other state's court action upon a criminal investigation here or elsewhere."
+      },
+      {
+        "key": "28-records-lead-in-warrant",
+        "kind": "verbatim-paragraph",
+        "text": "The following records pertaining to the account(s) associated with any one or more of the following identifiers:"
+      },
+      {
+        "key": "29-target-account-warrant",
+        "kind": "target-account"
+      },
+      {
+        "key": "30-date-range-line-warrant",
+        "kind": "verbatim-paragraph",
+        "text": "From the period of {{addendum.dateRange.start}} to {{addendum.dateRange.end}}:"
+      },
+      {
+        "key": "31-items-to-seize-warrant",
+        "kind": "items-to-seize",
+        "style": "semicolons"
+      },
+      {
+        "key": "32-evidence-pertaining-warrant",
+        "kind": "verbatim-paragraph",
+        "text": "*These records will be searched for evidence pertaining the {{case.offenseDescription}} that occurred on {{case.offenseDate}}."
+      },
+      {
+        "key": "33-14-day-service",
+        "kind": "verbatim-paragraph",
+        "text": "This warrant and court order for the production of records shall be served upon the business entity to whom it is directed within fourteen days after being signed by the court."
+      },
+      {
+        "key": "34-35-day-production",
+        "kind": "verbatim-paragraph",
+        "text": "The business entity is ORDERED to produce the above-described records to the affiant or his/her designee within thirty-five (35) days of service."
+      },
+      {
+        "key": "35-records-to-header",
+        "kind": "constant",
+        "text": "The records should be provided to:"
+      },
+      {
+        "key": "36-affiant-contact",
+        "kind": "affiant-contact",
+        "fields": [
+          "affiantName",
+          "affiantEmail",
+          "affiantPhone"
+        ],
+        "labels": {
+          "affiantName": "",
+          "affiantEmail": "",
+          "affiantPhone": ""
+        },
+        "requiredFields": [
+          "affiantName",
+          "affiantEmail"
+        ]
+      },
+      {
+        "key": "37-attestation-of-accuracy",
+        "kind": "verbatim-paragraph",
+        "text": "The business entity shall also provide a notarized attestation of accuracy that the records produced represent complete and accurate copies of all records identified in this order that are in the actual or constructive possession or control of the business entity, signed by a custodian of records or other person with personal knowledge of the records produced. If the business entity does not produce all records identified in this order, it shall identify the records not produced. Failure to comply with this order shall support a finding of contempt of court."
+      },
+      {
+        "key": "38-return-and-inventory",
+        "kind": "verbatim-paragraph",
+        "text": "Upon receiving the records from the business entity, the peace officer named herein shall file a return and inventory with the court indicating the records that have been received and the date and time upon which the records were received. The peace officer named herein may also file the original of the attestation of accuracy with the court."
+      },
+      {
+        "key": "39-it-is-further-ordered-header",
+        "kind": "constant",
+        "text": "IT IS FURTHER ORDERED:"
+      },
+      {
+        "key": "40-ndo-order",
+        "kind": "verbatim-paragraph",
+        "text": "Pursuant to 18 U.S.C. \u00a7\u00a7 2703(b)(1)(A) and 2705(b)(1)-(5) that business entity and any of its employees or third-party vendors processing this request not disclose the existence of this search warrant and court order to the subscriber or to any third party for a period of one year from the date of service of this warrant, as such disclosure would seriously jeopardize the investigation by giving the subscriber an opportunity to destroy evidence, change patterns of behavior, intimidate witnesses, flee from prosecution, or otherwise impede the investigation."
+      },
+      {
+        "key": "41-no-adverse-action-order",
+        "kind": "verbatim-paragraph",
+        "text": "That business entity and any of its employees or third-party vendors processing this request not take adverse action against the subject account because of this warrant, such as shutting it down, so as not to disrupt this ongoing investigation."
+      },
+      {
+        "key": "42-judge-signature",
+        "kind": "co-judge-signature"
+      },
+      {
+        "key": "43-da-approval",
+        "kind": "co-da-approval"
+      }
+    ]
+  }
 ];
   for (var i = 0; i < TEMPLATES.length; i++) {
     try { TE.registerTemplate(TEMPLATES[i]); }

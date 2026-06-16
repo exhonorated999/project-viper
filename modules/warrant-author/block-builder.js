@@ -88,6 +88,18 @@
         const items = Array.isArray(rb.items) ? rb.items : [];
         if (items.length === 0) {
           out.push({ kind: 'paragraph', text: '[NO ITEMS SELECTED — review Items to Produce]' });
+        } else if (rb.style === 'semicolons') {
+          // CO semicolon-terminated paragraph list — one paragraph per
+          // item, each ending in ';' except the last which ends in '.'.
+          // Matches the verbatim formatting of CO Multi-Business ESP
+          // exemplars (no numbering, no lettering, no bullets).
+          items.forEach((it, i) => {
+            const body = _safe(it.description || it.label || it.name || it.key).trim();
+            if (!body) return;
+            const isLast = i === items.length - 1;
+            const cleaned = body.replace(/[.;]?\s*$/, '');
+            out.push({ kind: 'paragraph', text: cleaned + (isLast ? '.' : ';') });
+          });
         } else {
           out.push({
             kind: 'numbered',
@@ -114,6 +126,91 @@
             if (t) out.push({ kind: 'paragraph', text: t });
           }
         }
+        break;
+      }
+
+      // ─── CO-specific kinds ─────────────────────────────────────────────
+      case 'page-break':
+        out.push({ kind: 'page-break' });
+        break;
+
+      case 'co-caption': {
+        // Three-line caption + document title + Case No. line.
+        // Court name + JD + COLORADO on one line; Case No. centered;
+        // document title centered, bold.
+        const courtName = _safe(rb.courtName).trim() || 'COUNTY/DISTRICT COURT';
+        const jd = _safe(rb.judicialDistrict).trim();
+        const captionLine = `${courtName}, ${jd ? jd + ' JUDICIAL DISTRICT, ' : ''}COLORADO`.toUpperCase();
+        out.push({ kind: 'cover-subheading', text: captionLine });
+        const caseNo = _safe(rb.caseNumber).trim();
+        out.push({ kind: 'cover-meta', label: 'Case No.', value: caseNo || '[case number]' });
+        out.push({ kind: 'spacer', size: 'sm' });
+        const title = _safe(rb.documentTitle).trim();
+        if (title) out.push({ kind: 'cover-heading', text: title });
+        out.push({ kind: 'spacer', size: 'sm' });
+        break;
+      }
+
+      case 'co-provider-block': {
+        // Multi-line provider block. Render each line as its own
+        // paragraph so the composer preserves line breaks (PDF/DOCX
+        // would otherwise reflow a single paragraph).
+        if (text) {
+          text.split(/\r?\n/).forEach(ln => {
+            const t = ln.trim();
+            if (t) out.push({ kind: 'paragraph', text: t });
+          });
+        }
+        out.push({ kind: 'spacer', size: 'sm' });
+        break;
+      }
+
+      case 'co-affiant-signature': {
+        const jd = _safe(rb.judicialDistrict).trim();
+        out.push({ kind: 'spacer', size: 'md' });
+        out.push({
+          kind: 'paragraph',
+          text: `Subscribed and Sworn to in the ${jd ? jd : '_______'} Judicial District of Colorado`,
+        });
+        out.push({ kind: 'spacer', size: 'sm' });
+        out.push({ kind: 'signature', label: 'Signature of Affiant' });
+        break;
+      }
+
+      case 'co-judge-oath-affidavit': {
+        const jd = _safe(rb.judicialDistrict).trim();
+        out.push({ kind: 'spacer', size: 'md' });
+        out.push({
+          kind: 'paragraph',
+          text: `Subscribed under oath before me on this _____ day of ________________, 20____ in the ${jd ? jd : '_______'} Judicial District of Colorado`,
+        });
+        out.push({ kind: 'spacer', size: 'sm' });
+        out.push({ kind: 'signature', label: 'Signature of Judge' });
+        out.push({ kind: 'signature', label: 'Printed Name of Judge' });
+        break;
+      }
+
+      case 'co-judge-signature': {
+        const jd = _safe(rb.judicialDistrict).trim();
+        out.push({ kind: 'spacer', size: 'md' });
+        out.push({ kind: 'paragraph', text: 'Date' });
+        out.push({ kind: 'paragraph', text: `In the ${jd ? jd : '_______'} Judicial District, Colorado` });
+        out.push({ kind: 'spacer', size: 'sm' });
+        out.push({ kind: 'signature', label: 'Signature of Judge' });
+        out.push({ kind: 'signature', label: 'Printed Name of Judge' });
+        break;
+      }
+
+      case 'co-da-approval': {
+        const daName = _safe(rb.daName).trim();
+        const daTitle = _safe(rb.daTitle).trim() || 'District Attorney';
+        const daDeputy = _safe(rb.daDeputyLine).trim() || '[Chief][Senior] Deputy District Attorney';
+        out.push({ kind: 'spacer', size: 'md' });
+        out.push({ kind: 'paragraph', text: 'APPROVED AS TO FORM:' });
+        out.push({ kind: 'paragraph', text: daName || '[District Attorney Name]' });
+        out.push({ kind: 'paragraph', text: daTitle });
+        out.push({ kind: 'paragraph', text: 'By /s' });
+        out.push({ kind: 'paragraph', text: daDeputy });
         break;
       }
 
@@ -1141,6 +1238,41 @@
 
 
   /**
+   * CO Multi-Business ESP — combined Affidavit + Search Warrant and
+   * Court Order in a single document. The CO template (43 blocks)
+   * already lays out the entire two-page document including a hard
+   * page-break between the affidavit and the warrant; this builder
+   * simply walks addendumComposes and emits one full document per
+   * provider, with a page-break between providers.
+   *
+   * The template engine resolved ALL slots — including agency.daName,
+   * agency.affiantRank/Name/Badge, addendum.probableCause,
+   * addendum.dateRangeBasis, court.judicialDistrict, case.number,
+   * case.offenseDescription, case.offenseDate. The block-builder just
+   * maps each resolved block to its output kind via _mapResolvedBlock.
+   */
+  function _buildCoEsp(draft, agency, caseInfo, addendumComposes, pcNarrative) {
+    const blocks = [];
+    if (!Array.isArray(addendumComposes) || !addendumComposes.length) {
+      blocks.push({
+        kind: 'paragraph',
+        text: '[ No provider attached — add a provider addendum to render the CO Affidavit / Search Warrant. ]',
+      });
+      return blocks;
+    }
+    addendumComposes.forEach((ac, i) => {
+      if (i > 0) blocks.push({ kind: 'page-break' });
+      const composed = ac.compose || {};
+      const resolvedBlocks = Array.isArray(composed.blocks) ? composed.blocks : [];
+      for (const rb of resolvedBlocks) {
+        for (const m of _mapResolvedBlock(rb)) blocks.push(m);
+      }
+    });
+    return blocks;
+  }
+
+
+  /**
    * Top-level: build complete document block stream.
    */
   function build({ draft, addendumComposes, agency, caseInfo, pcNarrative, includeDisclaimer }) {
@@ -1164,10 +1296,51 @@
       _safe(draft.jurisdiction).toUpperCase() === 'VA' ||
       _safe(agency.state).toUpperCase() === 'VA'
     );
+    // Detect Colorado jurisdiction — switches to CO combined Affidavit +
+    // Search Warrant flow (single document, hard page-break inside).
+    // Resolved BEFORE the VA check so agency.state='VA' doesn't shadow
+    // an explicit CO template choice.
+    const isCo = (
+      _safe(draft.template) === 'co-multi-business-esp' ||
+      _safe(draft.jurisdiction).toUpperCase() === 'CO'
+    );
     const isResidential = (
       _safe(draft.type) === 'residential' ||
       _safe(draft.template) === 'ca-residential'
     );
+
+    // 0-CO) Colorado ESP flow — combined Affidavit + Search Warrant and
+    //       Court Order in a single document. Returns early; no cover
+    //       page, no PC narrative section, no addendum loop — the CO
+    //       template already encodes the full document layout.
+    if (isCo && !isResidential) {
+      for (const b of _buildCoEsp(draft, agency, caseInfo, addendumComposes, pcNarrative)) blocks.push(b);
+      const drNumberCo = _safe(draft.caseRef) || _safe(caseInfo.caseNumber) || '';
+      // Aggregate dangling slots from per-addendum compose envelopes.
+      const allDanglingCo = [];
+      for (const ac of addendumComposes) {
+        const cs = (ac.compose && Array.isArray(ac.compose.danglingSlots)) ? ac.compose.danglingSlots : [];
+        for (const d of cs) allDanglingCo.push(`${ac.addendumId || ac.providerKey || '?'}/${d}`);
+      }
+      return {
+        blocks,
+        meta: {
+          jurisdiction: 'CO',
+          // Aesthetic fidelity: CO exemplars do NOT use running headers or
+          // footers — the caption + Case No. lines print only on each
+          // page's body where the template emits them.
+          runningHeader: { enabled: false, lines: [] },
+          runningFooter: { enabled: false, drNumber: drNumberCo, revision: '' },
+        },
+        stats: {
+          addendums: addendumComposes.length,
+          totalBlocks: blocks.length,
+          danglingSlots: allDanglingCo,
+          pcAuthored: !!(pcNarrative && String(pcNarrative).trim().length > 0),
+          colorado: true,
+        },
+      };
+    }
 
     // 0-VA) Virginia ESP flow — DC-338 affidavit + DC-339 warrant + Attachment
     //       A (per provider) + Attachment B (Statement of Material Facts).
@@ -1359,7 +1532,7 @@
 
   const api = Object.freeze({
     build,
-    _internals: { _mapResolvedBlock, _abc, _buildCover, _buildCaFacePage, _buildProbableCause, _buildAddendum, _buildSignature, _buildCaStatementOfProbableCause, _buildVaEsp },
+    _internals: { _mapResolvedBlock, _abc, _buildCover, _buildCaFacePage, _buildProbableCause, _buildAddendum, _buildSignature, _buildCaStatementOfProbableCause, _buildVaEsp, _buildCoEsp },
   });
 
   if (typeof module !== 'undefined' && module.exports) {

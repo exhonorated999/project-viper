@@ -296,8 +296,16 @@ function _resolveItemsToSeize(block, ctx) {
     key: block.key,
     kind: block.kind,
     heading: block.heading || '',
+    style: block.style || '',
     text: items.length
-      ? items.map((it, i) => `  ${String.fromCharCode(97 + i)}. ${it.description}`).join('\n\n')
+      ? (block.style === 'semicolons'
+          ? items.map((it, i) => {
+              const body = (it.description || it.label || '').trim();
+              if (!body) return '';
+              const sep = (i === items.length - 1) ? '.' : ';';
+              return body.replace(/[.;]?\s*$/, '') + sep;
+            }).filter(Boolean).join('\n')
+          : items.map((it, i) => `  ${String.fromCharCode(97 + i)}. ${it.description}`).join('\n\n'))
       : '{{items.empty}}',
     items,
     danglingSlots: dangling,
@@ -365,6 +373,182 @@ function _resolveAffiantContact(block, ctx) {
   };
 }
 
+// ─── CO-SPECIFIC RESOLVERS ─────────────────────────────────────────────────
+// The CO Multi-Business ESP template emits a single combined document
+// (Affidavit + Search Warrant and Court Order). These resolvers handle
+// the layout-only block kinds the template adds. They do NOT format the
+// final output — the block-builder's CO branch does that, using the
+// substituted text + the per-kind metadata preserved here.
+
+function _resolveCoCaption(block, ctx) {
+  // ctx.court  = { name, judicialDistrict, county }   (from agency profile)
+  // ctx.case   = { number, ... }                       (from draft / case info)
+  const court = ctx.court || {};
+  const cs = ctx.case || {};
+  const dangling = [];
+  const name = String(court.name || '').trim() || 'COUNTY/DISTRICT COURT';
+  const jd = String(court.judicialDistrict || '').trim();
+  const titleRes = substituteSlots(block.documentTitle || '', ctx);
+  if (!jd) dangling.push('court.judicialDistrict');
+  if (!cs.number) dangling.push('case.number');
+  return {
+    key: block.key,
+    kind: block.kind,
+    heading: '',
+    text: '',
+    // Carry structured fields for the block-builder. (Composers read
+    // resolved.* fields by name when they need them.)
+    courtName: name,
+    judicialDistrict: jd,
+    county: String(court.county || '').trim(),
+    caseNumber: String(cs.number || '').trim(),
+    documentTitle: titleRes.text,
+    danglingSlots: dangling.concat(titleRes.danglingSlots || []),
+  };
+}
+
+function _resolveCoProviderBlock(block, ctx) {
+  // Concatenates: legalEntity → custodian (c/o) → ATTN → address lines →
+  // Registered Agent: → coRegisteredAgent → coRegisteredAgentAddress lines →
+  // Service provided via portal at <portalUrl>.
+  const provider = ctx.provider || {};
+  const dangling = [];
+  const lines = [];
+
+  // Primary custodian block
+  const legalEntity = String(provider.legalEntity || '').trim();
+  if (legalEntity) lines.push(legalEntity);
+  else dangling.push('provider.legalEntity');
+
+  // "c/o" line — name shown if provider has a display name distinct from
+  // legalEntity (e.g. "Cash App" → "c/o Block, Inc."). Optional.
+  const displayName = String(provider.name || '').trim();
+  if (displayName && legalEntity && displayName.toLowerCase() !== legalEntity.toLowerCase()) {
+    // Show "c/o {legalEntity}" beneath the display name. But we've already
+    // pushed legalEntity above; instead replace with the display name and
+    // add c/o.
+    lines[0] = displayName;
+    lines.push('c/o ' + legalEntity);
+  }
+
+  const custodian = String(provider.custodianAttention || '').trim();
+  if (custodian) lines.push('ATTN: ' + custodian);
+
+  const address = String(provider.address || '').trim();
+  if (address) {
+    // Address may be a single line or multi-line. Split on \n for display.
+    address.split(/\r?\n/).forEach(ln => { const t = ln.trim(); if (t) lines.push(t); });
+  } else {
+    dangling.push('provider.address');
+  }
+
+  // Registered Agent section (CO requirement for out-of-state ESPs).
+  const agent = String(provider.coRegisteredAgent || '').trim();
+  const agentAddr = String(provider.coRegisteredAgentAddress || '').trim();
+  if (agent || agentAddr) {
+    lines.push('Registered Agent:');
+    if (agent) lines.push(agent);
+    if (agentAddr) {
+      agentAddr.split(/\r?\n/).forEach(ln => { const t = ln.trim(); if (t) lines.push(t); });
+    }
+  } else {
+    // Soft warning — many CO templates DO include the registered agent.
+    // Not a hard dangle; the affiant can omit if the provider has none.
+  }
+
+  // Portal line (verbatim phrasing from CO samples).
+  const portal = String(provider.portalUrl || '').trim();
+  if (portal) lines.push('Service provided via portal at ' + portal);
+
+  return {
+    key: block.key,
+    kind: block.kind,
+    heading: '',
+    text: lines.join('\n'),
+    danglingSlots: dangling,
+  };
+}
+
+function _resolveCoAffiantSignature(block, ctx) {
+  // "Subscribed and Sworn to in the [N]th Judicial District, Colorado" +
+  // signature line.
+  const court = ctx.court || {};
+  const jd = String(court.judicialDistrict || '').trim();
+  const dangling = jd ? [] : ['court.judicialDistrict'];
+  return {
+    key: block.key,
+    kind: block.kind,
+    heading: '',
+    text: '',
+    judicialDistrict: jd,
+    danglingSlots: dangling,
+  };
+}
+
+function _resolveCoJudgeOathAffidavit(block, ctx) {
+  // "Subscribed under oath before me on this ___ day of ___, 20__ in
+  // the [N]th Judicial District, CO" + signature + printed name lines.
+  const court = ctx.court || {};
+  const jd = String(court.judicialDistrict || '').trim();
+  return {
+    key: block.key,
+    kind: block.kind,
+    heading: '',
+    text: '',
+    judicialDistrict: jd,
+    danglingSlots: jd ? [] : ['court.judicialDistrict'],
+  };
+}
+
+function _resolveCoJudgeSignature(block, ctx) {
+  // Date / In the [N]th Judicial District, Colorado / Signature of Judge /
+  // Printed Name of Judge.
+  const court = ctx.court || {};
+  const jd = String(court.judicialDistrict || '').trim();
+  return {
+    key: block.key,
+    kind: block.kind,
+    heading: '',
+    text: '',
+    judicialDistrict: jd,
+    danglingSlots: jd ? [] : ['court.judicialDistrict'],
+  };
+}
+
+function _resolveCoDaApproval(block, ctx) {
+  // APPROVED AS TO FORM:
+  // {{agency.daName}}
+  // {{agency.daTitle}}
+  // By /s
+  // {{agency.daDeputyLine}}
+  const agency = ctx.agency || {};
+  const dangling = [];
+  const daName = String(agency.daName || '').trim();
+  const daTitle = String(agency.daTitle || 'District Attorney').trim();
+  const daDeputy = String(agency.daDeputyLine || '[Chief][Senior] Deputy District Attorney').trim();
+  if (!daName) dangling.push('agency.daName');
+  return {
+    key: block.key,
+    kind: block.kind,
+    heading: '',
+    text: '',
+    daName,
+    daTitle,
+    daDeputyLine: daDeputy,
+    danglingSlots: dangling,
+  };
+}
+
+function _resolvePageBreak(block) {
+  return {
+    key: block.key,
+    kind: block.kind,
+    heading: '',
+    text: '',
+    danglingSlots: [],
+  };
+}
+
 // ─── BLOCK DISPATCH TABLE ──────────────────────────────────────────────────
 const RESOLVERS = Object.freeze({
   'constant':                _resolveConstant,
@@ -377,6 +561,14 @@ const RESOLVERS = Object.freeze({
   'provider-slot-paragraph': _resolveProviderSlotParagraph,
   'optional-paragraph':      _resolveOptional,
   'affiant-contact':         _resolveAffiantContact,
+  // CO-specific
+  'co-caption':              _resolveCoCaption,
+  'co-provider-block':       _resolveCoProviderBlock,
+  'co-affiant-signature':    _resolveCoAffiantSignature,
+  'co-judge-oath-affidavit': _resolveCoJudgeOathAffidavit,
+  'co-judge-signature':      _resolveCoJudgeSignature,
+  'co-da-approval':          _resolveCoDaApproval,
+  'page-break':              _resolvePageBreak,
 });
 
 // ─── COMPOSE ───────────────────────────────────────────────────────────────

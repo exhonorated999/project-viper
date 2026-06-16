@@ -1951,6 +1951,7 @@
                                         class="ml-auto px-3 py-1.5 bg-viper-dark border border-gray-600 rounded-lg text-sm text-white focus:border-viper-cyan outline-none">
                                         <option value="CA">California (CA)</option>
                                         <option value="VA">Virginia (VA) — DC-338/DC-339 ESP · Beta</option>
+                                        <option value="CO">Colorado (CO) — Multi-Business ESP · Beta</option>
                                     </select>
                                 </div>
                             </div>
@@ -2234,6 +2235,9 @@
                                 Change Password
                             </summary>
                             <div class="mt-3 ml-6 space-y-3">
+                                <div class="text-[11px] text-gray-500 leading-relaxed bg-viper-dark/40 border border-gray-800 rounded-md px-3 py-2">
+                                    Changing your password only rewraps the existing master key under the new password. <span class="text-gray-300">Your encrypted files (vault, case data, evidence) are not re-encrypted</span> — they continue to open with the new password.
+                                </div>
                                 <input id="secChangePw" type="password" placeholder="New password"
                                     class="w-full bg-viper-dark border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:border-viper-green focus:outline-none transition-colors">
                                 <input id="secChangePwConfirm" type="password" placeholder="Confirm new password"
@@ -2259,6 +2263,100 @@
                                 <button onclick="doNewRecoveryKey()" id="btnNewRecKey" class="px-4 py-2 bg-viper-purple/10 border border-viper-purple/30 text-viper-purple rounded-lg text-xs hover:bg-viper-purple/20 transition-colors">
                                     Generate New Key
                                 </button>
+                            </div>
+                        </details>
+
+                        <!-- ═══ Recover Lost Encrypted Data (v3.8.7) ═══ -->
+                        <details class="mb-4 group" id="secRecoveryPanel">
+                            <summary class="cursor-pointer text-sm text-amber-400/80 hover:text-amber-400 transition-colors flex items-center gap-2">
+                                <svg class="w-4 h-4 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86A2.07 2.07 0 0021 16.93L13.93 4a2.07 2.07 0 00-3.86 0L3 16.93A2.07 2.07 0 005.07 19z"/></svg>
+                                Recover Lost Encrypted Data
+                            </summary>
+                            <div class="mt-3 ml-6 space-y-3">
+                                <div class="bg-amber-400/5 border border-amber-400/20 rounded-lg p-3 text-xs text-amber-200/90 space-y-1">
+                                    <p class="font-medium">When to use this</p>
+                                    <p class="text-amber-200/70">Use only if your case files appear empty/locked after a disable→re-enable cycle, or after restoring a backup where Field Security keys no longer match. You'll need the <code class="bg-viper-dark px-1 rounded">security.json</code> from before the break, plus the password OR recovery key that paired with it.</p>
+                                </div>
+
+                                <!-- Step 1: Pick config file -->
+                                <div class="space-y-2">
+                                    <label class="text-xs text-gray-400 block">Original <code>security.json</code></label>
+                                    <div class="flex gap-2">
+                                        <input id="secRecCfgPath" type="text" readonly placeholder="Click Browse or Search to select…"
+                                            class="flex-1 bg-viper-dark border border-gray-700 rounded-lg px-3 py-2 text-white text-xs placeholder-gray-600">
+                                        <button onclick="recBrowseConfig()" class="px-3 py-2 bg-viper-cyan/10 border border-viper-cyan/30 text-viper-cyan rounded-lg text-xs hover:bg-viper-cyan/20 transition-colors">
+                                            Browse…
+                                        </button>
+                                        <button onclick="recSearchConfig()" id="secRecSearchBtn" class="px-3 py-2 bg-amber-400/10 border border-amber-400/30 text-amber-400 rounded-lg text-xs hover:bg-amber-400/20 transition-colors" title="Walk a folder tree looking for security.json and shadow backups">
+                                            Search PC…
+                                        </button>
+                                    </div>
+                                    <!-- Search results list (hidden until first search) -->
+                                    <div id="secRecSearchResults" class="hidden bg-viper-dark border border-gray-700 rounded-lg max-h-48 overflow-auto">
+                                        <div id="secRecSearchHeader" class="text-xs text-gray-400 px-3 py-2 border-b border-gray-700/50 sticky top-0 bg-viper-dark"></div>
+                                        <div id="secRecSearchList" class="divide-y divide-gray-800"></div>
+                                    </div>
+                                </div>
+
+                                <!-- Step 2: Credential kind + value -->
+                                <div class="space-y-2">
+                                    <label class="text-xs text-gray-400 block">Credential</label>
+                                    <div class="flex gap-2">
+                                        <select id="secRecCredKind" class="bg-viper-dark border border-gray-700 rounded-lg px-3 py-2 text-white text-xs focus:border-viper-cyan focus:outline-none">
+                                            <option value="password">Password</option>
+                                            <option value="recovery">Recovery Key</option>
+                                        </select>
+                                        <input id="secRecCredValue" type="password" placeholder="Enter password or VIPER-XXXX-..."
+                                            class="flex-1 bg-viper-dark border border-gray-700 rounded-lg px-3 py-2 text-white text-xs placeholder-gray-600 focus:border-viper-cyan focus:outline-none">
+                                    </div>
+                                    <p class="text-xs text-gray-500">The credential is sent to the main process and never logged or stored. It is cleared from memory when this panel is closed.</p>
+                                </div>
+
+                                <!-- Step 3: Working dir for pre-flight backup -->
+                                <div class="space-y-2">
+                                    <label class="text-xs text-gray-400 block">Pre-flight backup directory</label>
+                                    <div class="flex gap-2">
+                                        <input id="secRecWorkDir" type="text" readonly placeholder="Click Browse to select…"
+                                            class="flex-1 bg-viper-dark border border-gray-700 rounded-lg px-3 py-2 text-white text-xs placeholder-gray-600">
+                                        <button onclick="recBrowseWorkDir()" class="px-3 py-2 bg-viper-cyan/10 border border-viper-cyan/30 text-viper-cyan rounded-lg text-xs hover:bg-viper-cyan/20 transition-colors">
+                                            Browse…
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-gray-500">Every encrypted file is mirrored here as VIPENC bytes <em>before</em> any decrypt runs. Requires ~1.5× the scanned size free.</p>
+                                </div>
+
+                                <!-- Step 4: Validate / Run -->
+                                <div class="flex flex-wrap gap-2 pt-1">
+                                    <button onclick="recValidate()" id="secRecValidateBtn"
+                                        class="px-4 py-2 bg-viper-cyan/10 border border-viper-cyan/30 text-viper-cyan rounded-lg text-xs font-medium hover:bg-viper-cyan/20 transition-colors">
+                                        1. Validate Credentials
+                                    </button>
+                                    <button onclick="recScan()" id="secRecScanBtn" disabled
+                                        class="px-4 py-2 bg-viper-cyan/10 border border-viper-cyan/30 text-viper-cyan rounded-lg text-xs font-medium hover:bg-viper-cyan/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                                        2. Scan Disk
+                                    </button>
+                                    <button onclick="recRunFull()" id="secRecRunBtn" disabled
+                                        class="px-4 py-2 bg-amber-400/10 border border-amber-400/30 text-amber-400 rounded-lg text-xs font-medium hover:bg-amber-400/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                                        3. Pre-flight Backup + Decrypt
+                                    </button>
+                                    <button onclick="recDispose()" id="secRecResetBtn"
+                                        class="px-4 py-2 bg-gray-700/30 border border-gray-700/50 text-gray-400 rounded-lg text-xs font-medium hover:bg-gray-700/50 transition-colors">
+                                        Reset
+                                    </button>
+                                </div>
+
+                                <!-- Status / progress pane -->
+                                <div id="secRecStatus" class="hidden bg-viper-dark rounded-lg p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap max-h-64 overflow-auto"></div>
+                                <div id="secRecProgress" class="hidden">
+                                    <div class="flex justify-between text-xs text-gray-400 mb-1">
+                                        <span id="secRecProgressPhase">…</span>
+                                        <span id="secRecProgressCount">0 / 0</span>
+                                    </div>
+                                    <div class="h-1.5 bg-viper-dark rounded-full overflow-hidden">
+                                        <div id="secRecProgressBar" class="h-full bg-viper-cyan transition-all" style="width:0%"></div>
+                                    </div>
+                                </div>
                             </div>
                         </details>
 
@@ -2430,6 +2528,20 @@
                     <!-- Backup Status -->
                     <div id="backupStatus" class="hidden mb-6"></div>
 
+                    <!-- Encryption toggle (v3.8.7) — defaults OFF -->
+                    <div class="mb-4 p-3 bg-viper-dark/60 border border-gray-700/50 rounded-lg">
+                        <label class="flex items-start gap-3 cursor-pointer select-none">
+                            <input type="checkbox" id="backupEncryptToggle" class="mt-0.5 w-4 h-4 accent-viper-purple cursor-pointer">
+                            <div class="flex-1">
+                                <div class="text-sm text-gray-200 font-medium">Encrypt backup file</div>
+                                <div class="text-[11px] text-gray-500 leading-relaxed mt-0.5">
+                                    Off (recommended): the <code>.vbak</code> contains a plain ZIP of your cases — restorable on any machine, even if Field Security is later disabled or your key is lost.
+                                    On: seals the backup under your current Field Security key. Cannot be restored without the password/recovery key that was active when it was created.
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+
                     <!-- Backup Actions -->
                     <div class="flex gap-4">
                         <button 
@@ -2600,6 +2712,9 @@
                             getPlatform: function () { return (window.electronAPI && window.electronAPI.platform) || "unknown"; },
                         });
                         ViperTelemetry.appOpen();
+                        // v3.8.7: emit module_open so the dashboard
+                        // heatmap reflects that the user opened Settings.
+                        try { ViperTelemetry.moduleOpen('settings'); } catch (_) {}
                         window.__viper_session_start = Date.now();
                         window.addEventListener("beforeunload", function () {
                             ViperTelemetry.sessionEnd(Math.floor((Date.now() - window.__viper_session_start) / 1000));
@@ -3317,12 +3432,27 @@
             }
             errDiv.classList.add('hidden');
 
+            // changePassword() requires masterKey to rewrap.  If user
+            // jumped straight to Settings without unlocking, prompt now.
+            // NOTE: changing the password ONLY rewraps the master key
+            // under a new password-derived KEK.  The master key itself
+            // is unchanged, so existing encrypted files (vault, case
+            // files, evidence) continue to decrypt without re-encryption.
+            const unlocked = await _ensureSecurityUnlocked(
+                'Changing the password rewraps the existing master key. <strong>Your encrypted files are NOT touched</strong> — they will continue to open with the new password. Please unlock first to authorize the change.'
+            );
+            if (!unlocked) {
+                errDiv.textContent = 'Password change cancelled — Field Security is still locked.';
+                errDiv.classList.remove('hidden');
+                return;
+            }
+
             try {
                 const result = await window.electronAPI.securityChangePassword({ newPassword: pw });
                 if (result.success) {
                     document.getElementById('secChangePw').value = '';
                     document.getElementById('secChangePwConfirm').value = '';
-                    showNotification('Password updated successfully', 'success');
+                    showNotification('Password updated — encrypted files unaffected, master key rewrapped.', 'success');
                 } else {
                     errDiv.textContent = result.error || 'Failed to change password.';
                     errDiv.classList.remove('hidden');
@@ -3349,21 +3479,679 @@
             }
         }
 
-        async function doDisableSecurity() {
-            if (!await viperConfirm('This will disable encryption and decrypt your vault. Your case data will be stored unencrypted. Continue?')) return;
+        // Typed-confirmation modal — user must type a specific phrase
+        // to proceed.  Used for destructive ops where viperConfirm's
+        // one-click yes/no isn't enough friction.  Returns Promise<bool>.
+        function viperTypedConfirm({ title, html, requireType, okText = 'Confirm', danger = true }) {
+            return new Promise(resolve => {
+                const backdrop = document.createElement('div');
+                backdrop.className = 'viper-confirm-backdrop';
+                backdrop.style.zIndex = '9999';
+                backdrop.innerHTML = `
+                    <div class="viper-confirm-box" style="max-width:520px">
+                        <p style="font-weight:600;font-size:14px;margin-bottom:6px;color:${danger ? '#f87171' : '#06b6d4'}">${title}</p>
+                        <div style="font-size:12.5px;color:#d1d5db;margin-bottom:10px;line-height:1.45">${html}</div>
+                        <div style="font-size:11.5px;color:#9ca3af;margin-bottom:4px">Type <code style="color:#fbbf24;background:#1f2937;padding:1px 5px;border-radius:3px">${requireType}</code> to confirm:</div>
+                        <input type="text" id="_vtc_input" autocomplete="off" spellcheck="false"
+                            style="width:100%;background:#0f1014;border:1px solid #374151;border-radius:6px;padding:8px;color:#fff;font-size:13px;font-family:ui-monospace,monospace;letter-spacing:1px"/>
+                        <div class="viper-confirm-btns" style="margin-top:12px">
+                            <button class="vc-cancel">Cancel</button>
+                            <button class="${danger ? 'vc-danger' : 'vc-ok'}" id="_vtc_ok" disabled>${okText}</button>
+                        </div>
+                    </div>`;
+                const cancelBtn = backdrop.querySelector('.vc-cancel');
+                const okBtn = backdrop.querySelector('#_vtc_ok');
+                const input = backdrop.querySelector('#_vtc_input');
+                function close(val) { backdrop.style.opacity='0'; setTimeout(()=>backdrop.remove(),150); resolve(val); }
+                input.addEventListener('input', () => {
+                    okBtn.disabled = input.value.trim() !== requireType;
+                });
+                cancelBtn.onclick = () => close(false);
+                okBtn.onclick = () => close(true);
+                backdrop.onclick = (e) => { if (e.target === backdrop) close(false); };
+                document.addEventListener('keydown', function handler(e) {
+                    if (e.key === 'Escape') { document.removeEventListener('keydown', handler); close(false); }
+                    if (e.key === 'Enter' && !okBtn.disabled) { document.removeEventListener('keydown', handler); close(true); }
+                });
+                document.body.appendChild(backdrop);
+                setTimeout(()=>input.focus(),50);
+            });
+        }
+
+        function _fmtBytes(n) {
+            if (!n || n < 1024) return (n||0) + ' B';
+            if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+            if (n < 1024*1024*1024) return (n/(1024*1024)).toFixed(1) + ' MB';
+            return (n/(1024*1024*1024)).toFixed(2) + ' GB';
+        }
+
+        // ─── Busy-overlay helper ──────────────────────────────────
+        // Modal full-screen spinner used during sync main-process I/O
+        // (disk scan, decrypt walk).  Without this the renderer paints
+        // nothing while the IPC promise is pending and Windows marks
+        // the window "Not Responding".  All progress text + bar lives
+        // inside this overlay.  Updates are throttled to ~10 Hz via
+        // requestAnimationFrame so per-file IPC bursts don't swamp the
+        // renderer's compositor.
+        let _busyOverlay = null;
+        let _busyState = null;
+        let _busyRaf = 0;
+        function _busyShow({ title, subtitle = '', danger = false }) {
+            if (_busyOverlay) return; // already up
+            const el = document.createElement('div');
+            el.className = 'viper-confirm-backdrop';
+            el.style.zIndex = '10000';
+            el.style.cursor = 'wait';
+            const accent = danger ? '#f87171' : '#06b6d4';
+            el.innerHTML = `
+                <div class="viper-confirm-box" style="max-width:520px;text-align:center">
+                    <div style="display:flex;justify-content:center;margin-bottom:14px">
+                        <div class="_busy-spin" style="
+                            width:46px;height:46px;border-radius:50%;
+                            border:3px solid #1f2937;
+                            border-top-color:${accent};
+                            animation:_busy-rot 0.9s linear infinite"></div>
+                    </div>
+                    <p id="_busy_title" style="font-weight:600;font-size:15px;margin:0 0 6px;color:${accent}">${title}</p>
+                    <p id="_busy_sub" style="font-size:12.5px;color:#9ca3af;margin:0 0 12px;min-height:18px">${subtitle}</p>
+                    <div style="font-family:ui-monospace,monospace;font-size:11px;color:#d1d5db;background:#0f1014;border:1px solid #1f2937;border-radius:6px;padding:8px;text-align:left;min-height:34px;max-height:60px;overflow:hidden">
+                        <div id="_busy_path" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl">…preparing…</div>
+                    </div>
+                    <div style="margin-top:12px">
+                        <div style="display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;margin-bottom:4px">
+                            <span id="_busy_phase">working…</span>
+                            <span id="_busy_count">0 / 0</span>
+                        </div>
+                        <div style="height:6px;background:#1f2937;border-radius:3px;overflow:hidden">
+                            <div id="_busy_bar" style="height:100%;width:0%;background:${accent};transition:width 120ms linear"></div>
+                        </div>
+                    </div>
+                    <p style="font-size:10.5px;color:#6b7280;margin-top:14px">Do not close VIPER. The window may briefly show 'Not Responding' — that's the disk walk, not a crash.</p>
+                </div>`;
+            // inject keyframes once
+            if (!document.getElementById('_busy_kf')) {
+                const s = document.createElement('style');
+                s.id = '_busy_kf';
+                s.textContent = '@keyframes _busy-rot { from { transform: rotate(0); } to { transform: rotate(360deg); } }';
+                document.head.appendChild(s);
+            }
+            document.body.appendChild(el);
+            _busyOverlay = el;
+            _busyState = { phase: '', current: 0, total: 0, path: '', dirty: false };
+        }
+        function _busyUpdate(p) {
+            if (!_busyOverlay || !_busyState) return;
+            Object.assign(_busyState, p);
+            _busyState.dirty = true;
+            if (_busyRaf) return;
+            _busyRaf = requestAnimationFrame(() => {
+                _busyRaf = 0;
+                if (!_busyOverlay || !_busyState || !_busyState.dirty) return;
+                _busyState.dirty = false;
+                const s = _busyState;
+                const phaseEl = document.getElementById('_busy_phase');
+                const countEl = document.getElementById('_busy_count');
+                const pathEl  = document.getElementById('_busy_path');
+                const barEl   = document.getElementById('_busy_bar');
+                if (phaseEl) phaseEl.textContent = s.phase || 'working…';
+                if (countEl) countEl.textContent = `${s.current||0} / ${s.total||0}`;
+                if (pathEl)  pathEl.textContent  = s.path || '';
+                if (barEl) {
+                    const pct = s.total ? Math.max(0, Math.min(100, (s.current/s.total)*100)) : 0;
+                    barEl.style.width = pct + '%';
+                }
+            });
+        }
+        function _busySetSubtitle(text) {
+            const el = document.getElementById('_busy_sub');
+            if (el) el.textContent = text;
+        }
+        function _busyHide() {
+            if (_busyRaf) { cancelAnimationFrame(_busyRaf); _busyRaf = 0; }
+            if (_busyOverlay) {
+                _busyOverlay.style.opacity = '0';
+                const el = _busyOverlay;
+                setTimeout(() => { try { el.remove(); } catch (_) {} }, 150);
+            }
+            _busyOverlay = null;
+            _busyState = null;
+        }
+        // Force the browser to flush a paint before we start a sync
+        // operation.  rAF queues us for the next frame; the inner
+        // setTimeout(0) yields the macrotask after that frame commits.
+        function _flushPaint() {
+            return new Promise(resolve =>
+                requestAnimationFrame(() => setTimeout(resolve, 0))
+            );
+        }
+
+        // ─── Inline unlock prompt (used by disable & password change) ───
+        // Returns true on successful unlock, false on cancel/failure.
+        // Renders a modal w/ password input + recovery-key fallback so
+        // the user never has to leave the Settings page to authenticate.
+        async function _ensureSecurityUnlocked(reasonHtml) {
             try {
+                if (!window.electronAPI || !window.electronAPI.securityCheck) return true;
+                const s = await window.electronAPI.securityCheck();
+                if (!s.enabled) return true;       // not configured ⇒ nothing to unlock
+                if (s.unlocked) return true;       // already unlocked ⇒ proceed
+            } catch (_) { /* fall through, try prompt */ }
+
+            return new Promise((resolve) => {
+                const overlay = document.createElement('div');
+                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:10000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
+                overlay.innerHTML = `
+                    <div style="background:#111827;border:1px solid #f59e0b;border-radius:10px;padding:24px;max-width:480px;width:92%;box-shadow:0 25px 60px rgba(0,0,0,0.5)">
+                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+                            <svg style="width:22px;height:22px;color:#f59e0b" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m0-10a4 4 0 014 4v3H8v-3a4 4 0 014-4z"/><rect x="5" y="11" width="14" height="10" rx="2" stroke-width="2"/></svg>
+                            <h3 style="color:#fbbf24;font-size:16px;font-weight:600;margin:0">Unlock Field Security</h3>
+                        </div>
+                        <div style="color:#d1d5db;font-size:13px;line-height:1.5;margin-bottom:14px">${reasonHtml || 'Enter your password to authorize this operation.'}</div>
+                        <input id="_inlineUnlockPw" type="password" placeholder="Password"
+                            style="width:100%;background:#0b0f1a;border:1px solid #374151;border-radius:6px;padding:9px 11px;color:#fff;font-size:13px;margin-bottom:8px" />
+                        <div style="font-size:11px;color:#9ca3af;margin-bottom:8px">Or use recovery key (<code style="background:#1f2937;padding:1px 4px;border-radius:3px">VIPER-XXXX-XXXX-…</code>)</div>
+                        <input id="_inlineUnlockRk" type="text" placeholder="VIPER-XXXX-XXXX-XXXX-XXXX-XXXX (optional)"
+                            style="width:100%;background:#0b0f1a;border:1px solid #374151;border-radius:6px;padding:9px 11px;color:#fff;font-size:12px;font-family:ui-monospace,Menlo,monospace;letter-spacing:.5px;margin-bottom:8px" />
+                        <div id="_inlineUnlockErr" style="display:none;color:#f87171;font-size:12px;margin-bottom:10px;padding:6px 8px;background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.25);border-radius:5px"></div>
+                        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
+                            <button id="_inlineUnlockCancel" style="background:#374151;border:none;color:#d1d5db;padding:8px 14px;border-radius:6px;font-size:12px;cursor:pointer">Cancel</button>
+                            <button id="_inlineUnlockOk" style="background:#f59e0b;border:none;color:#000;padding:8px 18px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">Unlock</button>
+                        </div>
+                    </div>`;
+                document.body.appendChild(overlay);
+                const pw = overlay.querySelector('#_inlineUnlockPw');
+                const rk = overlay.querySelector('#_inlineUnlockRk');
+                const err = overlay.querySelector('#_inlineUnlockErr');
+                setTimeout(() => pw.focus(), 30);
+                const cleanup = (val) => { try { overlay.remove(); } catch (_) {} resolve(val); };
+                overlay.querySelector('#_inlineUnlockCancel').onclick = () => cleanup(false);
+                const tryUnlock = async () => {
+                    err.style.display = 'none';
+                    const pwVal = pw.value;
+                    const rkVal = rk.value.trim();
+                    if (!pwVal && !rkVal) { err.textContent = 'Enter password or recovery key.'; err.style.display = 'block'; return; }
+                    try {
+                        let res;
+                        if (rkVal) {
+                            res = await window.electronAPI.securityRecover({ recoveryKey: rkVal });
+                        } else {
+                            res = await window.electronAPI.securityUnlock({ password: pwVal });
+                        }
+                        if (res && res.success) { cleanup(true); }
+                        else { err.textContent = 'Invalid credential — try again.'; err.style.display = 'block'; pw.value = ''; rk.value = ''; pw.focus(); }
+                    } catch (e) {
+                        err.textContent = 'Unlock failed: ' + (e.message || e);
+                        err.style.display = 'block';
+                    }
+                };
+                overlay.querySelector('#_inlineUnlockOk').onclick = tryUnlock;
+                pw.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryUnlock(); });
+                rk.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryUnlock(); });
+            });
+        }
+
+        // ─── Persistent failure banner for disable flow ───────────────
+        function _showDisableFailureBanner(message, detail) {
+            let banner = document.getElementById('secDisableFailBanner');
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'secDisableFailBanner';
+                banner.style.cssText = 'margin:12px 0;padding:12px 14px;background:rgba(220,38,38,0.08);border:1px solid rgba(248,113,113,0.4);border-radius:8px;color:#fca5a5;font-size:13px;line-height:1.5;display:flex;gap:10px;align-items:flex-start';
+                const secEnabledDiv = document.getElementById('secEnabled');
+                if (secEnabledDiv) secEnabledDiv.insertBefore(banner, secEnabledDiv.firstChild);
+            }
+            banner.innerHTML = `
+                <svg style="width:18px;height:18px;color:#f87171;flex-shrink:0;margin-top:1px" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86A2.07 2.07 0 0021 16.93L13.93 4a2.07 2.07 0 00-3.86 0L3 16.93A2.07 2.07 0 005.07 19z"/></svg>
+                <div style="flex:1">
+                    <div style="font-weight:600;color:#fca5a5;margin-bottom:3px">Disable failed</div>
+                    <div style="color:#fecaca;font-size:12px">${message}</div>
+                    ${detail ? `<details style="margin-top:6px"><summary style="cursor:pointer;color:#fca5a5;font-size:11px">Details</summary><pre style="background:#1f0f0f;border:1px solid #5c1a1a;border-radius:4px;padding:6px;margin-top:4px;font-size:11px;color:#fca5a5;overflow:auto;max-height:160px;white-space:pre-wrap">${detail}</pre></details>` : ''}
+                </div>
+                <button onclick="document.getElementById('secDisableFailBanner').remove()" style="background:transparent;border:none;color:#fca5a5;cursor:pointer;font-size:18px;line-height:1">×</button>`;
+        }
+        function _clearDisableFailureBanner() {
+            const b = document.getElementById('secDisableFailBanner');
+            if (b) b.remove();
+        }
+
+        async function doDisableSecurity() {
+            // STAGE 0 — must be unlocked to know the masterKey.  If the
+            // user landed on Settings without going through the lock
+            // screen (e.g. opened via taskbar shortcut, fresh launch
+            // straight to Settings), prompt inline.  Without this, the
+            // disable() call throws "Not unlocked" silently and the UI
+            // looks like nothing happened.
+            _clearDisableFailureBanner();
+            const unlocked = await _ensureSecurityUnlocked(
+                '<strong>Disabling Field Security</strong> requires unlocking first so VIPER can decrypt every protected file. Without unlocking, the master key is unavailable and no files can be decrypted.'
+            );
+            if (!unlocked) {
+                showNotification('Disable cancelled — Field Security stays locked.', 'info');
+                return;
+            }
+
+            // STAGE 1 — pre-scan disk so the user sees the exact blast
+            // radius before they confirm.  Without this scan the user
+            // sees "Continue?" with no concrete numbers, which is what
+            // bit the original affected user.
+            let summary = null;
+            try {
+                _busyShow({ title: 'Scanning disk for encrypted files…',
+                            subtitle: 'Walking userdata + cases roots.  This is read-only.',
+                            danger: false });
+                _busyUpdate({ phase: 'scanning', current: 0, total: 0, path: '(read-only walk)' });
+                await _flushPaint();                  // commit the overlay BEFORE the IPC blocks
+                summary = await window.electronAPI.securityScanEncryptedSummary();
+            } catch (e) {
+                summary = { success: false, error: e.message };
+            } finally {
+                _busyHide();
+            }
+
+            const fileCount = (summary && summary.success) ? summary.totalFiles : null;
+            const byteCount = (summary && summary.success) ? summary.totalBytes : 0;
+            const rootsLines = (summary && summary.success && Array.isArray(summary.byRoot))
+                ? summary.byRoot.map(r => `&nbsp;&nbsp;<code>${r.root}</code> — ${r.files} file(s), ${_fmtBytes(r.bytes)}`).join('<br>')
+                : '<span style="color:#9ca3af">(scan failed — proceed with caution)</span>';
+
+            // STAGE 2 — show typed-confirmation modal w/ exact counts.
+            const warnHtml = `
+                <p style="margin-bottom:8px">Field Security is currently <strong style="color:#f87171">protecting your case data</strong>. Disabling will:</p>
+                <ul style="margin-left:18px;list-style:disc;margin-bottom:10px">
+                    <li>Walk every encrypted file on disk and rewrite it as plaintext</li>
+                    <li>Permanently turn off encryption until you re-enable</li>
+                    <li>Take several minutes for large case loads (no abort once started)</li>
+                </ul>
+                <div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px;margin-bottom:10px">
+                    <div style="font-size:11px;color:#fbbf24;margin-bottom:4px;font-weight:600">Pre-scan results</div>
+                    <div style="font-size:12px">${fileCount !== null
+                        ? `<strong style="color:#fbbf24">${fileCount.toLocaleString()}</strong> encrypted file(s) found, total <strong>${_fmtBytes(byteCount)}</strong><br><br>${rootsLines}`
+                        : rootsLines}</div>
+                </div>
+                <p style="color:#fca5a5;font-size:12px;font-weight:600">⚠ Strongly recommended: take a full backup of <code>userdata/</code> and <code>cases/</code> first.</p>`;
+            const ok = await viperTypedConfirm({
+                title: 'Disable Field Security?',
+                html: warnHtml,
+                requireType: 'DISABLE',
+                okText: 'Decrypt All & Disable',
+                danger: true
+            });
+            if (!ok) return;
+
+            // STAGE 3 — run the disable with per-file progress shown
+            // in the busy overlay (throttled to ~10 Hz via rAF).
+            let off = null;
+            try {
+                _busyShow({ title: 'Decrypting files…',
+                            subtitle: `Rewriting ${fileCount || 'all'} encrypted file(s) as plaintext.`,
+                            danger: true });
+                _busyUpdate({ phase: 'decrypting', current: 0, total: fileCount || 0, path: '' });
+                await _flushPaint();
+
+                if (window.electronAPI.securityDisableOnProgress) {
+                    off = window.electronAPI.securityDisableOnProgress((p) => {
+                        // Mirror to recovery log pane if the panel is open
+                        try {
+                            const box = document.getElementById('secRecStatus');
+                            if (box && !box.classList.contains('hidden')) {
+                                const tail = `[disable] ${p.phase} ${p.current||0}/${p.total||0} ${p.path||''}\n`;
+                                box.textContent = (box.textContent + tail).split('\n').slice(-200).join('\n');
+                                box.scrollTop = box.scrollHeight;
+                            }
+                        } catch (_) {}
+                        // Drive the overlay (throttled internally)
+                        _busyUpdate(p);
+                    });
+                }
+
                 const result = await window.electronAPI.securityDisable();
+                _busyHide();
+
                 if (result.success) {
-                    document.getElementById('secEnabled').classList.add('hidden');
-                    document.getElementById('secDisabled').classList.remove('hidden');
-                    showNotification('Field Security disabled', 'success');
+                    // Trust the source of truth: re-query main for actual state.
+                    // Belt-and-suspenders so the UI can never disagree with the
+                    // on-disk security.json after this transition.
+                    try { await loadSecurityState(); } catch (_) {}
+                    const r = result.report || {};
+                    const dec = (r.decrypted || []).length;
+                    const failed = (r.failed || []).length;
+                    if (failed > 0) {
+                        showNotification(`Disabled — ${dec} decrypted, ${failed} failed. See Audit Log.`, 'warning');
+                    } else {
+                        showNotification(`Field Security disabled (${dec} files decrypted)`, 'success');
+                    }
                 } else {
-                    showNotification('Failed: ' + (result.error || 'Unknown error'), 'error');
+                    const msg = result.error || 'Unknown error';
+                    _showDisableFailureBanner(
+                        msg === 'Not unlocked'
+                            ? 'Field Security must be unlocked first. Click "Decrypt All & Disable" again and enter your password when prompted.'
+                            : `The disable operation could not complete: ${msg}`,
+                        msg
+                    );
+                    showNotification('Disable failed — see banner above for details.', 'error');
                 }
             } catch (e) {
-                showNotification('Failed: ' + e.message, 'error');
+                _busyHide();
+                _showDisableFailureBanner(
+                    `Unexpected error: ${e.message}`,
+                    (e.stack || e.message || String(e))
+                );
+                showNotification('Disable failed — see banner above for details.', 'error');
+            } finally {
+                try { if (off) off(); } catch (_) {}
             }
         }
+
+        // ═════════════════════════════════════════════════════════════
+        // Field Security Recovery (v3.8.7)
+        // ═════════════════════════════════════════════════════════════
+        // Recovers VIPENC-encrypted files using an externally-supplied
+        // security.json + the password OR recovery key that paired with
+        // it.  Workflow: Validate → Scan → Pre-flight backup + Decrypt.
+        let _secRecSessionId = null;
+        let _secRecOffProgress = null;
+        let _secRecScanResult = null;
+
+        function _recLog(line) {
+            const box = document.getElementById('secRecStatus');
+            if (!box) return;
+            box.classList.remove('hidden');
+            box.textContent = (box.textContent + line + '\n').split('\n').slice(-200).join('\n');
+            box.scrollTop = box.scrollHeight;
+        }
+        function _recProg(phase, current, total) {
+            const wrap = document.getElementById('secRecProgress');
+            if (!wrap) return;
+            wrap.classList.remove('hidden');
+            document.getElementById('secRecProgressPhase').textContent = phase;
+            document.getElementById('secRecProgressCount').textContent = `${current||0} / ${total||0}`;
+            const pct = total ? Math.max(0, Math.min(100, Math.round((current/total)*100))) : 0;
+            document.getElementById('secRecProgressBar').style.width = pct + '%';
+        }
+        function _recAttachProgress() {
+            if (_secRecOffProgress) return;
+            if (!window.electronAPI.securityRecoveryOnProgress) return;
+            _secRecOffProgress = window.electronAPI.securityRecoveryOnProgress((p) => {
+                _recProg(p.phase, p.current, p.total);
+                if (p.path) _recLog(`  ${p.phase} ${p.current}/${p.total} ${p.path}`);
+            });
+        }
+        function _recDetachProgress() {
+            try { if (_secRecOffProgress) _secRecOffProgress(); } catch (_) {}
+            _secRecOffProgress = null;
+        }
+
+        async function recBrowseConfig() {
+            try {
+                const p = await window.electronAPI.securityRecoveryPickConfig();
+                if (p) document.getElementById('secRecCfgPath').value = p;
+            } catch (e) { showNotification('Browse failed: ' + e.message, 'error'); }
+        }
+        async function recBrowseWorkDir() {
+            try {
+                const p = await window.electronAPI.securityRecoveryPickWorkingDir();
+                if (p) document.getElementById('secRecWorkDir').value = p;
+            } catch (e) { showNotification('Browse failed: ' + e.message, 'error'); }
+        }
+
+        async function recValidate() {
+            const cfg = document.getElementById('secRecCfgPath').value.trim();
+            const kind = document.getElementById('secRecCredKind').value;
+            const cred = document.getElementById('secRecCredValue').value;
+            if (!cfg)  return showNotification('Pick a security.json first', 'warning');
+            if (!cred) return showNotification('Enter a password or recovery key', 'warning');
+
+            // Dispose any previous session first
+            if (_secRecSessionId) {
+                try { await window.electronAPI.securityRecoveryDispose({ sessionId: _secRecSessionId }); } catch (_) {}
+                _secRecSessionId = null;
+            }
+
+            _recLog(`Validating ${kind} against ${cfg}…`);
+            try {
+                const r = await window.electronAPI.securityRecoveryCreateSession({
+                    configPath: cfg,
+                    credential: cred,
+                    credentialKind: kind
+                });
+                if (!r.success) {
+                    _recLog(`  ✗ ${r.error}`);
+                    showNotification('Credentials rejected: ' + r.error, 'error');
+                    return;
+                }
+                _secRecSessionId = r.sessionId;
+                _recLog(`  ✓ Master key derived (session ${r.sessionId.slice(0,8)}…)`);
+                showNotification('Credentials valid', 'success');
+                document.getElementById('secRecScanBtn').disabled = false;
+            } catch (e) {
+                _recLog(`  ✗ ${e.message}`);
+                showNotification('Validate failed: ' + e.message, 'error');
+            }
+        }
+
+        async function recScan() {
+            if (!_secRecSessionId) return showNotification('Validate credentials first', 'warning');
+            _recLog('Scanning userdata/ and cases/ for VIPENC blobs…');
+            _recAttachProgress();
+            try {
+                _busyShow({ title: 'Scanning for encrypted files…',
+                            subtitle: 'Walking userdata + cases roots.  Read-only.',
+                            danger: false });
+                _busyUpdate({ phase: 'scanning', current: 0, total: 0, path: '' });
+                await _flushPaint();
+                const r = await window.electronAPI.securityRecoveryScan({ sessionId: _secRecSessionId });
+                _busyHide();
+                if (!r.success) {
+                    _recLog(`  ✗ ${r.error}`);
+                    return showNotification('Scan failed: ' + r.error, 'error');
+                }
+                _secRecScanResult = r;
+                _recLog(`  → ${r.totalFiles} encrypted files, ${Math.round((r.totalBytes||0)/1024/1024)} MB across ${(r.roots||[]).length} root(s)`);
+                for (const root of (r.roots||[])) {
+                    const stats = r.byRoot && r.byRoot[root];
+                    if (stats) _recLog(`    ${root}: ${stats.files} files / ${Math.round((stats.bytes||0)/1024/1024)} MB`);
+                }
+                if (r.totalFiles === 0) {
+                    showNotification('No VIPENC files found — nothing to recover', 'info');
+                } else {
+                    document.getElementById('secRecRunBtn').disabled = false;
+                    showNotification(`Found ${r.totalFiles} encrypted files`, 'success');
+                }
+            } catch (e) {
+                _busyHide();
+                _recLog(`  ✗ ${e.message}`);
+                showNotification('Scan failed: ' + e.message, 'error');
+            }
+        }
+
+        async function recRunFull() {
+            if (!_secRecSessionId) return showNotification('Validate credentials first', 'warning');
+            if (!_secRecScanResult) return showNotification('Run scan first', 'warning');
+            const workingDir = document.getElementById('secRecWorkDir').value.trim();
+            if (!workingDir) return showNotification('Pick a working directory for pre-flight backup', 'warning');
+
+            const sz = Math.round(_secRecScanResult.totalBytes / 1024 / 1024);
+            const confirmMsg =
+                `This will:\n\n` +
+                `  1. Copy all ${_secRecScanResult.totalFiles} encrypted files (${sz} MB) into:\n` +
+                `       ${workingDir}\n\n` +
+                `  2. Decrypt each original in place via atomic-rename.\n\n` +
+                `Requires ~${Math.ceil(sz * 1.5)} MB free on the working drive.\n\n` +
+                `Continue?`;
+            if (!await viperConfirm(confirmMsg)) return;
+
+            _recAttachProgress();
+            document.getElementById('secRecRunBtn').disabled = true;
+            try {
+                _recLog(`Pre-flight backup → ${workingDir}`);
+                _busyShow({ title: 'Pre-flight backup…',
+                            subtitle: `Mirroring ${_secRecScanResult.totalFiles} encrypted file(s) to ${workingDir}`,
+                            danger: false });
+                _busyUpdate({ phase: 'copying', current: 0, total: _secRecScanResult.totalFiles, path: '' });
+                // Drive the overlay from the recovery progress stream
+                const overlayBridgeOff = window.electronAPI.securityRecoveryOnProgress((p) => _busyUpdate(p));
+                await _flushPaint();
+                const pf = await window.electronAPI.securityRecoveryPreflight({
+                    sessionId: _secRecSessionId,
+                    workingDir
+                });
+                if (!pf.success) {
+                    _busyHide();
+                    try { overlayBridgeOff && overlayBridgeOff(); } catch (_) {}
+                    _recLog(`  ✗ Pre-flight failed: ${pf.error}`);
+                    showNotification('Pre-flight failed: ' + pf.error, 'error');
+                    return;
+                }
+                _recLog(`  ✓ Backup written to ${pf.backupDir} (${pf.copiedFiles} files)`);
+
+                _recLog('Decrypting…');
+                _busyShow({ title: 'Decrypting files…',
+                            subtitle: `Atomic-rename rewrite of ${_secRecScanResult.totalFiles} file(s).  Crash-safe.`,
+                            danger: true });
+                _busyUpdate({ phase: 'decrypting', current: 0, total: _secRecScanResult.totalFiles, path: '' });
+                await _flushPaint();
+                const dr = await window.electronAPI.securityRecoveryDecryptAll({
+                    sessionId: _secRecSessionId
+                });
+                _busyHide();
+                try { overlayBridgeOff && overlayBridgeOff(); } catch (_) {}
+                if (!dr.success) {
+                    _recLog(`  ✗ Decrypt failed: ${dr.error}`);
+                    return showNotification('Decrypt failed: ' + dr.error, 'error');
+                }
+                const rep = dr.report || {};
+                _recLog(`  ✓ Decrypted ${rep.decrypted.length}`);
+                if (rep.skipped.length) _recLog(`  • Skipped (already plain): ${rep.skipped.length}`);
+                if (rep.failed.length) {
+                    _recLog(`  ✗ Failed: ${rep.failed.length}`);
+                    for (const f of rep.failed.slice(0, 10)) _recLog(`     ${f.path}  —  ${f.error}`);
+                }
+                if (rep.failed.length === 0) {
+                    showNotification(`Recovery complete: ${rep.decrypted.length} files decrypted`, 'success');
+                } else {
+                    showNotification(`Recovery finished with ${rep.failed.length} failure(s) — see status pane`, 'warning');
+                }
+            } catch (e) {
+                _busyHide();
+                _recLog(`  ✗ ${e.message}`);
+                showNotification('Recovery failed: ' + e.message, 'error');
+            } finally {
+                _recDetachProgress();
+                document.getElementById('secRecRunBtn').disabled = false;
+            }
+        }
+
+        // Search this PC for security.json + shadow backups.  Walks
+        // a folder tree the user picks (default: SystemDrive root).
+        // Defensive: max 90s / 200 hits / depth 8, skips system dirs.
+        let _secRecSearchOff = null;
+        async function recSearchConfig() {
+            try {
+                const root = await window.electronAPI.securityRecoveryPickSearchRoot();
+                if (!root) return;
+
+                const list = document.getElementById('secRecSearchList');
+                const header = document.getElementById('secRecSearchHeader');
+                const wrap = document.getElementById('secRecSearchResults');
+                const searchBtn = document.getElementById('secRecSearchBtn');
+                list.innerHTML = '';
+                wrap.classList.remove('hidden');
+                searchBtn.disabled = true;
+                searchBtn.textContent = 'Searching…';
+                header.textContent = `Scanning ${root} — this may take up to 90 seconds.`;
+                _recLog(`Search: walking ${root} for security.json…`);
+
+                // Live progress: dirs scanned + hit count
+                try { if (_secRecSearchOff) _secRecSearchOff(); } catch (_) {}
+                _secRecSearchOff = window.electronAPI.securityRecoverySearchOnProgress((p) => {
+                    try {
+                        header.textContent = `Scanning… ${p.dirsScanned} folders · ${p.hits} hit(s)`;
+                    } catch (_) {}
+                });
+
+                const r = await window.electronAPI.securityRecoverySearchConfig({ root });
+                try { if (_secRecSearchOff) _secRecSearchOff(); } catch (_) {}
+                _secRecSearchOff = null;
+                searchBtn.disabled = false;
+                searchBtn.textContent = 'Search PC…';
+
+                if (!r.success) {
+                    header.textContent = `Search failed: ${r.error || 'unknown'}`;
+                    _recLog(`Search FAILED: ${r.error}`);
+                    return;
+                }
+                const truncated = r.stats && r.stats.truncated;
+                const elapsedS = Math.round((r.stats?.elapsedMs || 0)/1000);
+                header.textContent = `${r.hits.length} hit(s) · ${r.stats?.dirsScanned||0} folders · ${elapsedS}s${truncated ? ' · TRUNCATED (limit reached)' : ''}`;
+                _recLog(`Search done: ${r.hits.length} hit(s), ${r.stats?.dirsScanned||0} folders in ${elapsedS}s${truncated ? ' (truncated)' : ''}`);
+
+                if (!r.hits.length) {
+                    list.innerHTML = '<div class="px-3 py-4 text-xs text-gray-500 italic">No security.json or shadow backups found under this folder.</div>';
+                    return;
+                }
+                // Sort: prefer current security.json over .bak.*, newest mtime first
+                r.hits.sort((a, b) => {
+                    if (a.isBackup !== b.isBackup) return a.isBackup ? 1 : -1;
+                    return (b.mtime || '').localeCompare(a.mtime || '');
+                });
+                list.innerHTML = r.hits.map((h, idx) => {
+                    const kb = (h.size / 1024).toFixed(2);
+                    const when = (h.mtime || '').replace('T', ' ').slice(0, 19);
+                    const tag = h.isBackup
+                        ? '<span class="px-1.5 py-0.5 bg-amber-400/15 text-amber-400 rounded text-[10px] font-medium">SHADOW</span>'
+                        : '<span class="px-1.5 py-0.5 bg-viper-cyan/15 text-viper-cyan rounded text-[10px] font-medium">CURRENT</span>';
+                    const safePath = h.path.replace(/'/g, "\\'");
+                    return `
+                        <button onclick="recPickSearchHit('${safePath}', ${idx})" class="w-full text-left px-3 py-2 hover:bg-gray-800/60 transition-colors flex items-start gap-2">
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 mb-0.5">${tag}<span class="text-xs text-gray-300 truncate" title="${h.path}">${h.path}</span></div>
+                                <div class="text-[11px] text-gray-500">${kb} KB · modified ${when}</div>
+                            </div>
+                            <span class="text-viper-cyan text-xs opacity-60 group-hover:opacity-100">Pick →</span>
+                        </button>
+                    `;
+                }).join('');
+            } catch (e) {
+                _recLog(`Search FAILED: ${e.message}`);
+                showNotification('Search failed: ' + e.message, 'error');
+                try { document.getElementById('secRecSearchBtn').disabled = false; document.getElementById('secRecSearchBtn').textContent = 'Search PC…'; } catch (_) {}
+            }
+        }
+
+        // Click handler for a single search hit
+        function recPickSearchHit(filePath, idx) {
+            try {
+                document.getElementById('secRecCfgPath').value = filePath;
+                _recLog(`Picked: ${filePath}`);
+                showNotification('Selected security.json — now enter your credential and click Validate.', 'success');
+            } catch (e) {
+                showNotification('Pick failed: ' + e.message, 'error');
+            }
+        }
+
+        async function recDispose() {
+            _recDetachProgress();
+            if (_secRecSessionId) {
+                try { await window.electronAPI.securityRecoveryDispose({ sessionId: _secRecSessionId }); } catch (_) {}
+                _secRecSessionId = null;
+            }
+            _secRecScanResult = null;
+            try {
+                document.getElementById('secRecCredValue').value = '';
+                document.getElementById('secRecScanBtn').disabled = true;
+                document.getElementById('secRecRunBtn').disabled = true;
+                const st = document.getElementById('secRecStatus'); if (st) { st.textContent = ''; st.classList.add('hidden'); }
+                const pr = document.getElementById('secRecProgress'); if (pr) pr.classList.add('hidden');
+            } catch (_) {}
+        }
+
+        // Auto-dispose recovery session when the panel collapses
+        try {
+            const panel = document.getElementById('secRecoveryPanel');
+            if (panel) panel.addEventListener('toggle', () => {
+                if (!panel.open) recDispose();
+            });
+        } catch (_) {}
 
         // Directory selection removed — paths are now auto-detected and read-only
 
@@ -3514,11 +4302,19 @@
                 updateBackupProgress(30, 'Collecting case data...');
 
                 // Write ZIP backup (localStorage + case files) via Electron IPC
-                updateBackupProgress(50, 'Packaging case files + evidence...');
-                const savedPath = await window.electronAPI.createBackupZip({
+                // v3.8.7: pass encrypt flag from the new UI toggle.  IPC now
+                // returns { filePath, encrypted } instead of a bare path string.
+                const wantEncrypt = !!document.getElementById('backupEncryptToggle')?.checked;
+                updateBackupProgress(50, wantEncrypt
+                    ? 'Packaging + sealing under Field Security…'
+                    : 'Packaging case files + evidence (plaintext)…');
+                const result = await window.electronAPI.createBackupZip({
                     backupPath,
-                    data: JSON.stringify(backupData)
+                    data: JSON.stringify(backupData),
+                    encrypt: wantEncrypt
                 });
+                const savedPath = (result && typeof result === 'object') ? result.filePath : result;
+                const wasEncrypted = !!(result && result.encrypted);
 
                 // Update progress
                 updateBackupProgress(100, 'Complete!');
@@ -3530,7 +4326,12 @@
 
                 setTimeout(() => {
                     document.getElementById('backupProgress').classList.add('hidden');
-                    showNotification('Backup created successfully', 'success');
+                    showNotification(
+                        wasEncrypted
+                            ? 'Backup created (encrypted — requires current Field Security key to restore)'
+                            : 'Backup created (plaintext — portable across installs)',
+                        'success'
+                    );
                     backupButton.disabled = false;
                     backupButton.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg> Create Backup';
                 }, 1000);
@@ -5252,7 +6053,7 @@
     // ─── State / jurisdiction selector ──────────────────────────────
     // Persisted as 'viperWarrantAuthorState'. Default 'CA'. Drives which
     // jurisdiction-specific boilerplate the block-builder applies.
-    const _WARRANT_AUTHOR_SUPPORTED_STATES = ['CA', 'VA'];
+    const _WARRANT_AUTHOR_SUPPORTED_STATES = ['CA', 'VA', 'CO'];
     function getWarrantAuthorState() {
         const v = (localStorage.getItem('viperWarrantAuthorState') || 'CA').toUpperCase();
         return _WARRANT_AUTHOR_SUPPORTED_STATES.includes(v) ? v : 'CA';
@@ -5449,6 +6250,16 @@
             const key = el.getAttribute('data-agency-key');
             out[key] = (el.value || '').toString();
         });
+        // Non-scalar fields are managed by their own list editors and persist
+        // immediately to localStorage — but Save Profile would otherwise wipe
+        // them because they have no [data-agency-key] inputs. Merge them in
+        // from the stored profile so normalize() preserves them.
+        try {
+            const stored = _loadAgencyProfile();
+            if (stored && Array.isArray(stored.coCourts)) {
+                out.coCourts = stored.coCourts;
+            }
+        } catch (_) { /* non-fatal */ }
         return out;
     }
     function _populateAgencyProfileForm(profile) {
@@ -5552,6 +6363,12 @@
             `;
         }).join('');
         host.innerHTML = groupsHtml;
+        // Inject the CO Courts list editor inside the "Colorado-Specific"
+        // group. The DA name/title/deputy-line fields auto-render above via
+        // the FIELD_GROUPS loop; the courts list is an array of objects so
+        // it needs its own list editor (mirrors the Provider Directory
+        // pattern — immediate persist, no Save-button staging).
+        _renderCoCourtsEditor(host);
         // Populate values from storage and wire dirty tracking. Order matters:
         // populate FIRST (would otherwise trip the input listener), THEN wire.
         const stored = _loadAgencyProfile();
@@ -5560,6 +6377,222 @@
         _agencyProfileSetDirty(false);
         refreshAgencyProfileCompleteness();
     }
+    // ─── Colorado Courts list editor ────────────────────────────────────
+    // Renders inside the auto-generated "Administrative Defaults" group
+    // container (alongside Default Court Name — the courts list is the
+    // per-jurisdiction extension of that single field). Persists immediately
+    // via WarrantAuthorAgencyProfile helpers; does NOT participate in the
+    // form's dirty-tracking / Save Profile button.
+    function _renderCoCourtsEditor(profileHost) {
+        const api = window.WarrantAuthorAgencyProfile;
+        if (!api || !profileHost) return;
+        // Find the rendered "Administrative Defaults" group container. The
+        // group builder emits a <div> wrapper per group; we identify it by
+        // the group's UPPERCASE label string in the heading. Fall back to
+        // appending at the end if we can't find it.
+        let defaultsBlock = null;
+        profileHost.querySelectorAll('div > div.text-\\[11px\\]').forEach(label => {
+            const txt = (label.textContent || '').trim();
+            // FIELD_GROUPS uses label "Administrative Defaults" (CSS uppercases it).
+            if (/^administrative defaults$/i.test(txt)) defaultsBlock = label.parentElement;
+        });
+        const editorHost = document.createElement('div');
+        editorHost.id = 'coCourtsEditor';
+        editorHost.className = 'mt-4 pt-3 border-t border-gray-700/40';
+        if (defaultsBlock) defaultsBlock.appendChild(editorHost);
+        else profileHost.appendChild(editorHost);
+        _paintCoCourtsEditor();
+    }
+    function _paintCoCourtsEditor() {
+        const host = document.getElementById('coCourtsEditor');
+        const api = window.WarrantAuthorAgencyProfile;
+        if (!host || !api) return;
+        const profile = _loadAgencyProfile() || api.freshProfile();
+        const courts = Array.isArray(profile.coCourts) ? profile.coCourts : [];
+        const rowsHtml = courts.map(c => {
+            const star = c.isDefault
+                ? '<span class="text-amber-300" title="Default">★</span>'
+                : `<button type="button" onclick="setCoCourtDefaultRow('${_esc(c.id)}')"
+                        class="text-gray-500 hover:text-amber-300 transition" title="Set as default">☆</button>`;
+            return `
+                <tr class="border-b border-gray-800 last:border-0">
+                    <td class="py-2 pr-2 align-top text-center w-6">${star}</td>
+                    <td class="py-2 pr-2 align-top">
+                        <div class="text-sm text-white">${_esc(c.label || '(no label)')}</div>
+                        <div class="text-[11px] text-gray-500 mt-0.5">${_esc(c.county || '')}${c.county && c.judicialDistrict ? ' — ' : ''}${_esc(c.judicialDistrict || '')}${c.judicialDistrict ? ' JD' : ''}</div>
+                    </td>
+                    <td class="py-2 pr-2 align-top text-xs text-gray-400">${_esc(c.courtName || '')}</td>
+                    <td class="py-2 align-top text-right whitespace-nowrap">
+                        <button type="button" onclick="editCoCourtRow('${_esc(c.id)}')"
+                            class="px-2 py-1 text-[11px] text-gray-300 hover:text-white hover:bg-gray-700/40 border border-gray-700 rounded transition">Edit</button>
+                        <button type="button" onclick="deleteCoCourtRow('${_esc(c.id)}')"
+                            class="ml-1 px-2 py-1 text-[11px] text-rose-400 hover:bg-rose-500/10 border border-rose-500/30 rounded transition">Delete</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+        const tableHtml = courts.length
+            ? `<div class="overflow-x-auto rounded border border-gray-700/50 bg-viper-dark/40">
+                 <table class="w-full text-left">
+                   <thead>
+                     <tr class="border-b border-gray-700/60 text-[10px] uppercase tracking-wider text-gray-500">
+                       <th class="py-2 pr-2 pl-2 w-6"></th>
+                       <th class="py-2 pr-2">Court</th>
+                       <th class="py-2 pr-2">Court Name</th>
+                       <th class="py-2 pr-2 text-right">Actions</th>
+                     </tr>
+                   </thead>
+                   <tbody>${rowsHtml}</tbody>
+                 </table>
+               </div>`
+            : `<p class="text-xs text-gray-500 italic px-1 py-3">
+                 No courts yet — add the courts whose jurisdiction you file in.
+                 Agencies that straddle two or more Judicial Districts should add
+                 each one separately and pick the right court per warrant.
+               </p>`;
+        host.innerHTML = `
+            <div class="flex items-center justify-between mb-2">
+                <h5 class="text-xs uppercase tracking-wider text-gray-400 font-semibold">Colorado Courts</h5>
+                <button type="button" id="coCourtsAddToggleBtn" onclick="toggleAddCoCourtForm()"
+                    class="px-2 py-1 text-[11px] font-semibold rounded bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/40 hover:bg-viper-cyan/30 transition">
+                    + Add Court
+                </button>
+            </div>
+            ${tableHtml}
+            <div id="coCourtsAddForm" class="hidden mt-3 p-3 rounded border border-viper-cyan/30 bg-viper-cyan/5">
+                <div class="text-[11px] uppercase tracking-wider text-viper-cyan font-semibold mb-2" id="coCourtsAddFormTitle">Add Court</div>
+                <input type="hidden" id="coCourtsEditId" value="" />
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <label class="block">
+                        <span class="block text-[11px] text-gray-300 mb-1">Display Label <span class="text-rose-400">*</span></span>
+                        <input type="text" id="coCourtLabel" placeholder="Adams Co. — 17th JD"
+                            class="w-full bg-viper-dark border border-gray-700 rounded px-2 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-viper-cyan" />
+                    </label>
+                    <label class="block">
+                        <span class="block text-[11px] text-gray-300 mb-1">Court Name</span>
+                        <input type="text" id="coCourtCourtName" value="COUNTY/DISTRICT COURT" placeholder="COUNTY/DISTRICT COURT"
+                            class="w-full bg-viper-dark border border-gray-700 rounded px-2 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-viper-cyan" />
+                    </label>
+                    <label class="block">
+                        <span class="block text-[11px] text-gray-300 mb-1">Judicial District <span class="text-rose-400">*</span></span>
+                        <input type="text" id="coCourtJudicialDistrict" placeholder="17th"
+                            class="w-full bg-viper-dark border border-gray-700 rounded px-2 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-viper-cyan" />
+                    </label>
+                    <label class="block">
+                        <span class="block text-[11px] text-gray-300 mb-1">County <span class="text-rose-400">*</span></span>
+                        <input type="text" id="coCourtCounty" placeholder="Adams"
+                            class="w-full bg-viper-dark border border-gray-700 rounded px-2 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-viper-cyan" />
+                    </label>
+                </div>
+                <label class="flex items-center gap-2 mt-2 text-xs text-gray-300 cursor-pointer">
+                    <input type="checkbox" id="coCourtIsDefault" class="rounded border-gray-700 bg-viper-dark text-viper-cyan focus:ring-viper-cyan focus:ring-offset-0" />
+                    <span>Set as default court for new CO warrants</span>
+                </label>
+                <div class="flex justify-end gap-2 mt-3">
+                    <button type="button" onclick="cancelAddCoCourt()"
+                        class="px-3 py-1.5 text-xs text-gray-400 hover:text-white hover:bg-gray-700/40 border border-gray-700 rounded transition">Cancel</button>
+                    <button type="button" id="coCourtsSaveBtn" onclick="saveAddCoCourt()"
+                        class="px-3 py-1.5 text-xs font-semibold rounded bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/40 hover:bg-viper-cyan/30 transition">Add Court</button>
+                </div>
+            </div>
+        `;
+    }
+    function toggleAddCoCourtForm() {
+        const form = document.getElementById('coCourtsAddForm');
+        if (!form) return;
+        const isHidden = form.classList.contains('hidden');
+        if (isHidden) {
+            // Reset to "add" mode
+            document.getElementById('coCourtsEditId').value = '';
+            document.getElementById('coCourtsAddFormTitle').textContent = 'Add Court';
+            document.getElementById('coCourtsSaveBtn').textContent = 'Add Court';
+            document.getElementById('coCourtLabel').value = '';
+            document.getElementById('coCourtCourtName').value = 'COUNTY/DISTRICT COURT';
+            document.getElementById('coCourtJudicialDistrict').value = '';
+            document.getElementById('coCourtCounty').value = '';
+            document.getElementById('coCourtIsDefault').checked = false;
+            form.classList.remove('hidden');
+            setTimeout(() => { const f = document.getElementById('coCourtLabel'); if (f) f.focus(); }, 0);
+        } else {
+            form.classList.add('hidden');
+        }
+    }
+    function cancelAddCoCourt() {
+        const form = document.getElementById('coCourtsAddForm');
+        if (form) form.classList.add('hidden');
+    }
+    function editCoCourtRow(id) {
+        const api = window.WarrantAuthorAgencyProfile;
+        if (!api) return;
+        const profile = _loadAgencyProfile() || api.freshProfile();
+        const court = (profile.coCourts || []).find(c => c.id === id);
+        if (!court) return;
+        // Open the form prefilled.
+        const form = document.getElementById('coCourtsAddForm');
+        if (!form) return;
+        document.getElementById('coCourtsEditId').value = court.id;
+        document.getElementById('coCourtsAddFormTitle').textContent = 'Edit Court';
+        document.getElementById('coCourtsSaveBtn').textContent = 'Save Changes';
+        document.getElementById('coCourtLabel').value = court.label || '';
+        document.getElementById('coCourtCourtName').value = court.courtName || 'COUNTY/DISTRICT COURT';
+        document.getElementById('coCourtJudicialDistrict').value = court.judicialDistrict || '';
+        document.getElementById('coCourtCounty').value = court.county || '';
+        document.getElementById('coCourtIsDefault').checked = !!court.isDefault;
+        document.getElementById('coCourtIsDefault').disabled = !!court.isDefault; // can't un-default in-place
+        form.classList.remove('hidden');
+        setTimeout(() => { const f = document.getElementById('coCourtLabel'); if (f) f.focus(); }, 0);
+    }
+    function saveAddCoCourt() {
+        const api = window.WarrantAuthorAgencyProfile;
+        if (!api) return;
+        const editId = (document.getElementById('coCourtsEditId').value || '').trim();
+        const label = (document.getElementById('coCourtLabel').value || '').trim();
+        const courtName = (document.getElementById('coCourtCourtName').value || '').trim() || 'COUNTY/DISTRICT COURT';
+        const judicialDistrict = (document.getElementById('coCourtJudicialDistrict').value || '').trim();
+        const county = (document.getElementById('coCourtCounty').value || '').trim();
+        const isDefault = !!document.getElementById('coCourtIsDefault').checked;
+        if (!label || !judicialDistrict || !county) {
+            _agencyProfileToast('Label, Judicial District, and County are required.', 'error');
+            return;
+        }
+        let profile = _loadAgencyProfile() || api.freshProfile();
+        if (editId) {
+            profile = api.updateCoCourt(profile, editId, { label, courtName, judicialDistrict, county });
+            if (isDefault) profile = api.setCoCourtDefault(profile, editId);
+        } else {
+            profile = api.addCoCourt(profile, { label, courtName, judicialDistrict, county, isDefault });
+        }
+        const ok = _writeAgencyProfile(profile);
+        if (!ok) { _agencyProfileToast('Save failed — see DevTools console.', 'error'); return; }
+        document.getElementById('coCourtIsDefault').disabled = false;
+        _paintCoCourtsEditor();
+        _agencyProfileToast(editId ? 'Court updated.' : 'Court added.', 'success');
+        refreshAgencyProfileCompleteness();
+    }
+    function deleteCoCourtRow(id) {
+        const api = window.WarrantAuthorAgencyProfile;
+        if (!api) return;
+        const profile = _loadAgencyProfile() || api.freshProfile();
+        const court = (profile.coCourts || []).find(c => c.id === id);
+        if (!court) return;
+        if (!confirm(`Delete court "${court.label}"?\n\nThis cannot be undone.`)) return;
+        const updated = api.deleteCoCourt(profile, id);
+        const ok = _writeAgencyProfile(updated);
+        if (!ok) { _agencyProfileToast('Delete failed — see DevTools console.', 'error'); return; }
+        _paintCoCourtsEditor();
+        _agencyProfileToast('Court deleted.', 'success');
+    }
+    function setCoCourtDefaultRow(id) {
+        const api = window.WarrantAuthorAgencyProfile;
+        if (!api) return;
+        const profile = _loadAgencyProfile() || api.freshProfile();
+        const updated = api.setCoCourtDefault(profile, id);
+        const ok = _writeAgencyProfile(updated);
+        if (!ok) { _agencyProfileToast('Update failed — see DevTools console.', 'error'); return; }
+        _paintCoCourtsEditor();
+        _agencyProfileToast('Default court updated.', 'success');
+    }
+
     function _renderAgencyProfileField(field, isRequired) {
         const reqMark = isRequired ? ' <span class="text-rose-400">*</span>' : '';
         const helper = field.helper ? `<p class="text-[11px] text-gray-500 mt-1">${_esc(field.helper)}</p>` : '';

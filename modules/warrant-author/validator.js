@@ -157,6 +157,7 @@ function validateDraft(input) {
     const providers = Array.isArray(input.providers) ? input.providers : null;
     const today    = input.today instanceof Date ? input.today : new Date();
     const composeResults = Array.isArray(input.composeResults) ? input.composeResults : [];
+    const caseCtx  = (input.caseCtx && typeof input.caseCtx === 'object') ? input.caseCtx : {};
 
     const errors = [];
     const warnings = [];
@@ -224,7 +225,8 @@ function validateDraft(input) {
     // (handled via the DC-338 form's item-1-through-7 checkboxes in the
     // VA block builder, not via draft.pc1524Grounds). Generic-US drafts
     // also skip this check — the underlying federal SCA does not have a
-    // numbered-grounds taxonomy.
+    // numbered-grounds taxonomy.  Colorado warrants cite C.R.S. §16-3-301
+    // and §19-2.5-205 (not PC §1524) so they ALSO skip this check.
     //
     // Routing: explicit draft.jurisdiction wins. Otherwise we sniff the
     // template prefix. A draft with BOTH fields empty is treated as
@@ -233,13 +235,17 @@ function validateDraft(input) {
     const _jx = String(draft.jurisdiction || '').toUpperCase();
     const _tpl = String(draft.template || '');
     let _isCaJurisdiction;
+    let _isCoJurisdiction;
     if (_jx) {
         _isCaJurisdiction = (_jx === 'CA');
+        _isCoJurisdiction = (_jx === 'CO');
     } else if (_tpl) {
         _isCaJurisdiction = _tpl.startsWith('ca-');
+        _isCoJurisdiction = _tpl.startsWith('co-');
     } else {
         // Fully empty draft → legacy default = CA.
         _isCaJurisdiction = true;
+        _isCoJurisdiction = false;
     }
     if (_isCaJurisdiction) {
         const grounds = (draft.pc1524Grounds && typeof draft.pc1524Grounds === 'object') ? draft.pc1524Grounds : {};
@@ -250,6 +256,70 @@ function validateDraft(input) {
                 'PC_1524_GROUNDS_NONE',
                 'No §1524 grounds checkbox is ticked.',
                 { scope: 'draft', fieldPath: 'draft.pc1524Grounds' }
+            ));
+        }
+    }
+
+    // ── CO-specific checks (court + DA name) ─────────────────────────────
+    if (_isCoJurisdiction) {
+        // The Colorado Courts list under Agency Profile is OPTIONAL — it
+        // exists purely so multi-district agencies can pick from a dropdown
+        // (label + JD + county auto-fill the caption / oath / signature
+        // blocks). Single-court agencies just fill the "Court Name" field
+        // in the draft header. Therefore: NEVER block generation on an
+        // empty coCourts list, and NEVER require a coCourtId selection.
+        //
+        // What we DO require is that *some* court name is set somewhere —
+        // either via a picked coCourtId, the draft.courtName text field,
+        // or the agency.defaultCourtName fallback. Otherwise the caption
+        // line ("COUNTY/DISTRICT COURT, COLORADO") prints as a placeholder.
+        const coCourtId  = String(draft.coCourtId || '').trim();
+        const apCourts   = Array.isArray(agency.coCourts) ? agency.coCourts : [];
+        const pickedCourt = coCourtId ? apCourts.find(c => c.id === coCourtId) : null;
+        const draftCourtName = String(draft.courtName || '').trim();
+        const defaultCourtName = String(agency.defaultCourtName || '').trim();
+        const haveCourtName = !!(pickedCourt || draftCourtName || defaultCourtName);
+        if (!haveCourtName) {
+            warnings.push(_warn(
+                'draft.coCourt.unnamed',
+                'CO_COURT_UNNAMED',
+                'No court name on this draft. Fill "Court Name" in the draft header, or pick a court from the Colorado Courts list under Settings → Agency Profile.',
+                { scope: 'draft', fieldPath: 'draft.courtName' }
+            ));
+        }
+        // 2) DA name warning — the "APPROVED AS TO FORM" block reads
+        //    awkwardly with "[District Attorney Name]" as a placeholder.
+        const daName = String(agency.daName || '').trim();
+        if (!daName) {
+            warnings.push(_warn(
+                'agency.daName.empty',
+                'CO_DA_NAME_EMPTY',
+                'No District Attorney name on file — the CO "APPROVED AS TO FORM" block will print a [placeholder]. Set it under Settings → Agency Profile → Colorado-Specific.',
+                { scope: 'agency', fieldPath: 'agency.daName' }
+            ));
+        }
+        // 3) Offense description + date — used by CO templates'
+        //    "*These records will be searched for evidence pertaining..." line.
+        //    These now live at the case level (Case Probable Cause panel,
+        //    case-pc-store) so they auto-populate across every warrant in
+        //    the case. Caller passes them via input.caseCtx; we also
+        //    accept the legacy draft fields for back-compat.
+        const resolvedOffenseDesc = String(caseCtx.offenseDescription || draft.offenseDescription || '').trim();
+        const resolvedOffenseDate = String(caseCtx.offenseDate        || draft.offenseDate        || '').trim();
+        if (!resolvedOffenseDesc) {
+            warnings.push(_warn(
+                'draft.offenseDescription.empty',
+                'CO_OFFENSE_DESCRIPTION_EMPTY',
+                'No offense description on the case — the CO warrant will print "[case offense]" as a placeholder. Set it in the Case Probable Cause panel.',
+                { scope: 'case', fieldPath: 'case.offenseDescription' }
+            ));
+        }
+        if (!resolvedOffenseDate) {
+            warnings.push(_warn(
+                'draft.offenseDate.empty',
+                'CO_OFFENSE_DATE_EMPTY',
+                'No offense date on the case — the CO warrant will print "[offense date]" as a placeholder. Set it in the Case Probable Cause panel.',
+                { scope: 'case', fieldPath: 'case.offenseDate' }
             ));
         }
     }

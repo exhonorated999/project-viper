@@ -38,6 +38,80 @@ function _loadAgencyProfile() {
   } catch (_) { return {}; }
 }
 
+// ─── CO-specific compose-ctx helpers ────────────────────────────────────
+// Resolve the per-draft Colorado court + case info needed by the CO
+// template's co-caption / co-affiant-signature / co-judge-* / co-da-*
+// block resolvers. Harmless on other templates — non-CO resolvers
+// simply ignore ctx.court and ctx.case.
+function _resolveCoCourtForDraft(draft) {
+  try {
+    const ap = _agency();
+    if (!ap) return null;
+    // Prefer the per-draft snapshot's courts list (frozen at draft
+    // creation). Fall back to the live profile so a court added AFTER
+    // the draft was created is still selectable.
+    const snapshot = (draft && draft.affiantSnapshot) || {};
+    const snapList = Array.isArray(snapshot.coCourts) ? snapshot.coCourts : [];
+    if (draft && draft.coCourtId) {
+      const snapMatch = snapList.find(c => c.id === draft.coCourtId);
+      if (snapMatch) {
+        return {
+          name: snapMatch.courtName || 'COUNTY/DISTRICT COURT',
+          judicialDistrict: snapMatch.judicialDistrict || '',
+          county: snapMatch.county || '',
+        };
+      }
+    }
+    const profile = ap.normalize(_loadAgencyProfile());
+    const court = ap.getCoCourtById(profile, draft && draft.coCourtId);
+    if (court) {
+      return {
+        name: court.courtName || 'COUNTY/DISTRICT COURT',
+        judicialDistrict: court.judicialDistrict || '',
+        county: court.county || '',
+      };
+    }
+    // ── Fallback path: no court picked, and/or the Colorado Courts list
+    // is empty. Build a court object from the draft's header fields +
+    // the agency's "Default Court Name". This is the path single-court
+    // agencies use — the CO courts list is optional, intended for
+    // agencies that straddle multiple Judicial Districts.
+    const courtName =
+      String((draft && draft.courtName) || '').trim() ||
+      String(profile.defaultCourtName || '').trim() ||
+      '';
+    const judicialDistrict = String((draft && draft.judicialDistrict) || '').trim();
+    const county = String(profile.county || '').trim();
+    if (!courtName && !judicialDistrict && !county) return null;
+    return {
+      name: courtName || 'COUNTY/DISTRICT COURT',
+      judicialDistrict,
+      county,
+    };
+  } catch (_) { return null; }
+}
+function _resolveCaseCtxForDraft(draft) {
+  if (!draft) return {};
+  // Case-level overrides (offense description + date live on the Case
+  // Probable Cause panel — case-pc-store). Fall back to draft fields so
+  // legacy drafts authored before the case-level store existed still work.
+  let caseOffenseDesc = '';
+  let caseOffenseDate = '';
+  try {
+    const pcStore = (typeof window !== 'undefined') ? window.WarrantAuthorCasePcStore : null;
+    const caseId  = (window.currentCase && (window.currentCase.id || window.currentCase.caseId)) || _state.caseId;
+    if (pcStore && caseId) {
+      caseOffenseDesc = pcStore.getOffenseDescription(caseId) || '';
+      caseOffenseDate = pcStore.getOffenseDate(caseId) || '';
+    }
+  } catch (_e) { /* non-fatal */ }
+  return {
+    number: draft.caseRef || draft.caseNumber || '',
+    offenseDescription: caseOffenseDesc || draft.offenseDescription || '',
+    offenseDate:        caseOffenseDate || draft.offenseDate || '',
+  };
+}
+
 // ─── ephemeral renderer state (not persisted) ───────────────────────────
 
 const _state = {
@@ -528,21 +602,35 @@ function harvestIdentifiers(caseId) {
 
 function _readWarrantAuthorState() {
   // Settings dropdown wins over agency.state; falls back to agency.state, then 'CA'.
+  // Must mirror _WARRANT_AUTHOR_SUPPORTED_STATES in settings.html.
+  const SUPPORTED = ['CA', 'VA', 'CO'];
   try {
     const s = (localStorage.getItem('viperWarrantAuthorState') || '').toUpperCase();
-    if (s === 'CA' || s === 'VA') return s;
+    if (SUPPORTED.includes(s)) return s;
   } catch (_e) { /* localStorage unavailable */ }
   const agency = _loadAgencyProfile();
   const as = (agency && agency.state) ? String(agency.state).toUpperCase() : '';
-  if (as === 'CA' || as === 'VA') return as;
+  if (SUPPORTED.includes(as)) return as;
   return 'CA';
+}
+
+// ESP template descriptor for a given state. Used to lock the New-Draft
+// Template dropdown to the jurisdiction chosen in Settings → Warrant
+// Authoring (users can no longer change state formatting from inside the
+// case module — they must change it in Settings).
+function _espTemplateForState(state) {
+  switch ((state || '').toUpperCase()) {
+    case 'CA': return { id: 'ca-multi-business-esp',     label: 'CA — Multi-Business ESP (CalECPA §1546.1)' };
+    case 'VA': return { id: 'va-multi-business-esp',     label: 'VA — Multi-Business ESP (DC-338/DC-339, §19.2-53) · Beta' };
+    case 'CO': return { id: 'co-multi-business-esp',     label: 'CO — Affidavit + Search Warrant (§16-3-301) · Beta' };
+    default:   return { id: 'generic-us-multi-business-esp', label: 'US Generic — Multi-Business ESP (SCA §2703)' };
+  }
 }
 
 function _renderNewDraftModal(caseId) {
   const agency = _loadAgencyProfile();
   const jurisdiction = _readWarrantAuthorState();
-  const isCA = jurisdiction === 'CA';
-  const isVA = jurisdiction === 'VA';
+  const espTpl = _espTemplateForState(jurisdiction);
   // Crime presets are optional — module may not yet be loaded in some embeds.
   const crimePresets = (typeof window !== 'undefined' && window.WarrantAuthorCrimePresets
                          && typeof window.WarrantAuthorCrimePresets.listForPicker === 'function')
@@ -578,12 +666,11 @@ function _renderNewDraftModal(caseId) {
           </label>
           <label class="block">
             <span class="text-slate-400 text-xs uppercase tracking-wider">Template</span>
-            <select id="waNewTemplate" class="mt-1 w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded text-white focus:border-viper-cyan focus:outline-none">
-              <option value="ca-multi-business-esp" ${isCA ? 'selected' : ''}>CA — Multi-Business ESP (CalECPA §1546.1)</option>
-              <option value="va-multi-business-esp" ${isVA ? 'selected' : ''}>VA — Multi-Business ESP (DC-338/DC-339, §19.2-53) · Beta</option>
-              <option value="generic-us-multi-business-esp" ${(!isCA && !isVA) ? 'selected' : ''}>US Generic — Multi-Business ESP (SCA §2703)</option>
+            <select id="waNewTemplate" disabled
+                    class="mt-1 w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded text-white opacity-80 cursor-not-allowed focus:outline-none">
+              <option value="${attr(espTpl.id)}" selected>${esc(espTpl.label)}</option>
             </select>
-            <span class="block text-[11px] text-slate-500 mt-1">Default derived from Warrant Authoring state = <code>${attr(jurisdiction)}</code>. Change in Settings → Warrant Authoring.</span>
+            <span class="block text-[11px] text-slate-500 mt-1">Locked to Warrant Authoring state = <code>${attr(jurisdiction)}</code>. Change in Settings → Warrant Authoring.</span>
           </label>
           <label class="block hidden" id="waNewCrimeWrap">
             <span class="text-slate-400 text-xs uppercase tracking-wider">Crime Type</span>
@@ -1319,8 +1406,56 @@ function _renderDraftHeader(caseId, draft) {
   const tplOpts = [
     { v: 'ca-multi-business-esp', label: 'CA — CalECPA §1546.1' },
     { v: 'va-multi-business-esp', label: 'VA — DC-338/DC-339 (§19.2-53)' },
+    { v: 'co-multi-business-esp', label: 'CO — Affidavit + Search Warrant (§16-3-301)' },
     { v: 'generic-us-multi-business-esp', label: 'US Generic — SCA §2703' },
   ];
+  // Colorado: the agency profile carries a user-maintained list of courts
+  // (many CO agencies straddle two or more Judicial Districts). When the
+  // CO template is selected, render a court picker that drives the
+  // caption + judge-oath + judge-signature blocks. Courts are managed
+  // in Settings → Warrant Author → Colorado Courts.
+  let coCourts = [];
+  let coDefaultId = '';
+  if (typeof window !== 'undefined' && window.WarrantAuthorAgencyProfile) {
+    try {
+      const raw = localStorage.getItem('viperAgencyProfile');
+      const profile = window.WarrantAuthorAgencyProfile.normalize(raw ? JSON.parse(raw) : {});
+      coCourts = Array.isArray(profile.coCourts) ? profile.coCourts : [];
+      const def = coCourts.find(c => c.isDefault) || coCourts[0];
+      coDefaultId = def ? def.id : '';
+    } catch (_) { /* non-fatal */ }
+  }
+  const isCoTemplate = String(draft.template || '') === 'co-multi-business-esp';
+  const courtPickerHtml = isCoTemplate ? `
+      <label class="text-xs col-span-2">
+        <span class="text-slate-400 uppercase tracking-wider">Colorado Court</span>
+        ${coCourts.length === 0
+          ? `<div class="mt-1 grid grid-cols-2 gap-2">
+              <label class="text-xs col-span-2 text-[11px] text-slate-500 leading-snug">
+                Optional: add courts under
+                <a class="text-viper-cyan underline cursor-pointer" onclick="(window.openSettings ? openSettings() : (location.href='settings.html'))">Settings → Agency Profile → Colorado Courts</a>
+                if you file in more than one Judicial District. Otherwise the caption uses the
+                <span class="text-slate-300">Court Name</span> field above plus the
+                <span class="text-slate-300">Judicial District</span> below.
+              </label>
+              <label class="text-xs">
+                <span class="text-slate-400 uppercase tracking-wider">Judicial District</span>
+                <input type="text" placeholder="e.g. 17th"
+                       value="${attr(draft.judicialDistrict || '')}"
+                       onchange="WarrantAuthorUI.bus.onDraftFieldChange('${attr(caseId)}','${attr(draft.id)}','judicialDistrict',this.value)"
+                       class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
+              </label>
+            </div>`
+          : `<select onchange="WarrantAuthorUI.bus.onDraftFieldChange('${attr(caseId)}','${attr(draft.id)}','coCourtId',this.value)"
+                     class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
+              ${coCourts.map(c => {
+                const sel = (draft.coCourtId || coDefaultId) === c.id ? 'selected' : '';
+                return `<option value="${attr(c.id)}" ${sel}>${esc(c.label)} (${esc(c.judicialDistrict || '')} JD, ${esc(c.county || '')})</option>`;
+              }).join('')}
+             </select>`
+        }
+      </label>
+    ` : '';
   // Probable cause now lives on the Warrant Author screen header (above the
   // subtab pills). Show a compact reference here pointing back up to it.
   const pcStore = (typeof window !== 'undefined') ? window.WarrantAuthorCasePcStore : null;
@@ -1341,6 +1476,7 @@ function _renderDraftHeader(caseId, draft) {
           ${tplOpts.map(o => `<option value="${attr(o.v)}" ${o.v === draft.template ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
         </select>
       </label>
+      ${courtPickerHtml}
 
       <div class="col-span-2 text-[11px] text-slate-500 flex items-center justify-between border-t border-slate-700 pt-2 mt-1">
         <span>
@@ -1868,12 +2004,20 @@ function _runValidator(caseId, draft) {
   const pcNarrative = (pcStore && pcStore.getBody)
     ? pcStore.getBody(caseId)
     : (draft.probableCauseNarrative || '');
+  // Case-level offense (offense description + date live on the Case
+  // Probable Cause panel). Pass through so the CO validator branch can
+  // fall back to these without having to read the store itself.
+  const caseCtx = {
+    offenseDescription: (pcStore && pcStore.getOffenseDescription) ? pcStore.getOffenseDescription(caseId) : '',
+    offenseDate:        (pcStore && pcStore.getOffenseDate)        ? pcStore.getOffenseDate(caseId)        : '',
+  };
   try {
     return V.validateDraft({
       draft,
       agency: agencyProfile,
       providers: providersMerged,
       pcNarrative,
+      caseCtx,
     });
   } catch (_e) {
     return null;
@@ -2152,8 +2296,8 @@ function _renderAddendumForm(caseId, draft, addendumId, harvest) {
 
 /**
  * Renders the 4 optional-clause checkboxes for an addendum. Labels swap
- * by draft.jurisdiction so VA users see SCA citations (18 U.S.C. § 2705)
- * instead of CalECPA (§ 1546.x). The underlying flag names
+ * by draft.jurisdiction so non-CA users see federal SCA citations (18
+ * U.S.C. § 2705) instead of CalECPA (§ 1546.x). The underlying flag names
  * (`includeNonDisclosure`, `includeNonDisclosureInfoSupport`,
  * `includeDelay1546_2a`, `includeCalecpaSealing`) are kept stable so the
  * draft store / block-builder paths are unchanged — only the rendered
@@ -2161,24 +2305,31 @@ function _renderAddendumForm(caseId, draft, addendumId, harvest) {
  *
  * Citation notes:
  *  • CA → CalECPA Penal Code §§ 1546.2(b), 1546.2(a), 1546.1(d)(3)
- *  • VA → No state-law equivalent; standard practice for warrants
- *    served on nationwide ESPs is the federal SCA at 18 U.S.C. § 2705(b)
- *    (NDO) and § 2705(a) (delay-of-notice). Court-file sealing in VA is
- *    by motion under Va. Code §§ 17.1-208 / 19.2-265.01.
+ *  • VA / CO / US-generic → No state-law equivalent for these specific
+ *    clauses; standard practice for warrants served on nationwide ESPs
+ *    is the federal SCA at 18 U.S.C. § 2705(b) (NDO) and § 2705(a)
+ *    (delay-of-notice). Court-file sealing is by motion under local
+ *    state rules (e.g. Va. Code §§ 17.1-208 / 19.2-265.01; Colo. C.R.S.
+ *    § 16-3-305.5).
  */
 function _renderAddendumOptionalClauses(caseId, draft, ad) {
   const jx = (draft.jurisdiction || '').toUpperCase();
-  const isVa = jx === 'VA' || draft.template === 'va-multi-business-esp';
-  const labels = isVa ? {
-    ndo:       { text: 'NDO (90-day) — §2705(b)',  tip: 'Non-Disclosure Order under 18 U.S.C. § 2705(b) (federal SCA). Virginia has no state-law NDO statute; § 2705(b) is the standard citation for warrants served on out-of-state ESPs.' },
-    ndoInfo:   { text: 'NDO Info-Support',          tip: 'Factual articulation supporting the § 2705(b) NDO finding. Check this whenever NDO is checked.' },
-    delay:     { text: 'Delay-of-Notice — §2705(a)', tip: 'Order delaying notice to the subscriber under 18 U.S.C. § 2705(a). Covers the affiant\'s duty to notify the user; the NDO covers the provider.' },
-    sealing:   { text: 'Court Sealing (motion)',    tip: 'Request to seal the warrant, affidavit, and returns from public inspection. In Virginia this is handled by motion under Va. Code §§ 17.1-208 / 19.2-265.01.' },
-  } : {
+  const tpl = String(draft.template || '');
+  // CalECPA §1546.x clauses are California-specific. Show them ONLY when
+  // the draft jurisdiction / template is CA. All other states (VA, CO,
+  // US-generic, anything we add later) fall through to the federal SCA
+  // labels — never expose §1546.x outside CA.
+  const isCa = (jx === 'CA') || tpl.startsWith('ca-');
+  const labels = isCa ? {
     ndo:       { text: 'NDO (90-day)',              tip: 'Non-Disclosure Order under Cal. Pen. Code § 1546.2(b).' },
     ndoInfo:   { text: 'NDO Info-Support',          tip: 'Companion clause that articulates the factual basis for the NDO. Always check this when you check NDO.' },
     delay:     { text: 'Delay (§1546.2(a))',        tip: 'Use when contemporaneous notice to the subscriber would jeopardize the investigation. NDO covers the provider; this covers your duty to notify the user.' },
     sealing:   { text: '§1546.1(d)(3) Sealing',     tip: 'Asks the magistrate to seal the warrant, affidavit, and returns from public inspection. Distinct from NDO — NDO binds the provider; sealing binds the court file.' },
+  } : {
+    ndo:       { text: 'NDO (90-day) — §2705(b)',   tip: 'Non-Disclosure Order under 18 U.S.C. § 2705(b) (federal SCA). Used for warrants served on out-of-state ESPs in jurisdictions without an equivalent state-law NDO statute.' },
+    ndoInfo:   { text: 'NDO Info-Support',          tip: 'Factual articulation supporting the § 2705(b) NDO finding. Check this whenever NDO is checked.' },
+    delay:     { text: 'Delay-of-Notice — §2705(a)',tip: 'Order delaying notice to the subscriber under 18 U.S.C. § 2705(a). Covers the affiant\'s duty to notify the user; the NDO covers the provider.' },
+    sealing:   { text: 'Court Sealing (motion)',    tip: 'Request to seal the warrant, affidavit, and returns from public inspection. Handled by motion under local state-court rules (e.g. Va. Code §§ 17.1-208 / 19.2-265.01; Colo. C.R.S. § 16-3-305.5).' },
   };
   return `
       <div class="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800">
@@ -2266,6 +2417,11 @@ function _renderLivePreview(caseId, draft, activeId) {
     affiant: draft.affiantSnapshot || {},
     agency:  draft.affiantSnapshot || {},
     draft,
+    // Colorado template needs court (selected per-draft from agency.coCourts)
+    // + case info (case number, offense). The block-builder reads these
+    // from the resolved blocks emitted by the CO resolvers.
+    court: _resolveCoCourtForDraft(draft),
+    case: _resolveCaseCtxForDraft(draft),
   };
 
   let result;
@@ -2288,7 +2444,34 @@ function _renderLivePreview(caseId, draft, activeId) {
     const heading = b.heading ? `<div class="wa-pv-heading">${esc(b.heading)}</div>` : '';
     let body = '';
     if (b.kind === 'items-to-seize' && Array.isArray(b.items)) {
-      body = `<ol class="wa-pv-list">${b.items.map(it => `<li><span class="wa-pv-item-label">${esc(it.label || it.key)}</span>${it.description ? ` — <span class="wa-pv-item-desc">${esc(it.description)}</span>` : ''}</li>`).join('')}</ol>`;
+      if (b.style === 'semicolons') {
+        // CO semicolon-terminated list — render as semicolon paragraphs
+        // so the preview matches the exported DOCX faithfully.
+        body = `<div class="wa-pv-text">${b.items.map((it, idx) => {
+          const txt = (it.description || it.label || it.key || '').trim().replace(/[.;]?\s*$/, '');
+          const sep = (idx === b.items.length - 1) ? '.' : ';';
+          return esc(txt + sep);
+        }).join('<br>')}</div>`;
+      } else {
+        body = `<ol class="wa-pv-list">${b.items.map(it => `<li><span class="wa-pv-item-label">${esc(it.label || it.key)}</span>${it.description ? ` — <span class="wa-pv-item-desc">${esc(it.description)}</span>` : ''}</li>`).join('')}</ol>`;
+      }
+    } else if (b.kind === 'co-caption') {
+      const captionLine = `${(b.courtName || 'COUNTY/DISTRICT COURT')}, ${b.judicialDistrict ? b.judicialDistrict + ' JUDICIAL DISTRICT, ' : ''}COLORADO`.toUpperCase();
+      body = `<div class="wa-pv-text text-center font-semibold">${esc(captionLine)}</div>
+              <div class="wa-pv-text text-center text-slate-400">Case No. ${esc(b.caseNumber || '[case number]')}</div>
+              ${b.documentTitle ? `<div class="wa-pv-text text-center font-bold mt-1">${esc(b.documentTitle)}</div>` : ''}`;
+    } else if (b.kind === 'co-provider-block') {
+      body = `<div class="wa-pv-text">${_safeMultilineHtml(b.text || '')}</div>`;
+    } else if (b.kind === 'co-affiant-signature') {
+      body = `<div class="wa-pv-text">Subscribed and Sworn to in the ${esc(b.judicialDistrict || '_______')} Judicial District of Colorado<br><br>______________________________<br><span class="text-slate-400">Signature of Affiant</span></div>`;
+    } else if (b.kind === 'co-judge-oath-affidavit') {
+      body = `<div class="wa-pv-text">Subscribed under oath before me on this ___ day of __________, 20__ in the ${esc(b.judicialDistrict || '_______')} Judicial District of Colorado<br><br>______________________________<br><span class="text-slate-400">Signature of Judge</span><br><br>______________________________<br><span class="text-slate-400">Printed Name of Judge</span></div>`;
+    } else if (b.kind === 'co-judge-signature') {
+      body = `<div class="wa-pv-text">Date<br>In the ${esc(b.judicialDistrict || '_______')} Judicial District, Colorado<br><br>______________________________<br><span class="text-slate-400">Signature of Judge</span><br><br>______________________________<br><span class="text-slate-400">Printed Name of Judge</span></div>`;
+    } else if (b.kind === 'co-da-approval') {
+      body = `<div class="wa-pv-text">APPROVED AS TO FORM:<br>${esc(b.daName || '[District Attorney Name]')}<br>${esc(b.daTitle || 'District Attorney')}<br>By /s<br>${esc(b.daDeputyLine || '[Chief][Senior] Deputy District Attorney')}</div>`;
+    } else if (b.kind === 'page-break') {
+      body = `<div class="wa-pv-text text-center text-amber-400 italic border-t border-b border-dashed border-amber-500/40 py-1 my-1">— Page Break —</div>`;
     } else if (b.text) {
       body = `<div class="wa-pv-text">${_safeMultilineHtml(b.text)}</div>`;
     } else {
@@ -2308,6 +2491,7 @@ function _renderLivePreview(caseId, draft, activeId) {
       <div class="wa-pv-title">Live Preview — ${esc(
         draft.template === 'ca-multi-business-esp' ? 'CA template'
         : draft.template === 'va-multi-business-esp' ? 'VA template'
+        : draft.template === 'co-multi-business-esp' ? 'CO template'
         : 'US template'
       )} · Page ${esc(ad.pageLabel)}</div>
       ${issuesBar}
@@ -2895,6 +3079,29 @@ function renderCasePc(caseId) {
   const body  = pcStore.getBody(caseId);
   const stats = pcStore.stats(caseId);
   const updated = stats.updatedAt ? _shortDate(stats.updatedAt) : '—';
+  const offenseDesc = pcStore.getOffenseDescription(caseId);
+  const offenseDate = pcStore.getOffenseDate(caseId);
+  // Pull the user's offense reference library so they can pick from it
+  // instead of typing the description by hand. Stored by the offense
+  // reference page (index.html) under localStorage['viperOffenseReference'].
+  let offenseRefs = [];
+  try {
+    const rawRefs = localStorage.getItem('viperOffenseReference');
+    if (rawRefs) {
+      const parsed = JSON.parse(rawRefs);
+      if (Array.isArray(parsed)) offenseRefs = parsed;
+    }
+  } catch (_e) { /* non-fatal */ }
+  // Build the "pick from reference" options. Use the description as the
+  // display label (with the statute code prefixed so users see e.g.
+  // "§18-8-208 — Escape"). The value is what gets injected into the
+  // description input verbatim.
+  const offenseRefOpts = offenseRefs
+    .filter(o => o && o.description)
+    .map(o => {
+      const label = o.code ? `${o.code} — ${o.description}` : o.description;
+      return `<option value="${attr(label)}">${esc(label)}</option>`;
+    }).join('');
   const collapsedAttr = body && body.trim().length > 0 ? '' : 'open';
   return `
     <details class="wa-case-pc" ${collapsedAttr}>
@@ -2916,6 +3123,48 @@ function renderCasePc(caseId) {
         <div class="wa-case-pc-banner">
           <strong>Shared across all warrants in this case</strong> — author here, then build onto it as the investigation progresses
           (initial ESP/IP warrants → search-history → residence). Validator (P7) will flag empty PC as a hard error at submission.
+        </div>
+        <!-- Case-level offense fields (offense description + date).
+             Used by CO templates' "*These records will be searched for
+             evidence pertaining the {{case.offenseDescription}} that
+             occurred on {{case.offenseDate}}" line. Stored at the case
+             level so a single edit propagates to every draft in the case. -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+          <label class="block text-xs">
+            <span class="text-slate-400 uppercase tracking-wider">Offense Description</span>
+            <div class="mt-1 flex items-center gap-2">
+              <input type="text"
+                     id="waCaseOffenseDesc"
+                     value="${attr(offenseDesc)}"
+                     placeholder="e.g. Aggravated Robbery, Sexual Assault on a Child…"
+                     oninput="WarrantAuthorUI.bus.onCaseOffenseDescChange('${attr(caseId)}', this.value)"
+                     class="flex-1 px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
+              ${offenseRefOpts ? `
+                <select onchange="WarrantAuthorUI.bus.onCaseOffensePickFromRef('${attr(caseId)}', this.value); this.value='';"
+                        class="px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-slate-300 text-xs"
+                        title="Pick from your Offense Reference library">
+                  <option value="">📚 From reference…</option>
+                  ${offenseRefOpts}
+                </select>
+              ` : `
+                <span class="text-[10px] text-slate-500 italic" title="Build your Offense Reference library to enable picking from a list">📚 (empty)</span>
+              `}
+            </div>
+            <span class="block text-[10px] text-slate-500 mt-1">
+              Manual entry or pick from your Offense Reference library. Used by CO templates; harmless on others.
+            </span>
+          </label>
+          <label class="block text-xs">
+            <span class="text-slate-400 uppercase tracking-wider">Offense Date</span>
+            <input type="date"
+                   id="waCaseOffenseDate"
+                   value="${attr(offenseDate)}"
+                   onchange="WarrantAuthorUI.bus.onCaseOffenseDateChange('${attr(caseId)}', this.value)"
+                   class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
+            <span class="block text-[10px] text-slate-500 mt-1">
+              The date the offense occurred. Auto-populates every CO warrant in this case.
+            </span>
+          </label>
         </div>
         <textarea id="waCasePcTextarea"
                   oninput="WarrantAuthorUI.bus.onCasePcChange('${attr(caseId)}', this.value)"
@@ -3035,27 +3284,26 @@ const bus = {
   },
   /**
    * Handle Warrant Type dropdown changes in the New Draft modal: swap the
-   * Template options and show/hide the Crime Type picker. Residential is
-   * CA-only in v1; ESP supports CA + VA + US Generic templates.
+   * Template option to the one ESP template that matches the jurisdiction
+   * configured in Settings → Warrant Authoring. The Template select stays
+   * disabled (locked) — users change state formatting via Settings, never
+   * from inside the module. Residential remains CA-only in v1.
    */
   onNewDraftTypeChange(type) {
     const tplSel = document.getElementById('waNewTemplate');
     const crimeWrap = document.getElementById('waNewCrimeWrap');
     if (!tplSel) return;
     if (type === 'residential') {
-      // Residential is CA-only — Phase 1 of VA only added ESP. Surface a
-      // hint so VA-state users understand why they're being pushed to CA.
+      // Residential is CA-only — Phase 1 of VA/CO only added ESP. Surface a
+      // hint so non-CA users understand why they're being pushed to CA.
       tplSel.innerHTML = '<option value="ca-residential" selected>CA — Residential Search Warrant (combined SW + Affidavit + SOPC)</option>';
+      tplSel.disabled = true;
       if (crimeWrap) crimeWrap.classList.remove('hidden');
     } else {
       const state = _readWarrantAuthorState();
-      const isCA = state === 'CA';
-      const isVA = state === 'VA';
-      tplSel.innerHTML = `
-        <option value="ca-multi-business-esp" ${isCA ? 'selected' : ''}>CA — Multi-Business ESP (CalECPA §1546.1)</option>
-        <option value="va-multi-business-esp" ${isVA ? 'selected' : ''}>VA — Multi-Business ESP (DC-338/DC-339, §19.2-53) · Beta</option>
-        <option value="generic-us-multi-business-esp" ${(!isCA && !isVA) ? 'selected' : ''}>US Generic — Multi-Business ESP (SCA §2703)</option>
-      `;
+      const espTpl = _espTemplateForState(state);
+      tplSel.innerHTML = `<option value="${attr(espTpl.id)}" selected>${esc(espTpl.label)}</option>`;
+      tplSel.disabled = true;
       if (crimeWrap) crimeWrap.classList.add('hidden');
     }
   },
@@ -3076,6 +3324,7 @@ const bus = {
       type,
       jurisdiction: tpl.startsWith('ca-') ? 'CA'
                   : tpl.startsWith('va-') ? 'VA'
+                  : tpl.startsWith('co-') ? 'CO'
                   : 'US',
       agencyProfile: agency,
       crimeType: type === 'residential' ? crimeId : ''
@@ -3128,6 +3377,7 @@ const bus = {
       const v = String(value || '');
       if (v.startsWith('ca-'))      d.jurisdiction = 'CA';
       else if (v.startsWith('va-')) d.jurisdiction = 'VA';
+      else if (v.startsWith('co-')) d.jurisdiction = 'CO';
       else                          d.jurisdiction = 'US';
     }
     ds.saveDraft(caseId, d, { silent: true });
@@ -3666,6 +3916,66 @@ const bus = {
       if (u) u.textContent = stats.updatedAt ? _shortDate(stats.updatedAt) : '—';
     } catch (_e) {}
   },
+  /**
+   * Case-level offense description edit (Case Probable Cause panel).
+   * Mirrors into every draft on this case so the validator + template
+   * engine see it on the draft path too (back-compat with the old
+   * draft.offenseDescription field). Silent — no _rerender so the
+   * input keeps caret position mid-typing.
+   */
+  onCaseOffenseDescChange(caseId, value) {
+    const pcStore = (typeof window !== 'undefined') ? window.WarrantAuthorCasePcStore : null;
+    if (!pcStore) return;
+    pcStore.setOffenseDescription(caseId, value);
+    const ds = _store();
+    if (ds) {
+      try {
+        const drafts = ds.listDrafts(caseId) || [];
+        for (const d of drafts) {
+          if (d && d.offenseDescription !== value) {
+            d.offenseDescription = value;
+            ds.saveDraft(caseId, d, { silent: true });
+          }
+        }
+      } catch (_e) {}
+    }
+    // No rerender — keep focus in the input.
+  },
+  /**
+   * Case-level offense date edit. <input type="date"> fires change on a
+   * fully-formed ISO value, so it's safe to rerender — but we don't,
+   * to keep the picker focus state stable across cases where the user
+   * tabs into adjacent fields.
+   */
+  onCaseOffenseDateChange(caseId, value) {
+    const pcStore = (typeof window !== 'undefined') ? window.WarrantAuthorCasePcStore : null;
+    if (!pcStore) return;
+    pcStore.setOffenseDate(caseId, value);
+    const ds = _store();
+    if (ds) {
+      try {
+        const drafts = ds.listDrafts(caseId) || [];
+        for (const d of drafts) {
+          if (d && d.offenseDate !== value) {
+            d.offenseDate = value;
+            ds.saveDraft(caseId, d, { silent: true });
+          }
+        }
+      } catch (_e) {}
+    }
+  },
+  /**
+   * "Pick from reference" dropdown handler. Writes the selected label
+   * into the offense description input + the case-pc store (same path
+   * as a manual edit). Caller resets the <select> to "" after firing so
+   * it visually goes back to the placeholder.
+   */
+  onCaseOffensePickFromRef(caseId, value) {
+    if (!value) return;
+    const input = document.getElementById('waCaseOffenseDesc');
+    if (input) input.value = value;
+    this.onCaseOffenseDescChange(caseId, value);
+  },
   onSelectAddendum(caseId, draftId, addendumId) {
     _state.activeDraftId = draftId;
     _state.activeAddendumId = addendumId;
@@ -3714,7 +4024,39 @@ const bus = {
       if (items) ad.itemsToProduce = items.resolvePatternKeys(items.defaultPatternFor(providerKey));
     }
     ds.saveDraft(caseId, d, { silent: true });
-    _rerender();
+    // Electron focus quirk: when a <select>'s change handler synchronously
+    // tears down the DOM, the native popup-close focus event lands on a
+    // node that no longer exists. The renderer's keyboard focus then goes
+    // stale until the BrowserWindow itself loses + regains focus (which is
+    // why users had to alt-tab to be able to type in the date inputs).
+    //
+    // Fix: blur the select first, defer the rerender to the next animation
+    // frame so Chromium finishes its native popup cleanup against a stable
+    // tree, then explicitly nudge the renderer's focus state and land the
+    // caret in the "From" date input so the user can start typing.
+    try {
+      if (document.activeElement && typeof document.activeElement.blur === 'function') {
+        document.activeElement.blur();
+      }
+    } catch (_e) { /* ignore */ }
+    const _focusAfter = () => {
+      try { if (typeof window.focus === 'function') window.focus(); } catch (_e) {}
+      const fromInput = document.querySelector(
+        `input[onblur*="'${addendumId}'"][onblur*="dateRangeFrom"]`
+      );
+      if (fromInput) {
+        try { fromInput.focus({ preventScroll: true }); } catch (_e) { fromInput.focus(); }
+      }
+    };
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        _rerender();
+        requestAnimationFrame(_focusAfter);
+      });
+    } else {
+      _rerender();
+      setTimeout(_focusAfter, 0);
+    }
   },
   onAddendumFieldChange(caseId, draftId, addendumId, field, value) {
     const ds = _store(); if (!ds) return;
@@ -3797,11 +4139,16 @@ const bus = {
       const pcNarrative0 = (pcStore0 && pcStore0.getBody)
         ? pcStore0.getBody(caseId)
         : (draft.probableCauseNarrative || '');
+      const caseCtx0 = {
+        offenseDescription: (pcStore0 && pcStore0.getOffenseDescription) ? pcStore0.getOffenseDescription(caseId) : '',
+        offenseDate:        (pcStore0 && pcStore0.getOffenseDate)        ? pcStore0.getOffenseDate(caseId)        : '',
+      };
       const vres = V.validateDraft({
         draft,
         agency: agencyProfile,
         providers: providers0,
         pcNarrative: pcNarrative0,
+        caseCtx: caseCtx0,
       });
       if (!vres.ok) {
         _showValidatorBlockModal(caseId, draft, vres);
@@ -3848,6 +4195,10 @@ const bus = {
         affiant: draft.affiantSnapshot || {},
         agency:  draft.affiantSnapshot || {},
         draft,
+        // CO template needs court + case ctx; harmless on other templates
+        // because non-CO resolvers ignore them.
+        court: _resolveCoCourtForDraft(draft),
+        case: _resolveCaseCtxForDraft(draft),
       };
       let composed;
       try {

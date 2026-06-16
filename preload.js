@@ -66,6 +66,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   restoreBackup: (data) => ipcRenderer.invoke('restore-backup', data),
   restoreBackupZip: (data) => ipcRenderer.invoke('restore-backup-zip', data),
 
+  // Diagnostic Report (diagnostic-edition builds)
+  isDiagnosticMode: () => ipcRenderer.invoke('is-diagnostic-mode'),
+  generateDiagnosticReport: () => ipcRenderer.invoke('generate-diagnostic-report'),
+  showItemInFolder: (p) => ipcRenderer.invoke('show-item-in-folder', p),
+
   // RMS PDF Import
   openReportWindow: (caseNumber) => ipcRenderer.invoke('open-report-window', caseNumber),
   reportGet: (caseNumber) => ipcRenderer.invoke('report-get', caseNumber),
@@ -160,6 +165,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
   securityNavigateApp: () => ipcRenderer.invoke('security-navigate-app'),
   securitySaveVault: (data) => ipcRenderer.invoke('security-save-vault', data),
   securityLock: (opts) => ipcRenderer.invoke('security-lock', opts),
+
+  // v3.8.7 — Field Security Recovery
+  securityRecoveryCreateSession: (data) => ipcRenderer.invoke('security-recovery-create-session', data),
+  securityRecoveryScan: (data) => ipcRenderer.invoke('security-recovery-scan', data),
+  securityRecoveryPreflight: (data) => ipcRenderer.invoke('security-recovery-preflight', data),
+  securityRecoveryDecryptAll: (data) => ipcRenderer.invoke('security-recovery-decrypt-all', data),
+  securityRecoveryDispose: (data) => ipcRenderer.invoke('security-recovery-dispose', data),
+  securityRecoveryPickConfig: () => ipcRenderer.invoke('security-recovery-pick-config'),
+  securityRecoveryPickWorkingDir: () => ipcRenderer.invoke('security-recovery-pick-working-dir'),
+  securityRecoveryPickSearchRoot: () => ipcRenderer.invoke('security-recovery-pick-search-root'),
+  securityRecoverySearchConfig: (data) => ipcRenderer.invoke('security-recovery-search-config', data),
+  securityRecoverySearchOnProgress: (cb) => {
+    const handler = (_evt, p) => { try { cb(p); } catch (_) {} };
+    ipcRenderer.on('security-recovery-search-progress', handler);
+    return () => ipcRenderer.removeListener('security-recovery-search-progress', handler);
+  },
+  securityScanEncryptedSummary: () => ipcRenderer.invoke('security-scan-encrypted-summary'),
+  securityRecoveryOnProgress: (cb) => {
+    const handler = (_evt, p) => { try { cb(p); } catch (_) {} };
+    ipcRenderer.on('security-recovery-progress', handler);
+    return () => ipcRenderer.removeListener('security-recovery-progress', handler);
+  },
+  securityDisableOnProgress: (cb) => {
+    const handler = (_evt, p) => { try { cb(p); } catch (_) {} };
+    ipcRenderer.on('security-disable-progress', handler);
+    return () => ipcRenderer.removeListener('security-disable-progress', handler);
+  },
 
   // Audit log
   auditLogRead: (opts) => ipcRenderer.invoke('audit-log-read', opts),

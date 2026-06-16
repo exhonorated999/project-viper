@@ -5433,6 +5433,10 @@
                             getPlatform: function () { return (window.electronAPI && window.electronAPI.platform) || "unknown"; },
                         });
                         ViperTelemetry.appOpen();
+                        // v3.8.7: emit a page-level module_open so the
+                        // dashboard heatmap reflects that the user is on
+                        // the main dashboard view (default surface).
+                        try { ViperTelemetry.moduleOpen('dashboard'); } catch (_) {}
                         window.__viper_session_start = Date.now();
                         window.addEventListener("beforeunload", function () {
                             ViperTelemetry.sessionEnd(Math.floor((Date.now() - window.__viper_session_start) / 1000));
@@ -5562,6 +5566,9 @@
         }
 
         function showAllCases() {
+            // v3.8.7: emit module_open so dashboard heatmap reflects
+            // navigation to the cases list view.
+            try { ViperTelemetry.moduleOpen('cases_list'); } catch (_) {}
             // Update navigation
             document.querySelectorAll('.sidebar-item').forEach(item => {
                 item.classList.remove('active');
@@ -6996,6 +7003,8 @@
         }
 
         function showOffenseReference() {
+            // v3.8.7: emit module_open for heatmap visibility
+            try { ViperTelemetry.moduleOpen('offense_reference'); } catch (_) {}
             loadOffenses();
             
             // Update navigation
@@ -7887,6 +7896,8 @@
         }
 
         window.openCargonetInbox = async function () {
+            // v3.8.7: emit module_open for heatmap visibility
+            try { ViperTelemetry.moduleOpen('cargonet'); } catch (_) {}
             const modal = document.getElementById('cargonetModal');
             modal.classList.remove('hidden');
             cargonetShowList();
@@ -8240,6 +8251,8 @@
     }
     </script>
 
+<!-- Diagnostic Edition banner (no-op in production builds). -->
+<script src="modules/diagnostics/diagnostic-banner.js"></script>
 </body>
 </html>
 

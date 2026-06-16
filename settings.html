@@ -2235,6 +2235,9 @@
                                 Change Password
                             </summary>
                             <div class="mt-3 ml-6 space-y-3">
+                                <div class="text-[11px] text-gray-500 leading-relaxed bg-viper-dark/40 border border-gray-800 rounded-md px-3 py-2">
+                                    Changing your password only rewraps the existing master key under the new password. <span class="text-gray-300">Your encrypted files (vault, case data, evidence) are not re-encrypted</span> — they continue to open with the new password.
+                                </div>
                                 <input id="secChangePw" type="password" placeholder="New password"
                                     class="w-full bg-viper-dark border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:border-viper-green focus:outline-none transition-colors">
                                 <input id="secChangePwConfirm" type="password" placeholder="Confirm new password"
@@ -2525,6 +2528,20 @@
                     <!-- Backup Status -->
                     <div id="backupStatus" class="hidden mb-6"></div>
 
+                    <!-- Encryption toggle (v3.8.7) — defaults OFF -->
+                    <div class="mb-4 p-3 bg-viper-dark/60 border border-gray-700/50 rounded-lg">
+                        <label class="flex items-start gap-3 cursor-pointer select-none">
+                            <input type="checkbox" id="backupEncryptToggle" class="mt-0.5 w-4 h-4 accent-viper-purple cursor-pointer">
+                            <div class="flex-1">
+                                <div class="text-sm text-gray-200 font-medium">Encrypt backup file</div>
+                                <div class="text-[11px] text-gray-500 leading-relaxed mt-0.5">
+                                    Off (recommended): the <code>.vbak</code> contains a plain ZIP of your cases — restorable on any machine, even if Field Security is later disabled or your key is lost.
+                                    On: seals the backup under your current Field Security key. Cannot be restored without the password/recovery key that was active when it was created.
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+
                     <!-- Backup Actions -->
                     <div class="flex gap-4">
                         <button 
@@ -2695,6 +2712,9 @@
                             getPlatform: function () { return (window.electronAPI && window.electronAPI.platform) || "unknown"; },
                         });
                         ViperTelemetry.appOpen();
+                        // v3.8.7: emit module_open so the dashboard
+                        // heatmap reflects that the user opened Settings.
+                        try { ViperTelemetry.moduleOpen('settings'); } catch (_) {}
                         window.__viper_session_start = Date.now();
                         window.addEventListener("beforeunload", function () {
                             ViperTelemetry.sessionEnd(Math.floor((Date.now() - window.__viper_session_start) / 1000));
@@ -3412,12 +3432,27 @@
             }
             errDiv.classList.add('hidden');
 
+            // changePassword() requires masterKey to rewrap.  If user
+            // jumped straight to Settings without unlocking, prompt now.
+            // NOTE: changing the password ONLY rewraps the master key
+            // under a new password-derived KEK.  The master key itself
+            // is unchanged, so existing encrypted files (vault, case
+            // files, evidence) continue to decrypt without re-encryption.
+            const unlocked = await _ensureSecurityUnlocked(
+                'Changing the password rewraps the existing master key. <strong>Your encrypted files are NOT touched</strong> — they will continue to open with the new password. Please unlock first to authorize the change.'
+            );
+            if (!unlocked) {
+                errDiv.textContent = 'Password change cancelled — Field Security is still locked.';
+                errDiv.classList.remove('hidden');
+                return;
+            }
+
             try {
                 const result = await window.electronAPI.securityChangePassword({ newPassword: pw });
                 if (result.success) {
                     document.getElementById('secChangePw').value = '';
                     document.getElementById('secChangePwConfirm').value = '';
-                    showNotification('Password updated successfully', 'success');
+                    showNotification('Password updated — encrypted files unaffected, master key rewrapped.', 'success');
                 } else {
                     errDiv.textContent = result.error || 'Failed to change password.';
                     errDiv.classList.remove('hidden');
@@ -3490,17 +3525,227 @@
             return (n/(1024*1024*1024)).toFixed(2) + ' GB';
         }
 
+        // ─── Busy-overlay helper ──────────────────────────────────
+        // Modal full-screen spinner used during sync main-process I/O
+        // (disk scan, decrypt walk).  Without this the renderer paints
+        // nothing while the IPC promise is pending and Windows marks
+        // the window "Not Responding".  All progress text + bar lives
+        // inside this overlay.  Updates are throttled to ~10 Hz via
+        // requestAnimationFrame so per-file IPC bursts don't swamp the
+        // renderer's compositor.
+        let _busyOverlay = null;
+        let _busyState = null;
+        let _busyRaf = 0;
+        function _busyShow({ title, subtitle = '', danger = false }) {
+            if (_busyOverlay) return; // already up
+            const el = document.createElement('div');
+            el.className = 'viper-confirm-backdrop';
+            el.style.zIndex = '10000';
+            el.style.cursor = 'wait';
+            const accent = danger ? '#f87171' : '#06b6d4';
+            el.innerHTML = `
+                <div class="viper-confirm-box" style="max-width:520px;text-align:center">
+                    <div style="display:flex;justify-content:center;margin-bottom:14px">
+                        <div class="_busy-spin" style="
+                            width:46px;height:46px;border-radius:50%;
+                            border:3px solid #1f2937;
+                            border-top-color:${accent};
+                            animation:_busy-rot 0.9s linear infinite"></div>
+                    </div>
+                    <p id="_busy_title" style="font-weight:600;font-size:15px;margin:0 0 6px;color:${accent}">${title}</p>
+                    <p id="_busy_sub" style="font-size:12.5px;color:#9ca3af;margin:0 0 12px;min-height:18px">${subtitle}</p>
+                    <div style="font-family:ui-monospace,monospace;font-size:11px;color:#d1d5db;background:#0f1014;border:1px solid #1f2937;border-radius:6px;padding:8px;text-align:left;min-height:34px;max-height:60px;overflow:hidden">
+                        <div id="_busy_path" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl">…preparing…</div>
+                    </div>
+                    <div style="margin-top:12px">
+                        <div style="display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;margin-bottom:4px">
+                            <span id="_busy_phase">working…</span>
+                            <span id="_busy_count">0 / 0</span>
+                        </div>
+                        <div style="height:6px;background:#1f2937;border-radius:3px;overflow:hidden">
+                            <div id="_busy_bar" style="height:100%;width:0%;background:${accent};transition:width 120ms linear"></div>
+                        </div>
+                    </div>
+                    <p style="font-size:10.5px;color:#6b7280;margin-top:14px">Do not close VIPER. The window may briefly show 'Not Responding' — that's the disk walk, not a crash.</p>
+                </div>`;
+            // inject keyframes once
+            if (!document.getElementById('_busy_kf')) {
+                const s = document.createElement('style');
+                s.id = '_busy_kf';
+                s.textContent = '@keyframes _busy-rot { from { transform: rotate(0); } to { transform: rotate(360deg); } }';
+                document.head.appendChild(s);
+            }
+            document.body.appendChild(el);
+            _busyOverlay = el;
+            _busyState = { phase: '', current: 0, total: 0, path: '', dirty: false };
+        }
+        function _busyUpdate(p) {
+            if (!_busyOverlay || !_busyState) return;
+            Object.assign(_busyState, p);
+            _busyState.dirty = true;
+            if (_busyRaf) return;
+            _busyRaf = requestAnimationFrame(() => {
+                _busyRaf = 0;
+                if (!_busyOverlay || !_busyState || !_busyState.dirty) return;
+                _busyState.dirty = false;
+                const s = _busyState;
+                const phaseEl = document.getElementById('_busy_phase');
+                const countEl = document.getElementById('_busy_count');
+                const pathEl  = document.getElementById('_busy_path');
+                const barEl   = document.getElementById('_busy_bar');
+                if (phaseEl) phaseEl.textContent = s.phase || 'working…';
+                if (countEl) countEl.textContent = `${s.current||0} / ${s.total||0}`;
+                if (pathEl)  pathEl.textContent  = s.path || '';
+                if (barEl) {
+                    const pct = s.total ? Math.max(0, Math.min(100, (s.current/s.total)*100)) : 0;
+                    barEl.style.width = pct + '%';
+                }
+            });
+        }
+        function _busySetSubtitle(text) {
+            const el = document.getElementById('_busy_sub');
+            if (el) el.textContent = text;
+        }
+        function _busyHide() {
+            if (_busyRaf) { cancelAnimationFrame(_busyRaf); _busyRaf = 0; }
+            if (_busyOverlay) {
+                _busyOverlay.style.opacity = '0';
+                const el = _busyOverlay;
+                setTimeout(() => { try { el.remove(); } catch (_) {} }, 150);
+            }
+            _busyOverlay = null;
+            _busyState = null;
+        }
+        // Force the browser to flush a paint before we start a sync
+        // operation.  rAF queues us for the next frame; the inner
+        // setTimeout(0) yields the macrotask after that frame commits.
+        function _flushPaint() {
+            return new Promise(resolve =>
+                requestAnimationFrame(() => setTimeout(resolve, 0))
+            );
+        }
+
+        // ─── Inline unlock prompt (used by disable & password change) ───
+        // Returns true on successful unlock, false on cancel/failure.
+        // Renders a modal w/ password input + recovery-key fallback so
+        // the user never has to leave the Settings page to authenticate.
+        async function _ensureSecurityUnlocked(reasonHtml) {
+            try {
+                if (!window.electronAPI || !window.electronAPI.securityCheck) return true;
+                const s = await window.electronAPI.securityCheck();
+                if (!s.enabled) return true;       // not configured ⇒ nothing to unlock
+                if (s.unlocked) return true;       // already unlocked ⇒ proceed
+            } catch (_) { /* fall through, try prompt */ }
+
+            return new Promise((resolve) => {
+                const overlay = document.createElement('div');
+                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:10000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
+                overlay.innerHTML = `
+                    <div style="background:#111827;border:1px solid #f59e0b;border-radius:10px;padding:24px;max-width:480px;width:92%;box-shadow:0 25px 60px rgba(0,0,0,0.5)">
+                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+                            <svg style="width:22px;height:22px;color:#f59e0b" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m0-10a4 4 0 014 4v3H8v-3a4 4 0 014-4z"/><rect x="5" y="11" width="14" height="10" rx="2" stroke-width="2"/></svg>
+                            <h3 style="color:#fbbf24;font-size:16px;font-weight:600;margin:0">Unlock Field Security</h3>
+                        </div>
+                        <div style="color:#d1d5db;font-size:13px;line-height:1.5;margin-bottom:14px">${reasonHtml || 'Enter your password to authorize this operation.'}</div>
+                        <input id="_inlineUnlockPw" type="password" placeholder="Password"
+                            style="width:100%;background:#0b0f1a;border:1px solid #374151;border-radius:6px;padding:9px 11px;color:#fff;font-size:13px;margin-bottom:8px" />
+                        <div style="font-size:11px;color:#9ca3af;margin-bottom:8px">Or use recovery key (<code style="background:#1f2937;padding:1px 4px;border-radius:3px">VIPER-XXXX-XXXX-…</code>)</div>
+                        <input id="_inlineUnlockRk" type="text" placeholder="VIPER-XXXX-XXXX-XXXX-XXXX-XXXX (optional)"
+                            style="width:100%;background:#0b0f1a;border:1px solid #374151;border-radius:6px;padding:9px 11px;color:#fff;font-size:12px;font-family:ui-monospace,Menlo,monospace;letter-spacing:.5px;margin-bottom:8px" />
+                        <div id="_inlineUnlockErr" style="display:none;color:#f87171;font-size:12px;margin-bottom:10px;padding:6px 8px;background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.25);border-radius:5px"></div>
+                        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
+                            <button id="_inlineUnlockCancel" style="background:#374151;border:none;color:#d1d5db;padding:8px 14px;border-radius:6px;font-size:12px;cursor:pointer">Cancel</button>
+                            <button id="_inlineUnlockOk" style="background:#f59e0b;border:none;color:#000;padding:8px 18px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">Unlock</button>
+                        </div>
+                    </div>`;
+                document.body.appendChild(overlay);
+                const pw = overlay.querySelector('#_inlineUnlockPw');
+                const rk = overlay.querySelector('#_inlineUnlockRk');
+                const err = overlay.querySelector('#_inlineUnlockErr');
+                setTimeout(() => pw.focus(), 30);
+                const cleanup = (val) => { try { overlay.remove(); } catch (_) {} resolve(val); };
+                overlay.querySelector('#_inlineUnlockCancel').onclick = () => cleanup(false);
+                const tryUnlock = async () => {
+                    err.style.display = 'none';
+                    const pwVal = pw.value;
+                    const rkVal = rk.value.trim();
+                    if (!pwVal && !rkVal) { err.textContent = 'Enter password or recovery key.'; err.style.display = 'block'; return; }
+                    try {
+                        let res;
+                        if (rkVal) {
+                            res = await window.electronAPI.securityRecover({ recoveryKey: rkVal });
+                        } else {
+                            res = await window.electronAPI.securityUnlock({ password: pwVal });
+                        }
+                        if (res && res.success) { cleanup(true); }
+                        else { err.textContent = 'Invalid credential — try again.'; err.style.display = 'block'; pw.value = ''; rk.value = ''; pw.focus(); }
+                    } catch (e) {
+                        err.textContent = 'Unlock failed: ' + (e.message || e);
+                        err.style.display = 'block';
+                    }
+                };
+                overlay.querySelector('#_inlineUnlockOk').onclick = tryUnlock;
+                pw.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryUnlock(); });
+                rk.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryUnlock(); });
+            });
+        }
+
+        // ─── Persistent failure banner for disable flow ───────────────
+        function _showDisableFailureBanner(message, detail) {
+            let banner = document.getElementById('secDisableFailBanner');
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'secDisableFailBanner';
+                banner.style.cssText = 'margin:12px 0;padding:12px 14px;background:rgba(220,38,38,0.08);border:1px solid rgba(248,113,113,0.4);border-radius:8px;color:#fca5a5;font-size:13px;line-height:1.5;display:flex;gap:10px;align-items:flex-start';
+                const secEnabledDiv = document.getElementById('secEnabled');
+                if (secEnabledDiv) secEnabledDiv.insertBefore(banner, secEnabledDiv.firstChild);
+            }
+            banner.innerHTML = `
+                <svg style="width:18px;height:18px;color:#f87171;flex-shrink:0;margin-top:1px" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86A2.07 2.07 0 0021 16.93L13.93 4a2.07 2.07 0 00-3.86 0L3 16.93A2.07 2.07 0 005.07 19z"/></svg>
+                <div style="flex:1">
+                    <div style="font-weight:600;color:#fca5a5;margin-bottom:3px">Disable failed</div>
+                    <div style="color:#fecaca;font-size:12px">${message}</div>
+                    ${detail ? `<details style="margin-top:6px"><summary style="cursor:pointer;color:#fca5a5;font-size:11px">Details</summary><pre style="background:#1f0f0f;border:1px solid #5c1a1a;border-radius:4px;padding:6px;margin-top:4px;font-size:11px;color:#fca5a5;overflow:auto;max-height:160px;white-space:pre-wrap">${detail}</pre></details>` : ''}
+                </div>
+                <button onclick="document.getElementById('secDisableFailBanner').remove()" style="background:transparent;border:none;color:#fca5a5;cursor:pointer;font-size:18px;line-height:1">×</button>`;
+        }
+        function _clearDisableFailureBanner() {
+            const b = document.getElementById('secDisableFailBanner');
+            if (b) b.remove();
+        }
+
         async function doDisableSecurity() {
+            // STAGE 0 — must be unlocked to know the masterKey.  If the
+            // user landed on Settings without going through the lock
+            // screen (e.g. opened via taskbar shortcut, fresh launch
+            // straight to Settings), prompt inline.  Without this, the
+            // disable() call throws "Not unlocked" silently and the UI
+            // looks like nothing happened.
+            _clearDisableFailureBanner();
+            const unlocked = await _ensureSecurityUnlocked(
+                '<strong>Disabling Field Security</strong> requires unlocking first so VIPER can decrypt every protected file. Without unlocking, the master key is unavailable and no files can be decrypted.'
+            );
+            if (!unlocked) {
+                showNotification('Disable cancelled — Field Security stays locked.', 'info');
+                return;
+            }
+
             // STAGE 1 — pre-scan disk so the user sees the exact blast
             // radius before they confirm.  Without this scan the user
             // sees "Continue?" with no concrete numbers, which is what
             // bit the original affected user.
             let summary = null;
             try {
-                showNotification('Scanning disk for encrypted files…', 'info');
+                _busyShow({ title: 'Scanning disk for encrypted files…',
+                            subtitle: 'Walking userdata + cases roots.  This is read-only.',
+                            danger: false });
+                _busyUpdate({ phase: 'scanning', current: 0, total: 0, path: '(read-only walk)' });
+                await _flushPaint();                  // commit the overlay BEFORE the IPC blocks
                 summary = await window.electronAPI.securityScanEncryptedSummary();
             } catch (e) {
                 summary = { success: false, error: e.message };
+            } finally {
+                _busyHide();
             }
 
             const fileCount = (summary && summary.success) ? summary.totalFiles : null;
@@ -3533,28 +3778,40 @@
             });
             if (!ok) return;
 
-            // STAGE 3 — run the disable with per-file progress.
+            // STAGE 3 — run the disable with per-file progress shown
+            // in the busy overlay (throttled to ~10 Hz via rAF).
             let off = null;
             try {
-                const showProgress = (p) => {
-                    try {
-                        const box = document.getElementById('secRecStatus');
-                        if (!box) return;
-                        box.classList.remove('hidden');
-                        const tail = `[disable] ${p.phase} ${p.current||0}/${p.total||0} ${p.path||''}\n`;
-                        box.textContent = (box.textContent + tail).split('\n').slice(-200).join('\n');
-                        box.scrollTop = box.scrollHeight;
-                    } catch (_) {}
-                };
+                _busyShow({ title: 'Decrypting files…',
+                            subtitle: `Rewriting ${fileCount || 'all'} encrypted file(s) as plaintext.`,
+                            danger: true });
+                _busyUpdate({ phase: 'decrypting', current: 0, total: fileCount || 0, path: '' });
+                await _flushPaint();
+
                 if (window.electronAPI.securityDisableOnProgress) {
-                    off = window.electronAPI.securityDisableOnProgress(showProgress);
+                    off = window.electronAPI.securityDisableOnProgress((p) => {
+                        // Mirror to recovery log pane if the panel is open
+                        try {
+                            const box = document.getElementById('secRecStatus');
+                            if (box && !box.classList.contains('hidden')) {
+                                const tail = `[disable] ${p.phase} ${p.current||0}/${p.total||0} ${p.path||''}\n`;
+                                box.textContent = (box.textContent + tail).split('\n').slice(-200).join('\n');
+                                box.scrollTop = box.scrollHeight;
+                            }
+                        } catch (_) {}
+                        // Drive the overlay (throttled internally)
+                        _busyUpdate(p);
+                    });
                 }
 
-                showNotification('Decrypting files — do not close VIPER…', 'info');
                 const result = await window.electronAPI.securityDisable();
+                _busyHide();
+
                 if (result.success) {
-                    document.getElementById('secEnabled').classList.add('hidden');
-                    document.getElementById('secDisabled').classList.remove('hidden');
+                    // Trust the source of truth: re-query main for actual state.
+                    // Belt-and-suspenders so the UI can never disagree with the
+                    // on-disk security.json after this transition.
+                    try { await loadSecurityState(); } catch (_) {}
                     const r = result.report || {};
                     const dec = (r.decrypted || []).length;
                     const failed = (r.failed || []).length;
@@ -3564,10 +3821,22 @@
                         showNotification(`Field Security disabled (${dec} files decrypted)`, 'success');
                     }
                 } else {
-                    showNotification('Failed: ' + (result.error || 'Unknown error'), 'error');
+                    const msg = result.error || 'Unknown error';
+                    _showDisableFailureBanner(
+                        msg === 'Not unlocked'
+                            ? 'Field Security must be unlocked first. Click "Decrypt All & Disable" again and enter your password when prompted.'
+                            : `The disable operation could not complete: ${msg}`,
+                        msg
+                    );
+                    showNotification('Disable failed — see banner above for details.', 'error');
                 }
             } catch (e) {
-                showNotification('Failed: ' + e.message, 'error');
+                _busyHide();
+                _showDisableFailureBanner(
+                    `Unexpected error: ${e.message}`,
+                    (e.stack || e.message || String(e))
+                );
+                showNotification('Disable failed — see banner above for details.', 'error');
             } finally {
                 try { if (off) off(); } catch (_) {}
             }
@@ -3665,7 +3934,13 @@
             _recLog('Scanning userdata/ and cases/ for VIPENC blobs…');
             _recAttachProgress();
             try {
+                _busyShow({ title: 'Scanning for encrypted files…',
+                            subtitle: 'Walking userdata + cases roots.  Read-only.',
+                            danger: false });
+                _busyUpdate({ phase: 'scanning', current: 0, total: 0, path: '' });
+                await _flushPaint();
                 const r = await window.electronAPI.securityRecoveryScan({ sessionId: _secRecSessionId });
+                _busyHide();
                 if (!r.success) {
                     _recLog(`  ✗ ${r.error}`);
                     return showNotification('Scan failed: ' + r.error, 'error');
@@ -3683,6 +3958,7 @@
                     showNotification(`Found ${r.totalFiles} encrypted files`, 'success');
                 }
             } catch (e) {
+                _busyHide();
                 _recLog(`  ✗ ${e.message}`);
                 showNotification('Scan failed: ' + e.message, 'error');
             }
@@ -3708,11 +3984,20 @@
             document.getElementById('secRecRunBtn').disabled = true;
             try {
                 _recLog(`Pre-flight backup → ${workingDir}`);
+                _busyShow({ title: 'Pre-flight backup…',
+                            subtitle: `Mirroring ${_secRecScanResult.totalFiles} encrypted file(s) to ${workingDir}`,
+                            danger: false });
+                _busyUpdate({ phase: 'copying', current: 0, total: _secRecScanResult.totalFiles, path: '' });
+                // Drive the overlay from the recovery progress stream
+                const overlayBridgeOff = window.electronAPI.securityRecoveryOnProgress((p) => _busyUpdate(p));
+                await _flushPaint();
                 const pf = await window.electronAPI.securityRecoveryPreflight({
                     sessionId: _secRecSessionId,
                     workingDir
                 });
                 if (!pf.success) {
+                    _busyHide();
+                    try { overlayBridgeOff && overlayBridgeOff(); } catch (_) {}
                     _recLog(`  ✗ Pre-flight failed: ${pf.error}`);
                     showNotification('Pre-flight failed: ' + pf.error, 'error');
                     return;
@@ -3720,9 +4005,16 @@
                 _recLog(`  ✓ Backup written to ${pf.backupDir} (${pf.copiedFiles} files)`);
 
                 _recLog('Decrypting…');
+                _busyShow({ title: 'Decrypting files…',
+                            subtitle: `Atomic-rename rewrite of ${_secRecScanResult.totalFiles} file(s).  Crash-safe.`,
+                            danger: true });
+                _busyUpdate({ phase: 'decrypting', current: 0, total: _secRecScanResult.totalFiles, path: '' });
+                await _flushPaint();
                 const dr = await window.electronAPI.securityRecoveryDecryptAll({
                     sessionId: _secRecSessionId
                 });
+                _busyHide();
+                try { overlayBridgeOff && overlayBridgeOff(); } catch (_) {}
                 if (!dr.success) {
                     _recLog(`  ✗ Decrypt failed: ${dr.error}`);
                     return showNotification('Decrypt failed: ' + dr.error, 'error');
@@ -3740,6 +4032,7 @@
                     showNotification(`Recovery finished with ${rep.failed.length} failure(s) — see status pane`, 'warning');
                 }
             } catch (e) {
+                _busyHide();
                 _recLog(`  ✗ ${e.message}`);
                 showNotification('Recovery failed: ' + e.message, 'error');
             } finally {
@@ -4009,11 +4302,19 @@
                 updateBackupProgress(30, 'Collecting case data...');
 
                 // Write ZIP backup (localStorage + case files) via Electron IPC
-                updateBackupProgress(50, 'Packaging case files + evidence...');
-                const savedPath = await window.electronAPI.createBackupZip({
+                // v3.8.7: pass encrypt flag from the new UI toggle.  IPC now
+                // returns { filePath, encrypted } instead of a bare path string.
+                const wantEncrypt = !!document.getElementById('backupEncryptToggle')?.checked;
+                updateBackupProgress(50, wantEncrypt
+                    ? 'Packaging + sealing under Field Security…'
+                    : 'Packaging case files + evidence (plaintext)…');
+                const result = await window.electronAPI.createBackupZip({
                     backupPath,
-                    data: JSON.stringify(backupData)
+                    data: JSON.stringify(backupData),
+                    encrypt: wantEncrypt
                 });
+                const savedPath = (result && typeof result === 'object') ? result.filePath : result;
+                const wasEncrypted = !!(result && result.encrypted);
 
                 // Update progress
                 updateBackupProgress(100, 'Complete!');
@@ -4025,7 +4326,12 @@
 
                 setTimeout(() => {
                     document.getElementById('backupProgress').classList.add('hidden');
-                    showNotification('Backup created successfully', 'success');
+                    showNotification(
+                        wasEncrypted
+                            ? 'Backup created (encrypted — requires current Field Security key to restore)'
+                            : 'Backup created (plaintext — portable across installs)',
+                        'success'
+                    );
                     backupButton.disabled = false;
                     backupButton.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg> Create Backup';
                 }, 1000);

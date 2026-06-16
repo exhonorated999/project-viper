@@ -40,6 +40,36 @@ class SecurityManager {
   }
 
   _saveConfig() {
+    // Forward-fix (v3.8.7): before overwriting, rotate a timestamped backup of
+    // the existing config so a setup() / disable() cycle can never silently
+    // destroy the only copy of the wrapping metadata that ties saved
+    // password/recovery keys to the master key that encrypted on-disk blobs.
+    // Keeps the 5 most recent snapshots; oldest are unlink()ed.
+    try {
+      if (fs.existsSync(this.configPath)) {
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        const bakPath = `${this.configPath}.bak.${ts}`;
+        try {
+          fs.copyFileSync(this.configPath, bakPath);
+        } catch (e) {
+          console.error('SecurityManager: failed to write config backup', e.message);
+        }
+        // Prune to last 5
+        try {
+          const dir = path.dirname(this.configPath);
+          const base = path.basename(this.configPath);
+          const baks = fs.readdirSync(dir)
+            .filter(n => n.startsWith(`${base}.bak.`))
+            .sort()
+            .reverse();
+          for (const stale of baks.slice(5)) {
+            try { fs.unlinkSync(path.join(dir, stale)); } catch (_) {}
+          }
+        } catch (_) { /* best-effort prune */ }
+      }
+    } catch (e) {
+      console.error('SecurityManager: backup-rotate failed', e.message);
+    }
     fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2), 'utf-8');
   }
 
@@ -96,7 +126,37 @@ class SecurityManager {
 
   // ─── Setup (first-time enable) ───────────────────────────────────
 
-  setup(password) {
+  setup(password, opts = {}) {
+    // Forward-fix (v3.8.7): refuse to setup() when there is no existing
+    // config but VIPENC blobs already exist on disk — that signature
+    // means a previous SecurityManager session encrypted files with a
+    // master key that this setup() call would silently replace.
+    // Caller passes opts.scanRoots = [basePath, casesDir, ...] so we
+    // know where to look.  Pass opts.allowOverwriteEncrypted = true
+    // only after a successful recovery / decision to abandon old data.
+    if (!this.config && Array.isArray(opts.scanRoots) && !opts.allowOverwriteEncrypted) {
+      const found = [];
+      for (const root of opts.scanRoots) {
+        const hits = SecurityManager.scanForEncryptedFiles(root, { maxFiles: 5 });
+        for (const h of hits) {
+          found.push(h.path);
+          if (found.length >= 5) break;
+        }
+        if (found.length >= 5) break;
+      }
+      if (found.length) {
+        const err = new Error(
+          'VIPER detected encrypted files from a prior Field Security session. ' +
+          'Use "Recover Lost Encrypted Data" with your original security.json ' +
+          'before re-enabling encryption, or contact support. ' +
+          `Found ${found.length}+ encrypted file(s); first: ${found[0]}`
+        );
+        err.code = 'EXISTING_ENCRYPTED_FILES';
+        err.samples = found;
+        throw err;
+      }
+    }
+
     const masterKey = crypto.randomBytes(KEY_LENGTH);
 
     // Wrap with password
@@ -192,9 +252,25 @@ class SecurityManager {
     return recoveryKey;
   }
 
-  disable() {
+  /**
+   * Disable Field Security.  Walks all caller-supplied roots, decrypts
+   * every VIPENC blob found, and only then flips the enabled flag.
+   *
+   * @param {object} opts
+   * @param {string[]} [opts.scanRoots] additional roots besides basePath
+   *                                    (e.g. casesDir).  Caller MUST
+   *                                    pass cases dir or those files
+   *                                    will stay encrypted.
+   * @param {function} [opts.onProgress] ({ phase, current, total, path }) => void
+   * @returns {{ decrypted: string[], failed: {path:string,error:string}[] }}
+   */
+  disable(opts = {}) {
     if (!this.masterKey) throw new Error('Not unlocked');
-    // Decrypt vault to plain JSON if it exists
+
+    const roots = [this.basePath, ...(opts.scanRoots || [])];
+    const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : null;
+
+    // 1) Decrypt the localStorage snapshot vault to plaintext sidecar
     if (fs.existsSync(this.vaultPath)) {
       try {
         const data = this.decryptVault();
@@ -204,11 +280,57 @@ class SecurityManager {
           );
         }
       } catch (e) { /* best effort */ }
-      fs.unlinkSync(this.vaultPath);
+      try { fs.unlinkSync(this.vaultPath); } catch (_) {}
     }
+
+    // 2) Scan all roots for VIPENC blobs, excluding security.json itself
+    //    and our own backup shadows.
+    const skipPaths = new Set([
+      this.configPath,
+      this.vaultPath,
+    ]);
+    const targets = [];
+    for (const root of roots) {
+      const hits = SecurityManager.scanForEncryptedFiles(root);
+      for (const h of hits) {
+        if (!skipPaths.has(h.path) && !targets.some(t => t.path === h.path)) {
+          targets.push(h);
+        }
+      }
+    }
+
+    if (onProgress) onProgress({ phase: 'start', current: 0, total: targets.length });
+
+    const decrypted = [];
+    const failed = [];
+
+    // 3) Decrypt in place via shadow-write + atomic rename so a crash
+    //    mid-walk leaves either the original VIPENC or the decrypted
+    //    plaintext on disk, never a half-written file.
+    targets.forEach((t, idx) => {
+      if (onProgress) onProgress({ phase: 'decrypt', current: idx + 1, total: targets.length, path: t.path });
+      try {
+        const raw = fs.readFileSync(t.path);
+        const plain = SecurityManager.decryptBufferWithKey(raw, this.masterKey);
+        const shadow = `${t.path}.recovered.tmp`;
+        fs.writeFileSync(shadow, plain);
+        fs.renameSync(shadow, t.path);
+        decrypted.push(t.path);
+      } catch (e) {
+        failed.push({ path: t.path, error: e.message });
+      }
+    });
+
+    // 4) Only NOW flip the flag and clear the master key.  If we
+    //    crashed during the walk, security stays enabled — user can
+    //    re-run disable to finish.
     this.config.enabled = false;
     this._saveConfig();
     this.masterKey = null;
+
+    if (onProgress) onProgress({ phase: 'done', current: targets.length, total: targets.length });
+
+    return { decrypted, failed };
   }
 
   // ─── Vault: localStorage snapshot encrypt / decrypt ──────────────
@@ -291,6 +413,117 @@ class SecurityManager {
   lock() {
     this.masterKey = null;
   }
+
+  // ─── Recovery helpers (v3.8.7) ────────────────────────────────────
+  // These are stateless / static-style helpers used by the recovery
+  // module (modules/security-recovery.js) and the disable() walker.
+  // They never mutate instance state and never write to disk.
+
+  /**
+   * Derive masterKey from a config object + credential.
+   * Does NOT touch instance state.  Returns Buffer or throws.
+   */
+  static deriveMasterKey(configObj, credential, kind /* 'password' | 'recovery' */) {
+    if (!configObj || typeof configObj !== 'object') {
+      throw new Error('deriveMasterKey: invalid config object');
+    }
+    const saltHex   = kind === 'password' ? configObj.password_salt        : configObj.recovery_salt;
+    const wrappedHex= kind === 'password' ? configObj.password_wrapped_key : configObj.recovery_wrapped_key;
+    const ivHex     = kind === 'password' ? configObj.password_iv          : configObj.recovery_iv;
+    const tagHex    = kind === 'password' ? configObj.password_tag         : configObj.recovery_tag;
+    if (!saltHex || !wrappedHex || !ivHex || !tagHex) {
+      throw new Error(`deriveMasterKey: config missing ${kind} wrapping fields`);
+    }
+    const salt = Buffer.from(saltHex, 'hex');
+    const kek  = crypto.pbkdf2Sync(credential, salt, PBKDF2_ITERATIONS, KEY_LENGTH, 'sha256');
+    const decipher = crypto.createDecipheriv(
+      ALGORITHM, kek, Buffer.from(ivHex, 'hex')
+    );
+    decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+    return Buffer.concat([
+      decipher.update(Buffer.from(wrappedHex, 'hex')),
+      decipher.final()
+    ]);
+  }
+
+  /**
+   * Decrypt a VIPENC buffer with an externally-supplied master key.
+   * Pure function; no instance state.  Plaintext buffer returned as-is.
+   */
+  static decryptBufferWithKey(encBuffer, masterKey) {
+    if (!Buffer.isBuffer(encBuffer)) encBuffer = Buffer.from(encBuffer);
+    if (!Buffer.isBuffer(masterKey) || masterKey.length !== KEY_LENGTH) {
+      throw new Error('decryptBufferWithKey: invalid master key');
+    }
+    if (encBuffer.length < HEADER_SIZE || !encBuffer.subarray(0, 6).equals(MAGIC)) {
+      return encBuffer;
+    }
+    const iv         = encBuffer.subarray(8, 24);
+    const tag        = encBuffer.subarray(24, 40);
+    const ciphertext = encBuffer.subarray(40);
+    const decipher   = crypto.createDecipheriv(ALGORITHM, masterKey, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  }
+
+  /** True if file's first 6 bytes are the VIPENC magic. */
+  static isEncryptedFile(filePath) {
+    try {
+      const fd = fs.openSync(filePath, 'r');
+      const buf = Buffer.alloc(6);
+      const n = fs.readSync(fd, buf, 0, 6, 0);
+      fs.closeSync(fd);
+      return n === 6 && buf.equals(MAGIC);
+    } catch (_) { return false; }
+  }
+
+  /**
+   * Recursively walk `root` and return a list of VIPENC-encrypted files.
+   * Skips obvious non-evidence dirs and the recovery-backup folders.
+   * Returns [{ path, size }].
+   */
+  static scanForEncryptedFiles(root, opts = {}) {
+    const max = opts.maxFiles || 1_000_000;
+    const out = [];
+    const skipDirNames = new Set([
+      'node_modules', '.git', '__pycache__',
+      // never re-encrypt our own recovery work
+      ...((opts.skipDirNames) || [])
+    ]);
+    const skipPrefixes = ['_recovery_backup_', '_recovery_decrypted_'];
+    const walk = (dir) => {
+      if (out.length >= max) return;
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+      catch (_) { return; }
+      for (const ent of entries) {
+        if (out.length >= max) return;
+        const full = path.join(dir, ent.name);
+        if (ent.isDirectory()) {
+          if (skipDirNames.has(ent.name)) continue;
+          if (skipPrefixes.some(p => ent.name.startsWith(p))) continue;
+          walk(full);
+        } else if (ent.isFile()) {
+          if (SecurityManager.isEncryptedFile(full)) {
+            let size = 0;
+            try { size = fs.statSync(full).size; } catch (_) {}
+            out.push({ path: full, size });
+          }
+        }
+      }
+    };
+    if (fs.existsSync(root)) walk(root);
+    return out;
+  }
 }
+
+// Constants exported for the recovery module + tests
+SecurityManager.MAGIC = MAGIC;
+SecurityManager.HEADER_SIZE = HEADER_SIZE;
+SecurityManager.FORMAT_VERSION = FORMAT_VERSION;
+SecurityManager.ALGORITHM = ALGORITHM;
+SecurityManager.KEY_LENGTH = KEY_LENGTH;
+SecurityManager.IV_LENGTH = IV_LENGTH;
+SecurityManager.PBKDF2_ITERATIONS = PBKDF2_ITERATIONS;
 
 module.exports = SecurityManager;

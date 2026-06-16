@@ -1,4 +1,5 @@
-const { app, BrowserWindow, BrowserView, ipcMain, shell, dialog, globalShortcut, session, protocol, net, Menu } = require('electron');
+const electron = require('electron');
+const { app, BrowserView, ipcMain, shell, dialog, globalShortcut, session, protocol, net, Menu } = electron;
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -6,6 +7,45 @@ const url = require('url');
 const { spawn } = require('child_process');
 const os = require('os');
 const crypto = require('crypto');
+
+// ─────────────────────────────────────────────────────────────────────
+// DIAGNOSTIC MODE — initialized FIRST, before anything else can run.
+// Activated by ANY of:
+//   1) VIPER_DIAGNOSTIC_MODE=1 in the env
+//   2) app.getName() contains "Diagnostic" (the diagnostic build sets
+//      productName: "V.I.P.E.R. Diagnostic" — see electron-builder-diagnostic.yml)
+//   3) executable filename contains "Diagnostic" (portable .exe rename)
+// In diagnostic mode:
+//   - launch-logger writes a per-launch JSON with full system context
+//   - BrowserWindow constructor is wrapped to log every window creation
+//   - app lifecycle events are logged
+//   - auto-updater is DISABLED (skipped at require time below) — removes
+//     the Brocoiner heuristic surface so the build can install through
+//     locked-down Defender policies
+// ─────────────────────────────────────────────────────────────────────
+const _appName = (function(){ try { return app.getName() || ''; } catch (_) { return ''; } })();
+const _execName = path.basename(process.execPath || '');
+const DIAGNOSTIC_MODE = (
+  process.env.VIPER_DIAGNOSTIC_MODE === '1' ||
+  /diagnostic/i.test(_appName) ||
+  /diagnostic/i.test(_execName)
+);
+const DISABLE_AUTOUPDATE = DIAGNOSTIC_MODE || process.env.VIPER_DISABLE_AUTOUPDATE === '1';
+let launchLogger = null;
+if (DIAGNOSTIC_MODE) {
+  try {
+    launchLogger = require('./modules/diagnostics/launch-logger');
+    launchLogger.init({ app, captureWindows: true });
+  } catch (e) {
+    console.warn('launch-logger init failed:', e.message);
+    launchLogger = null;
+  }
+}
+// Re-read BrowserWindow AFTER logger init so we get the wrapped version
+// that logs every window construction with a stack trace (no-op when
+// launch-logger did not run — wrapping is in-process only).
+const BrowserWindow = electron.BrowserWindow;
+
 const SecurityManager = require('./modules/security');
 const AuditLogger = require('./modules/audit-log');
 const AUDIT_EVENTS = AuditLogger.EVENT_TYPES;
@@ -49,12 +89,19 @@ function _datapilotIssueMediaToken(absPath) {
   return tok;
 }
 
-// electron-updater: lazy-load to avoid crashing in dev mode
+// electron-updater: lazy-load to avoid crashing in dev mode.
+// DIAGNOSTIC builds and VIPER_DISABLE_AUTOUPDATE=1 builds skip the
+// require entirely — this removes the auto-updater code paths that
+// trip Windows Defender's Brocoiner heuristic on unsigned builds.
 let autoUpdater = null;
-try {
-  autoUpdater = require('electron-updater').autoUpdater;
-} catch (e) {
-  console.warn('electron-updater not available (dev mode):', e.message);
+if (!DISABLE_AUTOUPDATE) {
+  try {
+    autoUpdater = require('electron-updater').autoUpdater;
+  } catch (e) {
+    console.warn('electron-updater not available (dev mode):', e.message);
+  }
+} else {
+  console.log('electron-updater: SKIPPED (diagnostic mode or VIPER_DISABLE_AUTOUPDATE=1)');
 }
 
 let mainWindow;
@@ -497,6 +544,27 @@ function _setCasesHidden(hidden) {
       spawn('attrib', [flag, casesDir]);
     }
   } catch (e) { console.error('attrib error:', e.message); }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Single-instance lock. Prevents the spawn-N-windows bug users hit when
+// VIPER is double-launched (desktop shortcut + auto-start, taskbar, etc).
+// If we fail to acquire the lock, immediately quit; the existing process
+// receives a 'second-instance' event and focuses its window.
+// ─────────────────────────────────────────────────────────────────────
+const _gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!_gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    try {
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        if (!mainWindow.isVisible()) mainWindow.show();
+        mainWindow.focus();
+      }
+    } catch (e) { /* best-effort focus */ }
+  });
 }
 
 app.whenReady().then(async () => {
@@ -2071,82 +2139,124 @@ ipcMain.handle('update-install', async () => {
 
   console.log('update-install: launching', installerPath);
 
-  // ── 2. Write a self-deleting launcher batch file ───────────────────
-  // Why a batch file (not direct spawn):
-  //  - Runs OUTSIDE this Electron process tree, so it survives app.quit().
-  //    A direct child spawn (even with detached:true + unref()) can be
-  //    killed by Windows' job object when the parent dies.
-  //  - Lets us add a timeout so the installer launches AFTER VIPER has
-  //    fully exited and released its file locks.
-  //  - Lets the installer pop its own UAC dialog naturally (NSIS handles
-  //    elevation itself when targeting Program Files). No PowerShell
-  //    -Verb RunAs gymnastics, no /D= quoting issues.
-  //  - We deliberately DO NOT pass /S (silent) or /D= (install dir):
-  //      * oneClick:false NSIS shows an assisted wizard either way; let
-  //        the user click Next so they can SEE the install succeed.
-  //      * NSIS reads the previous install path from its registry key
-  //        and upgrades in-place — far more reliable than passing /D=
-  //        with a space-containing path through cmd/PowerShell quoting.
+  // ── 2. Hand off to electron-updater's native installer launcher ─────
+  // Why this instead of the previous `.bat` + `cmd.exe /c start` dance:
+  //  - autoUpdater.quitAndInstall() is the canonical Squirrel/NSIS launch
+  //    path. Windows Defender's heuristic engine already treats it as a
+  //    trusted update flow; our old "write .bat, spawn detached cmd.exe,
+  //    self-exit" pattern is identical to coin-miner droppers and was
+  //    triggering false positives as Trojan:Win32/Brocoiner.
+  //  - quitAndInstall handles parent-exit + file-lock release internally
+  //    via electron-updater's bundled launcher binary (signed, trusted).
+  //  - NSIS's own customInit/customInstall (in installer.nsh) still runs
+  //    the data-preservation backup/restore.
+  //  - Arguments: (isSilent=false, isForceRunAfter=true) — let the user
+  //    see the wizard so they can confirm, and relaunch VIPER after.
   //
-  // installer.nsh's customInit/customInstall handle the data-preservation
-  // backup/restore regardless.
-  const batPath = path.join(app.getPath('temp'), `viper_update_${Date.now()}.bat`);
-  const batLines = [
-    '@echo off',
-    'rem VIPER auto-update launcher (auto-generated, self-deleting)',
-    'rem Wait for VIPER to fully exit and release file locks',
-    'timeout /t 4 /nobreak >nul 2>&1',
-    `start "" "${installerPath}"`,
-    'rem Self-delete after launch',
-    '(goto) 2>nul & del "%~f0"'
-  ];
-  const batContent = batLines.join('\r\n') + '\r\n';
+  // Fallback path: if quitAndInstall throws (rare — usually means the
+  // updater never owned the file), use Electron's shell.openPath which
+  // is functionally equivalent to a user double-clicking the installer.
+  // Same Defender posture as a normal manual install — no Brocoiner trip.
+  try {
+    audit && audit.write(AUDIT_EVENTS.UPDATE_APPLIED, {
+      from_version: app.getVersion(),
+      installer: path.basename(installerPath),
+    });
+  } catch (_) {}
 
   try {
-    fs.writeFileSync(batPath, batContent, 'utf-8');
-  } catch (err) {
-    console.error('update-install: failed to write launcher batch:', err);
-    sendUpdateStatus('update-status', {
-      status: 'error',
-      message: 'Failed to prepare installer launcher: ' + err.message
-    });
-    return { success: false, error: err.message };
-  }
-
-  // ── 3. Spawn the batch via `cmd /c start` to fully detach ──────────
-  // `start ""` opens the batch in a NEW window/session, escaping the
-  // Electron process tree's job object so the launcher survives
-  // app.quit().  windowsHide keeps the launcher invisible until the
-  // installer's own UI appears.
-  try {
-    const { spawn } = require('child_process');
-    const child = spawn('cmd.exe', ['/c', 'start', '""', '/min', batPath], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true
-    });
-    child.unref();
-    console.log('update-install: launcher batch dispatched:', batPath);
+    // Primary: electron-updater's native launcher.
+    autoUpdater.quitAndInstall(false, true);
+    return { success: true };
+  } catch (primaryErr) {
+    console.warn('update-install: quitAndInstall failed, falling back to shell.openPath:', primaryErr.message);
     try {
-      audit && audit.write(AUDIT_EVENTS.UPDATE_APPLIED, {
-        from_version: app.getVersion(),
-        installer: path.basename(installerPath),
+      // Fallback: open the .exe via the OS shell. Same as user double-click.
+      const { shell } = require('electron');
+      const openErr = await shell.openPath(installerPath);
+      if (openErr) throw new Error(openErr);
+      // Give the installer a moment to launch before we quit so it can
+      // grab the file locks once they release.
+      setTimeout(() => { try { app.quit(); } catch (_) {} }, 1500);
+      return { success: true };
+    } catch (fallbackErr) {
+      console.error('update-install: fallback launch failed:', fallbackErr);
+      sendUpdateStatus('update-status', {
+        status: 'error',
+        message: 'Failed to launch installer: ' + fallbackErr.message
       });
-    } catch (_) {}
-  } catch (err) {
-    console.error('update-install: failed to spawn launcher:', err);
-    sendUpdateStatus('update-status', {
-      status: 'error',
-      message: 'Failed to launch installer: ' + err.message
-    });
-    return { success: false, error: err.message };
+      return { success: false, error: fallbackErr.message };
+    }
   }
+});
 
-  // ── 4. Quit so the new installer can replace the running exe ───────
-  // Brief delay lets the cmd.exe spawn fully detach before we exit.
-  await new Promise(resolve => setTimeout(resolve, 1500));
-  app.quit();
-  return { success: true };
+// --- Diagnostic Report (used by diagnostic-edition builds) ---
+// Bundles all launch-logger output + a live system snapshot into a
+// single .zip on the user's chosen location (defaults to Desktop).
+// Renderer invokes via:
+//   ipcRenderer.invoke('generate-diagnostic-report')
+ipcMain.handle('is-diagnostic-mode', async () => {
+  // Reconstruct the human-readable reason this build entered diagnostic
+  // mode. Order matches detection precedence at top of file.
+  let reason = 'not active';
+  if (DIAGNOSTIC_MODE) {
+    if (process.env.VIPER_DIAGNOSTIC_MODE === '1') reason = 'env VIPER_DIAGNOSTIC_MODE=1';
+    else if (/diagnostic/i.test(_appName)) reason = `app name "${_appName}"`;
+    else if (/diagnostic/i.test(_execName)) reason = `exec name "${_execName}"`;
+    else reason = 'unknown trigger';
+  }
+  let outputDir = '';
+  try { outputDir = launchLogger ? launchLogger.getOutputDir(app) : ''; } catch (_) {}
+  return {
+    diagnostic: DIAGNOSTIC_MODE,
+    autoupdate_disabled: DISABLE_AUTOUPDATE,
+    app_name: _appName,
+    app_version: app.getVersion(),
+    reason,
+    pid: process.pid,
+    outputDir,
+  };
+});
+
+ipcMain.handle('generate-diagnostic-report', async () => {
+  try {
+    if (!launchLogger) {
+      return { ok: false, error: 'Launch logger not initialized.' };
+    }
+    const diagReport = require('./modules/diagnostics/diagnostic-report');
+    const defaultName = `VIPER-DIAG-${os.hostname()}-${(process.env.USERNAME || 'user')}-${new Date().toISOString().slice(0,10)}.zip`;
+    const defaultPath = path.join(app.getPath('desktop'), defaultName);
+    const saveRes = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save VIPER Diagnostic Report',
+      defaultPath,
+      filters: [{ name: 'Zip Archive', extensions: ['zip'] }],
+    });
+    restoreFocus();
+    if (saveRes.canceled || !saveRes.filePath) return { ok: false, error: 'cancelled' };
+
+    const result = await diagReport.generate({
+      app,
+      launchLogger,
+      outPath: saveRes.filePath,
+    });
+    return result;
+  } catch (e) {
+    console.error('generate-diagnostic-report failed:', e);
+    return { ok: false, error: e.message };
+  }
+});
+
+// Reveals a file in Explorer (used by diagnostic banner "Open Folder").
+ipcMain.handle('show-item-in-folder', async (_evt, filePath) => {
+  try {
+    if (filePath && typeof filePath === 'string') {
+      shell.showItemInFolder(filePath);
+      return { ok: true };
+    }
+    return { ok: false, error: 'invalid path' };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 });
 
 // --- Backup & Restore ---
@@ -3150,12 +3260,33 @@ ipcMain.handle('security-check', async () => {
   };
 });
 
-ipcMain.handle('security-setup', async (event, { password }) => {
-  const recoveryKey = security.setup(password);
-  // Hide the cases folder on disk
-  _setCasesHidden(true);
-  try { audit && audit.write(AUDIT_EVENTS.SECURITY_ENABLED, {}); } catch (_) {}
-  return { success: true, recoveryKey };
+ipcMain.handle('security-setup', async (event, { password, allowOverwriteEncrypted }) => {
+  try {
+    // v3.8.7: pass scanRoots so setup() can refuse if VIPENC blobs
+    // exist on disk and no prior config was found.  This is the
+    // forward-fix that would have caught the affected user's
+    // disable-then-re-enable disaster before any data was lost.
+    const scanRoots = [];
+    try { if (casesDir) scanRoots.push(casesDir); } catch (_) {}
+    const recoveryKey = security.setup(password, {
+      scanRoots,
+      allowOverwriteEncrypted: !!allowOverwriteEncrypted
+    });
+    // Hide the cases folder on disk
+    _setCasesHidden(true);
+    try { audit && audit.write(AUDIT_EVENTS.SECURITY_ENABLED, {}); } catch (_) {}
+    return { success: true, recoveryKey };
+  } catch (e) {
+    if (e.code === 'EXISTING_ENCRYPTED_FILES') {
+      return {
+        success: false,
+        error: e.message,
+        code: 'EXISTING_ENCRYPTED_FILES',
+        samples: e.samples || []
+      };
+    }
+    return { success: false, error: e.message };
+  }
 });
 
 ipcMain.handle('security-unlock', async (event, { password }) => {
@@ -3207,11 +3338,290 @@ ipcMain.handle('security-new-recovery-key', async () => {
   }
 });
 
-ipcMain.handle('security-disable', async () => {
+ipcMain.handle('security-disable', async (event) => {
   try {
-    security.disable();
-    try { audit && audit.write(AUDIT_EVENTS.SECURITY_DISABLED, {}); } catch (_) {}
-    return { success: true };
+    // v3.8.7: pass casesDir so disable() actually decrypts case files
+    // before flipping the flag.  The pre-fix version only decrypted
+    // vault.enc, leaving every case file on disk encrypted with the
+    // master key it was about to throw away.  Emit progress so the
+    // renderer can show a per-file progress bar.
+    const scanRoots = [];
+    try { if (casesDir) scanRoots.push(casesDir); } catch (_) {}
+    const sender = event && event.sender;
+    const onProgress = (p) => {
+      try { sender && sender.send('security-disable-progress', p); } catch (_) {}
+    };
+    const report = security.disable({ scanRoots, onProgress });
+    try { audit && audit.write(AUDIT_EVENTS.SECURITY_DISABLED, {
+      decrypted: (report && report.decrypted && report.decrypted.length) || 0,
+      failed:    (report && report.failed    && report.failed.length)    || 0
+    }); } catch (_) {}
+    return { success: true, report };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+// v3.8.7 — Field Security Recovery IPC
+// ─────────────────────────────────────────────────────────────────
+// Recovers VIPENC-encrypted files when SecurityManager state has been
+// lost (disable+re-enable, accidental config overwrite, etc.) by
+// accepting an externally-supplied security.json + password OR
+// recovery key.  Sessions are tracked by opaque ID; credentials and
+// derived master keys NEVER leave the main process.
+const SecurityRecovery = require('./modules/security-recovery');
+const _recoverySessions = new Map();
+function _newSessionId() {
+  return 'rs_' + require('crypto').randomBytes(8).toString('hex');
+}
+function _scanRootsForRecovery() {
+  const out = [];
+  try { out.push(app.getPath('userData')); } catch (_) {}
+  try { if (casesDir) out.push(casesDir); } catch (_) {}
+  return out;
+}
+
+ipcMain.handle('security-recovery-create-session', async (event, args) => {
+  const { configPath, credential, credentialKind } = args || {};
+  if (!configPath || !credential || !credentialKind) {
+    return { success: false, error: 'configPath, credential, credentialKind required' };
+  }
+  try {
+    const session = await SecurityRecovery.createSession({
+      configPath, credential, credentialKind
+    });
+    if (!session.deriveResult.success) {
+      session.dispose();
+      try { audit && audit.write(AUDIT_EVENTS.SECURITY_UNLOCK_FAIL, {
+        method: 'recovery_' + credentialKind
+      }); } catch (_) {}
+      return { success: false, error: session.deriveResult.error };
+    }
+    const sessionId = _newSessionId();
+    _recoverySessions.set(sessionId, session);
+    try { audit && audit.write(AUDIT_EVENTS.SECURITY_RECOVERY, {
+      stage: 'session_created', kind: credentialKind
+    }); } catch (_) {}
+    return { success: true, sessionId };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('security-recovery-scan', async (event, args) => {
+  const { sessionId, roots } = args || {};
+  const session = _recoverySessions.get(sessionId);
+  if (!session) return { success: false, error: 'Session not found (call create-session first)' };
+  try {
+    const useRoots = (Array.isArray(roots) && roots.length) ? roots : _scanRootsForRecovery();
+    const result = await session.scan(useRoots);
+    return { success: true, ...result };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('security-recovery-preflight', async (event, args) => {
+  const { sessionId, workingDir } = args || {};
+  const session = _recoverySessions.get(sessionId);
+  if (!session) return { success: false, error: 'Session not found' };
+  if (!workingDir) return { success: false, error: 'workingDir required' };
+  const sender = event && event.sender;
+  try {
+    const result = await session.preflightBackup({
+      workingDir,
+      onProgress: (p) => { try { sender && sender.send('security-recovery-progress', p); } catch (_) {} }
+    });
+    try { audit && audit.write(AUDIT_EVENTS.SECURITY_RECOVERY, {
+      stage: 'preflight_done',
+      backupDir: result.backupDir,
+      copiedFiles: result.copiedFiles
+    }); } catch (_) {}
+    return { success: true, ...result };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('security-recovery-decrypt-all', async (event, args) => {
+  const { sessionId } = args || {};
+  const session = _recoverySessions.get(sessionId);
+  if (!session) return { success: false, error: 'Session not found' };
+  const sender = event && event.sender;
+  try {
+    const report = await session.decryptAll({
+      onProgress: (p) => { try { sender && sender.send('security-recovery-progress', p); } catch (_) {} }
+    });
+    try { audit && audit.write(AUDIT_EVENTS.SECURITY_RECOVERY, {
+      stage: 'decrypt_done',
+      decrypted: report.decrypted.length,
+      failed: report.failed.length,
+      skipped: report.skipped.length
+    }); } catch (_) {}
+    return { success: true, report };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('security-recovery-dispose', async (event, args) => {
+  const { sessionId } = args || {};
+  const session = _recoverySessions.get(sessionId);
+  if (session) {
+    try { session.dispose(); } catch (_) {}
+    _recoverySessions.delete(sessionId);
+  }
+  return { success: true };
+});
+
+ipcMain.handle('security-recovery-pick-config', async (event) => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select original security.json',
+    properties: ['openFile'],
+    filters: [
+      { name: 'VIPER Security Config', extensions: ['json'] }
+    ]
+  });
+  restoreFocus();
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle('security-recovery-pick-working-dir', async (event) => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select a working directory for pre-flight backup',
+    properties: ['openDirectory', 'createDirectory']
+  });
+  restoreFocus();
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle('security-recovery-pick-search-root', async (event) => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Pick a folder to search for security.json',
+    properties: ['openDirectory'],
+    defaultPath: process.env.SystemDrive ? (process.env.SystemDrive + '\\') : 'C:\\'
+  });
+  restoreFocus();
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
+});
+
+// Walks a root directory looking for `security.json` and any
+// `security.json.bak.*` shadows.  Defensive limits — never crawls
+// system / package / cache folders, max 90s wall clock, max depth 8,
+// max 200 hits.  Returns { hits: [{path,size,mtime,isBackup}], stats }.
+ipcMain.handle('security-recovery-search-config', async (event, args) => {
+  const fs = require('fs');
+  const path = require('path');
+  const root = (args && args.root) || (process.env.SystemDrive ? (process.env.SystemDrive + '\\') : 'C:\\');
+  const sender = event && event.sender;
+  const startedAt = Date.now();
+  const MAX_MS = 90 * 1000;
+  const MAX_DEPTH = 8;
+  const MAX_HITS = 200;
+  // Folders we will not descend into — saves enormous time and avoids
+  // surfacing junk paths.  Match is case-insensitive on basename.
+  const SKIP_NAMES = new Set([
+    'windows', 'program files', 'program files (x86)', '$recycle.bin',
+    'system volume information', 'programdata', 'msocache', 'recovery',
+    'node_modules', '.git', '.svn', '.hg', '.cache',
+    'temp', 'tmp', 'cache', 'caches', 'logs', 'log',
+    'application data', // legacy junction
+  ]);
+  const hits = [];
+  let dirsScanned = 0;
+  let lastEmit = 0;
+  function emit(phase, currentPath) {
+    const now = Date.now();
+    if (now - lastEmit < 100) return;
+    lastEmit = now;
+    try { sender && sender.send('security-recovery-search-progress', {
+      phase, dirsScanned, hits: hits.length, currentPath: currentPath || ''
+    }); } catch (_) {}
+  }
+  function walk(dir, depth) {
+    if (Date.now() - startedAt > MAX_MS) return;
+    if (hits.length >= MAX_HITS) return;
+    if (depth > MAX_DEPTH) return;
+    dirsScanned++;
+    emit('walking', dir);
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+    for (const entry of entries) {
+      if (Date.now() - startedAt > MAX_MS) return;
+      if (hits.length >= MAX_HITS) return;
+      const name = entry.name;
+      const lower = name.toLowerCase();
+      const full = path.join(dir, name);
+      if (entry.isFile()) {
+        // Match security.json or security.json.bak.<anything>
+        if (lower === 'security.json' || lower.startsWith('security.json.bak.')) {
+          try {
+            const st = fs.statSync(full);
+            hits.push({
+              path: full,
+              size: st.size,
+              mtime: st.mtime.toISOString(),
+              isBackup: lower !== 'security.json'
+            });
+          } catch (_) {}
+        }
+      } else if (entry.isDirectory()) {
+        if (SKIP_NAMES.has(lower)) continue;
+        // Junctions can recurse forever — skip reparse points.
+        try {
+          const lst = fs.lstatSync(full);
+          if (lst.isSymbolicLink()) continue;
+        } catch (_) { continue; }
+        walk(full, depth + 1);
+      }
+    }
+  }
+  try {
+    walk(root, 0);
+    emit('done', '');
+    const elapsed = Date.now() - startedAt;
+    return {
+      success: true,
+      hits,
+      stats: {
+        dirsScanned,
+        elapsedMs: elapsed,
+        truncated: hits.length >= MAX_HITS || elapsed >= MAX_MS,
+        rootSearched: root
+      }
+    };
+  } catch (e) {
+    return { success: false, error: e.message, hits, stats: { dirsScanned } };
+  }
+});
+
+// Returns a quick summary of how many VIPENC blobs exist on disk
+// under the standard scan roots, without requiring a recovery session.
+// Used by the "Disable Field Security" flow to warn the user how many
+// files will be touched BEFORE we touch them.
+ipcMain.handle('security-scan-encrypted-summary', async (event) => {
+  try {
+    const SecurityManager = require('./modules/security');
+    const roots = _scanRootsForRecovery();
+    const byRoot = [];
+    let totalFiles = 0;
+    let totalBytes = 0;
+    for (const r of roots) {
+      try {
+        const hits = SecurityManager.scanForEncryptedFiles(r);
+        const bytes = hits.reduce((a, h) => a + (h.size || 0), 0);
+        byRoot.push({ root: r, files: hits.length, bytes });
+        totalFiles += hits.length;
+        totalBytes += bytes;
+      } catch (e) {
+        byRoot.push({ root: r, files: 0, bytes: 0, error: e.message });
+      }
+    }
+    return { success: true, totalFiles, totalBytes, byRoot };
   } catch (e) {
     return { success: false, error: e.message };
   }

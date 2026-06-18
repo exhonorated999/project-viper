@@ -81,6 +81,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readFileAsDataUrl: (filePath) => ipcRenderer.invoke('read-file-as-data-url', filePath),
   resolveWarrantPath: (data) => ipcRenderer.invoke('resolve-warrant-path', data),
   viewWarrantExternal: (filePath) => ipcRenderer.invoke('view-warrant-external', filePath),
+  deleteWarrantFiles: (opts) => ipcRenderer.invoke('delete-warrant-files', opts),
 
   // Case Export / Import
   saveCaseExport: (data) => ipcRenderer.invoke('save-case-export', data),

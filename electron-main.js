@@ -4807,6 +4807,67 @@ ipcMain.handle('resolve-warrant-path', async (event, { caseNumber, subfolder, fi
   return null;
 });
 
+// Delete warrant file(s) from disk. Supports either:
+//   { filePath }                      — delete a single file
+//   { filePaths: [...] }              — delete a batch of files
+//   { caseNumber, subfolder, warrantId } — delete every file in
+//        cases/{caseNumber}/Warrants/{subfolder}/ that belongs to this warrant
+//        (matched by `${warrantId}__` prefix)
+// All paths are validated to live under casesDir to prevent traversal.
+ipcMain.handle('delete-warrant-files', async (event, opts) => {
+  try {
+    const { filePath, filePaths, caseNumber, subfolder, warrantId } = opts || {};
+    const targets = new Set();
+
+    const isUnderCases = (p) => {
+      try {
+        const resolved = path.resolve(p);
+        const root = path.resolve(casesDir);
+        return resolved.startsWith(root + path.sep) || resolved === root;
+      } catch { return false; }
+    };
+
+    if (filePath) targets.add(filePath);
+    if (Array.isArray(filePaths)) filePaths.forEach(p => p && targets.add(p));
+
+    if (caseNumber && subfolder && warrantId) {
+      const dir = path.join(casesDir, caseNumber, 'Warrants', subfolder);
+      if (fs.existsSync(dir)) {
+        try {
+          for (const f of fs.readdirSync(dir)) {
+            if (f.startsWith(`${warrantId}__`)) {
+              targets.add(path.join(dir, f));
+            }
+          }
+        } catch (err) {
+          console.error('delete-warrant-files dir scan failed:', err);
+        }
+      }
+    }
+
+    const deleted = [];
+    const skipped = [];
+    for (const p of targets) {
+      if (!p) continue;
+      if (!isUnderCases(p)) { skipped.push({ path: p, reason: 'outside cases dir' }); continue; }
+      try {
+        if (fs.existsSync(p)) {
+          fs.unlinkSync(p);
+          deleted.push(p);
+        } else {
+          skipped.push({ path: p, reason: 'not on disk' });
+        }
+      } catch (err) {
+        skipped.push({ path: p, reason: err.message });
+      }
+    }
+    return { success: true, deleted, skipped };
+  } catch (err) {
+    console.error('delete-warrant-files failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle('view-warrant-external', async (event, filePath) => {
   try {
     console.log('view-warrant-external called with:', filePath);

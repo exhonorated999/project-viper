@@ -9750,9 +9750,14 @@
                                                     </svg>
                                                     <span class="text-sm">Production (${warrant.productionFileCount} files)</span>
                                                 </div>
-                                                <button onclick="viewWarrantFile(${warrant.id}, 'production')" class="text-xs px-3 py-1 rounded bg-viper-purple/20 text-viper-purple hover:bg-viper-purple/30">
-                                                    View
-                                                </button>
+                                                <div class="flex gap-1">
+                                                    <button onclick="viewWarrantFile(${warrant.id}, 'production')" class="text-xs px-3 py-1 rounded bg-viper-purple/20 text-viper-purple hover:bg-viper-purple/30">
+                                                        View
+                                                    </button>
+                                                    <button onclick="removeWarrantFile(${warrant.id}, 'production')" class="text-xs px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20" title="Remove production files reference">
+                                                        ✕
+                                                    </button>
+                                                </div>
                                             </div>
                                         ` : `
                                             <button onclick="uploadWarrantProduction(${warrant.id})" class="w-full text-left flex items-center justify-between bg-viper-card/30 rounded p-2 hover:bg-viper-card/50 transition-colors">
@@ -10307,8 +10312,31 @@
         async function removeWarrantFile(warrantId, fileType) {
             const warrant = caseWarrants.find(w => w.id === warrantId);
             if (!warrant) return;
-            const label = fileType === 'warrant' ? 'Signed Warrant' : fileType === 'return' ? 'Court Return' : 'file';
-            if (!await viperConfirm(`Remove ${label} file reference? The file on disk will not be deleted, but you can re-upload a new one.`, { danger: true, okText: 'Remove' })) return;
+            const label = fileType === 'warrant' ? 'Signed Warrant'
+                : fileType === 'return' ? 'Court Return'
+                : fileType === 'production' ? 'Production files'
+                : 'file';
+            const promptMsg = fileType === 'production'
+                ? `Remove all ${warrant.productionFileCount || ''} production file reference${(warrant.productionFileCount || 0) === 1 ? '' : 's'}? You will be asked next whether to also delete the files on disk.`
+                : `Remove ${label} file reference? You will be asked next whether to also delete the file on disk.`;
+            if (!await viperConfirm(promptMsg, { danger: true, okText: 'Remove' })) return;
+
+            // Collect candidate file paths for disk-delete prompt
+            const subfolderMap = { warrant: 'Signed', return: 'CourtReturn', production: 'Production' };
+            const subfolder = subfolderMap[fileType];
+            const filePaths = [];
+            if (fileType === 'warrant' && warrant.warrantFilePath) filePaths.push(warrant.warrantFilePath);
+            if (fileType === 'return' && warrant.courtReturnFile?.path) filePaths.push(warrant.courtReturnFile.path);
+            if (fileType === 'production' && Array.isArray(warrant.productionFiles)) {
+                warrant.productionFiles.forEach(f => f?.path && filePaths.push(f.path));
+            }
+
+            const deleteOnDisk = await viperConfirm(
+                `Also permanently delete the ${fileType === 'production' ? 'file(s)' : 'file'} from disk?\n\nClick "Cancel" to keep the file(s) on disk (default) — only the reference will be removed.\nClick "Delete on disk" to permanently delete the actual file(s) in cases/${currentCase?.caseNumber || ''}/Warrants/${subfolder || ''}/`,
+                { danger: true, okText: 'Delete on disk', cancelText: 'Keep on disk' }
+            );
+
+            // Clear the reference
             if (fileType === 'warrant') {
                 warrant.hasWarrantFile = false;
                 warrant.warrantFilePath = null;
@@ -10316,10 +10344,38 @@
             } else if (fileType === 'return') {
                 warrant.hasCourtReturn = false;
                 warrant.courtReturnFile = null;
+            } else if (fileType === 'production') {
+                warrant.hasProduction = false;
+                warrant.productionFileCount = 0;
+                warrant.productionFiles = [];
             }
             saveWarrantsToStorage();
+
+            // Optionally delete files on disk
+            let diskMsg = '';
+            if (deleteOnDisk) {
+                try {
+                    const opts = { filePaths };
+                    // Also pass warrant id + subfolder so the main process can sweep
+                    // any id-prefixed leftovers (handles re-uploads that overwrote paths).
+                    if (currentCase?.caseNumber && subfolder) {
+                        opts.caseNumber = currentCase.caseNumber;
+                        opts.subfolder = subfolder;
+                        opts.warrantId = warrantId;
+                    }
+                    const res = await window.electronAPI.deleteWarrantFiles(opts);
+                    if (res?.success) {
+                        diskMsg = ` (${res.deleted.length} file${res.deleted.length === 1 ? '' : 's'} deleted from disk)`;
+                    } else {
+                        diskMsg = ' (disk delete failed: ' + (res?.error || 'unknown') + ')';
+                    }
+                } catch (err) {
+                    diskMsg = ' (disk delete error: ' + err.message + ')';
+                }
+            }
+
             renderTabContent('warrants');
-            showToast(`${label} reference removed — you can now re-upload`, 'success');
+            showToast(`${label} reference removed${diskMsg || ' — you can now re-upload'}`, 'success');
         }
         
         async function viewWarrantProduction(warrant) {
@@ -34957,95 +35013,271 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
         /* ========== CyberTip Module ========== */
 
+        // ----------------------------------------------------------------
+        // parseCyberTip — NCMEC CyberTipline PDF parser (v2 / 2025+ format)
+        // ----------------------------------------------------------------
+        // Handles the new structured NCMEC PDF layout (Section A reported,
+        // Section B automated, Section C NCMEC-added, Section D LE contact).
+        // Backward compatible with older pre-2025 reports — old field names
+        // (incidentType, esp.name, persons[].emails, uploadedFiles[].md5,
+        // lawEnforcement) are still populated so existing detail-view code
+        // continues to work.
+        // ----------------------------------------------------------------
         function parseCyberTip(text, fileName) {
             const report = {
                 id: 'ct_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
                 fileName, importedAt: new Date().toISOString(),
+                // Core
                 reportNumber: '', priorityLevel: '', receivedDate: '',
-                incidentType: '', incidentTime: '',
-                esp: { name: '', address: '', url: '' },
-                persons: [], uploadedFiles: [],
-                lawEnforcement: '', rawText: text
+                incidentType: '', incidentTime: '', incidentDescription: '',
+                chatService: '',
+                // ESP block
+                esp: { name: '', poc: '', address: '', url: '' },
+                // Reported entities
+                persons: [], webpages: [], uploadedFiles: [],
+                userProfile: null,
+                // NCMEC Section B/C
+                ipGeoLookup: [],         // [{address,country,region,city,postal,latLong,isp,type}]
+                deconfliction: [],       // [{role,type,value,result}]
+                fileCategorizations: [], // [{filename,md5,categorization}]
+                ncmecClassification: '',
+                ncmecCountry: '',
+                ncmecDateProcessed: '',
+                ncmecMadeAvailable: '',
+                ncmecNotes: [],
+                // Section D
+                leContact: null,         // {agency,officer,title,cityState,country,phone,email,dateTime}
+                lawEnforcement: '',      // legacy: just agency name
+                rawText: text
             };
-            // Strip page footers
-            const clean = text.replace(/CyberTipline Report \d+ \| [\di]+\nThis Report is provided solely for informational purposes pursuant to NCMEC's nonprofit mission\.\nPlease treat all information in this Report as confidential\.\n?/g, '\n');
-            const lines = clean.split('\n');
 
+            // ---------- 1. Clean text (strip per-page footers + cover sheet) ----------
+            // Normalize line endings first (PDF extraction can emit \r\n).
+            let clean = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+            // Footer pattern is consistent across all NCMEC reports.
+            const footerRe = /\s*CyberTipline Report \d+ \|\s*[\dixv]+\s*\n\s*This Report is provided solely for informational purposes pursuant to NCMEC['\u2019]s nonprofit mission\.\s*\n\s*Please treat all information in this Report as confidential\.\s*\n?/gi;
+            clean = clean.replace(footerRe, '\n');
+            // Collapse excessive blank lines (PDF extraction leaves many)
+            clean = clean.replace(/\n{3,}/g, '\n\n');
+            // Skip the Executive Summary + Table of Contents.  The TOC contains
+            // headings like "Reporting Electronic Service Provider (ESP) 1" that
+            // would otherwise be picked up by ESP / persons / upload regexes.
+            // Anchor on the real Section A heading: it's followed by either a
+            // blank line then the "The following information was submitted" intro.
+            const sectionAStart = clean.search(/Section A: Reported Information\s*\n(?:\s*\n)?\s*The following information was submitted/);
+            const body = sectionAStart > 0 ? clean.substring(sectionAStart) : clean;
+            const lines = body.split('\n');
+
+            // ---------- 2. Report-level metadata ----------
             const rptMatch = text.match(/CyberTipline Report (\d+)/);
             if (rptMatch) report.reportNumber = rptMatch[1];
 
-            const priMatch = clean.match(/NCMEC Priority Level:(.+)/);
-            if (priMatch) report.priorityLevel = priMatch[1].trim();
-            else { const p2 = clean.match(/Priority Level:\s*(.+)/); if (p2) report.priorityLevel = p2[1].trim(); }
+            // Priority: "Priority Level: E" then sometimes "(Report submitted by...)"
+            // Use full `clean` here — priority appears on cover sheet before Section A.
+            const priMatch = clean.match(/(?:NCMEC )?Priority Level:\s*([^\n]+)/);
+            if (priMatch) {
+                let pri = priMatch[1].trim();
+                // Next line may be the description in parens
+                const idx = clean.indexOf(priMatch[0]);
+                const after = clean.substring(idx + priMatch[0].length, idx + priMatch[0].length + 200);
+                const descM = after.match(/^\s*\n\(([^)]+)\)/);
+                if (descM && !pri.includes('(')) pri = `${pri} (${descM[1].trim()})`;
+                report.priorityLevel = pri.replace(/\s+/g, ' ').trim();
+            }
 
             const rcvMatch = clean.match(/Received by NCMEC on (.+? UTC)/);
-            if (rcvMatch) report.receivedDate = rcvMatch[1];
+            if (rcvMatch) report.receivedDate = rcvMatch[1].trim();
 
-            // ESP
-            const espIdx = lines.findIndex(l => /^Submitter:/.test(l));
-            if (espIdx >= 0) {
-                for (let i = espIdx + 1; i < Math.min(espIdx + 10, lines.length); i++) {
+            // ---------- 3. ESP block ----------
+            // New format: "Submitter: Point of Contact for Law Enforcement:" on one line,
+            // ESP name on the next line, then optional contact name, "Business Address:",
+            // address lines, and a URL. Old format: "Submitter:" alone then ESP name.
+            const espHeaderIdx = lines.findIndex(l => /^Reporting Electronic Service Provider/.test(l.trim()));
+            if (espHeaderIdx >= 0) {
+                // Find the Submitter line within the next ~8 lines.
+                const submitterIdx = lines.findIndex((l, i) => i > espHeaderIdx && i < espHeaderIdx + 10 && /^Submitter:/.test(l.trim()));
+                const startIdx = submitterIdx >= 0 ? submitterIdx + 1 : espHeaderIdx + 1;
+                const espBlock = [];
+                for (let i = startIdx; i < Math.min(startIdx + 25, lines.length); i++) {
                     const ln = lines[i].trim();
-                    if (ln && ln.length > 1 && ln.length < 50 && !ln.includes(':') && !ln.includes('http') && !/^\d/.test(ln) && !/Business Address/i.test(ln)) {
-                        report.esp.name = ln; break;
+                    if (/^(Company Information|Relevant Terms of Service|Incident Information)$/.test(ln)) break;
+                    if (ln) espBlock.push(ln);
+                }
+                // First non-empty, non-"Business Address:" line is ESP name
+                for (const ln of espBlock) {
+                    if (!report.esp.name && ln && !/^Business Address:/i.test(ln) && !/^https?:/.test(ln)) {
+                        report.esp.name = ln;
+                        break;
+                    }
+                }
+                // Address block: lines after first that aren't urls and aren't the ESP name
+                const addrLines = [];
+                let sawAddrHeader = false;
+                for (const ln of espBlock) {
+                    if (/^Business Address:/i.test(ln)) { sawAddrHeader = true; continue; }
+                    if (/^https?:/.test(ln)) continue;
+                    if (ln === report.esp.name) continue;
+                    // Skip POC names — usually short, no digits, no commas. Heuristic: line that looks like address has digits OR a comma.
+                    if (sawAddrHeader || /\d/.test(ln) || /,/.test(ln)) addrLines.push(ln);
+                    else if (!report.esp.poc) report.esp.poc = ln;
+                }
+                if (addrLines.length) report.esp.address = addrLines.join(', ').replace(/\s*,\s*/g, ', ');
+                // URL
+                for (const ln of espBlock) {
+                    if (/^https?:/.test(ln)) {
+                        // URL may wrap across two lines
+                        let url = ln;
+                        const k = espBlock.indexOf(ln);
+                        if (k >= 0 && k + 1 < espBlock.length && /^[a-z0-9\-_/.?=&%#]+$/i.test(espBlock[k + 1]) && !/:/.test(espBlock[k + 1])) {
+                            url += espBlock[k + 1];
+                        }
+                        report.esp.url = url;
+                        break;
                     }
                 }
             }
-            const espUrl = clean.match(/Reporting Electronic Service Provider[\s\S]*?(https?:\/\/\S+)/);
-            if (espUrl) report.esp.url = espUrl[1];
-
-            // Incident Type & Time
-            const incIdx = lines.findIndex(l => /^Incident Information$/.test(l.trim()));
-            if (incIdx >= 0) {
-                for (let i = incIdx; i < Math.min(incIdx + 10, lines.length); i++) {
-                    const ln = lines[i].trim();
-                    if (ln.startsWith('Incident Type:')) report.incidentType = ln.substring(14).trim();
-                    else if (ln.startsWith('Incident Time:')) report.incidentTime = ln.substring(14).trim();
-                }
+            // Fallback ESP url anywhere in the ESP block
+            if (!report.esp.url) {
+                const m = body.match(/Reporting Electronic Service Provider[\s\S]*?(https?:\/\/\S+)/);
+                if (m) report.esp.url = m[1];
             }
-            if (!report.incidentType) { const m = clean.match(/Incident Type:(.+)/); if (m) report.incidentType = m[1].trim(); }
 
-            // Persons
+            // ---------- 4. Incident Information ----------
+            // New: "Primary Incident Type:" — old: "Incident Type:"
+            const itM = body.match(/(?:Primary )?Incident Type:\s*([^\n]+)/);
+            if (itM) report.incidentType = itM[1].trim();
+            const itT = body.match(/Incident Time:\s*([^\n]+)/);
+            if (itT) report.incidentTime = itT[1].trim();
+            // Description of Incident Time: single line only — stop at known section headers.
+            const itD = body.match(/Description of Incident Time:\s*([^\n]+)/);
+            if (itD) report.incidentDescription = itD[1].trim();
+            const csM = body.match(/Chat Service\/IM Client:\s*([^\n]+)/);
+            if (csM) report.chatService = csM[1].trim();
+
+            // ---------- 5. Webpage/URL blocks (within Section A) ----------
+            // Pattern: "Webpage/URL\nURL: ...\nAdditional Information: Type: ...\nText: ...\nCreated At: ..."
+            const wpRe = /\nWebpage\/URL\n([\s\S]+?)(?=\nWebpage\/URL\n|\nSuspect\n|\nRecipient\n|\nUploaded File Information\n|\nSection [B-D]:)/g;
+            let wpM;
+            while ((wpM = wpRe.exec('\n' + body)) !== null) {
+                const block = wpM[1];
+                const wp = { url: '', type: '', text: '', createdAt: '' };
+                const um = block.match(/URL:\s*([^\n]+)/);
+                if (um) wp.url = um[1].trim();
+                const tm = block.match(/Type:\s*([^\n]+)/);
+                if (tm) wp.type = tm[1].trim();
+                const txm = block.match(/Text:\s*([\s\S]+?)(?=\nCreated At:|\nAdditional Information|$)/);
+                if (txm) wp.text = txm[1].replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+                const cm = block.match(/Created At:\s*([^\n]+)/);
+                if (cm) wp.createdAt = cm[1].trim();
+                if (wp.url) report.webpages.push(wp);
+            }
+
+            // ---------- 6. Persons (Suspect / Recipient / Child Victim) ----------
             for (let i = 0; i < lines.length; i++) {
                 const ln = lines[i].trim();
-                if (ln !== 'Suspect' && ln !== 'Recipient') continue;
+                if (!/^(Suspect|Recipient|Child Victim)$/.test(ln)) continue;
+                // Skip TOC and "Summary of ESP Reported ..." lines — those are headers, no follow-up data.
                 const nextLine = (lines[i + 1] || '').trim();
-                if (!nextLine.startsWith('Name:') && !nextLine.startsWith('Date of Birth:') && !nextLine.startsWith('Mobile Phone:') && !nextLine.startsWith('Email Address:') && !nextLine.startsWith('Screen/User Name:')) continue;
+                const personFieldRe = /^(Name|Date of Birth|Mobile Phone|Home Phone|Phone|Email Address|Screen\/User Name|ESP User ID|ESP Product\/Service|Display Name|Profile URL|IP Address|Approximate Age|Estimated Location|Prior CT|Additional Information):/;
+                if (!personFieldRe.test(nextLine)) continue;
 
-                const person = { role: ln, name: '', dob: '', age: '',
-                    emails: [], phones: [], screenNames: [], userIds: [],
-                    profileUrls: [], ipAddresses: [], priorReports: '',
-                    estimatedLocation: '', additionalInfo: '' };
+                const person = {
+                    role: ln, name: '', displayName: '',
+                    espProductService: '',
+                    dob: '', age: '',
+                    emails: [], phones: [],
+                    screenNames: [], userIds: [],
+                    profileUrls: [], ipAddresses: [],
+                    priorReports: '', estimatedLocation: '', additionalInfo: ''
+                };
 
                 let j = i + 1;
                 while (j < lines.length) {
                     const fl = lines[j].trim();
-                    if (fl === 'Suspect' || fl === 'Recipient') break;
-                    if (/^Section [A-D]:/.test(fl) || /^Additional Information Submitted/.test(fl) || /^Uploaded File Information/.test(fl) || /^Sent in product:/.test(fl) || /^The number of recipients/.test(fl)) break;
+                    // Section break or next person
+                    if (/^(Suspect|Recipient|Child Victim)$/.test(fl)) break;
+                    if (/^Section [A-D]:/.test(fl) || /^Uploaded File Information$/.test(fl) || /^Webpage\/URL$/.test(fl) || /^Sent in product:/.test(fl) || /^The number of recipients/.test(fl) || /^This concludes Section/.test(fl)) break;
 
                     if (fl.startsWith('Name:')) person.name = fl.substring(5).trim();
-                    else if (/^(Mobile Phone|Home Phone|Phone):/.test(fl)) { const ph = fl.split(':').slice(1).join(':').trim(); if (ph) person.phones.push(ph); }
+                    else if (fl.startsWith('Display Name:')) person.displayName = fl.substring(13).trim();
+                    else if (fl.startsWith('ESP Product/Service:')) person.espProductService = fl.substring(20).trim();
+                    else if (/^Mobile Phone:/.test(fl)) {
+                        // "Mobile Phone: 5217151480490 (Verified)"
+                        const v = fl.substring(13).trim();
+                        if (v) person.phones.push(v);
+                    } else if (/^(Home Phone|Phone):/.test(fl)) {
+                        const ph = fl.substring(fl.indexOf(':') + 1).trim();
+                        if (ph) person.phones.push(ph);
+                    }
                     else if (fl.startsWith('Date of Birth:')) person.dob = fl.substring(14).trim();
                     else if (fl.startsWith('Approximate Age:')) person.age = fl.substring(16).trim();
-                    else if (fl.startsWith('Email Address:')) person.emails.push(fl.substring(14).trim());
-                    else if (fl.startsWith('Screen/User Name:')) person.screenNames.push(fl.substring(17).trim());
-                    else if (fl.startsWith('ESP User ID:')) person.userIds.push(fl.substring(12).trim());
-                    else if (fl.startsWith('Profile URL:')) person.profileUrls.push(fl.substring(12).trim());
+                    else if (fl.startsWith('Email Address:')) {
+                        const e = fl.substring(14).trim();
+                        if (e) person.emails.push(e);
+                    }
+                    else if (fl.startsWith('Screen/User Name:')) {
+                        const s = fl.substring(17).trim();
+                        if (s) person.screenNames.push(s);
+                    }
+                    else if (fl.startsWith('ESP User ID:')) {
+                        const u = fl.substring(12).trim();
+                        if (u) person.userIds.push(u);
+                    }
+                    else if (/^Profile URL:?/.test(fl)) {
+                        // "Profile URL https://..." (no colon!) OR "Profile URL: https://..."
+                        let v = fl.replace(/^Profile URL:?\s*/, '').trim();
+                        // URL may wrap to next line
+                        while (v && j + 1 < lines.length && /^[a-z0-9\-_/.?=&%#]+$/i.test(lines[j + 1].trim()) && !lines[j + 1].includes(':')) {
+                            v += lines[++j].trim();
+                        }
+                        if (v) person.profileUrls.push(v);
+                    }
                     else if (fl.startsWith('IP Address:')) {
+                        // New format: "IP Address: x.x.x.x (Type)\n Port: NNNN\n MM-DD-YYYY HH:MM:SS UTC"
+                        // Old format: "IP Address: x.x.x.x (Type)\n MM-DD-YYYY HH:MM:SS UTC"
                         const ipPart = fl.substring(11).trim();
                         const ipM = ipPart.match(/^(.+?)\s*\((\w+)\)\s*$/);
-                        const ip = { address: ipM ? ipM[1].trim() : ipPart, type: ipM ? ipM[2] : '', timestamp: '' };
-                        if (j + 1 < lines.length && /^\d{2}-\d{2}-\d{4}/.test(lines[j + 1].trim())) { ip.timestamp = lines[++j].trim(); }
+                        const ip = {
+                            address: ipM ? ipM[1].trim() : ipPart,
+                            type: ipM ? ipM[2] : '',
+                            port: '',
+                            timestamp: ''
+                        };
+                        // Look ahead up to 2 lines for Port then Timestamp.
+                        let look = j + 1;
+                        if (look < lines.length && /^Port:\s*\d+/.test(lines[look].trim())) {
+                            ip.port = lines[look].trim().substring(5).trim();
+                            look++;
+                        }
+                        if (look < lines.length && /^\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}:\d{2}\s*UTC/i.test(lines[look].trim())) {
+                            ip.timestamp = lines[look].trim();
+                            j = look;
+                        } else if (ip.port) {
+                            // Port consumed but no timestamp — back off
+                            j = look - 1;
+                        }
                         person.ipAddresses.push(ip);
                     }
-                    else if (fl.startsWith('Prior CT Reports:')) { person.priorReports = fl.substring(17).trim(); while (j + 1 < lines.length && /^\d/.test(lines[j + 1].trim())) { j++; person.priorReports += lines[j].trim(); } }
+                    else if (fl.startsWith('Prior CT Reports:')) {
+                        person.priorReports = fl.substring(17).trim();
+                        while (j + 1 < lines.length && /^\d/.test(lines[j + 1].trim())) {
+                            j++;
+                            person.priorReports += ' ' + lines[j].trim();
+                        }
+                    }
                     else if (fl.startsWith('Estimated Location:')) person.estimatedLocation = fl.substring(19).trim();
                     else if (fl.startsWith('Additional Information:')) {
-                        const al = [fl.substring(22).trim()];
+                        const al = [fl.substring(23).trim()];
+                        // Special: "Additional Information: User-provided account information:" gets handled separately below,
+                        // but still collect the raw text here.
                         while (j + 1 < lines.length) {
                             const nl = lines[j + 1].trim();
-                            if (/^(Name|IP Address|Email Address|Estimated Location|Prior CT):/.test(nl) || nl === 'Suspect' || nl === 'Recipient' || /^Section [A-D]:/.test(nl)) break;
-                            j++; al.push(lines[j].trim());
+                            if (/^(Name|IP Address|Email Address|Estimated Location|Prior CT|Mobile Phone|Screen\/User Name|ESP User ID|ESP Product\/Service|Display Name|Profile URL|Uploaded File Information|Webpage\/URL|Sent in product):/.test(nl)
+                                || /^(Suspect|Recipient|Child Victim)$/.test(nl)
+                                || /^Section [A-D]:/.test(nl)
+                                || /^This concludes/.test(nl)) break;
+                            j++;
+                            al.push(lines[j].trim());
                         }
                         person.additionalInfo = (person.additionalInfo ? person.additionalInfo + '\n' : '') + al.join('\n').trim();
                     }
@@ -35055,35 +35287,278 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 i = j - 1;
             }
 
-            // Uploaded Files
-            const fileRe = /Uploaded File Information\n/g;
-            let fm2;
-            while ((fm2 = fileRe.exec(clean)) !== null) {
-                const start = fm2.index + fm2[0].length;
-                const bl = []; let ls = start;
-                while (ls < clean.length) {
-                    const le = clean.indexOf('\n', ls); if (le < 0) break;
-                    const line = clean.substring(ls, le).trim();
-                    if (/^(Section [A-D]:|Uploaded File Information$|This concludes)/.test(line)) break;
-                    bl.push(line); ls = le + 1;
+            // ---------- 7. User-provided account information (X / Twitter style) ----------
+            // "Additional Information: User-provided account information:" appears after the suspect IP list.
+            const upM = body.match(/Additional Information:\s*User-provided account information:\s*\n([\s\S]+?)(?=\nUploaded File Information|\nSection [B-D]:|\nThis concludes Section)/);
+            if (upM) {
+                const upBody = upM[1];
+                const up = { fullName: '', location: '', description: '', url: '', additionalEmails: [], additionalPhones: [] };
+                // Each field is single-line.  Stop at the next known label.
+                const PROFILE_LABELS = /^(Full Name|Location|Description|URL|Additional user emails on record|Additional user phone numbers on record):/;
+                const upLines = upBody.split('\n');
+                for (let li = 0; li < upLines.length; li++) {
+                    const ln = upLines[li].trim();
+                    if (!ln) continue;
+                    const m = ln.match(/^(Full Name|Location|Description|URL|Additional user emails on record|Additional user phone numbers on record):\s*(.*)$/);
+                    if (!m) continue;
+                    const label = m[1];
+                    let val = m[2].trim();
+                    // Continuation: while next line is not another known label or blank
+                    while (li + 1 < upLines.length && upLines[li + 1].trim() && !PROFILE_LABELS.test(upLines[li + 1].trim())) {
+                        val += ' ' + upLines[++li].trim();
+                    }
+                    switch (label) {
+                        case 'Full Name': up.fullName = val; break;
+                        case 'Location': up.location = val; break;
+                        case 'Description': up.description = val; break;
+                        case 'URL': up.url = val; break;
+                        case 'Additional user emails on record':
+                            up.additionalEmails = val.split(/[,;]/).map(s => s.trim()).filter(Boolean);
+                            break;
+                        case 'Additional user phone numbers on record':
+                            up.additionalPhones = val.split(/[,;]/).map(s => s.trim()).filter(Boolean);
+                            break;
+                    }
                 }
-                let cf = null;
-                for (let k = 0; k < bl.length; k++) {
-                    if (bl[k].startsWith('Filename:')) {
-                        if (cf && cf.filename) report.uploadedFiles.push(cf);
-                        cf = { filename: bl[k].substring(9).trim(), md5: '', categorization: '' };
-                        while (k + 1 < bl.length && !bl[k + 1].includes(':') && bl[k + 1].length > 0 && !/^Number/.test(bl[k + 1])) { k++; cf.filename += bl[k]; }
-                    } else if (cf && bl[k].startsWith('MD5:')) cf.md5 = bl[k].substring(4).trim();
-                    else if (cf && /^Image Categorization/.test(bl[k])) cf.categorization = bl[k].split(':').slice(1).join(':').trim();
-                }
-                if (cf && cf.filename) report.uploadedFiles.push(cf);
+                report.userProfile = up;
             }
-            const seen = new Set();
-            report.uploadedFiles = report.uploadedFiles.filter(f => { if (!f.md5 || seen.has(f.md5)) return false; seen.add(f.md5); return true; });
 
-            // Law Enforcement
-            const leMatch = clean.match(/The report was made available[\s\S]*?\n([A-Z][\w\s]+(?:Police|Sheriff|Bureau) (?:Department|Office)[^\n]*)/i);
-            if (leMatch) report.lawEnforcement = leMatch[1].trim();
+            // ---------- 8. Uploaded Files (Section A reported list) ----------
+            // Walk lines block-by-block.  An "Uploaded File Information" header
+            // introduces either a count line ("Number of uploaded files: N") or
+            // a single file's metadata (Filename:, MD5:, Did ESP view..., Sent in product:, etc.).
+            // Filenames frequently wrap across two PDF lines.
+            const STOP_LABELS = /^(MD5|Original Filename Associated with File|Did Reporting ESP|Were entire contents|Original URL Where File|Additional Information|Sent in product|Number of uploaded files|File's unique ESP Identifier|Uploaded [A-Z]|Image Categorization|With respect to|For video files|When Meta responds|Filename):/i;
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].trim() !== 'Uploaded File Information') continue;
+                let j = i + 1;
+                let curFile = null;
+                while (j < lines.length) {
+                    const ln = lines[j].trim();
+                    if (!ln) { j++; continue; }
+                    // Stop conditions: next block, new section, conclusion.
+                    if (ln === 'Uploaded File Information' || /^Section [B-D]:/.test(ln) || /^This concludes Section/.test(ln)) {
+                        break;
+                    }
+                    if (/^Filename:/.test(ln)) {
+                        if (curFile && curFile.md5) report.uploadedFiles.push(curFile);
+                        let filename = ln.substring(9).trim();
+                        // Continuation lines (no recognised label, not blank)
+                        while (j + 1 < lines.length) {
+                            const nl = lines[j + 1].trim();
+                            if (!nl) break;
+                            if (STOP_LABELS.test(nl)) break;
+                            if (/^(Section [B-D]:|This concludes|Uploaded File Information$|Suspect$|Recipient$|Child Victim$)/.test(nl)) break;
+                            filename += nl;
+                            j++;
+                        }
+                        curFile = {
+                            filename, md5: '', categorization: '',
+                            viewedByESP: '', viewedByNCMEC: null, publicly: ''
+                        };
+                    } else if (curFile && /^MD5:/.test(ln)) {
+                        curFile.md5 = ln.substring(4).trim().toLowerCase();
+                    } else if (curFile && /^Did Reporting ESP view entire contents of uploaded file\?/.test(ln)) {
+                        curFile.viewedByESP = ln.split('?').slice(1).join('?').trim();
+                    } else if (curFile && /^Were entire contents of uploaded file publicly available\?/.test(ln)) {
+                        curFile.publicly = ln.split('?').slice(1).join('?').trim();
+                    }
+                    j++;
+                }
+                if (curFile && curFile.md5) report.uploadedFiles.push(curFile);
+                i = j - 1;
+            }
+
+            // ---------- 9. Section B: Files and Categorization table ----------
+            // "Files and Categorization\nFilename MD5 Categorization\n<filename> <md5> <category>"
+            const catSecM = clean.match(/Files and Categorization\s*\n[^\n]*Filename\s+MD5\s+Categorization[^\n]*\n([\s\S]+?)(?=\n(?:IP Geo-Lookup|Auto Refer|Deconfliction|Date:|At this time|This concludes Section B|Section C:))/i);
+            if (catSecM) {
+                // Each row may wrap. Look for an MD5 hash anchor.
+                const rowRe = /([^\s\n]+(?:\n[^\s\n]+)*)\s+([a-f0-9]{32})\s+([^\n]+)/gi;
+                let rm;
+                while ((rm = rowRe.exec(catSecM[1])) !== null) {
+                    const filename = rm[1].replace(/\n/g, '').trim();
+                    const md5 = rm[2].toLowerCase();
+                    const cat = rm[3].trim();
+                    report.fileCategorizations.push({ filename, md5, categorization: cat });
+                    // Back-port category into uploadedFiles
+                    const f = report.uploadedFiles.find(x => x.md5 === md5);
+                    if (f) { f.categorization = cat; f.viewedByNCMEC = true; }
+                }
+            }
+
+            // Files Viewed / Not Viewed split (Section C)
+            const fvM = clean.match(/Files Viewed by NCMEC:\s*\n[^\n]*Filename\s+MD5[^\n]*\n([\s\S]+?)(?=\nFiles Not Viewed by NCMEC:|\nSection D:|\nThis concludes)/i);
+            if (fvM) {
+                const rowRe = /([^\s\n]+)\s+([a-f0-9]{32})/g;
+                let rm;
+                while ((rm = rowRe.exec(fvM[1])) !== null) {
+                    const md5 = rm[2].toLowerCase();
+                    const f = report.uploadedFiles.find(x => x.md5 === md5);
+                    if (f) f.viewedByNCMEC = true;
+                }
+            }
+            const fnvM = clean.match(/Files Not Viewed by NCMEC:\s*\n[^\n]*Filename\s+MD5[^\n]*\n([\s\S]+?)(?=\nSection D:|\nThis concludes)/i);
+            if (fnvM) {
+                const rowRe = /([^\s\n]+)\s+([a-f0-9]{32})/g;
+                let rm;
+                while ((rm = rowRe.exec(fnvM[1])) !== null) {
+                    const md5 = rm[2].toLowerCase();
+                    const f = report.uploadedFiles.find(x => x.md5 === md5);
+                    if (f) f.viewedByNCMEC = false;
+                }
+            }
+
+            // De-dup uploadedFiles by md5
+            const seenMd5 = new Set();
+            report.uploadedFiles = report.uploadedFiles.filter(f => {
+                if (!f.md5 || seenMd5.has(f.md5)) return false;
+                seenMd5.add(f.md5); return true;
+            });
+
+            // ---------- 10. Section B: IP Geo-Lookup (Suspect) ----------
+            // Table layout when extracted:
+            //   IP Address Country Region City Metro Area Postal ... Lat/Long ISP/Org Type
+            //   <ip> <country> <region> <city...wrap> ... <isp...wrap> <type>
+            // PDF text extraction breaks rows across many lines; we use the IP address as the row anchor.
+            const geoM = clean.match(/IP Geo-Lookup \(Suspect\)\s*\n([\s\S]+?)(?=\nIP Geo-Lookup \(Uploaded|\nAuto Refer|\nDeconfliction|\nThis concludes Section B|\nDate:|\nAt this time|\nSection C:)/i);
+            if (geoM) {
+                const geoBlock = geoM[1];
+                // First, defragment IPv6 addresses (PDF extractor breaks long IPv6 across 2-3 lines).
+                // Strategy: join any line that ends with hex+":" or starts with ":" or "(" to the next line.
+                let glines = geoBlock.split('\n').map(s => s.trim()).filter(Boolean);
+                // Merge IPv6 continuation pieces.
+                const merged = [];
+                for (let bi = 0; bi < glines.length; bi++) {
+                    let s = glines[bi];
+                    // Continuation rules: line ends with hex group + ":" OR is a pure colon chunk like ":9a20:24b0:fa2"
+                    while (bi + 1 < glines.length && (
+                        /:[0-9a-f]{0,4}$/i.test(s) && /^:?[0-9a-f]+/i.test(glines[bi + 1])
+                    )) {
+                        s += glines[bi + 1];
+                        bi++;
+                    }
+                    merged.push(s);
+                }
+                const ipRe = /(\d{1,3}(?:\.\d{1,3}){3}|[0-9a-f]{1,4}(?::[0-9a-f]{0,4}){2,7})/i;
+                let cur = null;
+                for (let bi = 0; bi < merged.length; bi++) {
+                    const trimmed = merged[bi];
+                    if (!trimmed) continue;
+                    const ipMatch = trimmed.match(ipRe);
+                    if (ipMatch && trimmed.startsWith(ipMatch[1])) {
+                        if (cur) report.ipGeoLookup.push(cur);
+                        cur = { address: ipMatch[1], country: '', region: '', city: '', postal: '', latLong: '', isp: '', type: '', _tokens: [] };
+                        const rest = trimmed.substring(ipMatch[1].length).trim();
+                        if (rest) cur._tokens.push(rest);
+                    } else if (cur) {
+                        cur._tokens.push(trimmed);
+                        if (/^(residential|hosting|wireless|mobile|satellite|business|education|government)$/i.test(trimmed)) {
+                            cur.type = trimmed.toLowerCase();
+                            report.ipGeoLookup.push(cur);
+                            cur = null;
+                        }
+                    }
+                }
+                if (cur) report.ipGeoLookup.push(cur);
+                // Post-process: extract country/region/city/isp from concatenated tokens.
+                for (const g of report.ipGeoLookup) {
+                    const all = (g._tokens || []).join(' ').replace(/\s+/g, ' ').trim();
+                    const m = all.match(/^([A-Z]{2})\s+([A-Z]{2,3})\s+(.+?)(?:\s+(\d{4,5}))?\s+([-\d]+\.\d+\/\s*[-\d]+\.\d+)\s+(.+?)(?:\s+(residential|hosting|wireless|mobile|satellite|business|education|government))?$/i);
+                    if (m) {
+                        g.country = m[1]; g.region = m[2];
+                        g.city = m[3].replace(/\s+/g, ' ').trim();
+                        g.postal = m[4] || '';
+                        g.latLong = m[5].replace(/\s+/g, '');
+                        g.isp = m[6].replace(/\s+/g, ' ').trim();
+                        if (!g.type && m[7]) g.type = m[7].toLowerCase();
+                    } else {
+                        g.isp = all;
+                    }
+                    delete g._tokens;
+                }
+            }
+
+            // ---------- 11. Section B: Deconfliction ----------
+            const dcM = clean.match(/\nDeconfliction\s*\n([\s\S]+?)(?=\nThis concludes Section B|\nSection C:)/);
+            if (dcM) {
+                // Lines like "ESP User ID 1969036526458933248 No match results returned from system"
+                const dclines = dcM[1].split('\n');
+                let currentRole = '';
+                for (const ln of dclines) {
+                    const t = ln.trim();
+                    if (!t) continue;
+                    if (/^(Suspect|Recipient|Child Victim)$/.test(t)) { currentRole = t; continue; }
+                    const m = t.match(/^(ESP User ID|Email|IP Address|Profile URL|Screen\/User Name|Phone)\s+([^\s].*?)\s+(No match results returned from system|.+ matches?.+)$/i);
+                    if (m) {
+                        report.deconfliction.push({ role: currentRole, type: m[1], value: m[2].trim(), result: m[3].trim() });
+                    }
+                }
+            }
+
+            // ---------- 12. Section C: NCMEC metadata ----------
+            // Use `body` (already starts at the real Section A) so we skip the TOC.
+            const sectionC = (() => {
+                const i = body.indexOf('Section C: Additional Information Provided by NCMEC');
+                if (i < 0) return '';
+                const j = body.indexOf('Section D: Law Enforcement Contact Information', i);
+                return j < 0 ? body.substring(i) : body.substring(i, j);
+            })();
+            if (sectionC) {
+                const cM = sectionC.match(/NCMEC Classification\*?:\s*([^\n]+)/);
+                if (cM) report.ncmecClassification = cM[1].trim();
+                const ctyM = sectionC.match(/International Country:\s*([^\n]+)/);
+                if (ctyM) report.ncmecCountry = ctyM[1].trim();
+                const dpM = sectionC.match(/NCMEC Date Processed:\s*([^\n]+)/);
+                if (dpM) report.ncmecDateProcessed = dpM[1].trim();
+                const maM = sectionC.match(/Made Available to Law Enforcement by NCMEC:\s*([^\n]+)/);
+                if (maM) report.ncmecMadeAvailable = maM[1].trim();
+                // NCMEC Notes (numbered)
+                const noteRe = /NCMEC Note #(\d+)\s*\n([\s\S]+?)(?=\nNCMEC Note #|\nUploaded File Information|\nSection D:|\nFiles Viewed by NCMEC|\nFiles Not Viewed by NCMEC|$)/g;
+                let nm;
+                while ((nm = noteRe.exec(sectionC)) !== null) {
+                    report.ncmecNotes.push({
+                        number: parseInt(nm[1], 10),
+                        text: nm[2].replace(/\s+/g, ' ').trim()
+                    });
+                }
+            }
+
+            // ---------- 13. Section D: Law Enforcement Contact ----------
+            const sectionD = (() => {
+                const i = body.indexOf('Section D: Law Enforcement Contact Information');
+                return i < 0 ? '' : body.substring(i);
+            })();
+            if (sectionD) {
+                // Agency line is the first line after "The report was made available to the Law Enforcement Agency listed below."
+                const agencyM = sectionD.match(/The report was made available to the Law Enforcement Agency listed below\.\s*\n([^\n]+)/);
+                if (agencyM) {
+                    const agency = agencyM[1].trim();
+                    report.lawEnforcement = agency;
+                    const le = { agency, officer: '', title: '', cityState: '', country: '', phone: '', email: '', dateTime: '' };
+                    const offM = sectionD.match(/Assigned Officer:\s*([^\n]+)/);
+                    if (offM) le.officer = offM[1].trim();
+                    const ttM = sectionD.match(/Title:\s*([^\n]+)/);
+                    if (ttM) le.title = ttM[1].trim();
+                    const csM2 = sectionD.match(/City\/State:\s*([^\n]+)/);
+                    if (csM2) le.cityState = csM2[1].trim();
+                    const ctyM = sectionD.match(/Country:\s*([^\n]+)/);
+                    if (ctyM) le.country = ctyM[1].trim();
+                    const phM = sectionD.match(/Phone Number:\s*([^\n]+)/);
+                    if (phM) le.phone = phM[1].trim();
+                    // Email can wrap across lines
+                    const emM = sectionD.match(/Email Address:\s*([^\n]+(?:\n[^\n]+)?)/);
+                    if (emM) le.email = emM[1].replace(/\s+/g, '').replace(/,$/, '');
+                    const dtM = sectionD.match(/Time\/Date was made available:\s*([^\n]+)/);
+                    if (dtM) le.dateTime = dtM[1].trim();
+                    report.leContact = le;
+                }
+                // Fallback legacy regex if structured agency match failed
+                if (!report.lawEnforcement) {
+                    const leMatch = sectionD.match(/\n([A-Z][\w\s&]+(?:Police|Sheriff|Bureau|Department|Office|Force|Task)[\w\s&]*)/);
+                    if (leMatch) report.lawEnforcement = leMatch[1].trim();
+                }
+            }
 
             return report;
         }
@@ -35539,6 +36014,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 const espColor = 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40';
                 const typeLabel = ip.type ? `${role} - ${ip.type}` : role;
                 const tsLabel = ip.timestamp ? ` ${ip.timestamp}` : '';
+                const portBadge = ip.port ? `<span class="text-xs px-1.5 py-0.5 rounded border bg-purple-500/20 text-purple-300 border-purple-500/40 font-mono">Port ${ip.port}</span>` : '';
                 const uid = 'arin_' + ip.address.replace(/[.:]/g, '_') + '_' + Math.random().toString(36).slice(2, 8);
                 const regIdx = ctRegisterSend([{ key: 'ip', label: 'IP', value: ip.address, espName: espName, meta: ip.type || '' }]);
                 return `
@@ -35546,6 +36022,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     <div class="flex items-center gap-2 mb-2 flex-wrap">
                         <span class="text-xs font-bold text-gray-400 uppercase">IP</span>
                         <span class="text-xs px-1.5 py-0.5 rounded border ${roleColor}">${typeLabel}${tsLabel}</span>
+                        ${portBadge}
                         ${espName ? `<span class="text-xs px-1.5 py-0.5 rounded border ${espColor}">${espName}</span>` : ''}
                     </div>
                     <div class="text-white font-semibold text-lg break-all font-mono">${ip.address}</div>
@@ -35617,9 +36094,37 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             <div class="text-xs text-gray-400">Date Received (UTC)</div>
                             <div class="text-white">${t.receivedDate || 'N/A'}</div>
                         </div>
-                        ${t.lawEnforcement ? `<div class="col-span-2"><div class="text-xs text-gray-400">Assigned Law Enforcement</div><div class="text-white">${t.lawEnforcement}</div></div>` : ''}
+                        ${t.chatService ? `<div><div class="text-xs text-gray-400">Chat Service / IM Client</div><div class="text-white">${t.chatService}</div></div>` : ''}
+                        ${t.incidentDescription ? `<div class="col-span-2"><div class="text-xs text-gray-400">Description of Incident</div><div class="text-gray-200 text-sm whitespace-pre-wrap leading-relaxed">${t.incidentDescription}</div></div>` : ''}
+                        ${(t.leContact?.agency || t.lawEnforcement) ? `<div class="col-span-2"><div class="text-xs text-gray-400">Assigned Law Enforcement</div><div class="text-white">${t.leContact?.agency || t.lawEnforcement}</div></div>` : ''}
                     </div>
                 </div>
+
+                <!-- Reporting ESP -->
+                ${(t.esp?.poc || t.esp?.address || t.esp?.url) ? `
+                <div class="glass-card rounded-xl p-6 border border-gray-700/50">
+                    <h3 class="text-xl font-bold text-white mb-4">Reporting ESP</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+                        ${t.esp.name ? `<div><div class="text-xs text-gray-400">Provider</div><div class="text-white font-semibold">${t.esp.name}</div></div>` : ''}
+                        ${t.esp.poc ? `<div><div class="text-xs text-gray-400">Point of Contact</div><div class="text-white">${t.esp.poc}</div></div>` : ''}
+                        ${t.esp.address ? `<div class="md:col-span-2"><div class="text-xs text-gray-400">Business Address</div><div class="text-gray-200 whitespace-pre-line">${t.esp.address}</div></div>` : ''}
+                        ${t.esp.url ? `<div class="md:col-span-2"><div class="text-xs text-gray-400">LE Portal</div><a href="${t.esp.url}" target="_blank" class="text-cyan-400 hover:underline break-all">${t.esp.url}</a></div>` : ''}
+                    </div>
+                </div>` : ''}
+
+                <!-- User-Provided Profile -->
+                ${t.userProfile ? `
+                <div class="glass-card rounded-xl p-6 border border-gray-700/50">
+                    <h3 class="text-xl font-bold text-white mb-4">User-Provided Account Information</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+                        ${t.userProfile.fullName ? `<div><div class="text-xs text-gray-400">Full Name</div><div class="text-white font-semibold">${t.userProfile.fullName}</div></div>` : ''}
+                        ${t.userProfile.location ? `<div><div class="text-xs text-gray-400">Location</div><div class="text-white">${t.userProfile.location}</div></div>` : ''}
+                        ${t.userProfile.description ? `<div class="md:col-span-2"><div class="text-xs text-gray-400">Description</div><div class="text-gray-200 whitespace-pre-wrap">${t.userProfile.description}</div></div>` : ''}
+                        ${t.userProfile.url ? `<div class="md:col-span-2"><div class="text-xs text-gray-400">URL</div><a href="${t.userProfile.url}" target="_blank" class="text-cyan-400 hover:underline break-all">${t.userProfile.url}</a></div>` : ''}
+                        ${(t.userProfile.additionalEmails || []).length ? `<div class="md:col-span-2"><div class="text-xs text-gray-400">Additional Emails</div><div class="text-gray-200">${t.userProfile.additionalEmails.join(', ')}</div></div>` : ''}
+                        ${(t.userProfile.additionalPhones || []).length ? `<div class="md:col-span-2"><div class="text-xs text-gray-400">Additional Phones</div><div class="text-gray-200">${t.userProfile.additionalPhones.join(', ')}</div></div>` : ''}
+                    </div>
+                </div>` : ''}
 
                 <!-- Identifiers -->
                 ${idCards.length ? `
@@ -35657,9 +36162,11 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                 </button>` : '';
                             return `
                             <div class="border border-gray-700 rounded-lg p-4">
-                                <div class="flex items-center gap-3 mb-2">
+                                <div class="flex items-center gap-3 mb-2 flex-wrap">
                                     <span class="text-xs px-2 py-0.5 rounded border font-semibold ${roleColor}">${p.role}</span>
                                     <span class="text-white font-bold">${p.name || '(unnamed)'}</span>
+                                    ${p.displayName ? `<span class="text-xs px-1.5 py-0.5 rounded border bg-gray-500/20 text-gray-300 border-gray-500/40">"${p.displayName}"</span>` : ''}
+                                    ${p.espProductService ? `<span class="text-xs px-1.5 py-0.5 rounded border bg-cyan-500/20 text-cyan-400 border-cyan-500/40">${p.espProductService}</span>` : ''}
                                     ${sendBtnHtml}
                                 </div>
                                 <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
@@ -35679,14 +36186,144 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 <div class="glass-card rounded-xl p-6 border border-gray-700/50">
                     <h3 class="text-xl font-bold text-white mb-4">NCMEC Files (${t.uploadedFiles.length})</h3>
                     <div class="space-y-3">
-                        ${t.uploadedFiles.map(f => `
+                        ${t.uploadedFiles.map(f => {
+                            const viewedTag = f.viewedByNCMEC === true
+                                ? `<span class="text-xs px-1.5 py-0.5 rounded border bg-green-500/20 text-green-400 border-green-500/40">Viewed by NCMEC</span>`
+                                : (f.viewedByNCMEC === false
+                                    ? `<span class="text-xs px-1.5 py-0.5 rounded border bg-gray-500/20 text-gray-300 border-gray-500/40">Not viewed by NCMEC</span>`
+                                    : '');
+                            const espViewed = f.viewedByESP ? `<span>ESP viewed: <span class="text-gray-300">${f.viewedByESP}</span></span>` : '';
+                            const publicly = f.publicly ? `<span>Publicly available: <span class="text-gray-300">${f.publicly}</span></span>` : '';
+                            return `
+                            <div class="border border-gray-700 rounded-lg p-4">
+                                <div class="flex items-start justify-between gap-3 mb-1 flex-wrap">
+                                    <div class="text-white font-medium text-sm break-all flex-1 min-w-0">${f.filename}</div>
+                                    ${viewedTag}
+                                </div>
+                                <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400">
+                                    ${f.md5 ? `<span>MD5: <span class="text-gray-300 font-mono">${f.md5}</span></span>` : ''}
+                                    ${f.categorization ? `<span>Category: <span class="text-yellow-400">${f.categorization}</span></span>` : ''}
+                                    ${espViewed}
+                                    ${publicly}
+                                </div>
+                            </div>`;
+                        }).join('')}
+                    </div>
+                </div>` : ''}
+
+                <!-- Webpages -->
+                ${(t.webpages || []).length ? `
+                <div class="glass-card rounded-xl p-6 border border-gray-700/50">
+                    <h3 class="text-xl font-bold text-white mb-4">Reported Webpages (${t.webpages.length})</h3>
+                    <div class="space-y-3">
+                        ${t.webpages.map(w => `
                         <div class="border border-gray-700 rounded-lg p-4">
-                            <div class="text-white font-medium text-sm break-all mb-1">${f.filename}</div>
-                            <div class="flex flex-wrap gap-4 text-xs text-gray-400">
-                                <span>MD5: <span class="text-gray-300 font-mono">${f.md5}</span></span>
-                                ${f.categorization ? `<span>Category: <span class="text-yellow-400">${f.categorization}</span></span>` : ''}
+                            ${w.url ? `<div class="break-all"><a href="${w.url}" target="_blank" class="text-cyan-400 hover:underline font-mono text-sm">${w.url}</a></div>` : ''}
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-x-4 gap-y-1 mt-2 text-xs text-gray-400">
+                                ${w.timestamp ? `<span>Time: <span class="text-gray-300">${w.timestamp}</span></span>` : ''}
+                                ${w.publicly ? `<span>Publicly available: <span class="text-gray-300">${w.publicly}</span></span>` : ''}
+                                ${w.additionalInfo ? `<span class="md:col-span-3">Notes: <span class="text-gray-300">${w.additionalInfo}</span></span>` : ''}
                             </div>
                         </div>`).join('')}
+                    </div>
+                </div>` : ''}
+
+                <!-- IP Geo-Lookup -->
+                ${(t.ipGeoLookup || []).length ? `
+                <div class="glass-card rounded-xl p-6 border border-gray-700/50">
+                    <h3 class="text-xl font-bold text-white mb-4">IP Geo-Lookup (Suspect)</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-xs">
+                            <thead>
+                                <tr class="text-gray-400 border-b border-gray-700/50">
+                                    <th class="text-left py-2 pr-3">IP Address</th>
+                                    <th class="text-left py-2 pr-3">Country</th>
+                                    <th class="text-left py-2 pr-3">Region</th>
+                                    <th class="text-left py-2 pr-3">City</th>
+                                    <th class="text-left py-2 pr-3">Postal</th>
+                                    <th class="text-left py-2 pr-3">Lat/Long</th>
+                                    <th class="text-left py-2 pr-3">ISP / Org</th>
+                                    <th class="text-left py-2 pr-3">Type</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${t.ipGeoLookup.map(g => `
+                                <tr class="border-b border-gray-800/50">
+                                    <td class="py-2 pr-3 font-mono text-white break-all">${g.address || ''}</td>
+                                    <td class="py-2 pr-3 text-gray-200">${g.country || ''}</td>
+                                    <td class="py-2 pr-3 text-gray-200">${g.region || ''}</td>
+                                    <td class="py-2 pr-3 text-gray-200">${g.city || ''}</td>
+                                    <td class="py-2 pr-3 text-gray-200">${g.postal || ''}</td>
+                                    <td class="py-2 pr-3 text-gray-200 font-mono">${g.latLong || ''}</td>
+                                    <td class="py-2 pr-3 text-gray-200">${g.isp || ''}</td>
+                                    <td class="py-2 pr-3 text-gray-300 capitalize">${g.type || ''}</td>
+                                </tr>`).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>` : ''}
+
+                <!-- Deconfliction -->
+                ${(t.deconfliction || []).length ? `
+                <div class="glass-card rounded-xl p-6 border border-gray-700/50">
+                    <h3 class="text-xl font-bold text-white mb-4">Deconfliction</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-xs">
+                            <thead>
+                                <tr class="text-gray-400 border-b border-gray-700/50">
+                                    <th class="text-left py-2 pr-3">Role</th>
+                                    <th class="text-left py-2 pr-3">Type</th>
+                                    <th class="text-left py-2 pr-3">Value</th>
+                                    <th class="text-left py-2 pr-3">Result</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${t.deconfliction.map(d => `
+                                <tr class="border-b border-gray-800/50">
+                                    <td class="py-2 pr-3 text-gray-200">${d.role || ''}</td>
+                                    <td class="py-2 pr-3 text-gray-300">${d.type || ''}</td>
+                                    <td class="py-2 pr-3 text-white font-mono break-all">${d.value || ''}</td>
+                                    <td class="py-2 pr-3 text-gray-300">${d.result || ''}</td>
+                                </tr>`).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>` : ''}
+
+                <!-- NCMEC Section C metadata -->
+                ${(t.ncmecClassification || t.ncmecCountry || t.ncmecDateProcessed || t.ncmecMadeAvailable || (t.ncmecNotes || []).length) ? `
+                <div class="glass-card rounded-xl p-6 border border-gray-700/50">
+                    <h3 class="text-xl font-bold text-white mb-4">NCMEC Review (Section C)</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3 text-sm mb-4">
+                        ${t.ncmecClassification ? `<div><div class="text-xs text-gray-400">NCMEC Classification</div><div class="text-yellow-400 font-semibold">${t.ncmecClassification}</div></div>` : ''}
+                        ${t.ncmecCountry ? `<div><div class="text-xs text-gray-400">International Country</div><div class="text-white">${t.ncmecCountry}</div></div>` : ''}
+                        ${t.ncmecDateProcessed ? `<div><div class="text-xs text-gray-400">Date Processed</div><div class="text-white">${t.ncmecDateProcessed}</div></div>` : ''}
+                        ${t.ncmecMadeAvailable ? `<div><div class="text-xs text-gray-400">Made Available to LE</div><div class="text-${t.ncmecMadeAvailable.toLowerCase()==='yes'?'green':'gray'}-400 font-semibold">${t.ncmecMadeAvailable}</div></div>` : ''}
+                    </div>
+                    ${(t.ncmecNotes || []).length ? `
+                    <div class="space-y-2">
+                        <div class="text-xs text-gray-400 uppercase tracking-wide">NCMEC Notes</div>
+                        ${t.ncmecNotes.map(n => `
+                        <div class="border border-gray-700 rounded-lg p-3 bg-gray-800/30">
+                            <div class="text-xs text-gray-400 mb-1">Note #${n.number}</div>
+                            <div class="text-gray-200 text-sm whitespace-pre-wrap">${n.text}</div>
+                        </div>`).join('')}
+                    </div>` : ''}
+                </div>` : ''}
+
+                <!-- LE Contact -->
+                ${t.leContact ? `
+                <div class="glass-card rounded-xl p-6 border border-gray-700/50">
+                    <h3 class="text-xl font-bold text-white mb-4">Law Enforcement Contact (Section D)</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+                        ${t.leContact.agency ? `<div><div class="text-xs text-gray-400">Agency</div><div class="text-white font-semibold">${t.leContact.agency}</div></div>` : ''}
+                        ${t.leContact.officer ? `<div><div class="text-xs text-gray-400">Assigned Officer</div><div class="text-white">${t.leContact.officer}</div></div>` : ''}
+                        ${t.leContact.title ? `<div><div class="text-xs text-gray-400">Title</div><div class="text-white">${t.leContact.title}</div></div>` : ''}
+                        ${t.leContact.cityState ? `<div><div class="text-xs text-gray-400">City / State</div><div class="text-white">${t.leContact.cityState}</div></div>` : ''}
+                        ${t.leContact.country ? `<div><div class="text-xs text-gray-400">Country</div><div class="text-white">${t.leContact.country}</div></div>` : ''}
+                        ${t.leContact.phone ? `<div><div class="text-xs text-gray-400">Phone</div><div class="text-white font-mono">${t.leContact.phone}</div></div>` : ''}
+                        ${t.leContact.email ? `<div class="md:col-span-2"><div class="text-xs text-gray-400">Email</div><div class="text-gray-200 break-all">${t.leContact.email.split(',').map(e => `<a href="mailto:${e.trim()}" class="text-cyan-400 hover:underline">${e.trim()}</a>`).join(', ')}</div></div>` : ''}
+                        ${t.leContact.dateTime ? `<div class="md:col-span-2"><div class="text-xs text-gray-400">Date/Time Made Available</div><div class="text-white">${t.leContact.dateTime}</div></div>` : ''}
                     </div>
                 </div>` : ''}
             </div>`;

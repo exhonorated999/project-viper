@@ -4868,6 +4868,156 @@ ipcMain.handle('delete-warrant-files', async (event, opts) => {
   }
 });
 
+
+// ─── Parser Submission (structural sample of unsupported warrant format) ──
+// Wire format mirrors Datapilot Scout's /api/parser-submission endpoint.
+// Walks a folder OR .zip locally, builds a shape-only JSON envelope, POSTs
+// to the Intellect Dashboard so a parser can be written without ever
+// touching the actual evidence.
+
+ipcMain.handle('parser-sample-pick-folder', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Select warrant-return folder',
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || !result.filePaths.length) {
+      return { success: false, cancelled: true };
+    }
+    return { success: true, path: result.filePaths[0] };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('parser-sample-pick-zip', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Select warrant-return .zip',
+      properties: ['openFile'],
+      filters: [{ name: 'ZIP archives', extensions: ['zip'] }],
+    });
+    if (result.canceled || !result.filePaths.length) {
+      return { success: false, cancelled: true };
+    }
+    return { success: true, path: result.filePaths[0] };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Single-file picker — for one-off PDFs (DMV/RMS reports) or CSVs (tower
+// dumps).  Filter list is liberal so we don't have to add every format
+// flavour an agency might bring us.
+ipcMain.handle('parser-sample-pick-file', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Select report / printout / dump file',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Common formats', extensions: ['pdf', 'csv', 'xlsx', 'xls', 'json', 'txt', 'tsv', 'xml', 'html', 'eml', 'mbox'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+    if (result.canceled || !result.filePaths.length) {
+      return { success: false, cancelled: true };
+    }
+    return { success: true, path: result.filePaths[0] };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Build the envelope locally — never leaves the machine until the user
+// explicitly submits.  Returns { success, envelope, summary }.
+ipcMain.handle('parser-sample-build', async (event, opts) => {
+  try {
+    const { rootPath, providerHint, submitterEmail, submitterNotes,
+            agencyName, reporterName, productSlug, appVersion, platform,
+            formatCategory } = opts || {};
+    if (!rootPath) return { success: false, error: 'rootPath is required' };
+    if (!fs.existsSync(rootPath)) return { success: false, error: 'Path does not exist: ' + rootPath };
+
+    const { buildSampleEnvelope } = require('./modules/parser-submission/sample-builder');
+    const envelope = buildSampleEnvelope(rootPath, {
+      providerHint: providerHint || '',
+      submitterEmail: submitterEmail || '',
+      submitterNotes: submitterNotes || '',
+      agencyName: agencyName || '',
+      reporterName: reporterName || '',
+      productSlug: productSlug || 'project-viper',
+      appVersion: appVersion || (app.getVersion ? app.getVersion() : ''),
+      platform: platform || 'desktop',
+      formatCategory: formatCategory || 'warrant_return',
+    });
+    const envelopeText = JSON.stringify(envelope);
+    return {
+      success: true,
+      envelope,
+      summary: {
+        total_files: envelope.root_summary.total_files,
+        total_bytes: envelope.root_summary.total_bytes,
+        truncated_files: envelope.root_summary.truncated_files,
+        max_depth: envelope.root_summary.max_depth,
+        format_counts: envelope.root_summary.format_counts,
+        envelope_size_bytes: envelopeText.length,
+      },
+    };
+  } catch (err) {
+    console.error('parser-sample-build failed:', err);
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
+// POST envelope to the Intellect Dashboard.  Caller passes apiKey + submitter
+// metadata; main builds the wrapped { envelope, submitter } body Scout uses.
+ipcMain.handle('parser-sample-submit', async (event, opts) => {
+  try {
+    const { envelope, submitter, apiKey, endpoint } = opts || {};
+    if (!envelope || typeof envelope !== 'object') {
+      return { success: false, error: 'envelope is required' };
+    }
+    if (!apiKey) return { success: false, error: 'X-API-Key is required' };
+    const url = endpoint
+      || 'https://intellect-unified-dashboard-production.up.railway.app/api/parser-submissions';
+
+    const body = JSON.stringify({
+      envelope,
+      submitter: submitter || {},
+    });
+
+    // Use the global fetch (Electron / Node 18+).
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': apiKey,
+      },
+      body,
+    });
+    const respText = await resp.text();
+    let respJson = null;
+    try { respJson = JSON.parse(respText); } catch { /* server may return text */ }
+
+    if (!resp.ok) {
+      return {
+        success: false,
+        status: resp.status,
+        error: (respJson && (respJson.detail || respJson.error)) || respText || `HTTP ${resp.status}`,
+      };
+    }
+    return {
+      success: true,
+      status: resp.status,
+      submission_id: respJson ? respJson.submission_id : null,
+      server_url: url,
+    };
+  } catch (err) {
+    console.error('parser-sample-submit failed:', err);
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
 ipcMain.handle('view-warrant-external', async (event, filePath) => {
   try {
     console.log('view-warrant-external called with:', filePath);

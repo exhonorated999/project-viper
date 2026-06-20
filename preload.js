@@ -83,6 +83,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   viewWarrantExternal: (filePath) => ipcRenderer.invoke('view-warrant-external', filePath),
   deleteWarrantFiles: (opts) => ipcRenderer.invoke('delete-warrant-files', opts),
 
+  // Parser Submission — structural sample of unsupported warrant format
+  parserSamplePickFolder: () => ipcRenderer.invoke('parser-sample-pick-folder'),
+  parserSamplePickZip: () => ipcRenderer.invoke('parser-sample-pick-zip'),
+  parserSamplePickFile: () => ipcRenderer.invoke('parser-sample-pick-file'),
+  parserSampleBuild: (opts) => ipcRenderer.invoke('parser-sample-build', opts),
+  parserSampleSubmit: (opts) => ipcRenderer.invoke('parser-sample-submit', opts),
+
   // Case Export / Import
   saveCaseExport: (data) => ipcRenderer.invoke('save-case-export', data),
   openCaseImport: () => ipcRenderer.invoke('open-case-import'),

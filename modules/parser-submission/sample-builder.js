@@ -34,13 +34,26 @@ const path = require('path');
 
 // ─── Limits & knobs (mirror Scout) ─────────────────────────────────────────
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const PER_FILE_BUDGET_BYTES = 64 * 1024 * 1024;     // 64 MB
 const MAX_FILES = 50_000;
 const MAX_STRUCTURE_DEPTH = 32;
 const MAX_NODES_PER_FILE = 100_000;
 const ENVELOPE_SOFT_CAP_BYTES = 8 * 1024 * 1024;    // 8 MB
 const PEEK_BYTES = 4096;
+const MAX_ARCHIVE_DEPTH = 4;                        // outer.zip → inner.zip → ... — guards zip-bombs
+const MAX_INNER_ARCHIVE_BYTES = 64 * 1024 * 1024;   // per inner zip; skip absurdly large
+
+// PDF text-enrichment knobs (schema v2).
+const PDF_TEXT_SAMPLES_DEFAULT = 5;          // Max PDFs to text-extract per envelope.
+const PDF_TEXT_TIMEOUT_MS = 8000;            // Per-PDF pdf-parse timeout.
+const PDF_TEXT_MAX_PAGES = 50;               // pdf-parse `max` option.
+const PDF_TOP_HEADINGS = 40;
+const PDF_TOP_LABELS = 80;
+const PDF_TOP_VERTICAL_LABELS = 60;
+const PDF_TOP_SHAPES = 30;
+const PDF_TOP_FONTS = 20;
+const PDF_EXCERPT_CHARS = 1500;
 
 // ─── Path sanitization ─────────────────────────────────────────────────────
 
@@ -80,6 +93,24 @@ function sanitizeDirComponent(component) {
     // Phone-shaped folder (must contain at least one digit)
     if (RE_PHONE.test(component) && /\d/.test(component) && component.replace(/\D/g, '').length >= 7) {
         return '<redacted-phone>';
+    }
+    // Warrant-return root pattern: handle + multi-segment numeric IDs.
+    // Examples:
+    //   icecube086-235112678-616234-0-2023012602   (Snapchat)
+    //   john.doe_123456789_abc                     (Meta-style)
+    //   user@example.com-1234567890-records        (already caught above by RE_EMAIL)
+    // Heuristic: hyphen/underscore-separated, ≥3 segments, ≥1 segment ≥6 digits,
+    // first segment contains a letter (so it's not just numbers).  Account
+    // handles, case IDs and warrant IDs all live in this shape.
+    if (/[-_]/.test(component)) {
+        const segs = component.split(/[-_]/);
+        if (segs.length >= 3) {
+            const firstHasLetter = /[A-Za-z]/.test(segs[0]);
+            const numericSegments = segs.filter(s => /^\d{6,}$/.test(s)).length;
+            if (firstHasLetter && numericSegments >= 1) {
+                return '<redacted-warrant-root>';
+            }
+        }
     }
     return component;
 }
@@ -307,13 +338,58 @@ function inspectJson(text) {
  */
 function inspectCsv(text, delim) {
     if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-    const firstNl = text.indexOf('\n');
-    const headerLine = (firstNl >= 0 ? text.slice(0, firstNl) : text).replace(/\r$/, '');
-    const headers = parseCsvLine(headerLine, delim);
-    // Count rows without storing them.
+
+    // ── Header pick: scan first ~8 lines and choose the one that looks
+    // most like a column header — multiple short fields, no prose.
+    // Snapchat / Meta / Google warrant CSVs often prefix a banner row
+    // ("Target username '...' is associated with...").  Picking row 1
+    // blindly leaks PII; instead score each candidate.
+    const MAX_HEAD_SCAN = 8;
+    const heads = [];
+    let cursor = 0;
+    for (let i = 0; i < MAX_HEAD_SCAN; i++) {
+        const nl = text.indexOf('\n', cursor);
+        const end = nl < 0 ? text.length : nl;
+        const line = text.slice(cursor, end).replace(/\r$/, '');
+        if (line.length === 0 && nl < 0) break;
+        heads.push({ idx: i, line, startOffset: cursor });
+        if (nl < 0) break;
+        cursor = nl + 1;
+    }
+    const scored = heads.map(h => {
+        const fields = parseCsvLine(h.line, delim);
+        const cells = fields.length;
+        const longest = fields.reduce((m, f) => Math.max(m, f.length), 0);
+        const avg = fields.length ? (fields.reduce((s, f) => s + f.length, 0) / fields.length) : 0;
+        // Score: prefer many fields, penalize very long cells (prose) and quoted PII.
+        let score = cells * 10;
+        if (longest > 120) score -= 60;
+        else if (longest > 60) score -= 25;
+        if (avg > 40) score -= 30;
+        if (cells === 1) score -= 50;
+        // Prose markers in any cell.
+        const proseHit = fields.some(f =>
+            /\b(target|username|email|associated|user id|account|subject)\b/i.test(f)
+        );
+        if (proseHit) score -= 80;
+        return { ...h, fields, cells, score, longest };
+    });
+    // Prefer the highest scoring candidate, tie-break on earliest line.
+    scored.sort((a, b) => b.score - a.score || a.idx - b.idx);
+    const picked = scored[0] || { fields: [], idx: 0 };
+
+    // Redact PII inside the chosen header cells regardless.  Column names
+    // *shouldn't* contain emails/UUIDs/phones, but if they do (banner row
+    // survived all scoring) we never want the raw value in the envelope.
+    const safeHeaders = picked.fields.map(_redactCellPii);
+
+    // Row count: count physical newlines after the chosen header line.
+    const tailStart = picked.startOffset != null
+        ? (picked.startOffset + picked.line.length + 1)
+        : 0;
     let rowCount = 0;
-    if (firstNl >= 0) {
-        let i = firstNl + 1;
+    if (tailStart < text.length) {
+        let i = tailStart;
         while (i < text.length) {
             const nl = text.indexOf('\n', i);
             if (nl < 0) {
@@ -324,12 +400,35 @@ function inspectCsv(text, delim) {
             i = nl + 1;
         }
     }
-    return {
+
+    const out = {
         type: delim === '\t' ? 'tsv' : 'csv',
-        headers: headers.slice(0, 200),
-        column_count: headers.length,
+        headers: safeHeaders.slice(0, 200),
+        column_count: picked.fields.length,
         row_count: rowCount,
     };
+    if (picked.idx > 0) {
+        out.banner_rows_skipped = picked.idx;
+    }
+    return out;
+}
+
+// Strip PII substrings from a single CSV header/cell.  Even though column
+// names *shouldn't* carry PII, banner-row text or accidental subject ID
+// concatenations sometimes survive header detection.  Tokens used here
+// match the same vocabulary as `_redactExcerpt` for consistency.
+function _redactCellPii(cell) {
+    if (typeof cell !== 'string') return cell;
+    let s = cell;
+    s = s.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '<EMAIL>');
+    s = s.replace(/\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g, '<UUID>');
+    s = s.replace(/\b[0-9a-fA-F]{32,}\b/g, '<HEX>');
+    s = s.replace(/\b\d{3}-\d{2}-\d{4}\b/g, '<SSN>');
+    s = s.replace(/\+?\d[\d\s().-]{7,}\d/g, '<PHONE>');
+    s = s.replace(/\b\d{10,}\b/g, '<NUM>');
+    // Cap length so prose banner rows can't blow up the envelope.
+    if (s.length > 160) s = s.slice(0, 157) + '...';
+    return s;
 }
 
 function parseCsvLine(line, delim) {
@@ -425,22 +524,245 @@ function inspectEml(text) {
 }
 
 /**
- * PDF: header check + /Count regex for page count.  No text extraction.
+ * PDF (sync, schema v1 compat) — header + page count + raw-byte signals.
+ * Cheap; runs on every PDF.  Heavy text extraction is in inspectPdfTextAsync().
  */
 function inspectPdf(buf) {
     if (!buf || buf.length < 5 || buf.slice(0, 5).toString('ascii') !== '%PDF-') {
         return { type: 'pdf', valid_header: false };
     }
     const version = buf.slice(5, 9).toString('ascii').match(/^\d\.\d/);
-    // Page count: count "/Type /Page" occurrences (excluding /Pages).
     const text = buf.toString('latin1');
     const pageMatches = text.match(/\/Type\s*\/Page[^s]/g);
     const pageCount = pageMatches ? pageMatches.length : 0;
+
+    // Raw-byte signals that don't need pdf-parse — cheap fingerprint.
+    const textOps = (text.match(/\b(Tj|TJ)\b/g) || []).length;
+    const imageOps = (text.match(/\/Subtype\s*\/Image/g) || []).length;
+
+    // Font family histogram (template signal — schema, not user data).
+    const fontCounts = {};
+    const fontMatches = text.match(/\/BaseFont\s*\/[A-Za-z0-9_\-+,]+/g) || [];
+    for (const m of fontMatches) {
+        let name = m.replace(/^\/BaseFont\s*\//, '');
+        // Strip subset prefix "AAABBB+" that PDF embeds add.
+        name = name.replace(/^[A-Z]{6}\+/, '');
+        fontCounts[name] = (fontCounts[name] || 0) + 1;
+    }
+    const fonts = Object.entries(fontCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, PDF_TOP_FONTS)
+        .map(([font, count]) => ({ font, count }));
+
     return {
         type: 'pdf',
         valid_header: true,
         version: version ? version[0] : null,
         page_count: pageCount,
+        text_ops: textOps,
+        image_ops: imageOps,
+        scanned_likely: textOps < 20 && imageOps > 0,
+        fonts,
+        text_extracted: false,  // flipped to true by inspectPdfTextAsync().
+    };
+}
+
+/**
+ * Abstract a line into a shape token.  Schema signal only — no value leaks.
+ *   "JONES, MARK 4521"  → "A, A N"
+ *   "(909) 555-1234"    → "(N) N-N"
+ *   "Date of Birth:"    → "Aa a Aa:"
+ * Runs of same character class collapse to a single token char.
+ */
+function _lineShape(line) {
+    let out = '';
+    let last = null;
+    for (let i = 0; i < line.length && out.length < 40; i++) {
+        const ch = line[i];
+        let cls;
+        if (/[A-Z]/.test(ch)) cls = 'A';
+        else if (/[a-z]/.test(ch)) cls = 'a';
+        else if (/[0-9]/.test(ch)) cls = 'N';
+        else cls = ch;
+        if (cls === last && (cls === 'A' || cls === 'a' || cls === 'N')) continue;
+        out += cls;
+        last = cls;
+    }
+    return out;
+}
+
+/**
+ * Redact a short PDF text excerpt so it's safe to ship in the envelope.
+ * Keeps layout/punctuation; strips identifiers.  Schema labels (uppercase
+ * single tokens like "NARRATIVE", lowercase mixed-case fragments) survive.
+ */
+function _redactExcerpt(s) {
+    return s
+        .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '<EMAIL>')
+        .replace(/\b\d{3}-\d{2}-\d{4}\b/g, '<SSN>')
+        .replace(/\(\d{3}\)\s*\d{3}-?\d{4}/g, '<PHONE>')
+        .replace(/\b\d{3}-\d{3}-\d{4}\b/g, '<PHONE>')
+        .replace(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g, '<DATE>')
+        .replace(/\b\d{4}-\d{2}-\d{2}\b/g, '<DATE>')
+        // Uppercase comma-separated names: "JONES, MARK ANDREW"
+        .replace(/\b[A-Z]{2,}, [A-Z]{2,}(?: [A-Z]{2,})?\b/g, '<UPPERNAME>')
+        // Proper-case multi-word names: "Mark Andrew Jones"
+        .replace(/\b[A-Z][a-z]+(?: [A-Z][a-z]+){1,3}\b/g, '<NAME>')
+        // Street addresses ending in common suffix
+        .replace(/\b\d{1,5}\s+[A-Za-z][A-Za-z\s]{1,30}\s+(?:St|Ave|Rd|Dr|Blvd|Ln|Way|Ct|Pl|Hwy)\b\.?/g, '<ADDRESS>')
+        // Bare long digit runs (badge nums, case nums, ZIPs).
+        .replace(/\b\d{4,}\b/g, '<NUM>')
+        // Collapse whitespace for compactness.
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\n{3,}/g, '\n\n');
+}
+
+/**
+ * PDF (async, schema v2) — full text-pass fingerprint.  Runs pdf-parse,
+ * extracts headings / labels / line-shapes / per-page metrics.  No raw
+ * values leave this function: only schema tokens (label text, heading
+ * text, shape histograms, redacted excerpts) and counts.
+ *
+ * @param {Buffer} buf      PDF bytes.
+ * @param {object} syncShape inspectPdf() result to merge into.
+ * @returns {Promise<object>} enriched structure object.
+ */
+async function inspectPdfTextAsync(buf, syncShape) {
+    const base = { ...syncShape, text_extracted: false };
+    if (!syncShape || syncShape.valid_header === false) return base;
+
+    let parsed;
+    try {
+        const pdfParse = require('pdf-parse');
+        parsed = await Promise.race([
+            pdfParse(buf, { max: PDF_TEXT_MAX_PAGES }),
+            new Promise((_, rej) =>
+                setTimeout(() => rej(new Error('pdf-parse timeout')), PDF_TEXT_TIMEOUT_MS)
+            ),
+        ]);
+    } catch (err) {
+        return { ...base, text_error: String((err && err.message) || err) };
+    }
+
+    const text = parsed.text || '';
+    const numpages = parsed.numpages || syncShape.page_count || 0;
+    const info = parsed.info || {};
+
+    if (!text || text.trim().length < 20) {
+        return { ...base, text_chars: text.length, scanned_likely: true };
+    }
+
+    const lines = text.split('\n').map(l => l.replace(/[ \t]+/g, ' ').trim()).filter(Boolean);
+
+    // --- Heading frequency: predominantly-uppercase short lines ---
+    const headingCounts = {};
+    for (const line of lines) {
+        if (line.length < 3 || line.length > 60) continue;
+        const letters = line.match(/[A-Za-z]/g) || [];
+        if (letters.length < 3) continue;
+        const upper = (line.match(/[A-Z]/g) || []).length;
+        if (upper / letters.length < 0.85) continue;
+        if (/^[\d\W]+$/.test(line)) continue;
+        headingCounts[line] = (headingCounts[line] || 0) + 1;
+    }
+    const headings = Object.entries(headingCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, PDF_TOP_HEADINGS)
+        .map(([heading, count]) => ({ heading, count }));
+
+    // --- Label tokens: text before ":" within first 40 chars of a line ---
+    const labelCounts = {};
+    for (const line of lines) {
+        const colon = line.indexOf(':');
+        if (colon < 2 || colon > 40) continue;
+        const label = line.slice(0, colon).trim();
+        if (!/^[A-Za-z][A-Za-z0-9 ./()\-#&]{0,38}$/.test(label)) continue;
+        if (/\d{4,}/.test(label)) continue;   // skip badge nums, case nums
+        const digits = (label.match(/\d/g) || []).length;
+        if (digits > label.length / 2) continue;
+        labelCounts[label] = (labelCounts[label] || 0) + 1;
+    }
+    const labels = Object.entries(labelCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, PDF_TOP_LABELS)
+        .map(([label, count]) => ({ label, count }));
+
+    // --- Line shape histogram ---
+    const shapeCounts = {};
+    for (const line of lines) {
+        const shape = _lineShape(line);
+        if (!shape) continue;
+        shapeCounts[shape] = (shapeCounts[shape] || 0) + 1;
+    }
+    const shapes = Object.entries(shapeCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, PDF_TOP_SHAPES)
+        .map(([shape, count]) => ({ shape, count }));
+
+    // --- Vertical labels: line N is label-shaped, line N+1 is value-shaped ---
+    // SSRS-style reports (INFORM RMS, Microsoft Reporting Services) lay labels
+    // and values on separate lines.  inline-`Label: value` detection misses
+    // every field.  This pass catches them.
+    //
+    // Rules for "label line":
+    //   - 2-30 chars, starts with letter
+    //   - mostly letters (digits ≤ 30% of length)
+    //   - no colon, no period in interior, no dollar sign
+    //   - next non-blank line exists and is NOT itself another label-shaped line
+    //     (so we don't double-count consecutive labels in a form-header row)
+    //   - case: title-case OR mixed-case OK; reject ALL-CAPS unless ≤15 chars
+    //     (ALL-CAPS long lines are usually values like "FREIGHTLINER CORP.")
+    const verticalLabelCounts = {};
+    const isLabelShape = (s) => {
+        if (!s || s.length < 2 || s.length > 30) return false;
+        if (!/^[A-Za-z]/.test(s)) return false;
+        if (s.includes(':') || s.includes('$')) return false;
+        if (/\d{4,}/.test(s)) return false;
+        const letters = (s.match(/[A-Za-z]/g) || []).length;
+        const digits = (s.match(/\d/g) || []).length;
+        if (letters < 2) return false;
+        if (digits / s.length > 0.3) return false;
+        // ALL-CAPS long lines = probably values not labels.
+        const upper = (s.match(/[A-Z]/g) || []).length;
+        if (upper / letters > 0.95 && s.length > 15) return false;
+        // Reject pure punctuation-laden strings.
+        if (/[!@#%^*]/.test(s)) return false;
+        return true;
+    };
+    for (let i = 0; i < lines.length - 1; i++) {
+        const cur = lines[i];
+        const next = lines[i + 1];
+        if (!isLabelShape(cur)) continue;
+        if (!next || next.length === 0) continue;
+        // If next is also label-shaped, this may be a consecutive header row
+        // (e.g. "Color(s)\nYear\nMake\n...") — still count cur, those are real labels.
+        verticalLabelCounts[cur] = (verticalLabelCounts[cur] || 0) + 1;
+    }
+    const verticalLabels = Object.entries(verticalLabelCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, PDF_TOP_VERTICAL_LABELS)
+        .map(([label, count]) => ({ label, count }));
+
+    // --- Redacted excerpt (first PDF_EXCERPT_CHARS chars of page 1-ish) ---
+    const excerpt = _redactExcerpt(text.slice(0, 2500)).slice(0, PDF_EXCERPT_CHARS);
+
+    return {
+        ...base,
+        text_extracted: true,
+        text_chars: text.length,
+        text_lines: lines.length,
+        text_lines_per_page: numpages ? Math.round(lines.length / numpages) : null,
+        page_count: numpages,
+        scanned_likely: lines.length < 5 && (syncShape.image_ops || 0) > 0,
+        pdf_info: {
+            creator: info.Creator || null,
+            producer: info.Producer || null,
+        },
+        headings,
+        label_tokens: labels,
+        vertical_labels: verticalLabels,
+        line_shapes: shapes,
+        page_excerpt_redacted: excerpt,
     };
 }
 
@@ -563,7 +885,7 @@ function inspectZipEntry(rel, size, entryBuffer, envelopeBytes, sanitizer) {
 // Used when the user submits one PDF (DMV printout, RMS report) or a single
 // CSV (cell tower dump) without the bother of zipping it.  The entry's `path`
 // is just the file's basename (after sanitization).
-function walkSingleFile(filePath, summary, entries, sanitizer, envelopeBytesRef) {
+function walkSingleFile(filePath, summary, entries, sanitizer, envelopeBytesRef, pdfRefs) {
     let stat;
     try { stat = fs.statSync(filePath); } catch { return; }
     const size = stat.size;
@@ -574,9 +896,20 @@ function walkSingleFile(filePath, summary, entries, sanitizer, envelopeBytesRef)
     summary.format_counts[entry.format] = (summary.format_counts[entry.format] || 0) + 1;
     envelopeBytesRef.value += approxEntrySize(entry);
     entries.push(entry);
+    if (entry.format === 'pdf' && pdfRefs) {
+        pdfRefs.push({ entryIdx: entries.length - 1, abs: filePath });
+    }
 }
 
-function walkDir(rootPath, summary, entries, sanitizer, envelopeBytesRef, onProgress) {
+// Yield interval — every N files we hand control back to the Node event loop
+// so the Electron main process can pump its message loop.  Without this the
+// OS marks the window "Not Responding" on multi-thousand-file scans.
+const YIELD_EVERY_N_FILES = 100;
+function _yieldToEventLoop() {
+    return new Promise(r => setImmediate(r));
+}
+
+async function walkDir(rootPath, summary, entries, sanitizer, envelopeBytesRef, onProgress, pdfRefs) {
     const stack = [{ dir: rootPath, depth: 0 }];
     let inspected = 0;
     while (stack.length) {
@@ -608,26 +941,55 @@ function walkDir(rootPath, summary, entries, sanitizer, envelopeBytesRef, onProg
             summary.format_counts[entry.format] = (summary.format_counts[entry.format] || 0) + 1;
             envelopeBytesRef.value += approxEntrySize(entry);
             entries.push(entry);
+            if (entry.format === 'pdf' && pdfRefs) {
+                pdfRefs.push({ entryIdx: entries.length - 1, abs });
+            }
             inspected++;
-            if (onProgress && inspected % 200 === 0) {
-                try { onProgress({ phase: 'walk', files: inspected }); } catch {}
+            if (onProgress && inspected % 50 === 0) {
+                try { onProgress({ phase: 'walk', files: inspected, bytes: summary.total_bytes }); } catch {}
+            }
+            // Yield periodically so the main process can pump its message
+            // loop (prevents OS "Not Responding" on large folder scans).
+            if (inspected % YIELD_EVERY_N_FILES === 0) {
+                await _yieldToEventLoop();
             }
         }
     }
 }
 
-function walkZip(zipPath, summary, entries, sanitizer, envelopeBytesRef, onProgress) {
+function walkZip(zipPath, summary, entries, sanitizer, envelopeBytesRef, onProgress, pdfRefs) {
     const AdmZip = require('adm-zip');
     const zip = new AdmZip(zipPath);
+    const counters = { inspected: 0, pdfBufKept: 0 };
+    return _walkZipObject(zip, '', 1, summary, entries, sanitizer, envelopeBytesRef, onProgress, pdfRefs, counters);
+}
+
+/**
+ * Walk an AdmZip object.  Entry names get an optional `pathPrefix` so nested
+ * archives produce paths like `outer.zip/inner/messages/file_001.json`.
+ *
+ * Inner ZIPs (format='archive', PK magic, depth ≤ MAX_ARCHIVE_DEPTH, size
+ * ≤ MAX_INNER_ARCHIVE_BYTES) are parsed from the in-memory buffer and
+ * recursed into.  Each parent entry gets `structure.recursed: true` or
+ * `structure.recurse_skipped: '<reason>'` so parser-authors can see the
+ * recursion graph.
+ *
+ * `counters` is a shared `{ inspected, pdfBufKept }` ref so PDF-buffer
+ * keeping is enforced across the entire envelope, not per-archive.
+ */
+function _walkZipObject(zip, pathPrefix, archiveDepth, summary, entries, sanitizer, envelopeBytesRef, onProgress, pdfRefs, counters) {
+    return (async () => {
+    const AdmZip = require('adm-zip');
     const zipEntries = zip.getEntries();
-    let inspected = 0;
     for (const ze of zipEntries) {
         if (ze.isDirectory) continue;
         if (entries.length >= MAX_FILES) {
             summary.truncated_files++;
             continue;
         }
-        const rel = ze.entryName;
+        const innerRel = ze.entryName;
+        // Compose path with outer prefix for nested-zip context.
+        const rel = pathPrefix ? `${pathPrefix}/${innerRel}` : innerRel;
         const depth = rel.split(/[\\/]+/).filter(Boolean).length;
         if (depth > summary.max_depth) summary.max_depth = depth;
         const size = ze.header.size;
@@ -642,13 +1004,65 @@ function walkZip(zipPath, summary, entries, sanitizer, envelopeBytesRef, onProgr
         }
         const entry = inspectZipEntry(rel, size, buf, envelopeBytesRef.value, sanitizer);
         summary.format_counts[entry.format] = (summary.format_counts[entry.format] || 0) + 1;
-        envelopeBytesRef.value += approxEntrySize(entry);
+        const entryIdx = entries.length;
         entries.push(entry);
-        inspected++;
-        if (onProgress && inspected % 200 === 0) {
-            try { onProgress({ phase: 'walk-zip', files: inspected }); } catch {}
+        // Keep buffer for first N PDFs only — memory-bounded, shared across archives.
+        if (entry.format === 'pdf' && pdfRefs && counters.pdfBufKept < PDF_TEXT_SAMPLES_DEFAULT && buf.length) {
+            pdfRefs.push({ entryIdx, buf });
+            counters.pdfBufKept++;
+        }
+
+        // ── Nested archive recursion ──────────────────────────────────────
+        // Only ZIPs are recursed (7z/rar/tar use different libraries).
+        // PK\03\04 (regular) or PK\05\06 (empty) — same detection used by detectFormat.
+        const isZipMagic = buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4B
+            && (buf[2] === 0x03 || buf[2] === 0x05);
+        if (entry.format === 'archive' && isZipMagic) {
+            if (archiveDepth >= MAX_ARCHIVE_DEPTH) {
+                entry.structure = { ...entry.structure, recurse_skipped: 'max_depth' };
+            } else if (size > MAX_INNER_ARCHIVE_BYTES) {
+                entry.structure = { ...entry.structure, recurse_skipped: 'too_large' };
+            } else if (!buf.length) {
+                entry.structure = { ...entry.structure, recurse_skipped: 'no_buffer' };
+            } else {
+                try {
+                    const innerZip = new AdmZip(buf);
+                    entry.structure = { ...entry.structure, recursed: true };
+                    await _walkZipObject(
+                        innerZip,
+                        entry.path,                  // sanitized path becomes inner prefix
+                        archiveDepth + 1,
+                        summary,
+                        entries,
+                        sanitizer,
+                        envelopeBytesRef,
+                        onProgress,
+                        pdfRefs,
+                        counters
+                    );
+                } catch (err) {
+                    entry.structure = {
+                        ...entry.structure,
+                        recurse_error: String(err && err.message || err).slice(0, 200),
+                    };
+                }
+            }
+        }
+
+        // Accounting: do this *after* recursion so structure mutations
+        // (recursed/recurse_skipped/recurse_error) are reflected.
+        envelopeBytesRef.value += approxEntrySize(entry);
+
+        counters.inspected++;
+        if (onProgress && counters.inspected % 50 === 0) {
+            try { onProgress({ phase: 'walk-zip', files: counters.inspected, bytes: summary.total_bytes }); } catch {}
+        }
+        // Yield periodically so the main process can pump its message loop.
+        if (counters.inspected % YIELD_EVERY_N_FILES === 0) {
+            await _yieldToEventLoop();
         }
     }
+    })();
 }
 
 // ─── Public entry ──────────────────────────────────────────────────────────
@@ -669,13 +1083,14 @@ function walkZip(zipPath, summary, entries, sanitizer, envelopeBytesRef, onProgr
  *   - onProgress       {function} optional
  * @returns {object} envelope ready to send to /api/parser-submissions
  */
-function buildSampleEnvelope(rootPath, opts = {}) {
+async function buildSampleEnvelope(rootPath, opts = {}) {
     if (!rootPath || !fs.existsSync(rootPath)) {
         throw new Error(`Path does not exist: ${rootPath}`);
     }
     const stat = fs.statSync(rootPath);
     const sanitizer = new PathSanitizer();
     const entries = [];
+    const pdfRefs = [];                          // PDFs to text-enrich post-walk.
     const envelopeBytesRef = { value: 0 };
     const summary = {
         total_files: 0,
@@ -685,18 +1100,90 @@ function buildSampleEnvelope(rootPath, opts = {}) {
         format_counts: {},
     };
 
+    // ── Start signal ─────────────────────────────────────────────────────
+    if (typeof opts.onProgress === 'function') {
+        let kind = 'file';
+        if (stat.isFile() && /\.zip$/i.test(rootPath)) kind = 'zip';
+        else if (stat.isDirectory()) kind = 'dir';
+        try { opts.onProgress({ phase: 'start', kind, rootPath }); } catch {}
+    }
+
     if (stat.isFile() && /\.zip$/i.test(rootPath)) {
-        walkZip(rootPath, summary, entries, sanitizer, envelopeBytesRef, opts.onProgress);
+        await walkZip(rootPath, summary, entries, sanitizer, envelopeBytesRef, opts.onProgress, pdfRefs);
     } else if (stat.isDirectory()) {
-        walkDir(rootPath, summary, entries, sanitizer, envelopeBytesRef, opts.onProgress);
+        await walkDir(rootPath, summary, entries, sanitizer, envelopeBytesRef, opts.onProgress, pdfRefs);
     } else if (stat.isFile()) {
         // Single-file submission — e.g. one DMV PDF, one RMS report, one CDR
         // CSV.  Behaves like a 1-entry folder walk.
-        walkSingleFile(rootPath, summary, entries, sanitizer, envelopeBytesRef);
+        walkSingleFile(rootPath, summary, entries, sanitizer, envelopeBytesRef, pdfRefs);
     } else {
         throw new Error(`Root path is not a regular file, directory, or .zip: ${rootPath}`);
     }
     summary.total_files = entries.length + summary.truncated_files;
+
+    // Walk-complete signal — UI can switch the bar from indeterminate to a
+    // determinate "N files found, enriching PDFs…" state.
+    if (typeof opts.onProgress === 'function') {
+        try { opts.onProgress({
+            phase: 'walk-complete',
+            files: summary.total_files,
+            bytes: summary.total_bytes,
+        }); } catch {}
+    }
+
+    // ── PDF text-enrichment (async) ───────────────────────────────────────
+    // pdf-parse is async-only.  Run it on the first N PDFs found; the rest
+    // keep the cheap raw-byte fingerprint from inspectPdf().
+    const maxPdfEnrich = (typeof opts.maxPdfTextSamples === 'number')
+        ? opts.maxPdfTextSamples
+        : PDF_TEXT_SAMPLES_DEFAULT;
+    const enrichTargets = pdfRefs.slice(0, Math.max(0, maxPdfEnrich));
+    const enrichmentPromise = (async () => {
+        if (typeof opts.onProgress === 'function' && enrichTargets.length) {
+            try { opts.onProgress({ phase: 'pdf-text', total: enrichTargets.length }); } catch {}
+        }
+        for (let i = 0; i < enrichTargets.length; i++) {
+            const ref = enrichTargets[i];
+            const entry = entries[ref.entryIdx];
+            if (!entry || entry.format !== 'pdf') continue;
+            let buf;
+            if (ref.buf && ref.buf.length) {
+                buf = ref.buf;
+            } else if (ref.abs) {
+                try { buf = fs.readFileSync(ref.abs); }
+                catch (err) {
+                    entry.structure = {
+                        ...entry.structure,
+                        text_extracted: false,
+                        text_error: 'read_failed: ' + err.message,
+                    };
+                    continue;
+                }
+            } else {
+                continue;
+            }
+            try {
+                envelopeBytesRef.value -= approxEntrySize(entry);
+                entry.structure = await inspectPdfTextAsync(buf, entry.structure);
+                envelopeBytesRef.value += approxEntrySize(entry);
+            } catch (err) {
+                entry.structure = {
+                    ...entry.structure,
+                    text_extracted: false,
+                    text_error: String(err.message || err),
+                };
+            }
+            if (typeof opts.onProgress === 'function') {
+                try { opts.onProgress({ phase: 'pdf-text', done: i + 1, total: enrichTargets.length }); } catch {}
+            }
+        }
+        if (pdfRefs.length > enrichTargets.length) {
+            summary.pdf_text_samples_omitted = pdfRefs.length - enrichTargets.length;
+        }
+        if (enrichTargets.length > 0) {
+            summary.pdf_text_samples_emitted = enrichTargets.length;
+        }
+    })();
 
     // Normalise + validate format_category against the dashboard's taxonomy.
     // Unknown values get rewritten to "other" so admin filtering stays sane.
@@ -707,21 +1194,25 @@ function buildSampleEnvelope(rootPath, opts = {}) {
     let formatCategory = (opts.formatCategory || 'warrant_return').trim();
     if (!VALID_CATEGORIES.has(formatCategory)) formatCategory = 'other';
 
-    const envelope = {
-        schema_version: SCHEMA_VERSION,
-        scout_version: opts.appVersion || '',
-        submitted_at: new Date().toISOString(),
-        format_category: formatCategory,
-        provider_hint: opts.providerHint || '',
-        submitter_email: opts.submitterEmail || '',
-        submitter_notes: opts.submitterNotes || '',
-        agency_name: opts.agencyName || '',
-        license_key_last4: opts.licenseKeyLast4 || '',
-        root_summary: summary,
-        tree: entries,
-    };
-
-    return envelope;
+    // Return a Promise that resolves to the envelope after enrichment.
+    return enrichmentPromise.then(() => {
+        if (typeof opts.onProgress === 'function') {
+            try { opts.onProgress({ phase: 'done', files: summary.total_files }); } catch {}
+        }
+        return ({
+            schema_version: SCHEMA_VERSION,
+            scout_version: opts.appVersion || '',
+            submitted_at: new Date().toISOString(),
+            format_category: formatCategory,
+            provider_hint: opts.providerHint || '',
+            submitter_email: opts.submitterEmail || '',
+            submitter_notes: opts.submitterNotes || '',
+            agency_name: opts.agencyName || '',
+            license_key_last4: opts.licenseKeyLast4 || '',
+            root_summary: summary,
+            tree: entries,
+        });
+    });
 }
 
 module.exports = {

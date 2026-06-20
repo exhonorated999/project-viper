@@ -89,6 +89,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   parserSamplePickFile: () => ipcRenderer.invoke('parser-sample-pick-file'),
   parserSampleBuild: (opts) => ipcRenderer.invoke('parser-sample-build', opts),
   parserSampleSubmit: (opts) => ipcRenderer.invoke('parser-sample-submit', opts),
+  onParserSampleProgress: (cb) => {
+    if (typeof cb !== 'function') return () => {};
+    const handler = (_evt, payload) => { try { cb(payload); } catch {} };
+    ipcRenderer.on('parser-sample-progress', handler);
+    return () => ipcRenderer.removeListener('parser-sample-progress', handler);
+  },
 
   // Case Export / Import
   saveCaseExport: (data) => ipcRenderer.invoke('save-case-export', data),

@@ -4939,7 +4939,20 @@ ipcMain.handle('parser-sample-build', async (event, opts) => {
     if (!fs.existsSync(rootPath)) return { success: false, error: 'Path does not exist: ' + rootPath };
 
     const { buildSampleEnvelope } = require('./modules/parser-submission/sample-builder');
-    const envelope = buildSampleEnvelope(rootPath, {
+    // Throttle: send at most ~10 progress events per second to renderer.
+    let lastEmit = 0;
+    const onProgress = (p) => {
+      try {
+        const now = Date.now();
+        const isMilestone = p && (p.phase === 'start' || p.phase === 'walk-complete' || p.phase === 'done' || p.phase === 'pdf-text');
+        if (!isMilestone && now - lastEmit < 100) return;
+        lastEmit = now;
+        if (event && event.sender && !event.sender.isDestroyed()) {
+          event.sender.send('parser-sample-progress', p);
+        }
+      } catch {}
+    };
+    const envelope = await buildSampleEnvelope(rootPath, {
       providerHint: providerHint || '',
       submitterEmail: submitterEmail || '',
       submitterNotes: submitterNotes || '',
@@ -4949,6 +4962,7 @@ ipcMain.handle('parser-sample-build', async (event, opts) => {
       appVersion: appVersion || (app.getVersion ? app.getVersion() : ''),
       platform: platform || 'desktop',
       formatCategory: formatCategory || 'warrant_return',
+      onProgress,
     });
     const envelopeText = JSON.stringify(envelope);
     return {

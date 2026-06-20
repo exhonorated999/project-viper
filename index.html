@@ -8247,6 +8247,25 @@
 
                     <div id="brBuildStatus" class="hidden text-xs rounded-lg px-3 py-2 border"></div>
 
+                    <!-- Progress UI: shown only during scan; hidden otherwise. -->
+                    <div id="brProgressWrap" class="hidden space-y-2">
+                        <div class="flex items-center justify-between text-xs">
+                            <span id="brProgressPhase" class="text-cyan-300 font-medium">Walking folder…</span>
+                            <span id="brProgressStats" class="text-gray-400 tabular-nums">0 files</span>
+                        </div>
+                        <div class="h-2 rounded-full bg-gray-800 border border-gray-700 overflow-hidden relative">
+                            <div id="brProgressBar" class="absolute inset-y-0 left-0 bg-cyan-500/70 transition-[width] duration-150 ease-out" style="width: 0%;"></div>
+                            <!-- Indeterminate shimmer overlay (CSS animation) — visible while we don't know a total. -->
+                            <div id="brProgressShimmer" class="absolute inset-0 pointer-events-none" style="background: linear-gradient(90deg, transparent, rgba(6,182,212,0.45), transparent); background-size: 35% 100%; background-repeat: no-repeat; animation: brShimmer 1.4s linear infinite;"></div>
+                        </div>
+                    </div>
+                    <style>
+                        @keyframes brShimmer {
+                            0%   { background-position: -35% 0; }
+                            100% { background-position: 135% 0; }
+                        }
+                    </style>
+
                     <div class="flex items-center justify-between mt-3">
                         <span class="text-xs text-gray-500">Shape-only — no case content uploaded</span>
                         <div class="flex gap-2">
@@ -8454,6 +8473,75 @@
     }
 
     // ── Build the structural envelope ─────────────────────────────────────
+    function __brFormatBytes(n) {
+        if (!n) return '0 B';
+        if (n < 1024) return n + ' B';
+        if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+        if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+        return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+    }
+    function brShowProgress(show) {
+        const wrap = document.getElementById('brProgressWrap');
+        if (!wrap) return;
+        wrap.classList.toggle('hidden', !show);
+        if (show) {
+            document.getElementById('brProgressPhase').textContent = 'Preparing…';
+            document.getElementById('brProgressStats').textContent = '0 files';
+            document.getElementById('brProgressBar').style.width = '2%';
+            const shim = document.getElementById('brProgressShimmer');
+            if (shim) shim.style.display = '';
+        }
+    }
+    function brUpdateProgress(payload) {
+        if (!payload) return;
+        const phaseEl = document.getElementById('brProgressPhase');
+        const statsEl = document.getElementById('brProgressStats');
+        const barEl   = document.getElementById('brProgressBar');
+        const shim    = document.getElementById('brProgressShimmer');
+        if (!phaseEl || !statsEl || !barEl) return;
+        switch (payload.phase) {
+            case 'start': {
+                const k = payload.kind === 'zip' ? 'Reading ZIP…' : payload.kind === 'dir' ? 'Walking folder…' : 'Inspecting file…';
+                phaseEl.textContent = k;
+                statsEl.textContent = '0 files';
+                barEl.style.width = '4%';
+                break;
+            }
+            case 'walk':
+            case 'walk-zip': {
+                const files = payload.files || 0;
+                phaseEl.textContent = payload.phase === 'walk-zip' ? 'Reading ZIP entries…' : 'Walking folder…';
+                statsEl.textContent = files.toLocaleString() + ' files · ' + __brFormatBytes(payload.bytes || 0);
+                // Indeterminate — we don't know the total — pulse width 25%→85% as a proxy.
+                const pct = Math.min(85, 25 + (files % 600) / 10);
+                barEl.style.width = pct + '%';
+                break;
+            }
+            case 'walk-complete': {
+                phaseEl.textContent = 'Walk complete — enriching samples…';
+                statsEl.textContent = (payload.files || 0).toLocaleString() + ' files · ' + __brFormatBytes(payload.bytes || 0);
+                barEl.style.width = '92%';
+                if (shim) shim.style.display = 'none';
+                break;
+            }
+            case 'pdf-text': {
+                if (payload.total) {
+                    const done = payload.done || 0;
+                    phaseEl.textContent = 'Extracting PDF text…';
+                    statsEl.textContent = done + ' / ' + payload.total + ' PDFs';
+                    const pct = 92 + (payload.total ? (done / payload.total) * 6 : 0);
+                    barEl.style.width = pct.toFixed(1) + '%';
+                }
+                break;
+            }
+            case 'done': {
+                phaseEl.textContent = 'Done';
+                barEl.style.width = '100%';
+                if (shim) shim.style.display = 'none';
+                break;
+            }
+        }
+    }
     async function brBuildSample() {
         const provider = document.getElementById('brProviderHint').value.trim();
         const email    = document.getElementById('brSubmitterEmail').value.trim();
@@ -8466,6 +8554,12 @@
         const btn = document.getElementById('brBuildBtn');
         btn.textContent = 'Walking folder…'; btn.disabled = true;
         brSetStatus('Walking folder and building structural envelope. This may take a few seconds for large returns…', 'info');
+        brShowProgress(true);
+        // Subscribe to progress events from main.  Detach handler on completion.
+        let unsub = () => {};
+        if (window.electronAPI.onParserSampleProgress) {
+            unsub = window.electronAPI.onParserSampleProgress(brUpdateProgress);
+        }
         try {
             const agency = document.getElementById('brAgency').value.trim();
             const notes  = document.getElementById('brNotes').value.trim();
@@ -8503,6 +8597,9 @@
         } catch (e) {
             brSetStatus('Build failed: ' + (e.message || e), 'error');
             btn.textContent = 'Build structural sample →'; btn.disabled = false;
+        } finally {
+            try { unsub(); } catch {}
+            brShowProgress(false);
         }
     }
 

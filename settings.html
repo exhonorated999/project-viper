@@ -7877,63 +7877,165 @@
     }
     </script>
 
-    <!-- Bug Report Modal -->
+    <!-- Bug Report + Parser Submission Modal (tabbed) -->
     <div id="bugReportOverlay" class="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" style="display:none" onclick="if(event.target===this)closeBugReportModal()">
-        <div class="glass-card rounded-xl p-6 w-full max-w-lg border border-red-500/30" onclick="event.stopPropagation()">
+        <div class="glass-card rounded-xl p-6 w-full max-w-2xl border border-red-500/30" onclick="event.stopPropagation()">
             <div class="flex items-center justify-between mb-4">
                 <h3 class="text-lg font-bold flex items-center gap-2">
                     <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/>
                     </svg>
-                    Report a Bug
+                    Report to Intellect
                 </h3>
                 <button onclick="closeBugReportModal()" class="text-gray-400 hover:text-white">✕</button>
             </div>
-            <form id="bugReportForm" onsubmit="submitBugReport(event)">
-                <div class="space-y-3">
-                    <div>
-                        <label class="block text-xs text-gray-400 mb-1">Title *</label>
-                        <input id="bugTitle" type="text" required maxlength="300" placeholder="Brief summary of the issue"
-                            class="w-full px-3 py-2 rounded-lg bg-viper-card border border-gray-600 text-white text-sm focus:border-viper-cyan focus:outline-none">
+
+            <!-- Tab strip -->
+            <div class="flex gap-1 mb-4 border-b border-gray-700">
+                <button type="button" id="brTabBugBtn" onclick="brSwitchTab('bug')" class="px-4 py-2 text-sm font-medium border-b-2 border-red-500 text-red-400">🐛 Report a bug</button>
+                <button type="button" id="brTabParserBtn" onclick="brSwitchTab('parser')" class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200">📦 Submit unsupported format</button>
+            </div>
+
+            <!-- Tab 1: Bug report -->
+            <div id="brTabBug">
+                <form id="bugReportForm" onsubmit="submitBugReport(event)">
+                    <div class="space-y-3">
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">Title *</label>
+                            <input id="bugTitle" type="text" required maxlength="300" placeholder="Brief summary of the issue"
+                                class="w-full px-3 py-2 rounded-lg bg-viper-card border border-gray-600 text-white text-sm focus:border-viper-cyan focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">Severity</label>
+                            <select id="bugSeverity" class="w-full px-3 py-2 rounded-lg bg-viper-card border border-gray-600 text-white text-sm focus:border-viper-cyan focus:outline-none">
+                                <option value="low">🟢 Low — cosmetic / minor</option>
+                                <option value="medium" selected>🟡 Medium — functionality affected</option>
+                                <option value="high">🟠 High — major feature broken</option>
+                                <option value="critical">🔴 Critical — app crash / data loss</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">Description *</label>
+                            <textarea id="bugDescription" required rows="3" placeholder="What happened? What did you expect to happen?"
+                                class="w-full px-3 py-2 rounded-lg bg-viper-card border border-gray-600 text-white text-sm focus:border-viper-cyan focus:outline-none resize-y"></textarea>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">Steps to Reproduce</label>
+                            <textarea id="bugSteps" rows="3" placeholder="1. Go to...&#10;2. Click on...&#10;3. See error..."
+                                class="w-full px-3 py-2 rounded-lg bg-viper-card border border-gray-600 text-white text-sm focus:border-viper-cyan focus:outline-none resize-y"></textarea>
+                        </div>
                     </div>
+                    <div class="flex items-center justify-between mt-5">
+                        <span class="text-xs text-gray-500">Sent to Intellect Command Center</span>
+                        <div class="flex gap-2">
+                            <button type="button" onclick="closeBugReportModal()" class="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm">Cancel</button>
+                            <button type="submit" id="bugSubmitBtn" class="px-4 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-400 text-sm font-medium">Submit Report</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Tab 2: Parser submission (any unsupported format) -->
+            <div id="brTabParser" style="display:none">
+                <div class="space-y-3">
+                    <div class="text-xs text-gray-400 leading-relaxed bg-gray-800/40 border border-gray-700 rounded-lg p-3">
+                        Help us add a parser for a new format — warrant returns, RMS reports, DMV printouts, cell-tower dumps, mobile-forensics bundles, anything else. VIPER walks the file/folder/ZIP locally and builds a <span class="text-cyan-400">shape-only</span> envelope (folder layout, file types, key/column names) with all filenames redacted. <strong>No case content, narratives, names, or attachments are uploaded.</strong>
+                    </div>
+
                     <div>
-                        <label class="block text-xs text-gray-400 mb-1">Severity</label>
-                        <select id="bugSeverity" class="w-full px-3 py-2 rounded-lg bg-viper-card border border-gray-600 text-white text-sm focus:border-viper-cyan focus:outline-none">
-                            <option value="low">🟢 Low — cosmetic / minor</option>
-                            <option value="medium" selected>🟡 Medium — functionality affected</option>
-                            <option value="high">🟠 High — major feature broken</option>
-                            <option value="critical">🔴 Critical — app crash / data loss</option>
+                        <label class="block text-xs text-gray-400 mb-1">Format Category *</label>
+                        <select id="brFormatCategory" onchange="brOnCategoryChange()"
+                            class="w-full px-3 py-2 rounded-lg bg-viper-card border border-gray-600 text-white text-sm focus:border-viper-cyan focus:outline-none">
+                            <option value="warrant_return">📦 Warrant Return (social / email / cloud account)</option>
+                            <option value="rms_report">📄 RMS PDF Report (records management narrative)</option>
+                            <option value="dmv_record">🚗 DMV / Driver Record printout</option>
+                            <option value="cell_tower_dump">📡 Cell Tower Dump (CDR / tower download)</option>
+                            <option value="mobile_forensics">📱 Mobile Forensics Bundle (Cellebrite / Magnet / UFED variant)</option>
+                            <option value="other">❓ Other</option>
                         </select>
                     </div>
+
                     <div>
-                        <label class="block text-xs text-gray-400 mb-1">Description *</label>
-                        <textarea id="bugDescription" required rows="3" placeholder="What happened? What did you expect to happen?"
+                        <label class="block text-xs text-gray-400 mb-1">Source *</label>
+                        <div class="flex gap-2">
+                            <button type="button" id="brPickFolderBtn" onclick="brPickFolder()" class="flex-1 px-3 py-2 rounded-lg bg-viper-card border border-gray-600 hover:border-viper-cyan text-sm">📁 Folder…</button>
+                            <button type="button" id="brPickZipBtn"    onclick="brPickZip()"    class="flex-1 px-3 py-2 rounded-lg bg-viper-card border border-gray-600 hover:border-viper-cyan text-sm">🗜️ .zip…</button>
+                            <button type="button" id="brPickFileBtn"   onclick="brPickFile()"   class="flex-1 px-3 py-2 rounded-lg bg-viper-card border border-gray-600 hover:border-viper-cyan text-sm">📄 Single file…</button>
+                        </div>
+                        <div id="brPickedPath" class="hidden mt-2 text-xs text-gray-300 bg-gray-800/40 border border-gray-700 rounded px-2 py-1 truncate"></div>
+                        <div id="brCategoryHint" class="mt-2 text-xs text-gray-500"></div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1" id="brProviderLabel">Provider / Vendor Hint *</label>
+                            <input id="brProviderHint" type="text" maxlength="200" placeholder="e.g. Yahoo"
+                                class="w-full px-3 py-2 rounded-lg bg-viper-card border border-gray-600 text-white text-sm focus:border-viper-cyan focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">Your Email *</label>
+                            <input id="brSubmitterEmail" type="email" maxlength="200" placeholder="you@agency.gov"
+                                class="w-full px-3 py-2 rounded-lg bg-viper-card border border-gray-600 text-white text-sm focus:border-viper-cyan focus:outline-none">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">Agency</label>
+                        <input id="brAgency" type="text" maxlength="200" placeholder="Optional — for follow-up"
+                            class="w-full px-3 py-2 rounded-lg bg-viper-card border border-gray-600 text-white text-sm focus:border-viper-cyan focus:outline-none">
+                    </div>
+
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">Notes</label>
+                        <textarea id="brNotes" rows="2" maxlength="2000" placeholder="Anything else we should know about this format? Region, software version, special fields…"
                             class="w-full px-3 py-2 rounded-lg bg-viper-card border border-gray-600 text-white text-sm focus:border-viper-cyan focus:outline-none resize-y"></textarea>
                     </div>
-                    <div>
-                        <label class="block text-xs text-gray-400 mb-1">Steps to Reproduce</label>
-                        <textarea id="bugSteps" rows="3" placeholder="1. Go to...&#10;2. Click on...&#10;3. See error..."
-                            class="w-full px-3 py-2 rounded-lg bg-viper-card border border-gray-600 text-white text-sm focus:border-viper-cyan focus:outline-none resize-y"></textarea>
+
+                    <div id="brBuildStatus" class="hidden text-xs rounded-lg px-3 py-2 border"></div>
+
+                    <div class="flex items-center justify-between mt-3">
+                        <span class="text-xs text-gray-500">Shape-only — no case content uploaded</span>
+                        <div class="flex gap-2">
+                            <button type="button" onclick="closeBugReportModal()" class="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm">Cancel</button>
+                            <button type="button" id="brBuildBtn" onclick="brBuildSample()" class="px-4 py-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 text-sm font-medium">Build structural sample →</button>
+                            <button type="button" id="brSubmitBtn" onclick="brSubmitSample()" class="hidden px-4 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-400 text-sm font-medium">Submit envelope</button>
+                        </div>
                     </div>
                 </div>
-                <div class="flex items-center justify-between mt-5">
-                    <span class="text-xs text-gray-500">Sent to Intellect Command Center</span>
-                    <div class="flex gap-2">
-                        <button type="button" onclick="closeBugReportModal()" class="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm">Cancel</button>
-                        <button type="submit" id="bugSubmitBtn" class="px-4 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-400 text-sm font-medium">Submit Report</button>
-                    </div>
-                </div>
-            </form>
+            </div>
         </div>
     </div>
 
     <script>
+    // ── Intellect Command Center endpoints ────────────────────────────────
     const BUG_REPORT_API = 'https://intellect-unified-dashboard-production.up.railway.app/api/bug-reports';
+    const PARSER_SUBMISSION_API = 'https://intellect-unified-dashboard-production.up.railway.app/api/parser-submissions';
+
+    // ── Per-page-safe helpers ─────────────────────────────────────────────
+    function __brToast(msg, type) {
+        type = type || 'info';
+        if (typeof viperToast === 'function') { try { viperToast(msg, type); return; } catch (_) {} }
+        if (typeof showToast === 'function')  { try { showToast(msg, type);  return; } catch (_) {} }
+        console.log('[' + type + '] ' + msg);
+    }
+    function __brAppVersion() {
+        const el = document.getElementById('appVersion');
+        if (el && el.textContent) return el.textContent.replace(/^v/i, '').trim();
+        return '';
+    }
+
+    // ── Modal open/close + tab switch ─────────────────────────────────────
+    let brSamplePickedPath = null;
+    let brSampleSourceKind = null; // 'folder' | 'zip'
+    let brBuiltEnvelope = null;
+    let brBuildSummary = null;
 
     function openBugReportModal() {
         document.getElementById('bugReportForm').reset();
-        document.getElementById('bugSubmitBtn').textContent = 'Submit Report';
-        document.getElementById('bugSubmitBtn').disabled = false;
+        const submitBtn = document.getElementById('bugSubmitBtn');
+        if (submitBtn) { submitBtn.textContent = 'Submit Report'; submitBtn.disabled = false; }
+        brResetParserTab();
+        brSwitchTab('bug');
         document.getElementById('bugReportOverlay').style.display = 'flex';
     }
 
@@ -7941,58 +8043,301 @@
         document.getElementById('bugReportOverlay').style.display = 'none';
     }
 
+    function brSwitchTab(which) {
+        const bugTab    = document.getElementById('brTabBug');
+        const parserTab = document.getElementById('brTabParser');
+        const bugBtn    = document.getElementById('brTabBugBtn');
+        const parserBtn = document.getElementById('brTabParserBtn');
+        if (!bugTab || !parserTab || !bugBtn || !parserBtn) return;
+        if (which === 'parser') {
+            bugTab.style.display    = 'none';
+            parserTab.style.display = '';
+            bugBtn.className    = 'px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200';
+            parserBtn.className = 'px-4 py-2 text-sm font-medium border-b-2 border-red-500 text-red-400';
+        } else {
+            bugTab.style.display    = '';
+            parserTab.style.display = 'none';
+            bugBtn.className    = 'px-4 py-2 text-sm font-medium border-b-2 border-red-500 text-red-400';
+            parserBtn.className = 'px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200';
+        }
+    }
+
+    // Per-category copy that primes the source-picker hint and provider-hint
+    // placeholder so users know what we expect them to send.
+    const BR_CATEGORY_META = {
+        warrant_return: {
+            providerLabel: 'Provider / Service Hint *',
+            providerPlaceholder: 'e.g. Yahoo, Discord, Verizon, TikTok',
+            hint: 'Pick the unzipped folder OR the original .zip the provider returned.',
+        },
+        rms_report: {
+            providerLabel: 'RMS Vendor + Agency *',
+            providerPlaceholder: 'e.g. INFORM RMS — Pinellas SO',
+            hint: 'Pick the PDF report directly, or a folder with several sample PDFs.',
+        },
+        dmv_record: {
+            providerLabel: 'State / DMV System *',
+            providerPlaceholder: 'e.g. Florida DAVID, California CLETS',
+            hint: 'A single PDF printout is fine. Multiple drivers in one folder works too.',
+        },
+        cell_tower_dump: {
+            providerLabel: 'Carrier + Format *',
+            providerPlaceholder: 'e.g. Verizon CDR, T-Mobile Tower Dump',
+            hint: 'Pick the CSV/XLSX/PDF dump file, the carrier portal export folder, or the original .zip.',
+        },
+        mobile_forensics: {
+            providerLabel: 'Tool + Version *',
+            providerPlaceholder: 'e.g. Cellebrite UFED 7.62, Magnet AXIOM 8.0',
+            hint: 'Pick the extracted bundle folder or the original .ufdr / .zip.',
+        },
+        other: {
+            providerLabel: 'What is this format? *',
+            providerPlaceholder: 'Brief name / vendor — we will follow up by email',
+            hint: 'Anything we should support — pick whichever source style fits.',
+        },
+    };
+
+    function brOnCategoryChange() {
+        const sel = document.getElementById('brFormatCategory');
+        if (!sel) return;
+        const meta = BR_CATEGORY_META[sel.value] || BR_CATEGORY_META.other;
+        const lbl = document.getElementById('brProviderLabel');   if (lbl)  lbl.textContent  = meta.providerLabel;
+        const ph  = document.getElementById('brProviderHint');    if (ph)   ph.placeholder   = meta.providerPlaceholder;
+        const hint = document.getElementById('brCategoryHint');   if (hint) hint.textContent = meta.hint;
+    }
+
+    function brResetParserTab() {
+        brSamplePickedPath = null;
+        brSampleSourceKind = null;
+        brBuiltEnvelope = null;
+        brBuildSummary = null;
+        ['brProviderHint','brSubmitterEmail','brAgency','brNotes'].forEach(id => {
+            const el = document.getElementById(id); if (el) el.value = '';
+        });
+        const cat = document.getElementById('brFormatCategory');
+        if (cat) cat.value = 'warrant_return';
+        brOnCategoryChange();
+        const picked = document.getElementById('brPickedPath');
+        if (picked) { picked.textContent = ''; picked.classList.add('hidden'); }
+        const status = document.getElementById('brBuildStatus');
+        if (status) { status.textContent = ''; status.className = 'hidden text-xs rounded-lg px-3 py-2 border'; }
+        const buildBtn = document.getElementById('brBuildBtn');
+        if (buildBtn) { buildBtn.textContent = 'Build structural sample →'; buildBtn.disabled = false; buildBtn.classList.remove('hidden'); }
+        const submitBtn = document.getElementById('brSubmitBtn');
+        if (submitBtn) { submitBtn.textContent = 'Submit envelope'; submitBtn.disabled = false; submitBtn.classList.add('hidden'); }
+    }
+
+    function brSetStatus(msg, tone) {
+        const el = document.getElementById('brBuildStatus');
+        if (!el) return;
+        let cls = 'text-xs rounded-lg px-3 py-2 border ';
+        if (tone === 'error')        cls += 'border-red-500/40 bg-red-500/10 text-red-300';
+        else if (tone === 'success') cls += 'border-green-500/40 bg-green-500/10 text-green-300';
+        else                         cls += 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
+        el.className = cls;
+        el.textContent = msg;
+    }
+
+    // ── Folder / ZIP pickers ──────────────────────────────────────────────
+    async function brPickFolder() {
+        try {
+            if (!window.electronAPI || !window.electronAPI.parserSamplePickFolder) {
+                __brToast('Folder picker unavailable in this build', 'error'); return;
+            }
+            const res = await window.electronAPI.parserSamplePickFolder();
+            if (!res || !res.success || !res.path) return;
+            brSamplePickedPath = res.path;
+            brSampleSourceKind = 'folder';
+            const picked = document.getElementById('brPickedPath');
+            picked.textContent = '📁 ' + res.path;
+            picked.classList.remove('hidden');
+            brBuiltEnvelope = null; brBuildSummary = null;
+            document.getElementById('brBuildBtn').classList.remove('hidden');
+            document.getElementById('brSubmitBtn').classList.add('hidden');
+            const status = document.getElementById('brBuildStatus');
+            status.className = 'hidden text-xs rounded-lg px-3 py-2 border';
+        } catch (e) { __brToast('Folder picker error: ' + (e.message || e), 'error'); }
+    }
+
+    async function brPickZip() {
+        try {
+            if (!window.electronAPI || !window.electronAPI.parserSamplePickZip) {
+                __brToast('Zip picker unavailable in this build', 'error'); return;
+            }
+            const res = await window.electronAPI.parserSamplePickZip();
+            if (!res || !res.success || !res.path) return;
+            brSamplePickedPath = res.path;
+            brSampleSourceKind = 'zip';
+            const picked = document.getElementById('brPickedPath');
+            picked.textContent = '🗜️ ' + res.path;
+            picked.classList.remove('hidden');
+            brBuiltEnvelope = null; brBuildSummary = null;
+            document.getElementById('brBuildBtn').classList.remove('hidden');
+            document.getElementById('brSubmitBtn').classList.add('hidden');
+            const status = document.getElementById('brBuildStatus');
+            status.className = 'hidden text-xs rounded-lg px-3 py-2 border';
+        } catch (e) { __brToast('Zip picker error: ' + (e.message || e), 'error'); }
+    }
+
+    async function brPickFile() {
+        try {
+            if (!window.electronAPI || !window.electronAPI.parserSamplePickFile) {
+                __brToast('File picker unavailable in this build', 'error'); return;
+            }
+            const res = await window.electronAPI.parserSamplePickFile();
+            if (!res || !res.success || !res.path) return;
+            brSamplePickedPath = res.path;
+            brSampleSourceKind = 'file';
+            const picked = document.getElementById('brPickedPath');
+            picked.textContent = '📄 ' + res.path;
+            picked.classList.remove('hidden');
+            brBuiltEnvelope = null; brBuildSummary = null;
+            document.getElementById('brBuildBtn').classList.remove('hidden');
+            document.getElementById('brSubmitBtn').classList.add('hidden');
+            const status = document.getElementById('brBuildStatus');
+            status.className = 'hidden text-xs rounded-lg px-3 py-2 border';
+        } catch (e) { __brToast('File picker error: ' + (e.message || e), 'error'); }
+    }
+
+    // ── Build the structural envelope ─────────────────────────────────────
+    async function brBuildSample() {
+        const provider = document.getElementById('brProviderHint').value.trim();
+        const email    = document.getElementById('brSubmitterEmail').value.trim();
+        if (!brSamplePickedPath) { __brToast('Choose a folder or ZIP first', 'error'); return; }
+        if (!provider)           { __brToast('Provider hint required (e.g. Yahoo)', 'error'); return; }
+        if (!email)              { __brToast('Your email is required for follow-up', 'error'); return; }
+        if (!window.electronAPI || !window.electronAPI.parserSampleBuild) {
+            __brToast('Sample builder unavailable in this build', 'error'); return;
+        }
+        const btn = document.getElementById('brBuildBtn');
+        btn.textContent = 'Walking folder…'; btn.disabled = true;
+        brSetStatus('Walking folder and building structural envelope. This may take a few seconds for large returns…', 'info');
+        try {
+            const agency = document.getElementById('brAgency').value.trim();
+            const notes  = document.getElementById('brNotes').value.trim();
+            const categoryEl = document.getElementById('brFormatCategory');
+            const formatCategory = categoryEl ? categoryEl.value : 'warrant_return';
+            const res = await window.electronAPI.parserSampleBuild({
+                rootPath: brSamplePickedPath,
+                sourceKind: brSampleSourceKind,
+                formatCategory,
+                providerHint: provider,
+                submitterEmail: email,
+                submitterNotes: notes,
+                agencyName: agency,
+                appVersion: __brAppVersion(),
+            });
+            if (!res || !res.success) throw new Error((res && res.error) || 'Sample build failed');
+            brBuiltEnvelope = res.envelope;
+            brBuildSummary  = res.summary;
+            const s = res.summary || {};
+            const fc = s.format_counts || {};
+            const fcStr = Object.keys(fc).map(k => k + ':' + fc[k]).join(', ') || '—';
+            const truncNote = s.truncated_files ? (' · ' + s.truncated_files + ' truncated') : '';
+            const envKb = ((s.envelope_size_bytes || 0) / 1024).toFixed(1);
+            const mb    = ((s.total_bytes || 0) / 1024 / 1024).toFixed(2);
+            brSetStatus(
+                '✓ Built: ' + (s.total_files || 0) + ' file(s), ' + mb + ' MB scanned · depth ' + (s.max_depth || 0)
+                + ' · ' + fcStr + truncNote + ' · envelope ' + envKb + ' KB',
+                'success'
+            );
+            btn.classList.add('hidden');
+            const submitBtn = document.getElementById('brSubmitBtn');
+            submitBtn.textContent = 'Submit envelope';
+            submitBtn.classList.remove('hidden');
+            submitBtn.disabled = false;
+        } catch (e) {
+            brSetStatus('Build failed: ' + (e.message || e), 'error');
+            btn.textContent = 'Build structural sample →'; btn.disabled = false;
+        }
+    }
+
+    // ── Submit envelope to Intellect Dashboard ────────────────────────────
+    async function brSubmitSample() {
+        if (!brBuiltEnvelope) { __brToast('Build the sample first', 'error'); return; }
+        const apiKey = localStorage.getItem('viper_api_key');
+        if (!apiKey) { __brToast('No API key found — activate your license first', 'error'); return; }
+        const provider = document.getElementById('brProviderHint').value.trim();
+        const email    = document.getElementById('brSubmitterEmail').value.trim();
+        const agency   = document.getElementById('brAgency').value.trim();
+        const notes    = document.getElementById('brNotes').value.trim();
+        if (!provider || !email) { __brToast('Provider hint and email are required', 'error'); return; }
+        const btn = document.getElementById('brSubmitBtn');
+        btn.textContent = 'Sending…'; btn.disabled = true;
+        brSetStatus('Uploading envelope to Intellect Command Center…', 'info');
+        try {
+            if (!window.electronAPI || !window.electronAPI.parserSampleSubmit) {
+                throw new Error('Submit unavailable in this build');
+            }
+            const categoryEl2 = document.getElementById('brFormatCategory');
+            const formatCategory = categoryEl2 ? categoryEl2.value : 'warrant_return';
+            const res = await window.electronAPI.parserSampleSubmit({
+                apiKey,
+                envelope: brBuiltEnvelope,
+                submitter: {
+                    format_category: formatCategory,
+                    provider_hint:   provider,
+                    submitter_email: email,
+                    submitter_notes: notes,
+                    agency_name:     agency,
+                    reporter_name:   localStorage.getItem('viper_customer_name') || 'Unknown',
+                    product_slug:    'project-viper',
+                    app_version:     __brAppVersion(),
+                    platform:        'desktop',
+                },
+                endpoint: PARSER_SUBMISSION_API,
+            });
+            if (!res || !res.success) throw new Error((res && res.error) || 'Server rejected envelope');
+            brSetStatus('✓ Submitted — submission ID ' + (res.submission_id || '?') + '. Thank you!', 'success');
+            __brToast('Parser submission received — thank you!', 'success');
+            btn.classList.add('hidden');
+            document.getElementById('brBuildBtn').classList.add('hidden');
+            setTimeout(closeBugReportModal, 2200);
+        } catch (e) {
+            brSetStatus('Submit failed: ' + (e.message || e), 'error');
+            btn.textContent = 'Submit envelope'; btn.disabled = false;
+        }
+    }
+
+    // ── Bug report submission ─────────────────────────────────────────────
     async function submitBugReport(e) {
         e.preventDefault();
         const btn = document.getElementById('bugSubmitBtn');
-        const title = document.getElementById('bugTitle').value.trim();
+        const title       = document.getElementById('bugTitle').value.trim();
         const description = document.getElementById('bugDescription').value.trim();
-        const severity = document.getElementById('bugSeverity').value;
-        const steps = document.getElementById('bugSteps').value.trim();
+        const severity    = document.getElementById('bugSeverity').value;
+        const steps       = document.getElementById('bugSteps').value.trim();
 
-        if (!title || !description) {
-            if (window.viperToast) viperToast('Title and description are required', 'error');
-            return;
-        }
+        if (!title || !description) { __brToast('Title and description are required', 'error'); return; }
 
         const apiKey = localStorage.getItem('viper_api_key');
-        if (!apiKey) {
-            if (window.viperToast) viperToast('No API key found — please activate your license first', 'error');
-            return;
-        }
+        if (!apiKey) { __brToast('No API key found — please activate your license first', 'error'); return; }
 
-        btn.textContent = 'Sending...';
-        btn.disabled = true;
+        btn.textContent = 'Sending...'; btn.disabled = true;
 
         try {
             const resp = await fetch(BUG_REPORT_API, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-API-Key': apiKey,
-                },
+                headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
                 body: JSON.stringify({
-                    title,
-                    description,
+                    title, description,
+                    steps_to_reproduce: steps,
                     severity,
-                    steps_to_reproduce: steps || null,
-                    page: 'settings',
-                    app_version: '2.3.9',
-                    user_agent: navigator.userAgent,
+                    product_slug:  'project-viper',
+                    reporter_name: localStorage.getItem('viper_customer_name') || 'Unknown',
+                    app_version:   __brAppVersion(),
                 }),
             });
-            if (resp.ok) {
-                if (window.viperToast) viperToast('Bug report submitted — thank you!', 'success');
-                closeBugReportModal();
-            } else {
-                const data = await resp.json().catch(() => ({}));
-                if (window.viperToast) viperToast(data.detail || 'Failed to submit report', 'error');
-                btn.textContent = 'Submit Report';
-                btn.disabled = false;
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.detail || ('Server error (' + resp.status + ')'));
             }
+            const data = await resp.json();
+            closeBugReportModal();
+            __brToast('Bug report submitted — thank you! (ID: ' + data.bug_id + ')', 'success');
         } catch (err) {
-            if (window.viperToast) viperToast('Network error — check your connection', 'error');
-            btn.textContent = 'Submit Report';
-            btn.disabled = false;
+            __brToast('Failed to submit: ' + (err.message || err), 'error');
+            btn.textContent = 'Submit Report'; btn.disabled = false;
         }
     }
     </script>

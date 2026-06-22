@@ -38,6 +38,51 @@ function _loadAgencyProfile() {
   } catch (_) { return {}; }
 }
 
+// Merge the LIVE agency profile with the draft's frozen affiantSnapshot.
+// Non-empty snapshot values win (preserves fidelity for a served/finalized
+// warrant), but BLANK snapshot fields fall back to the live profile. This
+// fixes the CO compose path, which previously read draft.affiantSnapshot
+// ONLY — so a draft created before the agency profile was filled out (or
+// edited afterward) lost affiantName / affiantRank / affiantBadge /
+// trainingExperienceBoilerplate and rendered them as raw {{...}} slots.
+// The residential/CA paths already merged; CO did not.
+function _mergeAgencyForDraft(draft) {
+  const live = _loadAgencyProfile() || {};
+  const snap = (draft && draft.affiantSnapshot && typeof draft.affiantSnapshot === 'object')
+    ? draft.affiantSnapshot : {};
+  const merged = Object.assign({}, live);
+  Object.keys(snap).forEach((k) => {
+    const v = snap[k];
+    // Non-empty snapshot value wins; '' / null / undefined defers to live.
+    if (v !== '' && v != null) merged[k] = v;
+  });
+  return merged;
+}
+
+// Resolve the case-level Probable Cause narrative for a draft. Source of
+// truth is the case PC store (casePcNarrative_${caseId}); falls back to the
+// draft's mirrored copy. The CO template renders this via
+// {{addendum.probableCause}}, so it must be injected into adForEngine.
+function _resolvePcForDraft(caseId, draft) {
+  const pcStore = (typeof window !== 'undefined') ? window.WarrantAuthorCasePcStore : null;
+  const fromStore = (pcStore && pcStore.getBody && caseId) ? pcStore.getBody(caseId) : '';
+  return (fromStore && String(fromStore).trim())
+    ? fromStore
+    : ((draft && draft.probableCauseNarrative) || '');
+}
+
+// Default basis sentence used when the affiant leaves the date-range basis
+// field blank, so the CO template's block 15 never prints a raw
+// {{addendum.dateRangeBasis}} token. The affiant can override via the UI.
+const CO_DEFAULT_DATE_RANGE_BASIS =
+  'the date range corresponds to the period relevant to the offenses under ' +
+  'investigation as described in the facts set forth above.';
+
+function _resolveDateRangeBasis(ad) {
+  const v = (ad && ad.dateRangeBasis != null) ? String(ad.dateRangeBasis).trim() : '';
+  return v || CO_DEFAULT_DATE_RANGE_BASIS;
+}
+
 // ─── CO-specific compose-ctx helpers ────────────────────────────────────
 // Resolve the per-draft Colorado court + case info needed by the CO
 // template's co-caption / co-affiant-signature / co-judge-* / co-da-*
@@ -1426,6 +1471,14 @@ function _renderDraftHeader(caseId, draft) {
     } catch (_) { /* non-fatal */ }
   }
   const isCoTemplate = String(draft.template || '') === 'co-multi-business-esp';
+  // When CO template is active AND the agency has a Colorado Courts list,
+  // the court picker (coCourtId) is the authoritative source for the
+  // caption — the legacy free-text "Court Name" field is ignored by the
+  // CO resolver. Hide it to stop it confusing affiants (it would otherwise
+  // show the agency default, e.g. "17th Judicial", and never change when
+  // they switch courts in the picker). When no CO Courts are configured,
+  // the CO fallback still uses Court Name, so keep it editable.
+  const coCourtPickerAuthoritative = isCoTemplate && coCourts.length > 0;
   const courtPickerHtml = isCoTemplate ? `
       <label class="text-xs col-span-2">
         <span class="text-slate-400 uppercase tracking-wider">Colorado Court</span>
@@ -1463,12 +1516,21 @@ function _renderDraftHeader(caseId, draft) {
   const hasPc = pcStats.chars > 0;
   return `
     <div class="grid grid-cols-2 gap-3 p-3 bg-viper-dark/60 border border-slate-700 rounded-lg">
+      ${coCourtPickerAuthoritative ? `
+      <label class="text-xs">
+        <span class="text-slate-400 uppercase tracking-wider">Court</span>
+        <div class="mt-1 w-full px-2 py-1.5 bg-viper-dark/40 border border-slate-700 border-dashed rounded text-slate-500 text-xs leading-snug">
+          Set by the <span class="text-viper-cyan">Colorado Court</span> picker below.
+        </div>
+      </label>
+      ` : `
       <label class="text-xs">
         <span class="text-slate-400 uppercase tracking-wider">Court Name</span>
         <input type="text" value="${attr(draft.courtName)}"
                onchange="WarrantAuthorUI.bus.onDraftFieldChange('${attr(caseId)}','${attr(draft.id)}','courtName',this.value)"
                class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
       </label>
+      `}
       <label class="text-xs">
         <span class="text-slate-400 uppercase tracking-wider">Template</span>
         <select onchange="WarrantAuthorUI.bus.onDraftFieldChange('${attr(caseId)}','${attr(draft.id)}','template',this.value)"
@@ -1491,7 +1553,127 @@ function _renderDraftHeader(caseId, draft) {
         <span class="text-slate-500">SW # and Judge captured when marked served</span>
       </div>
     </div>
+    ${_renderExhibitsPanel(caseId, draft)}
   `;
+}
+
+// ─── Exhibits (CR-Exhibit) ──────────────────────────────────────────────
+// Affiants frequently need to attach photos or screenshots of tables that
+// can't live inside the PC text field. We store them per-draft as
+// downscaled data URLs, auto-number them CR-Exhibit #N, and append an
+// "EXHIBITS" section to the generated PDF + DOCX (both consume the same
+// blockStream). Images are capped to a longest-side of EXHIBIT_MAX_DIM and
+// re-encoded so the draft localStorage / IPC payload stays manageable.
+
+const EXHIBIT_MAX_DIM = 1600;                 // px — cap longest side
+const EXHIBIT_MAX_BYTES = 8 * 1024 * 1024;    // 8 MB per source file guard
+
+function _draftExhibits(draft) {
+  return (draft && Array.isArray(draft.exhibits)) ? draft.exhibits : [];
+}
+
+// Read + (if needed) downscale an image File → { dataUrl, mime, w, h, name }.
+function _readExhibitFile(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) return reject(new Error('No file selected.'));
+    if (!/^image\//i.test(file.type)) return reject(new Error('Not an image: ' + file.name));
+    if (file.size > EXHIBIT_MAX_BYTES) return reject(new Error('Image too large (max 8 MB): ' + file.name));
+    const fr = new FileReader();
+    fr.onerror = () => reject(new Error('Read failed: ' + file.name));
+    fr.onload = () => {
+      const srcDataUrl = String(fr.result || '');
+      const img = new Image();
+      img.onerror = () => reject(new Error('Could not decode image: ' + file.name));
+      img.onload = () => {
+        const width = img.naturalWidth || img.width;
+        const height = img.naturalHeight || img.height;
+        const longest = Math.max(width, height) || 1;
+        const scale = longest > EXHIBIT_MAX_DIM ? (EXHIBIT_MAX_DIM / longest) : 1;
+        // Small enough + no scaling needed → keep the source bytes as-is.
+        if (scale === 1 && srcDataUrl.length < 1.5 * 1024 * 1024) {
+          return resolve({ dataUrl: srcDataUrl, mime: file.type, w: width, h: height, name: file.name });
+        }
+        const w = Math.max(1, Math.round(width * scale));
+        const h = Math.max(1, Math.round(height * scale));
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          const cx = canvas.getContext('2d');
+          // White matte so transparent PNGs don't go black when flattened to JPEG.
+          if (!/png/i.test(file.type)) { cx.fillStyle = '#ffffff'; cx.fillRect(0, 0, w, h); }
+          cx.drawImage(img, 0, 0, w, h);
+          const outMime = /png/i.test(file.type) ? 'image/png' : 'image/jpeg';
+          const outDataUrl = canvas.toDataURL(outMime, 0.9);
+          resolve({ dataUrl: outDataUrl, mime: outMime, w, h, name: file.name });
+        } catch (_e) {
+          resolve({ dataUrl: srcDataUrl, mime: file.type, w: width, h: height, name: file.name });
+        }
+      };
+      img.src = srcDataUrl;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
+function _renderExhibitsPanel(caseId, draft) {
+  const exhibits = _draftExhibits(draft);
+  const rows = exhibits.map((ex, i) => `
+    <div class="flex gap-2 items-start p-2 bg-viper-dark/40 border border-slate-700 rounded">
+      <img src="${attr(ex.dataUrl)}" alt="exhibit thumbnail"
+           class="w-16 h-16 object-cover rounded border border-slate-600 flex-shrink-0 bg-white">
+      <div class="flex-1 min-w-0">
+        <div class="text-xs font-mono text-viper-cyan mb-1">CR-Exhibit #${i + 1}</div>
+        <input type="text" value="${attr(ex.caption || '')}" placeholder="Caption / description (optional)"
+               onchange="WarrantAuthorUI.bus.onExhibitCaptionChange('${attr(caseId)}','${attr(draft.id)}','${attr(ex.id)}',this.value)"
+               class="w-full px-2 py-1 bg-viper-dark border border-slate-700 rounded text-white text-xs">
+        <div class="text-[10px] text-slate-500 mt-1 truncate">${esc(ex.name || '')}</div>
+      </div>
+      <button onclick="WarrantAuthorUI.bus.onRemoveExhibit('${attr(caseId)}','${attr(draft.id)}','${attr(ex.id)}')"
+              class="px-2 py-1 text-rose-300 hover:text-rose-200 text-xs flex-shrink-0" title="Remove exhibit">✕</button>
+    </div>
+  `).join('');
+  return `
+    <div class="mt-3 p-3 bg-viper-dark/60 border border-slate-700 rounded-lg">
+      <div class="flex items-center justify-between mb-2">
+        <div>
+          <span class="text-slate-300 text-sm font-medium">Exhibits</span>
+          <span class="text-[11px] text-slate-500 ml-2">photos / screenshots appended as CR-Exhibit #</span>
+        </div>
+        <button onclick="WarrantAuthorUI.bus.onAddExhibits('${attr(caseId)}','${attr(draft.id)}')"
+                class="text-[11px] text-viper-cyan hover:underline">+ Add Image</button>
+      </div>
+      ${exhibits.length
+        ? `<div class="space-y-2">${rows}</div>`
+        : `<div class="text-[11px] text-slate-500 leading-snug">No exhibits. Use <span class="text-viper-cyan">+ Add Image</span> to attach photos or screenshots of tables. Each is auto-labeled CR-Exhibit #1, #2, … and appended in its own EXHIBITS section after the warrant body.</div>`}
+    </div>
+  `;
+}
+
+// Append an EXHIBITS section to a built blockStream. Called by the generate
+// path AFTER builder.build() so BOTH the renderer PDF composer and the
+// main-process DOCX composer (which receive the same blockStream) render
+// the images.
+function _appendExhibitBlocks(blockStream, draft) {
+  const exhibits = _draftExhibits(draft);
+  if (!exhibits.length) return;
+  if (!blockStream || !Array.isArray(blockStream.blocks)) return;
+  blockStream.blocks.push({ kind: 'page-break' });
+  blockStream.blocks.push({ kind: 'heading-1', text: 'EXHIBITS' });
+  exhibits.forEach((ex, i) => {
+    const label = `CR-Exhibit #${i + 1}`;
+    blockStream.blocks.push({ kind: 'heading-2', text: label });
+    if (ex.caption && String(ex.caption).trim()) {
+      blockStream.blocks.push({ kind: 'paragraph', text: String(ex.caption).trim() });
+    }
+    blockStream.blocks.push({
+      kind: 'exhibit-image',
+      dataUrl: ex.dataUrl,
+      mime: ex.mime || 'image/png',
+      w: ex.w || 0,
+      h: ex.h || 0,
+      label,
+    });
+  });
 }
 
 // ─── CA face-page options (PC §1524 grounds + HOBBS + Night Search) ─────
@@ -2149,6 +2331,11 @@ function _renderAddendumForm(caseId, draft, addendumId, harvest) {
   const ad = draft.addendums.find(a => a.id === addendumId);
   if (!ad) return _renderAddendumEmptyForm(caseId, draft.id);
 
+  // CO Multi-Business ESP exposes an extra "Basis for Date Range" field
+  // (template block 15). Detected by jurisdiction or template id.
+  const isCo = (String(draft.jurisdiction || '').toUpperCase() === 'CO')
+            || /(^|[-_])co[-_]/i.test(String(draft.template || ''));
+
   const pdir = _pdir();
   const merged = pdir ? pdir.mergeProviders({
     providerOverrides: _safeLS('viperWarrantAuthorProviderOverrides'),
@@ -2245,6 +2432,18 @@ function _renderAddendumForm(caseId, draft, addendumId, harvest) {
                  class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm font-mono">
         </label>
       </div>
+      ${isCo ? `
+      <!-- CO only: Basis for the requested date range (template block 15).
+           If left blank, a neutral default sentence prints so the document
+           never shows a raw {{addendum.dateRangeBasis}} token. -->
+      <label class="block text-xs">
+        <span class="text-slate-400 uppercase tracking-wider">Basis for Date Range <span class="text-slate-500 normal-case">(optional — CO)</span></span>
+        <textarea rows="2"
+                  placeholder="e.g. The date range aligns with the suspected account activity established in the probable cause."
+                  onblur="WarrantAuthorUI.bus.onAddendumFieldChange('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','dateRangeBasis',this.value)"
+                  class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm resize-y">${esc(ad.dateRangeBasis || '')}</textarea>
+      </label>
+      ` : ''}
 
       <!-- Target accounts -->
       <div>
@@ -2408,14 +2607,22 @@ function _renderLivePreview(caseId, draft, activeId) {
     // itemsToProduce is the array of checkbox-selected item keys —
     // engine override path consumes this directly.
     itemsToProduce: Array.isArray(ad.itemsToProduce) ? ad.itemsToProduce.slice() : [],
+    // Probable Cause lives at the CASE level (pc store) / mirrored on the
+    // draft — inject it so the CO template's {{addendum.probableCause}}
+    // slot resolves instead of dangling.
+    probableCause: _resolvePcForDraft(caseId, draft),
+    // Date-range basis: CO block 15 ({{addendum.dateRangeBasis}}). Falls
+    // back to a neutral sentence so the slot never prints raw.
+    dateRangeBasis: _resolveDateRangeBasis(ad),
   });
 
+  const _coAgency = _mergeAgencyForDraft(draft);
   const ctx = {
     addendum: adForEngine,
     provider: provider || { key: ad.providerKey, name: ad.providerKey || '(no provider)' },
     items, // taxonomy API module
-    affiant: draft.affiantSnapshot || {},
-    agency:  draft.affiantSnapshot || {},
+    affiant: _coAgency,
+    agency:  _coAgency,
     draft,
     // Colorado template needs court (selected per-draft from agency.coCourts)
     // + case info (case number, offense). The block-builder reads these
@@ -3138,6 +3345,7 @@ function renderCasePc(caseId) {
                      value="${attr(offenseDesc)}"
                      placeholder="e.g. Aggravated Robbery, Sexual Assault on a Child…"
                      oninput="WarrantAuthorUI.bus.onCaseOffenseDescChange('${attr(caseId)}', this.value)"
+                     onblur="WarrantAuthorUI.bus.onCaseOffenseDescBlur('${attr(caseId)}')"
                      class="flex-1 px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
               ${offenseRefOpts ? `
                 <select onchange="WarrantAuthorUI.bus.onCaseOffensePickFromRef('${attr(caseId)}', this.value); this.value='';"
@@ -3939,13 +4147,28 @@ const bus = {
         }
       } catch (_e) {}
     }
-    // No rerender — keep focus in the input.
+    // No rerender on every keystroke — keep focus/caret in the input.
+    // The validator panel + live preview refresh on blur (see
+    // onCaseOffenseDescBlur) so we don't re-run engine.compose per char.
+  },
+  /**
+   * Fires when the offense-description input loses focus. The value was
+   * already persisted by onCaseOffenseDescChange (oninput); this just
+   * refreshes the validator panel + live preview so their "no offense
+   * description" warning / dangling {{case.offenseDescription}} slot
+   * clears once the field is filled. Safe to _rerender: the offense
+   * input lives in #waCasePcMount, a separate container from the
+   * #waSubtabContent that _rerender() rebuilds — caret is untouched.
+   */
+  onCaseOffenseDescBlur(_caseId) {
+    _rerender();
   },
   /**
    * Case-level offense date edit. <input type="date"> fires change on a
-   * fully-formed ISO value, so it's safe to rerender — but we don't,
-   * to keep the picker focus state stable across cases where the user
-   * tabs into adjacent fields.
+   * fully-formed ISO value, so it's safe to rerender. We do — otherwise
+   * the validator's "no offense date" warning and the dangling
+   * {{case.offenseDate}} slot in the live preview never clear after the
+   * user picks a date.
    */
   onCaseOffenseDateChange(caseId, value) {
     const pcStore = (typeof window !== 'undefined') ? window.WarrantAuthorCasePcStore : null;
@@ -3963,6 +4186,9 @@ const bus = {
         }
       } catch (_e) {}
     }
+    // Refresh validator + live preview so the offense-date warning/slot
+    // clears. The date input is in #waCasePcMount, untouched by _rerender.
+    _rerender();
   },
   /**
    * "Pick from reference" dropdown handler. Writes the selected label
@@ -3975,6 +4201,9 @@ const bus = {
     const input = document.getElementById('waCaseOffenseDesc');
     if (input) input.value = value;
     this.onCaseOffenseDescChange(caseId, value);
+    // Picking from the library is a commit action — refresh validator +
+    // live preview immediately so the warning/dangling slot clears.
+    _rerender();
   },
   onSelectAddendum(caseId, draftId, addendumId) {
     _state.activeDraftId = draftId;
@@ -4073,6 +4302,61 @@ const bus = {
     // is safe.
     if (!isDateField) _rerender();
   },
+
+  // ── Exhibits (CR-Exhibit) ──────────────────────────────────────────
+  onAddExhibits(caseId, draftId) {
+    const ds = _store(); if (!ds) return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.multiple = true;
+    input.style.display = 'none';
+    input.onchange = async () => {
+      const files = Array.from(input.files || []);
+      if (!files.length) { input.remove(); return; }
+      const draft = ds.getDraft(caseId, draftId);
+      if (!draft) { input.remove(); return; }
+      if (!Array.isArray(draft.exhibits)) draft.exhibits = [];
+      for (const f of files) {
+        try {
+          const ex = await _readExhibitFile(f);
+          draft.exhibits.push({
+            id: 'ex_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+            caption: '',
+            mime: ex.mime,
+            dataUrl: ex.dataUrl,
+            w: ex.w, h: ex.h,
+            name: ex.name,
+            addedAt: new Date().toISOString(),
+          });
+        } catch (e) {
+          if (typeof window.showToast === 'function') window.showToast(e.message, 'error');
+          else alert(e.message);
+        }
+      }
+      try { ds.saveDraft(caseId, draft); } catch (_) {}
+      input.remove();
+      _rerender();
+    };
+    document.body.appendChild(input);
+    input.click();
+  },
+  onExhibitCaptionChange(caseId, draftId, exhibitId, value) {
+    const ds = _store(); if (!ds) return;
+    const draft = ds.getDraft(caseId, draftId); if (!draft) return;
+    const ex = (draft.exhibits || []).find(e => e.id === exhibitId);
+    if (!ex) return;
+    ex.caption = value;
+    try { ds.saveDraft(caseId, draft); } catch (_) {}
+    // No rerender — preserve focus; caption is read at generate time.
+  },
+  onRemoveExhibit(caseId, draftId, exhibitId) {
+    const ds = _store(); if (!ds) return;
+    const draft = ds.getDraft(caseId, draftId); if (!draft) return;
+    draft.exhibits = (draft.exhibits || []).filter(e => e.id !== exhibitId);
+    try { ds.saveDraft(caseId, draft); } catch (_) {}
+    _rerender();
+  },
   /**
    * Persist handler for the MM/DD/YYYY text inputs. Parses to ISO
    * YYYY-MM-DD on blur so downstream code (validator, generation) gets
@@ -4087,7 +4371,6 @@ const bus = {
     // No _rerender(): the surrounding form needs no DOM update on a date save.
   },
 
-  /**
   /**
    * Generate a full PDF + DOCX warrant for ALL addendums in this draft.
    *
@@ -4187,13 +4470,19 @@ const bus = {
           allAvailable: !!ad.allDatesAvailable,
         },
         itemsToProduce: Array.isArray(ad.itemsToProduce) ? ad.itemsToProduce.slice() : [],
+        // Inject case-level Probable Cause + date-range basis so the CO
+        // template's {{addendum.probableCause}} / {{addendum.dateRangeBasis}}
+        // slots resolve in the EXPORTED document (not just preview).
+        probableCause: _resolvePcForDraft(caseId, draft),
+        dateRangeBasis: _resolveDateRangeBasis(ad),
       });
+      const _coAgency = _mergeAgencyForDraft(draft);
       const ctx = {
         addendum: adForEngine,
         provider,
         items,
-        affiant: draft.affiantSnapshot || {},
-        agency:  draft.affiantSnapshot || {},
+        affiant: _coAgency,
+        agency:  _coAgency,
         draft,
         // CO template needs court + case ctx; harmless on other templates
         // because non-CO resolvers ignore them.
@@ -4240,6 +4529,10 @@ const bus = {
       alert('Block builder failed: ' + e.message);
       return;
     }
+
+    // Append CR-Exhibit section (photos/screenshots) so both the renderer
+    // PDF and the main-process DOCX render them from the same blockStream.
+    try { _appendExhibitBlocks(blockStream, draft); } catch (_) {}
 
     // 3. Render PDF locally
     const pdfComp = window.WarrantAuthorPdfComposer;

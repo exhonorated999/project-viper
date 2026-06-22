@@ -17,7 +17,7 @@ const docxLib = require('docx');
 const {
   Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel,
   PageBreak, PageOrientation, Header, Footer, PageNumber,
-  TabStopType, TabStopPosition, BorderStyle,
+  TabStopType, TabStopPosition, BorderStyle, ImageRun,
 } = docxLib;
 
 // Convert inches → twentieths-of-a-point (TWIPs) — Word's unit.
@@ -136,6 +136,35 @@ function _pageBreakPara() {
   });
 }
 
+// Render an exhibit image block. dataUrl is a base64 data URI; decode to a
+// Buffer and embed via ImageRun. Display size fits a 6.5" content width and
+// caps at 9" tall, preserving aspect ratio from the stored w/h.
+function _exhibitImage(b) {
+  try {
+    const dataUrl = String((b && b.dataUrl) || '');
+    const m = dataUrl.match(/^data:([^;]+);base64,(.*)$/);
+    if (!m) return [_para('[exhibit image missing]', { italics: true, align: AlignmentType.CENTER })];
+    const mime = m[1];
+    const buf = Buffer.from(m[2], 'base64');
+    const type = /png/i.test(mime) ? 'png' : 'jpg';
+    const MAXW = 624; // 6.5" @ 96dpi
+    const MAXH = 864; // 9"   @ 96dpi
+    let w = (b && b.w) || 0;
+    let h = (b && b.h) || 0;
+    if (!(w > 0 && h > 0)) { w = MAXW; h = Math.round(MAXW * 0.75); }
+    let dw = MAXW;
+    let dh = Math.round(dw * (h / w));
+    if (dh > MAXH) { dh = MAXH; dw = Math.round(dh * (w / h)); }
+    return [new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 80, after: 200 },
+      children: [new ImageRun({ type, data: buf, transformation: { width: dw, height: dh } })],
+    })];
+  } catch (_e) {
+    return [_para('[exhibit image could not be rendered]', { italics: true, align: AlignmentType.CENTER })];
+  }
+}
+
 /**
  * Convert one block to one-or-more docx Paragraphs.
  */
@@ -161,6 +190,7 @@ function _renderBlock(b) {
       return items.map((it, i) => _numberedItem(it, i));
     }
     case 'signature':        return _signature(b.label);
+    case 'exhibit-image':    return _exhibitImage(b);
     case 'spacer':           return [_spacer(b.size)];
     case 'page-break':       return [_pageBreakPara()];
     case 'footer-disclaimer': return [_disclaimer(b.text)];

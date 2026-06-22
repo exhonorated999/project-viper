@@ -178,6 +178,37 @@
       y += FONT_BODY.lh + 6;
     }
 
+    function drawExhibitImage(b) {
+      if (!b || !b.dataUrl) return;
+      const fmt = /png/i.test(b.mime || '') ? 'PNG' : 'JPEG';
+      const natW = b.w || 0;
+      const natH = b.h || 0;
+      const maxW = CONTENT_W;
+      // Tallest an image may be: one full empty content page.
+      const maxH = (contentBottom - contentTop) - 8;
+      let w = maxW;
+      let h;
+      if (natW > 0 && natH > 0) {
+        const ar = natH / natW;
+        h = w * ar;
+        if (h > maxH) { h = maxH; w = h / ar; }
+      } else {
+        h = Math.min(maxH, maxW * 0.75);
+      }
+      // Keep the whole image on one page where possible.
+      if (y + h > contentBottom) newPage();
+      const x = MARGIN + (CONTENT_W - w) / 2;
+      try {
+        doc.addImage(b.dataUrl, fmt, x, y, w, h, undefined, 'FAST');
+        y += h + 8;
+      } catch (e) {
+        _setFont(doc, FONT_ITALIC);
+        ensureRoom(FONT_ITALIC.lh);
+        doc.text('[exhibit image could not be rendered]', MARGIN, y + FONT_ITALIC.size);
+        y += FONT_ITALIC.lh + 6;
+      }
+    }
+
     // First page footer placeholder
     footerPlaceholders.push({ pageIdx: 1 });
 
@@ -204,6 +235,16 @@
         case 'heading-1':        return FONT_H1.lh + 12;
         case 'heading-2':        return FONT_H2.lh + 8;
         case 'signature':        return 22 + FONT_BODY.lh + 6;
+        case 'exhibit-image': {
+          const maxH = (CONTENT_BOTTOM - MARGIN) - 8;
+          const natW = b.w || 0, natH = b.h || 0;
+          if (natW > 0 && natH > 0) {
+            let h = CONTENT_W * (natH / natW);
+            if (h > maxH) h = maxH;
+            return h + 8;
+          }
+          return Math.min(maxH, CONTENT_W * 0.75) + 8;
+        }
         case 'spacer':           return _spacerSize(b.size);
         case 'page-break':       return 0;
         default:                 return FONT_BODY.lh;
@@ -281,6 +322,9 @@
           break;
         case 'signature':
           drawSignature(b.label);
+          break;
+        case 'exhibit-image':
+          drawExhibitImage(b);
           break;
         case 'page-break':
           newPage();

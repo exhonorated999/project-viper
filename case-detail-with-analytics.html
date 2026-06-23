@@ -38896,8 +38896,6 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
     // ── Submit envelope to Intellect Dashboard ────────────────────────────
     async function brSubmitSample() {
         if (!brBuiltEnvelope) { __brToast('Build the sample first', 'error'); return; }
-        const apiKey = localStorage.getItem('viper_api_key');
-        if (!apiKey) { __brToast('No API key found — activate your license first', 'error'); return; }
         const provider = document.getElementById('brProviderHint').value.trim();
         const email    = document.getElementById('brSubmitterEmail').value.trim();
         const agency   = document.getElementById('brAgency').value.trim();
@@ -38907,13 +38905,16 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         btn.textContent = 'Sending…'; btn.disabled = true;
         brSetStatus('Uploading envelope to Intellect Command Center…', 'info');
         try {
-            if (!window.electronAPI || !window.electronAPI.parserSampleSubmit) {
+            // submitParserSample (ViperLicensing) injects the api key and
+            // self-heals it on a stale "invalid or inactive API key" 401 by
+            // re-registering with the stored email/name and retrying once —
+            // so a key clobbered by a backup/restore repairs itself silently.
+            if (!window.ViperLicensing || !window.ViperLicensing.submitParserSample) {
                 throw new Error('Submit unavailable in this build');
             }
             const categoryEl2 = document.getElementById('brFormatCategory');
             const formatCategory = categoryEl2 ? categoryEl2.value : 'warrant_return';
-            const res = await window.electronAPI.parserSampleSubmit({
-                apiKey,
+            const res = await window.ViperLicensing.submitParserSample({
                 envelope: brBuiltEnvelope,
                 submitter: {
                     format_category: formatCategory,

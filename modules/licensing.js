@@ -166,6 +166,83 @@ async function validateLicense() {
   }
 }
 
+/* ---------- API key self-heal ---------- */
+// Re-syncs viper_api_key when the dashboard reports it invalid/inactive.
+//
+// Why this exists: the api key and license key both live in localStorage
+// (viper_ prefix). A backup/restore after a re-registration can leave the
+// LOCAL api key stale — the server rotated the key hash during the
+// re-register, but the restore wrote the OLD key back over it. The license
+// key keeps working because it's only ever checked locally (lifetime,
+// no server validation), but every live /api/* call then 401s with
+// "invalid or inactive API key".
+//
+// Registration is idempotent server-side: POST /api/register matches the
+// customer by email, REUSES that row (paid license untouched — it lives on
+// a separate License row), and rotates + returns a fresh api key. So we can
+// silently re-register with the stored email/name to obtain a valid key.
+//
+// IMPORTANT: this updates ONLY viper_api_key. It never touches
+// license_key / license_type / expires_at / registered_at, so a paid
+// lifetime license is never disturbed.
+function _looksLikeBadApiKey(msg) {
+  return /invalid or inactive api key|missing api key/i.test(String(msg || ''));
+}
+
+async function refreshApiKey() {
+  const email = _get("contact_email");
+  const name  = _get("customer_name");
+  if (!email || !name) {
+    throw new Error("Cannot refresh API key — no registration email/name on file. Please re-register from Settings.");
+  }
+  const body = {
+    product_slug: PRODUCT_SLUG,
+    name,
+    contact_email: email,
+    agency: _get("agency") || "",
+    address: _get("address") || "",
+  };
+  const res = await fetch(`${API_BASE}/api/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const detail = Array.isArray(err.detail) ? err.detail.map(e => e.msg).join(", ") : err.detail;
+    throw new Error(detail || "API key refresh failed");
+  }
+  const json = await res.json();
+  if (!json || !json.api_key) throw new Error("API key refresh returned no key");
+  _set("api_key", json.api_key);   // ONLY the api key — license fields left alone
+  return json.api_key;
+}
+
+/* ---------- parser-submission with api-key self-heal ---------- */
+// Wraps the parser-sample submit IPC. If the server rejects the stored
+// api key as invalid/inactive, it transparently refreshes the key (see
+// refreshApiKey) and retries once. Callers pass the same opts they'd give
+// window.electronAPI.parserSampleSubmit, minus apiKey (we inject it).
+async function submitParserSample(opts) {
+  if (!window.electronAPI || !window.electronAPI.parserSampleSubmit) {
+    throw new Error('Submit unavailable in this build');
+  }
+  let apiKey = _get("api_key");
+  if (!apiKey) {
+    // No key at all — try to mint one from the stored registration.
+    apiKey = await refreshApiKey();
+  }
+  const call = (key) => window.electronAPI.parserSampleSubmit(Object.assign({}, opts, { apiKey: key }));
+
+  let res = await call(apiKey);
+  if (res && res.success === false && _looksLikeBadApiKey(res.error)) {
+    // Stale key — self-heal and retry exactly once.
+    const fresh = await refreshApiKey();
+    res = await call(fresh);
+  }
+  return res;
+}
+
 /* ---------- update checker ---------- */
 async function checkForUpdate() {
   try {
@@ -195,5 +272,7 @@ window.ViperLicensing = {
   registerDemo,
   activateLicense,
   validateLicense,
+  refreshApiKey,
+  submitParserSample,
   checkForUpdate,
 };

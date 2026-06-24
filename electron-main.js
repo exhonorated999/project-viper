@@ -539,8 +539,13 @@ function restoreFocus() {
   }
 }
 
-// Encrypt localStorage snapshot to vault, clear sensitive data, then quit
-async function saveVaultAndQuit() {
+// Encrypt localStorage snapshot to vault + clear sensitive data at rest.
+// Split out from saveVaultAndQuit so the update/quit path can flush the
+// vault WITHOUT relying on the async 'close' handler (which preventDefault's
+// and was stalling app.quit() during an update — see update-install).
+async function flushVaultIfNeeded() {
+  if (!(security && security.isEnabled() && security.isUnlocked())) return;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
   try {
     const data = await mainWindow.webContents.executeJavaScript(`
       JSON.stringify(Object.fromEntries(
@@ -558,8 +563,13 @@ async function saveVaultAndQuit() {
     `);
     security.lock();
   } catch (e) {
-    console.error('Vault save error:', e.message);
+    console.error('Vault flush error:', e.message);
   }
+}
+
+// Encrypt localStorage snapshot to vault, clear sensitive data, then quit
+async function saveVaultAndQuit() {
+  await flushVaultIfNeeded();
   isQuitting = true;
   mainWindow.destroy();
 }
@@ -2027,6 +2037,24 @@ if (autoUpdater) {
   autoUpdater.autoInstallOnAppQuit = false;  // user must click "Install & Restart"
   autoUpdater.allowDowngrade = false;
 
+  // ─────────────────────────────────────────────────────────────────────
+  // CRITICAL: let the app actually EXIT when an update is being applied.
+  //
+  // electron-updater emits 'before-quit-for-update' right before it quits
+  // the app to launch the installer. Without flipping isQuitting here, the
+  // mainWindow 'close' handler calls e.preventDefault() (to run the async
+  // vault save) and the app NEVER exits — it stays alive holding locks on
+  // its own install dir AND remains the installer's parent process. The
+  // installer's "close running app" check then fails with
+  // "V.I.P.E.R. cannot be closed" / "Failed to uninstall old application
+  // file", because a non-elevated installer cannot kill a still-running
+  // parent it spawned. Setting isQuitting=true lets the window close so the
+  // process terminates and the installer can replace the files.
+  // ─────────────────────────────────────────────────────────────────────
+  app.on('before-quit-for-update', () => {
+    isQuitting = true;
+  });
+
   autoUpdater.on('checking-for-update', () => {
     try { audit && audit.write(AUDIT_EVENTS.UPDATE_CHECKED, { current_version: app.getVersion() }); } catch (_) {}
     sendUpdateStatus('update-status', { status: 'checking' });
@@ -2193,8 +2221,26 @@ ipcMain.handle('update-install', async () => {
   } catch (_) {}
 
   try {
-    // Primary: electron-updater's native launcher.
+    // Flush the encrypted vault NOW, while the renderer is still alive and
+    // before we trigger the quit. Doing it here (instead of inside the
+    // 'close' handler) means the close handler won't need to
+    // preventDefault() and stall the app exit during the update.
+    await flushVaultIfNeeded();
+    // Allow the window 'close' handler to proceed instead of cancelling the
+    // quit for a vault save (which kept V.I.P.E.R.exe alive during installs).
+    isQuitting = true;
+
+    // Primary: electron-updater's native launcher. It spawns the installer
+    // DETACHED + unref'd, then quits the app. The detached installer
+    // survives the app's death, so the hard-exit watchdog below is safe.
     autoUpdater.quitAndInstall(false, true);
+
+    // Watchdog: guarantee the process actually terminates so it releases
+    // the file locks on its own install dir. If the cooperative quit stalls
+    // for any reason, force-exit. The installer is already detached, so this
+    // does NOT kill it — it just orphans it (the app-running check then
+    // finds nothing to close).
+    setTimeout(() => { try { app.exit(0); } catch (_) {} }, 3000);
     return { success: true };
   } catch (primaryErr) {
     console.warn('update-install: quitAndInstall failed, falling back to shell.openPath:', primaryErr.message);
@@ -2203,9 +2249,10 @@ ipcMain.handle('update-install', async () => {
       const { shell } = require('electron');
       const openErr = await shell.openPath(installerPath);
       if (openErr) throw new Error(openErr);
+      isQuitting = true;
       // Give the installer a moment to launch before we quit so it can
-      // grab the file locks once they release.
-      setTimeout(() => { try { app.quit(); } catch (_) {} }, 1500);
+      // grab the file locks once they release, then force-exit.
+      setTimeout(() => { try { app.exit(0); } catch (_) {} }, 1500);
       return { success: true };
     } catch (fallbackErr) {
       console.error('update-install: fallback launch failed:', fallbackErr);

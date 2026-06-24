@@ -175,6 +175,11 @@ class KikWarrantUI {
             { id: 'timeline', icon: '📅', label: 'Timeline', count: s?.totalRecords || 0 }
         ];
 
+        // Legacy returns carry assorted plaintext logs/*.txt — surface them raw.
+        if (this.data?.rawLogs?.length) {
+            sections.push({ id: 'rawlogs', icon: '📄', label: 'Raw Logs', count: this.data.rawLogs.length });
+        }
+
         nav.innerHTML = sections.map(sec => `
             <button class="kkp-nav-item ${sec.id === this.activeSection ? 'active' : ''}"
                 onclick="window.kikWarrantUI.switchSection('${sec.id}')">
@@ -197,8 +202,32 @@ class KikWarrantUI {
             case 'groups': content.innerHTML = this._renderGroups(); break;
             case 'media': content.innerHTML = this._renderMedia(); break;
             case 'timeline': content.innerHTML = this._renderTimeline(); break;
+            case 'rawlogs': content.innerHTML = this._renderRawLogs(); break;
             default: content.innerHTML = this._renderOverview();
         }
+    }
+
+    // ─── Raw Logs Section (legacy returns) ──────────────────────────────
+
+    _renderRawLogs() {
+        const logs = this.data?.rawLogs || [];
+        if (!logs.length) {
+            return '<div class="kkp-section"><div style="text-align:center; color:#6b7280; padding:24px">No raw log files in this return.</div></div>';
+        }
+        return `
+            <div class="kkp-section">
+                <div class="kkp-section-title">📄 Raw Logs (${logs.length} file${logs.length > 1 ? 's' : ''})</div>
+                <p style="color:#9ca3af; font-size:0.85em; margin-bottom:12px;">
+                    Plaintext log files included in this legacy return, shown verbatim.
+                </p>
+                ${logs.map(l => `
+                    <div style="margin-bottom:14px; border:1px solid #2a2f3a; border-radius:8px; overflow:hidden;">
+                        <div style="background:#1a1f29; padding:8px 12px; font-weight:600; color:#e5e7eb; font-size:0.85em;">${this._esc(l.name)}</div>
+                        <pre style="margin:0; padding:12px; background:#0d1117; color:#c9d1d9; font-size:0.8em; white-space:pre-wrap; word-break:break-word; max-height:400px; overflow:auto;">${this._esc(l.text)}</pre>
+                    </div>
+                `).join('')}
+            </div>
+        `;
     }
 
     // ─── Empty State ────────────────────────────────────────────────────
@@ -475,13 +504,13 @@ class KikWarrantUI {
             ensure(r.recipient);
             convos[r.recipient].sentText += r.msgCount;
             convos[r.recipient].total += r.msgCount;
-            convos[r.recipient].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'sent', type: 'text', count: r.msgCount, ip: r.ip, _raw: r });
+            convos[r.recipient].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'sent', type: 'text', count: r.msgCount, ip: r.ip, text: r.text, _raw: r });
         }
         for (const r of (d.chatSentReceived || [])) {
             ensure(r.sender);
             convos[r.sender].recvText += r.msgCount;
             convos[r.sender].total += r.msgCount;
-            convos[r.sender].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'recv', type: 'text', count: r.msgCount, _raw: r });
+            convos[r.sender].events.push({ ts: r.timestamp, dt: r.datetime, dir: 'recv', type: 'text', count: r.msgCount, text: r.text, _raw: r });
         }
         for (const r of (d.chatPlatformSent || [])) {
             ensure(r.recipient);
@@ -538,6 +567,15 @@ class KikWarrantUI {
         }).join('');
     }
 
+    _esc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     _renderConversationDetail(convo) {
         const events = convo.events.slice(0, 500); // limit for performance
         return `
@@ -549,7 +587,12 @@ class KikWarrantUI {
                     const flagged = this.module.isFlagged('dms', k);
                     let body = '';
                     if (e.type === 'text') {
-                        body = `${e.count} text message${e.count > 1 ? 's' : ''}${e.ip && e.ip !== 'REDACTED' ? ` <span style="color:#6b7280">(${e.ip})</span>` : ''}`;
+                        if (e.text && String(e.text).trim()) {
+                            const ipTag = (e.ip && e.ip !== 'REDACTED') ? ` <span style="color:#6b7280">(${this._esc(e.ip)})</span>` : '';
+                            body = `<span class="kkp-msg-text">${this._esc(String(e.text))}</span>${ipTag}`;
+                        } else {
+                            body = `${e.count} text message${e.count > 1 ? 's' : ''}${e.ip && e.ip !== 'REDACTED' ? ` <span style="color:#6b7280">(${this._esc(e.ip)})</span>` : ''}`;
+                        }
                     } else {
                         const hasMedia = this._hasMediaFile(e.uuid);
                         const mediaId = e.uuid ? e.uuid.replace(/[^a-zA-Z0-9-]/g, '') : '';

@@ -1377,6 +1377,12 @@
                     </select>
                 </div>
                 
+                <!-- CyberTip # (optional) -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">CyberTip # <span class="text-gray-500 font-normal">(optional)</span></label>
+                    <input type="text" id="caseCybertip" placeholder="e.g. NCMEC CyberTip report number" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none text-white placeholder-gray-500">
+                </div>
+
                 <!-- Synopsis -->
                 <div>
                     <label class="block text-sm font-medium text-gray-300 mb-2">Case Synopsis *</label>
@@ -2868,6 +2874,7 @@
                 
                 const caseNumber = document.getElementById('caseNumber').value;
                 const synopsis = document.getElementById('caseSynopsis').value;
+                const cybertipNumber = (document.getElementById('caseCybertip')?.value || '').trim();
                 const selectedModules = Array.from(document.querySelectorAll('.case-module:checked'))
                     .map(cb => cb.value);
                 
@@ -2881,6 +2888,7 @@
                     id: Date.now(),
                     caseNumber: caseNumber,
                     synopsis: synopsis,
+                    cybertipNumber: cybertipNumber,
                     status: 'active',
                     priority: parseInt(document.getElementById('newCasePriority')?.value) || 0,
                     modules: selectedModules,
@@ -4662,6 +4670,7 @@
                 filtered = filtered.filter(c =>
                     (c.caseNumber || '').toLowerCase().includes(query) ||
                     (c.synopsis || '').toLowerCase().includes(query) ||
+                    (c.cybertipNumber || '').toLowerCase().includes(query) ||
                     (c.createdBy || '').toLowerCase().includes(query) ||
                     (c.name || '').toLowerCase().includes(query)
                 );
@@ -4796,6 +4805,8 @@
                             return '<td class="py-4 px-4 text-sm text-gray-300">' + (caseItem.primaryOffense || '<span class="text-gray-600">—</span>') + '</td>';
                         case 'offenseType':
                             return '<td class="py-4 px-4 text-sm text-gray-300 whitespace-nowrap">' + (caseItem.offenseType || '<span class="text-gray-600">—</span>') + '</td>';
+                        case 'cybertip':
+                            return '<td class="py-4 px-4 text-sm whitespace-nowrap">' + (caseItem.cybertipNumber ? '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-viper-purple/15 text-viper-purple border border-viper-purple/40 text-xs font-medium font-mono" title="CyberTip #' + String(caseItem.cybertipNumber).replace(/"/g,'&quot;') + '">🌐 ' + String(caseItem.cybertipNumber).replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</span>' : '<span class="text-gray-600">—</span>') + '</td>';
                         case 'dateAssigned':
                             return '<td class="py-4 px-4 text-sm text-gray-400 whitespace-nowrap">' + (caseItem.dateAssigned ? new Date(caseItem.dateAssigned + 'T00:00').toLocaleDateString() : '<span class="text-gray-600">—</span>') + '</td>';
                         case 'dateClosed':
@@ -5597,6 +5608,7 @@
         const ALL_CASES_COLUMNS = [
             { key: 'caseNumber',     label: 'Case Number',     default: true,  sortType: 'text' },
             { key: 'synopsis',       label: 'Synopsis',        default: true,  sortType: 'text' },
+            { key: 'cybertip',       label: 'CyberTip #',      default: false, sortType: 'text' },
             { key: 'status',         label: 'Status',          default: true,  sortType: 'text' },
             { key: 'created',        label: 'Created',         default: true,  sortType: 'date' },
             { key: 'createdBy',      label: 'Investigator',    default: false, sortType: 'text' },
@@ -5872,6 +5884,7 @@
             switch(col) {
                 case 'caseNumber':     return c.caseNumber || '';
                 case 'synopsis':       return c.synopsis || '';
+                case 'cybertip':       return c.cybertipNumber || '';
                 case 'status':         return c.status || '';
                 case 'created':        return c.createdAt || '';
                 case 'createdBy':      return c.createdBy || '';
@@ -5952,7 +5965,7 @@
                                 </button>
                             </div>
                             <div class="mt-3 flex items-center justify-between gap-3">
-                                <p class="text-[11px] text-gray-500">Search cases by number, synopsis, suspect/victim names, or offense.</p>
+                                <p class="text-[11px] text-gray-500">Search cases by number, synopsis, CyberTip #, suspect/victim names, or offense.</p>
                                 <button onclick="openPersonSearchModal()" class="px-3 py-1.5 rounded-lg bg-viper-purple/15 hover:bg-viper-purple/25 border border-viper-purple/40 text-viper-purple hover:text-viper-purple text-xs font-medium transition inline-flex items-center gap-1.5" title="Find every case linked to a specific person">
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
@@ -6098,6 +6111,7 @@
                     const ex = extrasMap[c.id];
                     return c.caseNumber.toLowerCase().includes(searchTerm) ||
                            (c.synopsis||'').toLowerCase().includes(searchTerm) ||
+                           (c.cybertipNumber||'').toLowerCase().includes(searchTerm) ||
                            (c.primaryOffense||'').toLowerCase().includes(searchTerm) ||
                            (ex.suspectNames||'').toLowerCase().includes(searchTerm) ||
                            (ex.victimNames||'').toLowerCase().includes(searchTerm) ||
@@ -6177,7 +6191,10 @@
                             return '<td class="px-5 py-4 text-sm font-semibold text-viper-cyan whitespace-nowrap">' + c.caseNumber + '</td>';
                         case 'synopsis':
                             const syn = (c.synopsis||'').length > 70 ? c.synopsis.substring(0,70)+'…' : (c.synopsis||'');
-                            return '<td class="px-5 py-4 text-sm text-white max-w-xs truncate">' + syn + '</td>';
+                            const ctTag = c.cybertipNumber
+                                ? '<span class="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded bg-viper-purple/15 text-viper-purple border border-viper-purple/40 text-[10px] font-medium font-mono align-middle" title="CyberTip #' + String(c.cybertipNumber).replace(/"/g,'&quot;') + '">🌐 CT #' + String(c.cybertipNumber).replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</span>'
+                                : '';
+                            return '<td class="px-5 py-4 text-sm text-white max-w-xs"><div class="truncate">' + syn + '</div>' + ctTag + '</td>';
                         case 'status': {
                             return '<td class="px-5 py-4 text-sm">' + renderCaseStatusBadge(c.status) + '</td>';
                         }
@@ -6197,6 +6214,8 @@
                             return '<td class="px-5 py-4 text-sm text-white max-w-[200px] truncate">' + (c.primaryOffense || '<span class="text-gray-600">—</span>') + '</td>';
                         case 'offenseType':
                             return '<td class="px-5 py-4 text-sm text-white whitespace-nowrap">' + (c.offenseType || '<span class="text-gray-600">—</span>') + '</td>';
+                        case 'cybertip':
+                            return '<td class="px-5 py-4 text-sm whitespace-nowrap">' + (c.cybertipNumber ? '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-viper-purple/15 text-viper-purple border border-viper-purple/40 text-xs font-medium font-mono" title="CyberTip #' + String(c.cybertipNumber).replace(/"/g,'&quot;') + '">🌐 ' + String(c.cybertipNumber).replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</span>' : '<span class="text-gray-600">—</span>') + '</td>';
                         case 'dateAssigned':
                             return '<td class="px-5 py-4 text-sm text-gray-400 whitespace-nowrap">' + (c.dateAssigned ? new Date(c.dateAssigned + 'T00:00').toLocaleDateString() : '<span class="text-gray-600">—</span>') + '</td>';
                         case 'dateClosed':

@@ -63,6 +63,8 @@ class KikWarrantParser {
             }
 
             if (hasKikLogs) return true;
+            // Older (legacy) KIK return: messages live in content/text-msg-data/*.csv
+            if (KikWarrantParser._hasOlderCsvSignature(entries)) return true;
 
             // Try opening inner ZIP to check for KIK logs
             if (hasInnerZip) {
@@ -79,6 +81,7 @@ class KikWarrantParser {
                                 return true;
                             }
                         }
+                        if (KikWarrantParser._hasOlderCsvSignature(innerZip.getEntries())) return true;
                     } catch (e) { /* not a valid zip, skip */ }
                 }
             }
@@ -115,6 +118,8 @@ class KikWarrantParser {
                 }
             }
             if (hasKikLogs) return true;
+            // Older (legacy) KIK return: messages in content/text-msg-data/*.csv
+            if (KikWarrantParser._hasOlderCsvSignature(entries)) return true;
             if (!innerZipEntry) return false;
 
             // Open inner case ZIP — buffer if small, temp-extract if huge.
@@ -132,6 +137,7 @@ class KikWarrantParser {
                         return true;
                     }
                 }
+                if (KikWarrantParser._hasOlderCsvSignature(innerZip.getEntries())) return true;
             } catch (_) { /* not a valid inner zip */ }
 
             return false;
@@ -142,6 +148,22 @@ class KikWarrantParser {
             try { if (innerTempPath) fs.unlinkSync(innerTempPath); } catch (_) {}
             try { if (zip) zip.close(); } catch (_) {}
         }
+    }
+
+    /**
+     * Older/legacy KIK return signature: a CSV message store under a
+     * `text-msg-data/` directory (e.g. content/text-msg-data/file_1.csv).
+     * These pre-date the modern logs/*.txt TSV layout and carry the actual
+     * message bodies rather than per-conversation counts.
+     */
+    static _hasOlderCsvSignature(entries) {
+        for (const entry of entries) {
+            if (entry.isDirectory) continue;
+            const name = entry.entryName.toLowerCase();
+            if (name.startsWith('__macosx')) continue;
+            if (/(^|\/)text-msg-data\/[^/]+\.csv$/.test(name)) return true;
+        }
+        return false;
     }
 
     // ─── Main Parse ─────────────────────────────────────────────────────
@@ -215,6 +237,12 @@ class KikWarrantParser {
         }
 
         if (!logsPrefix) {
+            // No modern logs/*.txt layout. Fall back to the older/legacy KIK
+            // format: messages in content/text-msg-data/*.csv, media in
+            // content/, miscellaneous logs in logs/*.txt.
+            if (KikWarrantParser._hasOlderCsvSignature(entries)) {
+                return await this._parseOlderFormat(entries, activeZip, opts);
+            }
             throw new Error('Could not find KIK logs directory in ZIP');
         }
 
@@ -324,6 +352,257 @@ class KikWarrantParser {
 
         result.stats = this._computeStats(result);
         return result;
+    }
+
+    // ─── Older / legacy KIK format ──────────────────────────────────────
+
+    /**
+     * Parse the older KIK return layout where conversations are stored as a
+     * CSV (content/text-msg-data/*.csv) carrying actual message bodies, media
+     * lives in content/, and assorted logs live in logs/*.txt.
+     *
+     * Produces the SAME result shape as the modern parser so the existing UI
+     * works unchanged — DM rows are mapped into chatSent / chatSentReceived,
+     * with an extra `text` field holding the real message body. Raw log files
+     * are surfaced under result.rawLogs.
+     */
+    async _parseOlderFormat(entries, activeZip, opts) {
+        const usable = entries.filter(e =>
+            !e.isDirectory && !e.entryName.startsWith('__MACOSX'));
+
+        // ── Locate CSV message store(s) under text-msg-data/ ──
+        const csvEntries = usable.filter(e =>
+            /(^|\/)text-msg-data\/[^/]+\.csv$/i.test(e.entryName));
+
+        // ── Derive the content/ prefix (path up to and including 'content/') ──
+        let contentPrefix = '';
+        if (csvEntries.length) {
+            const m = csvEntries[0].entryName.match(/^(.*?)text-msg-data\//i);
+            if (m) contentPrefix = m[1];
+        }
+        if (!contentPrefix) {
+            for (const e of usable) {
+                const mm = e.entryName.match(/^(.*?content\/)/i);
+                if (mm) { contentPrefix = mm[1]; break; }
+            }
+        }
+
+        // ── Parse messages from every CSV ──
+        let messages = [];
+        for (const ce of csvEntries) {
+            let buf = null;
+            try { buf = ce.getData(); } catch (_) { buf = null; }
+            if (!buf) continue;
+            messages = messages.concat(this._parseOlderCsvMessages(buf.toString('utf-8')));
+        }
+
+        // ── Derive account JID (most frequent across sender + receiver) ──
+        const freq = {};
+        for (const m of messages) {
+            if (m.senderJid)   freq[m.senderJid]   = (freq[m.senderJid]   || 0) + 1;
+            if (m.receiverJid) freq[m.receiverJid] = (freq[m.receiverJid] || 0) + 1;
+        }
+        let accountJid = '';
+        let best = -1;
+        for (const [jid, n] of Object.entries(freq)) {
+            if (n > best) { best = n; accountJid = jid; }
+        }
+        const accountUsername = this._jidLocal(accountJid) || 'unknown';
+
+        // ── Map messages → chatSent / chatSentReceived (with real text) ──
+        const chatSent = [];
+        const chatSentReceived = [];
+        for (const m of messages) {
+            const row = {
+                timestamp: m.timestamp,
+                sender: this._jidLocal(m.senderJid),
+                recipient: this._jidLocal(m.receiverJid),
+                msgCount: 1,
+                ip: m.ip || '',
+                datetime: m.datetime,
+                text: m.text,
+                chatType: m.chatType,
+                msgId: m.msgId,
+            };
+            if (m.senderJid && m.senderJid === accountJid) chatSent.push(row);
+            else chatSentReceived.push(row);
+        }
+
+        // ── Extract media (direct children of content/) ──
+        const contentFiles = {};
+        let extractDir = null;
+        if (opts.extractDir) {
+            extractDir = opts.extractDir;
+            if (!fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
+        }
+        if (contentPrefix) {
+            for (const entry of usable) {
+                if (!entry.entryName.startsWith(contentPrefix)) continue;
+                const rel = entry.entryName.substring(contentPrefix.length);
+                if (!rel || rel.includes('/')) continue; // only direct children of content/
+                const mimeType = this._detectMimeType(rel, entry);
+                const entrySize = (entry.size != null)
+                    ? entry.size
+                    : ((entry.header && entry.header.size) || 0);
+                const info = { size: entrySize, mimeType };
+                if (extractDir) {
+                    try {
+                        const destPath = path.join(extractDir, rel);
+                        const buf = entry.getData();
+                        if (opts.security && opts.security.isUnlocked()) {
+                            fs.writeFileSync(destPath, opts.security.encryptBuffer(buf));
+                        } else {
+                            fs.writeFileSync(destPath, buf);
+                        }
+                        info.diskPath = destPath;
+                    } catch (e) {
+                        console.error(`Failed to extract KIK content file ${rel}:`, e.message);
+                    }
+                }
+                contentFiles[rel] = info;
+            }
+        }
+
+        // ── Surface logs/*.txt as raw text (skip empties) ──
+        const rawLogs = [];
+        for (const entry of usable) {
+            if (!/(^|\/)logs\/[^/]+\.txt$/i.test(entry.entryName)) continue;
+            let text = '';
+            try { text = entry.getData().toString('utf-8'); } catch (_) {}
+            if (!text.trim()) continue;
+            rawLogs.push({ name: entry.entryName.split('/').pop(), text });
+        }
+
+        // ── Case number, if encoded in any path ──
+        let caseNumber = null;
+        for (const entry of usable) {
+            const mm = entry.entryName.match(/_case(\d+)/i);
+            if (mm) { caseNumber = mm[1]; break; }
+        }
+
+        const result = {
+            accountUsername,
+            caseNumber,
+            legacyFormat: true,
+            contentFiles,
+            rawLogs,
+            binds: [],
+            friends: [],
+            blockedUsers: [],
+            chatSent,
+            chatSentReceived,
+            chatPlatformSent: [],
+            chatPlatformSentReceived: [],
+            groupSendMsg: [],
+            groupReceiveMsg: [],
+            groupSendMsgPlatform: [],
+            groupReceiveMsgPlatform: [],
+        };
+        result.stats = this._computeStats(result);
+        return result;
+    }
+
+    /**
+     * Parse a legacy KIK message CSV. Expected headers (order-independent):
+     *   msg_id, sender_jid, receiver_jid, chat_type, msg, ip, port, sent_at
+     * The `msg` field may contain commas, quotes, and embedded newlines, so a
+     * full quote-aware record parser is required.
+     */
+    _parseOlderCsvMessages(text) {
+        const records = this._csvRecords(text);
+        if (!records.length) return [];
+        const header = records[0].map(h => String(h).trim().toLowerCase());
+        const col = (name) => header.indexOf(name);
+        const iId   = col('msg_id');
+        const iS    = col('sender_jid');
+        const iR    = col('receiver_jid');
+        const iType = col('chat_type');
+        const iMsg  = col('msg');
+        const iIp   = col('ip');
+        const iPort = col('port');
+        const iSent = col('sent_at');
+
+        const out = [];
+        for (let r = 1; r < records.length; r++) {
+            const f = records[r];
+            if (!f || (f.length === 1 && !String(f[0]).trim())) continue;
+            const sentRaw = iSent >= 0 ? String(f[iSent] || '').trim() : '';
+            const ts = this._normalizeTs(sentRaw);
+            out.push({
+                msgId:       iId   >= 0 ? String(f[iId]   || '').trim() : '',
+                senderJid:   iS    >= 0 ? String(f[iS]    || '').trim() : '',
+                receiverJid: iR    >= 0 ? String(f[iR]    || '').trim() : '',
+                chatType:    iType >= 0 ? String(f[iType] || '').trim() : '',
+                text:        iMsg  >= 0 ? String(f[iMsg]  || '') : '',
+                ip:          iIp   >= 0 ? String(f[iIp]   || '').trim() : '',
+                port:        iPort >= 0 ? String(f[iPort] || '').trim() : '',
+                timestamp:   ts,
+                datetime:    ts ? new Date(ts).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '') : sentRaw,
+            });
+        }
+        return out;
+    }
+
+    /**
+     * Quote-aware CSV record parser. Handles RFC-4180 quoting (doubled quotes)
+     * and embedded newlines inside quoted fields. Returns an array of rows,
+     * each row an array of string fields.
+     */
+    _csvRecords(text) {
+        if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+        const records = [];
+        let field = '';
+        let row = [];
+        let inQuotes = false;
+        let sawAny = false;
+        for (let i = 0; i < text.length; i++) {
+            const c = text[i];
+            if (inQuotes) {
+                if (c === '"') {
+                    if (text[i + 1] === '"') { field += '"'; i++; }
+                    else inQuotes = false;
+                } else field += c;
+            } else {
+                if (c === '"') { inQuotes = true; sawAny = true; }
+                else if (c === ',') { row.push(field); field = ''; sawAny = true; }
+                else if (c === '\n') { row.push(field); records.push(row); row = []; field = ''; sawAny = false; }
+                else if (c === '\r') { /* swallow; \r\n handled by \n */ }
+                else { field += c; sawAny = true; }
+            }
+        }
+        if (sawAny || field.length || row.length) { row.push(field); records.push(row); }
+        return records;
+    }
+
+    /**
+     * Normalise a timestamp string to epoch milliseconds. Accepts epoch in
+     * seconds / milliseconds / microseconds, or an ISO-ish date string.
+     */
+    _normalizeTs(v) {
+        if (!v) return 0;
+        const s = String(v).trim();
+        if (/^\d+$/.test(s)) {
+            const n = parseInt(s, 10);
+            if (s.length >= 16) return Math.floor(n / 1000); // microseconds → ms
+            if (s.length >= 13) return n;                    // milliseconds
+            if (s.length >= 10) return n * 1000;             // seconds → ms
+            return n;
+        }
+        const t = Date.parse(s);
+        return isNaN(t) ? 0 : t;
+    }
+
+    /**
+     * Reduce a KIK JID (username_xxx@talk.kik.com) to its local part for
+     * display / conversation grouping. Keeps the full local part — the device
+     * suffix is deterministic per username, so identical users group together.
+     */
+    _jidLocal(jid) {
+        if (!jid) return '';
+        let s = String(jid).trim();
+        const at = s.indexOf('@');
+        if (at >= 0) s = s.slice(0, at);
+        return s;
     }
 
     /**

@@ -945,6 +945,7 @@
                     <div>
                         <h2 class="text-3xl font-bold" id="caseNumberHeader">Loading...</h2>
                         <p class="text-gray-400 mt-1" id="caseCreatedDate">-</p>
+                        <span id="caseCybertipBadge" class="hidden mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-viper-purple/15 text-viper-purple border border-viper-purple/40 text-sm font-medium font-mono"></span>
                     </div>
                     <div class="flex items-center space-x-4">
                         <div class="px-4 py-2 rounded-lg border" id="statusBadge">
@@ -1868,6 +1869,18 @@
         function renderCaseHeader() {
             document.getElementById('caseNumberHeader').textContent = `Case ${currentCase.caseNumber}`;
             document.getElementById('caseCreatedDate').textContent = `Created ${formatDate(currentCase.createdAt)}`;
+
+            // CyberTip # badge (header) — shown only when the case has one.
+            const ctBadge = document.getElementById('caseCybertipBadge');
+            if (ctBadge) {
+                if (currentCase.cybertipNumber) {
+                    ctBadge.textContent = `🌐 CyberTip #${currentCase.cybertipNumber}`;
+                    ctBadge.classList.remove('hidden');
+                } else {
+                    ctBadge.textContent = '';
+                    ctBadge.classList.add('hidden');
+                }
+            }
             
             const statusBadge = document.getElementById('statusBadge');
             const statusConfig = {
@@ -4562,6 +4575,7 @@
                                     ? `Same role in both cases: <span class="text-gray-200 font-medium">${escHtml(theirLabel)}</span>`
                                     : `In <span class="text-gray-300 font-mono">${escHtml(currentCase.caseNumber)}</span> as <span class="text-gray-200 font-medium">${escHtml(myLabel)}</span> · In <span class="text-viper-cyan font-mono">${escHtml(r.caseNumber)}</span> as <span class="text-gray-200 font-medium">${escHtml(theirLabel)}</span>`}
                             </div>
+                            ${sp.via ? `<div class="text-[11px] text-viper-cyan/80 mt-1">🔗 Matched on ${escHtml(sp.via)}${sp.viaValue ? `: <span class="font-mono text-gray-300">${escHtml(sp.viaValue)}</span>` : ''}</div>` : ''}
                         </div>
                     </div>`;
             };
@@ -4612,7 +4626,7 @@
                                 ${r.caseTitle ? `<span class="text-gray-300 truncate">${escHtml(r.caseTitle)}</span>` : ''}
                                 ${statusPill(r.caseStatus)}
                             </div>
-                            <p class="text-xs text-gray-500 mt-1">${r.sharedPersons.length} shared person${r.sharedPersons.length !== 1 ? 's' : ''} · auto-detected by name + DOB / phone / SSN</p>
+                            <p class="text-xs text-gray-500 mt-1">${r.sharedPersons.length} shared person${r.sharedPersons.length !== 1 ? 's' : ''} · auto-detected by name + DOB / phone / SSN / email / username / IP</p>
                         </div>
                         <button onclick="this.closest('#caseLinkDetailsModal').remove()" class="text-gray-400 hover:text-white p-1 -mr-1 -mt-1 flex-shrink-0">
                             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -5086,6 +5100,12 @@
                                     </div>
                                     ` : ''}
                                 </div>
+                                ${currentCase.cybertipNumber ? `
+                                <div class="col-span-2">
+                                    <label class="text-sm text-gray-400">CyberTip #</label>
+                                    <p class="mt-1"><span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-viper-purple/15 text-viper-purple border border-viper-purple/40 text-sm font-medium font-mono">🌐 ${String(currentCase.cybertipNumber).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span></p>
+                                </div>
+                                ` : ''}
                                 <div class="col-span-2">
                                     <label class="text-sm text-gray-400">Synopsis</label>
                                     <p class="text-white mt-2 leading-relaxed">${currentCase.synopsis || '<span class="text-gray-500 italic">No synopsis</span>'}</p>
@@ -5188,6 +5208,10 @@
                                         </button>
                                     </div>
                                     <div id="editOffensesList" class="space-y-2"></div>
+                                </div>
+                                <div class="col-span-2">
+                                    <label class="text-sm text-gray-400 block mb-1">CyberTip # <span class="text-gray-600">(optional)</span></label>
+                                    <input type="text" id="editCaseCybertip" value="${String(currentCase.cybertipNumber || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}" placeholder="e.g. NCMEC CyberTip report number" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
                                 </div>
                                 <div class="col-span-2">
                                     <label class="text-sm text-gray-400 block mb-1">Synopsis</label>
@@ -5322,9 +5346,11 @@
                                                     ? 'Manual link'
                                                     : (sameRole ? theirLabel : `${myLabel} → ${theirLabel}`);
                                                 const ico = isManual ? '🔗' : (roleIcon[sp.theirRole] || '');
-                                                return `<span class="inline-flex items-center gap-1.5 px-2 py-1 text-xs rounded ${cc.bg} ${cc.text} border ${cc.border}" title="${escHtml(sp.confidence)} — ${escHtml(roleStr)}${sp.note ? ' · ' + escHtml(sp.note) : ''}">
+                                                const viaStr = sp.via ? ' · ' + sp.via : '';
+                                                const viaTip = sp.via ? ' · matched on ' + sp.via + (sp.viaValue ? ': ' + sp.viaValue : '') : '';
+                                                return `<span class="inline-flex items-center gap-1.5 px-2 py-1 text-xs rounded ${cc.bg} ${cc.text} border ${cc.border}" title="${escHtml(sp.confidence)} — ${escHtml(roleStr)}${escHtml(viaTip)}${sp.note ? ' · ' + escHtml(sp.note) : ''}">
                                                     ${ico} <span class="font-medium">${escHtml(sp.name)}</span>
-                                                    <span class="text-[10px] opacity-70">(${escHtml(roleStr)})</span>
+                                                    <span class="text-[10px] opacity-70">(${escHtml(roleStr)}${escHtml(viaStr)})</span>
                                                 </span>`;
                                             }).join('')}
                                             ${r.sharedPersons.length > 6 ? `<span class="text-xs text-gray-500 self-center">+${r.sharedPersons.length - 6} more</span>` : ''}
@@ -5334,14 +5360,14 @@
                                 ${more > 0 ? `<div class="text-xs text-gray-500 text-center pt-1">…and ${more} more related case${more !== 1 ? 's' : ''}</div>` : ''}
                             </div>
                             <div class="mt-3 text-[11px] text-gray-500 italic">
-                                Cases auto-link when they share a suspect, victim, witness, or missing person. Click a card to open it.
+                                Cases auto-link when they share a suspect, victim, witness, or missing person — by name/DOB or a shared identifier (email, username, phone, IP). Click a card to open it.
                             </div>` : `
                             <div class="bg-viper-card/30 rounded-lg p-6 text-center border border-dashed border-gray-700 flex-1 flex flex-col items-center justify-center">
                                 <svg class="w-10 h-10 text-gray-600 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                                 </svg>
                                 <p class="text-sm text-gray-300 font-medium mb-1">No Related Cases found</p>
-                                <p class="text-xs text-gray-500 mb-4">No other cases share a suspect, victim, witness, or missing person with this one.</p>
+                                <p class="text-xs text-gray-500 mb-4">No other cases share a suspect, victim, witness, or missing person — by name/DOB or identifier (email, username, phone, IP) — with this one.</p>
                                 <button type="button" onclick="rescanRelatedCases()" class="px-4 py-2 rounded-lg bg-viper-cyan/15 hover:bg-viper-cyan/25 border border-viper-cyan/40 text-viper-cyan text-sm font-medium transition inline-flex items-center gap-2">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                                     Rescan
@@ -28577,6 +28603,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const newStatus = document.getElementById('editCaseStatus').value;
             const newCreatedBy = document.getElementById('editCaseCreatedBy').value.trim();
             const newSynopsis = document.getElementById('editCaseSynopsis').value.trim();
+            const newCybertip = (document.getElementById('editCaseCybertip')?.value || '').trim();
             const newDateAssigned = document.getElementById('editDateAssigned')?.value || '';
             const offenses = _readOffensesFromEditor();
             const newPrimaryOffense = offenses.primary;
@@ -28592,6 +28619,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             currentCase.status = newStatus;
             currentCase.createdBy = newCreatedBy;
             currentCase.synopsis = newSynopsis;
+            currentCase.cybertipNumber = newCybertip;
             currentCase.dateAssigned = newDateAssigned || null;
             currentCase.primaryOffense = newPrimaryOffense || null;
             currentCase.additionalOffenses = newAdditionalOffenses;

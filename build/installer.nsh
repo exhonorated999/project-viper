@@ -33,13 +33,62 @@
 
 !include "LogicLib.nsh"
 
+; ── Robust process termination ───────────────────────────────────────────
+;
+; Kill EVERY running V.I.P.E.R / Electron process and then WAIT until they
+; are actually gone before proceeding.
+;
+; WHY THIS EXISTS (root cause of "Failed to uninstall old application files"):
+;   During an auto-update the NEW installer must first run the OLD version's
+;   uninstaller. That uninstaller performs an ATOMIC RENAME of every file in
+;   $INSTDIR (un.atomicRMDir). If ANY file is still locked at that instant —
+;   e.g. an invisible V.I.P.E.R.exe child process (Electron reuses the main
+;   exe name for its GPU / renderer / utility / crashpad children) or an AV
+;   engine still holding a handle on a freshly-touched DLL — the rename fails
+;   with "file is busy", the uninstaller aborts with a non-zero exit code,
+;   and electron-builder shows "Failed to uninstall old application files /
+;   please try running again". The user sees this even with no visible VIPER
+;   window open, because the offending processes are background children.
+;
+; A single taskkill + fixed `Sleep 1000` is NOT reliable on agency machines
+; where endpoint-protection scanning delays handle release. So we loop:
+; kill -> check -> sleep, until taskkill reports "no such process" (exit
+; code 128) or we hit a sane cap, then add a final settle so Windows/AV
+; fully release handles before any rename/RMDir of $INSTDIR.
+; NOTE: a UNIQ suffix is required because ${__LINE__} inside a macro body
+; resolves to the same definition line on every insertion, which would
+; produce duplicate NSIS labels (compile error). Each call site passes a
+; distinct UNIQ string.
+!macro KillViperAndWait UNIQ
+  StrCpy $R9 0
+  viperKill_${UNIQ}:
+    nsExec::ExecToLog 'taskkill /F /IM "V.I.P.E.R.exe" /T'
+    Pop $R8
+    nsExec::ExecToLog 'taskkill /F /IM "electron.exe" /T'
+    Pop $R7
+    ; taskkill exit code 128 == "no matching process" -> nothing left to kill.
+    ${If} $R8 == 128
+      Goto viperGone_${UNIQ}
+    ${EndIf}
+    IntOp $R9 $R9 + 1
+    ${If} $R9 >= 12
+      Goto viperGone_${UNIQ}
+    ${EndIf}
+    Sleep 500
+    Goto viperKill_${UNIQ}
+  viperGone_${UNIQ}:
+    ; Final settle so Windows/AV fully release file handles before the
+    ; old-version uninstaller renames $INSTDIR.
+    Sleep 2000
+!macroend
+
 ; ── INSTALL FLOW ─────────────────────────────────────────────────────────
 
 !macro customInit
-  ; Kill any running V.I.P.E.R / Electron processes to release file locks
-  nsExec::ExecToLog 'taskkill /F /IM "V.I.P.E.R.exe" /T'
-  nsExec::ExecToLog 'taskkill /F /IM "electron.exe" /T'
-  Sleep 1000
+  ; Terminate any running V.I.P.E.R / Electron processes AND wait until the
+  ; OS confirms they are gone, so file locks are released before the
+  ; old-version uninstaller's atomic rename runs (see KillViperAndWait).
+  !insertmacro KillViperAndWait "init"
 
   ; Back up portable data (in $INSTDIR) before the old version is removed.
   ; Standard-install data (%APPDATA%\viper-electron\) is OUTSIDE $INSTDIR
@@ -85,10 +134,10 @@
   ; This is our one chance to rescue portable user data from the doomed
   ; install directory.
 
-  ; Kill running instances to release file locks
-  nsExec::ExecToLog 'taskkill /F /IM "V.I.P.E.R.exe" /T'
-  nsExec::ExecToLog 'taskkill /F /IM "electron.exe" /T'
-  Sleep 1000
+  ; Kill running instances AND wait until they are confirmed gone, so the
+  ; subsequent atomic rename / RMDir of $INSTDIR can't fail on a busy file
+  ; (see KillViperAndWait for the full rationale).
+  !insertmacro KillViperAndWait "uninit"
 
   ; Move portable data ONE LEVEL UP, out of $INSTDIR, so the default
   ; "RMDir /r $INSTDIR" cannot reach it. The user (or the next install)

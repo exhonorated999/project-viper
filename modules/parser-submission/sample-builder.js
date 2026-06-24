@@ -410,7 +410,39 @@ function inspectCsv(text, delim) {
     if (picked.idx > 0) {
         out.banner_rows_skipped = picked.idx;
     }
+    // Per-column value-format inference from a sample of data rows. Schema
+    // tokens only (ipv4 / epoch_ms_str / email / uuid / string / …) — never
+    // raw values. Lets a parser author know e.g. column 6 is an IP, column 8
+    // an epoch, column 5 free text.
+    const colFormats = _inferCsvColumnFormats(text, tailStart, delim, picked.fields.length);
+    if (colFormats) out.column_formats = colFormats;
     return out;
+}
+
+/**
+ * Sample up to 30 data rows after the header offset and infer the majority
+ * value-format per column. Reuses parseCsvLine for quote-aware splitting.
+ */
+function _inferCsvColumnFormats(text, tailStart, delim, cols) {
+    if (!cols || tailStart == null || tailStart >= text.length) return null;
+    const perCol = Array.from({ length: cols }, () => Object.create(null));
+    let i = tailStart;
+    let rows = 0;
+    while (i < text.length && rows < 30) {
+        let nl = text.indexOf('\n', i);
+        if (nl < 0) nl = text.length;
+        const line = text.slice(i, nl).replace(/\r$/, '');
+        i = nl + 1;
+        if (!line.trim()) continue;
+        const fields = parseCsvLine(line, delim);
+        rows++;
+        for (let c = 0; c < cols; c++) {
+            const fmt = inferValueFormat(String(fields[c] != null ? fields[c] : '').trim());
+            perCol[c][fmt] = (perCol[c][fmt] || 0) + 1;
+        }
+    }
+    if (!rows) return null;
+    return perCol.map(_majorityFormat);
 }
 
 // Strip PII substrings from a single CSV header/cell.  Even though column
@@ -767,18 +799,85 @@ async function inspectPdfTextAsync(buf, syncShape) {
 }
 
 /**
- * Plain text: line count + char count + first-line-shape hint.
+ * Plain text: line count + char count + first-line-shape hint, plus
+ * delimiter / per-column format inference and a PII-redacted excerpt.
+ *
+ * The enrichment (schema v2) exists so a parser author can tell, from the
+ * envelope alone, that a generically-named `.txt` (e.g. logs/file_4.txt) is
+ * actually a TAB-delimited table with timestamp / ip / username columns —
+ * without ever shipping the raw values.
  */
 function inspectText(text) {
     if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
     const lines = text.split(/\r?\n/);
     const firstLine = lines.find(l => l.length > 0) || '';
-    return {
+    const out = {
         type: 'text',
         line_count: lines.length,
         char_count: text.length,
         first_line_format: inferValueFormat(firstLine),
     };
+
+    // ── Delimiter inference ──
+    const sample = lines.filter(l => l.length > 0).slice(0, 50);
+    if (sample.length >= 2) {
+        // Tab/pipe/semicolon checked before comma — comma is the most prose-prone.
+        const candidates = [['\t', 'tab'], ['|', 'pipe'], [';', 'semicolon'], [',', 'comma']];
+        for (const [ch, dname] of candidates) {
+            const counts = sample.map(l => l.split(ch).length);
+            const min = Math.min(...counts);
+            const max = Math.max(...counts);
+            // Delimited if every sampled line splits into >1 field and the
+            // column count is stable (allow ±1 jitter for ragged tails).
+            if (min >= 2 && (max - min) <= 1) {
+                out.delimited = true;
+                out.delimiter = dname;
+                out.column_count = min;
+                out.column_formats = _inferDelimitedColumnFormats(sample, ch, min);
+                break;
+            }
+        }
+    }
+
+    // ── PII-redacted excerpt (first few non-empty lines) ──
+    const excerptLines = lines.filter(l => l.trim().length > 0).slice(0, 3);
+    if (excerptLines.length) {
+        let ex = _redactExcerpt(excerptLines.join('\n'));
+        if (ex.length > 600) ex = ex.slice(0, 597) + '...';
+        out.excerpt_redacted = ex;
+    }
+
+    return out;
+}
+
+/**
+ * Majority value-format per column for a set of already-split delimited
+ * lines. Emits only schema tokens (ipv4 / epoch_ms_str / email / int_str /
+ * string / …) — never raw values.
+ */
+function _inferDelimitedColumnFormats(sampleLines, delimChar, cols) {
+    const perCol = Array.from({ length: cols }, () => Object.create(null));
+    let used = 0;
+    for (const line of sampleLines.slice(0, 30)) {
+        const fields = line.split(delimChar);
+        if (fields.length < cols) continue;
+        used++;
+        for (let c = 0; c < cols; c++) {
+            const fmt = inferValueFormat(String(fields[c]).trim());
+            perCol[c][fmt] = (perCol[c][fmt] || 0) + 1;
+        }
+    }
+    if (!used) return null;
+    return perCol.map(_majorityFormat);
+}
+
+function _majorityFormat(counts) {
+    let bestFmt = 'string';
+    let bestN = -1;
+    for (const f in counts) {
+        if (counts[f] > bestN) { bestN = counts[f]; bestFmt = f; }
+    }
+    return bestFmt;
 }
 
 // ─── Top-level inspector dispatch ──────────────────────────────────────────

@@ -522,13 +522,60 @@
       if (!result.match_count) {
         out.innerHTML = '<div class="flex flex-col items-center py-12 text-center"><svg class="w-10 h-10 text-gray-600 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/></svg><p class="text-sm text-gray-400 font-medium">No matches found</p><p class="text-xs text-gray-600 mt-1">' + tokens.length + ' token(s) searched</p></div>';
       } else {
+        const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        const TIERS = {
+          red:    { label: 'STRONG CONNECTION — HIGH',     dot: 'bg-red-400',   band: 'border-red-500/50',   head: 'from-red-500/15',   text: 'text-red-300' },
+          green:  { label: 'POTENTIAL CONNECTION — MODERATE', dot: 'bg-green-400', band: 'border-green-500/50', head: 'from-green-500/15', text: 'text-green-300' },
+          orange: { label: 'POSSIBLE CONNECTION — LOW',    dot: 'bg-amber-400', band: 'border-amber-500/50', head: 'from-amber-500/15', text: 'text-amber-300' },
+        };
+        const CASE_TYPE = { retail: { tag: 'RETAIL', label: 'Retail Theft', icon: '🛒' }, cargo: { tag: 'CARGO', label: 'Cargo Theft', icon: '🚛' } };
+        const fmtDist = (d) => {
+          const n = (typeof d === 'number') ? d : parseFloat(d);
+          if (isNaN(n)) return '';
+          const r = Math.round(n);
+          return (r < 1 ? '<1' : r) + ' mi';
+        };
         out.innerHTML = '<p class="text-xs text-amber-400/80 font-medium mb-3">' + result.match_count + ' match(es) across TRACE network</p>' +
           (result.matches || []).map(m => {
-            const conf = m.confidence >= 80 ? 'bg-green-500/20 text-green-400 border-green-500/30' : m.confidence >= 50 ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' : 'bg-gray-500/20 text-gray-400 border-gray-500/30';
-            return '<div class="rh-result-card mb-3"><div class="flex items-start justify-between mb-2"><h5 class="text-white text-sm font-bold">' + (m.store_name || 'Unknown Store') + '</h5><span class="px-2 py-0.5 rounded text-[10px] font-bold border ' + conf + '">' + m.confidence + '%</span></div>' +
-              (m.case_ref ? '<p class="text-xs text-gray-400">Case: <span class="text-white">' + m.case_ref + '</span></p>' : '') +
-              (m.city ? '<p class="text-xs text-gray-500 mt-1">' + m.city + (m.state ? ', ' + m.state : '') + '</p>' : '') +
-              (m.matched_tokens ? '<p class="text-[10px] text-gray-600 mt-2">' + m.matched_tokens + ' token(s) matched</p>' : '') + '</div>';
+            const tier = TIERS[String(m.confidence || '').toLowerCase()] || { label: 'POTENTIAL CONNECTION', dot: 'bg-gray-400', band: 'border-gray-600/50', head: 'from-gray-500/10', text: 'text-gray-300' };
+            const ct = CASE_TYPE[String(m.case_type || '').toLowerCase()] || null;
+            const chips = (Array.isArray(m.matched_on) ? m.matched_on : (m.matched_on ? [m.matched_on] : []))
+              .map(c => '<span class="inline-block px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] text-gray-300 mr-1 mb-1">' + esc(c) + '</span>').join('');
+            const dist = fmtDist(m.distance_miles);
+            const loc = [m.city ? esc(m.city) + (m.state ? ', ' + esc(m.state) : '') : '', dist].filter(Boolean).join(' · ');
+
+            const colMatched = chips
+              ? '<div><div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1.5">Matched On</div><div class="flex flex-wrap">' + chips + '</div></div>'
+              : '';
+            const colStore =
+              '<div><div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1.5">Reporting Store</div>' +
+              '<div class="text-white text-sm font-bold leading-tight">' + esc(m.store_name || 'Unknown Store') + '</div>' +
+              (loc ? '<div class="text-xs text-gray-500 mt-1">📍 ' + loc + '</div>' : '') + '</div>';
+
+            const hasContact = m.contact_name || m.contact_phone || m.contact_email;
+            const colContact = hasContact
+              ? '<div><div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1.5">Contact to Verify</div>' +
+                (m.contact_name ? '<div class="text-white text-sm font-semibold">' + esc(m.contact_name) + '</div>' : '') +
+                (m.contact_phone ? '<div class="text-xs mt-1"><span class="text-pink-400">📞</span> <a href="tel:' + esc(m.contact_phone) + '" class="text-gray-300 hover:text-white">' + esc(m.contact_phone) + '</a></div>' : '') +
+                (m.contact_email ? '<div class="text-xs mt-0.5"><span class="text-gray-400">✉</span> <a href="mailto:' + esc(m.contact_email) + '" class="text-gray-300 hover:text-white break-all">' + esc(m.contact_email) + '</a></div>' : '') +
+                '<div class="text-[10px] text-gray-600 italic mt-1.5 leading-snug">Contact this party to independently verify before taking action.</div></div>'
+              : '<div><div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1.5">Contact to Verify</div><div class="text-xs text-gray-600 italic">No contact published by reporting party.</div></div>';
+
+            const colCase =
+              '<div><div class="text-[10px] uppercase tracking-wider text-gray-500 mb-1.5">Their Case</div>' +
+              (m.case_ref ? '<div class="text-cyan-400 text-sm font-bold font-mono">' + esc(m.case_ref) + '</div>' : '<div class="text-gray-600 text-sm">—</div>') +
+              (ct ? '<div class="text-xs text-gray-400 mt-1">' + ct.icon + ' ' + ct.label + '</div>' : (m.case_type ? '<div class="text-xs text-gray-400 mt-1">' + esc(m.case_type) + '</div>' : '')) +
+              (m.distant_flag ? '<div class="text-[10px] text-amber-400/80 mt-1">⚠ Outside normal range</div>' : '') + '</div>';
+
+            return '<div class="rh-result-card mb-3 border ' + tier.band + ' rounded-lg overflow-hidden">' +
+              '<div class="flex items-center justify-between px-3 py-2 bg-gradient-to-r ' + tier.head + ' to-transparent border-b ' + tier.band + '">' +
+                '<div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full ' + tier.dot + '"></span>' +
+                  '<span class="text-[11px] font-bold uppercase tracking-wider ' + tier.text + '">' + tier.label + '</span></div>' +
+                (ct ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-white/5 border border-white/10 text-gray-300">' + ct.icon + ' ' + ct.tag + '</span>' : '') +
+              '</div>' +
+              '<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-3">' +
+                colMatched + colStore + colContact + colCase +
+              '</div></div>';
           }).join('');
       }
     } catch (e) {

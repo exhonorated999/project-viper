@@ -47,6 +47,33 @@
     const norm = (s) => String(s == null ? '' : s).trim().toUpperCase();
     const digits = (s) => String(s == null ? '' : s).replace(/\D+/g, '');
 
+    // Identifier normalizers — return '' when the value isn't a usable token.
+    const normEmail = (s) => {
+        const v = String(s == null ? '' : s).trim().toLowerCase();
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? v : '';
+    };
+    const normUser = (s) => {
+        let v = String(s == null ? '' : s).trim().replace(/^@+/, '').toLowerCase();
+        if (v.length < 3) return '';           // too short / ambiguous
+        if (/^\d+$/.test(v)) return '';        // pure-numeric handle — skip (noisy)
+        return v;
+    };
+    const RE_IPV4 = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+    const normIp = (s) => {
+        const v = String(s == null ? '' : s).trim().toLowerCase();
+        if (!v) return '';
+        if (RE_IPV4.test(v)) {
+            const parts = v.split('.');
+            if (parts.every(o => o !== '' && +o >= 0 && +o <= 255)) {
+                if (v === '0.0.0.0' || v === '127.0.0.1') return ''; // non-identifying
+                return v;
+            }
+            return '';
+        }
+        if (v.includes(':') && /^[0-9a-f:]+$/.test(v) && v.replace(/[^0-9a-f]/g, '').length >= 4) return v;
+        return '';
+    };
+
     function normDob(d) {
         if (!d) return '';
         const s = String(d).trim();
@@ -102,15 +129,70 @@
 
         const ssn = raw.ssn ? digits(raw.ssn) : '';
 
+        // ── Identifiers (email / username / IP) ─────────────────────────────
+        // Collected so cases can auto-link on a shared identifier even when the
+        // person's name differs or is absent (previously name was mandatory and
+        // identifier-only persons were dropped, so these links never formed).
+        const emails = [];
+        const usernames = [];
+        const ips = [];
+        const addEmail = (v) => { const e = normEmail(v); if (e) emails.push(e); };
+        const addUser  = (v) => { const u = normUser(v);  if (u) usernames.push(u); };
+        const addIp    = (v) => { const p = normIp(v);    if (p) ips.push(p); };
+
+        addEmail(raw.email); addEmail(raw.emailAddress); addEmail(raw.email_address); addEmail(raw.mail);
+        if (Array.isArray(raw.emails)) raw.emails.forEach(addEmail);
+
+        addUser(raw.username); addUser(raw.userName); addUser(raw.user_name);
+        addUser(raw.handle); addUser(raw.screenName); addUser(raw.screen_name);
+        addUser(raw.alias); addUser(raw.nickname); addUser(raw.moniker);
+        addUser(raw.kik); addUser(raw.kikUsername);
+        if (Array.isArray(raw.aliases)) raw.aliases.forEach(addUser);
+        if (Array.isArray(raw.usernames)) raw.usernames.forEach(addUser);
+        if (Array.isArray(raw.socialMedia)) raw.socialMedia.forEach(sm => {
+            if (!sm) return;
+            if (typeof sm === 'string') addUser(sm);
+            else addUser(sm.handle || sm.username || sm.value || sm.account);
+        });
+
+        addIp(raw.ip); addIp(raw.ipAddress); addIp(raw.ip_address); addIp(raw.lastIp); addIp(raw.last_ip);
+        if (Array.isArray(raw.ips)) raw.ips.forEach(addIp);
+        if (Array.isArray(raw.ipAddresses)) raw.ipAddresses.forEach(addIp);
+
+        // Generic identifiers[] array: { type, value }
+        if (Array.isArray(raw.identifiers)) {
+            raw.identifiers.forEach(id => {
+                if (!id || !id.value) return;
+                const t = String(id.type || '').toLowerCase();
+                if (t === 'email' || t === 'e-mail') addEmail(id.value);
+                else if (t === 'username' || t === 'handle' || t === 'screenname' ||
+                         t === 'screen_name' || t === 'alias' || t === 'social' || t === 'kik') addUser(id.value);
+                else if (t === 'ip' || t === 'ip_address' || t === 'ipaddress') addIp(id.value);
+                // phone handled above
+            });
+        }
+
         const firstN = norm(first);
         const lastN  = norm(last);
-        if (!firstN || !lastN) return null;
+
+        const cleanPhones = Array.from(new Set(phones.filter(p => p && p.length >= 7)));
+        const cleanEmails = Array.from(new Set(emails));
+        const cleanUsers  = Array.from(new Set(usernames));
+        const cleanIps    = Array.from(new Set(ips));
+
+        const hasName  = !!(firstN && lastN);
+        const hasIdent = cleanPhones.length || cleanEmails.length || cleanUsers.length || cleanIps.length || ssn;
+        // Keep the record if it has a usable name OR at least one linkable identifier.
+        if (!hasName && !hasIdent) return null;
 
         return {
             firstName: firstN,
             lastName: lastN,
             dob: normDob(dob),
-            phones: Array.from(new Set(phones.filter(p => p && p.length >= 7))),
+            phones: cleanPhones,
+            emails: cleanEmails,
+            usernames: cleanUsers,
+            ips: cleanIps,
             ssn,
             raw, // original object retained for "Copy" action
         };
@@ -156,6 +238,31 @@
     function nameKey(p) {
         if (!p || !p.lastName || !p.firstName) return '';
         return `${p.lastName}|${p.firstName}`;
+    }
+
+    // ---- Identifier helpers -------------------------------------------------
+    // Enumerate the linkable identifier tokens on a person record.
+    function identTokens(p) {
+        const toks = [];
+        if (!p) return toks;
+        (p.emails || []).forEach(v => toks.push({ type: 'email', value: v }));
+        (p.usernames || []).forEach(v => toks.push({ type: 'username', value: v }));
+        (p.ips || []).forEach(v => toks.push({ type: 'ip', value: v }));
+        (p.phones || []).forEach(v => toks.push({ type: 'phone', value: v }));
+        if (p.ssn) toks.push({ type: 'ssn', value: p.ssn });
+        return toks;
+    }
+    // IP is MEDIUM (can be shared/NAT/public); the rest are strong identifiers.
+    const IDENT_CONF  = { email: 'HIGH', username: 'HIGH', phone: 'HIGH', ssn: 'HIGH', ip: 'MEDIUM' };
+    const IDENT_LABEL = { email: 'Email', username: 'Username', phone: 'Phone', ssn: 'SSN', ip: 'IP address' };
+    function identDisplay(tok) {
+        if (!tok) return '';
+        if (tok.type === 'phone') {
+            const d = String(tok.value);
+            return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : d;
+        }
+        if (tok.type === 'ssn') return '***-**-' + String(tok.value).slice(-4);
+        return tok.value;
     }
 
     // ---- Index --------------------------------------------------------------
@@ -210,6 +317,7 @@
         // Build keyed maps
         const byKey  = new Map();
         const byName = new Map();
+        const byIdent = new Map(); // "<type>:<value>" -> [entries]
         entries.forEach(e => {
             const ck = canonicalKey(e.person);
             if (ck) {
@@ -221,9 +329,14 @@
                 if (!byName.has(nk)) byName.set(nk, []);
                 byName.get(nk).push(e);
             }
+            identTokens(e.person).forEach(tok => {
+                const ik = tok.type + ':' + tok.value;
+                if (!byIdent.has(ik)) byIdent.set(ik, []);
+                byIdent.get(ik).push(e);
+            });
         });
 
-        _index = { byKey, byName, entries, caseLookup };
+        _index = { byKey, byName, byIdent, entries, caseLookup };
         _builtAt = Date.now();
         return _index;
     }
@@ -310,6 +423,14 @@
             }
         });
 
+        // Identifier matches — same email / username / IP / phone / SSN, even
+        // when names differ or are absent.
+        identTokens(q).forEach(tok => {
+            const ik = tok.type + ':' + tok.value;
+            (idx.byIdent.get(ik) || []).forEach(h =>
+                score(h, IDENT_CONF[tok.type] || 'MEDIUM', `${IDENT_LABEL[tok.type]} match`));
+        });
+
         // Sort: HIGH > MEDIUM > LOW, then newest case first
         out.sort((a, b) => (rank(a.confidence) - rank(b.confidence)) ||
                           String(b.caseNumber || '').localeCompare(String(a.caseNumber || '')));
@@ -362,7 +483,18 @@
                     // excluded from getRelatedCases — too noisy for the overview card.
                 });
 
-            candidates.forEach(({ o, confidence }) => {
+            // ── Identifier matches (email / username / IP / phone / SSN) ──
+            // Link cases that share a strong identifier even when names differ
+            // or are absent. This is what surfaces e.g. two cases tied by the
+            // same KIK username, email, phone, or IP address.
+            identTokens(mine.person).forEach(tok => {
+                const ik = tok.type + ':' + tok.value;
+                (idx.byIdent.get(ik) || [])
+                    .filter(o => o.caseId !== caseId)
+                    .forEach(o => candidates.push({ o, confidence: IDENT_CONF[tok.type] || 'MEDIUM', via: tok }));
+            });
+
+            candidates.forEach(({ o, confidence, via }) => {
                 const r = related.get(o.caseId) || {
                     caseId: o.caseId,
                     caseNumber: o.caseNumber,
@@ -374,16 +506,27 @@
 
                 const pSet = personSeen.get(o.caseId) || new Set();
                 personSeen.set(o.caseId, pSet);
-                const pk = canonicalKey(o.person);
+                // Dedup key: prefer the canonical person key; fall back to the
+                // shared identifier so identifier-only persons (no name) don't
+                // all collapse into a single empty-key bucket.
+                let pk = canonicalKey(o.person);
+                if (!pk) pk = via ? `IDENT:${via.type}:${via.value}` : `ROW:${o.role}:${o.caseId}`;
                 if (pSet.has(pk)) return;
                 pSet.add(pk);
 
+                const hasName = o.person.firstName && o.person.lastName;
+                const displayName = hasName
+                    ? `${titleCase(o.person.lastName)}, ${titleCase(o.person.firstName)}`
+                    : (via ? identDisplay(via) : '(unnamed)');
+
                 r.sharedPersons.push({
-                    name: `${titleCase(o.person.lastName)}, ${titleCase(o.person.firstName)}`,
+                    name: displayName,
                     dob: o.person.dob,
                     myRole: mine.role,
                     theirRole: o.role,
                     confidence,
+                    via: via ? IDENT_LABEL[via.type] : undefined,
+                    viaValue: via ? identDisplay(via) : undefined,
                 });
             });
         });
@@ -859,6 +1002,7 @@
         // Helpers exposed for UI / tests
         canonicalKey,
         extractPerson,
+        identTokens,
         parseNameString,
         ROLE_LABELS,
         ROLES,

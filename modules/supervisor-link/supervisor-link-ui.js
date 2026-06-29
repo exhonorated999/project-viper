@@ -198,6 +198,28 @@
     const pickerHint = el('div', `font-size:12px;color:${C.dim};min-height:16px;`);
     bodyWrap.appendChild(pickerHint);
 
+    // Secure-link status line (device id + node pin + reset).
+    const secureLine = el('div', `font-size:11px;color:${C.faint};margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;`);
+    bodyWrap.appendChild(secureLine);
+    async function refreshSecure() {
+      try {
+        const st = await api().status();
+        secureLine.innerHTML = '';
+        const lock = el('span', `color:${C.green};`, { textContent: '\u{1F512}' });
+        secureLine.appendChild(lock);
+        secureLine.appendChild(el('span', '', { textContent: `device ${st.deviceId || '—'}` }));
+        secureLine.appendChild(el('span', `color:${st.nodePin ? C.green : C.amber};`, {
+          textContent: st.nodePin ? `· node pinned ${st.nodePin}` : '· node not pinned (pins on connect)',
+        }));
+        if (st.nodePin) {
+          const reset = el('a', `color:${C.cyan};cursor:pointer;text-decoration:underline;`, { textContent: 'reset pin' });
+          reset.addEventListener('click', async () => { await api().resetPin({}); refreshSecure(); });
+          secureLine.appendChild(reset);
+        }
+      } catch (_) { /* ignore */ }
+    }
+    refreshSecure();
+
     // Section: payload
     const payloadWrap = el('div', 'margin-top:16px;');
     bodyWrap.appendChild(payloadWrap);
@@ -284,9 +306,19 @@
       const res = await api().discover({ identity: getIdentity() });
       if (!res || !res.ok) {
         select.innerHTML = '';
-        select.appendChild(el('option', '', { textContent: 'LAN node unreachable', value: '' }));
+        const err = (res && res.error) || '';
+        select.appendChild(el('option', '', { textContent: 'Secure link unavailable', value: '' }));
         pickerHint.style.color = C.red;
-        pickerHint.textContent = 'Could not reach the V.I.P.E.R. LAN node. Is it running?';
+        if (/NODE_PIN_MISMATCH/.test(err)) {
+          pickerHint.textContent = 'Node key changed — pin mismatch (possible rogue node). Reset the pin only if you trust this node.';
+        } else if (/DEVICE_REVOKED/.test(err)) {
+          pickerHint.textContent = 'This device has been revoked by the supervisor/node. Contact the administrator.';
+        } else if (/NODE_PROOF_FAILED/.test(err)) {
+          pickerHint.textContent = 'Node failed its identity proof — refusing to connect.';
+        } else {
+          pickerHint.textContent = 'Could not reach the V.I.P.E.R. LAN node. Is it running?';
+        }
+        refreshSecure();
         return;
       }
       roster = res.roster || [];

@@ -40,6 +40,7 @@
     "pdf-parse": "^1.1.1",
     "qrcode": "^1.5.4",
     "single-file-cli": "^2.0.83",
-    "tesseract.js": "^7.0.0"
+    "tesseract.js": "^7.0.0",
+    "ws": "^8.18.0"
   }
 }

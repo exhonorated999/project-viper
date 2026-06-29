@@ -14,6 +14,7 @@
     <script src="modules/trace-search-api.js"></script>
     <script src="modules/resource-hub.js"></script>
     <script src="modules/case-link.js"></script>
+    <script src="modules/supervisor-link/supervisor-link-ui.js"></script>
     <script src="case-snapshot.js"></script>
 
     <script src="libs/tailwindcss.js"></script>
@@ -25998,6 +25999,9 @@
                             <button onclick="showGenerateOpsPlanModal()" class="px-4 py-2 bg-viper-green hover:bg-viper-green/80 rounded-lg text-black font-semibold transition text-sm flex items-center gap-2">
                                 📄 Generate OPS Plan
                             </button>
+                            <button onclick="sendOpsPlanForApproval()" title="Send this operations plan to a supervisor for digital approval over the LAN" class="px-4 py-2 rounded-lg transition text-sm flex items-center gap-2" style="border:1px solid #0078D4;color:#4ea8f0;background:rgba(0,120,212,.16);">
+                                ⬆️ Send for Approval
+                            </button>
                             <button onclick="importTemplatesIntoForm()" class="px-4 py-2 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded-lg text-viper-purple transition text-sm flex items-center gap-2">
                                 ⚙️ Import from Settings
                             </button>
@@ -26577,6 +26581,32 @@
                 </div>
             `;
             document.body.insertAdjacentHTML('beforeend', html);
+        }
+
+        // Send the current operations plan to a supervisor for digital approval
+        // over the LAN. Saves the form first, builds a compact field set, and
+        // opens the Supervisor Link push dialog (PDF is generated at push time).
+        function sendOpsPlanForApproval() {
+            try { if (typeof saveCurrentOpsPlan === 'function') saveCurrentOpsPlan(); } catch (_) {}
+            if (!window.SupervisorLink) {
+                alert('Supervisor Link is only available in the desktop app.');
+                return;
+            }
+            const d = (typeof opsPlanData === 'object' && opsPlanData) ? opsPlanData : {};
+            const opTypes = d.operationType
+                ? Object.entries(d.operationType).filter(([, v]) => v).map(([k]) => k)
+                : [];
+            const caseNumber = (typeof currentCase === 'object' && currentCase && currentCase.caseNumber) || '';
+            const ops = {
+                caseNumber,
+                title: 'Operations Plan' + (caseNumber ? ' — ' + caseNumber : ''),
+                date: d.date || '',
+                risk: opTypes.join(', ') || 'Not specified',
+                location: d.location || '',
+                officer: localStorage.getItem('viper_customer_name') || (d.caseAgent || ''),
+                summary: d.caseSummary || d.tacticalPlan || d.suspectInfo || 'No summary provided.',
+            };
+            window.SupervisorLink.openPushDialog({ mode: 'opsplan', ops });
         }
 
         async function generateOpsPlanReport() {

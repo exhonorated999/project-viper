@@ -804,6 +804,7 @@
     <link rel="stylesheet" href="modules/meta-warrant/meta-warrant-styles.css">
     <link rel="stylesheet" href="modules/kik-warrant/kik-warrant-styles.css">
     <link rel="stylesheet" href="modules/snapchat-warrant/snapchat-warrant-styles.css">
+    <link rel="stylesheet" href="modules/x-warrant/x-warrant-styles.css">
     <link rel="stylesheet" href="modules/discord-warrant/discord-warrant-styles.css">
     <link rel="stylesheet" href="modules/datapilot/datapilot-styles.css">
     <link rel="stylesheet" href="modules/cellebrite/cellebrite-styles.css">
@@ -818,6 +819,8 @@
     <script src="modules/kik-warrant/kik-warrant-ui.js"></script>
     <script src="modules/snapchat-warrant/snapchat-warrant-module.js"></script>
     <script src="modules/snapchat-warrant/snapchat-warrant-ui.js"></script>
+    <script src="modules/x-warrant/x-warrant-module.js"></script>
+    <script src="modules/x-warrant/x-warrant-ui.js"></script>
     <script src="modules/discord-warrant/discord-warrant-module.js"></script>
     <script src="modules/discord-warrant/discord-warrant-ui.js"></script>
     <script src="modules/datapilot/datapilot-analytics.js"></script>
@@ -1449,6 +1452,7 @@
                     kikWarrant:      hasArr(_ls(`kikWarrant_${caseId}`)),
                     discordWarrant:  hasArr(_ls(`discordWarrant_${caseId}`)),
                     snapchatWarrant: hasArr(_ls(`snapchatWarrant_${caseId}`)),
+                    xWarrant:        hasArr(_ls(`xWarrant_${caseId}`)),
                     metaWarrant:     hasArr(_ls(`metaWarrant_${caseId}`))
                 };
 
@@ -1956,6 +1960,7 @@
                 metaWarrant: { label: 'META Warrant', icon: 'M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z' },
                 kikWarrant: { label: 'KIK Warrant', icon: 'M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z' },
                 snapchatWarrant: { label: 'Snapchat Warrant', icon: 'M12 2C8.5 2 6 4.5 6 8c0 1.5.3 3 .8 4.2-.5.3-1.3.5-2 .5-.4 0-.8.3-.8.7 0 .5.5.9 1.2 1.2.7.3 1.6.5 2.3.6-.1.5-.5 1-1.2 1.5-.7.4-1.6.7-2.3.9-.5.1-.8.4-.8.8 0 .8 1.7 1.4 3.5 1.7.1.4.3.8.6 1 .3.2.7.2 1.1.1.5-.1 1-.1 1.6 0 .6.1 1.2.4 1.9.9.7.5 1.4.7 2.1.7s1.4-.2 2.1-.7c.7-.5 1.3-.8 1.9-.9.6-.1 1.1-.1 1.6 0 .4.1.8.1 1.1-.1.3-.2.5-.6.6-1 1.8-.3 3.5-.9 3.5-1.7 0-.4-.3-.7-.8-.8-.7-.2-1.6-.5-2.3-.9-.7-.5-1.1-1-1.2-1.5.7-.1 1.6-.3 2.3-.6.7-.3 1.2-.7 1.2-1.2 0-.4-.4-.7-.8-.7-.7 0-1.5-.2-2-.5.5-1.2.8-2.7.8-4.2 0-3.5-2.5-6-6-6z' },
+                xWarrant: { label: 'X / Twitter Warrant', icon: 'M4 4l16 16M20 4L4 20' },
                 discordWarrant: { label: 'Discord Warrant', icon: 'M19.27 5.33C17.94 4.71 16.5 4.26 15 4a.09.09 0 00-.07.03c-.18.33-.39.76-.53 1.09a16.09 16.09 0 00-4.8 0c-.14-.34-.35-.76-.54-1.09-.01-.02-.04-.03-.07-.03-1.5.26-2.93.71-4.27 1.33-.01 0-.02.01-.03.02-2.72 4.07-3.47 8.03-3.1 11.95 0 .02.01.04.03.05 1.8 1.32 3.53 2.12 5.24 2.65.03.01.06 0 .07-.02.4-.55.76-1.13 1.07-1.74.02-.04 0-.08-.04-.09-.57-.22-1.11-.48-1.64-.78-.04-.02-.04-.08-.01-.11.11-.08.22-.17.33-.25.02-.02.05-.02.07-.01 3.44 1.57 7.15 1.57 10.55 0 .02-.01.05-.01.07.01.11.09.22.17.33.26.04.03.04.09-.01.11-.52.31-1.07.56-1.64.78-.04.01-.05.06-.04.09.32.61.68 1.19 1.07 1.74.03.01.06.02.09.01 1.72-.53 3.45-1.33 5.25-2.65.02-.01.03-.03.03-.05.44-4.53-.73-8.46-3.1-11.95-.01-.01-.02-.02-.04-.02zM8.52 14.91c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.84 2.12-1.89 2.12zm6.97 0c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.83 2.12-1.89 2.12z' },
                 datapilot: { label: 'Datapilot', icon: 'M9 17a4 4 0 01-2-7.5l1-3a4 4 0 017 0l1 3A4 4 0 0115 17H9zM12 12v9' },
                 cellebrite: { label: 'Cellebrite (Mobile Forensics)', icon: 'M11 2H9a2 2 0 00-2 2v16a2 2 0 002 2h6a2 2 0 002-2V4a2 2 0 00-2-2h-2M11 18h2' },
@@ -2102,6 +2107,7 @@
             allModules.metaWarrant = { label: 'META Warrant', icon: '📘' };
             allModules.kikWarrant = { label: 'KIK Warrant', icon: '💬' };
             allModules.snapchatWarrant = { label: 'Snapchat Warrant', icon: '👻' };
+            allModules.xWarrant = { label: 'X / Twitter Warrant', icon: '𝕏' };
             allModules.discordWarrant = { label: 'Discord Warrant', icon: '💜' };
             allModules.datapilot = { label: 'Datapilot', icon: '📱' };
             allModules.cellebrite = { label: 'Cellebrite (Mobile Forensics)', icon: '📱' };
@@ -2199,6 +2205,7 @@
                 oversightImport:'Oversight', cyberTips:'Cyber Tips', consentSearch:'Consent Search',
                 googleWarrant:'Google Warrant', metaWarrant:'META Warrant', kikWarrant:'KIK Warrant',
                 snapchatWarrant:'Snapchat Warrant',
+                xWarrant:'X / Twitter Warrant',
                 discordWarrant:'Discord Warrant',
                 datapilot:'Datapilot',
                 cellebrite:'Cellebrite (Mobile Forensics)',
@@ -2258,6 +2265,7 @@
                 metaWarrant: { label: 'META Warrant', icon: '📘', type: 'data' },
                 kikWarrant: { label: 'KIK Warrant', icon: '💬', type: 'data' },
                 snapchatWarrant: { label: 'Snapchat Warrant', icon: '👻', type: 'data' },
+                xWarrant: { label: 'X / Twitter Warrant', icon: '𝕏', type: 'data' },
                 discordWarrant: { label: 'Discord Warrant', icon: '💜', type: 'data' },
                 datapilot: { label: 'Datapilot', icon: '📱', type: 'data' },
                 cellebrite: { label: 'Cellebrite (Mobile Forensics)', icon: '📱', type: 'data' },
@@ -2356,7 +2364,7 @@
                 'areacanvas', 'prosecution', 'narcotics', 'firearms',
                 'money', 'opsplan', 'rmsImports', 'oversightImport',
                 'canvasForms', 'cyberTips', 'timelineEvents', 'consentSearches',
-                'googleWarrant', 'metaWarrant', 'kikWarrant', 'snapchatWarrant', 'discordWarrant', 'datapilot', 'caseMetrics',
+                'googleWarrant', 'metaWarrant', 'kikWarrant', 'snapchatWarrant', 'xWarrant', 'discordWarrant', 'datapilot', 'caseMetrics',
                 'cellebriteImport'
             ];
             const moduleData = {};
@@ -2492,6 +2500,10 @@
                 case 'snapchatWarrant': {
                     const swData = _lsParse(`snapchatWarrant_${currentCase.id}`, {"imports": []});
                     return (swData.imports || []).length;
+                }
+                case 'xWarrant': {
+                    const xwData = _lsParse(`xWarrant_${currentCase.id}`, {"imports": []});
+                    return (xwData.imports || []).length;
                 }
                 case 'discordWarrant': {
                     const dwData = _lsParse(`discordWarrant_${currentCase.id}`, {"imports": []});
@@ -4487,6 +4499,9 @@
             } else if (tabId === 'snapchatWarrant') {
                 contentDiv.innerHTML = renderSnapchatWarrantTab();
                 initializeSnapchatWarrant();
+            } else if (tabId === 'xWarrant') {
+                contentDiv.innerHTML = renderXWarrantTab();
+                initializeXWarrant();
             } else if (tabId === 'discordWarrant') {
                 contentDiv.innerHTML = renderDiscordWarrantTab();
                 initializeDiscordWarrant();
@@ -11630,6 +11645,11 @@
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                                     Search Accurint
                                 </button>` : ''}
+                                ${isWhoosterEnabled() && suspect.name ? `
+                                <button onclick="event.stopPropagation(); openWhoosterPanel('${(suspect.name.split(' ')[0]||'').replace(/'/g,"\\'")}', '${(suspect.name.split(' ').slice(1).join(' ')||'').replace(/'/g,"\\'")}', '')" class="px-4 py-2 bg-fuchsia-500/20 hover:bg-fuchsia-500/30 border border-fuchsia-500 rounded-lg text-fuchsia-400 transition flex items-center gap-2">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                                    Search Whooster
+                                </button>` : ''}
                                 <button onclick="deleteSuspect(${index})" class="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500 rounded-lg text-red-500 transition">
                                     Delete
                                 </button>
@@ -15974,6 +15994,9 @@
             if (window.electronAPI && window.electronAPI.accurintSetVisible) {
                 window.electronAPI.accurintSetVisible(false);
             }
+            if (window.electronAPI && window.electronAPI.whoosterSetVisible) {
+                window.electronAPI.whoosterSetVisible(false);
+            }
         });
 
         function renderTloButton(firstName, lastName, state) {
@@ -16120,6 +16143,141 @@
             return `<button onclick="event.stopPropagation(); openAccurintPanel('${fn}', '${ln}', '${st}')" class="px-3 py-1.5 text-xs rounded-lg bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-blue-400 font-medium transition-colors inline-flex items-center gap-1.5" title="Search LexisNexis Accurint">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                 Search Accurint
+            </button>`;
+        }
+
+        /* ── Whooster Panel ──────────────────────────────────────── */
+        let whoosterPanelOpen = false;
+        let whoosterPanelExpanded = false;
+
+        function isWhoosterEnabled() {
+            return localStorage.getItem('whoosterEnabled') === 'true';
+        }
+
+        function openWhoosterPanel(firstName, lastName, state, dob) {
+            if (!window.electronAPI || !window.electronAPI.whoosterSetBounds) return;
+            firstName = (firstName || '').trim();
+            lastName = (lastName || '').trim();
+
+            let panel = document.getElementById('whoosterPanel');
+            if (!panel) {
+                panel = document.createElement('div');
+                panel.id = 'whoosterPanel';
+                panel.className = 'fixed top-0 right-0 h-full z-[9997] transition-transform duration-300 translate-x-full';
+                panel.style.width = '560px';
+                panel.innerHTML = `
+                    <div class="h-full flex flex-col" style="background:rgba(10,15,28,0.98);border-left:1px solid rgba(217,70,239,0.3);">
+                        <div class="flex items-center justify-between px-5 py-3 border-b border-fuchsia-500/20" style="background:rgba(217,70,239,0.08);">
+                            <div class="flex items-center gap-3">
+                                <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:rgba(217,70,239,0.15);">
+                                    <svg class="w-5 h-5 text-fuchsia-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                                </div>
+                                <div>
+                                    <h3 class="text-sm font-bold text-white tracking-wide">Whooster</h3>
+                                    <p id="whoosterPanelNameLabel" class="text-xs text-fuchsia-400 font-mono"></p>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <button onclick="toggleWhoosterExpand()" id="whoosterExpandBtn" title="Expand panel" class="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-fuchsia-400 transition">
+                                    <svg id="whoosterExpandIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+                                </button>
+                                <button onclick="whoosterOpenExternal()" title="Open in browser" class="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-fuchsia-400 transition">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                </button>
+                                <button onclick="closeWhoosterPanel()" class="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="whoosterBrowserArea" class="flex-1 relative">
+                            <!-- BrowserView overlays here -->
+                        </div>
+                    </div>`;
+                document.body.appendChild(panel);
+            }
+
+            const label = document.getElementById('whoosterPanelNameLabel');
+            if (label) label.textContent = (firstName || lastName) ? `${firstName} ${lastName}`.trim() : 'Search';
+
+            requestAnimationFrame(() => {
+                panel.classList.remove('translate-x-full');
+                whoosterPanelOpen = true;
+                setTimeout(() => reportWhoosterBounds(), 320);
+            });
+
+            if (firstName || lastName) {
+                setTimeout(() => {
+                    window.electronAPI.whoosterSearchPerson({ firstName, lastName, state, dob });
+                }, 500);
+            }
+        }
+
+        function closeWhoosterPanel() {
+            const panel = document.getElementById('whoosterPanel');
+            if (panel) {
+                panel.classList.add('translate-x-full');
+                whoosterPanelOpen = false;
+                whoosterPanelExpanded = false;
+                panel.style.width = '560px';
+                panel.style.left = '';
+                if (window.electronAPI && window.electronAPI.whoosterSetVisible) {
+                    window.electronAPI.whoosterSetVisible(false);
+                }
+            }
+        }
+
+        function reportWhoosterBounds() {
+            if (!whoosterPanelOpen) return;
+            const area = document.getElementById('whoosterBrowserArea');
+            if (!area || !window.electronAPI || !window.electronAPI.whoosterSetBounds) return;
+            const rect = area.getBoundingClientRect();
+            window.electronAPI.whoosterSetBounds({
+                x: Math.round(rect.x),
+                y: Math.round(rect.y),
+                width: Math.round(rect.width),
+                height: Math.round(rect.height)
+            });
+            window.electronAPI.whoosterSetVisible(true);
+        }
+
+        function toggleWhoosterExpand() {
+            const panel = document.getElementById('whoosterPanel');
+            if (!panel) return;
+            whoosterPanelExpanded = !whoosterPanelExpanded;
+            const icon = document.getElementById('whoosterExpandIcon');
+            if (whoosterPanelExpanded) {
+                panel.style.width = 'calc(100vw - 256px)';
+                panel.style.left = '256px';
+                panel.style.right = '0';
+                if (icon) icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 9L4 4m0 0v4m0-4h4m7 11l5 5m0 0v-4m0 4h-4M9 15l-5 5m0 0h4m-4 0v-4m11-7l5-5m0 0h-4m4 0v4"/>';
+            } else {
+                panel.style.width = '560px';
+                panel.style.left = '';
+                panel.style.right = '0';
+                if (icon) icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>';
+            }
+            setTimeout(() => reportWhoosterBounds(), 50);
+        }
+
+        function whoosterOpenExternal() {
+            if (window.electronAPI && window.electronAPI.openExternalUrl) {
+                window.electronAPI.openExternalUrl('https://app.whooster.com/#/login');
+            }
+        }
+
+        window.addEventListener('resize', () => {
+            if (whoosterPanelOpen) reportWhoosterBounds();
+        });
+
+        function renderWhoosterButton(firstName, lastName, state) {
+            if (!isWhoosterEnabled()) return '';
+            if (!firstName && !lastName) return '';
+            const fn = (firstName||'').replace(/'/g, "\\'");
+            const ln = (lastName||'').replace(/'/g, "\\'");
+            const st = (state||'').replace(/'/g, "\\'");
+            return `<button onclick="event.stopPropagation(); openWhoosterPanel('${fn}', '${ln}', '${st}')" class="px-3 py-1.5 text-xs rounded-lg bg-fuchsia-500/15 hover:bg-fuchsia-500/25 border border-fuchsia-500/30 text-fuchsia-400 font-medium transition-colors inline-flex items-center gap-1.5" title="Search Whooster">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                Search Whooster
             </button>`;
         }
 
@@ -28229,6 +28387,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 { id: 'metaWarrant', label: 'META Warrant Parser', icon: 'M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z', desc: 'Parse META (Facebook/Instagram) warrant returns — account, messages, photos, IP activity' },
                 { id: 'kikWarrant', label: 'KIK Warrant Parser', icon: 'M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z', desc: 'Parse KIK Messenger warrant returns — messages, contacts, sessions, groups' },
                 { id: 'snapchatWarrant', label: 'Snapchat Warrant Parser', icon: 'M12 2C8.5 2 6 4.5 6 8c0 1.5.3 3 .8 4.2-.5.3-1.3.5-2 .5-.4 0-.8.3-.8.7 0 .5.5.9 1.2 1.2.7.3 1.6.5 2.3.6-.1.5-.5 1-1.2 1.5-.7.4-1.6.7-2.3.9-.5.1-.8.4-.8.8 0 .8 1.7 1.4 3.5 1.7.1.4.3.8.6 1 .3.2.7.2 1.1.1.5-.1 1-.1 1.6 0 .6.1 1.2.4 1.9.9.7.5 1.4.7 2.1.7s1.4-.2 2.1-.7c.7-.5 1.3-.8 1.9-.9.6-.1 1.1-.1 1.6 0 .4.1.8.1 1.1-.1.3-.2.5-.6.6-1 1.8-.3 3.5-.9 3.5-1.7 0-.4-.3-.7-.8-.8-.7-.2-1.6-.5-2.3-.9-.7-.5-1.1-1-1.2-1.5.7-.1 1.6-.3 2.3-.6.7-.3 1.2-.7 1.2-1.2 0-.4-.4-.7-.8-.7-.7 0-1.5-.2-2-.5.5-1.2.8-2.7.8-4.2 0-3.5-2.5-6-6-6z', desc: 'Parse Snapchat warrant returns — conversations, geo, memories, devices, media' },
+                { id: 'xWarrant', label: 'X / Twitter Warrant Parser', icon: 'M4 4l16 16M20 4L4 20', desc: 'Parse X/Twitter productions — threads, tweets, records, media, users' },
                 { id: 'discordWarrant', label: 'Discord Warrant Parser', icon: 'M19.27 5.33C17.94 4.71 16.5 4.26 15 4a.09.09 0 00-.07.03c-.18.33-.39.76-.53 1.09a16.09 16.09 0 00-4.8 0c-.14-.34-.35-.76-.54-1.09-.01-.02-.04-.03-.07-.03-1.5.26-2.93.71-4.27 1.33-.01 0-.02.01-.03.02-2.72 4.07-3.47 8.03-3.1 11.95 0 .02.01.04.03.05 1.8 1.32 3.53 2.12 5.24 2.65.03.01.06 0 .07-.02.4-.55.76-1.13 1.07-1.74.02-.04 0-.08-.04-.09-.57-.22-1.11-.48-1.64-.78-.04-.02-.04-.08-.01-.11.11-.08.22-.17.33-.25.02-.02.05-.02.07-.01 3.44 1.57 7.15 1.57 10.55 0 .02-.01.05-.01.07.01.11.09.22.17.33.26.04.03.04.09-.01.11-.52.31-1.07.56-1.64.78-.04.01-.05.06-.04.09.32.61.68 1.19 1.07 1.74.03.01.06.02.09.01 1.72-.53 3.45-1.33 5.25-2.65.02-.01.03-.03.03-.05.44-4.53-.73-8.46-3.1-11.95-.01-.01-.02-.02-.04-.02zM8.52 14.91c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.84 2.12-1.89 2.12zm6.97 0c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.83 2.12-1.89 2.12z', desc: 'Parse Discord Data Package warrant returns — messages, sessions, IPs, devices, billing' },
                 { id: 'datapilot', label: 'Datapilot (Mobile Forensics)', icon: 'M9 17a4 4 0 01-2-7.5l1-3a4 4 0 017 0l1 3A4 4 0 0115 17H9zM12 12v9', desc: 'Parse mobile forensic CSV exports — calls, messages, contacts, GPS, apps, files + AI insights' },
                 { id: 'cellebrite', label: 'Cellebrite (Mobile Forensics)', icon: 'M11 2H9a2 2 0 00-2 2v16a2 2 0 002 2h6a2 2 0 002-2V4a2 2 0 00-2-2h-2M11 18h2', desc: 'Parse raw UFED filesystem extractions (.ufdx) — device, apps, contacts, calls, SMS/MMS, accounts, Wi-Fi' },
@@ -37470,6 +37629,37 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     <div class="glass-card p-6 rounded-xl">
                         <div class="text-center text-red-400">
                             <p class="text-lg font-semibold mb-2">Snapchat Warrant Parser Not Loaded</p>
+                            <p class="text-sm text-gray-400">Please check that all module files are properly installed.</p>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function renderXWarrantTab() {
+            return `
+                <div id="x-warrant-tab-container" style="height: calc(100vh - 220px);"></div>
+            `;
+        }
+
+        function initializeXWarrant() {
+            if (window.XWarrantModule) {
+                window.xWarrantModule = new XWarrantModule(
+                    String(currentCase.id),
+                    String(currentCase.caseNumber || currentCase.id),
+                    currentCase.title || currentCase.name || currentCase.caseNumber
+                );
+                window.xWarrantModule.init('x-warrant-tab-container').then(() => {
+                    window.xWarrantUI = window.xWarrantModule.ui;
+                }).catch(err => {
+                    console.error('X Warrant init error:', err);
+                });
+            } else {
+                console.error('X Warrant module not loaded');
+                document.getElementById('x-warrant-tab-container').innerHTML = `
+                    <div class="glass-card p-6 rounded-xl">
+                        <div class="text-center text-red-400">
+                            <p class="text-lg font-semibold mb-2">X / Twitter Warrant Parser Not Loaded</p>
                             <p class="text-sm text-gray-400">Please check that all module files are properly installed.</p>
                         </div>
                     </div>

@@ -2,31 +2,65 @@
 // ---------------------------------------------------------------------------
 // Supervisor Link — investigator (Project V.I.P.E.R.) side of the push bridge.
 //
-// Lives in the Electron MAIN process. Opens an AES-256-GCM encrypted
-// WebSocket session to the V.I.P.E.R. LAN node as role "investigator", then:
+// Lives in the Electron MAIN process. Opens a mutually-authenticated,
+// forward-secret WebSocket session to the V.I.P.E.R. LAN node as role
+// "investigator" (protocol v2), then:
 //   • discovers the live roster of online supervisor machines
 //   • pushes datasets (stats snapshot / case-status digest) and OPS plan PDFs
-//     addressed to a chosen supervisor
 //   • forwards "decision" events (approve / return) back to the renderer
 //
-// The renderer drives everything through ipcRenderer.invoke; identity
-// (officer name / badge) is read from renderer localStorage and passed in,
-// since the main process cannot see localStorage.
+// Security (v2): this machine has a persistent ECDSA P-256 device key
+// (userData). deviceId = key fingerprint. The node signs its ephemeral key
+// with its static key; we PIN the node (TOFU) and refuse a changed node key.
+// Session keys are derived via ephemeral ECDH (forward secrecy).
 //
-// Wire protocol + crypto params MUST match the LAN node and supervisor app.
+// Crypto + wire protocol MUST match the LAN node and supervisor app.
 // ---------------------------------------------------------------------------
 'use strict';
 
+const fs = require('node:fs');
+const path = require('node:path');
 const WebSocket = require('ws');
-const { BrowserWindow } = require('electron');
-const { deriveKey, encryptJSON, decryptJSON } = require('./supervisor-link-crypto');
+const { app, BrowserWindow } = require('electron');
+const X = require('./supervisor-link-crypto');
 
 const DEFAULT_URL = process.env.VIPER_SUPERVISOR_LAN_URL || 'ws://127.0.0.1:7071';
-const DEFAULT_PSK = process.env.VIPER_SUPERVISOR_LAN_PSK || 'VIPER-LAN-PSK-2025';
 const RPC_TIMEOUT = 10000;
 const CONNECT_TIMEOUT = 8000;
 
-let client = null; // active SupervisorLinkClient (one node at a time)
+let client = null;       // active SupervisorLinkClient (one node at a time)
+let store = null;        // persisted { deviceKey, pins:{url:nodeId} }
+
+// ── persistent device key + node pins ──────────────────────────────────────
+function storePath() {
+  try { return path.join(app.getPath('userData'), 'supervisor-link-identity.json'); }
+  catch { return path.join(__dirname, 'supervisor-link-identity.json'); }
+}
+function loadStore() {
+  if (store) return store;
+  try {
+    const raw = fs.readFileSync(storePath(), 'utf8');
+    store = JSON.parse(raw);
+  } catch { store = null; }
+  if (!store || !store.deviceKey || !store.deviceKey.publicJwk) {
+    const kp = X.generateKeyPair();
+    store = { deviceKey: kp, pins: {} };
+    saveStore();
+  }
+  if (!store.pins) store.pins = {};
+  return store;
+}
+function saveStore() {
+  try { fs.writeFileSync(storePath(), JSON.stringify(store, null, 2), 'utf8'); } catch (_) {}
+}
+function deviceIdentity() {
+  const s = loadStore();
+  return {
+    deviceId: X.deviceIdFromJwk(s.deviceKey.publicJwk, 'DEV'),
+    publicJwk: s.deviceKey.publicJwk,
+    privateJwk: s.deviceKey.privateJwk,
+  };
+}
 
 function broadcastToRenderer(channel, payload) {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -35,56 +69,48 @@ function broadcastToRenderer(channel, payload) {
 }
 
 class SupervisorLinkClient {
-  constructor(url, psk, identity) {
+  constructor(url, identity) {
     this.url = url;
-    this.psk = psk;
-    this.identity = identity; // { name, badge, deviceId, unit }
+    this.identity = identity; // { name, badge, unit }
     this.ws = null;
     this.key = null;
     this.seq = 0;
     this.pending = new Map();
     this.state = 'idle';
     this.session = null;
+    this.lastError = null;
     this._connectWaiters = [];
   }
 
   sameIdentity(identity) {
     return this.identity
-      && this.identity.deviceId === identity.deviceId
       && this.identity.name === identity.name
-      && this.identity.badge === identity.badge;
+      && this.identity.badge === identity.badge
+      && this.identity.unit === identity.unit;
   }
 
-  isReady() {
-    return this.state === 'connected' && this.ws && this.ws.readyState === 1 && this.key;
-  }
+  isReady() { return this.state === 'connected' && this.ws && this.ws.readyState === 1 && this.key; }
 
   connect() {
     if (this.isReady()) return Promise.resolve(true);
-    if (this.state === 'connecting' || this.state === 'handshaking') {
-      return new Promise((resolve, reject) => this._connectWaiters.push({ resolve, reject }));
-    }
-    this.state = 'connecting';
     return new Promise((resolve, reject) => {
       this._connectWaiters.push({ resolve, reject });
+      if (this.state === 'connecting' || this.state === 'handshaking') return;
+      this.state = 'connecting';
 
       let settled = false;
       const fail = (err) => {
         if (settled) return;
         settled = true;
+        this.lastError = String(err && err.message || err);
         this._flushWaiters(err);
         try { this.ws && this.ws.close(); } catch (_) {}
       };
       const timer = setTimeout(() => fail(new Error('CONNECT_TIMEOUT')), CONNECT_TIMEOUT);
 
       let ws;
-      try {
-        ws = new WebSocket(this.url, { maxPayload: 64 * 1024 * 1024 });
-      } catch (e) {
-        clearTimeout(timer);
-        this.state = 'offline';
-        return fail(e);
-      }
+      try { ws = new WebSocket(this.url, { maxPayload: 64 * 1024 * 1024 }); }
+      catch (e) { clearTimeout(timer); this.state = 'offline'; return fail(e); }
       this.ws = ws;
 
       ws.on('open', () => { this.state = 'handshaking'; });
@@ -95,22 +121,39 @@ class SupervisorLinkClient {
 
         if (msg.t === 'hello') {
           try {
-            this.key = deriveKey(this.psk, Buffer.from(msg.salt, 'hex'));
-            const auth = encryptJSON(this.key, {
-              role: 'investigator',
-              name: this.identity.name,
-              badge: this.identity.badge,
-              deviceId: this.identity.deviceId,
-              unit: this.identity.unit,
-              nonce: msg.nonce,
+            // (a) verify node proof + pin the node key (TOFU).
+            const nodeEphThumb = X.jwkThumbprint(msg.nodeEphJwk);
+            const nodeOk = X.verifyUtf8(msg.nodePubJwk, X.nodeProofString(msg.challenge, nodeEphThumb), msg.nodeSig);
+            const derivedNodeId = X.deviceIdFromJwk(msg.nodePubJwk, 'NODE');
+            if (!nodeOk || derivedNodeId !== msg.nodeId) { clearTimeout(timer); return fail(new Error('NODE_PROOF_FAILED')); }
+            const s = loadStore();
+            const pinned = s.pins[this.url];
+            if (pinned && pinned !== msg.nodeId) { clearTimeout(timer); return fail(new Error('NODE_PIN_MISMATCH')); }
+            if (!pinned) { s.pins[this.url] = msg.nodeId; saveStore(); }
+
+            // (b) device key + ephemeral ECDH key + transcript signature.
+            const id = deviceIdentity();
+            const eph = X.generateKeyPair();
+            const clientEphThumb = X.jwkThumbprint(eph.publicJwk);
+            const proof = X.deviceProofString(msg.challenge, nodeEphThumb, clientEphThumb, id.deviceId, 'investigator');
+            const sig = X.signUtf8(id.privateJwk, proof);
+
+            // (c) session key + encrypted identity.
+            this.key = X.deriveSessionKey(eph.privateJwk, msg.nodeEphJwk, msg.challenge);
+            const enc = X.encryptJSON(this.key, {
+              name: this.identity.name, badge: this.identity.badge,
+              unit: this.identity.unit, nonce: msg.challenge,
             });
-            ws.send(JSON.stringify({ t: 'auth', ...auth }));
-          } catch (e) { fail(e); }
+            ws.send(JSON.stringify({
+              t: 'auth', v: 2, role: 'investigator',
+              deviceId: id.deviceId, devicePubJwk: id.publicJwk, clientEphJwk: eph.publicJwk, sig, enc,
+            }));
+          } catch (e) { clearTimeout(timer); fail(e); }
           return;
         }
 
         if (msg.t === 'auth-ok') {
-          try { this.session = decryptJSON(this.key, msg.iv, msg.data); } catch (_) {}
+          try { this.session = X.decryptJSON(this.key, msg.iv, msg.data); } catch (_) {}
           this.state = 'connected';
           settled = true;
           clearTimeout(timer);
@@ -118,28 +161,20 @@ class SupervisorLinkClient {
           return;
         }
 
-        if (msg.t === 'auth-fail') {
-          clearTimeout(timer);
-          return fail(new Error('AUTH_FAILED:' + (msg.reason || 'UNKNOWN')));
-        }
+        if (msg.t === 'auth-fail') { clearTimeout(timer); return fail(new Error('AUTH_FAILED:' + (msg.reason || 'UNKNOWN'))); }
 
         if (!this.key) return;
 
         if (msg.t === 'rpc-res') {
-          let res;
-          try { res = decryptJSON(this.key, msg.iv, msg.data); } catch { return; }
-          const p = this.pending.get(res.id);
-          if (!p) return;
-          clearTimeout(p.timer);
-          this.pending.delete(res.id);
-          if (res.ok) p.resolve(res.result);
-          else p.reject(new Error(res.error || 'RPC_ERROR'));
+          let res; try { res = X.decryptJSON(this.key, msg.iv, msg.data); } catch { return; }
+          const p = this.pending.get(res.id); if (!p) return;
+          clearTimeout(p.timer); this.pending.delete(res.id);
+          res.ok ? p.resolve(res.result) : p.reject(new Error(res.error || 'RPC_ERROR'));
           return;
         }
 
         if (msg.t === 'event') {
-          let e;
-          try { e = decryptJSON(this.key, msg.iv, msg.data); } catch { return; }
+          let e; try { e = X.decryptJSON(this.key, msg.iv, msg.data); } catch { return; }
           broadcastToRenderer('supervisor-link:event', e);
           return;
         }
@@ -148,14 +183,10 @@ class SupervisorLinkClient {
       ws.on('error', () => { /* close handles state */ });
 
       ws.on('close', () => {
-        this.key = null;
-        this.session = null;
+        this.key = null; this.session = null;
         const wasReady = this.state === 'connected';
         this.state = 'offline';
-        for (const [, p] of this.pending) {
-          clearTimeout(p.timer);
-          p.reject(new Error('LAN_DISCONNECTED'));
-        }
+        for (const [, p] of this.pending) { clearTimeout(p.timer); p.reject(new Error('LAN_DISCONNECTED')); }
         this.pending.clear();
         if (!settled) fail(new Error('CLOSED_BEFORE_HANDSHAKE'));
         if (wasReady) broadcastToRenderer('supervisor-link:state', { state: 'offline' });
@@ -165,62 +196,54 @@ class SupervisorLinkClient {
 
   _flushWaiters(err, value) {
     const waiters = this._connectWaiters.splice(0);
-    for (const w of waiters) {
-      if (err) w.reject(err);
-      else w.resolve(value);
-    }
+    for (const w of waiters) { if (err) w.reject(err); else w.resolve(value); }
   }
 
   rpc(kind, payload) {
     if (!this.isReady()) return Promise.reject(new Error('LAN_OFFLINE'));
     const id = ++this.seq;
-    const env = encryptJSON(this.key, { id, kind, payload });
+    const env = X.encryptJSON(this.key, { id, kind, payload });
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error('RPC_TIMEOUT'));
-      }, RPC_TIMEOUT);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('RPC_TIMEOUT')); }, RPC_TIMEOUT);
       this.pending.set(id, { resolve, reject, timer });
       try { this.ws.send(JSON.stringify({ t: 'rpc', ...env })); }
       catch (e) { clearTimeout(timer); this.pending.delete(id); reject(e); }
     });
   }
 
-  close() {
-    try { this.ws && this.ws.close(); } catch (_) {}
-  }
+  close() { try { this.ws && this.ws.close(); } catch (_) {} }
 }
 
-// Ensure a live client matching the requested endpoint + identity.
 async function ensureClient(opts = {}) {
   const url = opts.url || DEFAULT_URL;
-  const psk = opts.psk || DEFAULT_PSK;
   const identity = opts.identity || {};
-  if (!identity.name || !identity.badge || !identity.deviceId) {
-    throw new Error('IDENTITY_REQUIRED');
-  }
-  // Rebuild the client if endpoint or identity changed.
-  if (client && (client.url !== url || client.psk !== psk || !client.sameIdentity(identity))) {
-    client.close();
-    client = null;
-  }
-  if (!client) client = new SupervisorLinkClient(url, psk, identity);
+  if (!identity.name || !identity.badge) throw new Error('IDENTITY_REQUIRED');
+  if (client && (client.url !== url || !client.sameIdentity(identity))) { client.close(); client = null; }
+  if (!client) client = new SupervisorLinkClient(url, identity);
   await client.connect();
   return client;
 }
 
 function registerIpc(ipcMain) {
-  ipcMain.handle('supervisor-link:status', async () => ({
-    state: client ? client.state : 'idle',
-    url: client ? client.url : DEFAULT_URL,
-    session: client ? client.session : null,
-  }));
+  ipcMain.handle('supervisor-link:status', async () => {
+    const id = deviceIdentity();
+    const s = loadStore();
+    const url = client ? client.url : DEFAULT_URL;
+    return {
+      state: client ? client.state : 'idle',
+      url,
+      deviceId: id.deviceId,
+      nodePin: s.pins[url] || null,
+      session: client ? client.session : null,
+      lastError: client ? client.lastError : null,
+    };
+  });
 
   ipcMain.handle('supervisor-link:discover', async (_e, opts = {}) => {
     try {
       const c = await ensureClient(opts);
       const roster = await c.rpc('get:roster');
-      return { ok: true, state: c.state, roster: roster || [] };
+      return { ok: true, state: c.state, roster: roster || [], deviceId: deviceIdentity().deviceId };
     } catch (e) {
       return { ok: false, error: String(e && e.message || e), roster: [] };
     }
@@ -230,10 +253,7 @@ function registerIpc(ipcMain) {
     try {
       const c = await ensureClient(opts);
       const ack = await c.rpc('action:push', {
-        to: opts.to,
-        dtype: opts.dtype,
-        manifest: opts.manifest || {},
-        body: opts.body,
+        to: opts.to, dtype: opts.dtype, manifest: opts.manifest || {}, body: opts.body,
       });
       return { ok: true, ...ack };
     } catch (e) {
@@ -242,6 +262,16 @@ function registerIpc(ipcMain) {
   });
 
   ipcMain.handle('supervisor-link:disconnect', async () => {
+    if (client) { client.close(); client = null; }
+    return { ok: true };
+  });
+
+  // Forget the pinned node key for the current/given URL (re-TOFU next time).
+  ipcMain.handle('supervisor-link:reset-pin', async (_e, opts = {}) => {
+    const s = loadStore();
+    const url = opts.url || (client ? client.url : DEFAULT_URL);
+    delete s.pins[url];
+    saveStore();
     if (client) { client.close(); client = null; }
     return { ok: true };
   });
@@ -256,7 +286,7 @@ function registerIpc(ipcMain) {
     }
   });
 
-  console.log('[SupervisorLink] IPC registered (LAN node default:', DEFAULT_URL, ')');
+  console.log('[SupervisorLink] IPC registered (node:', DEFAULT_URL, '· deviceId:', deviceIdentity().deviceId, ')');
 }
 
 // Compose a compact, readable operations-plan PDF from the supplied fields.
@@ -289,9 +319,7 @@ async function buildOpsPdf(ops) {
     if (line) lines.push(line);
     return lines.length ? lines : [''];
   };
-  const ensure = (need) => {
-    if (y - need < margin) { page = doc.addPage([612, 792]); y = 792 - margin; }
-  };
+  const ensure = (need) => { if (y - need < margin) { page = doc.addPage([612, 792]); y = 792 - margin; } };
   const text = (s, opts = {}) => {
     const f = opts.bold ? bold : font;
     const size = opts.size || 11;
@@ -311,7 +339,6 @@ async function buildOpsPdf(ops) {
     gap(4);
   };
 
-  // Header band
   page.drawRectangle({ x: 0, y: 792 - 8, width: 612, height: 8, color: accent });
   text('OPERATIONS PLAN', { bold: true, size: 20 });
   text('V.I.P.E.R. — Submitted for Supervisor Approval', { size: 10, color: dim });

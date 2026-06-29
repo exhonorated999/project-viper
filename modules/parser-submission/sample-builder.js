@@ -13,9 +13,9 @@
  *   - Per-format `structure` blocks contain only counts, header names,
  *     key paths, format inferences — NEVER raw values.
  *
- * Envelope schema (wire-compatible with Scout v1):
+ * Envelope schema (wire-compatible with Scout v1; v3 adds robust PDF text):
  *   {
- *     schema_version: 1,
+ *     schema_version: 3,
  *     scout_version:  "<viper version>",
  *     submitted_at:   "<ISO 8601 UTC>",
  *     provider_hint:  "T-Mobile CDR",
@@ -27,6 +27,13 @@
  *                       format_counts: { json: 12, html: 3, ... } },
  *     tree: [ { path, size, ext, format, structure }, ... ]
  *   }
+ *
+ * PDF `structure` (schema v3) additionally carries: extraction_method
+ * ('pdf-parse'|'mupdf'|'ocr'), extraction_quality, pdfparse_garble (0-1),
+ * and structure_skeleton_redacted — the full multi-page form layout with
+ * PII tokenized and free-text narratives collapsed to <NARRATIVE …>.  Broken
+ * ToUnicode/Type3 fonts are recovered via MuPDF→Tesseract OCR fallback so the
+ * sample matches what the runtime importer will feed the parser.
  */
 
 const fs = require('fs');
@@ -34,7 +41,7 @@ const path = require('path');
 
 // ─── Limits & knobs (mirror Scout) ─────────────────────────────────────────
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const PER_FILE_BUDGET_BYTES = 64 * 1024 * 1024;     // 64 MB
 const MAX_FILES = 50_000;
 const MAX_STRUCTURE_DEPTH = 32;
@@ -54,6 +61,18 @@ const PDF_TOP_VERTICAL_LABELS = 60;
 const PDF_TOP_SHAPES = 30;
 const PDF_TOP_FONTS = 20;
 const PDF_EXCERPT_CHARS = 1500;
+
+// PDF robust-extraction knobs (schema v3).  Scout runs in the Electron main
+// process, so it shares the same pdf-parse / mupdf / tesseract.js stack as
+// the runtime `extract-pdf-text` importer.  When pdf-parse yields garbled
+// text (broken ToUnicode CMap / Type3 fonts — common in RMS exports), we
+// fall back to MuPDF structured text and then full Tesseract OCR so the
+// emitted structural sample matches what the runtime parser will actually
+// receive.
+const PDF_SKELETON_MAX_CHARS = 24000;        // Full redacted form-layout budget.
+const PDF_OCR_MAX_PAGES = 12;                // Cap pages OCR'd per PDF (perf).
+const PDF_OCR_PAGE_TIMEOUT_MS = 25000;       // Per-page OCR budget.
+const PDF_GARBLE_THRESHOLD = 0.12;           // Garble-score ratio that triggers fallback.
 
 // ─── Path sanitization ─────────────────────────────────────────────────────
 
@@ -650,16 +669,180 @@ function _redactExcerpt(s) {
 }
 
 /**
- * PDF (async, schema v2) — full text-pass fingerprint.  Runs pdf-parse,
- * extracts headings / labels / line-shapes / per-page metrics.  No raw
- * values leave this function: only schema tokens (label text, heading
- * text, shape histograms, redacted excerpts) and counts.
+ * Score how "garbled" extracted PDF text is, 0 (clean) → 1 (junk).
+ * Broken ToUnicode maps produce partial corruption that still contains some
+ * real keywords (so a naive readable-keyword test passes) but mangles most
+ * words: "BURGLARY"→"BIJRGLARY", "PROPERTY"→"PROPERW", "COUNTY"→"couN'l'v".
+ * We sample alphabetic tokens and flag ones that look impossible for English:
+ *   - punctuation (apostrophe/backtick) embedded between letters
+ *   - length ≥ 4 with zero vowels
+ *   - ≥ 3 case alternations within the token (cAsE sWaPs)
+ */
+function _pdfGarbleScore(text) {
+    const tokens = text.match(/[A-Za-z][A-Za-z'`]{2,}/g) || [];
+    if (tokens.length < 12) return 0;        // too little to judge
+    let weird = 0;
+    for (const tok of tokens) {
+        const core = tok.replace(/^['`]+|['`]+$/g, '');
+        if (/[A-Za-z]['`][A-Za-z]/.test(core)) { weird++; continue; }
+        // lowercase→UPPERCASE transition mid-token: clean text and Title-case
+        // proper nouns ([A-Z][a-z]) never do this — strong garble signal.
+        if (/[a-z][A-Z]/.test(core)) { weird++; continue; }
+        const letters = core.replace(/[^A-Za-z]/g, '');
+        if (letters.length >= 4 && !/[aeiouAEIOU]/.test(letters)) { weird++; continue; }
+        let swaps = 0;
+        for (let i = 1; i < letters.length; i++) {
+            const a = /[A-Z]/.test(letters[i - 1]);
+            const b = /[A-Z]/.test(letters[i]);
+            if (a !== b) swaps++;
+        }
+        if (swaps >= 3) { weird++; continue; }
+    }
+    return weird / tokens.length;
+}
+
+/**
+ * Heuristic: is this a free-text narrative/prose line (vs a form label/value)?
+ * Long, space-rich, and lowercase-dominant.  RMS form fields are short and
+ * uppercase-heavy, so this cleanly separates the narrative body.
+ */
+function _isProseLine(line) {
+    if (line.length <= 60) return false;
+    const spaces = (line.match(/ /g) || []).length;
+    if (spaces < 8) return false;
+    const lower = (line.match(/[a-z]/g) || []).length;
+    const upper = (line.match(/[A-Z]/g) || []).length;
+    return lower > upper;
+}
+
+/**
+ * Collapse runs of narrative prose into `<NARRATIVE ~N chars>` placeholders.
+ * Honors the "no narratives uploaded" privacy promise while keeping the form
+ * skeleton (section headers + field labels in order) intact so a parser can
+ * be authored from the layout alone.
+ */
+function _collapseNarratives(text) {
+    const lines = text.split('\n');
+    const out = [];
+    let buf = [];
+    let bufChars = 0;
+    const flush = () => {
+        if (!buf.length) return;
+        if (bufChars >= 200) out.push(`<NARRATIVE ~${bufChars} chars>`);
+        else out.push(...buf);
+        buf = [];
+        bufChars = 0;
+    };
+    for (const ln of lines) {
+        if (_isProseLine(ln)) { buf.push(ln); bufChars += ln.length; }
+        else { flush(); out.push(ln); }
+    }
+    flush();
+    return out.join('\n');
+}
+
+/**
+ * Build a privacy-safe, full-document structural skeleton: narratives
+ * collapsed, then PII tokenized via _redactExcerpt.  Capped to budget.
+ */
+function _redactStructural(text) {
+    return _redactExcerpt(_collapseNarratives(text)).slice(0, PDF_SKELETON_MAX_CHARS);
+}
+
+/**
+ * Robust PDF text extraction mirroring the runtime `extract-pdf-text`
+ * pipeline: pdf-parse → (if garbled) MuPDF structured text → (if still
+ * garbled) Tesseract OCR.  Returns the best text plus the method used so the
+ * parser author knows whether to expect clean text-layer output or OCR.
+ *
+ * @param {Buffer} buf       PDF bytes.
+ * @param {object} parsed    Existing pdf-parse result (avoids re-parsing).
+ * @param {function} [onOcrPage]  Optional (page, total) progress callback.
+ * @returns {Promise<{text,numpages,info,method,quality,pdfparse_garble}>}
+ */
+async function _extractPdfTextRobust(buf, parsed, onOcrPage) {
+    const ppText = (parsed && parsed.text) || '';
+    const info = (parsed && parsed.info) || {};
+    let numpages = (parsed && parsed.numpages) || 0;
+
+    const ppGarble = _pdfGarbleScore(ppText);
+    const ppLongLines = ppText.split('\n').filter(l => l.length > 60);
+    const ppSpacesStripped = ppLongLines.length >= 3 &&
+        ppLongLines.filter(l => (l.match(/ /g) || []).length / l.length < 0.02).length > ppLongLines.length * 0.2;
+    const ppGood = ppText.trim().length >= 20 && ppGarble <= PDF_GARBLE_THRESHOLD && !ppSpacesStripped;
+
+    if (ppGood) {
+        return { text: ppText, numpages, info, method: 'pdf-parse', quality: 'clean', pdfparse_garble: +ppGarble.toFixed(3) };
+    }
+
+    // --- Fallback: MuPDF structured text (bypasses pdf-parse quirks) ---
+    let doc = null;
+    let mupdf = null;
+    try {
+        mupdf = await import('mupdf');
+        doc = mupdf.Document.openDocument(buf, 'application/pdf');
+        numpages = doc.countPages() || numpages;
+        let muText = '';
+        for (let i = 0; i < numpages; i++) {
+            muText += doc.loadPage(i).toStructuredText().asText() + '\n';
+        }
+        if (muText.trim().length >= 20 && _pdfGarbleScore(muText) <= PDF_GARBLE_THRESHOLD) {
+            return { text: muText, numpages, info, method: 'mupdf', quality: 'clean', pdfparse_garble: +ppGarble.toFixed(3) };
+        }
+
+        // --- Fallback: Tesseract OCR (renders glyphs, ignores font encoding) ---
+        const Tesseract = (await import('tesseract.js')).default;
+        const ocrPages = Math.min(numpages, PDF_OCR_MAX_PAGES);
+        let ocrText = '';
+        for (let i = 0; i < ocrPages; i++) {
+            if (typeof onOcrPage === 'function') { try { onOcrPage(i + 1, ocrPages); } catch {} }
+            const page = doc.loadPage(i);
+            const matrix = mupdf.Matrix.scale(300 / 72, 300 / 72);
+            const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false, true);
+            const pngBuf = pixmap.asPNG();
+            const rec = await Promise.race([
+                Tesseract.recognize(Buffer.from(pngBuf), 'eng'),
+                new Promise((_, rej) => setTimeout(() => rej(new Error('ocr timeout')), PDF_OCR_PAGE_TIMEOUT_MS)),
+            ]).catch(() => null);
+            if (rec && rec.data && rec.data.text) ocrText += rec.data.text + '\n';
+        }
+        ocrText = ocrText
+            .replace(/\u00a9/g, '0')
+            .replace(/\(([A-Z])0\)/g, '($1O)')
+            .replace(/[\u2018\u2019]/g, "'");
+        if (ocrText.trim().length >= 20) {
+            return {
+                text: ocrText, numpages, info, method: 'ocr',
+                quality: ocrPages < numpages ? 'ocr-partial' : 'ocr',
+                pdfparse_garble: +ppGarble.toFixed(3),
+            };
+        }
+    } catch (err) {
+        // Fallbacks unavailable/failed — fall through to whatever pdf-parse gave.
+        return {
+            text: ppText, numpages, info, method: 'pdf-parse',
+            quality: 'garbled', pdfparse_garble: +ppGarble.toFixed(3),
+            fallback_error: String((err && err.message) || err),
+        };
+    }
+
+    // Everything tried; return pdf-parse text flagged as garbled.
+    return { text: ppText, numpages, info, method: 'pdf-parse', quality: 'garbled', pdfparse_garble: +ppGarble.toFixed(3) };
+}
+
+/**
+ * PDF (async, schema v3) — full text-pass fingerprint.  Runs pdf-parse with
+ * MuPDF/OCR fallback for broken-font reports, extracts headings / labels /
+ * line-shapes / per-page metrics, and emits a full redacted form skeleton.
+ * No raw values leave this function: only schema tokens (label text, heading
+ * text, shape histograms, narrative-collapsed redacted layout) and counts.
  *
  * @param {Buffer} buf      PDF bytes.
  * @param {object} syncShape inspectPdf() result to merge into.
+ * @param {function} [onOcrPage] optional (page,total) OCR progress callback.
  * @returns {Promise<object>} enriched structure object.
  */
-async function inspectPdfTextAsync(buf, syncShape) {
+async function inspectPdfTextAsync(buf, syncShape, onOcrPage) {
     const base = { ...syncShape, text_extracted: false };
     if (!syncShape || syncShape.valid_header === false) return base;
 
@@ -673,15 +856,24 @@ async function inspectPdfTextAsync(buf, syncShape) {
             ),
         ]);
     } catch (err) {
-        return { ...base, text_error: String((err && err.message) || err) };
+        parsed = { text: '', numpages: syncShape.page_count || 0, info: {}, _ppError: String((err && err.message) || err) };
     }
 
-    const text = parsed.text || '';
-    const numpages = parsed.numpages || syncShape.page_count || 0;
-    const info = parsed.info || {};
+    // Robust extraction with MuPDF/OCR fallback for broken-font PDFs.
+    const extracted = await _extractPdfTextRobust(buf, parsed, onOcrPage);
+    const text = extracted.text || '';
+    const numpages = extracted.numpages || syncShape.page_count || 0;
+    const info = extracted.info || {};
 
     if (!text || text.trim().length < 20) {
-        return { ...base, text_chars: text.length, scanned_likely: true };
+        return {
+            ...base,
+            text_chars: text.length,
+            scanned_likely: true,
+            extraction_method: extracted.method,
+            extraction_quality: extracted.quality,
+            text_error: parsed._ppError || undefined,
+        };
     }
 
     const lines = text.split('\n').map(l => l.replace(/[ \t]+/g, ' ').trim()).filter(Boolean);
@@ -775,8 +967,10 @@ async function inspectPdfTextAsync(buf, syncShape) {
         .slice(0, PDF_TOP_VERTICAL_LABELS)
         .map(([label, count]) => ({ label, count }));
 
-    // --- Redacted excerpt (first PDF_EXCERPT_CHARS chars of page 1-ish) ---
+    // --- Redacted excerpt (first PDF_EXCERPT_CHARS chars — kept for back-compat) ---
     const excerpt = _redactExcerpt(text.slice(0, 2500)).slice(0, PDF_EXCERPT_CHARS);
+    // --- Full-document redacted form skeleton (all pages, narratives collapsed) ---
+    const skeleton = _redactStructural(text);
 
     return {
         ...base,
@@ -786,6 +980,9 @@ async function inspectPdfTextAsync(buf, syncShape) {
         text_lines_per_page: numpages ? Math.round(lines.length / numpages) : null,
         page_count: numpages,
         scanned_likely: lines.length < 5 && (syncShape.image_ops || 0) > 0,
+        extraction_method: extracted.method,
+        extraction_quality: extracted.quality,
+        pdfparse_garble: extracted.pdfparse_garble,
         pdf_info: {
             creator: info.Creator || null,
             producer: info.Producer || null,
@@ -795,6 +992,7 @@ async function inspectPdfTextAsync(buf, syncShape) {
         vertical_labels: verticalLabels,
         line_shapes: shapes,
         page_excerpt_redacted: excerpt,
+        structure_skeleton_redacted: skeleton,
     };
 }
 
@@ -1263,7 +1461,12 @@ async function buildSampleEnvelope(rootPath, opts = {}) {
             }
             try {
                 envelopeBytesRef.value -= approxEntrySize(entry);
-                entry.structure = await inspectPdfTextAsync(buf, entry.structure);
+                const onOcrPage = (typeof opts.onProgress === 'function')
+                    ? (page, total) => {
+                        try { opts.onProgress({ phase: 'pdf-ocr', file: i + 1, fileTotal: enrichTargets.length, page, pageTotal: total }); } catch {}
+                    }
+                    : null;
+                entry.structure = await inspectPdfTextAsync(buf, entry.structure, onOcrPage);
                 envelopeBytesRef.value += approxEntrySize(entry);
             } catch (err) {
                 entry.structure = {
@@ -1330,6 +1533,11 @@ module.exports = {
         inspectEml,
         inspectPdf,
         inspectText,
+        inspectPdfTextAsync,
+        _pdfGarbleScore,
+        _collapseNarratives,
+        _redactStructural,
+        _redactExcerpt,
         SCHEMA_VERSION,
         MAX_FILES,
         PER_FILE_BUDGET_BYTES,

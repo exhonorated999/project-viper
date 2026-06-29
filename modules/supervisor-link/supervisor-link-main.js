@@ -225,10 +225,10 @@ async function ensureClient(opts = {}) {
 }
 
 function registerIpc(ipcMain) {
-  ipcMain.handle('supervisor-link:status', async () => {
+  ipcMain.handle('supervisor-link:status', async (_e, opts = {}) => {
     const id = deviceIdentity();
     const s = loadStore();
-    const url = client ? client.url : DEFAULT_URL;
+    const url = opts.url || (client ? client.url : DEFAULT_URL);
     return {
       state: client ? client.state : 'idle',
       url,

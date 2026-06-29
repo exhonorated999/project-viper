@@ -20,11 +20,15 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
+const dgram = require('node:dgram');
 const WebSocket = require('ws');
 const { app, BrowserWindow } = require('electron');
 const X = require('./supervisor-link-crypto');
 
 const DEFAULT_URL = process.env.VIPER_SUPERVISOR_LAN_URL || 'ws://127.0.0.1:7071';
+const DISCOVERY_PORT = Number(process.env.VIPER_SUPERVISOR_DISCOVERY_PORT) || 7071;
+const DISCOVERY_MAGIC = 'VIPER_DISCOVER';
 const RPC_TIMEOUT = 10000;
 const CONNECT_TIMEOUT = 8000;
 
@@ -214,6 +218,69 @@ class SupervisorLinkClient {
   close() { try { this.ws && this.ws.close(); } catch (_) {} }
 }
 
+// ── UDP discovery (find Supervisor nodes on the LAN) ────────────────────────
+// Broadcasts a "VIPER_DISCOVER" datagram on every IPv4 interface's broadcast
+// address (plus the limited-broadcast 255.255.255.255). Supervisor nodes reply
+// with { magic:'VIPER_NODE', nodeId, wsPort, ... }; we map each reply's source
+// IP to ws://<ip>:<wsPort>. Returns a de-duplicated list of discovered nodes.
+function broadcastTargets() {
+  const targets = new Set(['255.255.255.255']);
+  const ifs = os.networkInterfaces();
+  for (const name of Object.keys(ifs)) {
+    for (const ni of ifs[name] || []) {
+      if (ni.family !== 'IPv4' || ni.internal) continue;
+      // Derive the subnet broadcast address: ip | ~netmask.
+      try {
+        const ip = ni.address.split('.').map(Number);
+        const mask = (ni.netmask || '255.255.255.0').split('.').map(Number);
+        const bc = ip.map((o, i) => (o & mask[i]) | (~mask[i] & 0xff)).join('.');
+        targets.add(bc);
+      } catch (_) { /* skip */ }
+    }
+  }
+  return [...targets];
+}
+
+function discoverNodes(timeoutMs = 1500) {
+  return new Promise((resolve) => {
+    let sock;
+    try { sock = dgram.createSocket({ type: 'udp4', reuseAddr: true }); }
+    catch (_) { return resolve([]); }
+    const found = new Map(); // url -> node info
+    let done = false;
+    const finish = () => {
+      if (done) return; done = true;
+      try { sock.close(); } catch (_) {}
+      resolve([...found.values()]);
+    };
+    sock.on('error', finish);
+    sock.on('message', (msg, rinfo) => {
+      try {
+        const j = JSON.parse(msg.toString('utf8'));
+        if (j && j.magic === 'VIPER_NODE' && j.wsPort) {
+          const url = `ws://${rinfo.address}:${j.wsPort}`;
+          found.set(url, {
+            url, address: rinfo.address, wsPort: j.wsPort,
+            nodeId: j.nodeId || null, serverId: j.serverId || null, name: j.name || null,
+          });
+        }
+      } catch (_) { /* ignore malformed */ }
+    });
+    sock.bind(() => {
+      try { sock.setBroadcast(true); } catch (_) {}
+      const payload = Buffer.from(DISCOVERY_MAGIC);
+      const send = () => {
+        for (const addr of broadcastTargets()) {
+          try { sock.send(payload, DISCOVERY_PORT, addr); } catch (_) {}
+        }
+      };
+      send();
+      setTimeout(send, 250); // second probe for reliability
+      setTimeout(finish, timeoutMs);
+    });
+  });
+}
+
 async function ensureClient(opts = {}) {
   const url = opts.url || DEFAULT_URL;
   const identity = opts.identity || {};
@@ -239,11 +306,32 @@ function registerIpc(ipcMain) {
     };
   });
 
+  // Broadcast-scan the LAN for Supervisor nodes (zero-config discovery).
+  ipcMain.handle('supervisor-link:scan', async (_e, opts = {}) => {
+    try {
+      const nodes = await discoverNodes(opts.timeoutMs || 1500);
+      return { ok: true, nodes };
+    } catch (e) {
+      return { ok: false, error: String(e && e.message || e), nodes: [] };
+    }
+  });
+
   ipcMain.handle('supervisor-link:discover', async (_e, opts = {}) => {
     try {
-      const c = await ensureClient(opts);
+      // No explicit address (or auto requested) → discover one on the LAN.
+      let url = (opts.url || '').trim();
+      let discovered = [];
+      if (!url || opts.auto) {
+        discovered = await discoverNodes(opts.timeoutMs || 1500);
+        if (discovered.length) url = discovered[0].url;
+      }
+      if (!url) url = DEFAULT_URL;
+      const c = await ensureClient({ ...opts, url });
       const roster = await c.rpc('get:roster');
-      return { ok: true, state: c.state, roster: roster || [], deviceId: deviceIdentity().deviceId };
+      return {
+        ok: true, state: c.state, roster: roster || [], url,
+        discovered, deviceId: deviceIdentity().deviceId,
+      };
     } catch (e) {
       return { ok: false, error: String(e && e.message || e), roster: [] };
     }

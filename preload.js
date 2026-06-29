@@ -434,6 +434,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   supervisorLink: {
     status: (opts) => ipcRenderer.invoke('supervisor-link:status', opts || {}),
     discover: (opts) => ipcRenderer.invoke('supervisor-link:discover', opts || {}),
+    scan: (opts) => ipcRenderer.invoke('supervisor-link:scan', opts || {}),
     push: (opts) => ipcRenderer.invoke('supervisor-link:push', opts || {}),
     buildOpsPdf: (ops) => ipcRenderer.invoke('supervisor-link:build-ops-pdf', ops || {}),
     resetPin: (opts) => ipcRenderer.invoke('supervisor-link:reset-pin', opts || {}),

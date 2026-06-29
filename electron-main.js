@@ -9058,3 +9058,15 @@ try {
 } catch (e) {
   console.error('[WarrantAuthor] Failed to register IPC handlers:', e);
 }
+
+// ─── Supervisor Link (Push to V.I.P.E.R. — Supervisor Edition) IPC ───────
+// Investigator side of the LAN delivery bridge. Discovers online supervisor
+// machines on the LAN node and pushes datasets (stats / case-status digest)
+// and OPS plan PDFs for digital approval. No case content is ever sent.
+try {
+  const SupervisorLink = require('./modules/supervisor-link/supervisor-link-main');
+  SupervisorLink.registerIpc(ipcMain);
+  console.log('[SupervisorLink] Push bridge IPC registered');
+} catch (e) {
+  console.error('[SupervisorLink] Failed to register IPC handlers:', e);
+}

@@ -424,4 +424,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Resource Hub generic per-BV zoom factor (0.5 .. 2.0)
   rhSetZoom: (resId, factor) => ipcRenderer.send('rh-set-zoom', { resId, factor }),
+
+  // ── Supervisor Link (Push to V.I.P.E.R. — Supervisor Edition) ──────────
+  // Discover online supervisor machines on the LAN and push datasets /
+  // OPS plan PDFs for digital approval. Identity is read from localStorage
+  // by the renderer and passed through on each call.
+  supervisorLink: {
+    status: () => ipcRenderer.invoke('supervisor-link:status'),
+    discover: (opts) => ipcRenderer.invoke('supervisor-link:discover', opts || {}),
+    push: (opts) => ipcRenderer.invoke('supervisor-link:push', opts || {}),
+    buildOpsPdf: (ops) => ipcRenderer.invoke('supervisor-link:build-ops-pdf', ops || {}),
+    disconnect: () => ipcRenderer.invoke('supervisor-link:disconnect'),
+    onEvent: (cb) => {
+      const handler = (_e, evt) => { try { cb(evt); } catch (_) {} };
+      ipcRenderer.on('supervisor-link:event', handler);
+      return () => ipcRenderer.removeListener('supervisor-link:event', handler);
+    },
+    onState: (cb) => {
+      const handler = (_e, evt) => { try { cb(evt); } catch (_) {} };
+      ipcRenderer.on('supervisor-link:state', handler);
+      return () => ipcRenderer.removeListener('supervisor-link:state', handler);
+    },
+  },
 });

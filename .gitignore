@@ -23,3 +23,4 @@ plans/2026-05-03_cellebrite-module/
 *.log
 tools/
 modules/warrant-author/_main_probed_TEMP.js
+dist-diagnostic/

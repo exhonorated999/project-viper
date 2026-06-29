@@ -1,0 +1,61 @@
+appId: com.intellect.viper.diagnostic
+productName: V.I.P.E.R. Diagnostic
+copyright: Copyright © 2026 Intellect LE, LLC
+directories:
+  output: dist-diagnostic
+files:
+  - "**/*"
+  - "!dist/**"
+  - "!dist-diagnostic/**"
+  - "!plans/**"
+  - "!tasks/**"
+  - "!test/**"
+  - "!cases/**"
+  - "!sample-data/**"
+  - "!viper-source/**"
+  - "!*.md"
+  - "!*.txt"
+  - "!*.bat"
+  - "!*.ps1"
+  - "!*.mbox"
+  - "!VIPER_*.exe"
+  - "!viper-app.exe"
+  - "!uninstall.exe"
+  - "!aperture-integration-tasks.json"
+  - "!test-*.html"
+  - "!check-*.html"
+  - "!.gitignore"
+asarUnpack:
+  - "build/**"
+# ─── DIAGNOSTIC BUILD ────────────────────────────────────────────────
+# Portable target ONLY — no NSIS installer, no MSI, no .bat launcher.
+# Extract-and-run from a folder. Designed for users whose IT policy
+# blocks unsigned installer execution but allows portable apps.
+#
+# The build runs with VIPER_DIAGNOSTIC_MODE=1 baked in via the
+# Windows shortcut metadata (see build/diagnostic-launch instructions
+# in the README delivered to testers). When set, electron-main.js:
+#   - SKIPS the electron-updater require entirely (no auto-update code
+#     paths in memory — removes the Brocoiner heuristic surface)
+#   - Initializes launch-logger which captures BrowserWindow ctor
+#     calls, app lifecycle events, system snapshot, Defender history
+#   - Exposes the "Generate Diagnostic Report" UI button
+#
+# Distribution: send the resulting .zip to the affected user with
+# instructions to extract to Desktop and run V.I.P.E.R. Diagnostic.exe
+# ──────────────────────────────────────────────────────────────────────
+win:
+  target:
+    - target: portable
+      arch:
+        - x64
+  icon: build/icon.ico
+  # No code-signing in diagnostic builds — we want them to be
+  # obviously "diagnostic" and avoid burning the production cert
+  # on debugging artifacts.
+  verifyUpdateCodeSignature: false
+  legalTrademarks: Copyright © 2026 Intellect LE, LLC
+portable:
+  artifactName: ${productName}-${version}-Portable.${ext}
+# No `publish` block — diagnostic builds are hand-distributed only,
+# never uploaded to the GitHub release stream.

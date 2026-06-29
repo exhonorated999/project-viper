@@ -65,6 +65,8 @@ class KikWarrantParser {
             if (hasKikLogs) return true;
             // Older (legacy) KIK return: messages live in content/text-msg-data/*.csv
             if (KikWarrantParser._hasOlderCsvSignature(entries)) return true;
+            // New records format: content/data-text.csv | content/data-media.csv
+            if (KikWarrantParser._hasNewRecordsSignature(entries)) return true;
 
             // Try opening inner ZIP to check for KIK logs
             if (hasInnerZip) {
@@ -82,6 +84,7 @@ class KikWarrantParser {
                             }
                         }
                         if (KikWarrantParser._hasOlderCsvSignature(innerZip.getEntries())) return true;
+                        if (KikWarrantParser._hasNewRecordsSignature(innerZip.getEntries())) return true;
                     } catch (e) { /* not a valid zip, skip */ }
                 }
             }
@@ -120,6 +123,8 @@ class KikWarrantParser {
             if (hasKikLogs) return true;
             // Older (legacy) KIK return: messages in content/text-msg-data/*.csv
             if (KikWarrantParser._hasOlderCsvSignature(entries)) return true;
+            // New records format: content/data-text.csv | content/data-media.csv
+            if (KikWarrantParser._hasNewRecordsSignature(entries)) return true;
             if (!innerZipEntry) return false;
 
             // Open inner case ZIP — buffer if small, temp-extract if huge.
@@ -138,6 +143,7 @@ class KikWarrantParser {
                     }
                 }
                 if (KikWarrantParser._hasOlderCsvSignature(innerZip.getEntries())) return true;
+                if (KikWarrantParser._hasNewRecordsSignature(innerZip.getEntries())) return true;
             } catch (_) { /* not a valid inner zip */ }
 
             return false;
@@ -162,6 +168,25 @@ class KikWarrantParser {
             const name = entry.entryName.toLowerCase();
             if (name.startsWith('__macosx')) continue;
             if (/(^|\/)text-msg-data\/[^/]+\.csv$/.test(name)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * NEW Kik records format signature: consolidated message stores
+     * `content/data-text.csv` and/or `content/data-media.csv`. This layout
+     * (introduced in recent Kik warrant returns) carries the ACTUAL message
+     * text/media in two top-level CSVs plus CSV transmission logs in logs/,
+     * rather than per-conversation `text-msg-data/*.csv` (older) or the
+     * counts-only `logs/*.txt` TSV (modern). Detected independently so both
+     * auto-scan and import route here.
+     */
+    static _hasNewRecordsSignature(entries) {
+        for (const entry of entries) {
+            if (entry.isDirectory) continue;
+            const name = entry.entryName.toLowerCase();
+            if (name.startsWith('__macosx')) continue;
+            if (/(^|\/)content\/data-(text|media)\.csv$/.test(name)) return true;
         }
         return false;
     }
@@ -236,12 +261,30 @@ class KikWarrantParser {
             }
         }
 
+        // New records format takes PRECEDENCE: its consolidated
+        // content/data-text.csv + data-media.csv carry the actual message
+        // bodies, whereas modern logs/*.txt (if also present) hold only
+        // per-conversation counts. Route here whenever the signature is found
+        // in either the primary entries or the content-source (inner) ZIP.
+        if (KikWarrantParser._hasNewRecordsSignature(entries)) {
+            return await this._parseNewRecordsFormat(entries, activeZip, opts);
+        }
+        if (contentSourceEntries && contentSourceEntries !== entries &&
+            KikWarrantParser._hasNewRecordsSignature(contentSourceEntries)) {
+            return await this._parseNewRecordsFormat(contentSourceEntries, contentSourceZip, opts);
+        }
+
         if (!logsPrefix) {
             // No modern logs/*.txt layout. Fall back to the older/legacy KIK
             // format: messages in content/text-msg-data/*.csv, media in
             // content/, miscellaneous logs in logs/*.txt.
             if (KikWarrantParser._hasOlderCsvSignature(entries)) {
                 return await this._parseOlderFormat(entries, activeZip, opts);
+            }
+            // New records format: content/data-text.csv + content/data-media.csv
+            // + CSV transmission logs in logs/ + media in medias/.
+            if (KikWarrantParser._hasNewRecordsSignature(entries)) {
+                return await this._parseNewRecordsFormat(entries, activeZip, opts);
             }
             throw new Error('Could not find KIK logs directory in ZIP');
         }
@@ -500,6 +543,269 @@ class KikWarrantParser {
         };
         result.stats = this._computeStats(result);
         return result;
+    }
+
+    /**
+     * Parse the NEW Kik records format. Layout:
+     *   content/data-text.csv   — text messages (actual bodies)
+     *   content/data-media.csv  — media messages (+ filename → medias/)
+     *   logs/*.csv              — transmission metadata (IP/timestamp by content_id)
+     *   medias/                 — media files
+     *
+     * Columns are normalized defensively (Kik has shipped two header variants):
+     *   id|msg_id, message|msg, sender_id|sender_jid, receiver_id|receiver_jid,
+     *   sent_at_ts(ms)|sent_at, content_id|cid, filename, group_jid, app_name, ip.
+     *
+     * Produces the SAME result shape as the modern/older parsers so the UI works
+     * unchanged: text rows → chatSent/chatSentReceived (DM) or groupSendMsg/
+     * groupReceiveMsg (group, when group_jid present); media rows → the
+     * corresponding *Platform arrays. Direction is by account JID (most frequent
+     * across sender+receiver), matching the older-format heuristic.
+     */
+    async _parseNewRecordsFormat(entries, activeZip, opts) {
+        const usable = entries.filter(e =>
+            !e.isDirectory && !e.entryName.startsWith('__MACOSX'));
+        const readEntry = (entry) => {
+            if (!entry) return '';
+            try { return entry.getData().toString('utf-8'); } catch (_) { return ''; }
+        };
+
+        // ── Locate the two consolidated content CSVs ──
+        const textEntry  = usable.find(e => /(^|\/)content\/data-text\.csv$/i.test(e.entryName));
+        const mediaEntry = usable.find(e => /(^|\/)content\/data-media\.csv$/i.test(e.entryName));
+
+        // ── Parse message rows from each content CSV ──
+        const textRecs  = this._parseNewFormatContentCsv(readEntry(textEntry), false);
+        const mediaRecs = this._parseNewFormatContentCsv(readEntry(mediaEntry), true);
+        const allRecs   = textRecs.concat(mediaRecs);
+
+        // ── CSV transmission logs → content_id → {ip, ts} enrichment ──
+        const logEntries = usable.filter(e => /(^|\/)logs\/[^/]+\.csv$/i.test(e.entryName));
+        const logByCid = {};
+        for (const le of logEntries) {
+            const recs = this._parseNewFormatLogCsv(readEntry(le));
+            for (const lg of recs) {
+                if (lg.contentId && !logByCid[lg.contentId]) logByCid[lg.contentId] = lg;
+            }
+        }
+        for (const m of allRecs) {
+            const lg = m.contentId ? logByCid[m.contentId] : null;
+            if (!lg) continue;
+            if (!m.ip && lg.ip) m.ip = lg.ip;
+            if (!m.groupJid && lg.groupJid) m.groupJid = lg.groupJid;
+            if (!m.timestamp && lg.timestamp) {
+                m.timestamp = lg.timestamp;
+                m.datetime = lg.timestamp
+                    ? new Date(lg.timestamp).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '')
+                    : m.datetime;
+            }
+        }
+
+        // ── Account JID = most frequent across sender + receiver ──
+        const freq = {};
+        for (const m of allRecs) {
+            if (m.senderJid)   freq[m.senderJid]   = (freq[m.senderJid]   || 0) + 1;
+            if (m.receiverJid) freq[m.receiverJid] = (freq[m.receiverJid] || 0) + 1;
+        }
+        let accountJid = ''; let best = -1;
+        for (const [jid, n] of Object.entries(freq)) { if (n > best) { best = n; accountJid = jid; } }
+        const accountUsername = this._jidLocal(accountJid) || 'unknown';
+
+        // ── Route messages into the standard arrays ──
+        const chatSent = [], chatSentReceived = [];
+        const chatPlatformSent = [], chatPlatformSentReceived = [];
+        const groupSendMsg = [], groupReceiveMsg = [];
+        const groupSendMsgPlatform = [], groupReceiveMsgPlatform = [];
+        for (const m of allRecs) {
+            const isOut = m.senderJid && m.senderJid === accountJid;
+            const inGroup = !!m.groupJid;
+            const row = {
+                timestamp: m.timestamp,
+                sender: this._jidLocal(m.senderJid),
+                recipient: this._jidLocal(m.receiverJid),
+                ip: m.ip || '',
+                datetime: m.datetime,
+                text: m.text,
+                msgId: m.msgId,
+                contentId: m.contentId,
+            };
+            if (inGroup) row.groupId = this._jidLocal(m.groupJid);
+            if (m.isMedia) {
+                row.mediaType = m.appName || 'media';
+                row.mediaUuid = m.contentId || '';
+                if (inGroup) (isOut ? groupSendMsgPlatform : groupReceiveMsgPlatform).push(row);
+                else (isOut ? chatPlatformSent : chatPlatformSentReceived).push(row);
+            } else {
+                row.msgCount = 1;
+                if (inGroup) (isOut ? groupSendMsg : groupReceiveMsg).push(row);
+                else (isOut ? chatSent : chatSentReceived).push(row);
+            }
+        }
+
+        // ── Resolve media files from medias/ (under content or root) ──
+        // Keyed by content_id (== mediaUuid the UI looks up) AND by filename.
+        const contentFiles = {};
+        let extractDir = null;
+        if (opts.extractDir) {
+            extractDir = opts.extractDir;
+            if (!fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
+        }
+        const fileToCid = {};
+        for (const m of mediaRecs) { if (m.filename && m.contentId) fileToCid[m.filename] = m.contentId; }
+        for (const entry of usable) {
+            const mm = entry.entryName.match(/(^|\/)medias\/(.+)$/i);
+            if (!mm) continue;
+            const rel = mm[2];
+            if (!rel || rel.includes('/')) continue; // direct children only
+            const cid = fileToCid[rel] || path.parse(rel).name;
+            const mimeType = this._detectMimeType(rel, entry);
+            const entrySize = (entry.size != null)
+                ? entry.size
+                : ((entry.header && entry.header.size) || 0);
+            const info = { size: entrySize, mimeType, filename: rel };
+            if (extractDir) {
+                try {
+                    const destPath = path.join(extractDir, rel);
+                    const buf = entry.getData();
+                    if (opts.security && opts.security.isUnlocked()) {
+                        fs.writeFileSync(destPath, opts.security.encryptBuffer(buf));
+                    } else {
+                        fs.writeFileSync(destPath, buf);
+                    }
+                    info.diskPath = destPath;
+                } catch (e) {
+                    console.error(`Failed to extract KIK media ${rel}:`, e.message);
+                }
+            }
+            if (cid) contentFiles[cid] = info;
+            contentFiles[rel] = info;
+        }
+
+        // ── Surface any logs/*.txt as raw text (skip empties) ──
+        const rawLogs = [];
+        for (const entry of usable) {
+            if (!/(^|\/)logs\/[^/]+\.txt$/i.test(entry.entryName)) continue;
+            let t = '';
+            try { t = entry.getData().toString('utf-8'); } catch (_) {}
+            if (!t.trim()) continue;
+            rawLogs.push({ name: entry.entryName.split('/').pop(), text: t });
+        }
+
+        // ── Case number, if encoded in any path ──
+        let caseNumber = null;
+        for (const entry of usable) {
+            const mm = entry.entryName.match(/_case(\d+)/i);
+            if (mm) { caseNumber = mm[1]; break; }
+        }
+
+        const result = {
+            accountUsername,
+            caseNumber,
+            newRecordsFormat: true,
+            contentFiles,
+            rawLogs,
+            binds: [],
+            friends: [],
+            blockedUsers: [],
+            chatSent,
+            chatSentReceived,
+            chatPlatformSent,
+            chatPlatformSentReceived,
+            groupSendMsg,
+            groupReceiveMsg,
+            groupSendMsgPlatform,
+            groupReceiveMsgPlatform,
+        };
+        result.stats = this._computeStats(result);
+        return result;
+    }
+
+    /**
+     * Parse one new-format content CSV (data-text.csv or data-media.csv).
+     * Defensive column resolution covers both Kik header variants.
+     */
+    _parseNewFormatContentCsv(text, isMedia) {
+        if (!text || !text.trim()) return [];
+        const records = this._csvRecords(text);
+        if (records.length < 2) return [];
+        const header = records[0].map(h => String(h).trim().toLowerCase());
+        const idx = (names) => { for (const n of names) { const i = header.indexOf(n); if (i >= 0) return i; } return -1; };
+        const iId   = idx(['msg_id', 'id', 'message_id']);
+        const iS    = idx(['sender_jid', 'sender_id', 'sender', 'from_jid', 'from']);
+        const iR    = idx(['receiver_jid', 'receiver_id', 'receiver', 'to_jid', 'to']);
+        const iMsg  = idx(['msg', 'message', 'body', 'text']);
+        const iCid  = idx(['content_id', 'cid']);
+        const iFile = idx(['filename', 'file_name', 'file']);
+        const iGrp  = idx(['group_jid', 'group_id', 'groupjid']);
+        const iApp  = idx(['app_name', 'app', 'media_type', 'content_type']);
+        const iIp   = idx(['ip', 'sender_ip', 'user_ip']);
+        const iPort = idx(['port']);
+        const iTsMs = idx(['sent_at_ts', 'timestamp_ms', 'ts_ms']);
+        const iTs   = idx(['sent_at', 'ts', 'timestamp', 'datetime']);
+        const get = (f, i) => (i >= 0 && f[i] != null) ? String(f[i]) : '';
+        const out = [];
+        for (let r = 1; r < records.length; r++) {
+            const f = records[r];
+            if (!f || (f.length === 1 && !String(f[0]).trim())) continue;
+            let ts = 0, rawTs = '';
+            if (iTsMs >= 0 && String(f[iTsMs] || '').trim()) { rawTs = String(f[iTsMs]).trim(); ts = this._normalizeTs(rawTs); }
+            else if (iTs >= 0) { rawTs = String(f[iTs] || '').trim(); ts = this._normalizeTs(rawTs); }
+            out.push({
+                msgId:       get(f, iId).trim(),
+                senderJid:   get(f, iS).trim(),
+                receiverJid: get(f, iR).trim(),
+                text:        get(f, iMsg),
+                contentId:   get(f, iCid).trim(),
+                filename:    get(f, iFile).trim(),
+                groupJid:    get(f, iGrp).trim(),
+                appName:     get(f, iApp).trim(),
+                ip:          get(f, iIp).trim(),
+                port:        get(f, iPort).trim(),
+                timestamp:   ts,
+                datetime:    ts ? new Date(ts).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '') : rawTs,
+                isMedia:     !!isMedia,
+            });
+        }
+        return out;
+    }
+
+    /**
+     * Parse a new-format CSV transmission log (chat_platform_sent.csv,
+     * chat_platform_sent_received.csv, group_send_msg_platform.csv,
+     * group_receive.csv, group_receive_msg_platform.csv). Pulls the fields we
+     * use to enrich content rows by content_id (IP, timestamp, parties, group).
+     */
+    _parseNewFormatLogCsv(text) {
+        if (!text || !text.trim()) return [];
+        const records = this._csvRecords(text);
+        if (records.length < 2) return [];
+        const header = records[0].map(h => String(h).trim().toLowerCase());
+        const idx = (names) => { for (const n of names) { const i = header.indexOf(n); if (i >= 0) return i; } return -1; };
+        const iCid  = idx(['content_id', 'cid']);
+        const iIp   = idx(['ip', 'sender_ip', 'user_ip']);
+        const iTsMs = idx(['sent_at_ts', 'ts_ms']);
+        const iTs   = idx(['ts', 'sent_at', 'timestamp', 'datetime']);
+        const iS    = idx(['user_jid', 'sender', 'sender_jid']);
+        const iR    = idx(['friend_user_jid', 'receiver', 'receiver_jid']);
+        const iGrp  = idx(['group_jid', 'group_id']);
+        const get = (f, i) => (i >= 0 && f[i] != null) ? String(f[i]).trim() : '';
+        const out = [];
+        for (let r = 1; r < records.length; r++) {
+            const f = records[r];
+            if (!f || (f.length === 1 && !String(f[0]).trim())) continue;
+            let ts = 0, rawTs = '';
+            if (iTsMs >= 0 && String(f[iTsMs] || '').trim()) { rawTs = String(f[iTsMs]).trim(); ts = this._normalizeTs(rawTs); }
+            else if (iTs >= 0) { rawTs = String(f[iTs] || '').trim(); ts = this._normalizeTs(rawTs); }
+            out.push({
+                contentId:   get(f, iCid),
+                ip:          get(f, iIp),
+                timestamp:   ts,
+                senderJid:   get(f, iS),
+                receiverJid: get(f, iR),
+                groupJid:    get(f, iGrp),
+            });
+        }
+        return out;
     }
 
     /**

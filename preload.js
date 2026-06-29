@@ -139,6 +139,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   snapchatWarrantImport: (data) => ipcRenderer.invoke('snapchat-warrant-import', data),
   snapchatWarrantPickFile: () => ipcRenderer.invoke('snapchat-warrant-pick-file'),
   snapchatWarrantReadMedia: (data) => ipcRenderer.invoke('snapchat-warrant-read-media', data),
+  xWarrantScan: (data) => ipcRenderer.invoke('x-warrant-scan', data),
+  xWarrantImport: (data) => ipcRenderer.invoke('x-warrant-import', data),
+  xWarrantPickFile: () => ipcRenderer.invoke('x-warrant-pick-file'),
+  xWarrantReadMedia: (data) => ipcRenderer.invoke('x-warrant-read-media', data),
 
   // Discord Warrant Parser
   discordWarrantScan: (data) => ipcRenderer.invoke('discord-warrant-scan', data),
@@ -391,6 +395,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   accurintSetVisible: (visible) => ipcRenderer.send('accurint-set-visible', visible),
   accurintSearchPerson: (params) => ipcRenderer.invoke('accurint-search-person', params),
   accurintReset: () => ipcRenderer.invoke('accurint-reset'),
+  whoosterSetBounds: (bounds) => ipcRenderer.send('whooster-set-bounds', bounds),
+  whoosterSetVisible: (visible) => ipcRenderer.send('whooster-set-visible', visible),
+  whoosterSearchPerson: (params) => ipcRenderer.invoke('whooster-search-person', params),
+  whoosterReset: () => ipcRenderer.invoke('whooster-reset'),
 
   // Vigilant Solutions / Motorola VehicleManager LPR (persistent BrowserView)
   vigilantSetBounds: (bounds) => ipcRenderer.send('vigilant-set-bounds', bounds),

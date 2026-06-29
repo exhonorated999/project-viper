@@ -123,6 +123,9 @@ let lastTloBounds = null;
 let accurintBrowserView = null;
 let accurintViewVisible = false;
 let lastAccurintBounds = null;
+let whoosterBrowserView = null;
+let whoosterViewVisible = false;
+let lastWhoosterBounds = null;
 let vigilantBrowserView = null;
 let vigilantViewVisible = false;
 let lastVigilantBounds = null;
@@ -407,6 +410,39 @@ function createWindow() {
 
     if (template.length) {
       Menu.buildFromTemplate(template).popup({ window: mainWindow });
+    }
+  });
+
+  // ── Unsaved-changes guard (will-prevent-unload) ──────────────────────────
+  // The case-detail page registers a `beforeunload` handler that calls
+  // e.preventDefault()/returnValue when it has unsaved changes. In a browser
+  // that pops Chromium's native "Leave site?" dialog — but in Electron the
+  // navigation/close is SILENTLY cancelled unless the main process handles
+  // `will-prevent-unload`. Without this handler the window gets permanently
+  // stuck: after adding a task (which flips hasUnsavedChanges=true) the user
+  // can't return to the dashboard / All Cases and can't even close the app —
+  // they have to kill it from Task Manager. Surfacing a real dialog here
+  // restores that escape hatch. NOTE: calling event.preventDefault() inside
+  // will-prevent-unload ALLOWS the unload to proceed (inverted semantics).
+  mainWindow.webContents.on('will-prevent-unload', (event) => {
+    try {
+      const choice = dialog.showMessageBoxSync(mainWindow, {
+        type: 'question',
+        buttons: ['Leave', 'Stay'],
+        defaultId: 0,
+        cancelId: 1,
+        title: 'Unsaved changes',
+        message: 'Leave this page?',
+        detail: 'You may have unsaved edits in progress. Saved case data (tasks, notes, evidence) is already stored — this only affects fields you are currently editing.'
+      });
+      if (choice === 0) {
+        event.preventDefault(); // allow navigation / close to continue
+      }
+    } catch (err) {
+      // If the dialog fails for any reason, fail OPEN (allow the unload) so the
+      // window can never become permanently unclosable.
+      console.warn('[will-prevent-unload] dialog failed, allowing unload:', err && err.message);
+      event.preventDefault();
     }
   });
 
@@ -800,6 +836,9 @@ app.whenReady().then(async () => {
       if (accurintViewVisible && lastAccurintBounds) {
         accurintBrowserView.setBounds(lastAccurintBounds);
       }
+      if (whoosterViewVisible && lastWhoosterBounds) {
+        whoosterBrowserView.setBounds(lastWhoosterBounds);
+      }
       if (vigilantViewVisible && lastVigilantBounds) {
         vigilantBrowserView.setBounds(lastVigilantBounds);
       }
@@ -908,6 +947,61 @@ app.whenReady().then(async () => {
                 }
                 setTimeout(fill, 500);
                 setTimeout(fill, 1500);
+              })();
+            `).catch(() => {});
+          }
+        }).catch(() => {});
+      }
+    });
+
+    // Create persistent BrowserView for Whooster — people search / skip tracing
+    whoosterBrowserView = new BrowserView({
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        partition: 'persist:whooster',
+      },
+    });
+    // Don't add to window yet — will be attached on first whooster-set-visible(true)
+    whoosterBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    whoosterBrowserView.setAutoResize({ width: false, height: false });
+
+    whoosterBrowserView.webContents.on('did-finish-load', () => {
+      if (!whoosterViewVisible) mainWindow.webContents.focus();
+      whoosterBrowserView.webContents.insertCSS(`
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0d1117; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+      `).catch(() => {});
+
+      const url = whoosterBrowserView.webContents.getURL();
+      // Whooster is a SPA on app.whooster.com (#/login). Auto-fill the login
+      // form using best-effort generic selectors when we're on a login route.
+      if (url.includes('whooster.com') && (url.includes('login') || url.includes('Login') || url.includes('signin') || url.includes('#/'))) {
+        mainWindow.webContents.executeJavaScript(
+          `JSON.stringify({ username: localStorage.getItem('whoosterUsername') || '', password: localStorage.getItem('whoosterPassword') || '' })`
+        ).then(json => {
+          const creds = JSON.parse(json);
+          if (creds.username || creds.password) {
+            whoosterBrowserView.webContents.executeJavaScript(`
+              (function() {
+                function fill() {
+                  const userInput = document.querySelector('input[type="email"], input[name*="email" i], input[id*="email" i], input[name*="user" i], input[id*="user" i], input[autocomplete="username"], input[type="text"]');
+                  const passInput = document.querySelector('input[type="password"], input[name*="pass" i], input[id*="pass" i], input[autocomplete="current-password"]');
+                  function setVal(el, val) {
+                    if (!el || !val) return;
+                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                    nativeSetter.call(el, val);
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                  }
+                  setVal(userInput, ${JSON.stringify(creds.username)});
+                  setVal(passInput, ${JSON.stringify(creds.password)});
+                }
+                // SPA renders the form async — retry a few times.
+                setTimeout(fill, 500);
+                setTimeout(fill, 1500);
+                setTimeout(fill, 3000);
               })();
             `).catch(() => {});
           }
@@ -1269,6 +1363,7 @@ app.whenReady().then(async () => {
       { partition: 'persist:flock',          label: 'Flock Safety',     defaultTag: 'Flock-Reports'    },
       { partition: 'persist:tlo',            label: 'TLO',              defaultTag: 'TLO-Reports'      },
       { partition: 'persist:accurint',       label: 'Accurint',         defaultTag: 'Accurint-Reports' },
+      { partition: 'persist:whooster',       label: 'Whooster',         defaultTag: 'Whooster-Reports' },
       { partition: 'persist:vigilant',       label: 'Vigilant LPR',     defaultTag: 'Vigilant-Reports' },
       { partition: 'persist:icacDataSystem', label: 'ICAC Data System', defaultTag: 'CyberTip-Reports' },
       { partition: 'persist:icacCops',       label: 'ICACCOPS',         defaultTag: 'ICACCOPS-Reports' },
@@ -1334,7 +1429,7 @@ app.whenReady().then(async () => {
     // on the next page. Media player is handled by its own show/hide via reportBounds().
     mainWindow.webContents.on('did-start-navigation', (_event, _url, isInPlace) => {
       if (isInPlace) return; // ignore hash/pushState navigations
-      const pageViews = [flockBrowserView, tloBrowserView, accurintBrowserView, vigilantBrowserView, icacDataSystemBrowserView, icacCopsBrowserView, gridcopBrowserView, callyoBrowserView];
+      const pageViews = [flockBrowserView, tloBrowserView, accurintBrowserView, whoosterBrowserView, vigilantBrowserView, icacDataSystemBrowserView, icacCopsBrowserView, gridcopBrowserView, callyoBrowserView];
       for (const bv of pageViews) {
         if (!bv) continue;
         try { mainWindow.removeBrowserView(bv); } catch (_) {}
@@ -1343,6 +1438,7 @@ app.whenReady().then(async () => {
       flockViewVisible = false;
       tloViewVisible = false;
       accurintViewVisible = false;
+      whoosterViewVisible = false;
       vigilantViewVisible = false;
       icacDataSystemViewVisible = false;
       icacCopsViewVisible = false;
@@ -4163,6 +4259,7 @@ const _rhResourceMap = () => ({
   flock:          { bv: flockBrowserView,          label: 'Flock Safety',     defaultTag: 'Flock-Reports'    },
   tlo:            { bv: tloBrowserView,            label: 'TLO',              defaultTag: 'TLO-Reports'      },
   accurint:       { bv: accurintBrowserView,       label: 'Accurint',         defaultTag: 'Accurint-Reports' },
+  whooster:       { bv: whoosterBrowserView,       label: 'Whooster',         defaultTag: 'Whooster-Reports' },
   vigilant:       { bv: vigilantBrowserView,       label: 'Vigilant LPR',     defaultTag: 'Vigilant-Reports' },
   icacDataSystem: { bv: icacDataSystemBrowserView, label: 'ICAC Data System', defaultTag: 'CyberTip-Reports' },
   icacCops:       { bv: icacCopsBrowserView,       label: 'ICACCOPS',         defaultTag: 'ICACCOPS-Reports' },
@@ -6573,6 +6670,86 @@ ipcMain.handle('accurint-reset', async () => {
   accurintBrowserView.webContents.loadURL('https://secure.accurint.com/app/bps/main');
 });
 
+// ── Whooster IPC ───────────────────────────────────────────
+const WHOOSTER_LOGIN_URL = 'https://app.whooster.com/#/login';
+
+ipcMain.on('whooster-set-bounds', (_event, bounds) => {
+  if (!whoosterBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  const b = {
+    x: Math.round(bounds.x),
+    y: Math.round(bounds.y),
+    width: Math.round(bounds.width),
+    height: Math.round(bounds.height),
+  };
+  lastWhoosterBounds = b;
+  if (whoosterViewVisible) {
+    whoosterBrowserView.setBounds(b);
+  }
+});
+
+ipcMain.on('whooster-set-visible', (_event, visible) => {
+  if (!whoosterBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  whoosterViewVisible = visible;
+  if (visible && lastWhoosterBounds) {
+    const currentUrl = whoosterBrowserView.webContents.getURL();
+    if (!currentUrl || currentUrl === '' || currentUrl === 'about:blank') {
+      whoosterBrowserView.webContents.loadURL(WHOOSTER_LOGIN_URL);
+    }
+    try { mainWindow.addBrowserView(whoosterBrowserView); } catch (_) {}
+    whoosterBrowserView.setBounds(lastWhoosterBounds);
+  } else if (!visible) {
+    whoosterBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    try { mainWindow.removeBrowserView(whoosterBrowserView); } catch (_) {}
+  }
+});
+
+ipcMain.handle('whooster-search-person', async (_event, { firstName, lastName, state, dob }) => {
+  if (!whoosterBrowserView) return { success: false, error: 'Whooster not initialized' };
+  try {
+    const currentUrl = whoosterBrowserView.webContents.getURL();
+    if (!currentUrl.includes('whooster.com')) {
+      whoosterBrowserView.webContents.loadURL(WHOOSTER_LOGIN_URL);
+      await new Promise(resolve => {
+        whoosterBrowserView.webContents.once('did-finish-load', resolve);
+        setTimeout(resolve, 8000);
+      });
+    }
+    if (firstName || lastName) {
+      await new Promise(r => setTimeout(r, 1500));
+      // Best-effort: fill any visible first/last-name search inputs. Whooster's
+      // post-login search form selectors are unknown, so we use generic
+      // attribute matching — may need tuning once real DOM is confirmed.
+      await whoosterBrowserView.webContents.executeJavaScript(`
+        (function() {
+          function setVal(el, val) {
+            if (!el || !val) return;
+            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            nativeSetter.call(el, val);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          const fnInput = document.querySelector('input[name*="irst" i], input[id*="irst" i], input[placeholder*="First" i]');
+          const lnInput = document.querySelector('input[name*="ast" i], input[id*="ast" i], input[placeholder*="Last" i]');
+          const stInput = document.querySelector('select[name*="tate" i], select[id*="tate" i], input[name*="tate" i], input[placeholder*="State" i]');
+          setVal(fnInput, ${JSON.stringify(firstName || '')});
+          setVal(lnInput, ${JSON.stringify(lastName || '')});
+          ${state ? `if (stInput) { setVal(stInput, ${JSON.stringify(state)}); }` : ''}
+        })();
+      `);
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('whooster-reset', async () => {
+  if (!whoosterBrowserView) return;
+  const ses = whoosterBrowserView.webContents.session;
+  await ses.clearStorageData();
+  whoosterBrowserView.webContents.loadURL(WHOOSTER_LOGIN_URL);
+});
+
 // ── Vigilant Solutions / Motorola VehicleManager IPC ────────────────
 const VIGILANT_LOGIN_URL = 'https://vm.motorolasolutions.com/VM8_Auth/Login/VehicleManager_web';
 
@@ -6714,6 +6891,7 @@ ipcMain.on('rh-set-zoom', (_event, payload) => {
     if (resId === 'flock') bv = flockBrowserView;
     else if (resId === 'tlo') bv = tloBrowserView;
     else if (resId === 'accurint') bv = accurintBrowserView;
+    else if (resId === 'whooster') bv = whoosterBrowserView;
     else if (resId === 'vigilant') bv = vigilantBrowserView;
     else if (resId === 'icacDataSystem') bv = icacDataSystemBrowserView;
     else if (resId === 'icacCops') bv = icacCopsBrowserView;
@@ -7355,6 +7533,112 @@ ipcMain.handle('snapchat-warrant-read-media', async (event, { filePath }) => {
     if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
       buf = security.decryptBuffer(buf);
     }
+    let mimeType = 'application/octet-stream';
+    if (buf[0] === 0xFF && buf[1] === 0xD8) mimeType = 'image/jpeg';
+    else if (buf[0] === 0x89 && buf[1] === 0x50) mimeType = 'image/png';
+    else if (buf.length > 7 && buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70) mimeType = 'video/mp4';
+    else if (buf.length > 12 && buf.slice(0, 4).toString() === 'RIFF' && buf.slice(8, 12).toString() === 'WEBP') mimeType = 'image/webp';
+    else {
+      const ext = path.extname(filePath).toLowerCase();
+      if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
+      else if (ext === '.png') mimeType = 'image/png';
+      else if (ext === '.mp4') mimeType = 'video/mp4';
+      else if (ext === '.gif') mimeType = 'image/gif';
+      else if (ext === '.webp') mimeType = 'image/webp';
+      else if (ext === '.webm') mimeType = 'video/webm';
+      else if (ext === '.mov') mimeType = 'video/quicktime';
+    }
+    return { success: true, data: buf.toString('base64'), mimeType };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// ─── X / Twitter Warrant Parser IPC ─────────────────────────────────
+
+const XWarrantParser = require('./modules/x-warrant/x-warrant-parser');
+const xwParser = new XWarrantParser();
+
+// Scan Evidence/ and Warrants/Production/ for X productions (ZIP or folder).
+ipcMain.handle('x-warrant-scan', async (event, { caseNumber }) => {
+  try {
+    const dirsToScan = [
+      path.join(casesDir, caseNumber, 'Evidence'),
+      path.join(casesDir, caseNumber, 'Warrants', 'Production')
+    ];
+    const files = [];
+    const seen = new Set();
+    for (const dir of dirsToScan) {
+      if (!fs.existsSync(dir)) continue;
+      const scanDir = async (d, depth) => {
+        if (depth > 5) return;
+        let entries;
+        try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { return; }
+        for (const entry of entries) {
+          const fullPath = path.join(d, entry.name);
+          if (seen.has(fullPath)) continue;
+          if (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')) {
+            try {
+              const detected = await XWarrantParser.isXWarrantZip(fullPath, { security });
+              if (detected) {
+                seen.add(fullPath);
+                files.push({ name: entry.name, path: fullPath, size: fs.statSync(fullPath).size, isFolder: false });
+              }
+            } catch (e) { /* skip */ }
+          } else if (entry.isDirectory()) {
+            if (XWarrantParser.isXWarrantFolder(fullPath)) {
+              seen.add(fullPath);
+              files.push({ name: entry.name, path: fullPath, size: 0, isFolder: true });
+              continue;
+            }
+            await scanDir(fullPath, depth + 1);
+          }
+        }
+      };
+      await scanDir(dir, 0);
+    }
+    return { success: true, files };
+  } catch (error) {
+    console.error('X warrant scan error:', error);
+    return { success: false, error: error.message, files: [] };
+  }
+});
+
+ipcMain.handle('x-warrant-import', async (event, { filePath, caseNumber, isFolder }) => {
+  try {
+    const extractDir = caseNumber
+      ? path.join(casesDir, caseNumber, 'Evidence', 'XWarrant')
+      : null;
+    if (extractDir && !fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
+    let data;
+    if (isFolder) data = await xwParser.parseFolder(filePath, { extractDir, security });
+    else data = await xwParser.parseZip(filePath, { extractDir, security });
+    return { success: true, data };
+  } catch (error) {
+    console.error('X warrant import error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('x-warrant-pick-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select X / Twitter Production (ZIP or Folder)',
+    properties: ['openFile', 'openDirectory'],
+    filters: [{ name: 'X Warrant Production', extensions: ['zip'] }]
+  });
+  restoreFocus();
+  if (result.canceled || !result.filePaths.length) return null;
+  const picked = result.filePaths[0];
+  let isFolder = false;
+  try { isFolder = fs.statSync(picked).isDirectory(); } catch (e) { /* leave false */ }
+  return { path: picked, isFolder };
+});
+
+ipcMain.handle('x-warrant-read-media', async (event, { filePath }) => {
+  try {
+    if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' };
+    let buf = fs.readFileSync(filePath);
+    if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) buf = security.decryptBuffer(buf);
     let mimeType = 'application/octet-stream';
     if (buf[0] === 0xFF && buf[1] === 0xD8) mimeType = 'image/jpeg';
     else if (buf[0] === 0x89 && buf[1] === 0x50) mimeType = 'image/png';

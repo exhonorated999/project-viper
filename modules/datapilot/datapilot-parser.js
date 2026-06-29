@@ -324,6 +324,22 @@ class DatapilotParser {
             // Calls
             result.calls = this._dpxParseCalls(db);
 
+            // App messenger data (WhatsApp, etc.) — these apps store their
+            // messages/media/calls inside AppDataEntities (a generic JSON
+            // entity store), NOT the Messages/Chats/CallHistory tables (which
+            // are empty for app-sourced comms). Extract them into the SAME
+            // message/call shape so the Comms thread view renders them like
+            // text messages. See _dpxParseAppMessengers.
+            try {
+                const appComms = this._dpxParseAppMessengers(db);
+                if (appComms.messages.length) result.messages = result.messages.concat(appComms.messages);
+                if (appComms.calls.length) result.calls = result.calls.concat(appComms.calls);
+                if (appComms.chats.length) result.chats = result.chats.concat(appComms.chats);
+                if (appComms.warnings && appComms.warnings.length) result.warnings.push(...appComms.warnings);
+            } catch (e) {
+                result.warnings.push('App messenger (WhatsApp) parse failed: ' + (e && e.message));
+            }
+
             // Calendar
             result.calendar = this._dpxParseCalendar(db);
 
@@ -758,6 +774,276 @@ class DatapilotParser {
         }
 
         return { chats, messages };
+    }
+
+    /**
+     * Extract messenger-app comms (WhatsApp and any app with the same DataPilot
+     * shape) from the AppDataEntities JSON entity store and normalize them into
+     * the standard message/call shape consumed by the Comms thread view.
+     *
+     * Why this exists: for app-sourced communications DataPilot leaves the
+     * top-level Messages / Chats / CallHistory tables EMPTY and instead writes
+     * every record as a row in AppDataEntities, where EntityData is a JSON map
+     * of { "Field Name": { Items:[value], DateTimeValue, ... } }. WhatsApp's
+     * entity groups are: "Messages", "Media Messages", "Call History".
+     *
+     * Direction heuristic (no explicit in/out flag exists): the device owner's
+     * own id is not recorded, so a populated "From User Id" with empty "To" is
+     * INCOMING, and a populated "To User Id" with empty "From" is OUTGOING.
+     * Group ids end in "@g.us"; "@s.whatsapp.net" ids carry the phone number;
+     * "@lid" ids are opaque WhatsApp linked-ids.
+     */
+    _dpxParseAppMessengers(db) {
+        const out = { chats: [], messages: [], calls: [], warnings: [] };
+
+        let appRows = [];
+        try {
+            appRows = db.prepare(`SELECT AppDataUUID, Caption, UniqueName, AppGroup FROM AppData`).all();
+        } catch (_) { return out; }
+        if (!appRows.length) return out;
+
+        // Flatten one EntityData JSON map → { key: firstItem, key+'__dt': iso }.
+        const flat = (json) => {
+            const o = this._dpxJson(json, null);
+            if (!o || typeof o !== 'object') return null;
+            const d = {};
+            for (const k in o) {
+                const v = o[k];
+                if (v && typeof v === 'object') {
+                    const items = Array.isArray(v.Items) ? v.Items : [];
+                    d[k] = items.length ? items[0] : '';
+                    if (v.DateTimeValue) d[k + '__dt'] = v.DateTimeValue;
+                }
+            }
+            return d;
+        };
+        const firstOf = (d, keys) => {
+            for (const k of keys) {
+                const v = (d[k] === undefined || d[k] === null) ? '' : String(d[k]).trim();
+                if (v) return v;
+            }
+            return '';
+        };
+        const localPart = (id) => {
+            const s = String(id || '');
+            const at = s.indexOf('@');
+            return at >= 0 ? s.slice(0, at) : s;
+        };
+        const isGroup = (id) => /@g\.us$/i.test(id || '');
+        // Map a WhatsApp id to a stable, readable thread/address key.
+        const cleanAddr = (id) => {
+            if (!id) return '';
+            if (/@s\.whatsapp\.net$/i.test(id)) return localPart(id);   // phone number
+            if (isGroup(id)) return 'wa-group:' + localPart(id);        // group thread
+            if (/@lid$/i.test(id)) return localPart(id) + '@lid';       // opaque linked id
+            return id;
+        };
+        // Resolve direction + remote-party id from a flattened record.
+        const resolve = (fromId, toId) => {
+            let direction, partner;
+            if (isGroup(fromId)) { direction = 'incoming'; partner = fromId; }
+            else if (isGroup(toId)) { direction = 'outgoing'; partner = toId; }
+            else if (fromId && !toId) { direction = 'incoming'; partner = fromId; }
+            else if (toId && !fromId) { direction = 'outgoing'; partner = toId; }
+            else { direction = 'unknown'; partner = fromId || toId; }
+            return { direction, partner };
+        };
+
+        // DataPilot frequently records the SAME record multiple times in
+        // AppDataEntities (commonly 3×). Dedupe by content so threads read
+        // cleanly instead of showing every message two or three times.
+        const seenMsg = new Set();
+        const seenMedia = new Set();
+        const seenCall = new Set();
+
+        for (const app of appRows) {
+            const isWa = /whatsapp/i.test(app.UniqueName || '') || /whatsapp/i.test(app.Caption || '');
+            const appLabel = isWa ? 'WhatsApp'
+                : String(app.Caption || 'App').replace(/\s*\(Group Data\)\s*$/i, '').replace(/\s+Shared\s*$/i, '').trim() || 'App';
+
+            // Only process apps that actually carry message-style entity groups.
+            let groups = [];
+            try {
+                groups = db.prepare(
+                    `SELECT DISTINCT EntityGroupTitle FROM AppDataEntities WHERE AppDataUUID = ?`
+                ).all(app.AppDataUUID).map(r => r.EntityGroupTitle || '');
+            } catch (_) { continue; }
+            const hasMsg = groups.includes('Messages');
+            const hasMedia = groups.includes('Media Messages');
+            const hasCalls = groups.includes('Call History');
+            if (!hasMsg && !hasMedia && !hasCalls) continue;
+
+            const pushChatOnce = (() => {
+                const seen = new Set();
+                return (addr, style) => {
+                    if (!addr || seen.has(addr)) return;
+                    seen.add(addr);
+                    out.chats.push({
+                        chatUuid: addr, style: style || 'Single', service: appLabel,
+                        owner: '', title: '', lastMessageAt: '', participants: [],
+                        lastMessage: '', messageCount: 0,
+                        isArchived: false, isHidden: false, isRemoved: false,
+                    });
+                };
+            })();
+
+            // ── Text messages ──
+            if (hasMsg) {
+                let rows = [];
+                try {
+                    rows = db.prepare(
+                        `SELECT EntityUUID, EntityData FROM AppDataEntities WHERE AppDataUUID = ? AND EntityGroupTitle = 'Messages'`
+                    ).all(app.AppDataUUID);
+                } catch (_) { rows = []; }
+                for (const r of rows) {
+                    const d = flat(r.EntityData);
+                    if (!d) continue;
+                    const fromId = firstOf(d, ['From User Id', 'From User(Id)', 'From User ID']);
+                    const toId = firstOf(d, ['To User Id', 'To User(Id)', 'To User ID']);
+                    const { direction, partner } = resolve(fromId, toId);
+                    const addr = cleanAddr(partner);
+                    let text = d['Message'] === undefined || d['Message'] === null ? '' : String(d['Message']);
+                    // Group chats: prefix the in-group sender so the thread is readable.
+                    if (isGroup(partner) && direction === 'incoming') {
+                        const sender = firstOf(d, ['From User (Contact Name)', 'From User(Contact Name)', 'Group Member']);
+                        if (sender) text = '~' + sender + ': ' + text;
+                    }
+                    const iso = this._dpxIso(d['Message Date (UTC)__dt'] || d['Message Date (UTC)'] || '');
+                    pushChatOnce(addr, isGroup(partner) ? 'Group' : 'Single');
+                    const dk = addr + '|' + iso + '|' + direction + '|' + text;
+                    if (seenMsg.has(dk)) continue;
+                    seenMsg.add(dk);
+                    out.messages.push({
+                        uid: 'wa_' + (r.EntityUUID || ''),
+                        chatUuid: addr,
+                        chatTitle: isGroup(partner) ? (appLabel + ' Group') : '',
+                        chatStyle: isGroup(partner) ? 'Group' : 'Single',
+                        service: appLabel,
+                        timestamp: d['Message Date (UTC)'] || '',
+                        timestampIso: iso,
+                        type: appLabel.toLowerCase() + ' ' + direction,
+                        direction,
+                        address: addr,
+                        text,
+                        subject: '',
+                        serviceCenter: '',
+                        isRead: false,
+                        isDeleted: false,
+                        attachments: [],
+                    });
+                }
+            }
+
+            // ── Media messages ── (rendered inline as a media placeholder bubble)
+            if (hasMedia) {
+                let rows = [];
+                try {
+                    rows = db.prepare(
+                        `SELECT EntityUUID, EntityData FROM AppDataEntities WHERE AppDataUUID = ? AND EntityGroupTitle = 'Media Messages'`
+                    ).all(app.AppDataUUID);
+                } catch (_) { rows = []; }
+                for (const r of rows) {
+                    const d = flat(r.EntityData);
+                    if (!d) continue;
+                    const fromId = firstOf(d, ['From User(Id)', 'From User Id']);
+                    const toId = firstOf(d, ['To User(Id)', 'To User Id']);
+                    const { direction, partner } = resolve(fromId, toId);
+                    const addr = cleanAddr(partner);
+                    const mType = String(d['Media Type'] || '');
+                    const mPath = String(d['Media Local Path'] || '');
+                    let label;
+                    if (/^image/i.test(mType)) label = '📷 Photo';
+                    else if (/^video/i.test(mType)) label = '🎬 Video';
+                    else if (/^audio/i.test(mType)) label = '🎤 Voice message';
+                    else if (/VCARD/i.test(mType)) label = '👤 Contact card';
+                    else label = '📎 Media';
+                    if (mType && !/VCARD/i.test(mType) && !/^(image|video|audio)/i.test(mType)) {
+                        label += ' (' + mType + ')';
+                    }
+                    const iso = this._dpxIso(d['Message Date (UTC)__dt'] || d['Message Date (UTC)'] || '');
+                    pushChatOnce(addr, isGroup(partner) ? 'Group' : 'Single');
+                    const dk = addr + '|' + iso + '|' + direction + '|' + mType + '|' + mPath;
+                    if (seenMedia.has(dk)) continue;
+                    seenMedia.add(dk);
+                    out.messages.push({
+                        uid: 'wam_' + (r.EntityUUID || ''),
+                        chatUuid: addr,
+                        chatTitle: isGroup(partner) ? (appLabel + ' Group') : '',
+                        chatStyle: isGroup(partner) ? 'Group' : 'Single',
+                        service: appLabel,
+                        timestamp: d['Message Date (UTC)'] || '',
+                        timestampIso: iso,
+                        type: appLabel.toLowerCase() + ' media ' + direction,
+                        direction,
+                        address: addr,
+                        text: label,
+                        subject: '',
+                        serviceCenter: '',
+                        isRead: false,
+                        isDeleted: false,
+                        attachments: mPath ? [{ path: mPath, mediaType: mType, url: String(d['Media URL'] || '') }] : [],
+                    });
+                }
+            }
+
+            // ── Call history ──
+            if (hasCalls) {
+                let rows = [];
+                try {
+                    rows = db.prepare(
+                        `SELECT EntityUUID, EntityData FROM AppDataEntities WHERE AppDataUUID = ? AND EntityGroupTitle = 'Call History'`
+                    ).all(app.AppDataUUID);
+                } catch (_) { rows = []; }
+                let n = 0;
+                for (const r of rows) {
+                    const d = flat(r.EntityData);
+                    if (!d) continue;
+                    n++;
+                    const fromId = firstOf(d, ['Call From', 'From User Id', 'From User(Id)']);
+                    const addr = cleanAddr(fromId);
+                    const dur = parseInt(d['Duration'] || '0', 10) || 0;
+                    const rawDate = String(d['Date'] || d['Message Date (UTC)'] || '');
+                    let iso = '';
+                    const epoch = parseInt(rawDate, 10);
+                    if (rawDate && !isNaN(epoch) && /^\d+$/.test(rawDate.trim())) {
+                        // WhatsApp call dates are Cocoa/Mac absolute time (seconds
+                        // since 2001-01-01 UTC). Convert to Unix → ISO.
+                        const ms = (epoch + 978307200) * 1000;
+                        const dt = new Date(ms);
+                        iso = isNaN(dt.getTime()) ? '' : dt.toISOString();
+                    } else {
+                        iso = this._dpxIso(d['Message Date (UTC)__dt'] || rawDate);
+                    }
+                    pushChatOnce(addr, 'Single');
+                    const dk = addr + '|' + iso + '|' + dur;
+                    if (seenCall.has(dk)) continue;
+                    seenCall.add(dk);
+                    out.calls.push({
+                        no: 'wa' + n,
+                        uid: 'wacall_' + (r.EntityUUID || ''),
+                        timestamp: rawDate,
+                        timestampIso: iso,
+                        type: appLabel.toLowerCase() + ' call',
+                        direction: 'unknown',
+                        name: '',
+                        number: addr,
+                        address: addr,
+                        duration: dur,
+                        durationIso: '',
+                        provider: appLabel,
+                        countryCode: '',
+                        location: '',
+                        summary: appLabel + ' call' + (dur ? ' · ' + dur + 's' : ''),
+                        isDeleted: false,
+                        source: appLabel,
+                        deletedData: '',
+                        hexDump: '',
+                    });
+                }
+            }
+        }
+
+        return out;
     }
 
     _dpxParseCalls(db) {

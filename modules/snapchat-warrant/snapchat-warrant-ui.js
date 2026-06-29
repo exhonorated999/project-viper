@@ -893,18 +893,25 @@ class SnapchatWarrantUI {
                 <h2 class="swp-section-title">📋 Other Data (${names.length} file${names.length !== 1 ? 's' : ''})</h2>
                 ${names.map(name => {
                     const csv = others[name];
+                    const secs = (csv.sections && csv.sections.length)
+                        ? csv.sections
+                        : [{ title: '', headers: csv.headers || [], rows: csv.rows || [] }];
+                    const totalRows = secs.reduce((a, s) => a + (s.rows || []).length, 0);
                     return `
                         <div class="swp-card">
-                            <h3 class="swp-card-title">📄 ${this._esc(name)} <span class="swp-conv-count">${(csv.rows || []).length.toLocaleString()} rows</span></h3>
-                            <div class="swp-table-wrapper">
-                                <table class="swp-table">
-                                    <thead><tr>${(csv.headers || []).map(h => `<th>${this._esc(h)}</th>`).join('')}</tr></thead>
-                                    <tbody>
-                                        ${(csv.rows || []).slice(0, 500).map(r => `<tr>${(csv.headers || []).map(h => `<td>${this._esc(r[h] || '')}</td>`).join('')}</tr>`).join('')}
-                                    </tbody>
-                                </table>
-                                ${(csv.rows || []).length > 500 ? `<div class="swp-empty-hint">Showing first 500 of ${(csv.rows || []).length.toLocaleString()} rows.</div>` : ''}
-                            </div>
+                            <h3 class="swp-card-title">📄 ${this._esc(name)} <span class="swp-conv-count">${totalRows.toLocaleString()} rows · ${secs.length} section${secs.length !== 1 ? 's' : ''}</span></h3>
+                            ${secs.map(sec => `
+                                ${sec.title ? `<h4 class="swp-subsection-title">${this._esc(sec.title)} <span class="swp-conv-count">${(sec.rows || []).length.toLocaleString()} rows</span></h4>` : ''}
+                                <div class="swp-table-wrapper">
+                                    <table class="swp-table">
+                                        <thead><tr>${(sec.headers || []).map(h => `<th>${this._esc(h)}</th>`).join('')}</tr></thead>
+                                        <tbody>
+                                            ${(sec.rows || []).slice(0, 500).map(r => `<tr>${(sec.headers || []).map(h => `<td>${this._esc(r[h] || '')}</td>`).join('')}</tr>`).join('')}
+                                        </tbody>
+                                    </table>
+                                    ${(sec.rows || []).length > 500 ? `<div class="swp-empty-hint">Showing first 500 of ${(sec.rows || []).length.toLocaleString()} rows.</div>` : ''}
+                                </div>
+                            `).join('')}
                         </div>
                     `;
                 }).join('')}

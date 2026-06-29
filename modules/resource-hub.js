@@ -16,6 +16,7 @@
     { id: 'flock',    label: 'Flock Safety',        enabledKey: 'flockEnabled',        isBV: true },
     { id: 'tlo',      label: 'TLO / TransUnion',    enabledKey: 'tloEnabled',          isBV: true },
     { id: 'accurint', label: 'LexisNexis Accurint', enabledKey: 'accurintEnabled',     isBV: true },
+    { id: 'whooster', label: 'Whooster',           enabledKey: 'whoosterEnabled',     isBV: true },
     { id: 'vigilant', label: 'Vigilant LPR',        enabledKey: 'vigilantEnabled',     isBV: true },
     { id: 'icacDataSystem', label: 'ICAC Data System',  enabledKey: 'icacDataSystemEnabled', isBV: true },
     { id: 'icacCops',       label: 'ICACCOPS',          enabledKey: 'icacCopsEnabled',       isBV: true },
@@ -52,6 +53,7 @@
       .rh-tab[data-res=flock].rh-active::after{width:100%;background:#2dd4bf}
       .rh-tab[data-res=tlo].rh-active::after{width:100%;background:#818cf8}
       .rh-tab[data-res=accurint].rh-active::after{width:100%;background:#60a5fa}
+      .rh-tab[data-res=whooster].rh-active::after{width:100%;background:#e879f9}
       .rh-tab[data-res=vigilant].rh-active::after{width:100%;background:#f87171}
       .rh-tab[data-res=trace].rh-active::after{width:100%;background:#fbbf24}
       .rh-tab[data-res=fmcsa].rh-active::after{width:100%;background:#60a5fa}
@@ -131,6 +133,9 @@
           </div>
           <div id="rhPanel_accurint" class="absolute inset-0 hidden">
             <div id="rhBV_accurint" class="rh-bv-placeholder w-full h-full flex items-center justify-center"><p class="text-gray-600 text-xs">Loading LexisNexis Accurint…</p></div>
+          </div>
+          <div id="rhPanel_whooster" class="absolute inset-0 hidden">
+            <div id="rhBV_whooster" class="rh-bv-placeholder w-full h-full flex items-center justify-center"><p class="text-gray-600 text-xs">Loading Whooster…</p></div>
           </div>
           <div id="rhPanel_vigilant" class="absolute inset-0 hidden">
             <div id="rhBV_vigilant" class="rh-bv-placeholder w-full h-full flex items-center justify-center"><p class="text-gray-600 text-xs">Loading Vigilant VehicleManager…</p></div>
@@ -288,6 +293,7 @@
     if (resId === 'flock') { window.electronAPI.flockSetBounds(b); window.electronAPI.flockSetVisible(true); }
     if (resId === 'tlo')   { window.electronAPI.tloSetBounds(b);   window.electronAPI.tloSetVisible(true); }
     if (resId === 'accurint') { window.electronAPI.accurintSetBounds(b); window.electronAPI.accurintSetVisible(true); }
+    if (resId === 'whooster') { window.electronAPI.whoosterSetBounds(b); window.electronAPI.whoosterSetVisible(true); }
     if (resId === 'vigilant') { window.electronAPI.vigilantSetBounds(b); window.electronAPI.vigilantSetVisible(true); }
     if (resId === 'icacDataSystem') { window.electronAPI.icacDataSystemSetBounds(b); window.electronAPI.icacDataSystemSetVisible(true); }
     if (resId === 'icacCops')       { window.electronAPI.icacCopsSetBounds(b);       window.electronAPI.icacCopsSetVisible(true); }
@@ -305,6 +311,7 @@
     if (resId === 'flock') window.electronAPI.flockSetVisible(false);
     if (resId === 'tlo')   window.electronAPI.tloSetVisible(false);
     if (resId === 'accurint') window.electronAPI.accurintSetVisible(false);
+    if (resId === 'whooster') window.electronAPI.whoosterSetVisible(false);
     if (resId === 'vigilant') window.electronAPI.vigilantSetVisible(false);
     if (resId === 'icacDataSystem') window.electronAPI.icacDataSystemSetVisible(false);
     if (resId === 'icacCops')       window.electronAPI.icacCopsSetVisible(false);

@@ -415,7 +415,21 @@ class SnapchatWarrantParser {
                     break;
                 default:
                     if (!KNOWN_CSVS.has(baseName)) {
-                        part.otherCsvs[baseName] = { headers, rows };
+                        // Additional-records production CSVs can hold MULTIPLE
+                        // sections; capture all of them (the single-section
+                        // `_parseSnapchatCsv` above kept only the last block).
+                        const prod = this._parseProductionSections(text);
+                        if (prod.sections.length) {
+                            const firstWithRows = prod.sections.find(s => s.rows.length) || prod.sections[0];
+                            part.otherCsvs[baseName] = {
+                                headers: firstWithRows.headers,
+                                rows: firstWithRows.rows,
+                                sections: prod.sections,
+                                banner: prod.banner,
+                            };
+                        } else {
+                            part.otherCsvs[baseName] = { headers, rows, sections: [], banner: prod.banner };
+                        }
                     }
                     break;
             }
@@ -478,8 +492,20 @@ class SnapchatWarrantParser {
             merged.friends.push(...p.friends);
             merged.snapHistory.push(...p.snapHistory);
             for (const [k, v] of Object.entries(p.otherCsvs || {})) {
-                if (!merged.otherCsvs[k]) merged.otherCsvs[k] = { headers: v.headers, rows: [] };
-                merged.otherCsvs[k].rows.push(...v.rows);
+                if (!merged.otherCsvs[k]) {
+                    merged.otherCsvs[k] = { headers: v.headers, rows: [], sections: [], banner: v.banner || null };
+                }
+                merged.otherCsvs[k].rows.push(...(v.rows || []));
+                if (v.banner && !merged.otherCsvs[k].banner) merged.otherCsvs[k].banner = v.banner;
+                // Merge multi-section data across parts, concatenating rows of
+                // same-titled sections so nothing is dropped.
+                if (Array.isArray(v.sections) && v.sections.length) {
+                    for (const sec of v.sections) {
+                        const existing = merged.otherCsvs[k].sections.find(s => s.title === sec.title);
+                        if (existing) existing.rows.push(...(sec.rows || []));
+                        else merged.otherCsvs[k].sections.push({ title: sec.title, headers: sec.headers, rows: [...(sec.rows || [])] });
+                    }
+                }
             }
         }
 
@@ -594,6 +620,86 @@ class SnapchatWarrantParser {
             headers,
             rows
         };
+    }
+
+    /**
+     * Parse a Snapchat production-record CSV into ALL of its sections.
+     *
+     * Snapchat returns many non-conversation production CSVs (IP data,
+     * subscriber info, device IDs, account-change history, AI conversations,
+     * push tokens, …) where a SINGLE file can contain MULTIPLE record blocks.
+     * Layout (mirrors koebbe14/Snapchat-Parser parse_production_record_text):
+     *
+     *   <banner: Target username … / User ID … / Date range searched …>
+     *   ----------------------------------------  (>= 20 dashes — section sep)
+     *   <preamble / section title / "Data Legend …">
+     *   ========================================  (>= 15 equals — header sep)
+     *   <csv header row>
+     *   <data rows …>
+     *   ----------------------------------------  (next section …)
+     *
+     * Our prior `_parseSnapchatCsv` kept only the LAST `===` block, silently
+     * DROPPING every earlier section — the reason officers reported Snapchat
+     * "not parsing everything". This captures every section.
+     *
+     * @returns {{ banner: object|null, sections: Array<{title,headers,rows}> }}
+     */
+    _parseProductionSections(text) {
+        const result = { banner: null, sections: [] };
+        if (!text || !String(text).trim()) return result;
+        const lines = String(text).split(/\r?\n/);
+        const isDash = (l) => /^-{20,}$/.test(l.trim());
+        const isEq   = (l) => /^={15,}$/.test(l.trim());
+        const csvLine = (l) => { const r = this._parseCsv(l); return r.length ? r[0] : null; };
+
+        // First dash separator marks the end of the banner / start of sections.
+        let firstSep = -1;
+        for (let i = 0; i < lines.length; i++) { if (isDash(lines[i])) { firstSep = i; break; } }
+
+        const bannerLines = (firstSep >= 0 ? lines.slice(0, firstSep) : lines.slice(0, 30));
+        result.banner = this._extractHeaderInfo(bannerLines.map(l => [l]));
+
+        if (firstSep < 0) return result; // no delimiter blocks (e.g. NO RESPONSIVE DATA banner)
+
+        let i = firstSep;
+        const n = lines.length;
+        while (i < n) {
+            if (!isDash(lines[i])) { i++; continue; }
+            i++; // skip the dash separator
+            const preamble = [];
+            while (i < n && !isEq(lines[i]) && !isDash(lines[i])) { preamble.push(lines[i]); i++; }
+            if (i >= n) break;
+            if (isDash(lines[i])) continue;     // empty section (no header block)
+            if (!isEq(lines[i])) continue;
+            i++; // skip the eq separator
+            while (i < n && !lines[i].trim()) i++; // skip blank lines before header
+            if (i >= n) break;
+            const header = csvLine(lines[i]); i++;
+            if (!header) continue;
+            const headers = header.map(h => (h || '').trim());
+            const rows = [];
+            while (i < n && !isDash(lines[i])) {
+                const row = csvLine(lines[i]); i++;
+                if (!row) continue;
+                if (!row.some(c => c && c.trim())) continue;
+                if (row.length === 1 && /NO RESPONSIVE DATA FOUND/i.test(row[0])) continue;
+                const obj = {};
+                for (let k = 0; k < headers.length; k++) {
+                    if (!headers[k]) continue;
+                    obj[headers[k]] = row[k] !== undefined ? row[k] : '';
+                }
+                rows.push(obj);
+            }
+            // Section title = first non-"Data Legend" preamble line.
+            let title = '';
+            for (const pl of preamble) {
+                const s = pl.trim();
+                if (s && !/data legend/i.test(s)) { title = s.slice(0, 120); break; }
+            }
+            if (!title) title = ((preamble[0] || '').trim().slice(0, 120)) || '(section)';
+            result.sections.push({ title, headers, rows });
+        }
+        return result;
     }
 
     /**

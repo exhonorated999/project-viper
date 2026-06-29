@@ -8558,6 +8558,17 @@
                 }
                 break;
             }
+            case 'pdf-ocr': {
+                // Broken-font PDF — running OCR fallback (slower). Keep the user informed.
+                phaseEl.textContent = 'Reading scanned/encoded PDF (OCR)…';
+                const f = payload.file || 1, ft = payload.fileTotal || 1;
+                const pg = payload.page || 0, pt = payload.pageTotal || 0;
+                statsEl.textContent = (ft > 1 ? ('PDF ' + f + '/' + ft + ' · ') : '') +
+                    (pt ? ('OCR page ' + pg + '/' + pt) : 'OCR…');
+                barEl.style.width = '95%';
+                if (shim) shim.style.display = 'none';
+                break;
+            }
             case 'done': {
                 phaseEl.textContent = 'Done';
                 barEl.style.width = '100%';

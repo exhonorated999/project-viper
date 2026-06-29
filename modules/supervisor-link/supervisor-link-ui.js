@@ -27,6 +27,18 @@
   function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
   function lsJSON(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch { return d; } }
 
+  // LAN node address — the Supervisor host on the network. Persisted locally so
+  // the investigator points at the right machine (default = supervisor host IP).
+  const NODE_URL_KEY = 'viper_supervisor_node_url';
+  const DEFAULT_NODE_URL = 'ws://192.168.1.52:7071';
+  function getNodeUrl() {
+    const u = (lsGet(NODE_URL_KEY) || '').trim();
+    return u || DEFAULT_NODE_URL;
+  }
+  function setNodeUrl(u) {
+    try { localStorage.setItem(NODE_URL_KEY, String(u || '').trim()); } catch (_) {}
+  }
+
   function deviceId() {
     let id = lsGet('viper_device_id');
     if (!id) {
@@ -183,6 +195,23 @@
     const bodyWrap = el('div', 'padding:18px 20px;');
     card.appendChild(bodyWrap);
 
+    // Section: LAN node address (the Supervisor host on the network)
+    bodyWrap.appendChild(el('div', `font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:${C.faint};margin-bottom:8px;`, { textContent: 'Supervisor LAN Node' }));
+    const nodeRow = el('div', 'display:flex;gap:8px;align-items:center;margin-bottom:6px;');
+    const nodeInput = el('input', `flex:1;background:${C.bg};border:1px solid ${C.border};color:${C.text};
+      border-radius:9px;padding:10px 12px;font-size:13px;outline:none;font-family:ui-monospace,Consolas,monospace;`,
+      { type: 'text', value: getNodeUrl(), placeholder: 'ws://<supervisor-ip>:7071' });
+    const applyBtn = el('button', `background:${C.panel};border:1px solid ${C.border};color:${C.dim};
+      border-radius:9px;padding:10px 14px;font-size:13px;cursor:pointer;white-space:nowrap;`, { textContent: 'Apply' });
+    nodeRow.appendChild(nodeInput);
+    nodeRow.appendChild(applyBtn);
+    bodyWrap.appendChild(nodeRow);
+    bodyWrap.appendChild(el('div', `font-size:11px;color:${C.faint};margin-bottom:14px;`, {
+      textContent: 'Address of the machine running V.I.P.E.R. Supervisor Edition. Use its LAN IP (not localhost) when on another computer.',
+    }));
+    applyBtn.addEventListener('click', () => { setNodeUrl(nodeInput.value); refreshSecure(); discover(); });
+    nodeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { setNodeUrl(nodeInput.value); refreshSecure(); discover(); } });
+
     // Section: supervisor picker
     bodyWrap.appendChild(el('div', `font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:${C.faint};margin-bottom:8px;`, { textContent: 'Destination Supervisor' }));
     const pickerRow = el('div', 'display:flex;gap:8px;align-items:center;margin-bottom:6px;');
@@ -203,7 +232,7 @@
     bodyWrap.appendChild(secureLine);
     async function refreshSecure() {
       try {
-        const st = await api().status();
+        const st = await api().status({ url: getNodeUrl() });
         secureLine.innerHTML = '';
         const lock = el('span', `color:${C.green};`, { textContent: '\u{1F512}' });
         secureLine.appendChild(lock);
@@ -213,7 +242,7 @@
         }));
         if (st.nodePin) {
           const reset = el('a', `color:${C.cyan};cursor:pointer;text-decoration:underline;`, { textContent: 'reset pin' });
-          reset.addEventListener('click', async () => { await api().resetPin({}); refreshSecure(); });
+          reset.addEventListener('click', async () => { await api().resetPin({ url: getNodeUrl() }); refreshSecure(); });
           secureLine.appendChild(reset);
         }
       } catch (_) { /* ignore */ }
@@ -303,7 +332,7 @@
       select.innerHTML = '';
       select.appendChild(el('option', '', { textContent: 'Discovering…', value: '' }));
       pickerHint.textContent = '';
-      const res = await api().discover({ identity: getIdentity() });
+      const res = await api().discover({ identity: getIdentity(), url: getNodeUrl() });
       if (!res || !res.ok) {
         select.innerHTML = '';
         const err = (res && res.error) || '';
@@ -349,7 +378,7 @@
         if (!pushes.length) { result.style.color = C.amber; result.textContent = 'Select at least one item.'; pushBtn.disabled = false; pushBtn.style.opacity = '1'; pushBtn.textContent = 'Push'; return; }
         let delivered = 0, queued = 0;
         for (const p of pushes) {
-          const ack = await api().push({ identity: getIdentity(), to, dtype: p.dtype, manifest: p.manifest, body: p.body });
+          const ack = await api().push({ identity: getIdentity(), url: getNodeUrl(), to, dtype: p.dtype, manifest: p.manifest, body: p.body });
           if (!ack || !ack.ok) throw new Error((ack && ack.error) || 'PUSH_FAILED');
           if (ack.delivered) delivered++; else queued++;
         }

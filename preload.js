@@ -432,7 +432,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // OPS plan PDFs for digital approval. Identity is read from localStorage
   // by the renderer and passed through on each call.
   supervisorLink: {
-    status: () => ipcRenderer.invoke('supervisor-link:status'),
+    status: (opts) => ipcRenderer.invoke('supervisor-link:status', opts || {}),
     discover: (opts) => ipcRenderer.invoke('supervisor-link:discover', opts || {}),
     push: (opts) => ipcRenderer.invoke('supervisor-link:push', opts || {}),
     buildOpsPdf: (ops) => ipcRenderer.invoke('supervisor-link:build-ops-pdf', ops || {}),

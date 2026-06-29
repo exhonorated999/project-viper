@@ -26,8 +26,24 @@ function _daysBetween(a, b) {
   return Math.floor((b - a) / 86400000);
 }
 
+// Dev-build detection (cached synchronously at module load).  Unpackaged
+// builds launched via `npm start` (electron .) unlock ALL features so the
+// team can test without a demo/license — production packaged builds are
+// unaffected.
+const _IS_DEV_BUILD = (() => {
+  try {
+    return !!(typeof window !== 'undefined' && window.electronAPI &&
+      typeof window.electronAPI.isDevBuild === 'function' && window.electronAPI.isDevBuild());
+  } catch { return false; }
+})();
+
 /* ---------- status ---------- */
 function getLicenseStatus() {
+  // Dev build: fully unlocked, no demo/expiry gating.
+  if (_IS_DEV_BUILD) {
+    return { registered: true, status: "licensed", licenseType: "dev", daysLeft: Infinity, canCreate: true, devBuild: true };
+  }
+
   const licenseKey = _get("license_key");
   const licenseType = _get("license_type");
   const registeredAt = _get("registered_at");

@@ -2119,6 +2119,11 @@ ipcMain.handle('open-external-url', async (_e, url) => {
 // --- App version (reads from package.json via Electron) ---
 ipcMain.handle('get-app-version', () => app.getVersion());
 
+// Synchronous dev-build signal for the renderer.  Dev builds run via
+// `electron .` (npm start) where app.isPackaged === false.  The licensing
+// module uses this to unlock all features for testing in dev.
+ipcMain.on('get-is-dev', (e) => { e.returnValue = !app.isPackaged; });
+
 // ── Auto-Update (electron-updater) ─────────────────────────────────
 // Uses GitHub Releases. NSIS installer.nsh backup/restore logic ensures
 // userdata/ and cases/ are NEVER overwritten during an update.

@@ -5,6 +5,8 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   // App info
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  // Synchronous: true when running an unpackaged dev build (npm start).
+  isDevBuild: () => { try { return ipcRenderer.sendSync('get-is-dev'); } catch { return false; } },
   platform: process.platform,  // 'win32' | 'darwin' | 'linux' — for telemetry & UA-aware code
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
 

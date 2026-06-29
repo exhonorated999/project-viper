@@ -27,13 +27,13 @@
   function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
   function lsJSON(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch { return d; } }
 
-  // LAN node address — the Supervisor host on the network. Persisted locally so
-  // the investigator points at the right machine (default = supervisor host IP).
+  // LAN node address — the Supervisor host on the network. Persisted locally.
+  // Blank ("") means AUTO-DETECT: the app UDP-broadcasts to find the node, so
+  // no manual configuration is needed on a normal LAN. A value pins a specific
+  // host (e.g. ws://192.168.1.52:7071) and skips discovery.
   const NODE_URL_KEY = 'viper_supervisor_node_url';
-  const DEFAULT_NODE_URL = 'ws://192.168.1.52:7071';
   function getNodeUrl() {
-    const u = (lsGet(NODE_URL_KEY) || '').trim();
-    return u || DEFAULT_NODE_URL;
+    return (lsGet(NODE_URL_KEY) || '').trim(); // '' => auto-detect
   }
   function setNodeUrl(u) {
     try { localStorage.setItem(NODE_URL_KEY, String(u || '').trim()); } catch (_) {}
@@ -195,19 +195,19 @@
     const bodyWrap = el('div', 'padding:18px 20px;');
     card.appendChild(bodyWrap);
 
-    // Section: LAN node address (the Supervisor host on the network)
+    // Section: LAN node address (auto-detected; optional manual override)
     bodyWrap.appendChild(el('div', `font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:${C.faint};margin-bottom:8px;`, { textContent: 'Supervisor LAN Node' }));
     const nodeRow = el('div', 'display:flex;gap:8px;align-items:center;margin-bottom:6px;');
     const nodeInput = el('input', `flex:1;background:${C.bg};border:1px solid ${C.border};color:${C.text};
       border-radius:9px;padding:10px 12px;font-size:13px;outline:none;font-family:ui-monospace,Consolas,monospace;`,
-      { type: 'text', value: getNodeUrl(), placeholder: 'ws://<supervisor-ip>:7071' });
+      { type: 'text', value: getNodeUrl(), placeholder: 'auto-detect on network  (or ws://host:7071)' });
     const applyBtn = el('button', `background:${C.panel};border:1px solid ${C.border};color:${C.dim};
       border-radius:9px;padding:10px 14px;font-size:13px;cursor:pointer;white-space:nowrap;`, { textContent: 'Apply' });
     nodeRow.appendChild(nodeInput);
     nodeRow.appendChild(applyBtn);
     bodyWrap.appendChild(nodeRow);
     bodyWrap.appendChild(el('div', `font-size:11px;color:${C.faint};margin-bottom:14px;`, {
-      textContent: 'Address of the machine running V.I.P.E.R. Supervisor Edition. Use its LAN IP (not localhost) when on another computer.',
+      textContent: 'Leave blank to auto-detect the Supervisor node on your network. Enter a LAN address (e.g. ws://192.168.1.52:7071) to target a specific machine.',
     }));
     applyBtn.addEventListener('click', () => { setNodeUrl(nodeInput.value); refreshSecure(); discover(); });
     nodeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { setNodeUrl(nodeInput.value); refreshSecure(); discover(); } });
@@ -330,9 +330,11 @@
     async function discover() {
       select.disabled = true; pushBtn.disabled = true; pushBtn.style.opacity = '.55';
       select.innerHTML = '';
-      select.appendChild(el('option', '', { textContent: 'Discovering…', value: '' }));
-      pickerHint.textContent = '';
-      const res = await api().discover({ identity: getIdentity(), url: getNodeUrl() });
+      const manual = getNodeUrl();
+      select.appendChild(el('option', '', { textContent: manual ? 'Connecting…' : 'Scanning network…', value: '' }));
+      pickerHint.style.color = C.dim;
+      pickerHint.textContent = manual ? '' : 'Searching the LAN for a Supervisor node…';
+      const res = await api().discover({ identity: getIdentity(), url: manual });
       if (!res || !res.ok) {
         select.innerHTML = '';
         const err = (res && res.error) || '';
@@ -344,18 +346,23 @@
           pickerHint.textContent = 'This device has been revoked by the supervisor/node. Contact the administrator.';
         } else if (/NODE_PROOF_FAILED/.test(err)) {
           pickerHint.textContent = 'Node failed its identity proof — refusing to connect.';
+        } else if (!manual) {
+          pickerHint.textContent = 'No Supervisor node found on the network. Make sure the Supervisor app is running and on the same Wi-Fi, or enter its address manually below.';
         } else {
-          pickerHint.textContent = 'Could not reach the V.I.P.E.R. LAN node. Is it running?';
+          pickerHint.textContent = 'Could not reach the Supervisor node at ' + manual + '. Check the address and that the app is running.';
         }
         refreshSecure();
         return;
       }
+      // Reflect the resolved address (auto-detected or manual) into the field.
+      if (res.url) { nodeInput.value = res.url; setNodeUrl(res.url); }
+      refreshSecure();
       roster = res.roster || [];
       select.innerHTML = '';
       if (!roster.length) {
         select.appendChild(el('option', '', { textContent: 'No supervisors online', value: '' }));
         pickerHint.style.color = C.amber;
-        pickerHint.textContent = 'No V.I.P.E.R. Supervisor machines are currently online on the LAN.';
+        pickerHint.textContent = 'Node found at ' + (res.url || '') + ', but no Supervisor is registered/online there.';
         return;
       }
       select.disabled = false;
@@ -363,7 +370,8 @@
         select.appendChild(el('option', '', { textContent: `${s.name} — ${s.unit || 'Unit'} (${s.badge || s.deviceId})`, value: s.deviceId }));
       });
       pickerHint.style.color = C.dim;
-      pickerHint.textContent = `${roster.length} supervisor${roster.length === 1 ? '' : 's'} online.`;
+      pickerHint.textContent = `${roster.length} supervisor${roster.length === 1 ? '' : 's'} online`
+        + (res.url ? ` · ${res.url}` : '') + '.';
       pushBtn.disabled = false; pushBtn.style.opacity = '1';
     }
     refreshBtn.addEventListener('click', discover);

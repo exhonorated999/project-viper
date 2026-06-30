@@ -26586,7 +26586,7 @@
         // Send the current operations plan to a supervisor for digital approval
         // over the LAN. Saves the form first, builds a compact field set, and
         // opens the Supervisor Link push dialog (PDF is generated at push time).
-        function sendOpsPlanForApproval() {
+        async function sendOpsPlanForApproval() {
             try { if (typeof saveCurrentOpsPlan === 'function') saveCurrentOpsPlan(); } catch (_) {}
             if (!window.SupervisorLink) {
                 alert('Supervisor Link is only available in the desktop app.');
@@ -26606,15 +26606,33 @@
                 officer: localStorage.getItem('viper_customer_name') || (d.caseAgent || ''),
                 summary: d.caseSummary || d.tacticalPlan || d.suspectInfo || 'No summary provided.',
             };
+            // Generate the FULL multi-page OPS plan PDF (same document as the
+            // export button — photos, maps, suspects, attachments) and attach
+            // it so the supervisor reviews the real plan, not a summary stub.
+            try {
+                const r = await generateOpsPlanReport({ returnPdf: true });
+                if (r && r.success && r.base64) {
+                    ops.pdfBase64 = r.base64;
+                    ops.fileName = r.fileName || ((caseNumber ? caseNumber + '-' : '') + 'ops-plan.pdf');
+                } else if (r && r.error) {
+                    console.warn('[SupervisorLink] full OPS PDF generation failed, falling back to summary:', r.error);
+                    viperToast('Could not build full OPS PDF — sending summary instead.', 'warning');
+                }
+            } catch (e) {
+                console.warn('[SupervisorLink] full OPS PDF generation threw, falling back to summary:', e);
+            }
             window.SupervisorLink.openPushDialog({ mode: 'opsplan', ops });
         }
 
-        async function generateOpsPlanReport() {
-            const includeSuspects = document.getElementById('genOps_includeSuspectPDF')?.checked;
-            const includePhotos = document.getElementById('genOps_includePhotos')?.checked;
-            const includeMaps = document.getElementById('genOps_includeMaps')?.checked;
-            const includeAttachments = document.getElementById('genOps_includeAttachments')?.checked !== false;
-            document.getElementById('genOpsPlanModal')?.remove();
+        async function generateOpsPlanReport(opts = {}) {
+            const returnPdf = !!opts.returnPdf;
+            // When generating for Supervisor Link "Send for Approval" there is
+            // no options modal open — include everything for a complete plan.
+            const includeSuspects = returnPdf ? true : document.getElementById('genOps_includeSuspectPDF')?.checked;
+            const includePhotos = returnPdf ? true : document.getElementById('genOps_includePhotos')?.checked;
+            const includeMaps = returnPdf ? true : document.getElementById('genOps_includeMaps')?.checked;
+            const includeAttachments = returnPdf ? true : document.getElementById('genOps_includeAttachments')?.checked !== false;
+            if (!returnPdf) document.getElementById('genOpsPlanModal')?.remove();
 
             const d = opsPlanData || {};
 
@@ -27258,6 +27276,22 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 const safeCase = (currentCase.caseNumber || 'case').replace(/[^A-Za-z0-9_-]+/g, '_');
                 const stamp = new Date().toISOString().slice(0, 10);
                 const defaultFileName = `OpsPlan_${safeCase}_${stamp}.pdf`;
+                // Supervisor Link path: render to base64 and hand the bytes
+                // back to the caller (sendOpsPlanForApproval) — no save dialog.
+                if (returnPdf) {
+                    viperToast('Generating full OPS plan for review…', 'info');
+                    const res = await window.electronAPI.saveHtmlAsPdf({
+                        html: reportHtml,
+                        defaultFileName,
+                        options: { pageSize: 'Letter', settleMs: 1800 },
+                        attachments: pdfAttachments,
+                        returnBase64: true
+                    });
+                    if (res && res.success && res.base64) {
+                        return { success: true, base64: res.base64, fileName: res.fileName || defaultFileName, attachmentsMerged: res.attachmentsMerged || 0 };
+                    }
+                    return { success: false, error: (res && res.error) || 'PDF generation failed' };
+                }
                 viperToast(pdfAttachments.length > 0
                     ? `Generating PDF + merging ${pdfAttachments.length} attachment${pdfAttachments.length === 1 ? '' : 's'}…`
                     : 'Generating PDF…', 'info');
@@ -27283,6 +27317,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 }
             } catch (e) {
                 console.error('OPS Plan PDF export error:', e);
+                if (opts && opts.returnPdf) return { success: false, error: e.message || String(e) };
                 viperToast('PDF export failed: ' + (e.message || e), 'error');
             }
         }

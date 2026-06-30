@@ -343,7 +343,11 @@
       }));
 
       getSelectedPushes = async () => {
-        const pdf = await buildOpsPdf(ops);
+        // Prefer the FULL OPS plan PDF the case-detail view already rendered
+        // (photos/maps/suspects/attachments). Fall back to the one-page
+        // summary stub only if no full PDF was attached.
+        const pdf = ops.pdfBase64 || await buildOpsPdf(ops);
+        const fileName = ops.fileName || ((ops.caseNumber ? ops.caseNumber + '-' : '') + 'ops-plan.pdf');
         return [{
           dtype: 'opsPlan',
           manifest: {
@@ -351,7 +355,7 @@
             caseNumber: ops.caseNumber || '', risk: ops.risk || '',
             date: ops.date || '', location: ops.location || '',
           },
-          body: { fileName: (ops.caseNumber ? ops.caseNumber + '-' : '') + 'ops-plan.pdf', pdfBase64: pdf },
+          body: { fileName, pdfBase64: pdf },
         }];
       };
     } else {

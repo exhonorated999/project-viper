@@ -249,6 +249,75 @@
     }
     refreshSecure();
 
+    // Diagnostics: layered TCP→WS→handshake probe with a copyable report.
+    const diagRow = el('div', `margin-top:10px;display:flex;gap:10px;align-items:center;`);
+    const diagBtn = el('button', `background:${C.panel};border:1px solid ${C.border};color:${C.cyan};
+      border-radius:8px;padding:7px 12px;font-size:12px;cursor:pointer;`, { textContent: 'Run connection diagnostics' });
+    const diagStatus = el('span', `font-size:11px;color:${C.faint};`);
+    diagRow.appendChild(diagBtn);
+    diagRow.appendChild(diagStatus);
+    bodyWrap.appendChild(diagRow);
+    const diagPanel = el('div', `display:none;margin-top:8px;border:1px solid ${C.border};border-radius:9px;
+      background:${C.bg};padding:10px 12px;`);
+    const diagPre = el('pre', `margin:0;white-space:pre-wrap;word-break:break-word;font-size:11px;line-height:1.5;
+      color:${C.text};font-family:ui-monospace,Consolas,monospace;max-height:220px;overflow:auto;`);
+    const diagFoot = el('div', `display:flex;gap:8px;margin-top:8px;`);
+    const copyBtn = el('button', `background:${C.panel};border:1px solid ${C.border};color:${C.dim};
+      border-radius:7px;padding:6px 11px;font-size:11px;cursor:pointer;`, { textContent: 'Copy report' });
+    diagFoot.appendChild(copyBtn);
+    diagPanel.appendChild(diagPre);
+    diagPanel.appendChild(diagFoot);
+    bodyWrap.appendChild(diagPanel);
+
+    function fmtDiag(r) {
+      if (!r) return 'No report.';
+      const s = r.steps || {};
+      const yn = (b) => (b ? 'PASS' : 'FAIL');
+      const lines = [];
+      lines.push('V.I.P.E.R. Supervisor-Link Diagnostics');
+      lines.push('time      ' + (r.ts || '—'));
+      lines.push('app       v' + (r.appVersion || '?') + '   ' + (r.platform || ''));
+      lines.push('device    ' + (r.deviceId || '—'));
+      lines.push('identity  ' + (r.identity && r.identity.present ? (r.identity.name + ' #' + r.identity.badge + ' / ' + (r.identity.unit || '—')) : 'NOT SET'));
+      lines.push('field     "' + ((r.field && r.field.input) || '') + '"');
+      lines.push('target    ' + ((r.target && r.target.url) || '—') + '   (host ' + ((r.target && r.target.host) || '—') + ' : ' + ((r.target && r.target.port) || '—') + ')');
+      const dn = (r.discovery && r.discovery.nodes) || [];
+      lines.push('discovery ' + (r.discovery && r.discovery.ran ? (dn.length + ' node(s)' + (r.discovery.error ? ' err=' + r.discovery.error : '')) : 'not run'));
+      dn.forEach((n) => lines.push('          • ' + n.url + '  ' + (n.nodeId || '')));
+      lines.push('');
+      lines.push('1) TCP        ' + yn(s.tcp && s.tcp.ok) + '  ' + ((s.tcp && s.tcp.ms) || 0) + 'ms' + (s.tcp && s.tcp.error ? '  ' + s.tcp.error : ''));
+      lines.push('2) WebSocket  ' + yn(s.ws && s.ws.ok) + '  ' + ((s.ws && s.ws.ms) || 0) + 'ms  hello=' + (s.ws && s.ws.helloReceived ? 'yes' : 'no') + (s.ws && s.ws.error ? '  ' + s.ws.error : ''));
+      lines.push('3) Handshake  ' + yn(s.handshake && s.handshake.ok) + '  ' + ((s.handshake && s.handshake.ms) || 0) + 'ms  state=' + ((s.handshake && s.handshake.state) || '—') + (s.handshake && s.handshake.rosterCount != null ? '  roster=' + s.handshake.rosterCount : '') + (s.handshake && s.handshake.error ? '  ' + s.handshake.error : ''));
+      lines.push('');
+      lines.push('VERDICT   ' + (r.summary || '—'));
+      return lines.join('\n');
+    }
+
+    diagBtn.addEventListener('click', async () => {
+      diagBtn.disabled = true;
+      diagStatus.style.color = C.faint;
+      diagStatus.textContent = 'Probing TCP → WebSocket → handshake…';
+      diagPanel.style.display = 'block';
+      diagPre.textContent = 'Running…';
+      try {
+        const r = await api().diagnostics({ url: getNodeUrl(), identity: getIdentity() });
+        diagPre.textContent = fmtDiag(r);
+        const good = r && r.steps && r.steps.handshake && r.steps.handshake.ok;
+        diagStatus.style.color = good ? C.green : C.red;
+        diagStatus.textContent = good ? 'Secure link OK' : 'Issue found — see report / copy it to share';
+      } catch (e) {
+        diagPre.textContent = 'Diagnostics failed: ' + (e && e.message || e);
+        diagStatus.style.color = C.red;
+        diagStatus.textContent = 'Diagnostics error';
+      } finally {
+        diagBtn.disabled = false;
+      }
+    });
+    copyBtn.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(diagPre.textContent || ''); copyBtn.textContent = 'Copied ✓'; setTimeout(() => { copyBtn.textContent = 'Copy report'; }, 1500); }
+      catch (_) { copyBtn.textContent = 'Copy failed'; setTimeout(() => { copyBtn.textContent = 'Copy report'; }, 1500); }
+    });
+
     // Section: payload
     const payloadWrap = el('div', 'margin-top:16px;');
     bodyWrap.appendChild(payloadWrap);
@@ -349,7 +418,7 @@
         } else if (!manual) {
           pickerHint.textContent = 'No Supervisor node found on the network. Make sure the Supervisor app is running and on the same Wi-Fi, or enter its address manually below.';
         } else {
-          pickerHint.textContent = 'Could not reach the Supervisor node at ' + manual + '. Check the address and that the app is running.';
+          pickerHint.textContent = 'Could not reach the Supervisor node at ' + manual + '. Check the address and that the app is running — then click "Run connection diagnostics" below for details.';
         }
         refreshSecure();
         return;

@@ -4730,7 +4730,7 @@ ipcMain.handle('save-html-as-pdf', async (event, payload) => {
   return run;
 });
 
-async function _doSaveHtmlAsPdf({ html, defaultFileName, options, attachments }) {
+async function _doSaveHtmlAsPdf({ html, defaultFileName, options, attachments, returnBase64 }) {
   let pdfWin = null;
   let tempHtmlPath = null;
   let printTimer = null;
@@ -4750,13 +4750,19 @@ async function _doSaveHtmlAsPdf({ html, defaultFileName, options, attachments })
     }
 
     const fileName = (defaultFileName || 'report.pdf').replace(/[<>:"|?*\x00-\x1F\\/]/g, '_');
-    const result = await dialog.showSaveDialog(mainWindow, {
-      title: 'Save Report as PDF',
-      defaultPath: fileName,
-      filters: [{ name: 'PDF', extensions: ['pdf'] }]
-    });
-    restoreFocus && restoreFocus();
-    if (result.canceled || !result.filePath) return { success: false, canceled: true };
+    // returnBase64 mode (used by Supervisor Link "Send for Approval"): render
+    // the PDF to bytes and hand them back to the renderer — no Save dialog,
+    // no disk write. Everything else (render + attachment merge) is shared.
+    let result = null;
+    if (!returnBase64) {
+      result = await dialog.showSaveDialog(mainWindow, {
+        title: 'Save Report as PDF',
+        defaultPath: fileName,
+        filters: [{ name: 'PDF', extensions: ['pdf'] }]
+      });
+      restoreFocus && restoreFocus();
+      if (result.canceled || !result.filePath) return { success: false, canceled: true };
+    }
 
     pdfWin = new BrowserWindow({
       show: false,
@@ -4855,6 +4861,19 @@ async function _doSaveHtmlAsPdf({ html, defaultFileName, options, attachments })
         mergeWarnings.push('Merge failed: ' + mergeErr.message);
         finalPdfBuffer = pdfBuffer;
       }
+    }
+
+    if (returnBase64) {
+      return {
+        success: true,
+        base64: finalPdfBuffer.toString('base64'),
+        fileName,
+        bytesIn: htmlBytes,
+        bytesOut: finalPdfBuffer.length,
+        attachmentsMerged: mergedCount,
+        attachmentsRequested: Array.isArray(attachments) ? attachments.length : 0,
+        mergeWarnings: mergeWarnings.length ? mergeWarnings : undefined
+      };
     }
 
     fs.writeFileSync(result.filePath, finalPdfBuffer);

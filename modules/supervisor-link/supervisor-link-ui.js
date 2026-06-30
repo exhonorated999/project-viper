@@ -122,6 +122,121 @@
     };
   }
 
+  // ── Case activity redactor ────────────────────────────────────────────
+  // Reconstructs a SAFE, metadata-only activity feed per case from the same
+  // localStorage sources the case-detail timeline uses. CRITICAL: this emits
+  // ONLY {date, lane, category, action, significance} where `action` is a
+  // curated status label (verb + type/platform). It NEVER includes names,
+  // addresses, free-text titles/descriptions, narrative text, note content,
+  // tags, file names, or any other PII / case content. Notes are excluded.
+  function _isoFull(v) {
+    try { const d = new Date(v); return isNaN(d) ? '' : d.toISOString(); }
+    catch { return ''; }
+  }
+
+  function buildCaseActivity(c) {
+    const caseNumber = c.caseNumber || ('#' + (c.id || ''));
+    const id = c.id;
+    const ev = []; // { date, lane, category, action, significance }
+    const push = (date, lane, category, action, significance) => {
+      const d = _isoFull(date);
+      if (!d) return;
+      ev.push({ date: d, lane, category, action, significance: significance || 'supporting' });
+    };
+
+    // Case opened
+    if (c.createdAt) push(c.createdAt, 'incident', 'custom', 'Case opened', 'major');
+
+    // Warrants — type + status verb only (NO issuedTo / description)
+    const warrants = (lsJSON('viperCaseWarrants', {})[caseNumber]) || [];
+    warrants.forEach((w) => {
+      const kind = String(w.provider || w.platform || w.service || w.type || 'Warrant').trim();
+      if (w.dateSigned)      push(w.dateSigned + 'T00:00:00', 'investigation', 'warrant', `${kind} warrant signed`, 'major');
+      if (w.dateServed)      push(w.dateServed + 'T00:00:00', 'investigation', 'warrant', `${kind} warrant served`, 'major');
+      if (w.courtReturnDate) push(w.courtReturnDate + 'T00:00:00', 'investigation', 'warrant', `${kind} court return`, 'supporting');
+      if (w.uploadedAt || w.createdAt) push(w.uploadedAt || w.createdAt, 'investigation', 'warrant', `${kind} warrant uploaded`, 'supporting');
+    });
+
+    // RMS imports — report TYPE only (NO number / agency / narrative text)
+    const rms = lsJSON(`rmsImports_${id}`, []);
+    rms.forEach((r) => {
+      const t = String(r.reportType || 'RMS report').trim();
+      const incidentDate = r.reportDate || r.fromDateTime;
+      if (incidentDate) push(incidentDate, 'incident', 'rms', `${t} filed`, 'major');
+      if (r.importedAt)  push(r.importedAt, 'investigation', 'rms', `${t} imported`, 'supporting');
+      // narratives intentionally skipped — free-text + officer name
+    });
+
+    // Evidence — TYPE only (NO tag / description / file names)
+    const evidence = (lsJSON('viperCaseEvidence', {})[caseNumber]) || [];
+    evidence.forEach((e) => {
+      let ts = e.createdAt;
+      if (!ts && typeof e.id === 'number' && e.id > 1e12) ts = new Date(e.id).toISOString();
+      const type = String(e.type || 'Evidence').trim();
+      push(ts, 'forensics', 'digital', `${type} evidence logged`, 'supporting');
+    });
+
+    // Area canvass — existence only (NO address / contact / notes)
+    const canvas = lsJSON(`areacanvas_${id}`, []);
+    canvas.forEach((cv) => push(cv.timestamp, 'investigation', 'surveillance', 'Area canvass conducted', 'supporting'));
+
+    // TRACE imports — existence only
+    const allTrace = lsJSON('viperTraceImports', {});
+    (allTrace[caseNumber] || []).forEach((imp) => push(imp._importedAt || imp.export_date, 'incident', 'rms', 'TRACE data imported', 'supporting'));
+
+    // Oversight imports — existence only (NO offender name / file name)
+    lsJSON(`oversightImport_${id}`, []).forEach((oi) => push(oi.importedAt, 'incident', 'rms', 'Oversight record imported', 'supporting'));
+
+    // Consent searches — type + granted/refused (NO party / location)
+    lsJSON(`consentSearches_${id}`, []).forEach((cs) => {
+      const granted = cs.consentGiven !== false;
+      const type = String(cs.consentType || 'verbal').trim();
+      push(cs.dateTime, 'investigation', 'fieldwork', `Consent search (${type}) — ${granted ? 'granted' : 'refused'}`, granted ? 'major' : 'major');
+    });
+
+    // Manual timeline entries — generic only (NO user title / description)
+    lsJSON(`timelineEvents_${id}`, []).forEach((m) => {
+      if (m.sourceType !== 'manual') return;
+      push(m.timestamp, m.lane || 'investigation', m.category || 'custom', 'Activity logged', m.significance === 'major' ? 'major' : 'supporting');
+    });
+
+    // NOTE: case notes (viperCaseNotes) intentionally NOT included.
+
+    // Sort newest first
+    ev.sort((a, b) => b.date.localeCompare(a.date));
+
+    // Totals (computed over ALL events, before capping)
+    const totals = {
+      total: ev.length,
+      warrants: ev.filter((x) => x.category === 'warrant').length,
+      warrantsServed: ev.filter((x) => x.category === 'warrant' && /served/.test(x.action)).length,
+      evidence: ev.filter((x) => x.category === 'digital').length,
+      reports: ev.filter((x) => x.category === 'rms').length,
+      fieldwork: ev.filter((x) => x.category === 'fieldwork' || x.category === 'surveillance').length,
+    };
+
+    // 12-week cadence (events per ISO week), oldest→newest
+    const cadence = {};
+    ev.forEach((x) => {
+      const d = new Date(x.date);
+      const onejan = new Date(d.getFullYear(), 0, 1);
+      const week = Math.ceil((((d - onejan) / 86400000) + onejan.getDay() + 1) / 7);
+      const key = `${d.getFullYear()}-W${String(week).padStart(2, '0')}`;
+      cadence[key] = (cadence[key] || 0) + 1;
+    });
+    const cadenceArr = Object.entries(cadence)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .slice(-12)
+      .map(([week, count]) => ({ week, count }));
+
+    return {
+      lastActivity: ev[0] ? ev[0].date.slice(0, 10) : (c.lastModified || c.createdAt || '').slice(0, 10),
+      totals,
+      cadence: cadenceArr,
+      events: ev.slice(0, 50), // cap per case to bound payload
+    };
+  }
+
   // Case-status digest — one lightweight row per case, metadata only.
   function buildCaseDigest() {
     const cases = getCases();
@@ -132,6 +247,7 @@
       risk: priorityLabel(c.priority),
       lastActivity: (c.lastModified || c.createdAt || '').slice(0, 10),
       assignee: c.createdBy || getIdentity().name,
+      activity: buildCaseActivity(c),
     }));
     return {
       manifest: {

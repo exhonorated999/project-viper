@@ -26614,12 +26614,13 @@
                 if (r && r.success && r.base64) {
                     ops.pdfBase64 = r.base64;
                     ops.fileName = r.fileName || ((caseNumber ? caseNumber + '-' : '') + 'ops-plan.pdf');
-                } else if (r && r.error) {
-                    console.warn('[SupervisorLink] full OPS PDF generation failed, falling back to summary:', r.error);
-                    viperToast('Could not build full OPS PDF — sending summary instead.', 'warning');
+                } else {
+                    console.warn('[SupervisorLink] full OPS PDF generation failed, falling back to summary:', r && r.error);
+                    viperToast('Could not build full OPS PDF (' + ((r && r.error) || 'unknown') + ') — sending 1-page summary instead. If you just updated VIPER, fully quit and relaunch the app.', 'warning');
                 }
             } catch (e) {
                 console.warn('[SupervisorLink] full OPS PDF generation threw, falling back to summary:', e);
+                viperToast('Full OPS PDF generation errored — sending 1-page summary. Fully restart VIPER if you just updated it.', 'warning');
             }
             window.SupervisorLink.openPushDialog({ mode: 'opsplan', ops });
         }

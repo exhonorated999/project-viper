@@ -21,6 +21,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const net = require('node:net');
 const dgram = require('node:dgram');
 const WebSocket = require('ws');
 const { app, BrowserWindow } = require('electron');
@@ -281,6 +282,121 @@ function discoverNodes(timeoutMs = 1500) {
   });
 }
 
+// ── connectivity diagnostics ────────────────────────────────────────────────
+// Layered probe that pinpoints WHERE a connection to the Supervisor node
+// breaks (DNS/TCP / WebSocket upgrade / node handshake / RBAC roster), so a
+// remote machine can self-report instead of needing manual terminal tests.
+function parseWsHostPort(url) {
+  try {
+    const u = new URL(url);
+    return { host: u.hostname, port: Number(u.port) || 7071 };
+  } catch (_) {
+    const m = String(url || '').match(/^ws:\/\/([^:/]+)(?::(\d+))?/i);
+    return { host: m ? m[1] : null, port: m && m[2] ? Number(m[2]) : 7071 };
+  }
+}
+
+function tcpProbe(host, port, timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    let done = false;
+    const finish = (ok, error) => { if (done) return; done = true; try { sock.destroy(); } catch (_) {} resolve({ ok, ms: Date.now() - t0, error: error || null }); };
+    const sock = net.connect({ host, port });
+    sock.setTimeout(timeoutMs);
+    sock.on('connect', () => finish(true));
+    sock.on('timeout', () => finish(false, 'TIMEOUT'));
+    sock.on('error', (e) => finish(false, e.code || e.message));
+  });
+}
+
+function wsProbe(url, timeoutMs = 6000) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    let opened = false, hello = false, done = false;
+    const finish = (ok, error) => { if (done) return; done = true; clearTimeout(timer); try { ws.close(); } catch (_) {} resolve({ ok, ms: Date.now() - t0, opened, helloReceived: hello, error: error || null }); };
+    let ws;
+    try { ws = new WebSocket(url, { maxPayload: 64 * 1024 * 1024 }); }
+    catch (e) { return resolve({ ok: false, ms: Date.now() - t0, opened: false, helloReceived: false, error: e.code || e.message }); }
+    const timer = setTimeout(() => finish(opened, opened ? 'NO_HELLO' : 'CONNECT_TIMEOUT'), timeoutMs);
+    ws.on('open', () => { opened = true; });
+    ws.on('message', (m) => {
+      try { const j = JSON.parse(m.toString()); if (j && j.t === 'hello') { hello = true; return finish(true); } } catch (_) {}
+      hello = true; finish(true);
+    });
+    ws.on('unexpected-response', (_q, r) => finish(false, 'HTTP_' + (r && r.statusCode)));
+    ws.on('error', (e) => finish(false, e.code || e.message));
+  });
+}
+
+async function runDiagnostics(opts = {}) {
+  const ts = new Date().toISOString();
+  let appVersion = 'unknown';
+  try { appVersion = app.getVersion(); } catch (_) {}
+  const id = deviceIdentity();
+  const identity = opts.identity || {};
+  const s = loadStore();
+  const report = {
+    ok: true,
+    ts,
+    appVersion,
+    platform: `${process.platform} ${process.arch} node-${process.versions.node} electron-${process.versions.electron || '?'}`,
+    deviceId: id.deviceId,
+    identity: { name: identity.name || '', badge: identity.badge || '', unit: identity.unit || '', present: !!(identity.name && identity.badge) },
+    field: { input: (opts.url || '').trim() },
+    discovery: { ran: false, nodes: [], error: null },
+    target: { url: null, host: null, port: null },
+    steps: {
+      tcp: { ok: false, ms: 0, error: 'skipped' },
+      ws: { ok: false, ms: 0, opened: false, helloReceived: false, error: 'skipped' },
+      handshake: { ok: false, ms: 0, state: null, rosterCount: null, error: 'skipped' },
+    },
+    pins: {},
+    summary: '',
+  };
+
+  // Step 0 — resolve target: explicit field wins, else UDP discovery.
+  let url = report.field.input;
+  try {
+    report.discovery.ran = true;
+    const nodes = await discoverNodes(opts.timeoutMs || 1500);
+    report.discovery.nodes = nodes.map((n) => ({ url: n.url, address: n.address, nodeId: n.nodeId, name: n.name }));
+    if (!url && nodes.length) url = nodes[0].url;
+  } catch (e) { report.discovery.error = String(e && e.message || e); }
+  if (!url) url = DEFAULT_URL;
+  const { host, port } = parseWsHostPort(url);
+  report.target = { url, host, port };
+  report.pins[url] = s.pins[url] || null;
+
+  // Step 1 — raw TCP reachability.
+  if (host) report.steps.tcp = await tcpProbe(host, port);
+
+  // Step 2 — WebSocket upgrade + node hello (only if TCP succeeded).
+  if (report.steps.tcp.ok) report.steps.ws = await wsProbe(url);
+
+  // Step 3 — full mutually-authenticated handshake + roster RPC.
+  if (report.steps.ws.ok && report.identity.present) {
+    const t0 = Date.now();
+    try {
+      const c = await ensureClient({ url, identity });
+      const roster = await c.rpc('get:roster');
+      report.steps.handshake = { ok: true, ms: Date.now() - t0, state: c.state, rosterCount: (roster || []).length, error: null };
+    } catch (e) {
+      report.steps.handshake = { ok: false, ms: Date.now() - t0, state: client ? client.state : null, rosterCount: null, error: String(e && e.message || e) };
+    }
+  } else if (!report.identity.present) {
+    report.steps.handshake.error = 'NO_IDENTITY';
+  }
+
+  // Verdict.
+  if (report.steps.handshake.ok) report.summary = `OK — secure link established (${report.steps.handshake.rosterCount} supervisor(s) online) at ${url}.`;
+  else if (!report.steps.tcp.ok) report.summary = `BLOCKED at TCP — cannot open ${host}:${port} (${report.steps.tcp.error}). Check the address, that the Supervisor node is running, and firewalls.`;
+  else if (!report.steps.ws.ok) report.summary = `TCP ok but WebSocket failed (${report.steps.ws.error}) — node may not be the V.I.P.E.R. node, or a proxy is interfering.`;
+  else if (!report.identity.present) report.summary = `Network ok (TCP+WS+hello) but no investigator identity set — fill in name/badge.`;
+  else report.summary = `Network ok (TCP+WS+hello) but handshake failed: ${report.steps.handshake.error}.`;
+
+  return report;
+}
+
 async function ensureClient(opts = {}) {
   const url = opts.url || DEFAULT_URL;
   const identity = opts.identity || {};
@@ -313,6 +429,15 @@ function registerIpc(ipcMain) {
       return { ok: true, nodes };
     } catch (e) {
       return { ok: false, error: String(e && e.message || e), nodes: [] };
+    }
+  });
+
+  // Layered connectivity diagnostics (TCP → WS → handshake → roster).
+  ipcMain.handle('supervisor-link:diagnostics', async (_e, opts = {}) => {
+    try {
+      return await runDiagnostics(opts);
+    } catch (e) {
+      return { ok: false, error: String(e && e.message || e), summary: 'Diagnostics crashed: ' + String(e && e.message || e) };
     }
   });
 

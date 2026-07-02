@@ -1733,40 +1733,9 @@ function _buildPaEspBlocks(caseId, draft, agency) {
       || { key: ad.providerKey, name: ad.providerKey || '(no provider)' };
     const provName = ad.businessName || provider.legalEntity || provider.name || provider.key || '(provider)';
 
-    // ── COURT ORDERS PAGE ────────────────────────────────────────────────
-    blocks.push({ break: true });
-    blocks.push({ h1: 'ADDITIONALLY AUTHORIZED COURT ORDERS' });
-    blocks.push({ label: 'Authorization to implement special procedure(s):',
-      p: 'The Affidavit filed herewith has demonstrated legal justification for the implementation of the following special procedures, which shall be employed by the officers who execute this warrant:' });
-    blocks.push({ spacer: true });
-    blocks.push({ h2: 'Certificate of Records ORDER' });
-    blocks.push({ p: 'IT IS HEREBY ORDERED that the Service Provider listed in the search warrant provide a valid "Certificate of Records" document consisting of an affidavit and return the document to the affiant along with a copy of the requested records.' });
-    blocks.push({ spacer: true });
-    blocks.push({ h2: 'Five Business Day Record Production ORDER' });
-    blocks.push({ p: 'IT IS HEREBY ORDERED that the organizations described in this search warrant shall produce the requested records within five (5) business days of receipt of this search warrant.' });
-    blocks.push({ spacer: true });
-    blocks.push({ h2: 'Property Return and Destruction ORDER' });
-    blocks.push({ p: 'IT IS HEREBY ORDERED that any property or things taken pursuant to this warrant that have been determined not to contain relevant evidence or that have been photographically or digitally recorded shall be disposed of, returned to the known victim(s) or property owners, or appropriately dispositioned in accordance with law without the necessity of further court order upon adjudication of this case.' });
-    blocks.push({ spacer: true });
-
-    if (ad.includeNonDisclosure) {
-      blocks.push({ h2: 'NON-DISCLOSURE STATEMENT:' });
-      blocks.push({ p: `Due to the sensitivity of this ongoing criminal investigation, ${provName}'s notification to the listed subscriber that these records have been released to a law enforcement agency could compromise this investigation and the safety of law enforcement officers participating in it. Based on these facts, it is further ordered that the customer/subscriber is not to be notified of the release of this information, as it could jeopardize an ongoing criminal investigation.` });
-      blocks.push({ spacer: true });
-    }
-
-    blocks.push({ h2: 'Order to Send Information' });
-    blocks.push({ p: 'Responsive data may be delivered via digital delivery or mail, notwithstanding 18 U.S.C. § 2252A or similar statute or code, by sending to:' });
-    blocks.push({ spacer: true });
-    const affLine = [ag.affiantRank, ag.affiantName].filter(Boolean).join(' ').trim();
-    if (affLine)          blocks.push({ bold: affLine });
-    if (ag.agencyName)    blocks.push({ p: ag.agencyName });
-    if (ag.unit)          blocks.push({ p: ag.unit });
-    if (ag.agencyAddress) blocks.push({ p: ag.agencyAddress });
-    if (ag.affiantEmail)  blocks.push({ p: ag.affiantEmail });
-    if (ag.affiantPhone)  blocks.push({ p: ag.affiantPhone });
-
-    // ── RECORDS PAGE ─────────────────────────────────────────────────────
+    // ── RECORDS PAGE (specific items to be searched for & seized) ────────
+    // Rendered FIRST so the "Additionally Authorized Court Orders" fall UNDER
+    // the specific records on the following page.
     blocks.push({ break: true });
     blocks.push({ bold: provName });
     blocks.push({ p: 'FOR THE FOLLOWING RECORDS:' });
@@ -1804,6 +1773,39 @@ function _buildPaEspBlocks(caseId, draft, agency) {
       blocks.push({ label: label + ':', p: desc });
       blocks.push({ spacer: true });
     });
+
+    // ── COURT ORDERS PAGE (falls UNDER the specific records above) ───────
+    blocks.push({ break: true });
+    blocks.push({ h1: 'ADDITIONALLY AUTHORIZED COURT ORDERS' });
+    blocks.push({ label: 'Authorization to implement special procedure(s):',
+      p: 'The Affidavit filed herewith has demonstrated legal justification for the implementation of the following special procedures, which shall be employed by the officers who execute this warrant:' });
+    blocks.push({ spacer: true });
+    blocks.push({ h2: 'Certificate of Records ORDER' });
+    blocks.push({ p: 'IT IS HEREBY ORDERED that the Service Provider listed in the search warrant provide a valid "Certificate of Records" document consisting of an affidavit and return the document to the affiant along with a copy of the requested records.' });
+    blocks.push({ spacer: true });
+    blocks.push({ h2: 'Five Business Day Record Production ORDER' });
+    blocks.push({ p: 'IT IS HEREBY ORDERED that the organizations described in this search warrant shall produce the requested records within five (5) business days of receipt of this search warrant.' });
+    blocks.push({ spacer: true });
+    blocks.push({ h2: 'Property Return and Destruction ORDER' });
+    blocks.push({ p: 'IT IS HEREBY ORDERED that any property or things taken pursuant to this warrant that have been determined not to contain relevant evidence or that have been photographically or digitally recorded shall be disposed of, returned to the known victim(s) or property owners, or appropriately dispositioned in accordance with law without the necessity of further court order upon adjudication of this case.' });
+    blocks.push({ spacer: true });
+
+    if (ad.includeNonDisclosure) {
+      blocks.push({ h2: 'NON-DISCLOSURE STATEMENT:' });
+      blocks.push({ p: `Due to the sensitivity of this ongoing criminal investigation, ${provName}'s notification to the listed subscriber that these records have been released to a law enforcement agency could compromise this investigation and the safety of law enforcement officers participating in it. Based on these facts, it is further ordered that the customer/subscriber is not to be notified of the release of this information, as it could jeopardize an ongoing criminal investigation.` });
+      blocks.push({ spacer: true });
+    }
+
+    blocks.push({ h2: 'Order to Send Information' });
+    blocks.push({ p: 'Responsive data may be delivered via digital delivery or mail, notwithstanding 18 U.S.C. § 2252A or similar statute or code, by sending to:' });
+    blocks.push({ spacer: true });
+    const affLine = [ag.affiantRank, ag.affiantName].filter(Boolean).join(' ').trim();
+    if (affLine)          blocks.push({ bold: affLine });
+    if (ag.agencyName)    blocks.push({ p: ag.agencyName });
+    if (ag.unit)          blocks.push({ p: ag.unit });
+    if (ag.agencyAddress) blocks.push({ p: ag.agencyAddress });
+    if (ag.affiantEmail)  blocks.push({ p: ag.affiantEmail });
+    if (ag.affiantPhone)  blocks.push({ p: ag.affiantPhone });
   });
 
   return blocks;
@@ -4847,6 +4849,14 @@ const bus = {
       const paOverrides = {};
       const espBlocks = _buildPaEspBlocks(caseId, draft, agencyMerged);
       if (espBlocks && espBlocks.length) paOverrides.espBlocks = espBlocks;
+      // Items cross-reference: when the officer leaves the Items box blank (or
+      // used the legacy "See Addendum X" phrasing) and ESP addendums exist,
+      // point the reader to the official continuation pages we now emit.
+      const _hasAds = Array.isArray(draft.addendums) && draft.addendums.length > 0;
+      const _itemsRaw = String((draft.pa && draft.pa.itemsToSearchSeize) || '').trim();
+      if (_hasAds && (!_itemsRaw || /^see\s+addendum\b/i.test(_itemsRaw))) {
+        paOverrides.itemsToSearchSeize = 'See continuation pages';
+      }
       // Exhibit photos → PA overlay photo-exhibit pages (2 per page, appended
       // after the affidavit). Overlay reads draft.pa.photos = [{dataUrl, caption}].
       const exhibits = _draftExhibits(draft);

@@ -753,6 +753,24 @@
       }
     ]
   }
+,
+  {
+    "id": "pa-multi-business-esp",
+    "name": "Pennsylvania Search Warrant + Affidavit (AOPC 410A)",
+    "jurisdiction": "PA",
+    "version": 1,
+    "description": "Pennsylvania search warrant built onto the official Unified Judicial System forms: Application for Search Warrant and Authorization (AOPC 410A, Rev. 10/2024), its Continuation Pages, the Affidavit of Probable Cause, and its Continuation Page. The mandated forms are filled via AcroForm overlay in the main process (modules/warrant-author/pa-form-overlay.js) — the affidavit narrative flows onto official continuation pages and photographic exhibits are appended two-per-page onto the Affidavit Continuation master. Issuing-authority / magistrate fields and all signature lines are left blank for wet/ink signing at issuance. Governed by Pa.R.Crim.P. 200-211 (DA approval per Rule 202(A) / 507).",
+    "compatibleProviderTypes": [
+      "ESP",
+      "Phone",
+      "Internet",
+      "Financial",
+      "Other"
+    ],
+    "blocks": [
+      { "key": "01-page-label", "kind": "label", "slot": "addendum.pageLabel" }
+    ]
+  }
 ];
   for (var i = 0; i < TEMPLATES.length; i++) {
     try { TE.registerTemplate(TEMPLATES[i]); }

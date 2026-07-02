@@ -648,7 +648,7 @@ function harvestIdentifiers(caseId) {
 function _readWarrantAuthorState() {
   // Settings dropdown wins over agency.state; falls back to agency.state, then 'CA'.
   // Must mirror _WARRANT_AUTHOR_SUPPORTED_STATES in settings.html.
-  const SUPPORTED = ['CA', 'VA', 'CO'];
+  const SUPPORTED = ['CA', 'VA', 'CO', 'PA'];
   try {
     const s = (localStorage.getItem('viperWarrantAuthorState') || '').toUpperCase();
     if (SUPPORTED.includes(s)) return s;
@@ -668,6 +668,7 @@ function _espTemplateForState(state) {
     case 'CA': return { id: 'ca-multi-business-esp',     label: 'CA — Multi-Business ESP (CalECPA §1546.1)' };
     case 'VA': return { id: 'va-multi-business-esp',     label: 'VA — Multi-Business ESP (DC-338/DC-339, §19.2-53) · Beta' };
     case 'CO': return { id: 'co-multi-business-esp',     label: 'CO — Affidavit + Search Warrant (§16-3-301) · Beta' };
+    case 'PA': return { id: 'pa-multi-business-esp',     label: 'PA — Search Warrant + Affidavit (AOPC 410A) · Beta' };
     default:   return { id: 'generic-us-multi-business-esp', label: 'US Generic — Multi-Business ESP (SCA §2703)' };
   }
 }
@@ -1421,6 +1422,9 @@ function _renderEditor(caseId, draftId) {
       <!-- VA-specific face-page options: item 5, night service, knowledge, target accounts, advanced DC-339 -->
       ${_renderVaWarrantOptions(caseId, draft)}
 
+      <!-- PA-specific face-page options: AOPC 410A application fields + photo exhibits -->
+      ${_renderPaWarrantOptions(caseId, draft)}
+
       <!-- 2-pane: addendum form (left) + live preview (right) -->
       <div class="grid grid-cols-12 gap-4">
         <!-- addendum list rail -->
@@ -1452,6 +1456,7 @@ function _renderDraftHeader(caseId, draft) {
     { v: 'ca-multi-business-esp', label: 'CA — CalECPA §1546.1' },
     { v: 'va-multi-business-esp', label: 'VA — DC-338/DC-339 (§19.2-53)' },
     { v: 'co-multi-business-esp', label: 'CO — Affidavit + Search Warrant (§16-3-301)' },
+    { v: 'pa-multi-business-esp', label: 'PA — Search Warrant + Affidavit (AOPC 410A)' },
     { v: 'generic-us-multi-business-esp', label: 'US Generic — SCA §2703' },
   ];
   // Colorado: the agency profile carries a user-maintained list of courts
@@ -1674,6 +1679,117 @@ function _appendExhibitBlocks(blockStream, draft) {
       label,
     });
   });
+}
+
+/**
+ * Compose + render the ESP addendum pages (provider block, target
+ * accounts, date range, items-to-produce, NDO clauses) to standalone
+ * PDF bytes, using the supplied template id.
+ *
+ * Used by the Pennsylvania generate flow: PA's own template only carries
+ * the official AOPC 410A forms (filled via main-process overlay), so the
+ * per-provider ESP attachment pages are composed here with the generic
+ * US ESP template and appended AFTER the official forms in the merged PDF.
+ *
+ * Returns { arrayBuffer, blob, pageCount, blockStream } or null when the
+ * draft has no addendums or a required subsystem is unavailable.
+ */
+function _composeEspAddendumBytes(caseId, draft, templateId) {
+  const ads = Array.isArray(draft.addendums) ? draft.addendums : [];
+  if (!ads.length) return null;
+
+  const engine = _engine();
+  if (!engine) return null;
+  const tpl = engine.getTemplate(templateId);
+  if (!tpl) return null;
+
+  const pdir = _pdir();
+  const items = _items();
+  const providersMerged = pdir ? pdir.mergeProviders({
+    providerOverrides: _safeLS('viperWarrantAuthorProviderOverrides'),
+    customProviders:   _safeLS('viperWarrantAuthorCustomProviders'),
+    providerDeletions: _safeLS('viperWarrantAuthorProviderDeletions')
+  }) : [];
+
+  // 1. Compose each addendum
+  const addendumComposes = [];
+  for (const ad of ads) {
+    const provider = providersMerged.find(p => p.key === ad.providerKey) || { key: ad.providerKey, name: ad.providerKey || '(no provider)' };
+    const adForEngine = Object.assign({}, ad, {
+      targets: Array.isArray(ad.targetAccounts)
+        ? ad.targetAccounts.filter(t => t && String(t.value || '').trim() !== '')
+        : [],
+      dateRange: {
+        start: ad.dateRangeFrom || '',
+        end:   ad.dateRangeTo   || '',
+        allAvailable: !!ad.allDatesAvailable,
+      },
+      itemsToProduce: Array.isArray(ad.itemsToProduce) ? ad.itemsToProduce.slice() : [],
+      probableCause: _resolvePcForDraft(caseId, draft),
+      dateRangeBasis: _resolveDateRangeBasis(ad),
+    });
+    const _agency = _mergeAgencyForDraft(draft);
+    const ctx = {
+      addendum: adForEngine,
+      provider,
+      items,
+      affiant: _agency,
+      agency:  _agency,
+      draft,
+      court: _resolveCoCourtForDraft(draft),
+      case: _resolveCaseCtxForDraft(draft),
+    };
+    let composed;
+    try {
+      composed = engine.compose(tpl, ctx);
+    } catch (e) {
+      composed = { blocks: [{ kind: 'paragraph', text: '(compose error: ' + e.message + ')' }], danglingSlots: ['engine.error'], missingItems: true };
+    }
+    addendumComposes.push({
+      addendumId:   ad.id,
+      providerKey:  provider.key,
+      providerName: provider.name || provider.key,
+      businessName: ad.businessName || '',
+      compose:      composed,
+    });
+  }
+
+  // 2. Build unified block stream
+  const builder = window.WarrantAuthorBlockBuilder;
+  if (!builder) return null;
+  const agencyProfile = _safeLS('viperAgencyProfile') || {};
+  const agencyMerged = Object.assign({}, agencyProfile, draft.affiantSnapshot || {});
+  const pcStore = window.WarrantAuthorCasePcStore;
+  const pcNarrative = (pcStore && pcStore.getBody) ? pcStore.getBody(caseId) : (draft.probableCauseNarrative || '');
+  const caseInfo = {
+    caseNumber: (window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || draft.caseRef || '',
+    caseName:   (window.currentCase && window.currentCase.name) || '',
+  };
+  let blockStream;
+  try {
+    blockStream = builder.build({
+      draft, addendumComposes, agency: agencyMerged, caseInfo, pcNarrative, includeDisclaimer: true,
+    });
+  } catch (e) {
+    return null;
+  }
+  try { _appendExhibitBlocks(blockStream, draft); } catch (_) {}
+
+  // 3. Render PDF locally
+  const pdfComp = window.WarrantAuthorPdfComposer;
+  if (!pdfComp) return null;
+  let pdfResult;
+  try {
+    pdfResult = pdfComp.composePdf({ blockStream, draft, agency: agencyMerged });
+  } catch (e) {
+    return null;
+  }
+  return {
+    arrayBuffer: pdfResult.arrayBuffer,
+    blob:        pdfResult.blob,
+    pageCount:   pdfResult.pageCount,
+    blockStream,
+  };
 }
 
 // ─── CA face-page options (PC §1524 grounds + HOBBS + Night Search) ─────
@@ -2167,6 +2283,193 @@ function _renderVaWarrantOptions(caseId, draft) {
         ${knowledgeHtml}
         ${targetsHtml}
         ${advancedHtml}
+      </div>
+    </details>
+  `;
+}
+
+// ─── PA (AOPC 410A) face-page options ────────────────────────────────────
+// Surfaces the Pennsylvania Application + Affidavit officer-fill fields that
+// feed modules/warrant-author/pa-form-overlay.js:
+//   draft.pa.premisesDescription  → DescOfPremisesOrPersonSearched
+//   draft.pa.ownerOccupant        → NameOfOwnerSearchedProp
+//   draft.pa.itemsToSearchSeize   → IDItemsForSearchSeize (flows to continuation)
+//   draft.pa.violationOf          → ViolationOf
+//   draft.pa.datesOfViolation     → DATE(S) OF VIOLATION
+//   draft.pa.daApproved/daFileNumber → ViolationCheckBox1 + DAFile#
+//   draft.pa.county / policeIncidentNumber / warrantControlNumber → headers
+//   draft.pa.photos[]             → appended photo-exhibit pages (2/page)
+// The Affidavit narrative reuses the shared Case Probable Cause narrative
+// (draft.probableCauseNarrative); signatures/issuing-authority left blank.
+function _renderPaWarrantOptions(caseId, draft) {
+  if (!draft) return '';
+  const jx = String(draft.jurisdiction || '').toUpperCase();
+  const isPa = jx === 'PA' || draft.template === 'pa-multi-business-esp';
+  if (!isPa) return '';
+
+  const pa = (draft.pa && typeof draft.pa === 'object') ? draft.pa : {};
+  const cId = attr(caseId), dId = attr(draft.id);
+
+  const county          = String(pa.county || '');
+  const policeIncident  = String(pa.policeIncidentNumber || '');
+  const warrantControl  = String(pa.warrantControlNumber || '');
+  const items           = String(pa.itemsToSearchSeize || '');
+  const premises        = String(pa.premisesDescription || '');
+  const owner           = String(pa.ownerOccupant || '');
+  const violationOf     = String(pa.violationOf || '');
+  const datesOfViolation = String(pa.datesOfViolation || '');
+  const daApproved      = !!pa.daApproved;
+  const daFileNumber    = String(pa.daFileNumber || '');
+  const photos          = Array.isArray(pa.photos) ? pa.photos : [];
+
+  const isOpen = (_state.paOptionsOpen === undefined) ? true : !!_state.paOptionsOpen;
+
+  // status: how many of the core application fields are populated
+  const facets = [
+    items.trim() !== '',
+    premises.trim() !== '',
+    owner.trim() !== '',
+    violationOf.trim() !== '',
+    String(draft.probableCauseNarrative || '').trim() !== '',
+  ];
+  const filledFacets = facets.filter(Boolean).length;
+  const statusColor = filledFacets >= 4 ? 'text-emerald-400' : 'text-amber-400';
+  const statusIcon  = filledFacets >= 4 ? '✓' : '⚠';
+  const statusText  = `${filledFacets}/5 core fields populated`;
+
+  const inputCls = 'w-full bg-slate-900/60 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:border-viper-cyan focus:outline-none';
+  const areaCls  = inputCls + ' resize-none';
+  const labelCls = 'block text-[10px] uppercase tracking-wider text-slate-400 mb-1';
+
+  const photosHtml = photos.map((p, i) => {
+    const src = attr(p && (p.dataUrl || p.pngBase64) || '');
+    const cap = attr(p && p.caption || '');
+    return `
+      <div class="flex items-center gap-2 bg-slate-900/50 border border-slate-800 rounded p-2">
+        <div class="w-14 h-14 flex-shrink-0 rounded overflow-hidden bg-slate-800 flex items-center justify-center">
+          ${src ? `<img src="${src}" class="w-full h-full object-cover" alt="Exhibit ${i + 1}">` : '<span class="text-[9px] text-slate-500">no img</span>'}
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-[10px] text-slate-400 mb-1">Exhibit ${i + 1}</div>
+          <input type="text" value="${cap}" placeholder="Caption (e.g. 'Front of residence')"
+                 oninput="WarrantAuthorUI.bus.onPaPhotoCaption('${cId}','${dId}',${i}, this.value)"
+                 class="${inputCls}">
+        </div>
+        <button onclick="WarrantAuthorUI.bus.onPaPhotoRemove('${cId}','${dId}',${i})"
+                class="flex-shrink-0 px-2 py-1 text-[10px] text-rose-300 hover:bg-rose-900/30 border border-rose-800/50 rounded transition" title="Remove">
+          Remove
+        </button>
+      </div>`;
+  }).join('');
+
+  return `
+    <details class="bg-viper-dark/60 border border-slate-700 rounded-lg" ${isOpen ? 'open' : ''}
+             ontoggle="WarrantAuthorUI.bus.onPaOptionsToggle(this.open)">
+      <summary class="px-3 py-2 cursor-pointer select-none flex items-center justify-between hover:bg-slate-800/40">
+        <span class="text-xs uppercase tracking-wider text-slate-300 font-medium">
+          PA Face Page · AOPC 410A Application + Affidavit
+        </span>
+        <span class="text-[11px] ${statusColor}">${statusIcon} ${esc(statusText)}</span>
+      </summary>
+      <div class="p-3 border-t border-slate-700 space-y-3">
+
+        <div class="text-[10px] text-slate-500 -mt-0.5">
+          The Affidavit of Probable Cause narrative uses this case's shared
+          <span class="text-slate-400 font-medium">Probable Cause narrative</span> and flows onto
+          official continuation pages automatically. Issuing-authority fields and all signature
+          lines are left blank for signing at issuance.
+        </div>
+
+        <div class="grid grid-cols-3 gap-2">
+          <div>
+            <label class="${labelCls}">County</label>
+            <input type="text" value="${attr(county)}" placeholder="Auto from agency profile"
+                   oninput="WarrantAuthorUI.bus.onPaTextInput('${cId}','${dId}','pa.county', this.value)"
+                   class="${inputCls}">
+          </div>
+          <div>
+            <label class="${labelCls}">Police Incident #</label>
+            <input type="text" value="${attr(policeIncident)}" placeholder="Auto from case #"
+                   oninput="WarrantAuthorUI.bus.onPaTextInput('${cId}','${dId}','pa.policeIncidentNumber', this.value)"
+                   class="${inputCls}">
+          </div>
+          <div>
+            <label class="${labelCls}">Warrant Control #</label>
+            <input type="text" value="${attr(warrantControl)}"
+                   oninput="WarrantAuthorUI.bus.onPaTextInput('${cId}','${dId}','pa.warrantControlNumber', this.value)"
+                   class="${inputCls}">
+          </div>
+        </div>
+
+        <div>
+          <label class="${labelCls}">Identify items/persons to be searched for &amp; seized</label>
+          <textarea rows="4" placeholder="Be as specific as possible. Overflow flows onto the Application Continuation page."
+                    oninput="WarrantAuthorUI.bus.onPaTextInput('${cId}','${dId}','pa.itemsToSearchSeize', this.value)"
+                    class="${areaCls}">${esc(items)}</textarea>
+        </div>
+
+        <div>
+          <label class="${labelCls}">Specific description of premises and/or person to be searched</label>
+          <textarea rows="3" placeholder="Street & No., Apt. No., Vehicle, Safe Deposit Box, etc. Overflow flows to continuation."
+                    oninput="WarrantAuthorUI.bus.onPaTextInput('${cId}','${dId}','pa.premisesDescription', this.value)"
+                    class="${areaCls}">${esc(premises)}</textarea>
+        </div>
+
+        <div>
+          <label class="${labelCls}">Name of owner, occupant or possessor</label>
+          <input type="text" value="${attr(owner)}" placeholder="If unknown, give alias and/or description"
+                 oninput="WarrantAuthorUI.bus.onPaTextInput('${cId}','${dId}','pa.ownerOccupant', this.value)"
+                 class="${inputCls}">
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="${labelCls}">Violation of (conduct or statute)</label>
+            <input type="text" value="${attr(violationOf)}" placeholder='e.g. "18 Pa.C.S. § 3502 (Burglary)"'
+                   oninput="WarrantAuthorUI.bus.onPaTextInput('${cId}','${dId}','pa.violationOf', this.value)"
+                   class="${inputCls}">
+          </div>
+          <div>
+            <label class="${labelCls}">Date(s) of violation</label>
+            <input type="text" value="${attr(datesOfViolation)}"
+                   oninput="WarrantAuthorUI.bus.onPaTextInput('${cId}','${dId}','pa.datesOfViolation', this.value)"
+                   class="${inputCls}">
+          </div>
+        </div>
+
+        <div class="bg-slate-900/40 rounded border border-slate-800 p-2.5">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" ${daApproved ? 'checked' : ''}
+                   onchange="WarrantAuthorUI.bus.onPaFieldSet('${cId}','${dId}','pa.daApproved', this.checked)"
+                   class="rounded border-slate-600 bg-slate-900 text-viper-cyan focus:ring-0">
+            <span class="text-xs text-slate-300">Warrant Application Approved by District Attorney (Pa.R.Crim.P. 202(A)/507)</span>
+          </label>
+          ${daApproved ? `
+          <div class="mt-2">
+            <label class="${labelCls}">DA File No.</label>
+            <input type="text" value="${attr(daFileNumber)}"
+                   oninput="WarrantAuthorUI.bus.onPaTextInput('${cId}','${dId}','pa.daFileNumber', this.value)"
+                   class="${inputCls}">
+          </div>` : ''}
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-[11px] uppercase tracking-wider text-slate-400">
+              Photographic Exhibits
+              <span class="text-[10px] normal-case tracking-normal text-slate-500">— appended 2 per page after the affidavit</span>
+            </span>
+            <label class="px-2.5 py-1 text-[11px] text-viper-cyan hover:bg-viper-cyan/10 border border-viper-cyan/30 rounded transition cursor-pointer">
+              + Add photos
+              <input type="file" accept="image/png,image/jpeg" multiple class="hidden"
+                     onchange="WarrantAuthorUI.bus.onPaPhotoFiles('${cId}','${dId}', this)">
+            </label>
+          </div>
+          <div class="space-y-2">
+            ${photos.length ? photosHtml : '<div class="text-[11px] text-slate-500 italic py-2">No photos attached. Use “Add photos” to attach PNG/JPEG images as numbered exhibits (Exhibit A, B, C…).</div>'}
+          </div>
+        </div>
+
       </div>
     </details>
   `;
@@ -3044,6 +3347,9 @@ function _showGenerateResultModal(caseId, draft, blockStream, issues, pdfResult,
             Template: <span class="text-slate-300 font-mono">${esc(
               draft.template === 'ca-multi-business-esp'  ? 'CA · CalECPA' :
               draft.template === 'va-multi-business-esp'  ? 'VA · DC-338/DC-339' :
+              draft.template === 'co-multi-business-esp'  ? 'CO · §16-3-301' :
+              draft.template === 'pa-multi-business-esp'  ? 'PA · AOPC 410A' :
+              (String(draft.jurisdiction || '').toUpperCase() === 'PA') ? 'PA · AOPC 410A' :
               draft.template === 'ca-residential-sw'      ? 'CA · Residential SW' :
               draft.template === 'ca-residential'         ? 'CA · Residential SW' :
               'US · SCA §2703'
@@ -3533,6 +3839,7 @@ const bus = {
       jurisdiction: tpl.startsWith('ca-') ? 'CA'
                   : tpl.startsWith('va-') ? 'VA'
                   : tpl.startsWith('co-') ? 'CO'
+                  : tpl.startsWith('pa-') ? 'PA'
                   : 'US',
       agencyProfile: agency,
       crimeType: type === 'residential' ? crimeId : ''
@@ -3586,6 +3893,7 @@ const bus = {
       if (v.startsWith('ca-'))      d.jurisdiction = 'CA';
       else if (v.startsWith('va-')) d.jurisdiction = 'VA';
       else if (v.startsWith('co-')) d.jurisdiction = 'CO';
+      else if (v.startsWith('pa-')) d.jurisdiction = 'PA';
       else                          d.jurisdiction = 'US';
     }
     ds.saveDraft(caseId, d, { silent: true });
@@ -4088,6 +4396,80 @@ const bus = {
   onVaAdvancedDc339Toggle(open) {
     _state.vaAdvancedDc339Open = !!open;
   },
+  // ─── PA (AOPC 410A) face-page handlers ───────────────────────────────
+  // Prefix-locked to 'pa.' — mirror of the VA setters.
+  onPaFieldSet(caseId, draftId, path, value) {
+    if (typeof path !== 'string' || path.indexOf('pa.') !== 0) return;
+    const ds = _store(); if (!ds) return;
+    const d = ds.getDraft(caseId, draftId); if (!d) return;
+    if (!d.pa || typeof d.pa !== 'object') d.pa = {};
+    _setByPath(d, path, value);
+    ds.saveDraft(caseId, d, { silent: true });
+    _rerender();
+  },
+  onPaTextInput(caseId, draftId, path, value) {
+    if (typeof path !== 'string' || path.indexOf('pa.') !== 0) return;
+    const ds = _store(); if (!ds) return;
+    const d = ds.getDraft(caseId, draftId); if (!d) return;
+    if (!d.pa || typeof d.pa !== 'object') d.pa = {};
+    _setByPath(d, path, value);
+    ds.saveDraft(caseId, d, { silent: true });
+    // no _rerender() — keep caret in the field while typing
+  },
+  onPaOptionsToggle(open) {
+    _state.paOptionsOpen = !!open;
+  },
+  // Read selected image files as data URLs and append them as exhibits.
+  onPaPhotoFiles(caseId, draftId, inputEl) {
+    if (!inputEl || !inputEl.files || !inputEl.files.length) return;
+    const ds = _store(); if (!ds) return;
+    const files = Array.from(inputEl.files);
+    let pending = files.length;
+    const added = [];
+    const commit = () => {
+      const d = ds.getDraft(caseId, draftId); if (!d) return;
+      if (!d.pa || typeof d.pa !== 'object') d.pa = {};
+      if (!Array.isArray(d.pa.photos)) d.pa.photos = [];
+      d.pa.photos.push(...added);
+      ds.saveDraft(caseId, d, { silent: true });
+      try { inputEl.value = ''; } catch (_) {}
+      _rerender();
+    };
+    files.forEach(file => {
+      if (!/^image\/(png|jpeg)$/i.test(file.type)) {
+        if (typeof viperToast === 'function') viperToast(`Skipped ${file.name}: only PNG/JPEG supported.`, 'warning');
+        if (--pending === 0) commit();
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        added.push({ dataUrl: String(reader.result || ''), caption: '' });
+        if (--pending === 0) commit();
+      };
+      reader.onerror = () => {
+        if (typeof viperToast === 'function') viperToast(`Failed to read ${file.name}.`, 'error');
+        if (--pending === 0) commit();
+      };
+      reader.readAsDataURL(file);
+    });
+  },
+  onPaPhotoCaption(caseId, draftId, idx, value) {
+    const ds = _store(); if (!ds) return;
+    const d = ds.getDraft(caseId, draftId); if (!d) return;
+    if (!d.pa || !Array.isArray(d.pa.photos) || !d.pa.photos[idx]) return;
+    d.pa.photos[idx].caption = value;
+    ds.saveDraft(caseId, d, { silent: true });
+    // no _rerender() — keep caret in the caption field
+  },
+  onPaPhotoRemove(caseId, draftId, idx) {
+    const ds = _store(); if (!ds) return;
+    const d = ds.getDraft(caseId, draftId); if (!d) return;
+    if (!d.pa || !Array.isArray(d.pa.photos)) return;
+    if (idx < 0 || idx >= d.pa.photos.length) return;
+    d.pa.photos.splice(idx, 1);
+    ds.saveDraft(caseId, d, { silent: true });
+    _rerender();
+  },
   /**
    * Case-level shared probable cause edit. Fired on every keystroke.
    * Writes to the case-PC store, mirrors into every draft on this case
@@ -4372,6 +4754,121 @@ const bus = {
   },
 
   /**
+   * Generate the Pennsylvania AOPC 410A deliverable (Application + Affidavit
+   * + continuations + photo exhibits). Unlike the ESP path this has NO
+   * per-provider addendums and doesn't run the ESP slot validator — the
+   * main-process overlay (pa-form-overlay.js) builds the whole document from
+   * draft.pa.* + the shared Probable Cause narrative + agency profile.
+   * Output is PDF only (the official AcroForm document is the deliverable).
+   */
+  async onPaGenerate(caseId, draftId) {
+    const ds = _store(); if (!ds) return;
+    const draft = ds.getDraft(caseId, draftId); if (!draft) return;
+
+    // Self-heal: ensure the draft is coherently PA before we build. A draft
+    // can reach here with jurisdiction 'PA' but a stale non-PA template (e.g.
+    // created before PA existed, or the header template <select> drifted).
+    // Normalise both so the main-process overlay branch + the result modal
+    // label agree, and persist the correction.
+    if (draft.template !== 'pa-multi-business-esp' || String(draft.jurisdiction || '').toUpperCase() !== 'PA') {
+      draft.template = 'pa-multi-business-esp';
+      draft.jurisdiction = 'PA';
+      try { ds.saveDraft(caseId, draft, { silent: true }); } catch (_) {}
+    }
+
+    // Auto-sync caseRef from the running case.
+    const runningCaseNumber = (window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || '';
+    if (runningCaseNumber && !(draft.caseRef && String(draft.caseRef).trim())) {
+      draft.caseRef = runningCaseNumber;
+      try { ds.saveDraft(caseId, draft, { silent: true }); } catch (_) {}
+    }
+
+    // Mirror shared case Probable Cause narrative onto the draft so main sees it.
+    const pcStore = window.WarrantAuthorCasePcStore;
+    const pcNarrative = (pcStore && pcStore.getBody) ? pcStore.getBody(caseId) : (draft.probableCauseNarrative || '');
+    if (pcNarrative && draft.probableCauseNarrative !== pcNarrative) {
+      draft.probableCauseNarrative = pcNarrative;
+      try { ds.saveDraft(caseId, draft, { silent: true }); } catch (_) {}
+    }
+
+    // Soft pre-flight — warn (do not hard-block) on empty core fields.
+    const pa = (draft.pa && typeof draft.pa === 'object') ? draft.pa : {};
+    const missing = [];
+    if (!String(pa.itemsToSearchSeize || '').trim())  missing.push('Items/persons to be searched for & seized');
+    if (!String(pa.premisesDescription || '').trim()) missing.push('Description of premises/person to be searched');
+    if (!String(pcNarrative || '').trim())            missing.push('Probable Cause narrative (Affidavit body)');
+    if (missing.length) {
+      const proceed = confirm('These Pennsylvania fields are empty:\n\n• ' + missing.join('\n• ') + '\n\nGenerate the warrant anyway?');
+      if (!proceed) return;
+    }
+
+    const agencyProfile = _loadAgencyProfile();
+    const agencyMerged = Object.assign({}, agencyProfile, draft.affiantSnapshot || {});
+    const caseInfo = {
+      caseNumber: runningCaseNumber || draft.caseRef || '',
+      caseName:   (window.currentCase && window.currentCase.name) || '',
+      county:     agencyMerged.county || '',
+    };
+
+    if (!window.electronAPI || typeof window.electronAPI.warrantAuthorGenerate !== 'function') {
+      alert('Pennsylvania warrant generation requires the VIPER desktop app.');
+      return;
+    }
+
+    const casePath = caseInfo.caseNumber ? `cases/${caseInfo.caseNumber}` : null;
+    if (casePath) {
+      try { await window.electronAPI.warrantAuthorSaveDraft(casePath, draft.id, draft); } catch (_) {}
+    }
+
+    // Compose the ESP addendum pages (Google/etc. provider attachments)
+    // separately, using the generic US ESP template — PA's own template
+    // carries only the official AOPC 410A forms. These pages are appended
+    // AFTER the official forms by the main-process PA overlay merge.
+    let addendumBytes = null;
+    try {
+      const composed = _composeEspAddendumBytes(caseId, draft, 'generic-us-multi-business-esp');
+      if (composed && composed.arrayBuffer) addendumBytes = composed.arrayBuffer;
+    } catch (_) { addendumBytes = null; }
+
+    let saveResult;
+    try {
+      saveResult = await window.electronAPI.warrantAuthorGenerate({
+        casePath,
+        warrantId: draft.id,
+        draft,
+        formats: ['pdf'],           // PA deliverable is the official PDF forms
+        pdfBytes: addendumBytes,    // ESP addendum pages — appended after forms
+        agency: agencyMerged,
+        caseInfo,
+      });
+    } catch (e) {
+      saveResult = { success: false, error: e.message };
+    }
+    if (!casePath && saveResult && saveResult.success) {
+      saveResult.diskSkipped = true;
+      saveResult.diskSkippedReason = 'No case number available — PDF available for manual download only.';
+    }
+
+    // Build preview blob from the merged bytes main returns.
+    _state._genPdfBlob   = null;
+    _state._genDocxBlob  = null;
+    _state._genFilename  = (draft.caseRef || 'warrant') + '_PA-AOPC410A';
+    _state._genPageCount = (saveResult && saveResult.paOverlay && saveResult.paOverlay.pageCount) || 0;
+    _state._genSave      = saveResult;
+    if (saveResult && saveResult.pdfBytes) {
+      try {
+        _state._genPdfBlob = new Blob([new Uint8Array(saveResult.pdfBytes)], { type: 'application/pdf' });
+      } catch (_) { _state._genPdfBlob = null; }
+    }
+    if (saveResult && saveResult.paOverlay && !saveResult.paOverlay.merged && saveResult.paOverlay.error) {
+      alert('PA warrant build failed: ' + saveResult.paOverlay.error);
+    }
+
+    const pdfResult = { blob: _state._genPdfBlob, pageCount: _state._genPageCount, arrayBuffer: null };
+    _showGenerateResultModal(caseId, draft, null, [], pdfResult, saveResult);
+  },
+
+  /**
    * Generate a full PDF + DOCX warrant for ALL addendums in this draft.
    *
    * Pipeline:
@@ -4389,7 +4886,14 @@ const bus = {
   async onGenerateWarrant(caseId, draftId) {
     const ds = _store(); if (!ds) return;
     const draft = ds.getDraft(caseId, draftId); if (!draft) return;
+    // PA (AOPC 410A) uses its own overlay-driven generate flow — it has no
+    // per-provider addendums and doesn't run the ESP block/slot validator.
+    const _jx = String(draft.jurisdiction || '').toUpperCase();
+    if (_jx === 'PA' || draft.template === 'pa-multi-business-esp') {
+      return this.onPaGenerate(caseId, draftId);
+    }
     const engine = _engine();
+    if (!engine) { alert('Template engine not loaded.'); return; }
     if (!engine) { alert('Template engine not loaded.'); return; }
     const tpl = engine.getTemplate(draft.template);
     if (!tpl) { alert("Template '" + draft.template + "' not registered."); return; }
@@ -4570,6 +5074,7 @@ const bus = {
           formats: ['pdf', 'docx'],
           pdfBytes: pdfResult.arrayBuffer,
           agency:   agencyMerged,
+          caseInfo,                              // {caseNumber, county?} — PA overlay auto-fills headers
         });
         // Decorate failure mode when no case number — UI still wants the
         // DOCX/PDF blobs, but the disk-status banner should explain why

@@ -1218,3 +1218,890 @@
     flex-shrink: 0;
 }
 .dp-contact-row:not(.has-comms) .dp-contact-meta { opacity: 0.5; }
+
+/* ════════════════════════════════════════════════════════════════════
+   ═══ V.I.P.E.R. Unified Light Mode overrides ═══
+   Body.light-mode overrides for the DataPilot module.
+   Appends only — dark-mode rules above are untouched.
+   Strategy: white cards on light-gray page, dark readable text,
+   teal accent (var(--lm-accent)), thin #dde3ea borders.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── Shell + page background ─────────────────────────────────────── */
+body.light-mode .dp-shell {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-tab-content {
+    background: var(--lm-page, #eaeef3) !important;
+}
+body.light-mode .dp-view-body {
+    background: var(--lm-page, #eaeef3) !important;
+}
+
+/* ── Header ──────────────────────────────────────────────────────── */
+body.light-mode .dp-header {
+    background: var(--lm-card, #fff) !important;
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-import-switcher {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text, #1b2733) !important;
+    border: 1px solid var(--lm-inset-border, #dde3ea) !important;
+}
+body.light-mode .dp-device-chip {
+    background: rgba(8, 145, 178, 0.08) !important;
+    border: 1px solid rgba(8, 145, 178, 0.25) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .dp-chip-num { color: var(--lm-accent, #0891b2) !important; }
+body.light-mode .dp-chip-carrier { color: var(--lm-text-3, #8b97a5) !important; }
+
+/* ── Buttons ─────────────────────────────────────────────────────── */
+body.light-mode .dp-btn {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text, #1b2733) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-btn:hover {
+    background: rgba(8, 145, 178, 0.10) !important;
+    border-color: rgba(8, 145, 178, 0.30) !important;
+}
+body.light-mode .dp-btn-primary {
+    background: linear-gradient(135deg, #06b6d4, #0891b2) !important;
+    color: #fff !important;
+    border-color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-btn-secondary {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border-color: var(--lm-card-border, #dde3ea) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-btn-danger {
+    background: rgba(220, 38, 38, 0.10) !important;
+    border-color: rgba(220, 38, 38, 0.35) !important;
+    color: #b91c1c !important;
+}
+body.light-mode .dp-btn-danger:hover {
+    background: rgba(220, 38, 38, 0.18) !important;
+}
+body.light-mode .dp-btn-coach {
+    background: rgba(168, 85, 247, 0.10) !important;
+    border-color: rgba(168, 85, 247, 0.30) !important;
+    color: #7c3aed !important;
+}
+body.light-mode .dp-btn-coach:hover {
+    background: rgba(168, 85, 247, 0.18) !important;
+}
+body.light-mode .dp-btn-link {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-btn-link:hover {
+    color: #0e7490 !important;
+}
+
+/* ── Badges / counts ─────────────────────────────────────────────── */
+body.light-mode .dp-coach-badge,
+body.light-mode .dp-flag-count {
+    background: var(--lm-accent, #0891b2) !important;
+    color: #fff !important;
+}
+
+/* ── Tab bar ─────────────────────────────────────────────────────── */
+body.light-mode .dp-tabs {
+    background: var(--lm-card, #fff) !important;
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-tab {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-tab:hover {
+    color: var(--lm-text, #1b2733) !important;
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .dp-tab.active {
+    color: var(--lm-accent, #0891b2) !important;
+    border-bottom-color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-tab-count {
+    background: rgba(8, 145, 178, 0.12) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+
+/* ── View tabs (4-view redesign) ─────────────────────────────────── */
+body.light-mode .dp-vtabs {
+    background: var(--lm-card, #fff) !important;
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-vtab {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-vtab:hover {
+    color: var(--lm-text, #1b2733) !important;
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .dp-vtab.active {
+    color: var(--lm-accent, #0891b2) !important;
+    background: rgba(8, 145, 178, 0.10) !important;
+    border-color: rgba(8, 145, 178, 0.35) !important;
+}
+
+/* ── Empty state ─────────────────────────────────────────────────── */
+body.light-mode .dp-empty {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .dp-empty-icon {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-empty h2 {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-empty-help {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-inset-border, #dde3ea) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .dp-empty-help code {
+    background: rgba(8, 145, 178, 0.10) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-empty-inline {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-tab-empty h3 {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-tab-empty p {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+
+/* ── Scanned folders ─────────────────────────────────────────────── */
+body.light-mode .dp-scanned {
+    background: rgba(34, 197, 94, 0.06) !important;
+    border: 1px solid rgba(34, 197, 94, 0.25) !important;
+}
+body.light-mode .dp-scanned h3 {
+    color: #15803d !important;
+}
+body.light-mode .dp-scanned-title {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-scanned-row {
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .dp-scanned-name {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-scanned-path {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── Cards ───────────────────────────────────────────────────────── */
+body.light-mode .dp-card {
+    background: var(--lm-card, #fff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-card h3 {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-card-sub {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-card-anomaly {
+    border-color: rgba(245, 158, 11, 0.45) !important;
+}
+
+/* ── KV grid ─────────────────────────────────────────────────────── */
+body.light-mode .dp-kv {
+    border-bottom: 1px solid var(--lm-inset-border, #dde3ea) !important;
+}
+body.light-mode .dp-kv-l {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-kv-v {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-kv-empty {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── Stats ───────────────────────────────────────────────────────── */
+body.light-mode .dp-stat {
+    background: var(--lm-card, #fff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-stat:hover {
+    border-color: rgba(8, 145, 178, 0.40) !important;
+}
+body.light-mode .dp-stat-num {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-stat-label {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-stat-clickable:hover {
+    border-color: rgba(8, 145, 178, 0.45) !important;
+    background: rgba(8, 145, 178, 0.06) !important;
+}
+
+/* ── Toolbar / Search ────────────────────────────────────────────── */
+body.light-mode .dp-search {
+    background: var(--lm-card, #fff) !important;
+    color: var(--lm-text, #1b2733) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-search:focus {
+    border-color: var(--lm-accent, #0891b2) !important;
+    box-shadow: 0 0 0 2px rgba(8, 145, 178, 0.15) !important;
+}
+body.light-mode .dp-toolbar-info {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-movement-toolbar {
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+
+/* ── Filter pills ────────────────────────────────────────────────── */
+body.light-mode .dp-pill-btn {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .dp-pill-btn:hover {
+    color: var(--lm-text, #1b2733) !important;
+    border-color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-pill-btn.active {
+    background: rgba(8, 145, 178, 0.12) !important;
+    border-color: var(--lm-accent, #0891b2) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+
+/* ── Tables ──────────────────────────────────────────────────────── */
+body.light-mode .dp-table-wrap {
+    background: var(--lm-card, #fff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-table th {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-table td {
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-table tr:hover td {
+    background: rgba(8, 145, 178, 0.04) !important;
+}
+body.light-mode .dp-table-clickable tbody tr:hover {
+    background: rgba(8, 145, 178, 0.06) !important;
+}
+body.light-mode .dp-hex {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-mark {
+    background: rgba(8, 145, 178, 0.25) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-help {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .dp-more {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── Status pills ────────────────────────────────────────────────── */
+body.light-mode .dp-pill {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .dp-pill-incoming {
+    background: rgba(22, 163, 74, 0.12) !important;
+    color: #15803d !important;
+}
+body.light-mode .dp-pill-outgoing {
+    background: rgba(8, 145, 178, 0.12) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-pill-warn,
+body.light-mode .dp-pill-compressed {
+    background: rgba(217, 119, 6, 0.12) !important;
+    color: #b45309 !important;
+}
+body.light-mode .dp-pill-other {
+    background: rgba(79, 70, 229, 0.12) !important;
+    color: #4338ca !important;
+}
+body.light-mode .dp-pill-database {
+    background: rgba(126, 34, 206, 0.12) !important;
+    color: #7c2d12 !important;
+}
+body.light-mode .dp-pill-text {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+
+/* ── Flag button ─────────────────────────────────────────────────── */
+body.light-mode .dp-flag-btn {
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-flag-btn:hover {
+    color: #b45309 !important;
+    border-color: #b45309 !important;
+}
+body.light-mode .dp-flag-btn.on {
+    background: rgba(217, 119, 6, 0.15) !important;
+    color: #b45309 !important;
+    border-color: #b45309 !important;
+    box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.12) !important;
+}
+
+/* ── GPS map ─────────────────────────────────────────────────────── */
+body.light-mode .dp-gps-map {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-gps-map .leaflet-popup-content-wrapper {
+    background: var(--lm-card, #fff) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-gps-map .leaflet-popup-tip {
+    background: var(--lm-card, #fff) !important;
+}
+
+/* ── Media grid ──────────────────────────────────────────────────── */
+body.light-mode .dp-media-card {
+    background: var(--lm-card, #fff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-media-card:hover {
+    border-color: rgba(8, 145, 178, 0.40) !important;
+}
+body.light-mode .dp-media-card.flagged {
+    border-color: #b45309 !important;
+    box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.12) !important;
+}
+body.light-mode .dp-media-thumb {
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .dp-thumb-placeholder {
+    color: var(--lm-text-3, #8b97a5) !important;
+    background: linear-gradient(135deg, var(--lm-inset, #f0f3f6), var(--lm-page, #eaeef3)) !important;
+}
+body.light-mode .dp-thumb-badge {
+    background: var(--lm-accent, #0891b2) !important;
+    color: #fff !important;
+}
+body.light-mode .dp-media-name {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-media-sub {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-media-open {
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-media-open:hover {
+    color: var(--lm-accent, #0891b2) !important;
+    border-color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-media-more {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── Lightbox ────────────────────────────────────────────────────── */
+/* Lightbox stays dark — it's a fullscreen image overlay; dark is correct. */
+body.light-mode .dp-lightbox-caption {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── Timeline ────────────────────────────────────────────────────── */
+body.light-mode .dp-timeline::before {
+    background: var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-timeline-dot {
+    background: var(--lm-accent, #0891b2) !important;
+    border: 2px solid var(--lm-card, #fff) !important;
+}
+body.light-mode .dp-tl-msg .dp-timeline-dot { background: #15803d !important; }
+body.light-mode .dp-tl-photo .dp-timeline-dot { background: #b45309 !important; }
+body.light-mode .dp-timeline-time {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-timeline-text {
+    color: var(--lm-text, #1b2733) !important;
+}
+
+/* ── Coach drawer ────────────────────────────────────────────────── */
+body.light-mode .dp-coach {
+    background: var(--lm-card, #fff) !important;
+    border-right: 1px solid rgba(168, 85, 247, 0.30) !important;
+    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.10) !important;
+}
+body.light-mode .dp-coach-header {
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+    background: rgba(168, 85, 247, 0.06) !important;
+}
+body.light-mode .dp-coach-header h3 {
+    color: #7c3aed !important;
+}
+body.light-mode .dp-coach-close {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-coach-close:hover {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-coach-rail {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-coach-rail-btn {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-coach-rail-btn:hover {
+    background: rgba(168, 85, 247, 0.08) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-coach-rail-btn.active {
+    background: rgba(168, 85, 247, 0.15) !important;
+    color: #7c3aed !important;
+    border-color: rgba(168, 85, 247, 0.35) !important;
+}
+body.light-mode .dp-coach-row {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-coach-row .dp-row-num {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-coach-row .dp-row-label {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-coach-row .dp-row-meta {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-coach-empty {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-coach-panel h4 {
+    color: #7c3aed !important;
+}
+body.light-mode .dp-coach-row-clickable:hover {
+    background: rgba(8, 145, 178, 0.08) !important;
+}
+body.light-mode .dp-coach-row-warn {
+    background: rgba(217, 119, 6, 0.05) !important;
+}
+body.light-mode .dp-coach-section {
+    border-top: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-coach-section-title {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-coach-help {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── Coach bar chart ─────────────────────────────────────────────── */
+body.light-mode .dp-bar-label {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-bar {
+    background: rgba(168, 85, 247, 0.30) !important;
+}
+body.light-mode .dp-bar-num {
+    color: #7c3aed !important;
+}
+body.light-mode .dp-bar-fill {
+    background: linear-gradient(to right, var(--lm-accent, #0891b2), #0e7490) !important;
+}
+
+/* ── Anomaly cards ───────────────────────────────────────────────── */
+body.light-mode .dp-anomaly {
+    background: rgba(239, 68, 68, 0.06) !important;
+    border: 1px solid rgba(239, 68, 68, 0.25) !important;
+    border-left: 3px solid #dc2626 !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-anomaly h5 {
+    color: #b91c1c !important;
+}
+body.light-mode .dp-anomaly-title {
+    color: #b45309 !important;
+}
+body.light-mode .dp-anomaly-text {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-anomaly-good {
+    background: rgba(22, 163, 74, 0.06) !important;
+    border-color: rgba(22, 163, 74, 0.25) !important;
+    border-left: 3px solid #16a34a !important;
+    color: #15803d !important;
+}
+body.light-mode .dp-anomaly-good h5 {
+    color: #15803d !important;
+}
+
+/* ── Heat table ──────────────────────────────────────────────────── */
+body.light-mode .dp-heat-table td {
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-heat-label {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-heat-h {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-heat-cell {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-heat-clickable:hover {
+    outline: 2px solid var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-spark-meta {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── Subject view ────────────────────────────────────────────────── */
+body.light-mode .dp-keyapp-label {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+
+/* ── Comms view: rail ────────────────────────────────────────────── */
+body.light-mode .dp-comms-rail {
+    border-right: 1px solid var(--lm-card-border, #dde3ea) !important;
+    background: var(--lm-card, #fff) !important;
+}
+body.light-mode .dp-rail-search {
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-filter-chip {
+    background: rgba(8, 145, 178, 0.08) !important;
+    border: 1px solid rgba(8, 145, 178, 0.30) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-chip-x {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-rail-row {
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-rail-row:hover {
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .dp-rail-row.active {
+    background: rgba(8, 145, 178, 0.08) !important;
+    border-left: 3px solid var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-rail-name {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-rail-num {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .dp-rail-meta {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-rail-count {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── Comms view: thread ──────────────────────────────────────────── */
+body.light-mode .dp-comms-thread {
+    background: var(--lm-page, #eaeef3) !important;
+}
+body.light-mode .dp-thread-head {
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+    background: var(--lm-card, #fff) !important;
+}
+body.light-mode .dp-thread-name strong {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-thread-name .dp-mono {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .dp-thread-stats {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .dp-date-sep {
+    color: var(--lm-text-3, #8b97a5) !important;
+    border-top: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-msg-bubble {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-msg-out .dp-msg-bubble {
+    background: rgba(8, 145, 178, 0.12) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-msg-in .dp-msg-bubble {
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .dp-msg.flagged .dp-msg-bubble {
+    box-shadow: 0 0 0 2px #b45309 !important;
+}
+body.light-mode .dp-msg-foot {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-msg-foot .dp-flag-btn {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-msg.flagged .dp-msg-foot .dp-flag-btn {
+    color: #b45309 !important;
+}
+body.light-mode .dp-thread-filtered {
+    color: #b45309 !important;
+    background: rgba(217, 119, 6, 0.08) !important;
+    border: 1px solid rgba(217, 119, 6, 0.30) !important;
+}
+
+/* ── Call events ─────────────────────────────────────────────────── */
+body.light-mode .dp-call-event {
+    background: rgba(126, 34, 206, 0.06) !important;
+    border-left: 3px solid #7c3aed !important;
+}
+body.light-mode .dp-call-text {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-call-foot {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-call-foot .dp-flag-btn {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── Movement view ───────────────────────────────────────────────── */
+body.light-mode .dp-movement-empty {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-mv-map {
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .dp-mv-scrubber {
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .dp-mv-scrubber-labels {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-scrubber-current {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-mv-track {
+    background: linear-gradient(to right, rgba(8, 145, 178, 0.10), rgba(8, 145, 178, 0.05)) !important;
+}
+body.light-mode .dp-mv-tick {
+    background: rgba(8, 145, 178, 0.50) !important;
+}
+body.light-mode .dp-mv-handle {
+    background: var(--lm-accent, #0891b2) !important;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15) !important;
+}
+body.light-mode .dp-mv-handle:hover {
+    background: #0e7490 !important;
+}
+body.light-mode .dp-mv-strip,
+body.light-mode .dp-mv-clusters {
+    background: var(--lm-card, #fff) !important;
+}
+body.light-mode .dp-mv-strip-card {
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .dp-mv-strip-img {
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .dp-mv-strip-date {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-cluster-row {
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-cluster-row:hover {
+    background: rgba(8, 145, 178, 0.06) !important;
+}
+body.light-mode .dp-cluster-rank {
+    background: rgba(8, 145, 178, 0.12) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-cluster-info .dp-mono {
+    color: var(--lm-text, #1b2733) !important;
+}
+
+/* ── Artifacts view: facets ──────────────────────────────────────── */
+body.light-mode .dp-art-facets {
+    border-right: 1px solid var(--lm-card-border, #dde3ea) !important;
+    background: var(--lm-card, #fff) !important;
+}
+body.light-mode .dp-facet-label {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-facet-row {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-facet-row:hover {
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .dp-facet-row.active {
+    background: rgba(8, 145, 178, 0.10) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-facet-count {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-facet-row.active .dp-facet-count {
+    color: var(--lm-accent, #0891b2) !important;
+}
+
+/* ── Artifacts view: results ─────────────────────────────────────── */
+body.light-mode .dp-art-result-head {
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+    color: var(--lm-text, #1b2733) !important;
+    background: var(--lm-card, #fff) !important;
+}
+body.light-mode .dp-art-card {
+    background: var(--lm-card, #fff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-art-card:hover {
+    border-color: rgba(8, 145, 178, 0.40) !important;
+}
+body.light-mode .dp-art-card.flagged {
+    border-color: #b45309 !important;
+    box-shadow: 0 0 0 1px rgba(217, 119, 6, 0.25) !important;
+}
+body.light-mode .dp-art-thumb {
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .dp-art-icon {
+    opacity: 0.5 !important;
+}
+body.light-mode .dp-art-badge {
+    background: rgba(220, 38, 38, 0.85) !important;
+    color: #fff !important;
+}
+body.light-mode .dp-art-badge-gps {
+    background: rgba(22, 163, 74, 0.85) !important;
+}
+body.light-mode .dp-art-name {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-art-meta {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .dp-art-actions .dp-flag-btn {
+    background: rgba(217, 119, 6, 0.06) !important;
+    border: 1px solid rgba(217, 119, 6, 0.20) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .dp-art-actions .dp-flag-btn:hover {
+    background: rgba(217, 119, 6, 0.15) !important;
+    border-color: rgba(217, 119, 6, 0.50) !important;
+    color: #b45309 !important;
+}
+body.light-mode .dp-art-card.flagged .dp-flag-btn {
+    color: #b45309 !important;
+    background: rgba(217, 119, 6, 0.15) !important;
+    border-color: rgba(217, 119, 6, 0.50) !important;
+}
+
+/* ── Coach detail (in-drawer) ────────────────────────────────────── */
+body.light-mode .dp-coach-detail-head {
+    background: rgba(168, 85, 247, 0.06) !important;
+    border-bottom: 1px solid rgba(168, 85, 247, 0.20) !important;
+}
+body.light-mode .dp-coach-detail-head .dp-detail-title {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-coach-detail-head .dp-detail-sub {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .dp-coach-detail-back,
+body.light-mode .dp-coach-detail-expand {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-coach-detail-back:hover {
+    background: rgba(168, 85, 247, 0.15) !important;
+    border-color: rgba(168, 85, 247, 0.40) !important;
+}
+body.light-mode .dp-coach-detail-expand:hover {
+    background: rgba(8, 145, 178, 0.12) !important;
+    border-color: rgba(8, 145, 178, 0.40) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-detail-msg {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+    border-left: 3px solid var(--lm-text-3, #8b97a5) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-detail-msg.out {
+    border-left-color: var(--lm-accent, #0891b2) !important;
+    background: rgba(8, 145, 178, 0.05) !important;
+}
+body.light-mode .dp-detail-msg.in {
+    border-left-color: #16a34a !important;
+    background: rgba(22, 163, 74, 0.05) !important;
+}
+body.light-mode .dp-detail-msg.call {
+    border-left-color: #b45309 !important;
+    background: rgba(217, 119, 6, 0.05) !important;
+}
+body.light-mode .dp-detail-msg .dp-detail-meta {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-detail-empty {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-detail-date-sep {
+    color: #7c3aed !important;
+    border-bottom: 1px solid rgba(168, 85, 247, 0.20) !important;
+}
+body.light-mode .dp-detail-cluster-item {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-detail-cluster-item .dp-detail-coords {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── Contacts list ───────────────────────────────────────────────── */
+body.light-mode .dp-contact-search-meta {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .dp-contact-list {
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+    background: var(--lm-card, #fff) !important;
+}
+body.light-mode .dp-contact-row {
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .dp-contact-row:hover {
+    background: rgba(8, 145, 178, 0.06) !important;
+}
+body.light-mode .dp-contact-row .dp-contact-name {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .dp-contact-row .dp-contact-num {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .dp-contact-row.has-comms .dp-contact-name {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-contact-row .dp-contact-meta {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── Message row direction borders ───────────────────────────────── */
+body.light-mode .dp-msg-row.dp-dir-outgoing td:first-child + td {
+    border-left: 2px solid rgba(8, 145, 178, 0.30) !important;
+}
+body.light-mode .dp-msg-row.dp-dir-incoming td:first-child + td {
+    border-left: 2px solid rgba(22, 163, 74, 0.30) !important;
+}

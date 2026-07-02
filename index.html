@@ -66,6 +66,14 @@
             scroll-padding-bottom: 4rem;
         }
 
+        /* Sidebar becomes scrollable on short viewports so the footer
+           (theme toggle, profile, Report a Bug) is always reachable. */
+        .sidebar-scroll { scrollbar-width: thin; }
+        .sidebar-scroll::-webkit-scrollbar { width: 8px; }
+        .sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
+        .sidebar-scroll::-webkit-scrollbar-thumb { background: rgba(120,140,160,0.35); border-radius: 4px; }
+        .sidebar-scroll::-webkit-scrollbar-thumb:hover { background: rgba(120,140,160,0.55); }
+
         /* Native date/time pickers — make the calendar / clock indicator and
            text legible on the dark theme. `color-scheme: dark` flips the
            browser's native UI (picker popup, clear button, internal text,
@@ -587,51 +595,89 @@
         body.light-mode .cal-cell .cal-daynum { color: #334155; }
         body.light-mode .cal-cell.is-today { background: rgba(0, 217, 255, 0.12); }
 
+        /* ═══════════════════════════════════════════════════════════
+           V.I.P.E.R. Unified Light Mode — Design Tokens
+           Single source of truth. Keep identical across
+           index.html, case-detail-with-analytics.html, settings.html.
+           Aesthetic: calm light-gray page, white cards, LIGHT sidebar,
+           teal primary accent, subtle-yet-vibrant categorical accents.
+           ═══════════════════════════════════════════════════════════ */
+        body.light-mode {
+            --lm-page: #eaeef3;          /* app background behind cards   */
+            --lm-surface: #f0f3f6;       /* content / inset regions       */
+            --lm-card: #ffffff;          /* cards, panels                 */
+            --lm-card-border: #dde3ea;
+            --lm-card-shadow: 0 1px 3px rgba(27,39,51,0.08);
+            --lm-sidebar: #f6f8fa;       /* LIGHT sidebar                 */
+            --lm-sidebar-border: #e2e7ee;
+            --lm-inset: #f0f3f6;         /* inset boxes, fields           */
+            --lm-inset-border: #dde3ea;
+            --lm-text: #1b2733;          /* primary text                  */
+            --lm-text-2: #5c6b7a;        /* secondary text                */
+            --lm-text-3: #8b97a5;        /* muted text / icons            */
+            --lm-accent: #0891b2;        /* teal — primary accent         */
+            --lm-accent-soft: rgba(8,145,178,0.10);
+            --lm-accent-border: rgba(8,145,178,0.30);
+            --lm-green: #0f9d58;
+            --lm-blue: #2563eb;
+            --lm-amber: #d97706;
+            --lm-purple: #7c3aed;
+            --lm-red: #dc2626;
+        }
+
         /* Light Mode Styles */
         /* ═══════════════════════════════════════════
-           Light Mode — Cyber-clean: dark sidebar,
-           cool gray content, green accents
+           Light Mode — calm gray page, light sidebar,
+           white cards, teal accents
            ═══════════════════════════════════════════ */
         body.light-mode {
-            background: #0d1117;
-            color: #c9d1d9;
+            background: var(--lm-page);
+            color: var(--lm-text);
         }
 
         body.light-mode .hex-pattern { background-image: none; }
 
-        /* ── Sidebar stays dark (no change needed, inherits) ── */
+        /* ── Sidebar: LIGHT to match the rest of the aesthetic ── */
+        body.light-mode .w-64.glass-card {
+            background: var(--lm-sidebar) !important;
+            border-right: 1px solid var(--lm-sidebar-border) !important;
+            box-shadow: none;
+        }
+        body.light-mode .w-64.glass-card .border-viper-cyan\/20,
+        body.light-mode .w-64.glass-card .border-b,
+        body.light-mode .w-64.glass-card .border-t { border-color: var(--lm-sidebar-border) !important; }
+        body.light-mode .w-64.glass-card h1 { color: var(--lm-text) !important; }
+        body.light-mode .w-64.glass-card .text-gray-400 { color: var(--lm-text-3) !important; }
 
         /* ── Main content area: cool slate ── */
         body.light-mode .flex-1 {
-            background: #f0f3f6;
+            background: var(--lm-surface);
         }
 
         body.light-mode .flex-1 .glass-card {
-            background: #ffffff;
-            border: 1px solid #d8dee4;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            background: var(--lm-card);
+            border: 1px solid var(--lm-card-border);
+            box-shadow: var(--lm-card-shadow);
         }
 
-        /* ── Stat cards: frosted glass, slightly darker than white ── */
+        /* ── Stat cards: clean white with subtle tinted border ── */
         body.light-mode .stat-card {
-            background: rgba(190,200,212,0.7) !important;
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(0,204,106,0.18) !important;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            background: var(--lm-card) !important;
+            border: 1px solid var(--lm-card-border) !important;
+            box-shadow: var(--lm-card-shadow);
         }
         body.light-mode .stat-card .card-title,
         body.light-mode .stat-card .text-gray-400,
-        body.light-mode .stat-card .text-gray-300 { color: #656d76 !important; }
+        body.light-mode .stat-card .text-gray-300 { color: var(--lm-text-2) !important; }
         body.light-mode .stat-card .text-2xl,
         body.light-mode .stat-card .text-3xl,
-        body.light-mode .stat-card h3 { color: #1b1f23 !important; }
+        body.light-mode .stat-card h3 { color: var(--lm-text) !important; }
 
         /* ── Content text ── */
-        body.light-mode .text-white { color: #1b1f23 !important; }
-        body.light-mode .text-gray-400 { color: #656d76 !important; }
-        body.light-mode .text-gray-300 { color: #484f58 !important; }
-        body.light-mode .text-gray-500 { color: #8b949e !important; }
+        body.light-mode .text-white { color: var(--lm-text) !important; }
+        body.light-mode .text-gray-400 { color: var(--lm-text-2) !important; }
+        body.light-mode .text-gray-300 { color: var(--lm-text) !important; }
+        body.light-mode .text-gray-500 { color: var(--lm-text-3) !important; }
 
         /* ── Headings / body text in main area ── */
         body.light-mode h1, body.light-mode h2, body.light-mode h3,
@@ -641,28 +687,28 @@
         body.light-mode .flex-1 div:not(.stat-card):not([class*="bg-gradient"]):not(.text-viper-cyan):not(.text-viper-green):not(.text-viper-purple):not(.text-viper-orange):not(.text-viper-dark),
         body.light-mode .flex-1 label { color: #1b1f23 !important; }
 
-        /* ── Accent colors (slightly deeper for contrast on white) ── */
-        body.light-mode .flex-1 .text-viper-cyan { color: #0088a3 !important; }
-        body.light-mode .flex-1 .text-viper-green { color: #00894a !important; }
-        body.light-mode .flex-1 .text-viper-orange { color: #d47600 !important; }
-        body.light-mode .flex-1 .text-viper-purple { color: #6f36a5 !important; }
+        /* ── Accent colors (deeper for contrast on white) ── */
+        body.light-mode .flex-1 .text-viper-cyan { color: var(--lm-accent) !important; }
+        body.light-mode .flex-1 .text-viper-green { color: var(--lm-green) !important; }
+        body.light-mode .flex-1 .text-viper-orange { color: var(--lm-amber) !important; }
+        body.light-mode .flex-1 .text-viper-purple { color: var(--lm-purple) !important; }
 
         /* ── Inputs ── */
         body.light-mode input,
         body.light-mode textarea,
         body.light-mode select {
-            background: #f6f8fa;
-            color: #1b1f23;
+            background: var(--lm-inset);
+            color: var(--lm-text);
             border: 1px solid #d0d7de;
         }
         body.light-mode input::placeholder,
-        body.light-mode textarea::placeholder { color: #8b949e; }
+        body.light-mode textarea::placeholder { color: var(--lm-text-3); }
         body.light-mode input:focus,
         body.light-mode textarea:focus,
         body.light-mode select:focus {
             background: #fff;
-            border-color: #00cc6a;
-            box-shadow: 0 0 0 3px rgba(0,204,106,0.12);
+            border-color: var(--lm-accent);
+            box-shadow: 0 0 0 3px var(--lm-accent-soft);
         }
 
         /* ── Borders ── */
@@ -683,28 +729,30 @@
         body.light-mode .flex-1 .bg-viper-dark { background: #edf0f4 !important; }
         body.light-mode .flex-1 .bg-viper-dark\/50 { background: #f0f3f6 !important; }
 
-        /* ── Sidebar items (dark sidebar, keep light text) ── */
-        body.light-mode .sidebar-item { color: #8b949e; }
+        /* ── Sidebar items (LIGHT sidebar, dark text, teal active) ── */
+        body.light-mode .sidebar-item { color: var(--lm-text-2); }
+        body.light-mode .sidebar-item svg { color: var(--lm-text-3); }
         body.light-mode .sidebar-item:hover {
-            background: rgba(0,255,136,0.08);
-            border-left: 3px solid #00ff88;
-            color: #f0f6fc;
+            background: var(--lm-accent-soft);
+            border-left: 3px solid var(--lm-accent);
+            color: var(--lm-text);
         }
         body.light-mode .sidebar-item.active {
-            background: rgba(0,255,136,0.1);
-            border-left: 3px solid #00ff88;
-            color: #00ff88;
+            background: var(--lm-accent-soft);
+            border-left: 3px solid var(--lm-accent);
+            color: var(--lm-accent);
         }
-        /* Keep sidebar text light */
+        body.light-mode .sidebar-item.active svg,
+        body.light-mode .sidebar-item:hover svg { color: var(--lm-accent); }
         body.light-mode .sidebar-item span { color: inherit !important; }
 
         /* ── Task items & toggles ── */
         body.light-mode .border-l-4 { background: #f6f8fa !important; }
         body.light-mode .hover\:bg-viper-card\/70:hover { background: #edf0f4 !important; }
         body.light-mode .view-toggle-active {
-            background: rgba(0,204,106,0.12) !important;
-            color: #00894a !important;
-            border: 1px solid rgba(0,204,106,0.3) !important;
+            background: var(--lm-accent-soft) !important;
+            color: var(--lm-accent) !important;
+            border: 1px solid var(--lm-accent-border) !important;
         }
         body.light-mode button.text-gray-400:not(.view-toggle-active) { background: #f0f3f6 !important; }
         body.light-mode button.text-gray-400:not(.view-toggle-active):hover { background: #e6eaef !important; }
@@ -754,9 +802,9 @@
 <body class="text-white">
     <div class="flex h-screen hex-pattern">
         <!-- Sidebar -->
-        <div class="w-64 glass-card border-r-2 border-viper-cyan/20 flex flex-col">
+        <div class="w-64 glass-card border-r-2 border-viper-cyan/20 flex flex-col overflow-y-auto sidebar-scroll">
             <!-- Logo -->
-            <div class="p-6 border-b border-viper-cyan/20">
+            <div class="p-6 border-b border-viper-cyan/20 flex-shrink-0">
                 <div class="flex items-center space-x-3">
                     <img src="assets/icon.png" alt="V.I.P.E.R." class="w-10 h-10 rounded-lg">
                     <div>
@@ -876,7 +924,7 @@
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
                             Import Case
                         </button>
-                        <button onclick="window.SupervisorLink && SupervisorLink.openPushDialog({mode:'dashboard'})" title="Share stats and case status with a supervisor over the LAN" class="px-4 md:px-6 py-2 rounded-lg font-medium transition-all whitespace-nowrap text-sm md:text-base flex items-center gap-2" style="border:1px solid #0078D4;color:#4ea8f0;background:rgba(0,120,212,.16);">
+                        <button onclick="window.SupervisorLink && SupervisorLink.openPushDialog({mode:'dashboard'})" title="Share stats and case status with a supervisor over the LAN" id="supervisorPushBtn" class="hidden px-4 md:px-6 py-2 rounded-lg font-medium transition-all whitespace-nowrap text-sm md:text-base flex items-center gap-2" style="border:1px solid #0078D4;color:#4ea8f0;background:rgba(0,120,212,.16);">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"/></svg>
                             Push to Supervisor
                         </button>
@@ -7726,6 +7774,26 @@
     </script>
 
     <!-- CargoNet Theft Alert inbox wiring -->
+    <script>
+    // Supervisor Link button visibility — show the Dashboard "Push to Supervisor"
+    // button only when the feature is enabled in Settings (default OFF).
+    (function initSupervisorPushButton() {
+        function apply() {
+            const btn = document.getElementById('supervisorPushBtn');
+            if (!btn) return;
+            const enabled = localStorage.getItem('viperSupervisorLinkEnabled') === 'true';
+            btn.classList.toggle('hidden', !enabled);
+        }
+        apply();
+        // React to the toggle being changed in the Settings window/tab.
+        window.addEventListener('storage', (e) => {
+            if (!e || e.key === 'viperSupervisorLinkEnabled') apply();
+        });
+        // Re-check when the dashboard regains focus (Settings is a separate page).
+        window.addEventListener('focus', apply);
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) apply(); });
+    })();
+    </script>
     <script>
     (function initCargonetBell() {
         if (!window.electronAPI || !window.electronAPI.cargonetGetStatus) return;

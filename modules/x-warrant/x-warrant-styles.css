@@ -537,3 +537,179 @@ tr.xwp-row-flagged > td { background: rgba(29, 155, 240, 0.08); }
     margin-bottom: 12px;
 }
 .xwp-flag-toolbar-spacer { flex: 1; }
+
+
+/* ═══ LIGHT MODE ═══ */
+body.light-mode .xwp-layout { background: var(--lm-page, #eaeef3) !important; }
+body.light-mode .xwp-content { background: var(--lm-page, #eaeef3) !important; color: var(--lm-text, #1b2733) !important; }
+
+/* Sidebar */
+body.light-mode .xwp-sidebar {
+    background: var(--lm-sidebar, #f6f8fa) !important;
+    border-right-color: var(--lm-sidebar-border, #e2e7ee) !important;
+}
+body.light-mode .xwp-nav-item { color: var(--lm-text-2, #5c6b7a) !important; }
+body.light-mode .xwp-nav-item:hover { background: rgba(8,145,178,0.06) !important; color: var(--lm-text, #1b2733) !important; }
+body.light-mode .xwp-nav-item.active { background: rgba(8,145,178,0.10) !important; color: var(--lm-accent, #0891b2) !important; }
+body.light-mode .xwp-nav-count { background: var(--lm-inset, #f0f3f6) !important; color: var(--lm-text-2, #5c6b7a) !important; }
+body.light-mode .xwp-nav-actions { border-top-color: var(--lm-sidebar-border, #e2e7ee) !important; }
+
+/* Buttons */
+body.light-mode .xwp-btn-sm {
+    background: var(--lm-inset, #f0f3f6) !important; color: var(--lm-text, #1b2733) !important;
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .xwp-btn-sm:hover { background: #e3e8ee !important; }
+body.light-mode .xwp-btn-sm.danger { color: #dc2626 !important; border-color: rgba(220,38,38,0.25) !important; }
+body.light-mode .xwp-btn-sm.danger:hover { background: rgba(220,38,38,0.08) !important; }
+body.light-mode .xwp-btn-primary {
+    background: var(--lm-accent, #0891b2) !important; color: #fff !important;
+}
+body.light-mode .xwp-btn-primary:hover { box-shadow: 0 4px 16px rgba(8,145,178,0.30) !important; }
+body.light-mode .xwp-back-btn {
+    background: var(--lm-inset, #f0f3f6) !important; color: var(--lm-text, #1b2733) !important;
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .xwp-back-btn:hover { background: #e3e8ee !important; }
+
+/* Import selector */
+body.light-mode .xwp-import-selector { border-bottom-color: var(--lm-card-border, #dde3ea) !important; }
+body.light-mode .xwp-label { color: var(--lm-text-3, #8b97a5) !important; }
+body.light-mode .xwp-select, body.light-mode .xwp-input {
+    background: #fff !important; color: var(--lm-text, #1b2733) !important;
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .xwp-input:focus, body.light-mode .xwp-select:focus { border-color: var(--lm-accent, #0891b2) !important; }
+
+/* Sections & cards */
+body.light-mode .xwp-section-title { color: var(--lm-text, #1b2733) !important; }
+body.light-mode .xwp-card {
+    background: var(--lm-card, #fff) !important; border-color: var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .xwp-card-title { color: var(--lm-text, #1b2733) !important; }
+body.light-mode .xwp-subsection-title { color: var(--lm-accent, #0891b2) !important; border-left-color: var(--lm-accent, #0891b2) !important; }
+
+/* Account header */
+body.light-mode .xwp-account-header {
+    background: linear-gradient(135deg, rgba(8,145,178,0.06), rgba(8,145,178,0.01)) !important;
+    border-color: rgba(8,145,178,0.18) !important;
+}
+body.light-mode .xwp-snap-logo { background: var(--lm-accent, #0891b2) !important; color: #fff !important; box-shadow: 0 4px 12px rgba(8,145,178,0.25) !important; }
+body.light-mode .xwp-account-username { color: var(--lm-text, #1b2733) !important; }
+body.light-mode .xwp-account-meta { color: var(--lm-text-2, #5c6b7a) !important; }
+body.light-mode .xwp-date-range { color: var(--lm-text-2, #5c6b7a) !important; }
+
+/* Stats */
+body.light-mode .xwp-stat {
+    background: var(--lm-inset, #f0f3f6) !important; border-color: var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .xwp-stat.has-data { background: rgba(8,145,178,0.05) !important; border-color: rgba(8,145,178,0.18) !important; }
+body.light-mode .xwp-stat-count { color: var(--lm-text, #1b2733) !important; }
+body.light-mode .xwp-stat-label { color: var(--lm-text-3, #8b97a5) !important; }
+
+/* KV pairs */
+body.light-mode .xwp-kv-label { color: var(--lm-text-3, #8b97a5) !important; }
+body.light-mode .xwp-kv-value { color: var(--lm-text, #1b2733) !important; }
+
+/* Tables */
+body.light-mode .xwp-table th { color: var(--lm-text-3, #8b97a5) !important; border-bottom-color: var(--lm-card-border, #dde3ea) !important; }
+body.light-mode .xwp-table td { color: var(--lm-text, #1b2733) !important; border-bottom-color: var(--lm-card-border, #dde3ea) !important; }
+body.light-mode .xwp-table tbody tr:hover { background: rgba(8,145,178,0.04) !important; }
+
+/* Tags */
+body.light-mode .xwp-tag { background: var(--lm-inset, #f0f3f6) !important; color: var(--lm-text-2, #5c6b7a) !important; }
+body.light-mode .xwp-tag-flag { background: rgba(8,145,178,0.08) !important; color: var(--lm-accent, #0891b2) !important; }
+
+/* Toolbar / filter tabs */
+body.light-mode .xwp-filter-tab { color: var(--lm-text-2, #5c6b7a) !important; border-color: var(--lm-card-border, #dde3ea) !important; }
+body.light-mode .xwp-filter-tab:hover { background: var(--lm-inset, #f0f3f6) !important; color: var(--lm-text, #1b2733) !important; }
+body.light-mode .xwp-filter-tab.active { background: rgba(8,145,178,0.10) !important; color: var(--lm-accent, #0891b2) !important; border-color: rgba(8,145,178,0.25) !important; }
+
+/* Conversation list */
+body.light-mode .xwp-conv-item { background: var(--lm-card, #fff) !important; border-color: var(--lm-card-border, #dde3ea) !important; }
+body.light-mode .xwp-conv-item:hover { background: rgba(8,145,178,0.04) !important; border-color: rgba(8,145,178,0.20) !important; }
+body.light-mode .xwp-conv-title { color: var(--lm-text, #1b2733) !important; }
+body.light-mode .xwp-conv-count { color: var(--lm-accent, #0891b2) !important; }
+body.light-mode .xwp-conv-participants { color: var(--lm-text-2, #5c6b7a) !important; }
+body.light-mode .xwp-conv-last { color: var(--lm-text-3, #8b97a5) !important; }
+
+/* Thread / messages */
+body.light-mode .xwp-thread-meta { color: var(--lm-text-2, #5c6b7a) !important; border-bottom-color: var(--lm-card-border, #dde3ea) !important; }
+body.light-mode .xwp-message { background: var(--lm-inset, #f0f3f6) !important; border-left-color: var(--lm-card-border, #dde3ea) !important; }
+body.light-mode .xwp-message.from-target { border-right-color: var(--lm-accent, #0891b2) !important; background: rgba(8,145,178,0.05) !important; }
+body.light-mode .xwp-message.from-other { border-left-color: #38bdf8 !important; }
+body.light-mode .xwp-msg-author { color: var(--lm-text, #1b2733) !important; }
+body.light-mode .xwp-msg-arrow { color: var(--lm-text-3, #8b97a5) !important; }
+body.light-mode .xwp-msg-recipient { color: var(--lm-accent, #0891b2) !important; }
+body.light-mode .xwp-msg-time { color: var(--lm-text-3, #8b97a5) !important; }
+body.light-mode .xwp-msg-body { color: var(--lm-text, #1b2733) !important; }
+body.light-mode .xwp-msg-img, body.light-mode .xwp-msg-video { border-color: var(--lm-card-border, #dde3ea) !important; background: var(--lm-inset, #f0f3f6) !important; }
+body.light-mode .xwp-att-meta { color: var(--lm-text-3, #8b97a5) !important; }
+body.light-mode .xwp-msg-media-missing { color: #b45309 !important; }
+
+/* Media gallery */
+body.light-mode .xwp-media-card { background: var(--lm-card, #fff) !important; border-color: var(--lm-card-border, #dde3ea) !important; }
+body.light-mode .xwp-media-card:hover { border-color: rgba(8,145,178,0.30) !important; }
+body.light-mode .xwp-media-thumb { background: var(--lm-inset, #f0f3f6) !important; }
+body.light-mode .xwp-media-video-thumb { background: linear-gradient(135deg, #e8ecf0, #dde3ea) !important; }
+body.light-mode .xwp-video-play-icon { background: var(--lm-accent, #0891b2) !important; color: #fff !important; }
+body.light-mode .xwp-media-time { color: var(--lm-text-2, #5c6b7a) !important; }
+body.light-mode .xwp-media-people { color: var(--lm-text-3, #8b97a5) !important; }
+
+/* Lightbox */
+body.light-mode .xwp-lightbox { background: rgba(0,0,0,0.75) !important; }
+body.light-mode .xwp-lightbox-content { background: var(--lm-card, #fff) !important; border-color: var(--lm-card-border, #dde3ea) !important; }
+body.light-mode .xwp-lightbox-close { background: rgba(0,0,0,0.4) !important; color: #fff !important; }
+body.light-mode .xwp-lightbox-details { color: var(--lm-text, #1b2733) !important; }
+
+/* Geo map */
+body.light-mode .xwp-geo-map { background: var(--lm-inset, #f0f3f6) !important; border-color: var(--lm-card-border, #dde3ea) !important; }
+
+/* Pagination */
+body.light-mode .xwp-page-label { color: var(--lm-text-2, #5c6b7a) !important; }
+
+/* Timeline */
+body.light-mode .xwp-timeline { border-left-color: rgba(8,145,178,0.20) !important; }
+body.light-mode .xwp-timeline-event { border-bottom-color: var(--lm-card-border, #dde3ea) !important; }
+body.light-mode .xwp-timeline-dot { background: var(--lm-card, #fff) !important; border-color: rgba(8,145,178,0.30) !important; }
+body.light-mode .xwp-timeline-time { color: var(--lm-text-3, #8b97a5) !important; }
+body.light-mode .xwp-timeline-desc { color: var(--lm-text, #1b2733) !important; }
+body.light-mode .xwp-timeline-author { color: var(--lm-accent, #0891b2) !important; }
+
+/* Evidence bar */
+body.light-mode .xwp-evidence-bar { background: rgba(8,145,178,0.05) !important; border-color: rgba(8,145,178,0.18) !important; }
+body.light-mode .xwp-evidence-label { color: var(--lm-accent, #0891b2) !important; }
+body.light-mode .xwp-evidence-file { background: rgba(8,145,178,0.08) !important; border-color: rgba(8,145,178,0.20) !important; color: var(--lm-accent, #0891b2) !important; }
+body.light-mode .xwp-evidence-file:hover { background: rgba(8,145,178,0.14) !important; }
+body.light-mode .xwp-evidence-size { color: var(--lm-text-3, #8b97a5) !important; }
+
+/* Empty state */
+body.light-mode .xwp-empty-title { color: var(--lm-text, #1b2733) !important; }
+body.light-mode .xwp-empty-desc { color: var(--lm-text-2, #5c6b7a) !important; }
+body.light-mode .xwp-empty-hint { color: var(--lm-text-3, #8b97a5) !important; }
+body.light-mode .xwp-empty { color: var(--lm-text-3, #8b97a5) !important; }
+
+/* Loading */
+body.light-mode .xwp-loading { color: var(--lm-text-2, #5c6b7a) !important; }
+body.light-mode .xwp-spinner { border-color: rgba(8,145,178,0.15) !important; border-top-color: var(--lm-accent, #0891b2) !important; }
+
+/* ARIN */
+body.light-mode .xwp-arin-btn { background: var(--lm-inset, #f0f3f6) !important; color: var(--lm-text-2, #5c6b7a) !important; border-color: var(--lm-card-border, #dde3ea) !important; }
+body.light-mode .xwp-arin-btn:hover { background: #e3e8ee !important; }
+body.light-mode .xwp-arin-btn.xwp-arin-done { background: rgba(34,197,94,0.10) !important; border-color: rgba(34,197,94,0.30) !important; color: #15803d !important; }
+body.light-mode .xwp-arin-btn.xwp-arin-fail { background: rgba(239,68,68,0.10) !important; border-color: rgba(239,68,68,0.30) !important; color: #dc2626 !important; }
+body.light-mode .xwp-arin-result { color: var(--lm-text-3, #8b97a5) !important; }
+body.light-mode .xwp-arin-success { color: #15803d !important; }
+
+/* Flag buttons */
+body.light-mode .xwp-flag-btn { border-color: var(--lm-card-border, #dde3ea) !important; color: var(--lm-text-3, #8b97a5) !important; }
+body.light-mode .xwp-flag-btn:hover { color: #b45309 !important; border-color: #b45309 !important; }
+body.light-mode .xwp-flag-btn.on { background: rgba(8,145,178,0.12) !important; color: var(--lm-accent, #0891b2) !important; border-color: var(--lm-accent, #0891b2) !important; box-shadow: 0 0 0 2px rgba(8,145,178,0.12) !important; }
+body.light-mode .xwp-flag-header-btn { background: rgba(8,145,178,0.08) !important; border-color: rgba(8,145,178,0.25) !important; color: var(--lm-accent, #0891b2) !important; }
+body.light-mode .xwp-flag-header-btn:hover { background: rgba(8,145,178,0.14) !important; }
+body.light-mode .xwp-flag-count-pill { background: var(--lm-accent, #0891b2) !important; color: #fff !important; }
+body.light-mode .xwp-push-btn { background: rgba(8,145,178,0.10) !important; border-color: rgba(8,145,178,0.30) !important; color: var(--lm-accent, #0891b2) !important; }
+body.light-mode .xwp-push-btn:hover { background: rgba(8,145,178,0.18) !important; }
+body.light-mode .xwp-message.flagged { box-shadow: 0 0 0 2px rgba(8,145,178,0.40) !important; border-left-color: var(--lm-accent, #0891b2) !important; }
+body.light-mode tr.xwp-row-flagged > td { background: rgba(8,145,178,0.06) !important; }
+body.light-mode .xwp-flag-toolbar { background: var(--lm-inset, #f0f3f6) !important; border-color: var(--lm-card-border, #dde3ea) !important; }

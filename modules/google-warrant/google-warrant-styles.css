@@ -1041,3 +1041,757 @@ tr.gwp-row-flagged > td { background: rgba(245, 158, 11, 0.08); }
     border-radius: 6px;
     border: 1px solid rgba(248, 113, 113, 0.35);
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   ═══ LIGHT MODE ═══
+   Clean white-card light theme matching the app's unified light mode.
+   White cards on light-gray page, light sub-sidebar, thin borders,
+   dark readable text everywhere, teal accents.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── Layout & Sidebar ── */
+body.light-mode .gwp-sidebar {
+    background: var(--lm-sidebar, #f6f8fa) !important;
+    border-right: 1px solid var(--lm-sidebar-border, #e2e7ee) !important;
+}
+body.light-mode .gwp-content {
+    background: var(--lm-page, #eaeef3) !important;
+}
+body.light-mode .gwp-section-scroll {
+    background: var(--lm-page, #eaeef3) !important;
+}
+
+/* ── Import Header ── */
+body.light-mode .gwp-import-header {
+    border-bottom: 1px solid var(--lm-sidebar-border, #e2e7ee) !important;
+}
+body.light-mode .gwp-import-email {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-import-meta {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── Import Tabs ── */
+body.light-mode .gwp-import-tabs {
+    border-bottom: 1px solid var(--lm-sidebar-border, #e2e7ee) !important;
+}
+body.light-mode .gwp-import-tab {
+    color: var(--lm-text-2, #5c6b7a) !important;
+    border: 1px solid var(--lm-inset-border, #dde3ea) !important;
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .gwp-import-tab:hover {
+    border-color: var(--lm-accent-border, rgba(8,145,178,0.30)) !important;
+}
+body.light-mode .gwp-import-tab.active {
+    background: var(--lm-accent-soft, rgba(8,145,178,0.10)) !important;
+    border-color: var(--lm-accent-border, rgba(8,145,178,0.30)) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+
+/* ── Navigation ── */
+body.light-mode .gwp-nav-item {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .gwp-nav-item:hover {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-nav-item.active {
+    background: var(--lm-accent-soft, rgba(8,145,178,0.10)) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .gwp-nav-badge {
+    background: var(--lm-accent-soft, rgba(8,145,178,0.10)) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .gwp-nav-footer {
+    border-top: 1px solid var(--lm-sidebar-border, #e2e7ee) !important;
+}
+
+/* ── Cards ── */
+body.light-mode .gwp-card {
+    background: var(--lm-card, #ffffff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .gwp-card-highlight {
+    background: var(--lm-accent-soft, rgba(8,145,178,0.10)) !important;
+    border-color: var(--lm-accent-border, rgba(8,145,178,0.30)) !important;
+}
+body.light-mode .gwp-card-header h3 {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-card-title {
+    color: var(--lm-text, #1b2733) !important;
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+
+/* ── Fields (key-value rows) ── */
+body.light-mode .gwp-field {
+    border-bottom: 1px solid var(--lm-inset-border, #dde3ea) !important;
+}
+body.light-mode .gwp-field label {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .gwp-field span {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-field-sm label {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .gwp-field-sm span {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+
+/* ── Table ── */
+body.light-mode .gwp-table th {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .gwp-table td {
+    color: var(--lm-text, #1b2733) !important;
+    border-bottom: 1px solid var(--lm-inset-border, #dde3ea) !important;
+}
+body.light-mode .gwp-table tr:hover td {
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+
+/* ── Badges & Tags ── */
+body.light-mode .gwp-badge-green {
+    background: rgba(15, 157, 88, 0.10) !important;
+    color: #0f9d58 !important;
+    border: 1px solid rgba(15, 157, 88, 0.30) !important;
+}
+body.light-mode .gwp-badge-red {
+    background: rgba(220, 38, 38, 0.10) !important;
+    color: #dc2626 !important;
+    border: 1px solid rgba(220, 38, 38, 0.30) !important;
+}
+body.light-mode .gwp-badge-change {
+    background: rgba(217, 119, 6, 0.10) !important;
+    color: #d97706 !important;
+}
+body.light-mode .gwp-tag-green {
+    background: rgba(15, 157, 88, 0.10) !important;
+    color: #0f9d58 !important;
+}
+body.light-mode .gwp-tag-gray {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .gwp-tag-sm {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .gwp-categories label {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── ARIN lookup ── */
+body.light-mode .gwp-arin-btn {
+    background: rgba(217, 119, 6, 0.10) !important;
+    border: 1px solid rgba(217, 119, 6, 0.35) !important;
+    color: #d97706 !important;
+}
+body.light-mode .gwp-arin-btn:hover { background: rgba(217, 119, 6, 0.20) !important; }
+body.light-mode .gwp-arin-done {
+    background: rgba(15, 157, 88, 0.10) !important;
+    border-color: rgba(15, 157, 88, 0.35) !important;
+    color: #0f9d58 !important;
+}
+body.light-mode .gwp-arin-fail {
+    background: rgba(220, 38, 38, 0.10) !important;
+    border-color: rgba(220, 38, 38, 0.35) !important;
+    color: #dc2626 !important;
+}
+body.light-mode .gwp-arin-result {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .gwp-arin-result.gwp-arin-success { color: #0f9d58 !important; }
+
+/* ── Utility text ── */
+body.light-mode .gwp-more {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .gwp-pre {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+    border: 1px solid var(--lm-inset-border, #dde3ea) !important;
+}
+
+/* ── Drive file browser ── */
+body.light-mode .gwp-badge-shared {
+    background: rgba(37, 99, 235, 0.10) !important;
+    color: #2563eb !important;
+}
+body.light-mode .gwp-drive-row:hover {
+    background: var(--lm-accent-soft, rgba(8,145,178,0.10)) !important;
+}
+body.light-mode .gwp-drive-selected {
+    background: var(--lm-accent-soft, rgba(8,145,178,0.10)) !important;
+}
+body.light-mode .gwp-drive-detail-header h4 {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-close-btn {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .gwp-close-btn:hover {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-drive-detail-field {
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .gwp-drive-detail-label {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .gwp-drive-detail-value {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-drive-raw {
+    border-bottom: 1px solid var(--lm-inset-border, #dde3ea) !important;
+}
+body.light-mode .gwp-drive-raw-summary {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-drive-raw-summary:hover {
+    background: var(--lm-accent-soft, rgba(8,145,178,0.10)) !important;
+}
+
+/* ── Photo gallery (legacy) ── */
+body.light-mode .gwp-gallery-item {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .gwp-gallery-item:hover {
+    box-shadow: 0 4px 16px rgba(8,145,178,0.15) !important;
+}
+body.light-mode .gwp-gallery-label {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .gwp-gallery-label span {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── Lightbox (keep dark overlay — it's a modal) ── */
+body.light-mode .gwp-lightbox {
+    background: rgba(0, 0, 0, 0.88) !important;
+}
+body.light-mode .gwp-lightbox-caption {
+    color: #e2e8f0 !important;
+}
+body.light-mode .gwp-lightbox-nav button {
+    background: rgba(255,255,255,0.12) !important;
+    border: 1px solid rgba(255,255,255,0.25) !important;
+    color: #fff !important;
+}
+body.light-mode .gwp-lightbox-nav span {
+    color: #9ca3af !important;
+}
+/* v3.4.3 lightbox buttons — keep dark, they're on black overlay */
+body.light-mode .gwp-lightbox-close,
+body.light-mode .gwp-lightbox-prev,
+body.light-mode .gwp-lightbox-next {
+    background: rgba(15, 23, 42, 0.85) !important;
+    color: var(--lm-accent, #0891b2) !important;
+    border: 1px solid var(--lm-accent-border, rgba(8,145,178,0.30)) !important;
+}
+body.light-mode .gwp-lightbox-name { color: #e2e8f0 !important; }
+body.light-mode .gwp-lightbox-meta { color: #64748b !important; }
+body.light-mode .gwp-lightbox-loading { color: #94a3b8 !important; }
+body.light-mode .gwp-lightbox-error {
+    color: #f87171 !important;
+    background: rgba(127, 29, 29, 0.5) !important;
+    border: 1px solid rgba(248, 113, 113, 0.40) !important;
+}
+
+/* ── Video / Media player ── */
+body.light-mode .gwp-media-item {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .gwp-media-label {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+
+/* ── File list (PDFs, docs) ── */
+body.light-mode .gwp-file-item {
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .gwp-file-item:hover {
+    background: var(--lm-accent-soft, rgba(8,145,178,0.10)) !important;
+}
+body.light-mode .gwp-file-name {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-file-size {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── PDF inline viewer ── */
+body.light-mode .gwp-pdf-viewer {
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .gwp-pdf-header {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+
+/* ── Buttons ── */
+body.light-mode .gwp-btn-primary {
+    background: var(--lm-accent-soft, rgba(8,145,178,0.10)) !important;
+    color: var(--lm-accent, #0891b2) !important;
+    border: 1px solid var(--lm-accent-border, rgba(8,145,178,0.30)) !important;
+}
+body.light-mode .gwp-btn-primary:hover {
+    background: rgba(8,145,178,0.18) !important;
+    border-color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .gwp-btn-outline {
+    color: var(--lm-text-2, #5c6b7a) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+    background: transparent !important;
+}
+body.light-mode .gwp-btn-outline:hover {
+    border-color: var(--lm-accent-border, rgba(8,145,178,0.30)) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .gwp-btn-sm {
+    background: var(--lm-accent-soft, rgba(8,145,178,0.10)) !important;
+    color: var(--lm-accent, #0891b2) !important;
+    border: 1px solid var(--lm-accent-border, rgba(8,145,178,0.30)) !important;
+}
+body.light-mode .gwp-btn-sm:hover {
+    background: rgba(8,145,178,0.18) !important;
+}
+body.light-mode .gwp-btn-danger-sm {
+    color: #dc2626 !important;
+    border: 1px solid rgba(220, 38, 38, 0.25) !important;
+}
+body.light-mode .gwp-btn-danger-sm:hover {
+    background: rgba(220, 38, 38, 0.10) !important;
+    color: #dc2626 !important;
+}
+
+/* ── Empty State ── */
+body.light-mode .gwp-empty h3 {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-empty p {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .gwp-empty-hint {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .gwp-empty-section {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── Loading ── */
+body.light-mode .gwp-loading p {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .gwp-loading-sub {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .gwp-spinner {
+    border: 3px solid var(--lm-inset-border, #dde3ea) !important;
+    border-top: 3px solid var(--lm-accent, #0891b2) !important;
+}
+
+/* ── Email ── */
+body.light-mode .gwp-email-item {
+    background: var(--lm-card, #ffffff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .gwp-email-item:hover {
+    border-color: var(--lm-accent-border, rgba(8,145,178,0.30)) !important;
+}
+body.light-mode .gwp-email-from {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-email-date {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .gwp-email-subject {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-email-to {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .gwp-email-headers {
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .gwp-email-iframe {
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .gwp-email-text {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+
+/* ── Map ── */
+body.light-mode .gwp-map {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+
+/* ── Devices ── */
+body.light-mode .gwp-device-card {
+    background: var(--lm-card, #ffffff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .gwp-device-model {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-device-detail {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .gwp-device-fp {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── Filter / Search / Select ── */
+body.light-mode .gwp-search-input {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-inset-border, #dde3ea) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-search-input:focus {
+    border-color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .gwp-select {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-inset-border, #dde3ea) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-checkbox-label {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+
+/* ── Activity List ── */
+body.light-mode .gwp-activity-item {
+    border-bottom: 1px solid var(--lm-inset-border, #dde3ea) !important;
+}
+body.light-mode .gwp-activity-action {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .gwp-activity-time {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── Timeline ── */
+body.light-mode .gwp-timeline {
+    border-left: 2px solid var(--lm-accent-border, rgba(8,145,178,0.30)) !important;
+}
+body.light-mode .gwp-timeline-time {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .gwp-timeline-title {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-timeline-detail {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── Section Header ── */
+body.light-mode .gwp-section-header h3 {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-section-header h2 {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-section-count {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .gwp-section-subheader {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .gwp-count-badge {
+    background: var(--lm-accent-soft, rgba(8,145,178,0.10)) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .gwp-note {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── Evidence Bar ── */
+body.light-mode .gwp-evidence-bar {
+    background: var(--lm-accent-soft, rgba(8,145,178,0.10)) !important;
+    border: 1px solid var(--lm-accent-border, rgba(8,145,178,0.30)) !important;
+}
+body.light-mode .gwp-evidence-label {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .gwp-evidence-file {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-inset-border, #dde3ea) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .gwp-evidence-file:hover {
+    border-color: var(--lm-accent-border, rgba(8,145,178,0.30)) !important;
+}
+body.light-mode .gwp-evidence-size {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── Flag-to-Evidence ── */
+body.light-mode .gwp-flag-btn {
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+    color: var(--lm-text-3, #8b97a5) !important;
+    background: transparent !important;
+}
+body.light-mode .gwp-flag-btn:hover {
+    color: #d97706 !important;
+    border-color: #d97706 !important;
+}
+body.light-mode .gwp-flag-btn.on {
+    background: rgba(217, 119, 6, 0.12) !important;
+    color: #d97706 !important;
+    border-color: #d97706 !important;
+    box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.12) !important;
+}
+body.light-mode .gwp-flag-header-btn {
+    background: rgba(217, 119, 6, 0.10) !important;
+    border: 1px solid rgba(217, 119, 6, 0.35) !important;
+    color: #d97706 !important;
+}
+body.light-mode .gwp-flag-header-btn:hover {
+    background: rgba(217, 119, 6, 0.20) !important;
+}
+body.light-mode .gwp-flag-count-pill {
+    background: #d97706 !important;
+    color: #fff !important;
+}
+body.light-mode .gwp-push-btn {
+    background: var(--lm-accent-soft, rgba(8,145,178,0.10)) !important;
+    border: 1px solid var(--lm-accent-border, rgba(8,145,178,0.30)) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .gwp-push-btn:hover {
+    background: rgba(8,145,178,0.18) !important;
+}
+body.light-mode .gwp-flag-toolbar {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+/* Flagged item highlights — keep amber, readable on light */
+body.light-mode .gwp-email-item.gwp-flagged {
+    box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.40) !important;
+    border-left: 4px solid #d97706 !important;
+}
+body.light-mode .gwp-device-card.gwp-flagged {
+    border: 1px solid #d97706 !important;
+    box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.12) !important;
+}
+body.light-mode .gwp-chat-html.gwp-flagged {
+    box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.40) !important;
+    border-left: 4px solid #d97706 !important;
+}
+body.light-mode div.gwp-flagged > pre.gwp-pre {
+    border-left: 4px solid #d97706 !important;
+}
+body.light-mode tr.gwp-row-flagged > td {
+    background: rgba(217, 119, 6, 0.06) !important;
+}
+
+/* ── Raw category / file viewers ── */
+body.light-mode .gwp-raw-cat {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-inset-border, #dde3ea) !important;
+}
+body.light-mode .gwp-raw-cat > summary {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-raw-file {
+    background: var(--lm-card, #ffffff) !important;
+    border: 1px solid var(--lm-inset-border, #dde3ea) !important;
+}
+body.light-mode .gwp-raw-name {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .gwp-raw-content {
+    color: var(--lm-text-2, #5c6b7a) !important;
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-inset-border, #dde3ea) !important;
+}
+
+/* ── Photos & Media Gallery (v3.4.3) ── */
+body.light-mode .gwp-photos-summary {
+    background: var(--lm-accent-soft, rgba(8,145,178,0.10)) !important;
+    border: 1px solid var(--lm-accent-border, rgba(8,145,178,0.30)) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .gwp-photos-summary strong {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .gwp-photos-meta {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .gwp-photos-filter {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-inset-border, #dde3ea) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .gwp-photos-filter:hover {
+    background: var(--lm-accent-soft, rgba(8,145,178,0.10)) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .gwp-photos-filter.active {
+    background: var(--lm-accent-soft, rgba(8,145,178,0.10)) !important;
+    border-color: var(--lm-accent-border, rgba(8,145,178,0.30)) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .gwp-photo-tile {
+    background: var(--lm-card, #ffffff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .gwp-photo-tile:hover {
+    border-color: var(--lm-accent-border, rgba(8,145,178,0.30)) !important;
+}
+body.light-mode .gwp-photo-thumb {
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .gwp-photo-loading {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .gwp-photo-video-badge {
+    background: rgba(0, 0, 0, 0.65) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .gwp-photo-name {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-photo-meta {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ═══ V.I.P.E.R. Unified Light Mode overrides ═══ */
+/* Appended section: corrects tokens to match unified design system,
+   adds missing selectors, and ensures no dark panels or sidebar remain.
+   All rules prefixed body.light-mode — append-only, no dark rules modified. */
+
+/* ── Page / scroll container backgrounds (use --lm-surface, not --lm-page) ── */
+body.light-mode .gwp-layout {
+    background: var(--lm-surface, #f0f3f6) !important;
+}
+body.light-mode .gwp-content {
+    background: var(--lm-surface, #f0f3f6) !important;
+}
+body.light-mode .gwp-section-scroll {
+    background: var(--lm-surface, #f0f3f6) !important;
+}
+
+/* ── Sidebar (explicit — light module sidebar) ── */
+body.light-mode .gwp-sidebar {
+    background: var(--lm-sidebar, #f6f8fa) !important;
+    border-right: 1px solid var(--lm-sidebar-border, #e2e7ee) !important;
+}
+body.light-mode .gwp-import-header {
+    background: var(--lm-sidebar, #f6f8fa) !important;
+    border-bottom: 1px solid var(--lm-sidebar-border, #e2e7ee) !important;
+}
+body.light-mode .gwp-import-tabs {
+    background: var(--lm-sidebar, #f6f8fa) !important;
+    border-bottom: 1px solid var(--lm-sidebar-border, #e2e7ee) !important;
+}
+body.light-mode .gwp-nav {
+    background: transparent !important;
+}
+body.light-mode .gwp-nav-footer {
+    background: transparent !important;
+    border-top: 1px solid var(--lm-sidebar-border, #e2e7ee) !important;
+}
+
+/* ── Nav items: hover uses teal tint, active gets left accent border ── */
+body.light-mode .gwp-nav-item:hover {
+    background: rgba(8, 145, 178, 0.10) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .gwp-nav-item.active {
+    background: rgba(8, 145, 178, 0.10) !important;
+    color: var(--lm-accent, #0891b2) !important;
+    border-left: 3px solid var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .gwp-nav-badge {
+    background: rgba(8, 145, 178, 0.10) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+
+/* ── Import tab active (left accent border for consistency) ── */
+body.light-mode .gwp-import-tab.active {
+    background: rgba(8, 145, 178, 0.10) !important;
+    border-color: var(--lm-accent, #0891b2) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+
+/* ── Remaining selectors: ensure no dark inheritance ── */
+
+/* .gwp-badge base — no color in dark, but ensure inherit is clean */
+body.light-mode .gwp-badge {
+    color: var(--lm-text, #1b2733) !important;
+}
+
+/* .gwp-mono — monospace text, ensure readable */
+body.light-mode .gwp-mono {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+
+/* .gwp-tag base — inherits dark bg in some contexts */
+body.light-mode .gwp-tag {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+
+/* .gwp-drive-name — inherits text color, make explicit */
+body.light-mode .gwp-drive-name {
+    color: var(--lm-text, #1b2733) !important;
+}
+
+/* .gwp-device-icon — emoji icon, no color override needed but ensure no dark */
+body.light-mode .gwp-device-icon {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+
+/* .gwp-audio-item — inside .gwp-media-item which is already light, but ensure */
+body.light-mode .gwp-audio-item {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+
+/* .gwp-photo-caption — ensure readable on light tile */
+body.light-mode .gwp-photo-caption {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+
+/* .gwp-email-row — ensure text inherits correctly */
+body.light-mode .gwp-email-row {
+    color: var(--lm-text, #1b2733) !important;
+}
+
+/* .gwp-evidence-name — ensure readable */
+body.light-mode .gwp-evidence-name {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+
+/* .gwp-file-name already covered, .gwp-file-info ensure no dark */
+body.light-mode .gwp-file-info {
+    color: var(--lm-text, #1b2733) !important;
+}
+
+/* .gwp-timeline-content — ensure readable */
+body.light-mode .gwp-timeline-content {
+    color: var(--lm-text, #1b2733) !important;
+}
+
+/* .gwp-timeline-dot — emoji, ensure no dark color */
+body.light-mode .gwp-timeline-dot {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+
+/* .gwp-lightbox-content — keep dark (modal overlay context) */
+/* .gwp-lightbox-stage — keep dark (modal overlay context) */
+/* .gwp-video-player — keep background:#000 (video player) */
+/* .gwp-pdf-iframe — already background:#fff */
+/* .gwp-google-icon / .gwp-google-icon-sm — brand gradient, leave as-is */

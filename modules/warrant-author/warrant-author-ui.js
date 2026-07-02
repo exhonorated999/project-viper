@@ -1682,114 +1682,75 @@ function _appendExhibitBlocks(blockStream, draft) {
 }
 
 /**
- * Compose + render the ESP addendum pages (provider block, target
- * accounts, date range, items-to-produce, NDO clauses) to standalone
- * PDF bytes, using the supplied template id.
+ * Format the draft's ESP addendum(s) into plain text for the Pennsylvania
+ * Application Continuation form. Produces ONLY the electronic-service-
+ * provider production details (provider, target accounts, records period,
+ * records to produce, non-disclosure) — it deliberately does NOT include
+ * the Probable Cause narrative, which lives on the Affidavit.
  *
- * Used by the Pennsylvania generate flow: PA's own template only carries
- * the official AOPC 410A forms (filled via main-process overlay), so the
- * per-provider ESP attachment pages are composed here with the generic
- * US ESP template and appended AFTER the official forms in the merged PDF.
- *
- * Returns { arrayBuffer, blob, pageCount, blockStream } or null when the
- * draft has no addendums or a required subsystem is unavailable.
+ * Returns a string (\n-separated) or '' when the draft has no addendums.
  */
-function _composeEspAddendumBytes(caseId, draft, templateId) {
+function _buildPaEspContinuationText(caseId, draft) {
   const ads = Array.isArray(draft.addendums) ? draft.addendums : [];
-  if (!ads.length) return null;
+  if (!ads.length) return '';
 
-  const engine = _engine();
-  if (!engine) return null;
-  const tpl = engine.getTemplate(templateId);
-  if (!tpl) return null;
-
-  const pdir = _pdir();
   const items = _items();
+  const pdir = _pdir();
   const providersMerged = pdir ? pdir.mergeProviders({
     providerOverrides: _safeLS('viperWarrantAuthorProviderOverrides'),
     customProviders:   _safeLS('viperWarrantAuthorCustomProviders'),
     providerDeletions: _safeLS('viperWarrantAuthorProviderDeletions')
   }) : [];
 
-  // 1. Compose each addendum
-  const addendumComposes = [];
-  for (const ad of ads) {
-    const provider = providersMerged.find(p => p.key === ad.providerKey) || { key: ad.providerKey, name: ad.providerKey || '(no provider)' };
-    const adForEngine = Object.assign({}, ad, {
-      targets: Array.isArray(ad.targetAccounts)
-        ? ad.targetAccounts.filter(t => t && String(t.value || '').trim() !== '')
-        : [],
-      dateRange: {
-        start: ad.dateRangeFrom || '',
-        end:   ad.dateRangeTo   || '',
-        allAvailable: !!ad.allDatesAvailable,
-      },
-      itemsToProduce: Array.isArray(ad.itemsToProduce) ? ad.itemsToProduce.slice() : [],
-      probableCause: _resolvePcForDraft(caseId, draft),
-      dateRangeBasis: _resolveDateRangeBasis(ad),
-    });
-    const _agency = _mergeAgencyForDraft(draft);
-    const ctx = {
-      addendum: adForEngine,
-      provider,
-      items,
-      affiant: _agency,
-      agency:  _agency,
-      draft,
-      court: _resolveCoCourtForDraft(draft),
-      case: _resolveCaseCtxForDraft(draft),
-    };
-    let composed;
-    try {
-      composed = engine.compose(tpl, ctx);
-    } catch (e) {
-      composed = { blocks: [{ kind: 'paragraph', text: '(compose error: ' + e.message + ')' }], danglingSlots: ['engine.error'], missingItems: true };
+  const labelFor = (k) => (items && typeof items.labelFor === 'function') ? items.labelFor(k) : k;
+  const out = [];
+  out.push('The following records are to be produced by the electronic service provider(s) identified below:');
+
+  ads.forEach((ad, idx) => {
+    const provider = providersMerged.find(p => p.key === ad.providerKey)
+      || { key: ad.providerKey, name: ad.providerKey || '(no provider)' };
+    const letter = String.fromCharCode(65 + (idx % 26));
+    const provName = ad.businessName || provider.name || provider.key || '(provider)';
+
+    out.push('');
+    out.push(`ATTACHMENT ${letter} — ${provName}`);
+    if (provider.legalEntity) out.push(`Service Provider: ${provider.legalEntity}`);
+    if (provider.address) {
+      const attn = provider.custodianAttention ? ` (Attn: ${provider.custodianAttention})` : '';
+      out.push(`Service Address: ${provider.address}${attn}`);
     }
-    addendumComposes.push({
-      addendumId:   ad.id,
-      providerKey:  provider.key,
-      providerName: provider.name || provider.key,
-      businessName: ad.businessName || '',
-      compose:      composed,
-    });
-  }
 
-  // 2. Build unified block stream
-  const builder = window.WarrantAuthorBlockBuilder;
-  if (!builder) return null;
-  const agencyProfile = _safeLS('viperAgencyProfile') || {};
-  const agencyMerged = Object.assign({}, agencyProfile, draft.affiantSnapshot || {});
-  const pcStore = window.WarrantAuthorCasePcStore;
-  const pcNarrative = (pcStore && pcStore.getBody) ? pcStore.getBody(caseId) : (draft.probableCauseNarrative || '');
-  const caseInfo = {
-    caseNumber: (window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || draft.caseRef || '',
-    caseName:   (window.currentCase && window.currentCase.name) || '',
-  };
-  let blockStream;
-  try {
-    blockStream = builder.build({
-      draft, addendumComposes, agency: agencyMerged, caseInfo, pcNarrative, includeDisclaimer: true,
-    });
-  } catch (e) {
-    return null;
-  }
-  try { _appendExhibitBlocks(blockStream, draft); } catch (_) {}
+    // Target accounts
+    const targets = (Array.isArray(ad.targetAccounts) ? ad.targetAccounts : [])
+      .filter(t => t && String(t.value || '').trim() !== '');
+    if (targets.length) {
+      out.push('Target Account(s):');
+      targets.forEach(t => out.push(`  - ${t.type || 'account'}: ${String(t.value).trim()}`));
+    }
 
-  // 3. Render PDF locally
-  const pdfComp = window.WarrantAuthorPdfComposer;
-  if (!pdfComp) return null;
-  let pdfResult;
-  try {
-    pdfResult = pdfComp.composePdf({ blockStream, draft, agency: agencyMerged });
-  } catch (e) {
-    return null;
-  }
-  return {
-    arrayBuffer: pdfResult.arrayBuffer,
-    blob:        pdfResult.blob,
-    pageCount:   pdfResult.pageCount,
-    blockStream,
-  };
+    // Records period
+    if (ad.allDatesAvailable) {
+      out.push('Records Period: All records available (no date restriction)');
+    } else if (ad.dateRangeFrom || ad.dateRangeTo) {
+      out.push(`Records Period: ${ad.dateRangeFrom || '(open)'} to ${ad.dateRangeTo || '(open)'}`);
+    }
+
+    // Items to produce (resolve to human labels; fall back to provider default pattern)
+    let itemKeys = (Array.isArray(ad.itemsToProduce) && ad.itemsToProduce.length)
+      ? ad.itemsToProduce.slice()
+      : (items && ad.providerKey ? items.resolvePatternKeys(items.defaultPatternFor(ad.providerKey)) : []);
+    if (itemKeys && itemKeys.length) {
+      out.push('Records to be produced:');
+      itemKeys.forEach(k => out.push(`  - ${labelFor(k)}`));
+    }
+
+    // Non-disclosure (federal SCA — standard for out-of-state ESPs)
+    if (ad.includeNonDisclosure) {
+      out.push('Non-Disclosure: A 90-day non-disclosure order under 18 U.S.C. § 2705(b) is requested as to this provider.');
+    }
+  });
+
+  return out.join('\n');
 }
 
 // ─── CA face-page options (PC §1524 grounds + HOBBS + Night Search) ─────
@@ -4820,24 +4781,30 @@ const bus = {
       try { await window.electronAPI.warrantAuthorSaveDraft(casePath, draft.id, draft); } catch (_) {}
     }
 
-    // Compose the ESP addendum pages (Google/etc. provider attachments)
-    // separately, using the generic US ESP template — PA's own template
-    // carries only the official AOPC 410A forms. These pages are appended
-    // AFTER the official forms by the main-process PA overlay merge.
-    let addendumBytes = null;
+    // Build the ESP addendum info (Google/etc. provider records to produce)
+    // as plain text and render it onto the OFFICIAL PA Application
+    // Continuation form (not a generic appended page, and without
+    // re-posting the Probable Cause narrative). The overlay flows this
+    // into the continuation page's ContinuationField under box 18.
+    let draftForGen = draft;
     try {
-      const composed = _composeEspAddendumBytes(caseId, draft, 'generic-us-multi-business-esp');
-      if (composed && composed.arrayBuffer) addendumBytes = composed.arrayBuffer;
-    } catch (_) { addendumBytes = null; }
+      const espText = _buildPaEspContinuationText(caseId, draft);
+      if (espText && espText.trim()) {
+        draftForGen = Object.assign({}, draft, {
+          pa: Object.assign({}, (draft.pa && typeof draft.pa === 'object') ? draft.pa : {}, {
+            espContinuation: espText,
+          }),
+        });
+      }
+    } catch (_) { draftForGen = draft; }
 
     let saveResult;
     try {
       saveResult = await window.electronAPI.warrantAuthorGenerate({
         casePath,
         warrantId: draft.id,
-        draft,
+        draft: draftForGen,
         formats: ['pdf'],           // PA deliverable is the official PDF forms
-        pdfBytes: addendumBytes,    // ESP addendum pages — appended after forms
         agency: agencyMerged,
         caseInfo,
       });

@@ -82,6 +82,10 @@
 //   draft.pa.probableCauseFacts          → affidavit narrative (falls back to
 //                                           draft.probableCauseNarrative)
 //   draft.pa.photos = [{ pngBase64|dataUrl, caption }]  → exhibit pages (2/page)
+//   draft.pa.espContinuation             → ESP addendum records text, flowed
+//                                           onto an Application Continuation
+//                                           page (box 18). Built by the
+//                                           renderer from draft.addendums[].
 //
 // AGENCY DATA SHAPE (from agency profile)
 //   agency.agencyName / agency.affiantName / agency.affiantBadge
@@ -188,9 +192,10 @@ async function fillPaForms(opts) {
   });
   pages.push({ bytes: appResult.bytes, family: 'application', role: 'application' });
 
-  // 2) APPLICATION CONTINUATION pages (items/premises overflow)
+  // 2) APPLICATION CONTINUATION pages (items/premises overflow + ESP addendum)
   const appContPages = await _buildApplicationContinuations({
     overflow: appResult.overflow, county, issuingAuthority, policeIncident, warrantControl, warnings,
+    espText: _safe(pa.espContinuation),
   });
   appContPages.forEach(b => pages.push({ bytes: b, family: 'application', role: 'application-cont' }));
 
@@ -338,7 +343,7 @@ async function _fillApplication(ctx) {
 // APPLICATION CONTINUATION (items / premises overflow)
 // ────────────────────────────────────────────────────────────────────────────
 async function _buildApplicationContinuations(ctx) {
-  const { overflow, county, issuingAuthority, policeIncident, warrantControl, warnings } = ctx;
+  const { overflow, county, issuingAuthority, policeIncident, warrantControl, warnings, espText } = ctx;
   const { PDFDocument, StandardFonts } = _getPdfLib();
 
   const sections = [];
@@ -347,6 +352,16 @@ async function _buildApplicationContinuations(ctx) {
   }
   if (overflow.premises && overflow.premises.length) {
     sections.push({ box: 17, title: 'DESCRIPTION OF PREMISES AND/OR PERSON TO BE SEARCHED (continued):', lines: overflow.premises });
+  }
+  // ESP addendum — the electronic-service-provider records to be produced.
+  // Rendered onto the official continuation form (box 18 = items to be
+  // searched for and seized) rather than a generic appended page. The
+  // renderer supplies pre-formatted plain text via draft.pa.espContinuation.
+  if (espText && String(espText).trim()) {
+    const tmp = await PDFDocument.create();
+    const measureFont = await tmp.embedFont(StandardFonts.Helvetica);
+    const espLines = _wrap(measureFont, FONT_SIZE, espText, REGION.appContField.w);
+    sections.push({ box: 18, title: 'ELECTRONIC SERVICE PROVIDER — RECORDS TO BE PRODUCED:', lines: espLines });
   }
   if (!sections.length) return [];
 

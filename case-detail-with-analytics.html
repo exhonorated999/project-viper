@@ -7,6 +7,7 @@
     <title>V.I.P.E.R. - Case Detail</title>
     <script src="modules/viper-ui.js"></script>
     <script src="modules/viper-prefs.js"></script>
+    <script src="modules/datetime-format.js"></script>
     <script src="modules/licensing.js"></script>
     <script src="modules/telemetry.js"></script>
     <script src="modules/telemetry-consent.js"></script>
@@ -29335,114 +29336,71 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 maxT = center + 3.5 * 86400000;
             }
 
-            // ── Adaptive density: compress gaps, expand event-dense regions ──
-            // Collect unique event timestamps sorted, then build segments
-            const sortedTimes = [...new Set(timestamps)].filter(t => t >= minT && t <= maxT).sort((a, b) => a - b);
-            const GAP_THRESHOLD = 86400000; // 24 hours — any gap larger than this gets compressed
-            const GAP_COMPRESSED_PX = 40;   // compressed gaps render as 40px
-            const PX_PER_HOUR = 18;         // event-dense regions: 18px per hour
+            // ── Linear time scale ──
+            // Distance along the axis is directly proportional to elapsed time:
+            // equal pixels == equal time everywhere (a constant measure). Users
+            // narrow the visible span with the Zoom buttons (Full/Week/Day) rather
+            // than the axis stretching/compressing around event density. This is
+            // what the requested "equal distance from beginning to end" means.
+            const DAY_MS  = 86400000;
+            const HOUR_MS = 3600000;
+            const spanMs  = Math.max(1, maxT - minT);
+            const LEFT_PAD = 40, RIGHT_PAD = 40;
+            // Constant scale area; the lane scrolls horizontally if narrower than
+            // the track. Width is fixed per zoom window (zoom changes the span,
+            // not the pixel density) so the scale stays constant across the axis.
+            const usableWidth = 1180;
+            const trackWidth  = usableWidth + LEFT_PAD + RIGHT_PAD;
 
-            // Build segments: each segment is either an event-region or a gap
-            const segments = [];
-            if (sortedTimes.length === 0) {
-                // Zoom range has no events — single gap
-                segments.push({ type: 'gap', start: minT, end: maxT, weight: GAP_COMPRESSED_PX });
-            } else {
-                // Region before first event
-                if (sortedTimes[0] - minT > GAP_THRESHOLD) {
-                    segments.push({ type: 'gap', start: minT, end: sortedTimes[0], weight: GAP_COMPRESSED_PX });
-                } else if (sortedTimes[0] > minT) {
-                    segments.push({ type: 'region', start: minT, end: sortedTimes[0], weight: Math.max(30, ((sortedTimes[0] - minT) / 3600000) * PX_PER_HOUR) });
-                }
-
-                // Between events
-                for (let i = 0; i < sortedTimes.length - 1; i++) {
-                    const gap = sortedTimes[i + 1] - sortedTimes[i];
-                    if (gap > GAP_THRESHOLD) {
-                        // Event cluster boundary → region for the cluster, then compressed gap
-                        segments.push({ type: 'gap', start: sortedTimes[i], end: sortedTimes[i + 1], weight: GAP_COMPRESSED_PX });
-                    } else {
-                        segments.push({ type: 'region', start: sortedTimes[i], end: sortedTimes[i + 1], weight: Math.max(30, (gap / 3600000) * PX_PER_HOUR) });
-                    }
-                }
-
-                // Region after last event
-                if (maxT - sortedTimes[sortedTimes.length - 1] > GAP_THRESHOLD) {
-                    segments.push({ type: 'gap', start: sortedTimes[sortedTimes.length - 1], end: maxT, weight: GAP_COMPRESSED_PX });
-                } else if (maxT > sortedTimes[sortedTimes.length - 1]) {
-                    segments.push({ type: 'region', start: sortedTimes[sortedTimes.length - 1], end: maxT, weight: Math.max(30, ((maxT - sortedTimes[sortedTimes.length - 1]) / 3600000) * PX_PER_HOUR) });
-                }
-            }
-
-            // Compute total weight → track width
-            const totalWeight = segments.reduce((s, seg) => s + seg.weight, 0);
-            const trackWidth = Math.max(800, Math.min(4000, totalWeight + 60)); // clamp
-
-            // Build cumulative pixel offsets for segments
-            let cumPx = 30; // left padding
-            for (const seg of segments) {
-                seg.pxStart = cumPx;
-                seg.pxWidth = (seg.weight / totalWeight) * (trackWidth - 60);
-                seg.pxEnd = cumPx + seg.pxWidth;
-                cumPx = seg.pxEnd;
-            }
-
-            // Map a timestamp → px position
+            // Map a timestamp → px position (pure linear).
             function timeToPx(t) {
-                for (const seg of segments) {
-                    if (t >= seg.start && t <= seg.end) {
-                        if (seg.type === 'gap') {
-                            // Snap to middle of the compressed gap
-                            return seg.pxStart + seg.pxWidth / 2;
-                        }
-                        const frac = seg.end === seg.start ? 0.5 : (t - seg.start) / (seg.end - seg.start);
-                        return seg.pxStart + frac * seg.pxWidth;
-                    }
-                }
-                // Outside all segments — clamp to edges
-                if (t < (segments[0]?.start ?? minT)) return segments[0]?.pxStart ?? 30;
-                return segments[segments.length - 1]?.pxEnd ?? (trackWidth - 30);
+                const c = Math.max(minT, Math.min(maxT, t));
+                return LEFT_PAD + ((c - minT) / spanMs) * usableWidth;
             }
 
-            // ── Time ticks (placed at segment boundaries + intermediate marks) ──
+            // Timezone-aware formatters (honor Settings → Date & Time); fall back
+            // to raw locale rendering if the helper isn't loaded.
+            const _fmtTLDate  = (t) => (window.ViperDateTime
+                ? window.ViperDateTime.formatDate(t, { month: 'short', day: 'numeric' })
+                : new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' }));
+            const _fmtTLTime  = (t) => (window.ViperDateTime
+                ? window.ViperDateTime.formatTime(t, { hour: '2-digit', minute: '2-digit' })
+                : new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+            const _fmtTLMonth = (t) => (window.ViperDateTime
+                ? window.ViperDateTime.formatDate(t, { month: 'short', year: 'numeric' })
+                : new Date(t).toLocaleDateString([], { month: 'short', year: 'numeric' }));
+
+            // ── Axis ticks: ONE constant interval + ONE label style ──
+            // Pick a "nice" interval that yields ~8 evenly-spaced ticks. Because
+            // the scale is linear, evenly-spaced-in-time ticks are also evenly
+            // spaced in pixels, and every label uses the same granularity so the
+            // axis never mixes hours with days.
+            const NICE_INTERVALS = [
+                HOUR_MS, 3 * HOUR_MS, 6 * HOUR_MS, 12 * HOUR_MS,
+                DAY_MS, 2 * DAY_MS, 7 * DAY_MS, 14 * DAY_MS,
+                30 * DAY_MS, 90 * DAY_MS, 180 * DAY_MS, 365 * DAY_MS,
+            ];
+            const TARGET_TICKS = 8;
+            let tickInterval = NICE_INTERVALS[NICE_INTERVALS.length - 1];
+            for (const iv of NICE_INTERVALS) { if (spanMs / iv <= TARGET_TICKS) { tickInterval = iv; break; } }
+            const tickLabel = (t) => (tickInterval < DAY_MS)
+                ? _fmtTLTime(t)
+                : (tickInterval < 30 * DAY_MS ? _fmtTLDate(t) : _fmtTLMonth(t));
+
             const ticks = [];
-            for (const seg of segments) {
-                if (seg.type === 'gap') {
-                    // Show a zigzag gap indicator — start and end labels
-                    const dStart = new Date(seg.start);
-                    const dEnd = new Date(seg.end);
-                    ticks.push({ px: seg.pxStart + 2, label: dStart.toLocaleDateString([], { month: 'short', day: 'numeric' }), isGapEdge: true });
-                    ticks.push({ px: seg.pxEnd - 2, label: dEnd.toLocaleDateString([], { month: 'short', day: 'numeric' }), isGapEdge: true });
-                } else {
-                    const spanMs = seg.end - seg.start;
-                    const spanHrs = spanMs / 3600000;
-                    let tickInterval;
-                    if (spanHrs <= 48) tickInterval = 3600000 * 3;        // 3hr
-                    else if (spanHrs <= 336) tickInterval = 86400000;     // daily
-                    else tickInterval = 86400000 * 7;                     // weekly
-
-                    const first = Math.ceil(seg.start / tickInterval) * tickInterval;
-                    for (let t = first; t <= seg.end; t += tickInterval) {
-                        const px = timeToPx(t);
-                        const d = new Date(t);
-                        let label;
-                        if (tickInterval < 86400000) label = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                        else label = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-                        ticks.push({ px, label, isGapEdge: false });
-                    }
-                }
+            const firstTick = Math.ceil(minT / tickInterval) * tickInterval;
+            for (let t = firstTick; t <= maxT; t += tickInterval) {
+                ticks.push({ px: timeToPx(t), label: tickLabel(t), isGapEdge: false });
+            }
+            if (ticks.length < 2) {
+                // Degenerate span — at least anchor the start and end.
+                ticks.length = 0;
+                ticks.push({ px: timeToPx(minT), label: tickLabel(minT), isGapEdge: false });
+                ticks.push({ px: timeToPx(maxT), label: tickLabel(maxT), isGapEdge: false });
             }
 
-            // ── Gap indicators (zigzag SVG) ──
-            const gapIndicators = segments.filter(s => s.type === 'gap').map(seg => {
-                const x = seg.pxStart;
-                const w = seg.pxWidth;
-                return `<div class="absolute top-0 h-full flex items-center justify-center" style="left:${x}px; width:${w}px;">
-                    <svg width="${Math.min(w, 30)}" height="20" viewBox="0 0 30 20" class="opacity-30">
-                        <path d="M2 10 L8 4 L14 16 L20 4 L26 16" stroke="#6b7280" stroke-width="2" fill="none" stroke-linecap="round"/>
-                    </svg>
-                </div>`;
-            }).join('');
+            // No gap indicators in a linear scale.
+            const gapIndicators = '';
 
             // ── Lanes ──
             const laneOrder = ['subject', 'incident', 'investigation', 'forensics'];
@@ -29499,7 +29457,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                         const sz = isMajor ? 14 : 10;
                                         const glw = isSelected ? `0 0 12px ${lane.color}` : (isMajor ? `0 0 8px ${lane.color}55` : 'none');
                                         return `
-                                        <div class="absolute flex flex-col items-center cursor-pointer" style="left:${px}px; top:50%; transform:translate(-50%,-50%); z-index:${isSelected ? 20 : 10};" onclick="selectTimelineEvent('${evt.id}')" onmouseenter="showTlTooltip(event, this)" onmouseleave="hideTlTooltip()" data-tl-date="${new Date(evt.timestamp).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}" data-tl-title="${(TIMELINE_CATEGORIES[evt.category] || '📌') + ' ' + evt.title.replace(/"/g, '&quot;')}" data-tl-color="${lane.color}">
+                                        <div class="absolute flex flex-col items-center cursor-pointer" style="left:${px}px; top:50%; transform:translate(-50%,-50%); z-index:${isSelected ? 20 : 10};" onclick="selectTimelineEvent('${evt.id}')" onmouseenter="showTlTooltip(event, this)" onmouseleave="hideTlTooltip()" data-tl-date="${window.ViperDateTime ? window.ViperDateTime.formatDateTime(evt.timestamp, {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : new Date(evt.timestamp).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}" data-tl-title="${(TIMELINE_CATEGORIES[evt.category] || '📌') + ' ' + evt.title.replace(/"/g, '&quot;')}" data-tl-color="${lane.color}">
                                             <div class="rounded-full border-2 transition-all duration-200" style="width:${sz}px;height:${sz}px;background:${evt.color || lane.color};border-color:${isSelected ? '#fff' : (evt.color || lane.color)};box-shadow:${glw};"></div>
                                         </div>`;
                                     } else {
@@ -29533,7 +29491,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                                         <line x1="0" y1="0" x2="${dx}" y2="${dy}" stroke="${lane.color}" stroke-width="1" opacity="0.35"/>
                                                     </svg>
                                                     <!-- Fan dot -->
-                                                    <div class="absolute cursor-pointer" style="left:${dx - dotSz/2}px; top:${dy - dotSz/2}px; z-index:30;" onclick="event.stopPropagation();selectTimelineEvent('${item.evt.id}')" onmouseenter="showTlTooltip(event, this)" onmouseleave="hideTlTooltip()" data-tl-date="${new Date(item.evt.timestamp).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}" data-tl-title="${(TIMELINE_CATEGORIES[item.evt.category] || '📌') + ' ' + item.evt.title.replace(/"/g, '&quot;')}" data-tl-color="${lane.color}">
+                                                    <div class="absolute cursor-pointer" style="left:${dx - dotSz/2}px; top:${dy - dotSz/2}px; z-index:30;" onclick="event.stopPropagation();selectTimelineEvent('${item.evt.id}')" onmouseenter="showTlTooltip(event, this)" onmouseleave="hideTlTooltip()" data-tl-date="${window.ViperDateTime ? window.ViperDateTime.formatDateTime(item.evt.timestamp, {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : new Date(item.evt.timestamp).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}" data-tl-title="${(TIMELINE_CATEGORIES[item.evt.category] || '📌') + ' ' + item.evt.title.replace(/"/g, '&quot;')}" data-tl-color="${lane.color}">
                                                         <div class="rounded-full border-2 transition-all duration-150" style="width:${dotSz}px;height:${dotSz}px;background:${item.evt.color || lane.color};border-color:${isSelected ? '#fff' : (item.evt.color || lane.color)};box-shadow:${glw};"></div>
                                                     </div>`;
                                                 }).join('')}
@@ -29623,8 +29581,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             ${isManual ? '<span class="text-xs px-2 py-0.5 rounded-full bg-gray-600/50 text-gray-300 border border-gray-500">Manual</span>' : '<span class="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">Auto</span>'}
                         </div>
                         <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
-                            <div><span class="text-gray-400">Date:</span> <span class="text-white">${ts.toLocaleDateString([], {weekday:'short', month:'long', day:'numeric', year:'numeric'})}</span></div>
-                            <div><span class="text-gray-400">Time:</span> <span class="text-white">${ts.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span></div>
+                            <div><span class="text-gray-400">Date:</span> <span class="text-white">${window.ViperDateTime ? window.ViperDateTime.formatDate(ts, {weekday:'short', month:'long', day:'numeric', year:'numeric'}) : ts.toLocaleDateString([], {weekday:'short', month:'long', day:'numeric', year:'numeric'})}</span></div>
+                            <div><span class="text-gray-400">Time:</span> <span class="text-white">${window.ViperDateTime ? window.ViperDateTime.formatTime(ts, {hour:'2-digit', minute:'2-digit'}) : ts.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span></div>
                             <div><span class="text-gray-400">Lane:</span> <span style="color:${lane.color};">${lane.label}</span></div>
                             <div><span class="text-gray-400">Category:</span> <span class="text-white">${evt.category}</span></div>
                             ${evt.entityLink ? `<div class="col-span-2"><span class="text-gray-400">Entity:</span> <span class="text-white">${evt.entityLink}</span></div>` : ''}
@@ -39086,31 +39044,59 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
         if (!title || !description) { __brToast('Title and description are required', 'error'); return; }
 
-        const apiKey = localStorage.getItem('viper_api_key');
-        if (!apiKey) { __brToast('No API key found — please activate your license first', 'error'); return; }
+        let apiKey = localStorage.getItem('viper_api_key');
+        if (!apiKey) {
+            // No key at all — try to mint one from the stored registration
+            // (same self-heal the parser-submission path uses).
+            try {
+                if (window.ViperLicensing && window.ViperLicensing.refreshApiKey) {
+                    apiKey = await window.ViperLicensing.refreshApiKey();
+                }
+            } catch (_) { /* fall through to the explicit no-key message */ }
+            if (!apiKey) { __brToast('No API key found — please activate your license first', 'error'); return; }
+        }
 
         btn.textContent = 'Sending...'; btn.disabled = true;
 
-        try {
+        const payload = JSON.stringify({
+            title, description,
+            steps_to_reproduce: steps,
+            severity,
+            product_slug:  'project-viper',
+            reporter_name: localStorage.getItem('viper_customer_name') || 'Unknown',
+            app_version:   __brAppVersion(),
+        });
+
+        // Returns { ok, data, errMsg, badKey } — badKey signals the stored
+        // api key is stale/invalid so the caller can refresh + retry once.
+        const postBug = async (key) => {
             const resp = await fetch(BUG_REPORT_API, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
-                body: JSON.stringify({
-                    title, description,
-                    steps_to_reproduce: steps,
-                    severity,
-                    product_slug:  'project-viper',
-                    reporter_name: localStorage.getItem('viper_customer_name') || 'Unknown',
-                    app_version:   __brAppVersion(),
-                }),
+                headers: { 'Content-Type': 'application/json', 'X-API-Key': key },
+                body: payload,
             });
-            if (!resp.ok) {
-                const err = await resp.json().catch(() => ({}));
-                throw new Error(err.detail || ('Server error (' + resp.status + ')'));
+            if (resp.ok) return { ok: true, data: await resp.json().catch(() => ({})) };
+            const err = await resp.json().catch(() => ({}));
+            const errMsg = err.detail || ('Server error (' + resp.status + ')');
+            const badKey = resp.status === 401 || resp.status === 403 ||
+                /invalid or inactive api key|missing api key/i.test(String(errMsg));
+            return { ok: false, errMsg, badKey };
+        };
+
+        try {
+            let res = await postBug(apiKey);
+            // Stale key → self-heal (re-register to rotate the key) and retry once.
+            if (!res.ok && res.badKey && window.ViperLicensing && window.ViperLicensing.refreshApiKey) {
+                try {
+                    const fresh = await window.ViperLicensing.refreshApiKey();
+                    if (fresh) res = await postBug(fresh);
+                } catch (refreshErr) {
+                    throw new Error('Could not refresh your license key automatically — please re-register from Settings. (' + (refreshErr.message || refreshErr) + ')');
+                }
             }
-            const data = await resp.json();
+            if (!res.ok) throw new Error(res.errMsg);
             closeBugReportModal();
-            __brToast('Bug report submitted — thank you! (ID: ' + data.bug_id + ')', 'success');
+            __brToast('Bug report submitted — thank you! (ID: ' + res.data.bug_id + ')', 'success');
         } catch (err) {
             __brToast('Failed to submit: ' + (err.message || err), 'error');
             btn.textContent = 'Submit Report'; btn.disabled = false;

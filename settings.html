@@ -7,6 +7,7 @@
     <title>V.I.P.E.R. - Settings</title>
     <script src="modules/viper-ui.js"></script>
     <script src="modules/viper-prefs.js"></script>
+    <script src="modules/datetime-format.js"></script>
     <script src="modules/licensing.js"></script>
     <script src="modules/telemetry.js"></script>
     <script src="modules/telemetry-consent.js"></script>
@@ -570,6 +571,27 @@
                                     <span id="sidebarAutoHideToggleIndicator" class="inline-block w-4 h-4 transform transition-transform bg-white rounded-full translate-x-1"></span>
                                 </button>
                             </div>
+                        </div>
+
+                        <!-- Date & Time Display -->
+                        <div class="pt-4 border-t border-gray-700/50">
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Date &amp; Time Display</label>
+                            <p class="text-xs text-gray-500 mb-3">Controls the timezone and clock format used to display all dates and times across the app (timeline, evidence, reports, exports). Stored timestamps are never changed — only how they are shown.</p>
+                            <div class="flex flex-col sm:flex-row gap-4">
+                                <div class="flex-1">
+                                    <label class="block text-xs text-gray-400 mb-1" for="dtTimeZone">Timezone</label>
+                                    <select id="dtTimeZone" onchange="setViperDateTimePref()" class="w-full px-3 py-2 rounded-lg bg-viper-card border border-gray-600 text-white text-sm focus:border-viper-purple focus:outline-none"></select>
+                                </div>
+                                <div class="sm:w-52">
+                                    <label class="block text-xs text-gray-400 mb-1" for="dtClock">Clock format</label>
+                                    <select id="dtClock" onchange="setViperDateTimePref()" class="w-full px-3 py-2 rounded-lg bg-viper-card border border-gray-600 text-white text-sm focus:border-viper-purple focus:outline-none">
+                                        <option value="auto">Automatic (locale)</option>
+                                        <option value="12">12-hour (2:00 PM)</option>
+                                        <option value="24">24-hour (14:00)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-2">Preview: <span id="dtPreview" class="text-viper-cyan font-mono">—</span></p>
                         </div>
                     </div>
                 </div>
@@ -4916,10 +4938,45 @@
             if (preview) preview.textContent = 'Current: ' + size.charAt(0).toUpperCase() + size.slice(1);
         }
 
+        /* ---------- Date & Time preferences ---------- */
+        function _dtUpdatePreview() {
+            const el = document.getElementById('dtPreview');
+            if (!el) return;
+            if (window.ViperDateTime) {
+                el.textContent = window.ViperDateTime.formatDateTime(Date.now()) + '  (' + window.ViperDateTime.label() + ')';
+            } else {
+                el.textContent = new Date().toLocaleString();
+            }
+        }
+        function initViperDateTimePref() {
+            const tzSel = document.getElementById('dtTimeZone');
+            const clkSel = document.getElementById('dtClock');
+            if (!tzSel || !clkSel || !window.ViperDateTime) return;
+            // Populate timezone dropdown from the shared curated list.
+            tzSel.innerHTML = window.ViperDateTime.TIMEZONES
+                .map(z => `<option value="${z.value}">${z.label}</option>`).join('');
+            const s = window.ViperDateTime.getSettings();
+            tzSel.value = s.timeZone || 'auto';
+            clkSel.value = (s.hour12 === true) ? '12' : (s.hour12 === false) ? '24' : 'auto';
+            _dtUpdatePreview();
+        }
+        function setViperDateTimePref() {
+            const tzSel = document.getElementById('dtTimeZone');
+            const clkSel = document.getElementById('dtClock');
+            if (!window.ViperDateTime) return;
+            const clk = clkSel ? clkSel.value : 'auto';
+            window.ViperDateTime.setSettings({
+                timeZone: tzSel ? tzSel.value : 'auto',
+                hour12: (clk === '12') ? true : (clk === '24') ? false : 'auto',
+            });
+            _dtUpdatePreview();
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             initLicenseUI();
             doCheckUpdate();
             applyViperFontSize(localStorage.getItem('viperFontSize') || 'medium');
+            initViperDateTimePref();
         });
     </script>
     <script src="/modules/security-ui.js"></script>

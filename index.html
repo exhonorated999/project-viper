@@ -7,6 +7,7 @@
     <title>V.I.P.E.R. - Dashboard</title>
     <script src="modules/viper-ui.js"></script>
     <script src="modules/viper-prefs.js"></script>
+    <script src="modules/datetime-format.js"></script>
     <script src="modules/licensing.js"></script>
     <script src="modules/telemetry.js"></script>
     <script src="modules/telemetry-consent.js"></script>
@@ -8765,31 +8766,59 @@
 
         if (!title || !description) { __brToast('Title and description are required', 'error'); return; }
 
-        const apiKey = localStorage.getItem('viper_api_key');
-        if (!apiKey) { __brToast('No API key found — please activate your license first', 'error'); return; }
+        let apiKey = localStorage.getItem('viper_api_key');
+        if (!apiKey) {
+            // No key at all — try to mint one from the stored registration
+            // (same self-heal the parser-submission path uses).
+            try {
+                if (window.ViperLicensing && window.ViperLicensing.refreshApiKey) {
+                    apiKey = await window.ViperLicensing.refreshApiKey();
+                }
+            } catch (_) { /* fall through to the explicit no-key message */ }
+            if (!apiKey) { __brToast('No API key found — please activate your license first', 'error'); return; }
+        }
 
         btn.textContent = 'Sending...'; btn.disabled = true;
 
-        try {
+        const payload = JSON.stringify({
+            title, description,
+            steps_to_reproduce: steps,
+            severity,
+            product_slug:  'project-viper',
+            reporter_name: localStorage.getItem('viper_customer_name') || 'Unknown',
+            app_version:   __brAppVersion(),
+        });
+
+        // Returns { ok, data, errMsg, badKey } — badKey signals the stored
+        // api key is stale/invalid so the caller can refresh + retry once.
+        const postBug = async (key) => {
             const resp = await fetch(BUG_REPORT_API, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
-                body: JSON.stringify({
-                    title, description,
-                    steps_to_reproduce: steps,
-                    severity,
-                    product_slug:  'project-viper',
-                    reporter_name: localStorage.getItem('viper_customer_name') || 'Unknown',
-                    app_version:   __brAppVersion(),
-                }),
+                headers: { 'Content-Type': 'application/json', 'X-API-Key': key },
+                body: payload,
             });
-            if (!resp.ok) {
-                const err = await resp.json().catch(() => ({}));
-                throw new Error(err.detail || ('Server error (' + resp.status + ')'));
+            if (resp.ok) return { ok: true, data: await resp.json().catch(() => ({})) };
+            const err = await resp.json().catch(() => ({}));
+            const errMsg = err.detail || ('Server error (' + resp.status + ')');
+            const badKey = resp.status === 401 || resp.status === 403 ||
+                /invalid or inactive api key|missing api key/i.test(String(errMsg));
+            return { ok: false, errMsg, badKey };
+        };
+
+        try {
+            let res = await postBug(apiKey);
+            // Stale key → self-heal (re-register to rotate the key) and retry once.
+            if (!res.ok && res.badKey && window.ViperLicensing && window.ViperLicensing.refreshApiKey) {
+                try {
+                    const fresh = await window.ViperLicensing.refreshApiKey();
+                    if (fresh) res = await postBug(fresh);
+                } catch (refreshErr) {
+                    throw new Error('Could not refresh your license key automatically — please re-register from Settings. (' + (refreshErr.message || refreshErr) + ')');
+                }
             }
-            const data = await resp.json();
+            if (!res.ok) throw new Error(res.errMsg);
             closeBugReportModal();
-            __brToast('Bug report submitted — thank you! (ID: ' + data.bug_id + ')', 'success');
+            __brToast('Bug report submitted — thank you! (ID: ' + res.data.bug_id + ')', 'success');
         } catch (err) {
             __brToast('Failed to submit: ' + (err.message || err), 'error');
             btn.textContent = 'Submit Report'; btn.disabled = false;

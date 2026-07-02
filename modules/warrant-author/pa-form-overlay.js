@@ -82,10 +82,14 @@
 //   draft.pa.probableCauseFacts          → affidavit narrative (falls back to
 //                                           draft.probableCauseNarrative)
 //   draft.pa.photos = [{ pngBase64|dataUrl, caption }]  → exhibit pages (2/page)
-//   draft.pa.espContinuation             → ESP addendum records text, flowed
-//                                           onto an Application Continuation
-//                                           page (box 18). Built by the
-//                                           renderer from draft.addendums[].
+//   draft.pa.espBlocks = [ op, … ]       → ESP addendum content (court-orders
+//                                           + records pages), flowed onto
+//                                           Application Continuation pages
+//                                           (box 18) with bold headings.
+//                                           Built by the renderer from
+//                                           draft.addendums[]. Op shapes:
+//                                           {break}|{spacer}|{h1}|{h2}|{bold}|
+//                                           {p}|{label,p}.
 //
 // AGENCY DATA SHAPE (from agency profile)
 //   agency.agencyName / agency.affiantName / agency.affiantBadge
@@ -195,7 +199,7 @@ async function fillPaForms(opts) {
   // 2) APPLICATION CONTINUATION pages (items/premises overflow + ESP addendum)
   const appContPages = await _buildApplicationContinuations({
     overflow: appResult.overflow, county, issuingAuthority, policeIncident, warrantControl, warnings,
-    espText: _safe(pa.espContinuation),
+    espBlocks: Array.isArray(pa.espBlocks) ? pa.espBlocks : null,
   });
   appContPages.forEach(b => pages.push({ bytes: b, family: 'application', role: 'application-cont' }));
 
@@ -343,38 +347,54 @@ async function _fillApplication(ctx) {
 // APPLICATION CONTINUATION (items / premises overflow)
 // ────────────────────────────────────────────────────────────────────────────
 async function _buildApplicationContinuations(ctx) {
-  const { overflow, county, issuingAuthority, policeIncident, warrantControl, warnings, espText } = ctx;
+  const { overflow, county, issuingAuthority, policeIncident, warrantControl, warnings, espBlocks } = ctx;
   const { PDFDocument, StandardFonts } = _getPdfLib();
 
-  const sections = [];
+  const maxW = REGION.appContField.w;
+
+  // Measure fonts (regular + bold) for wrapping, embedded on a scratch doc.
+  const tmp = await PDFDocument.create();
+  const measureReg  = await tmp.embedFont(StandardFonts.Helvetica);
+  const measureBold = await tmp.embedFont(StandardFonts.HelveticaBold);
+
+  // Build one flat ordered list of draw items:
+  //   { type:'line', runs:[{text,bold}], box? } | { type:'gap', box? } | { type:'break' }
+  const items = [];
   if (overflow.items && overflow.items.length) {
-    sections.push({ box: 18, title: 'ITEMS/PERSONS TO BE SEARCHED FOR AND SEIZED (continued):', lines: overflow.items });
+    items.push({ type: 'line', runs: [{ text: 'ITEMS/PERSONS TO BE SEARCHED FOR AND SEIZED (continued):', bold: true }], box: 18 });
+    for (const l of overflow.items) items.push({ type: 'line', runs: [{ text: _sanitize(l), bold: false }], box: 18 });
+    items.push({ type: 'gap', box: 18 });
   }
   if (overflow.premises && overflow.premises.length) {
-    sections.push({ box: 17, title: 'DESCRIPTION OF PREMISES AND/OR PERSON TO BE SEARCHED (continued):', lines: overflow.premises });
+    items.push({ type: 'line', runs: [{ text: 'DESCRIPTION OF PREMISES AND/OR PERSON TO BE SEARCHED (continued):', bold: true }], box: 17 });
+    for (const l of overflow.premises) items.push({ type: 'line', runs: [{ text: _sanitize(l), bold: false }], box: 17 });
+    items.push({ type: 'gap', box: 17 });
   }
-  // ESP addendum — the electronic-service-provider records to be produced.
-  // Rendered onto the official continuation form (box 18 = items to be
-  // searched for and seized) rather than a generic appended page. The
-  // renderer supplies pre-formatted plain text via draft.pa.espContinuation.
-  if (espText && String(espText).trim()) {
-    const tmp = await PDFDocument.create();
-    const measureFont = await tmp.embedFont(StandardFonts.Helvetica);
-    const espLines = _wrap(measureFont, FONT_SIZE, espText, REGION.appContField.w);
-    sections.push({ box: 18, title: 'ELECTRONIC SERVICE PROVIDER — RECORDS TO BE PRODUCED:', lines: espLines });
+  // ESP addendum blocks — rich (bold headings + inline bold labels), rendered
+  // onto the official continuation form (box 18 = items to be searched for and
+  // seized). The renderer supplies structured ops via draft.pa.espBlocks.
+  if (Array.isArray(espBlocks) && espBlocks.length) {
+    const espItems = _espBlocksToItems(espBlocks, maxW, measureReg, measureBold, FONT_SIZE);
+    for (const it of espItems) {
+      if (it.type === 'line') items.push({ type: 'line', runs: it.runs, box: 18 });
+      else if (it.type === 'gap') items.push({ type: 'gap', box: 18 });
+      else items.push(it); // break
+    }
   }
-  if (!sections.length) return [];
+  if (!items.length) return [];
 
-  // Build a queue of {title, box, lines} then flow across as many continuation
-  // pages as needed. Section checkboxes are checked on every page the section
-  // appears on.
   const outPages = [];
-  let queue = sections.map(s => ({ ...s, lines: s.lines.slice() }));
+  let idx = 0;
 
-  while (queue.length) {
+  while (idx < items.length) {
+    // Skip leading breaks/gaps so we never emit a blank page.
+    while (idx < items.length && (items[idx].type === 'break' || items[idx].type === 'gap')) idx++;
+    if (idx >= items.length) break;
+
     const doc = await PDFDocument.load(_loadBlank(APPLICATION_CONT_BLANK));
     const form = doc.getForm();
-    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const font     = await doc.embedFont(StandardFonts.Helvetica);
+    const boldFont = await doc.embedFont(StandardFonts.HelveticaBold);
     const page = doc.getPages()[0];
 
     _setText(form, 'County', county, warnings);
@@ -382,41 +402,32 @@ async function _buildApplicationContinuations(ctx) {
     _setText(form, 'Police Incident Number', policeIncident, warnings);
     _setText(form, 'Warrant Control Number', warrantControl, warnings);
 
-    // Draw sections into ContinuationField top-down until the page fills.
     let cursorTop = REGION.appContField.yBottom + REGION.appContField.h;
     const bottom = REGION.appContField.yBottom;
     const boxesOnThisPage = new Set();
-    const nextQueue = [];
 
-    for (const sec of queue) {
-      if (cursorTop - LINE_HEIGHT <= bottom) { nextQueue.push(sec); continue; }
-      boxesOnThisPage.add(sec.box);
-      // Title line (bold-ish via same font; it's a header)
-      page.drawText(sec.title, { x: REGION.appContField.x, y: cursorTop - FONT_SIZE, size: FONT_SIZE, font });
+    for (; idx < items.length; idx++) {
+      const it = items[idx];
+      if (it.type === 'break') { idx++; break; }         // consume break, end page
+      if (it.type === 'gap') {
+        cursorTop -= LINE_HEIGHT * 0.5;
+        if (it.box) boxesOnThisPage.add(it.box);
+        if (cursorTop - LINE_HEIGHT <= bottom) { idx++; break; }
+        continue;
+      }
+      // line
+      if (cursorTop - LINE_HEIGHT <= bottom) break;      // page full — leave for next page
+      _drawRuns(page, it.runs, REGION.appContField.x, cursorTop - FONT_SIZE, FONT_SIZE, font, boldFont);
+      if (it.box) boxesOnThisPage.add(it.box);
       cursorTop -= LINE_HEIGHT;
-
-      const remaining = [];
-      let i = 0;
-      for (; i < sec.lines.length; i++) {
-        if (cursorTop - LINE_HEIGHT <= bottom) break;
-        page.drawText(sec.lines[i], { x: REGION.appContField.x, y: cursorTop - FONT_SIZE, size: FONT_SIZE, font });
-        cursorTop -= LINE_HEIGHT;
-      }
-      if (i < sec.lines.length) {
-        remaining.push(...sec.lines.slice(i));
-        nextQueue.push({ ...sec, lines: remaining });
-      }
-      cursorTop -= LINE_HEIGHT * 0.5; // spacer between sections
     }
 
-    // Check the section boxes present on this page.
-    // Check Box18=Items, 17=Premises, 16=Owner, 15=Violations (states /Off /Yes).
+    // Check the section boxes present on this page (18=Items,17=Premises,16=Owner,15=Violations).
     boxesOnThisPage.forEach(n => _setCheckbox(form, `Check Box${n}`, true, warnings, 'Yes'));
 
     await _finalize(form, doc, font, SHORT_FONT, warnings);
     outPages.push(await doc.save());
-    queue = nextQueue;
-    if (outPages.length > 40) { warnings.push('application continuation exceeded 40 pages — truncated'); break; }
+    if (outPages.length > 60) { warnings.push('application continuation exceeded 60 pages — truncated'); break; }
   }
 
   // Page N of M on Text3/Text4
@@ -628,6 +639,102 @@ function _drawFlow(page, font, size, lineHeight, lines, region) {
     y -= lineHeight;
   }
   return { overflow: lines.slice(i) };
+}
+
+// ── Rich-run text (mixed regular/bold) for ESP continuation blocks ─────────
+// A "run" is { text, bold }. _wrapRuns word-wraps a sequence of runs to
+// maxWidth using the correct font per word, and returns an array of lines,
+// each line being an array of merged runs. _drawRuns draws one such line.
+function _wrapRuns(runs, maxWidth, regFont, boldFont, size) {
+  const fontFor = (b) => (b ? boldFont : regFont);
+  const words = [];
+  for (const r of runs) {
+    const parts = _sanitize(r.text).split(/(\s+)/);
+    for (const p of parts) {
+      if (p === '') continue;
+      words.push({ text: p, bold: !!r.bold, space: /^\s+$/.test(p) });
+    }
+  }
+  const lines = [];
+  let cur = [];
+  let curW = 0;
+  const trimTrailingSpaces = () => {
+    while (cur.length && cur[cur.length - 1].space) {
+      curW -= fontFor(cur[cur.length - 1].bold).widthOfTextAtSize(cur[cur.length - 1].text, size);
+      cur.pop();
+    }
+  };
+  for (const w of words) {
+    const f = fontFor(w.bold);
+    const wWidth = f.widthOfTextAtSize(w.text, size);
+    if (w.space) {
+      if (cur.length === 0) continue;         // never lead a line with space
+      cur.push(w); curW += wWidth; continue;
+    }
+    // Single word longer than the line → hard-break it.
+    if (wWidth > maxWidth) {
+      if (cur.length) { trimTrailingSpaces(); lines.push(cur); cur = []; curW = 0; }
+      let chunk = '';
+      for (const ch of w.text) {
+        if (f.widthOfTextAtSize(chunk + ch, size) > maxWidth && chunk) {
+          lines.push([{ text: chunk, bold: w.bold }]);
+          chunk = ch;
+        } else { chunk += ch; }
+      }
+      if (chunk) { cur = [{ text: chunk, bold: w.bold, space: false }]; curW = f.widthOfTextAtSize(chunk, size); }
+      continue;
+    }
+    if (curW + wWidth > maxWidth && cur.length) {
+      trimTrailingSpaces();
+      lines.push(cur); cur = []; curW = 0;
+    }
+    cur.push(w); curW += wWidth;
+  }
+  if (cur.length) { trimTrailingSpaces(); lines.push(cur); }
+  // Merge consecutive same-weight tokens into single runs per line.
+  return lines.map((lineWords) => {
+    const merged = [];
+    for (const w of lineWords) {
+      const last = merged[merged.length - 1];
+      if (last && last.bold === w.bold) last.text += w.text;
+      else merged.push({ text: w.text, bold: w.bold });
+    }
+    return merged;
+  });
+}
+
+function _drawRuns(page, lineRuns, x, y, size, regFont, boldFont) {
+  let cx = x;
+  for (const run of lineRuns) {
+    const f = run.bold ? boldFont : regFont;
+    if (run.text) page.drawText(run.text, { x: cx, y, size, font: f });
+    cx += f.widthOfTextAtSize(run.text, size);
+  }
+}
+
+// Expand an ESP block op list into flat draw items:
+//   { type:'line', runs:[...] } | { type:'gap' } | { type:'break' }
+// Ops: {break}|{spacer}|{h1}|{h2}|{bold}|{p}|{label,p}
+function _espBlocksToItems(blocks, maxWidth, regFont, boldFont, size) {
+  const items = [];
+  for (const op of (blocks || [])) {
+    if (!op) continue;
+    if (op.break)  { items.push({ type: 'break' }); continue; }
+    if (op.spacer) { items.push({ type: 'gap' });   continue; }
+    let runs = null;
+    if (op.h1 || op.h2 || op.bold) {
+      runs = [{ text: op.h1 || op.h2 || op.bold, bold: true }];
+    } else if (op.label) {
+      runs = [{ text: op.label + ' ', bold: true }];
+      if (op.p) runs.push({ text: op.p, bold: false });
+    } else if (op.p) {
+      runs = [{ text: op.p, bold: false }];
+    }
+    if (!runs) continue;
+    const wrapped = _wrapRuns(runs, maxWidth, regFont, boldFont, size);
+    for (const ln of wrapped) items.push({ type: 'line', runs: ln });
+  }
+  return items;
 }
 
 function _drawContinuedPointer(page, font, region) {

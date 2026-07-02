@@ -4788,12 +4788,25 @@ const bus = {
     // into the continuation page's ContinuationField under box 18.
     let draftForGen = draft;
     try {
+      const paOverrides = {};
       const espText = _buildPaEspContinuationText(caseId, draft);
-      if (espText && espText.trim()) {
+      if (espText && espText.trim()) paOverrides.espContinuation = espText;
+      // Exhibit photos → PA overlay photo-exhibit pages (2 per page, appended
+      // after the affidavit). Overlay reads draft.pa.photos = [{dataUrl, caption}].
+      const exhibits = _draftExhibits(draft);
+      if (exhibits.length) {
+        paOverrides.photos = exhibits.map(ex => ({
+          dataUrl: ex.dataUrl,
+          caption: ex.caption || '',
+        }));
+      }
+      if (Object.keys(paOverrides).length) {
         draftForGen = Object.assign({}, draft, {
-          pa: Object.assign({}, (draft.pa && typeof draft.pa === 'object') ? draft.pa : {}, {
-            espContinuation: espText,
-          }),
+          pa: Object.assign(
+            {},
+            (draft.pa && typeof draft.pa === 'object') ? draft.pa : {},
+            paOverrides
+          ),
         });
       }
     } catch (_) { draftForGen = draft; }
@@ -4832,7 +4845,12 @@ const bus = {
     }
 
     const pdfResult = { blob: _state._genPdfBlob, pageCount: _state._genPageCount, arrayBuffer: null };
-    _showGenerateResultModal(caseId, draft, null, [], pdfResult, saveResult);
+    // PA fills official forms rather than a block stream, so synthesize a stats
+    // object so the result modal reports the real addendum count (folded into the
+    // Application Continuation page) instead of 0.
+    const paAddCount = Array.isArray(draft.addendums) ? draft.addendums.length : 0;
+    const paStats = { stats: { addendums: paAddCount, totalBlocks: 0, pcAuthored: true } };
+    _showGenerateResultModal(caseId, draft, paStats, [], pdfResult, saveResult);
   },
 
   /**

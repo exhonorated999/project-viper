@@ -782,3 +782,1206 @@
 /* Scope chip used in residential validator (Case PC scope) — reuses
    the same purple as ESP compose chip. */
 .wa-vl-chip--compose { background: rgba(168, 85, 247, 0.18); color: #c4b5fd; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ═══ LIGHT MODE ═══
+   Appended overrides for body.light-mode.  Every rule is scoped to
+   body.light-mode and uses !important so it wins over both the dark
+   .wa-* rules above and the inline Tailwind utility classes (which the
+   global light-mode sheet in case-detail-with-analytics.html does NOT
+   cover for slate-* hues).  Goal: white panels on a light-gray page,
+   dark readable text, teal accents, softly-tinted status banners —
+   matching the Cellebrite module aesthetic.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. Collapsible section panels (Case PC, CA/VA options, residential
+      wa-section) → white cards with thin borders ── */
+body.light-mode .wa-case-pc {
+    background: var(--lm-card, #ffffff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+    box-shadow: 0 1px 3px rgba(27,39,51,0.06) !important;
+}
+body.light-mode .wa-case-pc[open] {
+    border-color: var(--lm-accent, #0891b2) !important;
+    box-shadow: 0 0 0 1px rgba(8,145,178,0.12), 0 4px 14px -6px rgba(27,39,51,0.10) !important;
+}
+body.light-mode .wa-case-pc > summary:hover {
+    background-color: rgba(8,145,178,0.04) !important;
+}
+body.light-mode .wa-case-pc-title {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .wa-case-pc-chevron {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .wa-case-pc[open] .wa-case-pc-chevron {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .wa-case-pc-stats {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .wa-case-pc-stats .pill-filled {
+    color: var(--lm-green, #0f9d58) !important;
+}
+body.light-mode .wa-case-pc-stats .pill-empty {
+    color: var(--lm-amber, #d97706) !important;
+}
+body.light-mode .wa-case-pc-body {
+    border-top: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-case-pc-banner {
+    background-color: rgba(217,119,6,0.08) !important;
+    border: 1px solid rgba(217,119,6,0.25) !important;
+    border-left: 3px solid var(--lm-amber, #d97706) !important;
+    color: #92400e !important;
+}
+body.light-mode .wa-case-pc-footer {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── 2. Residential editor collapsible <details> sections ── */
+body.light-mode .wa-editor details.wa-section {
+    background: var(--lm-card, #ffffff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-editor details.wa-section > summary.wa-section-summary {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .wa-editor details.wa-section > summary.wa-section-summary::before {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .wa-editor details.wa-section > .wa-section-body {
+    color: var(--lm-text, #1b2733) !important;
+}
+
+/* ── 3. Form container + empty-mini ── */
+body.light-mode .wa-form {
+    background: var(--lm-card, #ffffff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-empty-mini {
+    border: 1px dashed var(--lm-card-border, #dde3ea) !important;
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+
+/* ── 4. Live Preview pane (wa-preview) ── */
+body.light-mode .wa-preview {
+    background: var(--lm-card, #ffffff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-pv-title {
+    color: var(--lm-text-2, #5c6b7a) !important;
+    background: rgba(8,145,178,0.06) !important;
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-pv-body {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .wa-pv-block {
+    border-bottom: 1px dashed var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-pv-block-num {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .wa-pv-heading {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .wa-pv-item-label {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .wa-pv-item-desc {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+
+/* ── 5. Validator banners: errors (red) + warnings (amber) ── */
+body.light-mode .wa-validator {
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+    background: var(--lm-card, #ffffff) !important;
+}
+body.light-mode .wa-validator--ok {
+    border-color: rgba(15,157,88,0.35) !important;
+    background: rgba(15,157,88,0.06) !important;
+}
+body.light-mode .wa-validator--warn {
+    border-color: rgba(217,119,6,0.35) !important;
+    background: rgba(217,119,6,0.06) !important;
+}
+body.light-mode .wa-validator--fail {
+    border-color: rgba(220,38,38,0.40) !important;
+    background: rgba(220,38,38,0.06) !important;
+}
+body.light-mode .wa-validator--unloaded {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .wa-validator-title {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .wa-validator-sub {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .wa-validator-chevron {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .wa-validator-body {
+    border-top: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-validator-body--ok {
+    color: var(--lm-green, #0f9d58) !important;
+}
+body.light-mode .wa-validator-group--err {
+    background: rgba(220,38,38,0.06) !important;
+    border: 1px solid rgba(220,38,38,0.20) !important;
+    border-left: 3px solid rgba(220,38,38,0.50) !important;
+}
+body.light-mode .wa-validator-group--warn {
+    background: rgba(217,119,6,0.06) !important;
+    border: 1px solid rgba(217,119,6,0.20) !important;
+    border-left: 3px solid rgba(217,119,6,0.50) !important;
+}
+body.light-mode .wa-validator-group--err summary {
+    color: #b91c1c !important;
+}
+body.light-mode .wa-validator-group--warn summary {
+    color: #92400e !important;
+}
+body.light-mode .wa-validator-list li {
+    color: var(--lm-text, #1b2733) !important;
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .wa-vl-chip {
+    background: var(--lm-card-border, #dde3ea) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .wa-vl-chip--agency {
+    background: rgba(8,145,178,0.10) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .wa-vl-chip--draft {
+    background: rgba(124,58,237,0.10) !important;
+    color: var(--lm-purple, #7c3aed) !important;
+}
+body.light-mode .wa-vl-chip--compose {
+    background: rgba(124,58,237,0.10) !important;
+    color: var(--lm-purple, #7c3aed) !important;
+}
+
+/* ── 6. Preview issues panel (dangling-slot chips, red-tinted) ── */
+body.light-mode .wa-pv-issues {
+    background: rgba(220,38,38,0.05) !important;
+    border-bottom: 1px solid rgba(220,38,38,0.20) !important;
+}
+body.light-mode .wa-pv-issues-summary {
+    color: #b91c1c !important;
+}
+body.light-mode .wa-pv-issues-summary:hover {
+    background: rgba(220,38,38,0.08) !important;
+}
+body.light-mode .wa-pv-issues-hint {
+    color: rgba(185,28,28,0.55) !important;
+}
+body.light-mode .wa-issue-list {
+    border-top: 1px solid rgba(220,38,38,0.15) !important;
+}
+body.light-mode .wa-issue-row {
+    border-bottom: 1px dashed rgba(220,38,38,0.12) !important;
+}
+body.light-mode .wa-issue-key {
+    color: #b91c1c !important;
+    background: rgba(220,38,38,0.10) !important;
+}
+body.light-mode .wa-issue-label {
+    color: #991b1b !important;
+}
+body.light-mode .wa-issue-what {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .wa-issue-where {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .wa-issue-where-label {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .wa-pv-issue {
+    color: #b91c1c !important;
+}
+
+/* ── 7. Modal ── */
+body.light-mode .wa-modal {
+    background: var(--lm-card, #ffffff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+    color: var(--lm-text, #1b2733) !important;
+    box-shadow: 0 20px 60px rgba(27,39,51,0.18) !important;
+}
+body.light-mode .wa-modal-header {
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .wa-modal-footer {
+    border-top: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-btn-secondary {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-btn-secondary:hover {
+    background: #e6eaef !important;
+}
+body.light-mode .wa-btn-primary {
+    background: rgba(8,145,178,0.12) !important;
+    color: var(--lm-accent, #0891b2) !important;
+    border: 1px solid rgba(8,145,178,0.35) !important;
+}
+body.light-mode .wa-btn-primary:hover {
+    background: rgba(8,145,178,0.20) !important;
+}
+
+/* ── 8. Subtab pills ── */
+body.light-mode .wa-subtab-row {
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-subtab-pill {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+    border: 1px solid transparent !important;
+}
+body.light-mode .wa-subtab-pill:hover {
+    background: #e6eaef !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .wa-subtab-pill.active {
+    background: rgba(8,145,178,0.10) !important;
+    color: var(--lm-accent, #0891b2) !important;
+    border-color: rgba(8,145,178,0.30) !important;
+}
+
+/* ── 9. Empty-state cards ── */
+body.light-mode .wa-empty {
+    border: 1px dashed var(--lm-card-border, #dde3ea) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .wa-empty-title {
+    color: var(--lm-text, #1b2733) !important;
+}
+
+/* ── 10. Draft rows + generic rows ── */
+body.light-mode .wa-draft-row {
+    background: var(--lm-card, #ffffff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-draft-row:hover {
+    background: rgba(8,145,178,0.04) !important;
+    border-color: rgba(8,145,178,0.25) !important;
+}
+body.light-mode .wa-row {
+    background: var(--lm-card, #ffffff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+
+/* ── 11. Addendum rail pills ── */
+body.light-mode .wa-addendum-pill {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-addendum-pill:hover {
+    background: rgba(8,145,178,0.06) !important;
+    border-color: rgba(8,145,178,0.25) !important;
+}
+body.light-mode .wa-addendum-pill.active {
+    background: rgba(8,145,178,0.10) !important;
+    border-color: rgba(8,145,178,0.40) !important;
+}
+body.light-mode .wa-page-label {
+    background: rgba(8,145,178,0.15) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .wa-page-provider {
+    color: var(--lm-text, #1b2733) !important;
+}
+
+/* ── 12. PC textarea focus ── */
+body.light-mode .wa-pc-textarea:focus {
+    border-color: rgba(8,145,178,0.55) !important;
+    box-shadow: 0 0 0 1px rgba(8,145,178,0.30) !important;
+}
+
+/* ── 13. Select / option contrast — light theme ── */
+body.light-mode #waNewDraftModal select,
+body.light-mode .wa-form select,
+body.light-mode .wa-row select,
+body.light-mode .wa-addendum-form select {
+    color: var(--lm-text, #1b2733) !important;
+    background-color: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode #waNewDraftModal select option,
+body.light-mode .wa-form select option,
+body.light-mode .wa-row select option,
+body.light-mode .wa-addendum-form select option {
+    color: var(--lm-text, #1b2733) !important;
+    background-color: var(--lm-card, #ffffff) !important;
+}
+body.light-mode #waNewDraftModal select option:checked,
+body.light-mode .wa-form select option:checked,
+body.light-mode .wa-row select option:checked,
+body.light-mode .wa-addendum-form select option:checked {
+    color: #ffffff !important;
+    background-color: var(--lm-accent, #0891b2) !important;
+}
+
+/* ── 14. Autofill chips ── */
+body.light-mode .wa-autofill-chip {
+    background: rgba(217,119,6,0.08) !important;
+    border: 1px solid rgba(217,119,6,0.30) !important;
+    color: var(--lm-amber, #d97706) !important;
+}
+body.light-mode .wa-autofill-chip:hover {
+    background: rgba(217,119,6,0.15) !important;
+}
+
+/* ── 15. Residential Live Preview panel (wa-lp-*) ── */
+body.light-mode .wa-lp-shell {
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+    background: var(--lm-card, #ffffff) !important;
+}
+body.light-mode .wa-lp-title {
+    color: var(--lm-text-3, #8b97a5) !important;
+    background: var(--lm-inset, #f0f3f6) !important;
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-lp-page {
+    background: var(--lm-card, #ffffff) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .wa-lp-runheader {
+    border-bottom: 1px dashed var(--lm-card-border, #dde3ea) !important;
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .wa-lp-runfooter {
+    border-top: 1px dashed var(--lm-card-border, #dde3ea) !important;
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .wa-lp-coverhead {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .wa-lp-covermeta {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .wa-lp-h1 {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .wa-lp-h2 {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .wa-lp-p {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .wa-lp-num {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .wa-lp-sig-line {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .wa-lp-sig-label {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .wa-lp-pagebreak {
+    color: var(--lm-text-3, #8b97a5) !important;
+    border-top: 1px dashed var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-lp-disclaimer {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .wa-lp-empty {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── 16. Tailwind slate-* text labels scoped to warrant-author ──
+      The global light-mode sheet handles text-gray-* but NOT text-slate-*.
+      These are the field labels ("OFFENSE DESCRIPTION", "COURT NAME",
+      "TEMPLATE", "COLORADO COURT", "JUDICIAL DISTRICT", "TARGET ACCOUNTS",
+      "ITEMS TO PRODUCE", "ADDENDUMS", etc.) and helper/hint text. ── */
+body.light-mode .wa-editor .text-slate-200,
+body.light-mode .wa-editor .text-slate-300 {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .wa-editor .text-slate-400 {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .wa-editor .text-slate-500 {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode #waNewDraftModal .text-slate-400 {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode #waNewDraftModal .text-slate-500 {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .wa-case-pc .text-slate-400 {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .wa-case-pc .text-slate-500 {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .wa-case-pc .text-slate-300 {
+    color: var(--lm-text, #1b2733) !important;
+}
+
+/* ── 17. Tailwind slate-* borders scoped to warrant-author ── */
+body.light-mode .wa-editor .border-slate-700,
+body.light-mode .wa-editor .border-slate-800 {
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-case-pc .border-slate-700,
+body.light-mode .wa-case-pc .border-slate-800 {
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+
+/* ── 18. Tailwind slate-* backgrounds scoped to warrant-author ──
+      bg-slate-900/40 (items checkbox panel, autofill area, VA particulars),
+      bg-slate-800/60 (CA/VA options hover), bg-slate-800/40 ── */
+body.light-mode .wa-editor [class*="bg-slate-9"],
+body.light-mode .wa-editor [class*="bg-slate-8"] {
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .wa-editor .hover\:bg-slate-800\/60:hover,
+body.light-mode .wa-editor .hover\:bg-slate-800\/40:hover {
+    background: #e6eaef !important;
+}
+
+/* ── 19. Buttons: "+ New Warrant", "+ Add Addendum", "+ Add First
+      Addendum", "+ Add Target", "Apply pattern", "Fix to", "Remove" ──
+      The global sheet handles bg-viper-cyan/20 and /10, but the warrant
+      author also uses inline border-viper-cyan and text-viper-cyan on
+      buttons that need explicit light-mode treatment. ── */
+body.light-mode .wa-editor .text-viper-cyan,
+body.light-mode .wa-case-pc .text-viper-cyan,
+body.light-mode #waNewDraftModal .text-viper-cyan {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .wa-editor .border-viper-cyan,
+body.light-mode .wa-editor .border-viper-cyan\/40,
+body.light-mode .wa-editor .border-viper-cyan\/50 {
+    border-color: var(--lm-accent-border, rgba(8,145,178,0.30)) !important;
+}
+body.light-mode .wa-editor .border-dashed.border-viper-cyan\/40 {
+    border-color: var(--lm-accent-border, rgba(8,145,178,0.30)) !important;
+}
+
+/* "Remove" / "✕" buttons — muted red on light */
+body.light-mode .wa-editor .text-rose-300,
+body.light-mode .wa-editor .text-rose-200 {
+    color: #c53030 !important;
+}
+body.light-mode .wa-editor .text-rose-300:hover,
+body.light-mode .wa-editor .text-rose-200:hover {
+    color: #9b2c2c !important;
+}
+
+/* "Generate PDF + DOCX" button — emerald on light */
+body.light-mode .wa-editor .bg-emerald-500\/15,
+body.light-mode .wa-editor .bg-emerald-500\/20,
+body.light-mode .wa-editor .bg-emerald-500\/25 {
+    background: rgba(15,157,88,0.10) !important;
+    border-color: rgba(15,157,88,0.30) !important;
+}
+body.light-mode .wa-editor .text-emerald-300 {
+    color: var(--lm-green, #0f9d58) !important;
+}
+body.light-mode .wa-editor .text-emerald-400 {
+    color: var(--lm-green, #0f9d58) !important;
+}
+
+/* amber status text */
+body.light-mode .wa-editor .text-amber-400,
+body.light-mode .wa-case-pc .text-amber-400 {
+    color: var(--lm-amber, #d97706) !important;
+}
+body.light-mode .wa-editor .text-amber-300 {
+    color: var(--lm-amber, #d97706) !important;
+}
+
+/* ── 20. New Draft modal ── */
+body.light-mode #waNewDraftModal .bg-viper-dark {
+    background: var(--lm-card, #ffffff) !important;
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode #waNewDraftModal .text-white {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode #waNewDraftModal .text-slate-300 {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode #waNewDraftModal .border-viper-cyan\/30 {
+    border-color: rgba(8,145,178,0.25) !important;
+}
+
+/* ── 21. DRAFT status pill (purple) ── */
+body.light-mode .wa-editor .bg-slate-500\/20,
+body.light-mode .wa-editor .bg-purple-500\/20 {
+    background: rgba(124,58,237,0.10) !important;
+    border-color: rgba(124,58,237,0.25) !important;
+}
+body.light-mode .wa-editor .text-slate-300,
+body.light-mode #waNewDraftModal .text-slate-300 {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+
+/* ── 22. "From reference" select control ── */
+body.light-mode .wa-case-pc select,
+body.light-mode .wa-editor select {
+    background-color: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-case-pc select:focus,
+body.light-mode .wa-editor select:focus {
+    border-color: var(--lm-accent, #0891b2) !important;
+    box-shadow: 0 0 0 2px rgba(8,145,178,0.12) !important;
+}
+
+/* ── 23. Inputs / textareas scoped to warrant-author ──
+      The global sheet handles these, but we reinforce for the
+      bg-viper-dark + border-slate-700 combo common in this module. ── */
+body.light-mode .wa-editor input,
+body.light-mode .wa-editor textarea,
+body.light-mode .wa-case-pc input,
+body.light-mode .wa-case-pc textarea {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .wa-editor input:focus,
+body.light-mode .wa-editor textarea:focus,
+body.light-mode .wa-case-pc input:focus,
+body.light-mode .wa-case-pc textarea:focus {
+    border-color: var(--lm-accent, #0891b2) !important;
+    box-shadow: 0 0 0 2px rgba(8,145,178,0.12) !important;
+}
+body.light-mode .wa-editor input::placeholder,
+body.light-mode .wa-editor textarea::placeholder,
+body.light-mode .wa-case-pc input::placeholder,
+body.light-mode .wa-case-pc textarea::placeholder {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── 24. Checkboxes list (Items to Produce) → light inset panel ── */
+body.light-mode .wa-editor .max-h-40 {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-editor .max-h-40 label {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .wa-editor .max-h-40 label:hover {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .wa-editor input[type="checkbox"] {
+    accent-color: var(--lm-accent, #0891b2) !important;
+}
+
+/* ── 25. Code elements in helper text ── */
+body.light-mode .wa-editor code,
+body.light-mode .wa-case-pc code {
+    color: var(--lm-accent, #0891b2) !important;
+    background: rgba(8,145,178,0.06) !important;
+    padding: 0.05rem 0.3rem !important;
+    border-radius: 0.2rem !important;
+}
+
+/* ── 26. "Multi-Business ESP" badge / status badges ── */
+body.light-mode .wa-editor .bg-cyan-500\/20 {
+    background: rgba(8,145,178,0.10) !important;
+    border-color: rgba(8,145,178,0.30) !important;
+}
+body.light-mode .wa-editor .text-cyan-300 {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .wa-editor .bg-amber-500\/20 {
+    background: rgba(217,119,6,0.10) !important;
+    border-color: rgba(217,119,6,0.30) !important;
+}
+body.light-mode .wa-editor .text-amber-300 {
+    color: var(--lm-amber, #d97706) !important;
+}
+body.light-mode .wa-editor .bg-rose-500\/20 {
+    background: rgba(220,38,38,0.10) !important;
+    border-color: rgba(220,38,38,0.30) !important;
+}
+body.light-mode .wa-editor .text-rose-300 {
+    color: #c53030 !important;
+}
+
+/* ── 27. VA attachment pills (Att A, B, C) ── */
+body.light-mode .wa-editor .bg-cyan-900\/50 {
+    background: rgba(8,145,178,0.10) !important;
+}
+body.light-mode .wa-editor .border-cyan-700\/50 {
+    border-color: rgba(8,145,178,0.25) !important;
+}
+
+/* ── 28. Page-break indicator in preview ── */
+body.light-mode .wa-pv-text.text-amber-400 {
+    color: var(--lm-amber, #d97706) !important;
+    border-color: rgba(217,119,6,0.30) !important;
+}
+
+/* ── 29. Exhibits panel images — keep white bg for thumbnails ── */
+body.light-mode .wa-editor img.bg-white {
+    background: #ffffff !important;
+}
+
+/* ═══ V.I.P.E.R. Unified Light Mode overrides ═══ */
+/* Appended gap-fillers: the rules above (sections 1–29) cover the
+   .wa-* custom classes and many Tailwind utilities scoped to
+   .wa-editor / .wa-case-pc / #waNewDraftModal.  This section closes
+   the remaining gaps — primarily bg-viper-dark (all opacities),
+   border-gray-600, bg-slate-700/*, viper-orange/purple badges,
+   status-banner tinted boxes in modals, modal overlays that use
+   bg-viper-dark directly (not .wa-modal), and hover states. */
+
+/* ── 30. bg-viper-dark (solid) — inputs, selects, textareas, exhibit
+      caption fields, target-account fields, date fields — everywhere
+      in the editor AND modals not already caught by §20 ── */
+body.light-mode .wa-editor .bg-viper-dark,
+body.light-mode .wa-case-pc .bg-viper-dark {
+    background: #ffffff !important;
+    border-color: #d0d7de !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+/* bg-viper-dark inside modal overlays (generate, help, save-result) */
+body.light-mode .fixed.inset-0 .bg-viper-dark {
+    background: var(--lm-card, #ffffff) !important;
+    border-color: var(--lm-card-border, #dde3ea) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+
+/* ── 31. bg-viper-dark with opacity — sub-panels, exhibit boxes,
+      autofill areas, night-service / Hobbs panels, items-to-produce ── */
+body.light-mode .wa-editor .bg-viper-dark\/70,
+body.light-mode .wa-editor .bg-viper-dark\/60,
+body.light-mode .wa-editor .bg-viper-dark\/40 {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+/* same opacities inside modal overlays */
+body.light-mode .fixed.inset-0 .bg-viper-dark\/70,
+body.light-mode .fixed.inset-0 .bg-viper-dark\/60,
+body.light-mode .fixed.inset-0 .bg-viper-dark\/40 {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+
+/* ── 32. border-gray-600 — input borders throughout editor ── */
+body.light-mode .wa-editor .border-gray-600,
+body.light-mode #waNewDraftModal .border-gray-600 {
+    border-color: #d0d7de !important;
+}
+
+/* ── 33. bg-slate-700/* — small buttons, stat boxes, secondary
+      buttons in modals ── */
+body.light-mode .wa-editor .bg-slate-700\/50,
+body.light-mode .wa-editor .bg-slate-700\/40,
+body.light-mode .wa-editor .bg-slate-700\/30,
+body.light-mode .fixed.inset-0 .bg-slate-700\/40,
+body.light-mode .fixed.inset-0 .bg-slate-700\/60 {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-editor .hover\:bg-slate-700:hover,
+body.light-mode .wa-editor .hover\:bg-slate-700\/60:hover {
+    background: #e6eaef !important;
+}
+
+/* ── 34. bg-slate-800/50 — export error panel in validator modal ── */
+body.light-mode .fixed.inset-0 .bg-slate-800\/50,
+body.light-mode .fixed.inset-0 .bg-slate-800\/60 {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .fixed.inset-0 .border-slate-600 {
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .fixed.inset-0 .border-slate-700 {
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .fixed.inset-0 .border-slate-800,
+body.light-mode .fixed.inset-0 .border-slate-800\/60 {
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+
+/* ── 35. bg-slate-900/60 — CA/VA attachment inputs (not caught by
+      §18 wildcard because they're bg-slate-900/60, and §18 uses
+      [class*="bg-slate-9"] which DOES match — but only scoped to
+      .wa-editor.  Reinforce border + text here.) ── */
+body.light-mode .wa-editor .bg-slate-900\/60 {
+    background: #ffffff !important;
+    border-color: #d0d7de !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .wa-editor .bg-slate-900\/40 {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-editor .bg-slate-900\/30 {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+
+/* ── 36. viper-orange badges (Residential) ── */
+body.light-mode .wa-editor .text-viper-orange,
+body.light-mode .wa-case-pc .text-viper-orange,
+body.light-mode .fixed.inset-0 .text-viper-orange {
+    color: var(--lm-amber, #d97706) !important;
+}
+body.light-mode .wa-editor .bg-viper-orange\/20,
+body.light-mode .fixed.inset-0 .bg-viper-orange\/20 {
+    background: rgba(217,119,6,0.10) !important;
+    border-color: rgba(217,119,6,0.30) !important;
+}
+body.light-mode .wa-editor .border-viper-orange\/40,
+body.light-mode .fixed.inset-0 .border-viper-orange\/40 {
+    border-color: rgba(217,119,6,0.30) !important;
+}
+
+/* ── 37. viper-purple badges (ESP) ── */
+body.light-mode .wa-editor .text-viper-purple,
+body.light-mode .wa-case-pc .text-viper-purple,
+body.light-mode .fixed.inset-0 .text-viper-purple {
+    color: var(--lm-purple, #7c3aed) !important;
+}
+body.light-mode .wa-editor .bg-viper-purple\/20,
+body.light-mode .fixed.inset-0 .bg-viper-purple\/20 {
+    background: rgba(124,58,237,0.10) !important;
+    border-color: rgba(124,58,237,0.30) !important;
+}
+body.light-mode .wa-editor .border-viper-purple\/40,
+body.light-mode .fixed.inset-0 .border-viper-purple\/40 {
+    border-color: rgba(124,58,237,0.30) !important;
+}
+
+/* ── 38. Status banners in save-result / generate modals
+      (bg-amber-500/10, bg-emerald-500/10, bg-rose-500/10) ── */
+body.light-mode .fixed.inset-0 .bg-amber-500\/10,
+body.light-mode .wa-editor .bg-amber-500\/10 {
+    background: rgba(217,119,6,0.08) !important;
+    border-color: rgba(217,119,6,0.25) !important;
+}
+body.light-mode .fixed.inset-0 .bg-emerald-500\/10,
+body.light-mode .wa-editor .bg-emerald-500\/10 {
+    background: rgba(15,157,88,0.08) !important;
+    border-color: rgba(15,157,88,0.25) !important;
+}
+body.light-mode .fixed.inset-0 .bg-rose-500\/10,
+body.light-mode .wa-editor .bg-rose-500\/10 {
+    background: rgba(220,38,38,0.08) !important;
+    border-color: rgba(220,38,38,0.25) !important;
+}
+/* banner borders */
+body.light-mode .fixed.inset-0 .border-amber-500\/30,
+body.light-mode .fixed.inset-0 .border-amber-500\/40 {
+    border-color: rgba(217,119,6,0.25) !important;
+}
+body.light-mode .fixed.inset-0 .border-emerald-500\/30,
+body.light-mode .fixed.inset-0 .border-emerald-500\/40 {
+    border-color: rgba(15,157,88,0.25) !important;
+}
+body.light-mode .fixed.inset-0 .border-rose-500\/30 {
+    border-color: rgba(220,38,38,0.25) !important;
+}
+
+/* ── 39. Status banner text (amber-200, emerald-200, rose-200) ── */
+body.light-mode .fixed.inset-0 .text-amber-200,
+body.light-mode .wa-editor .text-amber-200 {
+    color: #b45309 !important;
+}
+body.light-mode .fixed.inset-0 .text-emerald-200,
+body.light-mode .wa-editor .text-emerald-200 {
+    color: #047857 !important;
+}
+body.light-mode .fixed.inset-0 .text-rose-200,
+body.light-mode .wa-editor .text-rose-200 {
+    color: #b91c1c !important;
+}
+
+/* ── 40. amber-100/* and emerald-100 — save-result detail text ── */
+body.light-mode .fixed.inset-0 .text-amber-100\/80,
+body.light-mode .fixed.inset-0 .text-amber-100\/70 {
+    color: #92400e !important;
+}
+body.light-mode .fixed.inset-0 .text-emerald-100 {
+    color: #047857 !important;
+}
+body.light-mode .fixed.inset-0 .text-amber-300\/90 {
+    color: #b45309 !important;
+}
+
+/* ── 41. text-rose-400 — status indicators (checkboxes, validation) ── */
+body.light-mode .wa-editor .text-rose-400,
+body.light-mode .wa-case-pc .text-rose-400,
+body.light-mode .fixed.inset-0 .text-rose-400 {
+    color: #dc2626 !important;
+}
+
+/* ── 42. text-white in modal headings ── */
+body.light-mode .fixed.inset-0 .text-white {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .fixed.inset-0 .hover\:text-white:hover {
+    color: var(--lm-text, #1b2733) !important;
+}
+
+/* ── 43. text-slate-* in modal overlays (not scoped to .wa-editor) ── */
+body.light-mode .fixed.inset-0 .text-slate-200 {
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .fixed.inset-0 .text-slate-300 {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .fixed.inset-0 .text-slate-400 {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .fixed.inset-0 .text-slate-500 {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .fixed.inset-0 .hover\:text-slate-300:hover {
+    color: var(--lm-text, #1b2733) !important;
+}
+
+/* ── 44. viper-cyan text + backgrounds in modal overlays ── */
+body.light-mode .fixed.inset-0 .text-viper-cyan {
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .fixed.inset-0 .bg-viper-cyan\/5 {
+    background: rgba(8,145,178,0.04) !important;
+}
+body.light-mode .fixed.inset-0 .bg-viper-cyan\/10 {
+    background: rgba(8,145,178,0.08) !important;
+}
+body.light-mode .fixed.inset-0 .bg-viper-cyan\/15 {
+    background: rgba(8,145,178,0.10) !important;
+}
+body.light-mode .fixed.inset-0 .bg-viper-cyan\/20 {
+    background: rgba(8,145,178,0.12) !important;
+}
+body.light-mode .fixed.inset-0 .border-viper-cyan\/30 {
+    border-color: rgba(8,145,178,0.25) !important;
+}
+body.light-mode .fixed.inset-0 .border-viper-cyan\/40 {
+    border-color: rgba(8,145,178,0.30) !important;
+}
+body.light-mode .fixed.inset-0 .border-viper-cyan\/50 {
+    border-color: rgba(8,145,178,0.35) !important;
+}
+body.light-mode .fixed.inset-0 .border-viper-cyan {
+    border-color: var(--lm-accent, #0891b2) !important;
+}
+
+/* ── 45. viper-cyan button hovers (all scopes) ── */
+body.light-mode .wa-editor .hover\:bg-viper-cyan\/20:hover,
+body.light-mode .fixed.inset-0 .hover\:bg-viper-cyan\/20:hover {
+    background: rgba(8,145,178,0.15) !important;
+}
+body.light-mode .wa-editor .hover\:bg-viper-cyan\/25:hover,
+body.light-mode .fixed.inset-0 .hover\:bg-viper-cyan\/25:hover {
+    background: rgba(8,145,178,0.18) !important;
+}
+body.light-mode .wa-editor .hover\:bg-viper-cyan\/30:hover,
+body.light-mode .fixed.inset-0 .hover\:bg-viper-cyan\/30:hover {
+    background: rgba(8,145,178,0.22) !important;
+}
+
+/* ── 46. Semantic button hovers (amber, emerald, rose, cyan) ── */
+body.light-mode .wa-editor .hover\:bg-amber-500\/25:hover,
+body.light-mode .fixed.inset-0 .hover\:bg-amber-500\/25:hover {
+    background: rgba(217,119,6,0.15) !important;
+}
+body.light-mode .wa-editor .hover\:bg-emerald-500\/25:hover,
+body.light-mode .fixed.inset-0 .hover\:bg-emerald-500\/25:hover {
+    background: rgba(15,157,88,0.15) !important;
+}
+body.light-mode .wa-editor .hover\:bg-rose-500\/10:hover,
+body.light-mode .fixed.inset-0 .hover\:bg-rose-500\/10:hover {
+    background: rgba(220,38,38,0.08) !important;
+}
+body.light-mode .wa-editor .hover\:bg-cyan-500\/10:hover,
+body.light-mode .fixed.inset-0 .hover\:bg-cyan-500\/10:hover {
+    background: rgba(8,145,178,0.08) !important;
+}
+body.light-mode .wa-editor .hover\:text-cyan-300:hover,
+body.light-mode .fixed.inset-0 .hover\:text-cyan-300:hover {
+    color: var(--lm-accent, #0891b2) !important;
+}
+
+/* ── 47. hover:text-rose-* in modal overlays ── */
+body.light-mode .fixed.inset-0 .hover\:text-rose-200:hover,
+body.light-mode .fixed.inset-0 .hover\:text-rose-300:hover {
+    color: #9b2c2c !important;
+}
+
+/* ── 48. accent-viper-cyan — checkbox/radio accent ── */
+body.light-mode .wa-editor .accent-viper-cyan,
+body.light-mode .wa-case-pc .accent-viper-cyan {
+    accent-color: var(--lm-accent, #0891b2) !important;
+}
+
+/* ── 49. bg-slate-800/40 hover in modal overlays ── */
+body.light-mode .fixed.inset-0 .hover\:bg-slate-800\/40:hover,
+body.light-mode .fixed.inset-0 .hover\:bg-slate-800\/60:hover {
+    background: #e6eaef !important;
+}
+
+/* ── 50. purple-900/50 attachment pills (Att B) ── */
+body.light-mode .wa-editor .bg-purple-900\/50,
+body.light-mode .fixed.inset-0 .bg-purple-900\/50 {
+    background: rgba(124,58,237,0.10) !important;
+}
+body.light-mode .wa-editor .text-purple-300,
+body.light-mode .fixed.inset-0 .text-purple-300 {
+    color: var(--lm-purple, #7c3aed) !important;
+}
+body.light-mode .wa-editor .border-purple-700\/50,
+body.light-mode .fixed.inset-0 .border-purple-700\/50 {
+    border-color: rgba(124,58,237,0.25) !important;
+}
+
+/* ── 51. amber-900/50 attachment pills (Att C) ── */
+body.light-mode .wa-editor .bg-amber-900\/50,
+body.light-mode .fixed.inset-0 .bg-amber-900\/50 {
+    background: rgba(217,119,6,0.10) !important;
+}
+body.light-mode .wa-editor .text-amber-300,
+body.light-mode .fixed.inset-0 .text-amber-300 {
+    color: var(--lm-amber, #d97706) !important;
+}
+body.light-mode .wa-editor .border-amber-700\/50,
+body.light-mode .fixed.inset-0 .border-amber-700\/50 {
+    border-color: rgba(217,119,6,0.25) !important;
+}
+
+/* ── 52. bg-slate-700/60 hover in modal overlays ── */
+body.light-mode .fixed.inset-0 .hover\:bg-slate-700\/60:hover {
+    background: #e6eaef !important;
+}
+
+/* ── 53. text-emerald-400 in modal overlays ── */
+body.light-mode .fixed.inset-0 .text-emerald-400 {
+    color: var(--lm-green, #0f9d58) !important;
+}
+body.light-mode .fixed.inset-0 .text-emerald-300 {
+    color: var(--lm-green, #0f9d58) !important;
+}
+body.light-mode .fixed.inset-0 .text-amber-400 {
+    color: var(--lm-amber, #d97706) !important;
+}
+
+/* ── 54. Inputs inside modal overlays — reinforce light bg ── */
+body.light-mode .fixed.inset-0 input,
+body.light-mode .fixed.inset-0 textarea,
+body.light-mode .fixed.inset-0 select {
+    background: #ffffff !important;
+    border: 1px solid #d0d7de !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .fixed.inset-0 input:focus,
+body.light-mode .fixed.inset-0 textarea:focus,
+body.light-mode .fixed.inset-0 select:focus {
+    border-color: var(--lm-accent, #0891b2) !important;
+    box-shadow: 0 0 0 2px rgba(8,145,178,0.12) !important;
+}
+body.light-mode .fixed.inset-0 input::placeholder,
+body.light-mode .fixed.inset-0 textarea::placeholder {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── 55. code elements in modal overlays ── */
+body.light-mode .fixed.inset-0 code {
+    color: var(--lm-accent, #0891b2) !important;
+    background: rgba(8,145,178,0.06) !important;
+    padding: 0.05rem 0.3rem !important;
+    border-radius: 0.2rem !important;
+}
+
+/* ── 56. bg-slate-700/50 hover for small buttons in editor ── */
+body.light-mode .wa-editor .hover\:bg-slate-700:hover {
+    background: #e6eaef !important;
+}
+
+/* ── 57. text-slate-200 labels in editor (reinforce — some are
+      outside .wa-editor direct children, e.g. inside nested divs) ── */
+body.light-mode .wa-editor .text-slate-200 {
+    color: var(--lm-text, #1b2733) !important;
+}
+
+/* ── 58. border-slate-800 (non-hover) in editor — divider borders ── */
+body.light-mode .wa-editor .border-slate-800 {
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-editor .border-slate-800\/60 {
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .wa-editor .border-slate-800\/70 {
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+
+/* ── 59. border-slate-600 in editor ── */
+body.light-mode .wa-editor .border-slate-600 {
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+
+/* ── 60. Live preview pane — reinforce white paper surface
+      The wa-lp-page (residential) and wa-pv-body (legacy) are already
+      covered in §4 and §15, but the wa-preview container itself
+      sometimes inherits a dark bg from Tailwind bg-viper-dark/60
+      on a parent.  Ensure the preview shell is always white. ── */
+body.light-mode .wa-preview {
+    background: var(--lm-card, #ffffff) !important;
+}
+body.light-mode .wa-lp-shell {
+    background: var(--lm-card, #ffffff) !important;
+}
+body.light-mode .wa-lp-page {
+    background: var(--lm-card, #ffffff) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .wa-lp-title {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+
+/* ── 61. Validator banners — reinforce light tints
+      (§5 covers these, but reinforce to ensure they read as
+      light alert banners, NOT dark boxes) ── */
+body.light-mode .wa-validator--fail {
+    background: rgba(220,38,38,0.06) !important;
+    border-color: rgba(220,38,38,0.30) !important;
+}
+body.light-mode .wa-validator--warn {
+    background: rgba(217,119,6,0.06) !important;
+    border-color: rgba(217,119,6,0.30) !important;
+}
+body.light-mode .wa-validator--ok {
+    background: rgba(15,157,88,0.06) !important;
+    border-color: rgba(15,157,88,0.30) !important;
+}
+body.light-mode .wa-validator-group--err {
+    background: rgba(220,38,38,0.06) !important;
+    border: 1px solid rgba(220,38,38,0.20) !important;
+}
+body.light-mode .wa-validator-group--warn {
+    background: rgba(217,119,6,0.06) !important;
+    border: 1px solid rgba(217,119,6,0.20) !important;
+}
+body.light-mode .wa-validator-group--err summary {
+    color: #b91c1c !important;
+}
+body.light-mode .wa-validator-group--warn summary {
+    color: #92400e !important;
+}
+body.light-mode .wa-validator-icon {
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .wa-validator--fail .wa-validator-icon {
+    color: #dc2626 !important;
+}
+body.light-mode .wa-validator--warn .wa-validator-icon {
+    color: #d97706 !important;
+}
+body.light-mode .wa-validator--ok .wa-validator-icon {
+    color: #0f9d58 !important;
+}
+
+/* ── 62. Dangling-slot / issue chips — reinforce light tints ── */
+body.light-mode .wa-pv-issues {
+    background: rgba(220,38,38,0.05) !important;
+}
+body.light-mode .wa-pv-issues-summary {
+    color: #b91c1c !important;
+}
+body.light-mode .wa-issue-key {
+    color: #b91c1c !important;
+    background: rgba(220,38,38,0.10) !important;
+}
+body.light-mode .wa-issue-label {
+    color: #991b1b !important;
+}
+
+/* ── 63. DRAFT status pills — reinforce light tinted ── */
+body.light-mode .wa-editor .bg-slate-500\/20 {
+    background: rgba(124,58,237,0.10) !important;
+    border-color: rgba(124,58,237,0.25) !important;
+}
+body.light-mode .wa-editor .bg-purple-500\/20 {
+    background: rgba(124,58,237,0.10) !important;
+    border-color: rgba(124,58,237,0.25) !important;
+}
+
+/* ── 64. Status pills (finalized, served, partial-return, returned,
+      quashed) — light tinted versions ── */
+body.light-mode .wa-editor .bg-amber-500\/20 {
+    background: rgba(217,119,6,0.10) !important;
+    border-color: rgba(217,119,6,0.25) !important;
+}
+body.light-mode .wa-editor .border-amber-500\/40 {
+    border-color: rgba(217,119,6,0.25) !important;
+}
+body.light-mode .wa-editor .bg-cyan-500\/20 {
+    background: rgba(8,145,178,0.10) !important;
+    border-color: rgba(8,145,178,0.25) !important;
+}
+body.light-mode .wa-editor .border-cyan-500\/40 {
+    border-color: rgba(8,145,178,0.25) !important;
+}
+body.light-mode .wa-editor .bg-emerald-500\/20 {
+    background: rgba(15,157,88,0.10) !important;
+    border-color: rgba(15,157,88,0.25) !important;
+}
+body.light-mode .wa-editor .border-emerald-500\/40 {
+    border-color: rgba(15,157,88,0.25) !important;
+}
+body.light-mode .wa-editor .bg-rose-500\/20 {
+    background: rgba(220,38,38,0.10) !important;
+    border-color: rgba(220,38,38,0.25) !important;
+}
+body.light-mode .wa-editor .border-rose-500\/40 {
+    border-color: rgba(220,38,38,0.25) !important;
+}
+body.light-mode .wa-editor .border-slate-500\/40 {
+    border-color: var(--lm-card-border, #dde3ea) !important;
+}
+
+/* ── 65. text-slate-300 in editor (status pill text) — reinforce ── */
+body.light-mode .wa-editor .text-slate-300 {
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+
+/* ── 66. focus:border-viper-cyan — input focus borders ── */
+body.light-mode .wa-editor .focus\:border-viper-cyan:focus,
+body.light-mode #waNewDraftModal .focus\:border-viper-cyan:focus,
+body.light-mode .fixed.inset-0 .focus\:border-viper-cyan:focus {
+    border-color: var(--lm-accent, #0891b2) !important;
+}
+
+/* ── 67. bg-viper-cyan/15 — "Open" button on drafts ── */
+body.light-mode .wa-editor .bg-viper-cyan\/15,
+body.light-mode .fixed.inset-0 .bg-viper-cyan\/15 {
+    background: rgba(8,145,178,0.10) !important;
+}
+body.light-mode .wa-editor .hover\:bg-viper-cyan\/25:hover {
+    background: rgba(8,145,178,0.18) !important;
+}
+
+/* ── 68. bg-amber-500/15 — "Re-seed" button ── */
+body.light-mode .wa-editor .bg-amber-500\/15 {
+    background: rgba(217,119,6,0.10) !important;
+    border-color: rgba(217,119,6,0.30) !important;
+}
+body.light-mode .wa-editor .hover\:bg-amber-500\/25:hover {
+    background: rgba(217,119,6,0.15) !important;
+}
+body.light-mode .wa-editor .border-amber-500\/40 {
+    border-color: rgba(217,119,6,0.30) !important;
+}
+body.light-mode .wa-editor .text-amber-200 {
+    color: #b45309 !important;
+}

@@ -303,3 +303,113 @@
     font-weight: 600;
     font-size: 12px;
 }
+
+/* ═══ LIGHT MODE ═══ */
+
+/* ── Left device sub-sidebar / rail ── */
+body.light-mode .cellebrite-rail {
+    background: var(--lm-sidebar, #f6f8fa) !important;
+    border-right: 1px solid var(--lm-sidebar-border, #e2e7ee) !important;
+}
+
+/* ── Results table header row (FLAG / NAME / PHONES / EMAILS / ACCOUNT) ──
+      The thead uses bg-viper-card/60 which the global catch-all turns white
+      (same as the card) — force inset so headers are distinguishable.       */
+body.light-mode .cb-topscroll-bottom thead,
+body.light-mode .cb-topscroll-bottom thead tr,
+body.light-mode .cb-topscroll-bottom thead th {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+
+/* ── Subject dashboard KV pairs ── */
+body.light-mode .cb-kv-label { color: var(--lm-text-3, #8b97a5) !important; }
+body.light-mode .cb-kv-value { color: var(--lm-text, #1b2733) !important; }
+
+/* ── Insights Coach drawer (near-opaque dark gradient → light) ── */
+body.light-mode .cb-coach {
+    background: var(--lm-card, #ffffff) !important;
+    border-right: 1px solid var(--lm-card-border, #dde3ea) !important;
+    box-shadow: 4px 0 24px rgba(27, 39, 51, 0.12) !important;
+}
+body.light-mode .cb-coach-header {
+    background: rgba(124, 58, 237, 0.08) !important;
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+    color: var(--lm-purple, #7c3aed) !important;
+}
+body.light-mode .cb-coach-close { color: var(--lm-text-2, #5c6b7a) !important; }
+body.light-mode .cb-coach-close:hover { color: var(--lm-text, #1b2733) !important; }
+
+/* Coach rail tabs */
+body.light-mode .cb-coach-rail {
+    border-bottom: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .cb-coach-rail-btn {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-inset-border, #dde3ea) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .cb-coach-rail-btn:hover {
+    background: rgba(124, 58, 237, 0.08) !important;
+    border-color: rgba(124, 58, 237, 0.3) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+body.light-mode .cb-coach-rail-btn.active {
+    background: rgba(124, 58, 237, 0.12) !important;
+    border-color: rgba(124, 58, 237, 0.4) !important;
+    color: var(--lm-purple, #7c3aed) !important;
+}
+
+/* Coach body text */
+body.light-mode .cb-coach-loading { color: var(--lm-text-3, #8b97a5) !important; }
+body.light-mode .cb-coach-label { color: var(--lm-text-3, #8b97a5) !important; }
+body.light-mode .cb-coach-mono { color: var(--lm-text, #1b2733) !important; }
+body.light-mode .cb-coach-sub { color: var(--lm-text-2, #5c6b7a) !important; }
+body.light-mode .cb-coach-help { color: var(--lm-text-2, #5c6b7a) !important; }
+body.light-mode .cb-coach-empty { color: var(--lm-text-2, #5c6b7a) !important; }
+body.light-mode .cb-coach-link { color: var(--lm-accent, #0891b2) !important; }
+body.light-mode .cb-coach-link:hover { color: #0e7490 !important; }
+
+/* Coach rows */
+body.light-mode .cb-coach-row {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-inset-border, #dde3ea) !important;
+}
+body.light-mode .cb-coach-row.cb-coach-row-clickable:hover {
+    border-color: rgba(8, 145, 178, 0.4) !important;
+    background: rgba(8, 145, 178, 0.06) !important;
+}
+body.light-mode .cb-coach-section {
+    border-top: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .cb-coach-section-title { color: var(--lm-text-3, #8b97a5) !important; }
+
+/* Coach numbers — deepen neon cyan to teal accent for readability */
+body.light-mode .cb-coach-num { color: var(--lm-accent, #0891b2) !important; }
+
+/* ── Heatmap ── */
+body.light-mode .cb-heat-table { color: var(--lm-text-2, #5c6b7a) !important; }
+body.light-mode .cb-heat-h,
+body.light-mode .cb-heat-label { color: var(--lm-text-3, #8b97a5) !important; }
+body.light-mode .cb-heat-cell {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+
+/* ── Prime bar rows ── */
+body.light-mode .cb-bar-row {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-inset-border, #dde3ea) !important;
+}
+body.light-mode .cb-bar-row:hover { border-color: rgba(8, 145, 178, 0.4) !important; }
+body.light-mode .cb-bar {
+    background: var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .cb-bar-num { color: var(--lm-accent, #0891b2) !important; }
+
+/* ── Empty-state code chip ── */
+body.light-mode .cellebrite-empty code {
+    background: rgba(8, 145, 178, 0.08) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}

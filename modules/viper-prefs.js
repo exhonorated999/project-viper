@@ -36,18 +36,52 @@
         // Setting font-size on <html> rescales every rem-based Tailwind class.
         document.documentElement.style.fontSize = cfg.px;
         document.documentElement.style.setProperty('--viper-font-size', cfg.px);
+        // Publish the active zoom factor as a CSS variable on <html> so the
+        // root-height compensation rule (see injectZoomFixCss) can divide
+        // 100vh by it. Without this, a `height:100vh` container inside a
+        // zoomed <body> renders at 100vh × zoom and the bottom of the app
+        // (including the sidebar theme toggle) is clipped off-screen at
+        // every window size.
+        document.documentElement.style.setProperty('--viper-zoom', cfg.zoom);
         // Zoom scales hardcoded px text (text-[10px], text-[11px], inline
         // font-size:Npx) plus all layout dimensions, so the whole page
         // grows together. Apply on body so position:fixed widgets that
         // anchor to <html> (toast, modals) aren't double-scaled.
         if (document.body) {
             document.body.style.zoom = cfg.zoom;
+            injectZoomFixCss();
         } else {
             // body not parsed yet — attach when ready.
             document.addEventListener('DOMContentLoaded', () => {
                 document.body.style.zoom = cfg.zoom;
+                injectZoomFixCss();
             }, { once: true });
         }
+    }
+
+    // Compensate the root app container's height for the <body> zoom.
+    // A `height:100vh` element inside `body{zoom:Z}` renders at 100vh×Z
+    // real pixels — overflowing the viewport when Z>1 (Large / X-Large
+    // font presets) so the bottom is permanently cut off, or leaving a
+    // gap when Z<1 (Small). Dividing 100vh by the zoom makes the rendered
+    // height exactly one viewport at any preset. No-op at zoom 1.
+    function injectZoomFixCss() {
+        if (document.getElementById('viper-zoom-fix-css')) return;
+        const css = document.createElement('style');
+        css.id = 'viper-zoom-fix-css';
+        css.textContent = `
+            /* Root shells across all pages:
+                 index.html         -> body > .flex.h-screen
+                 case-detail…html   -> body > .flex.h-screen
+                 settings.html      -> body > .flex.h-screen
+               Dividing 100vh by the body zoom makes the shell render at
+               exactly one real viewport (no bottom clip, no gap). */
+            body > .flex.h-screen {
+                height: calc(100vh / var(--viper-zoom, 1)) !important;
+                max-height: calc(100vh / var(--viper-zoom, 1)) !important;
+            }
+        `;
+        (document.head || document.documentElement).appendChild(css);
     }
     // Apply immediately, before Tailwind has even painted the page.
     applyFontSize(localStorage.getItem('viperFontSize') || 'medium');

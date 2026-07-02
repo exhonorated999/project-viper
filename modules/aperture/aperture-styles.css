@@ -375,3 +375,232 @@ button[onclick*="toggleFlag"]:hover {
     border-left-color: #fbbf24 !important;
     background: rgba(245, 158, 11, 0.06) !important;
 }
+
+/* ═══ LIGHT MODE ═══ */
+
+/* ── Container & base text ── */
+body.light-mode .aperture-container {
+    color: var(--lm-text, #1b2733) !important;
+}
+
+/* ── Header panel ── */
+body.light-mode .aperture-header {
+    background: var(--lm-card, #ffffff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .aperture-header .text-gray-400 { color: var(--lm-text-2, #5c6b7a) !important; }
+
+/* ── Sidebar (email list) ── */
+body.light-mode .aperture-sidebar {
+    background: var(--lm-card, #ffffff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+
+/* ── Detail panel ── */
+body.light-mode .aperture-detail > .flex-1 {
+    background: var(--lm-card, #ffffff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+
+/* ── Notes panel ── */
+body.light-mode #aperture-notes-panel {
+    background: var(--lm-card, #ffffff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+
+/* ── Stats cards ── */
+body.light-mode .aperture-stats .bg-viper-card {
+    background: var(--lm-card, #ffffff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode .aperture-stats .text-gray-400 { color: var(--lm-text-2, #5c6b7a) !important; }
+body.light-mode .aperture-stats .text-viper-cyan { color: var(--lm-accent, #0891b2) !important; }
+body.light-mode .aperture-stats .text-viper-green { color: var(--lm-green, #0f9d58) !important; }
+body.light-mode .aperture-stats .text-viper-orange { color: var(--lm-amber, #d97706) !important; }
+body.light-mode .aperture-stats .text-viper-purple { color: var(--lm-purple, #7c3aed) !important; }
+
+/* ── Email list items ── */
+body.light-mode .email-item {
+    border-left: 2px solid transparent !important;
+}
+body.light-mode .email-item:hover {
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .email-item h4 { color: var(--lm-text, #1b2733) !important; }
+body.light-mode .email-item .text-viper-cyan { color: var(--lm-accent, #0891b2) !important; }
+body.light-mode .email-item .text-gray-500 { color: var(--lm-text-3, #8b97a5) !important; }
+body.light-mode .email-item .text-gray-300 { color: var(--lm-text-2, #5c6b7a) !important; }
+body.light-mode .email-item .text-gray-400 { color: var(--lm-text-2, #5c6b7a) !important; }
+
+/* Selected email item */
+body.light-mode .email-item[class*="bg-viper-cyan"] {
+    background: rgba(8, 145, 178, 0.08) !important;
+    border-left-color: var(--lm-accent, #0891b2) !important;
+}
+
+/* ── Email detail ── */
+body.light-mode .email-detail .text-white { color: var(--lm-text, #1b2733) !important; }
+body.light-mode .email-detail .text-gray-500 { color: var(--lm-text-3, #8b97a5) !important; }
+body.light-mode .email-detail .text-gray-300 { color: var(--lm-text-2, #5c6b7a) !important; }
+body.light-mode .email-detail .text-gray-400 { color: var(--lm-text-2, #5c6b7a) !important; }
+body.light-mode .email-detail .text-viper-cyan { color: var(--lm-accent, #0891b2) !important; }
+body.light-mode .email-detail .text-viper-purple { color: var(--lm-purple, #7c3aed) !important; }
+body.light-mode .email-detail .text-viper-orange { color: var(--lm-amber, #d97706) !important; }
+
+/* Email detail meta labels */
+body.light-mode .email-detail .bg-viper-dark {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text, #1b2733) !important;
+}
+
+/* Headers block */
+body.light-mode .email-detail .bg-viper-dark.font-mono {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-inset-border, #dde3ea) !important;
+}
+body.light-mode .email-detail .bg-viper-dark.font-mono .text-viper-cyan { color: var(--lm-accent, #0891b2) !important; }
+body.light-mode .email-detail .bg-viper-dark.font-mono .text-gray-300 { color: var(--lm-text-2, #5c6b7a) !important; }
+
+/* IP Analysis section */
+body.light-mode .email-detail .bg-gradient-to-br {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-inset-border, #dde3ea) !important;
+}
+
+/* Flag button in detail (non-flagged state) */
+body.light-mode .email-detail button[class*="bg-viper-dark"] {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+    border-color: var(--lm-inset-border, #dde3ea) !important;
+}
+
+/* ── Notes panel internals ── */
+body.light-mode #aperture-notes-content .text-viper-orange { color: var(--lm-amber, #d97706) !important; }
+body.light-mode #aperture-notes-content .bg-viper-dark\/80 {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-inset-border, #dde3ea) !important;
+}
+body.light-mode #aperture-notes-content .bg-viper-dark\/80 .text-gray-300 { color: var(--lm-text, #1b2733) !important; }
+body.light-mode #aperture-notes-content .bg-viper-dark\/80 .text-gray-500 { color: var(--lm-text-3, #8b97a5) !important; }
+body.light-mode #aperture-notes-content .text-gray-500 { color: var(--lm-text-3, #8b97a5) !important; }
+
+/* ── Buttons ── */
+body.light-mode .btn-viper-primary {
+    background: linear-gradient(135deg, var(--lm-accent, #0891b2), var(--lm-green, #0f9d58)) !important;
+    color: #ffffff !important;
+}
+body.light-mode .btn-viper-primary:hover {
+    box-shadow: 0 4px 12px rgba(8, 145, 178, 0.25) !important;
+}
+body.light-mode .btn-viper-secondary {
+    background: var(--lm-card, #ffffff) !important;
+    color: var(--lm-accent, #0891b2) !important;
+    border: 1px solid var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .btn-viper-secondary:hover {
+    background: var(--lm-accent, #0891b2) !important;
+    color: #ffffff !important;
+}
+
+/* Report button (viper-purple border) */
+body.light-mode .aperture-header button[class*="bg-viper-card"][class*="text-viper-purple"] {
+    background: var(--lm-card, #ffffff) !important;
+    color: var(--lm-purple, #7c3aed) !important;
+    border-color: rgba(124, 58, 237, 0.4) !important;
+}
+body.light-mode .aperture-header button[class*="bg-viper-card"][class*="text-viper-purple"]:hover {
+    background: rgba(124, 58, 237, 0.08) !important;
+}
+
+/* ── Prose / email body ── */
+body.light-mode .prose-invert { color: var(--lm-text, #1b2733) !important; }
+body.light-mode .prose-invert h1,
+body.light-mode .prose-invert h2,
+body.light-mode .prose-invert h3 { color: var(--lm-accent, #0891b2) !important; }
+body.light-mode .prose-invert blockquote {
+    border-left-color: var(--lm-accent, #0891b2) !important;
+    color: var(--lm-text-2, #5c6b7a) !important;
+}
+body.light-mode .prose-invert code {
+    background: var(--lm-inset, #f0f3f6) !important;
+    color: var(--lm-green, #0f9d58) !important;
+}
+body.light-mode .prose-invert pre {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-inset-border, #dde3ea) !important;
+}
+
+/* Email body links */
+body.light-mode .email-body a { color: var(--lm-accent, #0891b2) !important; }
+body.light-mode .email-body a:hover { color: #0e7490 !important; }
+
+/* ── Glass card (used by import dialog etc.) ── */
+body.light-mode .glass-card {
+    background: var(--lm-card, #ffffff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+    backdrop-filter: none !important;
+}
+
+/* ── Import dialog ── */
+body.light-mode #aperture-import-dialog > div {
+    background: var(--lm-card, #ffffff) !important;
+    border: 1px solid var(--lm-card-border, #dde3ea) !important;
+}
+body.light-mode #aperture-import-dialog .text-viper-cyan { color: var(--lm-accent, #0891b2) !important; }
+body.light-mode #aperture-import-dialog .text-gray-400 { color: var(--lm-text-2, #5c6b7a) !important; }
+
+/* ── Scrollbar ── */
+body.light-mode .aperture-container ::-webkit-scrollbar-track {
+    background: var(--lm-inset, #f0f3f6) !important;
+}
+body.light-mode .aperture-container ::-webkit-scrollbar-thumb {
+    background: rgba(8, 145, 178, 0.3) !important;
+}
+body.light-mode .aperture-container ::-webkit-scrollbar-thumb:hover {
+    background: rgba(8, 145, 178, 0.5) !important;
+}
+
+/* ── Flag-to-Evidence (awp- prefix) ── */
+body.light-mode .awp-flag-btn {
+    border-color: var(--lm-inset-border, #dde3ea) !important;
+    color: var(--lm-text-3, #8b97a5) !important;
+}
+body.light-mode .awp-flag-btn:hover {
+    color: var(--lm-amber, #d97706) !important;
+    border-color: var(--lm-amber, #d97706) !important;
+}
+body.light-mode .awp-flag-btn.on {
+    background: rgba(217, 119, 6, 0.12) !important;
+    color: var(--lm-amber, #d97706) !important;
+    border-color: var(--lm-amber, #d97706) !important;
+    box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.12) !important;
+}
+
+body.light-mode .awp-flag-header-btn {
+    background: rgba(217, 119, 6, 0.10) !important;
+    border-color: rgba(217, 119, 6, 0.35) !important;
+    color: var(--lm-amber, #d97706) !important;
+}
+body.light-mode .awp-flag-header-btn:hover { background: rgba(217, 119, 6, 0.18) !important; }
+
+body.light-mode .awp-flag-count-pill {
+    background: var(--lm-amber, #d97706) !important;
+    color: #ffffff !important;
+}
+
+body.light-mode .awp-push-btn {
+    background: rgba(8, 145, 178, 0.10) !important;
+    border-color: rgba(8, 145, 178, 0.35) !important;
+    color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .awp-push-btn:hover { background: rgba(8, 145, 178, 0.18) !important; }
+
+body.light-mode .awp-flag-toolbar {
+    background: var(--lm-inset, #f0f3f6) !important;
+    border: 1px solid var(--lm-inset-border, #dde3ea) !important;
+}
+
+body.light-mode .email-item.awp-row-flagged {
+    border-left-color: var(--lm-amber, #d97706) !important;
+    background: rgba(217, 119, 6, 0.05) !important;
+}

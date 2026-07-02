@@ -142,6 +142,64 @@ async function _mergeVaPdfs(jspdfBuf, draft, agency, addendumComposes) {
     }
 }
 
+// ─── PA form overlay (AOPC 410A application + affidavit + exhibits) ────
+// When draft.template starts with 'pa-', the Pennsylvania overlay builds
+// the ENTIRE deliverable itself (official Application + continuation +
+// Affidavit + narrative-continuations + photo-exhibit pages). Unlike VA,
+// the renderer-supplied jsPDF buffer is IGNORED — the mandated AOPC 410A
+// forms ARE the deliverable (there is no "Attachment A/B/C" concept), and
+// the ESP block stream only carries a stub page-label. Lazy-loads pdf-lib
+// + overlay so a require failure here doesn't taint the whole IPC surface.
+async function _mergePaPdfs(attachmentsBuf, draft, agency, caseInfo) {
+    let overlay, PDFLib;
+    try { PDFLib = require('pdf-lib'); }
+    catch (e) { return { ok: false, error: `pdf-lib not available: ${e.message}` }; }
+    try { overlay = require('./pa-form-overlay'); }
+    catch (e) { return { ok: false, error: `pa-form-overlay not available: ${e.message}` }; }
+
+    try {
+        const result = await overlay.fillPaForms({
+            draft,
+            agency: agency || {},
+            caseInfo: caseInfo || {},
+        });
+        let outBytes = Buffer.from(result.bytes);
+        let totalPageCount = result.pageCount;
+
+        // Append the ESP addendum pages (provider attachments composed by
+        // the renderer) AFTER the official AOPC 410A forms + exhibits.
+        const addLen = attachmentsBuf && attachmentsBuf.length ? attachmentsBuf.length : 0;
+        if (addLen) {
+            try {
+                const { PDFDocument } = PDFLib;
+                const merged = await PDFDocument.load(outBytes);
+                const addDoc = await PDFDocument.load(
+                    Buffer.isBuffer(attachmentsBuf) ? attachmentsBuf : Buffer.from(attachmentsBuf)
+                );
+                const pages = await merged.copyPages(addDoc, addDoc.getPageIndices());
+                pages.forEach(p => merged.addPage(p));
+                outBytes = Buffer.from(await merged.save());
+                totalPageCount = merged.getPageCount();
+            } catch (e) {
+                console.error('[WarrantAuthor] PA addendum append failed:', e);
+                (result.warnings || (result.warnings = [])).push(
+                    'ESP addendum pages could not be appended: ' + e.message
+                );
+            }
+        }
+
+        return {
+            ok: true,
+            bytes: outBytes,
+            warnings: result.warnings || [],
+            pageCount: totalPageCount,
+            sectionPageCounts: result.sectionPageCounts || {},
+        };
+    } catch (e) {
+        return { ok: false, error: `PA overlay fill failed: ${e.message}` };
+    }
+}
+
 // ─── IPC handlers (P0: stubs only — P1 implements) ────────────────────
 function registerIpc(ipcMain) {
 
@@ -263,11 +321,41 @@ function registerIpc(ipcMain) {
 
         // ── PDF ─────────────────────────────────────────────────────────
         if (fmts.includes('pdf')) {
-            if (!pdfBytes) {
+            const isPa = !!(draft && (
+                (typeof draft.template === 'string' && draft.template.startsWith('pa-')) ||
+                String(draft.jurisdiction || '').toUpperCase() === 'PA'
+            ));
+            if (!pdfBytes && !isPa) {
                 return { success: false, error: 'pdfBytes required when formats includes pdf' };
             }
             try {
-                let buf = Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes);
+                let buf = pdfBytes
+                    ? (Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes))
+                    : Buffer.alloc(0);
+
+                // ── PA form-overlay build ────────────────────────────────
+                // The PA (AOPC 410A) overlay produces the COMPLETE
+                // deliverable (Application + continuations + Affidavit +
+                // narrative continuations + photo exhibits). Any renderer
+                // attachment buffer is appended after the forms.
+                if (isPa) {
+                    const mergeRes = await _mergePaPdfs(buf, draft, agency || {}, payload.caseInfo || {});
+                    if (mergeRes.ok) {
+                        buf = mergeRes.bytes;
+                        result.paOverlay = {
+                            merged: true,
+                            warnings: mergeRes.warnings,
+                            pageCount: mergeRes.pageCount,
+                            sectionPageCounts: mergeRes.sectionPageCounts,
+                        };
+                    } else {
+                        console.error('[WarrantAuthor] PA overlay build failed:', mergeRes.error);
+                        result.paOverlay = { merged: false, error: mergeRes.error };
+                        if (!buf.length) {
+                            return { success: false, error: `PA overlay build failed: ${mergeRes.error}` };
+                        }
+                    }
+                }
 
                 // ── VA form-overlay merge ────────────────────────────────
                 // When the draft is the Virginia template, the renderer-
@@ -491,5 +579,5 @@ module.exports = {
     registerIpc,
     setSecurityManager,
     setMainWindow,
-    _internals: { genWarrantId, _secureReadJson, _secureWriteJson, _draftsDirFor, _manifestPath, _mergeVaPdfs },
+    _internals: { genWarrantId, _secureReadJson, _secureWriteJson, _draftsDirFor, _manifestPath, _mergeVaPdfs, _mergePaPdfs },
 };

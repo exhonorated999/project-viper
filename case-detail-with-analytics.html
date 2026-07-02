@@ -405,355 +405,205 @@
             font-weight: bold;
         }
 
-        /* Light Mode Styles */
+        /* ═══════════════════════════════════════════════════════════
+           V.I.P.E.R. Unified Light Mode — calm gray page, white cards,
+           LIGHT sidebar, teal accent, flat module tab bar. Tokens shared
+           across index.html, settings.html — keep identical.
+           ═══════════════════════════════════════════════════════════ */
         body.light-mode {
-            background: linear-gradient(135deg,
-                #b3e5fc 0%,
-                #81d4fa 25%,
-                #00d9ff 50%,
-                #9d4edd 75%,
-                #4a90e2 100%);
-            background-size: 400% 400%;
-            animation: gradientShift 120s ease-in-out infinite;
-            color: #1a1a1a;
+            --lm-page: #eaeef3;
+            --lm-surface: #f0f3f6;
+            --lm-card: #ffffff;
+            --lm-card-border: #dde3ea;
+            --lm-card-shadow: 0 1px 3px rgba(27,39,51,0.08);
+            --lm-sidebar: #f6f8fa;
+            --lm-sidebar-border: #e2e7ee;
+            --lm-inset: #f0f3f6;
+            --lm-inset-border: #dde3ea;
+            --lm-text: #1b2733;
+            --lm-text-2: #5c6b7a;
+            --lm-text-3: #8b97a5;
+            --lm-accent: #0891b2;
+            --lm-accent-soft: rgba(8,145,178,0.10);
+            --lm-accent-border: rgba(8,145,178,0.30);
+            --lm-green: #0f9d58;
+            --lm-blue: #2563eb;
+            --lm-amber: #d97706;
+            --lm-purple: #7c3aed;
+            --lm-red: #dc2626;
         }
 
-        @keyframes gradientShift {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
+        /* Calm flat page — NO gradient, NO animation */
+        body.light-mode {
+            background: var(--lm-page);
+            color: var(--lm-text);
         }
+        body.light-mode .hex-pattern { background-image: none; }
 
-        body.light-mode .hex-pattern {
-            background-image: url("data:image/svg+xml,%3Csvg width='50' height='43.4' viewBox='0 0 50 43.4' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M25 0l12.5 21.7L25 43.4 12.5 21.7z' fill='none' stroke='rgba(0,150,200,0.08)' stroke-width='1'/%3E%3C/svg%3E");
-        }
-
+        /* Cards: solid white */
         body.light-mode .glass-card {
-            background: rgba(255, 255, 255, 0.85);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(0, 150, 200, 0.3);
-            box-shadow: 0 4px 16px rgba(0, 150, 200, 0.1);
+            background: var(--lm-card) !important;
+            backdrop-filter: none !important;
+            border: 1px solid var(--lm-card-border) !important;
+            box-shadow: var(--lm-card-shadow) !important;
         }
 
-        body.light-mode .sidebar-item {
-            color: #424242;
+        /* Sidebar (if present): LIGHT */
+        body.light-mode .w-64.glass-card {
+            background: var(--lm-sidebar) !important;
+            border-right: 1px solid var(--lm-sidebar-border) !important;
         }
+        body.light-mode .sidebar-item { color: var(--lm-text-2); }
+        body.light-mode .sidebar-item svg { color: var(--lm-text-3) !important; }
+        body.light-mode .sidebar-item:hover { background: var(--lm-accent-soft); color: var(--lm-text); }
+        body.light-mode .sidebar-item.active { background: var(--lm-accent-soft); color: var(--lm-accent); }
 
-        body.light-mode .sidebar-item:hover {
-            background: rgba(0, 150, 200, 0.1);
-        }
-
-        body.light-mode .sidebar-item svg {
-            color: #616161 !important;
-        }
-
-        body.light-mode .sidebar-item.active {
-            background: rgba(0, 150, 200, 0.2);
-        }
-
+        /* Inputs */
         body.light-mode input,
         body.light-mode textarea,
         body.light-mode select {
-            background: white !important;
-            border-color: rgba(0, 150, 200, 0.3) !important;
-            color: #1a1a1a !important;
+            background: var(--lm-inset) !important;
+            border: 1px solid #d0d7de !important;
+            color: var(--lm-text) !important;
         }
-
         body.light-mode input::placeholder,
-        body.light-mode textarea::placeholder {
-            color: #9e9e9e !important;
-        }
-
+        body.light-mode textarea::placeholder { color: var(--lm-text-3) !important; }
         body.light-mode input:focus,
         body.light-mode textarea:focus,
         body.light-mode select:focus {
-            border-color: #0096c8 !important;
-            box-shadow: 0 0 0 3px rgba(0, 150, 200, 0.1);
+            border-color: var(--lm-accent) !important;
+            box-shadow: 0 0 0 3px var(--lm-accent-soft) !important;
         }
 
-        body.light-mode .text-white {
-            color: #1a1a1a !important;
-        }
+        /* Text */
+        body.light-mode .text-white { color: var(--lm-text) !important; }
+        body.light-mode .text-gray-400 { color: var(--lm-text-2) !important; }
+        body.light-mode .text-gray-300 { color: var(--lm-text-2) !important; }
+        body.light-mode .text-gray-500 { color: var(--lm-text-3) !important; }
+        body.light-mode .text-gray-600 { color: var(--lm-text-2) !important; }
 
-        body.light-mode .text-gray-400 {
-            color: #616161 !important;
-        }
-
-        body.light-mode .text-gray-300 {
-            color: #757575 !important;
-        }
-
-        body.light-mode .text-gray-500 {
-            color: #9e9e9e !important;
-        }
-
-        body.light-mode .text-gray-600 {
-            color: #757575 !important;
-        }
-
+        /* Inset boxes / gray boxes → light inset, NOT white translucent */
         body.light-mode .bg-gray-600,
         body.light-mode .bg-gray-700,
         body.light-mode .bg-gray-800 {
-            background-color: rgba(255, 255, 255, 0.9) !important;
-            border: 1px solid rgba(0, 150, 200, 0.2);
+            background: var(--lm-inset) !important;
+            border: 1px solid var(--lm-inset-border);
         }
-
         body.light-mode .hover\:bg-gray-700:hover,
-        body.light-mode .hover\:bg-gray-600:hover {
-            background-color: rgba(240, 240, 240, 0.9) !important;
-        }
+        body.light-mode .hover\:bg-gray-600:hover { background: #e6eaef !important; }
+        /* ── Catch-ALL for every viper-dark / viper-card opacity variant
+              (bg-viper-dark/30 /40 /50 /60 /70 /95, bg-viper-card/40 /60 …)
+              and the arbitrary-hex dark boxes. These are the leftover
+              "dark grey boxes" (RMS pills, person cards, module panels). ── */
+        body.light-mode [class*="bg-viper-card"] { background: var(--lm-card) !important; border-color: var(--lm-inset-border); }
+        body.light-mode [class*="bg-viper-dark"] { background: var(--lm-inset) !important; border-color: var(--lm-inset-border); }
+        body.light-mode [class*="bg-viper-dark"]:hover,
+        body.light-mode [class*="bg-viper-card"]:hover { background: #e6eaef !important; }
+        body.light-mode .bg-\[\#1a1d27\],
+        body.light-mode .bg-\[\#161921\],
+        body.light-mode .bg-\[\#0a0e14\],
+        body.light-mode .bg-\[\#0f1117\] { background: var(--lm-inset) !important; border-color: var(--lm-inset-border) !important; color: var(--lm-text) !important; }
+        /* Opacity-variant gray boxes (bg-gray-600/30, bg-gray-700/50 …) */
+        body.light-mode [class*="bg-gray-6"],
+        body.light-mode [class*="bg-gray-7"],
+        body.light-mode [class*="bg-gray-8"],
+        body.light-mode [class*="bg-slate-7"],
+        body.light-mode [class*="bg-slate-8"] { background: var(--lm-inset) !important; }
+        body.light-mode button.rounded-full[class*="bg-gray-6"],
+        body.light-mode button.rounded-full[class*="bg-gray-7"] { background: #c4ccd6 !important; }
 
-        body.light-mode .border-gray-700,
-        body.light-mode .border-gray-600 {
-            border-color: rgba(0, 150, 200, 0.2) !important;
-        }
+        /* Borders */
+        body.light-mode .border-gray-600,
+        body.light-mode .border-gray-700 { border-color: var(--lm-card-border) !important; }
 
+        /* ── Module tab bar: FLAT, clean, teal active underline ── */
+        body.light-mode .border-b.border-gray-700.bg-viper-card\/50 {
+            background: var(--lm-page) !important;
+            border-bottom: 1px solid var(--lm-card-border) !important;
+        }
         body.light-mode .tab-button {
-            color: #424242;
-            background: rgba(255, 255, 255, 0.5);
+            color: var(--lm-text-2);
+            background: transparent;
         }
-
+        body.light-mode .tab-button:hover { background: var(--lm-inset); color: var(--lm-text); }
         body.light-mode .tab-button.active {
-            color: #0096c8;
-            background: rgba(255, 255, 255, 0.9);
-            border-bottom-color: #0096c8;
+            color: var(--lm-accent);
+            background: transparent;
+            border-bottom-color: var(--lm-accent);
         }
 
-        body.light-mode .tab-button:hover {
-            background: rgba(255, 255, 255, 0.7);
-        }
+        /* Accent text */
+        body.light-mode .text-viper-cyan { color: var(--lm-accent) !important; font-weight: 600; }
+        body.light-mode .text-viper-green { color: var(--lm-green) !important; font-weight: 600; }
+        body.light-mode .text-viper-orange { color: var(--lm-amber) !important; font-weight: 600; }
+        body.light-mode .text-viper-purple { color: var(--lm-purple) !important; font-weight: 600; }
 
-        /* Tab container background */
-        body.light-mode .border-b.border-gray-700.bg-viper-card\/50 {
-            background: rgba(255, 255, 255, 0.4) !important;
-            border-color: rgba(0, 150, 200, 0.2) !important;
-        }
+        /* Header + action buttons: soft accent fill, unified */
+        body.light-mode .bg-viper-cyan\/20 { background: var(--lm-accent-soft) !important; border-color: var(--lm-accent-border) !important; }
+        body.light-mode .bg-viper-cyan\/20:hover { background: rgba(8,145,178,0.18) !important; }
+        body.light-mode .bg-viper-cyan\/10 { background: var(--lm-accent-soft) !important; border-color: var(--lm-accent-border) !important; }
+        body.light-mode .bg-viper-green\/20 { background: rgba(15,157,88,0.10) !important; border-color: rgba(15,157,88,0.30) !important; }
+        body.light-mode .bg-viper-orange\/20 { background: rgba(217,119,6,0.10) !important; border-color: rgba(217,119,6,0.30) !important; }
+        body.light-mode .bg-viper-purple\/20 { background: rgba(124,58,237,0.10) !important; border-color: rgba(124,58,237,0.30) !important; }
 
-        /* Back to Dashboard button */
-        body.light-mode .bg-viper-card {
-            background: rgba(255, 255, 255, 0.9) !important;
-            color: #1a1a1a !important;
-        }
-
-        /* Evidence viewer header */
-        body.light-mode .bg-viper-card\/30 {
-            background: rgba(255, 255, 255, 0.6) !important;
-        }
-
-        /* Evidence viewer content area */
-        body.light-mode .bg-viper-dark {
-            background: rgba(255, 255, 255, 0.5) !important;
-        }
-
-        /* Warrant date boxes, upload buttons, and similar card elements */
-        body.light-mode .bg-viper-card\/50,
-        body.light-mode .bg-viper-card\/30 {
-            background: rgba(255, 255, 255, 0.7) !important;
-            border-color: rgba(0, 150, 200, 0.2) !important;
-        }
-
-        body.light-mode .bg-viper-card\/50:hover,
-        body.light-mode .bg-viper-card\/30:hover {
-            background: rgba(255, 255, 255, 0.85) !important;
-        }
-
-        /* File attachment button in notes */
-        body.light-mode .border-dashed.border-gray-600 {
-            border-color: rgba(0, 150, 200, 0.3) !important;
-            background: rgba(255, 255, 255, 0.6) !important;
-        }
-
-        body.light-mode .border-dashed.border-gray-600:hover {
-            border-color: #0096c8 !important;
-            background: rgba(255, 255, 255, 0.8) !important;
-        }
-
-        /* Report Editor Light Mode */
-        body.light-mode #reportEditor p,
-        body.light-mode #reportEditor div,
-        body.light-mode #reportEditor span,
-        body.light-mode #reportEditor h1,
-        body.light-mode #reportEditor h2,
-        body.light-mode #reportEditor h3,
-        body.light-mode #reportEditor h4,
-        body.light-mode #reportEditor h5,
-        body.light-mode #reportEditor h6,
-        body.light-mode #reportEditor li,
-        body.light-mode #reportEditor td,
-        body.light-mode #reportEditor th,
-        body.light-mode #noteEditor p,
-        body.light-mode #noteEditor div,
-        body.light-mode #noteEditor span,
-        body.light-mode #noteEditor h1,
-        body.light-mode #noteEditor h2,
-        body.light-mode #noteEditor h3,
-        body.light-mode #noteEditor h4,
-        body.light-mode #noteEditor h5,
-        body.light-mode #noteEditor h6,
-        body.light-mode #noteEditor li,
-        body.light-mode #noteEditor td,
-        body.light-mode #noteEditor th {
-            color: #1a1a1a !important;
-        }
-
-        /* Soft purple background for editor */
+        /* Report / note editor: plain white, NO purple gradient */
         body.light-mode .p-8.min-h-\[600px\] {
-            background: linear-gradient(135deg, #f3e5f5 0%, #ede7f6 50%, #e8eaf6 100%) !important;
+            background: var(--lm-card) !important;
         }
-
-        body.light-mode #reportEditor,
-        body.light-mode #noteEditor {
-            caret-color: #6a1b9a;
-        }
-
-        /* Toolbar styling in light mode */
+        body.light-mode #reportEditor p, body.light-mode #reportEditor div, body.light-mode #reportEditor span,
+        body.light-mode #reportEditor h1, body.light-mode #reportEditor h2, body.light-mode #reportEditor h3,
+        body.light-mode #reportEditor h4, body.light-mode #reportEditor h5, body.light-mode #reportEditor h6,
+        body.light-mode #reportEditor li, body.light-mode #reportEditor td, body.light-mode #reportEditor th,
+        body.light-mode #noteEditor p, body.light-mode #noteEditor div, body.light-mode #noteEditor span,
+        body.light-mode #noteEditor h1, body.light-mode #noteEditor h2, body.light-mode #noteEditor h3,
+        body.light-mode #noteEditor h4, body.light-mode #noteEditor h5, body.light-mode #noteEditor h6,
+        body.light-mode #noteEditor li, body.light-mode #noteEditor td, body.light-mode #noteEditor th { color: var(--lm-text) !important; }
+        body.light-mode #reportEditor, body.light-mode #noteEditor { caret-color: var(--lm-accent); }
         body.light-mode .bg-viper-card\/70 {
-            background: rgba(237, 231, 246, 0.8) !important;
-            border-color: rgba(106, 27, 154, 0.15) !important;
+            background: var(--lm-inset) !important;
+            border-color: var(--lm-card-border) !important;
         }
+        body.light-mode .bg-viper-card\/70 button { color: var(--lm-text-2) !important; }
+        body.light-mode .bg-viper-card\/70 button:hover { background: var(--lm-accent-soft) !important; color: var(--lm-accent) !important; }
+        body.light-mode .bg-viper-card\/70 select { background: #fff !important; color: var(--lm-text) !important; border-color: var(--lm-card-border) !important; }
+        body.light-mode .bg-viper-card\/70 .bg-gray-600 { background: var(--lm-card-border) !important; }
+        body.light-mode .bg-viper-card\/70 .text-gray-400 { color: var(--lm-text-2) !important; }
 
-        /* Toolbar buttons in light mode - make them visible */
-        body.light-mode .bg-viper-card\/70 button {
-            color: #4a148c !important;
-        }
+        /* Dashed attachment button */
+        body.light-mode .border-dashed.border-gray-600 { border-color: var(--lm-accent-border) !important; background: var(--lm-inset) !important; }
+        body.light-mode .border-dashed.border-gray-600:hover { border-color: var(--lm-accent) !important; background: #e6eaef !important; }
 
-        body.light-mode .bg-viper-card\/70 button:hover {
-            background: rgba(106, 27, 154, 0.2) !important;
-            color: #6a1b9a !important;
-        }
-
-        /* Font size selector in light mode */
-        body.light-mode .bg-viper-card\/70 select {
-            background: rgba(255, 255, 255, 0.9) !important;
-            color: #1a1a1a !important;
-            border-color: rgba(106, 27, 154, 0.3) !important;
-        }
-
-        /* Toolbar divider and text */
-        body.light-mode .bg-viper-card\/70 .bg-gray-600 {
-            background: rgba(106, 27, 154, 0.3) !important;
-        }
-
-        body.light-mode .bg-viper-card\/70 .text-gray-400 {
-            color: #4a148c !important;
-        }
-
-        /* Header buttons in light mode - better contrast */
-        body.light-mode .bg-viper-green\/20 {
-            background: rgba(0, 200, 83, 0.25) !important;
-            border-color: rgba(0, 150, 63, 0.5) !important;
-        }
-
-        body.light-mode .text-viper-green {
-            color: #00782a !important;
-            font-weight: 600;
-        }
-
-        body.light-mode .bg-viper-purple\/20 {
-            background: rgba(106, 27, 154, 0.2) !important;
-            border-color: rgba(106, 27, 154, 0.5) !important;
-        }
-
-        body.light-mode .text-viper-purple {
-            color: #6a1b9a !important;
-            font-weight: 600;
-        }
-
-        body.light-mode .bg-viper-orange\/20 {
-            background: rgba(255, 143, 0, 0.2) !important;
-            border-color: rgba(255, 143, 0, 0.5) !important;
-        }
-
-        body.light-mode .text-viper-orange {
-            color: #e65100 !important;
-            font-weight: 600;
-        }
-
-        /* Remove tab container box */
-        body.light-mode .border-b.border-gray-700.bg-viper-card\/50 {
-            background: transparent !important;
-            border-color: rgba(0, 150, 200, 0.15) !important;
-            border-bottom-width: 1px !important;
-        }
-
-        /* Tab scroll arrows - make visible */
-        body.light-mode .overflow-x-auto::-webkit-scrollbar {
-            height: 8px;
-        }
-
-        body.light-mode .overflow-x-auto::-webkit-scrollbar-track {
-            background: rgba(0, 150, 200, 0.1);
-            border-radius: 4px;
-        }
-
-        body.light-mode .overflow-x-auto::-webkit-scrollbar-thumb {
-            background: rgba(0, 150, 200, 0.4);
-            border-radius: 4px;
-        }
-
-        body.light-mode .overflow-x-auto::-webkit-scrollbar-thumb:hover {
-            background: rgba(0, 150, 200, 0.6);
-        }
-
-        /* Status badge in light mode */
-        body.light-mode #statusBadge {
-            font-weight: 600;
-        }
-
-        /* Map loading indicator */
-        .map-loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(10, 14, 20, 0.9);
-            padding: 16px 24px;
-            border-radius: 8px;
-            z-index: 1000;
-        }
-
+        /* Map loading */
         body.light-mode .map-loading {
-            background: rgba(237, 231, 246, 0.95);
-            border: 2px solid rgba(106, 27, 154, 0.3);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            background: #fff;
+            border: 1px solid var(--lm-card-border);
+            box-shadow: var(--lm-card-shadow);
         }
+        body.light-mode .map-loading .text-white { color: var(--lm-text) !important; }
+        body.light-mode .map-loading .border-viper-cyan { border-color: var(--lm-accent) !important; }
 
-        body.light-mode .map-loading .text-white {
-            color: #4a148c !important;
-        }
+        /* Tab scroll bars */
+        body.light-mode .overflow-x-auto::-webkit-scrollbar { height: 8px; }
+        body.light-mode .overflow-x-auto::-webkit-scrollbar-track { background: var(--lm-inset); border-radius: 4px; }
+        body.light-mode .overflow-x-auto::-webkit-scrollbar-thumb { background: #c5ccd4; border-radius: 4px; }
+        body.light-mode .overflow-x-auto::-webkit-scrollbar-thumb:hover { background: #a8b1ba; }
+        body.light-mode #statusBadge { font-weight: 600; }
 
-        body.light-mode .map-loading .border-viper-cyan {
-            border-color: #6a1b9a !important;
-        }
+        /* ── Case Timeline swimlane: light grid in light mode ── */
+        body.light-mode .tl-swimlane { background: var(--lm-surface) !important; }
+        body.light-mode .tl-swimlane .border-gray-700,
+        body.light-mode .tl-swimlane .border-gray-700\/50 { border-color: var(--lm-card-border) !important; }
+        body.light-mode .tl-swimlane .border-gray-800\/40 { border-color: rgba(27,39,51,0.10) !important; }
+        /* Deepen the colored lane labels so they stay legible on the light grid */
+        body.light-mode .tl-lane-label { filter: saturate(1.35) brightness(0.62); }
 
-        /* Evidence tab - Add button and info boxes */
-        body.light-mode .bg-viper-cyan\/20 {
-            background: rgba(0, 150, 200, 0.2) !important;
-            border-color: rgba(0, 100, 150, 0.5) !important;
-        }
-
-        body.light-mode .text-viper-cyan {
-            color: #006494 !important;
-            font-weight: 600;
-        }
-
-        body.light-mode .bg-viper-cyan\/10 {
-            background: rgba(0, 150, 200, 0.15) !important;
-            border-color: rgba(0, 100, 150, 0.4) !important;
-        }
-
-        body.light-mode .bg-viper-cyan\/10 .text-viper-cyan {
-            color: #00496d !important;
-        }
-
-        body.light-mode .bg-viper-cyan\/10 .text-gray-300 {
-            color: #424242 !important;
-        }
-
-        /* Hover state for Add button */
-        body.light-mode .bg-viper-cyan\/20:hover {
-            background: rgba(0, 150, 200, 0.3) !important;
-        }
+        /* Sidebar scrollable on short viewports so the theme toggle / profile
+           in the footer is always reachable. */
+        .sidebar-scroll { scrollbar-width: thin; }
+        .sidebar-scroll::-webkit-scrollbar { width: 8px; }
+        .sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
+        .sidebar-scroll::-webkit-scrollbar-thumb { background: rgba(120,140,160,0.35); border-radius: 4px; }
+        .sidebar-scroll::-webkit-scrollbar-thumb:hover { background: rgba(120,140,160,0.55); }
 
         /* ── GenLogs Styles ─────────────────────────────────────── */
         .gl-action-btn {
@@ -850,9 +700,9 @@
 <body class="text-white">
     <div class="flex h-screen overflow-hidden hex-pattern">
         <!-- Sidebar -->
-        <div class="w-64 glass-card border-r-2 border-viper-cyan/20 flex flex-col">
+        <div class="w-64 glass-card border-r-2 border-viper-cyan/20 flex flex-col overflow-y-auto sidebar-scroll">
             <!-- Logo -->
-            <div class="p-6 border-b border-viper-cyan/20">
+            <div class="p-6 border-b border-viper-cyan/20 flex-shrink-0">
                 <div class="flex items-center space-x-3">
                     <img src="assets/icon.png" alt="V.I.P.E.R." class="w-10 h-10 rounded-lg">
                     <div>
@@ -1002,7 +852,7 @@
             </div>
             
             <!-- Tab Content -->
-            <div class="p-8" id="tabContent">
+            <div class="p-8 pb-24" id="tabContent">
                 <!-- Content will be dynamically loaded -->
             </div>
         </div>
@@ -25999,9 +25849,9 @@
                             <button onclick="showGenerateOpsPlanModal()" class="px-4 py-2 bg-viper-green hover:bg-viper-green/80 rounded-lg text-black font-semibold transition text-sm flex items-center gap-2">
                                 📄 Generate OPS Plan
                             </button>
-                            <button onclick="sendOpsPlanForApproval()" title="Send this operations plan to a supervisor for digital approval over the LAN" class="px-4 py-2 rounded-lg transition text-sm flex items-center gap-2" style="border:1px solid #0078D4;color:#4ea8f0;background:rgba(0,120,212,.16);">
+                            ${localStorage.getItem('viperSupervisorLinkEnabled') === 'true' ? `<button onclick="sendOpsPlanForApproval()" title="Send this operations plan to a supervisor for digital approval over the LAN" class="px-4 py-2 rounded-lg transition text-sm flex items-center gap-2" style="border:1px solid #0078D4;color:#4ea8f0;background:rgba(0,120,212,.16);">
                                 ⬆️ Send for Approval
-                            </button>
+                            </button>` : ''}
                             <button onclick="importTemplatesIntoForm()" class="px-4 py-2 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded-lg text-viper-purple transition text-sm flex items-center gap-2">
                                 ⚙️ Import from Settings
                             </button>
@@ -29625,7 +29475,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
             // ── Render ──
             return `
-            <div class="rounded-lg border border-gray-700" style="background: rgba(15,15,20,0.6); overflow: visible;">
+            <div class="rounded-lg border border-gray-700 tl-swimlane" style="background: rgba(15,15,20,0.6); overflow: visible;">
                 ${activeLanes.map(laneKey => {
                     const lane = TIMELINE_LANES[laneKey];
                     const laneEvents = events.filter(e => e.lane === laneKey);
@@ -29633,7 +29483,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     return `
                     <div class="flex border-b border-gray-700/50 tl-lane-row" style="min-height:80px;">
                         <div class="flex-shrink-0 w-40 px-3 py-3 flex items-center border-r border-gray-700/50" style="background:${lane.bg}; border-left: 3px solid ${lane.border};">
-                            <span class="text-xs font-bold uppercase tracking-wider" style="color:${lane.color};">${lane.label}</span>
+                            <span class="text-xs font-bold uppercase tracking-wider tl-lane-label" style="color:${lane.color};">${lane.label}</span>
                         </div>
                         <div class="flex-1 overflow-x-auto tl-lane-scroll">
                             <div class="relative" style="width:${trackWidth}px; height:100%; min-height:80px;">

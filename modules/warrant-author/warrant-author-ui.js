@@ -1682,17 +1682,24 @@ function _appendExhibitBlocks(blockStream, draft) {
 }
 
 /**
- * Format the draft's ESP addendum(s) into plain text for the Pennsylvania
- * Application Continuation form. Produces ONLY the electronic-service-
- * provider production details (provider, target accounts, records period,
- * records to produce, non-disclosure) — it deliberately does NOT include
- * the Probable Cause narrative, which lives on the Affidavit.
+ * Build the draft's ESP addendum(s) into structured "blocks" for the
+ * Pennsylvania Application Continuation form, mirroring the California ESP
+ * warrant layout. Per addendum it emits a court-orders page (Certificate of
+ * Records, Five-Business-Day Production, Property Return/Destruction, optional
+ * Non-Disclosure Statement, Order to Send + officer contact) and a records
+ * page (provider name, crime/date preamble, each record type as a bold
+ * heading + full description from items-taxonomy). It deliberately does NOT
+ * include the Probable Cause narrative (that lives on the Affidavit).
  *
- * Returns a string (\n-separated) or '' when the draft has no addendums.
+ * Block ops the overlay understands:
+ *   {break} force new page · {spacer} half-line gap · {h1}/{h2}/{bold} bold
+ *   line · {p} paragraph · {label,p} inline bold label + regular text.
+ *
+ * Returns an array of block ops, or [] when the draft has no addendums.
  */
-function _buildPaEspContinuationText(caseId, draft) {
+function _buildPaEspBlocks(caseId, draft, agency) {
   const ads = Array.isArray(draft.addendums) ? draft.addendums : [];
-  if (!ads.length) return '';
+  if (!ads.length) return [];
 
   const items = _items();
   const pdir = _pdir();
@@ -1702,55 +1709,104 @@ function _buildPaEspContinuationText(caseId, draft) {
     providerDeletions: _safeLS('viperWarrantAuthorProviderDeletions')
   }) : [];
 
-  const labelFor = (k) => (items && typeof items.labelFor === 'function') ? items.labelFor(k) : k;
-  const out = [];
-  out.push('The following records are to be produced by the electronic service provider(s) identified below:');
+  const ag = agency || {};
+  const caseCtx = (typeof _resolveCaseCtxForDraft === 'function') ? _resolveCaseCtxForDraft(draft) : {};
+  const offenseDesc = String((caseCtx && caseCtx.offenseDescription) || draft.offenseDescription || '').trim();
 
-  ads.forEach((ad, idx) => {
+  // Format a MM/DD/YYYY (or M-D-YY) date to "Month D, YYYY"; pass through otherwise.
+  const fmtDate = (s) => {
+    const t = String(s || '').trim();
+    if (!t) return '';
+    const m = /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/.exec(t);
+    if (m) {
+      const mm = +m[1], dd = +m[2]; let yy = +m[3]; if (yy < 100) yy += 2000;
+      const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+      if (mm >= 1 && mm <= 12) return `${months[mm - 1]} ${dd}, ${yy}`;
+    }
+    return t;
+  };
+
+  const blocks = [];
+
+  ads.forEach((ad) => {
     const provider = providersMerged.find(p => p.key === ad.providerKey)
       || { key: ad.providerKey, name: ad.providerKey || '(no provider)' };
-    const letter = String.fromCharCode(65 + (idx % 26));
-    const provName = ad.businessName || provider.name || provider.key || '(provider)';
+    const provName = ad.businessName || provider.legalEntity || provider.name || provider.key || '(provider)';
 
-    out.push('');
-    out.push(`ATTACHMENT ${letter} — ${provName}`);
-    if (provider.legalEntity) out.push(`Service Provider: ${provider.legalEntity}`);
-    if (provider.address) {
-      const attn = provider.custodianAttention ? ` (Attn: ${provider.custodianAttention})` : '';
-      out.push(`Service Address: ${provider.address}${attn}`);
+    // ── COURT ORDERS PAGE ────────────────────────────────────────────────
+    blocks.push({ break: true });
+    blocks.push({ h1: 'ADDITIONALLY AUTHORIZED COURT ORDERS' });
+    blocks.push({ label: 'Authorization to implement special procedure(s):',
+      p: 'The Affidavit filed herewith has demonstrated legal justification for the implementation of the following special procedures, which shall be employed by the officers who execute this warrant:' });
+    blocks.push({ spacer: true });
+    blocks.push({ h2: 'Certificate of Records ORDER' });
+    blocks.push({ p: 'IT IS HEREBY ORDERED that the Service Provider listed in the search warrant provide a valid "Certificate of Records" document consisting of an affidavit and return the document to the affiant along with a copy of the requested records.' });
+    blocks.push({ spacer: true });
+    blocks.push({ h2: 'Five Business Day Record Production ORDER' });
+    blocks.push({ p: 'IT IS HEREBY ORDERED that the organizations described in this search warrant shall produce the requested records within five (5) business days of receipt of this search warrant.' });
+    blocks.push({ spacer: true });
+    blocks.push({ h2: 'Property Return and Destruction ORDER' });
+    blocks.push({ p: 'IT IS HEREBY ORDERED that any property or things taken pursuant to this warrant that have been determined not to contain relevant evidence or that have been photographically or digitally recorded shall be disposed of, returned to the known victim(s) or property owners, or appropriately dispositioned in accordance with law without the necessity of further court order upon adjudication of this case.' });
+    blocks.push({ spacer: true });
+
+    if (ad.includeNonDisclosure) {
+      blocks.push({ h2: 'NON-DISCLOSURE STATEMENT:' });
+      blocks.push({ p: `Due to the sensitivity of this ongoing criminal investigation, ${provName}'s notification to the listed subscriber that these records have been released to a law enforcement agency could compromise this investigation and the safety of law enforcement officers participating in it. Based on these facts, it is further ordered that the customer/subscriber is not to be notified of the release of this information, as it could jeopardize an ongoing criminal investigation.` });
+      blocks.push({ spacer: true });
     }
 
-    // Target accounts
+    blocks.push({ h2: 'Order to Send Information' });
+    blocks.push({ p: 'Responsive data may be delivered via digital delivery or mail, notwithstanding 18 U.S.C. § 2252A or similar statute or code, by sending to:' });
+    blocks.push({ spacer: true });
+    const affLine = [ag.affiantRank, ag.affiantName].filter(Boolean).join(' ').trim();
+    if (affLine)          blocks.push({ bold: affLine });
+    if (ag.agencyName)    blocks.push({ p: ag.agencyName });
+    if (ag.unit)          blocks.push({ p: ag.unit });
+    if (ag.agencyAddress) blocks.push({ p: ag.agencyAddress });
+    if (ag.affiantEmail)  blocks.push({ p: ag.affiantEmail });
+    if (ag.affiantPhone)  blocks.push({ p: ag.affiantPhone });
+
+    // ── RECORDS PAGE ─────────────────────────────────────────────────────
+    blocks.push({ break: true });
+    blocks.push({ bold: provName });
+    blocks.push({ p: 'FOR THE FOLLOWING RECORDS:' });
+    blocks.push({ p: 'Records from the above-listed Service Provider for the Target Account:' });
+
     const targets = (Array.isArray(ad.targetAccounts) ? ad.targetAccounts : [])
       .filter(t => t && String(t.value || '').trim() !== '');
     if (targets.length) {
-      out.push('Target Account(s):');
-      targets.forEach(t => out.push(`  - ${t.type || 'account'}: ${String(t.value).trim()}`));
+      blocks.push({ label: 'Target Account(s):',
+        p: targets.map(t => `${t.type || 'account'}: ${String(t.value).trim()}`).join('; ') });
     }
 
-    // Records period
+    // Preamble — uses the addendum's own date range (no extra fields).
+    let preamble;
     if (ad.allDatesAvailable) {
-      out.push('Records Period: All records available (no date restriction)');
-    } else if (ad.dateRangeFrom || ad.dateRangeTo) {
-      out.push(`Records Period: ${ad.dateRangeFrom || '(open)'} to ${ad.dateRangeTo || '(open)'}`);
+      preamble = 'Each type of record specified below shall be for all dates available';
+    } else {
+      const to = fmtDate(ad.dateRangeTo);
+      preamble = `Each type of record specified below shall be for the creation date of each account until ${to || 'the present'}`;
     }
+    if (offenseDesc) preamble += `, for evidence related to the crime(s) of ${offenseDesc}`;
+    preamble += '.';
+    blocks.push({ spacer: true });
+    blocks.push({ p: preamble });
+    blocks.push({ spacer: true });
 
-    // Items to produce (resolve to human labels; fall back to provider default pattern)
+    // Record types with full descriptions (from items-taxonomy).
     let itemKeys = (Array.isArray(ad.itemsToProduce) && ad.itemsToProduce.length)
       ? ad.itemsToProduce.slice()
       : (items && ad.providerKey ? items.resolvePatternKeys(items.defaultPatternFor(ad.providerKey)) : []);
-    if (itemKeys && itemKeys.length) {
-      out.push('Records to be produced:');
-      itemKeys.forEach(k => out.push(`  - ${labelFor(k)}`));
-    }
-
-    // Non-disclosure (federal SCA — standard for out-of-state ESPs)
-    if (ad.includeNonDisclosure) {
-      out.push('Non-Disclosure: A 90-day non-disclosure order under 18 U.S.C. § 2705(b) is requested as to this provider.');
-    }
+    itemKeys.forEach((k) => {
+      const it = (items && typeof items.getItem === 'function') ? items.getItem(k) : null;
+      const label = (it && it.label) ? it.label : k;
+      const desc  = (it && it.description) ? it.description : '';
+      blocks.push({ label: label + ':', p: desc });
+      blocks.push({ spacer: true });
+    });
   });
 
-  return out.join('\n');
+  return blocks;
 }
 
 // ─── CA face-page options (PC §1524 grounds + HOBBS + Night Search) ─────
@@ -4789,8 +4845,8 @@ const bus = {
     let draftForGen = draft;
     try {
       const paOverrides = {};
-      const espText = _buildPaEspContinuationText(caseId, draft);
-      if (espText && espText.trim()) paOverrides.espContinuation = espText;
+      const espBlocks = _buildPaEspBlocks(caseId, draft, agencyMerged);
+      if (espBlocks && espBlocks.length) paOverrides.espBlocks = espBlocks;
       // Exhibit photos → PA overlay photo-exhibit pages (2 per page, appended
       // after the affidavit). Overlay reads draft.pa.photos = [{dataUrl, caption}].
       const exhibits = _draftExhibits(draft);

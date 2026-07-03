@@ -226,6 +226,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveEvidenceFile: (data) => ipcRenderer.invoke('save-evidence-file', data),
   readEvidenceFile: (filePath) => ipcRenderer.invoke('read-evidence-file', filePath),
 
+  // ── Whisper on-device transcription (Faster-Whisper-XXL) ──
+  whisperStatus: () => ipcRenderer.invoke('whisper-status'),
+  whisperTranscribe: (opts) => ipcRenderer.invoke('whisper-transcribe', opts),
+  whisperCancel: (jobId) => ipcRenderer.invoke('whisper-cancel', jobId),
+  whisperDownloadModel: (opts) => ipcRenderer.invoke('whisper-download-model', opts),
+  onWhisperProgress: (callback) => {
+    const listener = (_evt, payload) => { try { callback(payload); } catch (e) { console.error(e); } };
+    ipcRenderer.on('whisper-progress', listener);
+    return () => ipcRenderer.removeListener('whisper-progress', listener);
+  },
+
   // Resource Hub download interception — route downloads from Flock /
   // ICACCOPS / ICAC Data System / etc. straight into a case's Evidence
   // or Warrants/Production folder instead of bouncing through Downloads.

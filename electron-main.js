@@ -4436,6 +4436,277 @@ ipcMain.handle('read-evidence-file', async (event, filePath) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════
+// WHISPER — On-device audio/video transcription (Faster-Whisper-XXL)
+//
+// Fully offline / CJIS-friendly. The engine + a bundled "small" CTranslate2
+// model ship via electron-builder extraResources → resources/whisper.
+// Dev runs from build/whisper. No network calls at transcribe time.
+//
+// Model resolution priority: userData/whisper-models (optional downloads,
+// e.g. "medium") → resources/whisper/_models (bundled "small").
+// Encrypted evidence: media is decrypted to a temp file for the engine,
+// transcript sidecars are re-encrypted into the case Evidence/ tree.
+// ═══════════════════════════════════════════════════════════════════════
+function _whisperPaths() {
+  const base = app.isPackaged
+    ? path.join(process.resourcesPath, 'whisper')
+    : path.join(__dirname, 'build', 'whisper');
+  return {
+    base,
+    exe: path.join(base, 'faster-whisper-xxl.exe'),
+    bundledModels: path.join(base, '_models'),
+    userModels: path.join(app.getPath('userData'), 'whisper-models'),
+    silentWav: path.join(base, 'silent.wav'),
+  };
+}
+
+function _whisperHasModel(dir, model) {
+  try {
+    if (!dir || !fs.existsSync(dir)) return false;
+    const needle = String(model).toLowerCase();
+    return fs.readdirSync(dir).some((e) => e.toLowerCase().includes(needle));
+  } catch { return false; }
+}
+
+// Returns the --model_dir that already contains `model`, or null if none.
+function _whisperModelDir(model) {
+  const p = _whisperPaths();
+  if (_whisperHasModel(p.userModels, model)) return p.userModels;
+  if (_whisperHasModel(p.bundledModels, model)) return p.bundledModels;
+  return null;
+}
+
+// Build the Faster-Whisper-XXL CLI args. Centralised so flag tweaks live in one
+// place. Verified against faster-whisper-xxl.exe --help (r245.4):
+//   --model/-m, --model_dir, --device (default cuda!), --output_dir/-o,
+//   --output_format (nargs='*' → MUST be last; no positional after it),
+//   --language (omit = auto-detect), --beep_off, --print_progress.
+function _whisperArgs({ inputPath, model, modelDir, outDir, language, device }) {
+  const args = [
+    inputPath,
+    '--model', model,
+    '--model_dir', modelDir,
+    '--output_dir', outDir,
+    '--task', 'transcribe',
+    '--beep_off',
+    '--print_progress',
+  ];
+  // Default engine device is CUDA, which errors on CPU-only LE laptops.
+  // Force CPU unless an explicit cuda device is requested.
+  if (device && device !== 'auto') args.push('--device', device);
+  // Omit --language entirely to let the engine auto-detect.
+  if (language && language !== 'auto') args.push('--language', language);
+  // output_format consumes all following tokens → keep it LAST.
+  // 'text' = plain transcript (clean, report-ready); srt = timecoded; json = word-level.
+  args.push('--output_format', 'text', 'srt', 'json');
+  return args;
+}
+
+const _whisperJobs = new Map(); // jobId -> child process
+
+// Query engine + model availability (drives the renderer UI state).
+ipcMain.handle('whisper-status', async () => {
+  const p = _whisperPaths();
+  return {
+    enginePresent: fs.existsSync(p.exe),
+    models: {
+      small: !!_whisperModelDir('small'),
+      medium: !!_whisperModelDir('medium'),
+    },
+    enginePath: p.exe,
+  };
+});
+
+// Transcribe one media file. Returns { success, text, txtPath, srtPath, jsonPath }.
+ipcMain.handle('whisper-transcribe', async (event, opts = {}) => {
+  const {
+    mediaPath,
+    caseNumber,
+    evidenceTag,
+    model = 'small',
+    language = 'auto',
+    device = 'cpu',
+    jobId = String(Date.now()),
+  } = opts;
+
+  const P = _whisperPaths();
+  const send = (channel, payload) => {
+    try { if (event.sender && !event.sender.isDestroyed()) event.sender.send(channel, payload); } catch (_) {}
+  };
+
+  try {
+    if (!fs.existsSync(P.exe)) {
+      return { success: false, code: 'ENGINE_MISSING', error: 'Transcription engine is not installed.' };
+    }
+    if (!mediaPath || !fs.existsSync(mediaPath)) {
+      return { success: false, code: 'INPUT_MISSING', error: 'Media file not found: ' + mediaPath };
+    }
+    const modelDir = _whisperModelDir(model);
+    if (!modelDir) {
+      return { success: false, code: 'MODEL_MISSING', model, error: 'The "' + model + '" model is not installed.' };
+    }
+
+    // Working dirs (temp — never persist plaintext evidence outside the case tree)
+    const workRoot = path.join(os.tmpdir(), 'viper-whisper', jobId);
+    const inDir = path.join(workRoot, 'in');
+    const outDir = path.join(workRoot, 'out');
+    fs.mkdirSync(inDir, { recursive: true });
+    fs.mkdirSync(outDir, { recursive: true });
+
+    // Resolve input: decrypt encrypted evidence to a temp file the engine can read.
+    let inputPath = mediaPath;
+    let usedTempInput = false;
+    try {
+      const raw = fs.readFileSync(mediaPath);
+      if (security && security.isUnlocked() && security.isEncryptedBuffer(raw)) {
+        const decrypted = security.decryptBuffer(raw);
+        inputPath = path.join(inDir, path.basename(mediaPath));
+        fs.writeFileSync(inputPath, decrypted);
+        usedTempInput = true;
+      }
+    } catch (e) {
+      // If the read fails for a non-encrypted huge file, fall back to the original path.
+      inputPath = mediaPath;
+    }
+
+    const args = _whisperArgs({ inputPath, model, modelDir, outDir, language, device });
+    send('whisper-progress', { jobId, stage: 'starting', pct: 0, message: 'Loading model…' });
+
+    const result = await new Promise((resolve) => {
+      let child;
+      try {
+        child = spawn(P.exe, args, { cwd: P.base, windowsHide: true });
+      } catch (spawnErr) {
+        resolve({ success: false, code: 'SPAWN_FAILED', error: spawnErr.message });
+        return;
+      }
+      _whisperJobs.set(jobId, child);
+
+      let stderrTail = '';
+      const handleChunk = (buf) => {
+        const text = buf.toString();
+        // Faster-Whisper-XXL prints progress like "  53%|..." and segment lines.
+        const pctMatch = text.match(/(\d{1,3})%\|/);
+        const pct = pctMatch ? Math.min(100, parseInt(pctMatch[1], 10)) : undefined;
+        send('whisper-progress', { jobId, stage: 'transcribing', pct, message: text.trim().slice(-200) });
+        stderrTail = (stderrTail + text).slice(-4000);
+      };
+      if (child.stdout) child.stdout.on('data', handleChunk);
+      if (child.stderr) child.stderr.on('data', handleChunk);
+
+      child.on('error', (err) => {
+        _whisperJobs.delete(jobId);
+        resolve({ success: false, code: 'PROC_ERROR', error: err.message });
+      });
+      child.on('close', (exitCode) => {
+        _whisperJobs.delete(jobId);
+        if (exitCode !== 0) {
+          resolve({ success: false, code: 'NONZERO_EXIT', error: 'Engine exited with code ' + exitCode + '. ' + stderrTail.slice(-400) });
+          return;
+        }
+        resolve({ success: true });
+      });
+    });
+
+    if (!result.success) {
+      try { fs.rmSync(workRoot, { recursive: true, force: true }); } catch (_) {}
+      return result;
+    }
+
+    // Collect outputs
+    const outs = fs.readdirSync(outDir);
+    const pick = (ext) => {
+      const f = outs.find((n) => n.toLowerCase().endsWith('.' + ext));
+      return f ? path.join(outDir, f) : null;
+    };
+    const txtOut = pick('text'); // plain transcript (--output_format text → .text)
+    const srtOut = pick('srt');
+    const jsonOut = pick('json');
+    const transcriptText = txtOut ? fs.readFileSync(txtOut, 'utf8') : '';
+
+    // Persist sidecars into the case Evidence tree (encrypted if security is on).
+    const paths = { txtPath: null, srtPath: null, jsonPath: null };
+    if (caseNumber && evidenceTag) {
+      const tDir = path.join(casesDir, caseNumber, 'Evidence', evidenceTag, 'transcripts');
+      fs.mkdirSync(tDir, { recursive: true });
+      const baseName = path.basename(mediaPath, path.extname(mediaPath));
+      const writeSidecar = (srcPath, ext, key) => {
+        if (!srcPath) return;
+        const destPath = path.join(tDir, baseName + '.' + ext);
+        const buf = fs.readFileSync(srcPath);
+        if (security && security.isEnabled() && security.isUnlocked()) {
+          fs.writeFileSync(destPath, security.encryptBuffer(buf));
+        } else {
+          fs.writeFileSync(destPath, buf);
+        }
+        paths[key] = destPath;
+      };
+      writeSidecar(txtOut, 'txt', 'txtPath');
+      writeSidecar(srtOut, 'srt', 'srtPath');
+      writeSidecar(jsonOut, 'json', 'jsonPath');
+    }
+
+    // Cleanup temp
+    try { fs.rmSync(workRoot, { recursive: true, force: true }); } catch (_) {}
+
+    send('whisper-progress', { jobId, stage: 'done', pct: 100, message: 'Complete' });
+    return { success: true, text: transcriptText, ...paths };
+  } catch (error) {
+    console.error('whisper-transcribe failed:', error);
+    return { success: false, code: 'EXCEPTION', error: error.message };
+  }
+});
+
+// Cancel an in-flight transcription.
+ipcMain.handle('whisper-cancel', async (_e, jobId) => {
+  const child = _whisperJobs.get(jobId);
+  if (child) {
+    try { child.kill(); } catch (_) {}
+    _whisperJobs.delete(jobId);
+    return { success: true };
+  }
+  return { success: false, error: 'No such job' };
+});
+
+// Download an optional model (e.g. "medium") into userData/whisper-models by
+// letting the engine fetch it via its own downloader against a silent clip.
+ipcMain.handle('whisper-download-model', async (event, opts = {}) => {
+  const { model = 'medium', jobId = 'dl-' + Date.now() } = opts;
+  const P = _whisperPaths();
+  const send = (payload) => {
+    try { if (event.sender && !event.sender.isDestroyed()) event.sender.send('whisper-progress', payload); } catch (_) {}
+  };
+  try {
+    if (!fs.existsSync(P.exe)) return { success: false, code: 'ENGINE_MISSING', error: 'Engine not installed.' };
+    if (!fs.existsSync(P.silentWav)) return { success: false, code: 'NO_SILENT', error: 'Bundled silent clip missing.' };
+    fs.mkdirSync(P.userModels, { recursive: true });
+    const outDir = path.join(os.tmpdir(), 'viper-whisper', jobId);
+    fs.mkdirSync(outDir, { recursive: true });
+    const args = _whisperArgs({ inputPath: P.silentWav, model, modelDir: P.userModels, outDir, language: 'en', device: 'cpu' });
+    send({ jobId, stage: 'downloading', pct: 0, message: 'Downloading ' + model + ' model…' });
+    const ok = await new Promise((resolve) => {
+      const child = spawn(P.exe, args, { cwd: P.base, windowsHide: true });
+      _whisperJobs.set(jobId, child);
+      const onData = (b) => {
+        const t = b.toString();
+        const m = t.match(/(\d{1,3})%/);
+        send({ jobId, stage: 'downloading', pct: m ? parseInt(m[1], 10) : undefined, message: t.trim().slice(-200) });
+      };
+      if (child.stdout) child.stdout.on('data', onData);
+      if (child.stderr) child.stderr.on('data', onData);
+      child.on('error', () => { _whisperJobs.delete(jobId); resolve(false); });
+      child.on('close', (c) => { _whisperJobs.delete(jobId); resolve(c === 0); });
+    });
+    try { fs.rmSync(outDir, { recursive: true, force: true }); } catch (_) {}
+    if (!ok || !_whisperModelDir(model)) return { success: false, code: 'DL_FAILED', error: 'Model download failed.' };
+    send({ jobId, stage: 'done', pct: 100, message: model + ' model ready' });
+    return { success: true, model };
+  } catch (error) {
+    return { success: false, code: 'EXCEPTION', error: error.message };
+  }
+});
+
 // --- Save warrant file to disk ---
 ipcMain.handle('save-warrant-file', async (event, data) => {
   try {

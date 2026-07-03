@@ -27,8 +27,20 @@ files:
   - "!test-*.html"
   - "!check-*.html"
   - "!.gitignore"
+  # Whisper engine is shipped via extraResources (below) → resources/whisper,
+  # NOT packed into the asar. Exclude it here to avoid a multi-GB double-copy.
+  - "!build/whisper/**"
 asarUnpack:
   - "build/**"
+# ─── Bundled offline transcription engine (Faster-Whisper-XXL + small model) ───
+# Copied verbatim into resources/whisper/ so the main process can spawn
+# resources/whisper/faster-whisper-xxl.exe. Fetched at build time by
+# tools/whisper/fetch-whisper.ps1 (not committed to git; see .gitignore).
+extraResources:
+  - from: build/whisper
+    to: whisper
+    filter:
+      - "**/*"
 win:
   # ─── Build targets (multi-modal deployment for LE / agency IT) ───
   #

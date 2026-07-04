@@ -4625,6 +4625,25 @@ ipcMain.handle('whisper-transcribe', async (event, opts = {}) => {
     const jsonOut = pick('json');
     const transcriptText = txtOut ? fs.readFileSync(txtOut, 'utf8') : '';
 
+    // Parse timed segments from the JSON output so the renderer can show
+    // clickable timestamps. Schema: { segments: [{ start, end, text, ... }], ... }
+    let segments = [];
+    try {
+      if (jsonOut) {
+        const parsed = JSON.parse(fs.readFileSync(jsonOut, 'utf8'));
+        const segs = Array.isArray(parsed) ? parsed : (parsed && parsed.segments) || [];
+        segments = segs
+          .map((s) => ({
+            start: typeof s.start === 'number' ? s.start : 0,
+            end: typeof s.end === 'number' ? s.end : 0,
+            text: String(s.text == null ? '' : s.text).trim(),
+          }))
+          .filter((s) => s.text.length);
+      }
+    } catch (e) {
+      console.warn('whisper: failed to parse segments JSON:', e.message);
+    }
+
     // Persist sidecars into the case Evidence tree (encrypted if security is on).
     const paths = { txtPath: null, srtPath: null, jsonPath: null };
     if (caseNumber && evidenceTag) {
@@ -4651,7 +4670,7 @@ ipcMain.handle('whisper-transcribe', async (event, opts = {}) => {
     try { fs.rmSync(workRoot, { recursive: true, force: true }); } catch (_) {}
 
     send('whisper-progress', { jobId, stage: 'done', pct: 100, message: 'Complete' });
-    return { success: true, text: transcriptText, ...paths };
+    return { success: true, text: transcriptText, segments, ...paths };
   } catch (error) {
     console.error('whisper-transcribe failed:', error);
     return { success: false, code: 'EXCEPTION', error: error.message };
@@ -4706,6 +4725,153 @@ ipcMain.handle('whisper-download-model', async (event, opts = {}) => {
     return { success: false, code: 'EXCEPTION', error: error.message };
   }
 });
+
+// ═══════════════════════════════════════════════════════════════════════
+// LIVE DICTATION (Reports)  — whisper.cpp streaming engine
+// ═══════════════════════════════════════════════════════════════════════
+// Separate engine from batch media transcription: whisper.cpp `stream.exe`
+// (ggml model) does true real-time recognition off the default mic. Bundle
+// via electron-builder extraResources → resources/whisper-stream. Dev runs
+// from build/whisper-stream. On-device only; NO network at dictation time.
+//
+// Engine output contract (VAD mode: `--step 0`): whisper.cpp stream prints,
+// per detected utterance, a block:
+//     ### Transcription N START | t0 = .. ms | t1 = .. ms
+//      <recognized text>
+//     ### Transcription N END
+// We capture the text between START/END and emit it as a `dictation-final`
+// segment. Any other non-marker line while listening is forwarded as a
+// `dictation-partial` (interim grey text). The renderer's ViperDictation
+// command grammar decides whether each final segment is a command or text.
+// ───────────────────────────────────────────────────────────────────────
+function _whisperStreamPaths() {
+  const base = app.isPackaged
+    ? path.join(process.resourcesPath, 'whisper-stream')
+    : path.join(__dirname, 'build', 'whisper-stream');
+  return {
+    base,
+    exe: path.join(base, 'whisper-stream.exe'),
+    bundledModels: path.join(base, '_models'),
+    userModels: path.join(app.getPath('userData'), 'whisper-stream-models'),
+  };
+}
+
+// Resolve the first ggml model (userData override wins over bundled).
+function _dictationModelPath() {
+  const p = _whisperStreamPaths();
+  const findGgml = (dir) => {
+    try {
+      if (!dir || !fs.existsSync(dir)) return null;
+      const hit = fs.readdirSync(dir).find((e) => /^ggml-.*\.bin$/i.test(e));
+      return hit ? path.join(dir, hit) : null;
+    } catch { return null; }
+  };
+  return findGgml(p.userModels) || findGgml(p.bundledModels) || null;
+}
+
+let _dictationChild = null;
+
+// Parse a stdout/stderr chunk from stream.exe, emitting partial/final events.
+// `state` persists across chunks for one child (buffer + in-block accumulator).
+function _dictationParseChunk(buf, state, emit) {
+  // Strip carriage returns + common ANSI erase-line sequences.
+  state.buffer += buf.toString().replace(/\r/g, '\n').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+  let nl;
+  while ((nl = state.buffer.indexOf('\n')) !== -1) {
+    const line = state.buffer.slice(0, nl);
+    state.buffer = state.buffer.slice(nl + 1);
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const startM = trimmed.match(/^###\s+Transcription\s+\d+\s+START/i);
+    const endM = trimmed.match(/^###\s+Transcription\s+\d+\s+END/i);
+    if (startM) { state.inBlock = true; state.acc = []; continue; }
+    if (endM) {
+      state.inBlock = false;
+      const text = state.acc.join(' ').replace(/\s+/g, ' ').trim();
+      state.acc = [];
+      if (text) emit('dictation-final', { text });
+      continue;
+    }
+    if (trimmed.startsWith('###')) continue; // other markers (init / [Start speaking])
+    if (state.inBlock) {
+      state.acc.push(trimmed);
+      // Interim view of the utterance as it grows.
+      emit('dictation-partial', { text: state.acc.join(' ').replace(/\s+/g, ' ').trim() });
+    } else {
+      // Non-VAD / sliding-window builds print bare lines — treat as final.
+      emit('dictation-final', { text: trimmed });
+    }
+  }
+}
+
+ipcMain.handle('dictation-status', async () => {
+  const p = _whisperStreamPaths();
+  const model = _dictationModelPath();
+  return {
+    enginePresent: fs.existsSync(p.exe),
+    modelPresent: !!model,
+    enginePath: p.exe,
+    modelPath: model || null,
+    active: !!_dictationChild,
+  };
+});
+
+ipcMain.handle('dictation-start', async (event, opts = {}) => {
+  const { language = 'en' } = opts;
+  const p = _whisperStreamPaths();
+  const send = (channel, payload) => {
+    try { if (event.sender && !event.sender.isDestroyed()) event.sender.send(channel, payload); } catch (_) {}
+  };
+  if (_dictationChild) return { success: false, code: 'ALREADY_RUNNING', error: 'Dictation already active.' };
+  if (!fs.existsSync(p.exe)) return { success: false, code: 'ENGINE_MISSING', error: 'Dictation engine (whisper-stream.exe) is not installed in this build.' };
+  const modelPath = _dictationModelPath();
+  if (!modelPath) return { success: false, code: 'MODEL_MISSING', error: 'No streaming (ggml) model is installed.' };
+
+  // VAD mode (--step 0): finalize an utterance on silence → clean segment
+  // boundaries for the command grammar. Threads capped for LE laptops.
+  const threads = Math.max(2, Math.min(8, (os.cpus() || []).length - 1 || 4));
+  const args = [
+    '-m', modelPath,
+    '--step', '0',
+    '--length', '30000',
+    '-vth', '0.6',
+    '-t', String(threads),
+    '-l', language || 'en',
+    '--keep', '200',
+  ];
+  try {
+    _dictationChild = spawn(p.exe, args, { cwd: p.base, windowsHide: true });
+  } catch (spawnErr) {
+    _dictationChild = null;
+    return { success: false, code: 'SPAWN_FAILED', error: spawnErr.message };
+  }
+  const state = { buffer: '', inBlock: false, acc: [] };
+  const onData = (b) => _dictationParseChunk(b, state, send);
+  if (_dictationChild.stdout) _dictationChild.stdout.on('data', onData);
+  if (_dictationChild.stderr) _dictationChild.stderr.on('data', onData);
+  _dictationChild.on('error', (err) => {
+    _dictationChild = null;
+    send('dictation-ended', { reason: 'error', error: err.message });
+  });
+  _dictationChild.on('close', (code) => {
+    _dictationChild = null;
+    send('dictation-ended', { reason: 'closed', code });
+  });
+  send('dictation-ready', { modelPath });
+  return { success: true, modelPath };
+});
+
+ipcMain.handle('dictation-stop', async () => {
+  if (_dictationChild) {
+    try { _dictationChild.kill(); } catch (_) {}
+    _dictationChild = null;
+    return { success: true };
+  }
+  return { success: false, error: 'Not running' };
+});
+
+// Ensure the dictation child never outlives the app.
+app.on('before-quit', () => { try { if (_dictationChild) _dictationChild.kill(); } catch (_) {} });
 
 // --- Save warrant file to disk ---
 ipcMain.handle('save-warrant-file', async (event, data) => {

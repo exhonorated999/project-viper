@@ -4677,6 +4677,83 @@ ipcMain.handle('whisper-transcribe', async (event, opts = {}) => {
   }
 });
 
+// ── Dictation (batch) — transcribe a short mic recording for the Reports
+// editor. Reuses the Faster-Whisper-XXL engine + bundled model, but is fully
+// self-contained (no case/evidence/encryption coupling): renderer records the
+// mic, sends the audio bytes (base64), we write a temp file, transcribe, and
+// return the plain text. The renderer's command grammar handles structure.
+ipcMain.handle('dictation-transcribe', async (_e, opts = {}) => {
+  const {
+    audioBase64,
+    ext = 'webm',
+    model = 'small',
+    language = 'en',
+    device = 'cpu',
+  } = opts;
+  const P = _whisperPaths();
+  try {
+    if (!fs.existsSync(P.exe)) {
+      return { success: false, code: 'ENGINE_MISSING', error: 'Transcription engine is not installed.' };
+    }
+    if (!audioBase64) {
+      return { success: false, code: 'NO_AUDIO', error: 'No audio was captured.' };
+    }
+    const modelDir = _whisperModelDir(model);
+    if (!modelDir) {
+      return { success: false, code: 'MODEL_MISSING', model, error: 'The "' + model + '" model is not installed.' };
+    }
+
+    const jobId = 'dict-' + Date.now();
+    const workRoot = path.join(os.tmpdir(), 'viper-dictation', jobId);
+    const inDir = path.join(workRoot, 'in');
+    const outDir = path.join(workRoot, 'out');
+    fs.mkdirSync(inDir, { recursive: true });
+    fs.mkdirSync(outDir, { recursive: true });
+
+    const safeExt = String(ext || 'webm').replace(/[^a-z0-9]/gi, '').slice(0, 5) || 'webm';
+    const inputPath = path.join(inDir, 'dictation.' + safeExt);
+    fs.writeFileSync(inputPath, Buffer.from(audioBase64, 'base64'));
+
+    const args = _whisperArgs({ inputPath, model, modelDir, outDir, language, device });
+    const result = await new Promise((resolve) => {
+      let child;
+      try {
+        child = spawn(P.exe, args, { cwd: P.base, windowsHide: true });
+      } catch (spawnErr) {
+        return resolve({ success: false, error: spawnErr.message });
+      }
+      let tail = '';
+      const onChunk = (buf) => { tail = (tail + buf.toString()).slice(-4000); };
+      if (child.stdout) child.stdout.on('data', onChunk);
+      if (child.stderr) child.stderr.on('data', onChunk);
+      child.on('error', (err) => resolve({ success: false, error: err.message }));
+      child.on('close', (code) => {
+        if (code === 0) resolve({ success: true });
+        else resolve({ success: false, error: 'Engine exited with code ' + code + '. ' + tail.slice(-300) });
+      });
+    });
+
+    if (!result.success) {
+      try { fs.rmSync(workRoot, { recursive: true, force: true }); } catch (_) {}
+      return result;
+    }
+
+    // Collect the plain-text transcript (--output_format text → .text).
+    let text = '';
+    try {
+      const outs = fs.readdirSync(outDir);
+      const txt = outs.find((n) => n.toLowerCase().endsWith('.text'));
+      if (txt) text = fs.readFileSync(path.join(outDir, txt), 'utf8');
+    } catch (_) {}
+
+    try { fs.rmSync(workRoot, { recursive: true, force: true }); } catch (_) {}
+    return { success: true, text: (text || '').trim() };
+  } catch (error) {
+    console.error('dictation-transcribe failed:', error);
+    return { success: false, code: 'EXCEPTION', error: error.message };
+  }
+});
+
 // Cancel an in-flight transcription.
 ipcMain.handle('whisper-cancel', async (_e, jobId) => {
   const child = _whisperJobs.get(jobId);
@@ -4771,6 +4848,23 @@ function _dictationModelPath() {
 
 let _dictationChild = null;
 
+// Clean one transcript line emitted inside a `### Transcription` block.
+// whisper-stream prints, per line: an optional timestamp span followed by the
+// recognized text, e.g.  "[00:00:00.000 --> 00:00:10.000]   hello world".
+// It also emits non-speech annotation tokens for silence/sound events such as
+// "[BLANK_AUDIO]", "[ Silence ]", "[MUSIC]", "(buzzing)". None of that belongs
+// in the report — strip the timestamp prefix and drop annotation tokens.
+function _dictationCleanLine(s) {
+  let t = s;
+  // Leading timestamp span: [hh:mm:ss.mmm --> hh:mm:ss.mmm]
+  t = t.replace(/^\s*\[\s*\d{1,2}:\d{2}:\d{2}\.\d{3}\s*-->\s*\d{1,2}:\d{2}:\d{2}\.\d{3}\s*\]/, '');
+  // whisper only wraps NON-speech events in [ ] or ( ); real words are never
+  // bracketed, so removing bracketed/parenthetical tokens is safe.
+  t = t.replace(/\[[^\]]*\]/g, ' ');
+  t = t.replace(/\([^)]*\)/g, ' ');
+  return t.replace(/\s+/g, ' ').trim();
+}
+
 // Parse a stdout/stderr chunk from stream.exe, emitting partial/final events.
 // `state` persists across chunks for one child (buffer + in-block accumulator).
 function _dictationParseChunk(buf, state, emit) {
@@ -4794,13 +4888,18 @@ function _dictationParseChunk(buf, state, emit) {
     }
     if (trimmed.startsWith('###')) continue; // other markers (init / [Start speaking])
     if (state.inBlock) {
-      state.acc.push(trimmed);
-      // Interim view of the utterance as it grows.
-      emit('dictation-partial', { text: state.acc.join(' ').replace(/\s+/g, ' ').trim() });
-    } else {
-      // Non-VAD / sliding-window builds print bare lines — treat as final.
-      emit('dictation-final', { text: trimmed });
+      const cleaned = _dictationCleanLine(trimmed);
+      if (cleaned) {
+        state.acc.push(cleaned);
+        // Interim view of the utterance as it grows.
+        emit('dictation-partial', { text: state.acc.join(' ').replace(/\s+/g, ' ').trim() });
+      }
     }
+    // NOTE: lines OUTSIDE a `### Transcription START/END` block are ignored on
+    // purpose. whisper-stream prints a large volume of engine diagnostics
+    // (whisper_model_load…, main: processing…, [Start speaking], using vad…)
+    // that are NOT transcript. Emitting them here would type engine logging
+    // into the report. Only marker-delimited text is ever a real segment.
   }
 }
 
@@ -4846,15 +4945,103 @@ ipcMain.handle('dictation-start', async (event, opts = {}) => {
     return { success: false, code: 'SPAWN_FAILED', error: spawnErr.message };
   }
   const state = { buffer: '', inBlock: false, acc: [] };
-  const onData = (b) => _dictationParseChunk(b, state, send);
-  if (_dictationChild.stdout) _dictationChild.stdout.on('data', onData);
-  if (_dictationChild.stderr) _dictationChild.stderr.on('data', onData);
+  // Transcription text is emitted on the child's STDOUT (the `### Transcription
+  // START/END` blocks). Engine diagnostics (model load, VAD info, [Start
+  // speaking], errors) are written to STDERR. We parse each stream with its
+  // OWN state so interleaving can't splice a stderr log line into the middle
+  // of a stdout transcript line and break marker detection. stderr is parsed
+  // only so that, in the unlikely event a build routes transcript there, it is
+  // still captured — but it is NEVER emitted as bare text (the parser only
+  // emits marker-delimited segments). stderr is otherwise logged for debugging.
+  const stderrState = { buffer: '', inBlock: false, acc: [] };
+  let stderrTail = '';
+
+  // ── Incremental de-duplication ──
+  // whisper-stream in VAD mode (--step 0) does NOT emit one utterance per
+  // segment. It keeps a growing audio buffer (up to --length) and, on every
+  // detected pause, RE-transcribes the WHOLE buffer from t0=0. So each
+  // `### Transcription N` block is a superset of the previous one:
+  //     T1: "On June 3rd 2013"
+  //     T2: "On June 3rd 2026"                 (re-transcribed)
+  //     T3: "On June 3rd 2026 I was assigned…" (buffer grew)
+  // Emitting each block verbatim makes the editor accumulate the same words
+  // over and over. Instead we track how many words we've already committed to
+  // the report this session and only forward the NEW tail of each block.
+  // `committed` only ever advances until the engine clears its buffer (a much
+  // shorter transcription than what we've committed), at which point we reset
+  // and start a fresh window. RESET_SLACK absorbs small word-count wobble from
+  // re-transcription so a minor shrink is NOT mistaken for a buffer clear.
+  // LOOKAHEAD holds back the last word of each block before committing it.
+  // Every spoken command is at most two words ("new paragraph", "scratch
+  // that", "full stop", "stop dictation"…). If we committed strictly by word
+  // count, a two-word command whose first word happened to land at a block
+  // boundary would be split across two deltas and the renderer's grammar would
+  // type both words as literal text instead of running the command. Holding
+  // one word back guarantees a two-word command is always delivered whole in a
+  // single delta. The held-back word is flushed when the buffer resets or when
+  // dictation stops (see _flushTail / close handler).
+  const dict = { committed: 0, RESET_SLACK: 4, LOOKAHEAD: 1, lastWords: [],
+    // First word of every multi-word command phrase in the renderer's grammar.
+    // If one of these is about to be committed as the LAST word of a delta we
+    // hold it back until its following word arrives, so e.g. "new paragraph"
+    // is always delivered together and matched as a command (never typed as
+    // the literal words "new" then "paragraph").
+    STARTERS: new Set(['stop', 'new', 'scratch', 'all', 'question', 'exclamation', 'full', 'end']) };
+  const _norm = (w) => String(w || '').toLowerCase().replace(/[^\w']/g, '');
+  const _flushTail = () => {
+    if (dict.lastWords.length > dict.committed) {
+      const delta = dict.lastWords.slice(dict.committed).join(' ');
+      dict.committed = dict.lastWords.length;
+      if (delta) send('dictation-final', { text: delta });
+    }
+  };
+  const _emitDelta = (fullText) => {
+    const words = String(fullText || '').trim().split(/\s+/).filter(Boolean);
+    if (words.length < dict.committed - dict.RESET_SLACK) {
+      // engine cleared its buffer → flush the old window's held-back tail, then start fresh
+      _flushTail();
+      dict.committed = 0;
+      dict.lastWords = [];
+    }
+    dict.lastWords = words;
+    let frontier = Math.max(0, words.length - dict.LOOKAHEAD);
+    // Don't end a delta on a command-starter word — wait for its partner.
+    while (frontier > dict.committed && dict.STARTERS.has(_norm(words[frontier - 1]))) frontier--;
+    if (frontier > dict.committed) {
+      const delta = words.slice(dict.committed, frontier).join(' ');
+      dict.committed = frontier;
+      if (delta) send('dictation-final', { text: delta });
+    }
+  };
+  // Route stdout through the de-duper. Finals become tail-only deltas; the
+  // interim pill shows only the not-yet-committed words so it stays short.
+  const sendStdout = (channel, payload) => {
+    if (channel === 'dictation-final') { _emitDelta(payload && payload.text); return; }
+    if (channel === 'dictation-partial') {
+      const words = String((payload && payload.text) || '').trim().split(/\s+/).filter(Boolean);
+      send('dictation-partial', { text: words.slice(Math.min(dict.committed, words.length)).join(' ') });
+      return;
+    }
+    send(channel, payload);
+  };
+  const onStdout = (b) => { _dictationParseChunk(b, state, sendStdout); };
+  const onStderr = (b) => {
+    const s = b.toString();
+    stderrTail = (stderrTail + s).slice(-4000);
+    _dictationParseChunk(b, stderrState, send);
+  };
+  if (_dictationChild.stdout) _dictationChild.stdout.on('data', onStdout);
+  if (_dictationChild.stderr) _dictationChild.stderr.on('data', onStderr);
   _dictationChild.on('error', (err) => {
     _dictationChild = null;
     send('dictation-ended', { reason: 'error', error: err.message });
   });
   _dictationChild.on('close', (code) => {
     _dictationChild = null;
+    try { _flushTail(); } catch (_) {} // emit the final held-back word
+    if (code && code !== 0) {
+      try { console.error('[dictation] whisper-stream exited', code, stderrTail.slice(-600)); } catch (_) {}
+    }
     send('dictation-ended', { reason: 'closed', code });
   });
   send('dictation-ready', { modelPath });

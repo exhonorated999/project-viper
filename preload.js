@@ -237,7 +237,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('whisper-progress', listener);
   },
 
-  // ── Live dictation (whisper.cpp streaming → Reports editor) ──
+  // ── Dictation (record → transcribe → Reports editor) ──
+  // Batch mode: renderer records the mic, then hands the audio bytes here for
+  // one-shot Whisper transcription (cleaner/more accurate than live streaming).
+  dictationTranscribe: (opts) => ipcRenderer.invoke('dictation-transcribe', opts),
+  // Live streaming handlers (retained; not used by the batch UI).
   dictationStatus: () => ipcRenderer.invoke('dictation-status'),
   dictationStart: (opts) => ipcRenderer.invoke('dictation-start', opts),
   dictationStop: () => ipcRenderer.invoke('dictation-stop'),

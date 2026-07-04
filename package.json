@@ -1,6 +1,6 @@
 {
   "name": "viper-electron",
-  "version": "4.0.1",
+  "version": "4.0.2",
   "description": "VIPER with Network Intelligence - Electron Desktop App",
   "main": "electron-main.js",
   "scripts": {

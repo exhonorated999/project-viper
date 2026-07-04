@@ -668,6 +668,8 @@
                                         <button id="whisperRemoveBtn" onclick="removeWhisperEngine()" class="px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20 transition-colors text-sm hidden">Remove</button>
                                     </div>
 
+                                    <p id="whisperEngineMsg" class="text-xs mt-2 hidden"></p>
+
                                     <details class="mt-3">
                                         <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-400">Advanced: custom download URL</summary>
                                         <input id="whisperEngineUrl" type="text" class="mt-2 w-full px-2 py-1.5 bg-viper-card border border-gray-600 rounded text-gray-200 text-xs focus:border-viper-purple outline-none" placeholder="https://…/viper-whisper-engines.zip">
@@ -2994,6 +2996,16 @@
             return n + ' B';
         }
 
+        // Persistent status message in the card (Settings has no showToast).
+        function _setEngineMsg(text, kind) {
+            var el = document.getElementById('whisperEngineMsg');
+            if (!el) return;
+            if (!text) { el.classList.add('hidden'); el.textContent = ''; return; }
+            el.classList.remove('hidden');
+            el.textContent = text;
+            el.style.color = kind === 'error' ? '#f87171' : (kind === 'success' ? '#4ade80' : '#94a3b8');
+        }
+
         function isWhisperEnabled() {
             var v = localStorage.getItem('viperWhisperEnabled');
             return v === null ? true : v === 'true';
@@ -3104,17 +3116,18 @@
             if (!(window.electronAPI && window.electronAPI.whisperEngineDownload)) return;
             var urlEl = document.getElementById('whisperEngineUrl');
             var url = urlEl && urlEl.value.trim() ? urlEl.value.trim() : undefined;
+            _setEngineMsg('Starting download…', 'info');
             _setEngineBusyUI(true, 'Preparing download…');
             try {
                 var res = await window.electronAPI.whisperEngineDownload({ url: url });
                 if (res && res.success) {
                     _renderEngineStatus(res.status);
-                    if (typeof showToast === 'function') showToast('Whisper engine installed.', 'success');
+                    _setEngineMsg('Whisper engine installed.', 'success');
                 } else {
-                    if (typeof showToast === 'function') showToast('Download failed: ' + ((res && res.error) || 'unknown'), 'error');
+                    _setEngineMsg('Download failed: ' + ((res && res.error) || 'unknown') + '. If the source isn\u2019t hosted yet, use “Install from file…”.', 'error');
                 }
             } catch (e) {
-                if (typeof showToast === 'function') showToast('Download failed: ' + e.message, 'error');
+                _setEngineMsg('Download failed: ' + e.message, 'error');
             } finally {
                 _setEngineBusyUI(false);
                 refreshWhisperEngineStatus();
@@ -3129,12 +3142,12 @@
                 var res = await window.electronAPI.whisperEngineInstallFile({});
                 if (res && res.success) {
                     _renderEngineStatus(res.status);
-                    if (typeof showToast === 'function') showToast('Whisper engine installed.', 'success');
+                    _setEngineMsg('Whisper engine installed.', 'success');
                 } else if (res && res.code !== 'CANCELLED') {
-                    if (typeof showToast === 'function') showToast('Install failed: ' + ((res && res.error) || 'unknown'), 'error');
+                    _setEngineMsg('Install failed: ' + ((res && res.error) || 'unknown'), 'error');
                 }
             } catch (e) {
-                if (typeof showToast === 'function') showToast('Install failed: ' + e.message, 'error');
+                _setEngineMsg('Install failed: ' + e.message, 'error');
             } finally {
                 _setEngineBusyUI(false);
                 refreshWhisperEngineStatus();
@@ -3148,10 +3161,10 @@
                 var res = await window.electronAPI.whisperEngineRemove();
                 if (res && res.success) {
                     _renderEngineStatus(res.status);
-                    if (typeof showToast === 'function') showToast('Whisper engine removed.', 'info');
+                    _setEngineMsg('Whisper engine removed.', 'info');
                 }
             } catch (e) {
-                if (typeof showToast === 'function') showToast('Remove failed: ' + e.message, 'error');
+                _setEngineMsg('Remove failed: ' + e.message, 'error');
             } finally {
                 refreshWhisperEngineStatus();
             }

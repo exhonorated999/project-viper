@@ -593,6 +593,44 @@
                             </div>
                             <p class="text-xs text-gray-500 mt-2">Preview: <span id="dtPreview" class="text-viper-cyan font-mono">—</span></p>
                         </div>
+
+                        <!-- Voice Dictation & Transcription (Whisper) -->
+                        <div class="pt-4 border-t border-gray-700/50">
+                            <label class="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
+                                <span>🎙️</span> Voice Dictation &amp; Transcription
+                            </label>
+                            <p class="text-xs text-gray-400 leading-relaxed mb-3">
+                                VIPER's dictation and media transcription are powered by <strong class="text-viper-purple">Whisper</strong>, an
+                                open-source speech-recognition model from OpenAI that runs <strong>entirely on this computer</strong>. No audio,
+                                recording, or transcript is ever uploaded to the cloud or sent to any third party — everything is processed locally,
+                                which keeps case audio compliant with CJIS and agency evidence-handling policy even with no internet connection.
+                            </p>
+                            <div class="rounded-lg bg-viper-purple/5 border border-viper-purple/15 p-3 space-y-2">
+                                <div class="flex items-start gap-2">
+                                    <span class="text-viper-purple mt-0.5">•</span>
+                                    <p class="text-xs text-gray-400 leading-relaxed">
+                                        <strong class="text-gray-200">Dictation (Reports):</strong> Click <strong>Dictate</strong> in a case's Reports
+                                        editor and speak your narrative. Words are typed in real time, and spoken commands like
+                                        <em>"new paragraph"</em>, <em>"period"</em>, or <em>"scratch that"</em> handle formatting. Tap the
+                                        <strong>?</strong> next to the Dictate button for the full command list. Speak in short phrases and pause
+                                        briefly between sentences for best accuracy.
+                                    </p>
+                                </div>
+                                <div class="flex items-start gap-2">
+                                    <span class="text-viper-purple mt-0.5">•</span>
+                                    <p class="text-xs text-gray-400 leading-relaxed">
+                                        <strong class="text-gray-200">Media Transcription &amp; Translation (Evidence):</strong> Audio and video
+                                        evidence can be transcribed to searchable, timestamped text on-device. Whisper can also translate
+                                        non-English speech into English during transcription. Larger recordings take longer on CPU-only machines;
+                                        a compatible GPU speeds this up significantly.
+                                    </p>
+                                </div>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-2">
+                                Recognition is not perfect — always proofread dictated narratives and generated transcripts before relying on them
+                                in a report or as evidence.
+                            </p>
+                        </div>
                     </div>
                 </div>
 

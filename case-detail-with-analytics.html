@@ -6442,6 +6442,9 @@
                                 </svg>
                                 <span class="dictate-label">Dictate</span>
                             </button>
+                            <button onclick="showDictationHelp()" id="dictateHelpBtn" title="Voice command reference" class="ml-1 w-7 h-7 flex items-center justify-center rounded-full border border-viper-purple/40 bg-viper-purple/10 text-viper-purple hover:bg-viper-purple/25 transition-colors text-sm font-bold">
+                                ?
+                            </button>
                             
                             <div class="w-px h-6 bg-gray-600 mx-2"></div>
                             
@@ -9604,9 +9607,59 @@
                 return tokens;
             }
 
+            // Batch-mode command set (Option B): Whisper OWNS punctuation and
+            // capitalization, so we only honor STRUCTURE it can't infer, plus
+            // formatting toggles. Ordered longest-phrase-first.
+            const BATCH_CMDS = [
+                { p: 'stop dictation', n: 'stop' },
+                { p: 'new paragraph', n: 'paragraph' },
+                { p: 'new line', n: 'newline' },
+                { p: 'new heading', n: 'heading' },
+                { p: 'new bullet', n: 'bullet' },
+                { p: 'scratch that', n: 'scratch' },
+                { p: 'end underline', n: 'fmt', v: 'underline', on: false },
+                { p: 'end bold', n: 'fmt', v: 'bold', on: false },
+                { p: 'end italic', n: 'fmt', v: 'italic', on: false },
+                { p: 'underline', n: 'fmt', v: 'underline', on: true },
+                { p: 'bold', n: 'fmt', v: 'bold', on: true },
+                { p: 'italic', n: 'fmt', v: 'italic', on: true },
+            ];
+
+            // PURE: split a FULL Whisper transcript into text runs + command
+            // tokens WITHOUT lowercasing or stripping punctuation — Whisper's
+            // own casing/punctuation is preserved verbatim in the text runs.
+            // Commands are matched case-insensitively on word boundaries and
+            // any trailing punctuation the model attached is swallowed.
+            function parseBatch(text) {
+                // Collapse ALL whitespace runs (incl. Whisper's fixed-column
+                // line-wrap newlines) to single spaces so text flows and fills
+                // the editor width. Paragraphs/lines come from spoken commands.
+                const src = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+                const alt = BATCH_CMDS.map(c => c.p.replace(/\s+/g, '\\s+')).join('|');
+                const re = new RegExp('\\b(' + alt + ')\\b[.,!?;:]*', 'ig');
+                const tokens = [];
+                let last = 0, m;
+                while ((m = re.exec(src)) !== null) {
+                    const pre = src.slice(last, m.index);
+                    if (pre.trim()) tokens.push({ type: 'text', value: pre.trim() });
+                    const phrase = m[1].toLowerCase().replace(/\s+/g, ' ').trim();
+                    const cmd = BATCH_CMDS.find(c => c.p === phrase);
+                    if (cmd) tokens.push(Object.assign({ type: 'cmd' }, cmd));
+                    last = m.index + m[0].length;
+                    if (re.lastIndex === m.index) re.lastIndex++; // guard zero-width
+                }
+                const tail = src.slice(last);
+                if (tail.trim()) tokens.push({ type: 'text', value: tail.trim() });
+                return tokens;
+            }
+
             // ── runtime state (DOM side) ──
-            let active = false;
-            let unsubs = [];
+            let active = false;          // dictation session open (recording OR transcribing)
+            let recording = false;       // mic currently capturing
+            let transcribing = false;    // waiting on Whisper
+            let mediaRecorder = null;
+            let mediaStream = null;
+            let chunks = [];
             let saveTimer = null;
             const marks = { bold: false, italic: false, underline: false };
             const st = { capNext: true, capOne: false, upperOne: false, lastChar: '', headingActive: false, lastLen: 0 };
@@ -9687,7 +9740,59 @@
                 saveTimer = setTimeout(() => { try { saveReport(true); } catch (_) {} }, 1500);
             }
 
-            // ── indicator pill (listening + interim partial) ──
+            // Insert a text run VERBATIM (Whisper's casing + punctuation kept).
+            // Only manages the single space between runs; no re-capitalization.
+            function _insertVerbatim(str) {
+                let out = String(str);
+                const atStart = st.lastChar === '' || st.lastChar === '\n';
+                if (!atStart && st.lastChar !== ' ' && !/^\s/.test(out)) out = ' ' + out;
+                document.execCommand('insertText', false, out);
+                st.lastChar = out.slice(-1);
+                st.lastLen = out.length;
+            }
+
+            // Apply batch tokens (structure + formatting only). Text runs go in
+            // untouched; commands drive paragraphs/lines/headings/bullets/marks.
+            function _applyBatch(tokens) {
+                const el = editorEl();
+                if (!el) return;
+                el.focus();
+                for (const t of tokens) {
+                    if (t.type === 'text') { _insertVerbatim(t.value); continue; }
+                    switch (t.n) {
+                        case 'paragraph':
+                            if (st.headingActive) { document.execCommand('insertParagraph'); try { document.execCommand('formatBlock', false, 'p'); } catch (_) {} st.headingActive = false; }
+                            else document.execCommand('insertParagraph');
+                            st.lastChar = ''; break;
+                        case 'newline':
+                            document.execCommand('insertHTML', false, '<br>');
+                            st.lastChar = ''; break;
+                        case 'heading':
+                            document.execCommand('insertParagraph');
+                            try { document.execCommand('formatBlock', false, 'h2'); } catch (_) {}
+                            st.headingActive = true; st.lastChar = ''; break;
+                        case 'bullet':
+                            try { document.execCommand('insertUnorderedList'); } catch (_) {}
+                            st.lastChar = ''; break;
+                        case 'fmt': {
+                            const key = t.v;
+                            if (t.on && !marks[key]) { document.execCommand(key); marks[key] = true; }
+                            else if (!t.on && marks[key]) { document.execCommand(key); marks[key] = false; }
+                            break;
+                        }
+                        case 'scratch':
+                            if (st.lastLen > 0) { for (let k = 0; k < st.lastLen; k++) document.execCommand('delete'); st.lastLen = 0; st.lastChar = ''; }
+                            break;
+                        case 'stop': return;
+                        default: break;
+                    }
+                }
+                try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+                if (saveTimer) clearTimeout(saveTimer);
+                saveTimer = setTimeout(() => { try { saveReport(true); } catch (_) {} }, 1500);
+            }
+
+            // ── indicator pill (recording → transcribing) ──
             function _indicator() { return document.getElementById('dictationIndicator'); }
             function _renderIndicator() {
                 if (_indicator()) return;
@@ -9698,12 +9803,12 @@
                     + 'padding:12px 14px;box-shadow:0 12px 40px rgba(0,0,0,0.5);color:#e2e8f0;font-size:13px;';
                 pill.innerHTML =
                     '<div style="display:flex;align-items:center;gap:8px;">'
-                    + '<span style="width:10px;height:10px;border-radius:50%;background:#ef4444;box-shadow:0 0 0 0 rgba(239,68,68,0.6);animation:vd-pulse 1.4s infinite;"></span>'
-                    + '<strong style="color:#a78bfa;">Dictating…</strong>'
+                    + '<span id="dictationDot" style="width:10px;height:10px;border-radius:50%;background:#ef4444;box-shadow:0 0 0 0 rgba(239,68,68,0.6);animation:vd-pulse 1.4s infinite;"></span>'
+                    + '<strong id="dictationTitle" style="color:#a78bfa;">Recording…</strong>'
                     + '<button id="dictationStopBtn" style="margin-left:auto;padding:3px 10px;border-radius:6px;font-size:12px;'
                     + 'background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);color:#f87171;cursor:pointer;">Stop</button>'
                     + '</div>'
-                    + '<div id="dictationInterim" style="margin-top:6px;color:#94a3b8;font-style:italic;min-height:16px;word-break:break-word;"></div>';
+                    + '<div id="dictationInterim" style="margin-top:6px;color:#94a3b8;font-style:italic;min-height:16px;word-break:break-word;">Speak now, then press Stop to transcribe.</div>';
                 document.body.appendChild(pill);
                 if (!document.getElementById('vd-pulse-style')) {
                     const s = document.createElement('style'); s.id = 'vd-pulse-style';
@@ -9713,8 +9818,18 @@
                 const sb = document.getElementById('dictationStopBtn');
                 if (sb) sb.onclick = () => stop();
             }
+            // Switch the pill from "Recording" to "Transcribing" (no Stop).
+            function _setPillTranscribing() {
+                const dot = document.getElementById('dictationDot');
+                if (dot) { dot.style.animation = 'none'; dot.style.background = '#f59e0b'; }
+                const title = document.getElementById('dictationTitle');
+                if (title) { title.textContent = 'Transcribing…'; title.style.color = '#fbbf24'; }
+                const btn = document.getElementById('dictationStopBtn');
+                if (btn) { btn.textContent = '…'; btn.disabled = true; btn.style.opacity = '0.5'; btn.style.cursor = 'default'; }
+                const it = document.getElementById('dictationInterim');
+                if (it) it.textContent = 'Converting speech to text…';
+            }
             function _removeIndicator() { const p = _indicator(); if (p && p.parentNode) p.parentNode.removeChild(p); }
-            function _setInterim(text) { const n = document.getElementById('dictationInterim'); if (n) n.textContent = text || ''; }
 
             function _updateButton() {
                 const b = document.getElementById('dictateBtn');
@@ -9732,50 +9847,176 @@
                 }
             }
 
-            function _wire() {
-                const api = window.electronAPI || {};
-                if (api.onDictationFinal) unsubs.push(api.onDictationFinal((p) => {
-                    if (!active) return;
-                    _setInterim('');
-                    try { _applyTokens(parseSegment(p && p.text)); } catch (e) { console.error('dictation apply', e); }
-                }));
-                if (api.onDictationPartial) unsubs.push(api.onDictationPartial((p) => {
-                    if (active) _setInterim(p && p.text ? p.text : '');
-                }));
-                if (api.onDictationEnded) unsubs.push(api.onDictationEnded((p) => {
-                    if (!active) return;
-                    active = false; _unwire(); _removeIndicator(); _updateButton();
-                    if (p && p.reason === 'error') toast('Dictation stopped: ' + (p.error || 'engine error'), 'error');
-                }));
+            // ── audio capture helpers ──
+            function _pickMime() {
+                const cands = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+                for (const c of cands) {
+                    try { if (window.MediaRecorder && MediaRecorder.isTypeSupported(c)) return c; } catch (_) {}
+                }
+                return '';
             }
-            function _unwire() { unsubs.forEach(u => { try { u(); } catch (_) {} }); unsubs = []; }
+            function _extForMime(mime) {
+                if (/mp4/i.test(mime)) return 'm4a';
+                if (/ogg/i.test(mime)) return 'ogg';
+                return 'webm';
+            }
+            function _abToBase64(buf) {
+                const bytes = new Uint8Array(buf);
+                let binary = '';
+                const CH = 0x8000;
+                for (let i = 0; i < bytes.length; i += CH) {
+                    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+                }
+                return btoa(binary);
+            }
 
             async function start() {
                 const el = editorEl();
                 if (!el) { toast('Open the Reports tab to dictate', 'info'); return; }
+                if (active) return;
                 const api = window.electronAPI || {};
-                if (!api.dictationStart) { toast('Dictation not available in this build', 'error'); return; }
+                if (!api.dictationTranscribe) { toast('Dictation not available in this build', 'error'); return; }
+                // Verify the batch engine + model are present.
                 let status = null;
-                try { status = await api.dictationStatus(); } catch (_) {}
-                if (!status || !status.enginePresent) { toast('Dictation engine (whisper-stream.exe) is not installed in this build', 'error'); return; }
-                if (!status.modelPresent) { toast('No dictation model is installed', 'error'); return; }
-                let res = null;
-                try { res = await api.dictationStart({ language: 'en' }); } catch (e) { res = { success: false, error: e.message }; }
-                if (!res || !res.success) { toast((res && res.error) || 'Failed to start dictation', 'error'); return; }
-                active = true; _resetState(); _wire(); _renderIndicator(); _updateButton();
+                try { status = await api.whisperStatus(); } catch (_) {}
+                if (!status || !status.enginePresent) { toast('Transcription engine is not installed in this build', 'error'); return; }
+                if (!status.models || !status.models.small) { toast('The transcription model is not installed', 'error'); return; }
+                // Open the mic.
+                try {
+                    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                } catch (e) {
+                    toast('Microphone access was blocked: ' + (e && e.message || e), 'error');
+                    return;
+                }
+                chunks = [];
+                const mime = _pickMime();
+                try {
+                    mediaRecorder = mime ? new MediaRecorder(mediaStream, { mimeType: mime }) : new MediaRecorder(mediaStream);
+                } catch (e) {
+                    try { mediaStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+                    mediaStream = null;
+                    toast('Could not start recording: ' + (e && e.message || e), 'error');
+                    return;
+                }
+                mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+                mediaRecorder.onstop = _onRecordingStop;
+                mediaRecorder.start();
+                recording = true; active = true;
+                _resetState(); _renderIndicator(); _updateButton();
                 _placeCaretEnd(el);
             }
+
+            async function _onRecordingStop() {
+                // Release the mic immediately.
+                try { if (mediaStream) mediaStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+                mediaStream = null;
+                const type = (mediaRecorder && mediaRecorder.mimeType) || (chunks[0] && chunks[0].type) || 'audio/webm';
+                const blob = new Blob(chunks, { type });
+                chunks = [];
+                mediaRecorder = null;
+                if (!blob.size) { active = false; _removeIndicator(); _updateButton(); return; }
+
+                transcribing = true; _setPillTranscribing();
+                let text = '';
+                try {
+                    const buf = await blob.arrayBuffer();
+                    const res = await (window.electronAPI || {}).dictationTranscribe({
+                        audioBase64: _abToBase64(buf),
+                        ext: _extForMime(type),
+                        language: 'en',
+                    });
+                    if (res && res.success) text = res.text || '';
+                    else toast((res && res.error) || 'Transcription failed', 'error');
+                } catch (e) {
+                    toast('Transcription failed: ' + (e && e.message || e), 'error');
+                }
+
+                transcribing = false; active = false;
+                _removeIndicator(); _updateButton();
+
+                if (text && text.trim()) {
+                    const el = editorEl();
+                    if (el) {
+                        _placeCaretEnd(el);
+                        try { _applyBatch(parseBatch(text)); } catch (e) { console.error('dictation apply', e); }
+                    }
+                }
+            }
+
             async function stop() {
-                const api = window.electronAPI || {};
-                try { if (api.dictationStop) await api.dictationStop(); } catch (_) {}
-                active = false; _unwire(); _removeIndicator(); _updateButton();
-                try { saveReport(true); } catch (_) {}
+                if (transcribing) return; // already converting — ignore
+                if (mediaRecorder && recording) {
+                    recording = false;
+                    try { mediaRecorder.stop(); } catch (_) { active = false; _removeIndicator(); _updateButton(); }
+                    return; // onstop finishes the flow
+                }
+                // Not recording (edge) — just tear down.
+                active = false; _removeIndicator(); _updateButton();
             }
             function toggle() { active ? stop() : start(); }
 
-            return { parseSegment, toggle, start, stop, isActive, CMD_LIST };
+            return { parseSegment, parseBatch, toggle, start, stop, isActive, CMD_LIST, BATCH_CMDS };
         })();
         try { window.ViperDictation = ViperDictation; } catch (_) {}
+
+        // Voice-command reference popup (the "?" next to the Dictate button).
+        function showDictationHelp() {
+            const existing = document.getElementById('dictationHelpOverlay');
+            if (existing) { existing.remove(); return; }
+            const groups = [
+                { title: 'Structure', items: [
+                    ['new paragraph', 'Start a new paragraph'],
+                    ['new line', 'Line break (same paragraph)'],
+                    ['new heading', 'Start a bold heading line'],
+                    ['new bullet', 'Add a bullet point'],
+                ]},
+                { title: 'Formatting', items: [
+                    ['bold … end bold', 'Bold the words in between'],
+                    ['italic … end italic', 'Italicize the words in between'],
+                    ['underline … end underline', 'Underline the words in between'],
+                ]},
+                { title: 'Editing', items: [
+                    ['scratch that', 'Delete the last thing dictated'],
+                    ['stop dictation', 'End the dictation session'],
+                ]},
+                { title: 'Automatic', items: [
+                    ['. , ? !', 'Punctuation is added for you'],
+                    ['Capitals', 'Sentences & names capitalized for you'],
+                ]},
+            ];
+            const groupHtml = groups.map(g => (
+                '<div style="margin-bottom:14px;">'
+                + '<div style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#a78bfa;font-weight:700;margin-bottom:6px;">' + g.title + '</div>'
+                + g.items.map(([cmd, desc]) => (
+                    '<div style="display:flex;gap:10px;align-items:baseline;padding:3px 0;">'
+                    + '<code style="flex:0 0 46%;color:#e2e8f0;background:rgba(124,58,237,0.12);border:1px solid rgba(124,58,237,0.25);border-radius:6px;padding:2px 8px;font-size:12.5px;">' + cmd + '</code>'
+                    + '<span style="color:#94a3b8;font-size:12.5px;">' + desc + '</span>'
+                    + '</div>'
+                )).join('')
+                + '</div>'
+            )).join('');
+            const ov = document.createElement('div');
+            ov.id = 'dictationHelpOverlay';
+            ov.style.cssText = 'position:fixed;inset:0;z-index:99995;background:rgba(2,6,23,0.6);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;padding:24px;';
+            ov.innerHTML =
+                '<div style="max-width:620px;width:100%;max-height:82vh;overflow:auto;background:#0f172a;border:1px solid rgba(124,58,237,0.5);border-radius:16px;box-shadow:0 24px 70px rgba(0,0,0,0.6);padding:22px 24px;">'
+                + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">'
+                + '<span style="font-size:18px;">🎙️</span>'
+                + '<h2 style="margin:0;color:#f1f5f9;font-size:18px;font-weight:700;">Dictation — Voice Commands</h2>'
+                + '<button id="dictationHelpClose" style="margin-left:auto;width:30px;height:30px;border-radius:8px;border:1px solid rgba(148,163,184,0.3);background:transparent;color:#94a3b8;cursor:pointer;font-size:16px;">✕</button>'
+                + '</div>'
+                + '<p style="color:#94a3b8;font-size:12.5px;margin:0 0 16px;line-height:1.5;">Click <strong style="color:#c4b5fd;">Dictate</strong> and speak naturally — punctuation and capitalization are added for you. When you\'re done, press <strong style="color:#c4b5fd;">Stop</strong> and the recording is transcribed and inserted at your cursor. Say any command below to shape the structure. Everything runs on-device — no audio leaves this computer.</p>'
+                + '<div style="columns:2;column-gap:26px;">' + groupHtml + '</div>'
+                + '<p style="color:#64748b;font-size:11.5px;margin:14px 0 0;border-top:1px solid rgba(148,163,184,0.15);padding-top:10px;">Text appears after you press Stop (the whole recording is transcribed at once for best accuracy). Recognition is not perfect — always proofread.</p>'
+                + '</div>';
+            document.body.appendChild(ov);
+            const close = () => ov.remove();
+            ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+            const cb = document.getElementById('dictationHelpClose');
+            if (cb) cb.onclick = close;
+            document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); } });
+        }
+        try { window.showDictationHelp = showDictationHelp; } catch (_) {}
 
         function renderEvidenceFiles(evidence) {
             if (!evidence.files || evidence.files.length === 0) {

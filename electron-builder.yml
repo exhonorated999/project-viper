@@ -30,6 +30,8 @@ files:
   # Whisper engine is shipped via extraResources (below) → resources/whisper,
   # NOT packed into the asar. Exclude it here to avoid a multi-GB double-copy.
   - "!build/whisper/**"
+  # Dictation streaming engine (whisper.cpp) likewise ships via extraResources.
+  - "!build/whisper-stream/**"
 asarUnpack:
   - "build/**"
 # ─── Bundled offline transcription engine (Faster-Whisper-XXL + small model) ───
@@ -39,6 +41,14 @@ asarUnpack:
 extraResources:
   - from: build/whisper
     to: whisper
+    filter:
+      - "**/*"
+  # ─── Live dictation engine (whisper.cpp stream.exe + ggml model) ───
+  # Copied into resources/whisper-stream/ so main can spawn
+  # resources/whisper-stream/stream.exe with _models/ggml-*.bin.
+  # Provisioned separately (binary + ggml model not committed to git).
+  - from: build/whisper-stream
+    to: whisper-stream
     filter:
       - "**/*"
 win:

@@ -237,6 +237,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('whisper-progress', listener);
   },
 
+  // ── Live dictation (whisper.cpp streaming → Reports editor) ──
+  dictationStatus: () => ipcRenderer.invoke('dictation-status'),
+  dictationStart: (opts) => ipcRenderer.invoke('dictation-start', opts),
+  dictationStop: () => ipcRenderer.invoke('dictation-stop'),
+  onDictationPartial: (callback) => {
+    const listener = (_evt, payload) => { try { callback(payload); } catch (e) { console.error(e); } };
+    ipcRenderer.on('dictation-partial', listener);
+    return () => ipcRenderer.removeListener('dictation-partial', listener);
+  },
+  onDictationFinal: (callback) => {
+    const listener = (_evt, payload) => { try { callback(payload); } catch (e) { console.error(e); } };
+    ipcRenderer.on('dictation-final', listener);
+    return () => ipcRenderer.removeListener('dictation-final', listener);
+  },
+  onDictationEnded: (callback) => {
+    const listener = (_evt, payload) => { try { callback(payload); } catch (e) { console.error(e); } };
+    ipcRenderer.on('dictation-ended', listener);
+    return () => ipcRenderer.removeListener('dictation-ended', listener);
+  },
+
   // Resource Hub download interception — route downloads from Flock /
   // ICACCOPS / ICAC Data System / etc. straight into a case's Evidence
   // or Warrants/Production folder instead of bouncing through Downloads.

@@ -478,6 +478,7 @@
 
         /* Text */
         body.light-mode .text-white { color: var(--lm-text) !important; }
+        body.light-mode .text-gray-200 { color: var(--lm-text) !important; }
         body.light-mode .text-gray-400 { color: var(--lm-text-2) !important; }
         body.light-mode .text-gray-300 { color: var(--lm-text-2) !important; }
         body.light-mode .text-gray-500 { color: var(--lm-text-3) !important; }
@@ -876,6 +877,33 @@
 
         let currentCase = null;
         let currentTab = 'overview';
+
+        // Evidence viewer persistence — remembers which evidence item the user
+        // has open in the right-side viewer panel so it is restored when they
+        // leave the Evidence tab (or reload the case) and come back, instead of
+        // resetting to the "No evidence selected" placeholder.
+        let currentEvidenceView = null;
+        function _evidenceOpenKey() {
+            return currentCase && currentCase.caseNumber ? String(currentCase.caseNumber) : null;
+        }
+        function _persistOpenEvidence(evidenceId) {
+            currentEvidenceView = evidenceId || null;
+            const key = _evidenceOpenKey();
+            if (!key) return;
+            try {
+                const store = _lsParse('viperOpenEvidence', {});
+                if (evidenceId) store[key] = evidenceId; else delete store[key];
+                localStorage.setItem('viperOpenEvidence', JSON.stringify(store));
+            } catch (e) {}
+        }
+        function _loadOpenEvidence() {
+            const key = _evidenceOpenKey();
+            if (!key) return null;
+            try {
+                const store = _lsParse('viperOpenEvidence', {});
+                return store[key] || null;
+            } catch (e) { return null; }
+        }
 
         // Audit log fire-and-forget helper. Never throws, never awaits.
         function audit(event, data) {
@@ -4241,6 +4269,11 @@
         }
 
         function renderTabContent(tabId) {
+            // Leaving the Reports tab must stop any live dictation (the editor
+            // it writes into is about to be torn down).
+            if (currentTab === 'reports' && tabId !== 'reports') {
+                try { if (window.ViperDictation && ViperDictation.isActive()) ViperDictation.stop(); } catch (_) {}
+            }
             currentTab = tabId;
 
             // Telemetry: track module open (demo-only, gated internally)
@@ -4274,6 +4307,19 @@
                 initializeReportEditor();
             } else if (tabId === 'evidence') {
                 contentDiv.innerHTML = renderEvidenceTab();
+                // Restore whichever evidence item the user had open in the
+                // viewer panel (survives tab switches and case reloads).
+                if (currentEvidenceView == null) currentEvidenceView = _loadOpenEvidence();
+                if (currentEvidenceView != null) {
+                    const _restoreId = currentEvidenceView;
+                    setTimeout(() => {
+                        try {
+                            if (currentTab === 'evidence' && caseEvidence.some(e => e.id === _restoreId)) {
+                                viewEvidenceInline(_restoreId);
+                            }
+                        } catch (_) {}
+                    }, 0);
+                }
             } else if (tabId === 'warrants') {
                 contentDiv.innerHTML = renderWarrantsTab();
             } else if (tabId === 'warrantAuthor') {
@@ -6390,6 +6436,15 @@
                             
                             <div class="flex-1"></div>
                             
+                            <button onclick="ViperDictation.toggle()" id="dictateBtn" title="Dictate (voice → report)" class="px-3 py-1.5 rounded-lg border border-viper-purple/40 bg-viper-purple/15 text-gray-300 hover:text-viper-purple hover:bg-viper-purple/25 transition-colors text-sm font-medium flex items-center space-x-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-14 0m7 7v3m0-3a3 3 0 003-3V6a3 3 0 00-6 0v6a3 3 0 003 3z"/>
+                                </svg>
+                                <span class="dictate-label">Dictate</span>
+                            </button>
+                            
+                            <div class="w-px h-6 bg-gray-600 mx-2"></div>
+                            
                             <span class="text-xs text-gray-400">Arial Font • Auto-save enabled</span>
                         </div>
                         
@@ -8145,6 +8200,10 @@
             const ev = caseEvidence.find(e => e.id === evidenceId);
             caseEvidence = caseEvidence.filter(e => e.id !== evidenceId);
 
+            // If the deleted item was the one open in the viewer, forget it so
+            // the panel returns to the empty state instead of trying to restore.
+            if (currentEvidenceView === evidenceId) _persistOpenEvidence(null);
+
             const allEvidence = _lsParse('viperCaseEvidence', {});
             allEvidence[currentCase.caseNumber] = caseEvidence;
             localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
@@ -8162,13 +8221,14 @@
         
         async function viewEvidenceInline(evidenceId) {
             const evidence = caseEvidence.find(e => e.id === evidenceId);
-            if (!evidence) return;
+            if (!evidence) { _persistOpenEvidence(null); return; }
 
             // Datapilot bundle entries get a dedicated tabbed viewer
             // (Messages / Media / Calls / Contacts) instead of the
             // generic file-list panel. Legacy entries (pre-bundle, only
             // a text description) fall through to the regular viewer.
             if (evidence.metadata && evidence.metadata.kind === 'datapilot' && evidence.metadata.bundlePath) {
+                _persistOpenEvidence(evidenceId);
                 return renderDatapilotEvidenceViewer(evidence);
             }
 
@@ -8177,14 +8237,22 @@
             if (evidence.metadata && typeof evidence.metadata.kind === 'string'
                 && evidence.metadata.kind.indexOf('warrant-') === 0
                 && evidence.metadata.bundlePath) {
+                _persistOpenEvidence(evidenceId);
                 return renderWarrantBundleViewer(evidence);
             }
 
             // Datapilot Extraction evidence (added via Add New Evidence form):
             // jump to the Datapilot tab and load the referenced extraction.
+            // This navigates AWAY from the evidence viewer panel, so it must
+            // NOT be remembered as the open evidence-panel item.
             if (evidence.type === 'datapilot' && evidence.datapilot && evidence.datapilot.folderPath) {
+                _persistOpenEvidence(null);
                 return openDatapilotEvidenceInTab(evidence);
             }
+
+            // Remember this as the open evidence so the panel is restored on
+            // tab re-entry / case reload.
+            _persistOpenEvidence(evidenceId);
 
             // Show loading overlay
             const loadingOverlay = document.getElementById('evidenceLoadingOverlay');
@@ -9107,35 +9175,172 @@
             return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
 
-        function _whisperPersistEvidence() {
+        // ── Dedicated, compact transcript store ────────────────────────
+        // Kept SEPARATE from the (potentially huge) viperCaseEvidence blob so
+        // it can't hit the localStorage quota and always survives tab switches
+        // and case reloads.  Shape: { [caseNumber]: { "<evidenceId>:<index>": entry } }
+        function _whisperKey(evidenceId, index) { return evidenceId + ':' + index; }
+        function _whisperLoadStore() {
+            try { return _lsParse('viperTranscripts', {}); } catch (e) { return {}; }
+        }
+        function _whisperGetEntry(evidenceId, index) {
+            if (!currentCase) return null;
+            const store = _whisperLoadStore();
+            const c = store[currentCase.caseNumber];
+            return (c && c[_whisperKey(evidenceId, index)]) || null;
+        }
+        function _whisperSaveEntry(evidenceId, index, entry) {
             try {
-                const allEvidence = _lsParse('viperCaseEvidence', {});
-                allEvidence[currentCase.caseNumber] = caseEvidence;
-                localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
-            } catch (e) { console.error('Failed to persist transcript to evidence:', e); }
+                if (!currentCase) return;
+                const store = _whisperLoadStore();
+                if (!store[currentCase.caseNumber]) store[currentCase.caseNumber] = {};
+                store[currentCase.caseNumber][_whisperKey(evidenceId, index)] = entry;
+                localStorage.setItem('viperTranscripts', JSON.stringify(store));
+            } catch (e) { console.error('Failed to persist transcript:', e); }
+        }
+
+        // Restore a stored transcript back onto the in-memory file object.
+        function _whisperHydrate(evidence, index, file) {
+            if (!file) return file;
+            if (file.transcript && String(file.transcript).trim().length) return file;
+            const entry = _whisperGetEntry(evidence.id, index);
+            if (entry) {
+                file.transcript = entry.text || '';
+                file.transcriptSegments = Array.isArray(entry.segments) ? entry.segments : null;
+                file.transcriptModel = entry.model || null;
+                file.transcribedAt = entry.at || null;
+                file.transcriptTxtPath = entry.txtPath || null;
+                file.transcriptSrtPath = entry.srtPath || null;
+                file.transcriptJsonPath = entry.jsonPath || null;
+            }
+            return file;
+        }
+
+        function _whisperFmtTime(sec) {
+            sec = Math.max(0, Math.floor(Number(sec) || 0));
+            const h = Math.floor(sec / 3600);
+            const m = Math.floor((sec % 3600) / 60);
+            const s = sec % 60;
+            const pad = (n) => (n < 10 ? '0' + n : '' + n);
+            return (h > 0 ? h + ':' + pad(m) : '' + m) + ':' + pad(s);
+        }
+
+        // Plain-text form of a transcript (optionally with [mm:ss] prefixes)
+        // for Copy / Insert. Falls back to the flat text for legacy transcripts.
+        function _whisperPlainText(file, withTimes) {
+            const segs = file && file.transcriptSegments;
+            if (Array.isArray(segs) && segs.length) {
+                return segs.map(s => withTimes ? `[${_whisperFmtTime(s.start)}] ${s.text}` : s.text).join('\n');
+            }
+            return (file && file.transcript) || '';
+        }
+
+        // Robust clipboard write (clipboard API + textarea/execCommand fallback).
+        async function _whisperClipboard(text) {
+            try { await navigator.clipboard.writeText(text); return true; }
+            catch (e) {
+                try {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.style.position = 'fixed'; ta.style.left = '-9999px'; ta.style.top = '0';
+                    document.body.appendChild(ta); ta.focus(); ta.select();
+                    const ok = document.execCommand('copy');
+                    document.body.removeChild(ta);
+                    return ok;
+                } catch (e2) { return false; }
+            }
+        }
+
+        // Ask whether to include timestamps. Resolves 'with' | 'without' | null(cancel).
+        // If the transcript has no segments there is nothing to timestamp, so we
+        // skip the prompt and just resolve 'without'.
+        function _whisperAskTimestamps(file, actionLabel) {
+            const hasSeg = file && Array.isArray(file.transcriptSegments) && file.transcriptSegments.length;
+            if (!hasSeg) return Promise.resolve('without');
+            return new Promise(resolve => {
+                const backdrop = document.createElement('div');
+                backdrop.className = 'viper-confirm-backdrop';
+                backdrop.innerHTML =
+                    '<div class="viper-confirm-box">' +
+                        '<p>' + _whisperEsc(actionLabel) + ' — include timestamps?</p>' +
+                        '<div class="viper-confirm-btns">' +
+                            '<button class="vc-cancel" data-v="cancel">Cancel</button>' +
+                            '<button class="vc-ok" data-v="without">Without timestamps</button>' +
+                            '<button class="vc-ok" data-v="with">With timestamps</button>' +
+                        '</div>' +
+                    '</div>';
+                function close(val) {
+                    backdrop.style.opacity = '0';
+                    setTimeout(() => { if (backdrop.parentNode) backdrop.remove(); }, 150);
+                    resolve(val);
+                }
+                backdrop.querySelectorAll('button').forEach(b => {
+                    b.onclick = () => close(b.dataset.v === 'cancel' ? null : b.dataset.v);
+                });
+                backdrop.onclick = (e) => { if (e.target === backdrop) close(null); };
+                document.addEventListener('keydown', function handler(e) {
+                    if (e.key === 'Escape') { document.removeEventListener('keydown', handler); close(null); }
+                });
+                document.body.appendChild(backdrop);
+            });
+        }
+
+        // Seek the audio/video player in the same evidence file card.
+        function whisperSeekMedia(evidenceId, index, seconds) {
+            const container = document.getElementById(`wtx-${evidenceId}-${index}`);
+            if (!container) return;
+            let media = null;
+            const card = container.closest('.glass-card');
+            if (card) media = card.querySelector('video, audio');
+            if (!media) {
+                let p = container.parentElement;
+                while (p && !media) { media = (p.querySelector && p.querySelector('video, audio')) || null; p = p.parentElement; }
+            }
+            if (media) {
+                try {
+                    media.currentTime = Math.max(0, Number(seconds) || 0);
+                    media.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    const pr = media.play(); if (pr && pr.catch) pr.catch(() => {});
+                } catch (e) {}
+            }
+        }
+
+        // Transcript body: clickable timestamps (seek media) when segments exist.
+        function _whisperBodyHtml(evidenceId, index, file) {
+            const segs = file.transcriptSegments;
+            if (Array.isArray(segs) && segs.length) {
+                return segs.map(seg => `
+                    <div class="flex gap-2 items-start py-0.5">
+                        <button onclick="whisperSeekMedia(${evidenceId}, ${index}, ${Number(seg.start) || 0})" title="Jump to ${_whisperFmtTime(seg.start)}" class="shrink-0 font-mono text-[11px] text-viper-cyan hover:text-white hover:bg-viper-cyan/20 rounded px-1 py-0.5 transition-colors">${_whisperFmtTime(seg.start)}</button>
+                        <span class="flex-1">${_whisperEsc(seg.text)}</span>
+                    </div>`).join('');
+            }
+            const t = file.transcript || '';
+            return `<div class="whitespace-pre-wrap">${_whisperEsc(t) || '<span class="text-gray-500 italic">(No speech detected)</span>'}</div>`;
         }
 
         // Transcript panel (shown once a file has a transcript).
         function _whisperTranscriptHtml(evidenceId, index, file) {
-            const t = file.transcript || '';
             const modelTag = file.transcriptModel ? ` · ${file.transcriptModel}` : '';
+            const hasSeg = Array.isArray(file.transcriptSegments) && file.transcriptSegments.length;
             return `
                 <div class="bg-viper-card/40 border border-viper-purple/20 rounded-lg overflow-hidden">
                     <div class="flex items-center justify-between px-3 py-2 bg-viper-purple/10">
-                        <span class="text-xs font-semibold text-viper-purple">📝 Transcript${modelTag}</span>
+                        <span class="text-xs font-semibold text-viper-purple">📝 Transcript${modelTag}${hasSeg ? ' · click a time to jump' : ''}</span>
                         <div class="flex gap-2">
                             <button onclick="whisperInsertIntoReport(${evidenceId}, ${index})" class="px-2 py-1 rounded text-[11px] bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/30 hover:bg-viper-cyan/30 transition-colors">Insert into report</button>
                             <button onclick="whisperCopyTranscript(${evidenceId}, ${index})" class="px-2 py-1 rounded text-[11px] bg-white/5 text-gray-300 border border-white/10 hover:bg-white/10 transition-colors">Copy</button>
                             <button onclick="whisperTranscribeEvidence(${evidenceId}, ${index}, true)" class="px-2 py-1 rounded text-[11px] bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10 transition-colors">Re-transcribe</button>
                         </div>
                     </div>
-                    <div class="p-3 max-h-64 overflow-auto text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">${_whisperEsc(t) || '<span class="text-gray-500 italic">(No speech detected)</span>'}</div>
+                    <div class="p-3 max-h-64 overflow-auto text-sm text-gray-200 leading-relaxed">${_whisperBodyHtml(evidenceId, index, file)}</div>
                 </div>`;
         }
 
         // Button / panel injected under each audio & video evidence player.
         function _whisperBlock(evidence, index, file) {
             if (!file || !file.path) return '';
+            _whisperHydrate(evidence, index, file);
             const cid = `wtx-${evidence.id}-${index}`;
             if (file.transcript && String(file.transcript).trim().length) {
                 return `<div id="${cid}" class="mt-3">${_whisperTranscriptHtml(evidence.id, index, file)}</div>`;
@@ -9216,12 +9421,23 @@
                 }
 
                 file.transcript = res.text || '';
+                file.transcriptSegments = Array.isArray(res.segments) ? res.segments : null;
                 file.transcriptModel = model;
                 file.transcriptTxtPath = res.txtPath || null;
                 file.transcriptSrtPath = res.srtPath || null;
                 file.transcriptJsonPath = res.jsonPath || null;
                 file.transcribedAt = new Date().toISOString();
-                _whisperPersistEvidence();
+                // Persist to the dedicated, quota-safe transcript store so it
+                // reappears automatically next time this evidence is opened.
+                _whisperSaveEntry(evidenceId, index, {
+                    text: file.transcript,
+                    segments: file.transcriptSegments,
+                    model: model,
+                    at: file.transcribedAt,
+                    txtPath: file.transcriptTxtPath,
+                    srtPath: file.transcriptSrtPath,
+                    jsonPath: file.transcriptJsonPath,
+                });
                 if (typeof audit === 'function') {
                     audit('evidence_transcribed', {
                         case_number: currentCase ? currentCase.caseNumber : null,
@@ -9253,44 +9469,313 @@
             }
         }
 
-        function whisperCopyTranscript(evidenceId, index) {
+        async function whisperCopyTranscript(evidenceId, index) {
             const evidence = caseEvidence.find(e => e.id === evidenceId);
             const file = evidence && evidence.files ? evidence.files[index] : null;
-            if (!file || !file.transcript) return;
-            try {
-                navigator.clipboard.writeText(file.transcript);
-                if (typeof showToast === 'function') showToast('Transcript copied to clipboard', 'success');
-            } catch (e) {
-                if (typeof showToast === 'function') showToast('Copy failed: ' + e.message, 'error');
+            if (!file) return;
+            _whisperHydrate(evidence, index, file);
+            const choice = await _whisperAskTimestamps(file, 'Copy transcript');
+            if (choice === null) return; // cancelled
+            const text = _whisperPlainText(file, choice === 'with');
+            if (!text) return;
+            const ok = await _whisperClipboard(text);
+            if (typeof showToast === 'function') {
+                showToast(ok ? 'Transcript copied to clipboard' : 'Copy failed', ok ? 'success' : 'error');
             }
         }
 
-        function whisperInsertIntoReport(evidenceId, index) {
+        async function whisperInsertIntoReport(evidenceId, index) {
             const evidence = caseEvidence.find(e => e.id === evidenceId);
             const file = evidence && evidence.files ? evidence.files[index] : null;
-            if (!file || !file.transcript) return;
+            if (!file) return;
+            _whisperHydrate(evidence, index, file);
+            const choice = await _whisperAskTimestamps(file, 'Insert into report');
+            if (choice === null) return; // cancelled
+            const withTimes = choice === 'with';
+            const text = _whisperPlainText(file, withTimes);
+            if (!text) return;
+            const stamp = file.transcribedAt
+                ? ' (' + (window.ViperDateTime ? window.ViperDateTime.formatDateTime(file.transcribedAt) : new Date(file.transcribedAt).toLocaleString()) + ')'
+                : '';
+            const header = `Transcript — ${file.name}${stamp}`;
+
+            // The Reports tab is rendered on demand, so #reportEditor only exists
+            // once we switch to it. Switch first, then append.
+            try { renderTabContent('reports'); } catch (e) {}
             const editor = document.getElementById('reportEditor');
-            const header = `Transcript — ${file.name}${file.transcribedAt ? ' (' + (window.ViperDateTime ? window.ViperDateTime.formatDateTime(file.transcribedAt) : new Date(file.transcribedAt).toLocaleString()) + ')' : ''}`;
-            if (editor) {
-                const block = document.createElement('div');
-                const h = document.createElement('p');
-                h.innerHTML = '<strong>' + _whisperEsc(header) + '</strong>';
-                const body = document.createElement('p');
-                body.textContent = file.transcript;
-                block.appendChild(h);
-                block.appendChild(body);
-                editor.appendChild(block);
-                editor.dispatchEvent(new Event('input', { bubbles: true }));
-                if (typeof showToast === 'function') showToast('Transcript inserted into report', 'success');
-            } else {
+            if (!editor) {
+                _whisperClipboard(header + '\n\n' + text).then(ok => {
+                    if (typeof showToast === 'function') {
+                        showToast(ok ? 'Transcript copied — open Reports and paste' : 'Open the Reports tab to insert', 'info');
+                    }
+                });
+                return;
+            }
+
+            // Clear the default placeholder if it's the only content.
+            if (editor.textContent.trim() === 'Start typing your report here...') editor.innerHTML = '';
+
+            const block = document.createElement('div');
+            const h = document.createElement('p');
+            h.innerHTML = '<strong>' + _whisperEsc(header) + '</strong>';
+            block.appendChild(h);
+            const lines = (withTimes && Array.isArray(file.transcriptSegments) && file.transcriptSegments.length)
+                ? file.transcriptSegments.map(s => `[${_whisperFmtTime(s.start)}] ${s.text}`)
+                : String(text).split('\n');
+            lines.forEach(line => {
+                const p = document.createElement('p');
+                p.textContent = line;
+                block.appendChild(p);
+            });
+            editor.appendChild(block);
+            editor.dispatchEvent(new Event('input', { bubbles: true }));
+            try { saveReport(true); } catch (e) {}
+            try { editor.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+            if (typeof showToast === 'function') showToast('Transcript inserted into report', 'success');
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        // ViperDictation — live voice dictation into the Reports editor.
+        // Whisper is transcription-only, so spoken COMMANDS ("new paragraph",
+        // "underline", "period", …) are interpreted HERE, on top of the
+        // finalized segments streamed from whisper.cpp. parseSegment() is a
+        // pure function (no DOM) so the grammar is unit-testable.
+        // ══════════════════════════════════════════════════════════════
+        const ViperDictation = (function () {
+            const EDITOR_ID = 'reportEditor';
+
+            // Command phrases → actions. Ordered so multi-word phrases are
+            // tested before shorter ones. `fmt` toggles a mark; `punct`
+            // inserts attached punctuation; text words accumulate between.
+            const CMD_LIST = [
+                { p: 'stop dictation', n: 'stop' },
+                { p: 'new paragraph', n: 'paragraph' },
+                { p: 'new line', n: 'newline' },
+                { p: 'new heading', n: 'heading' },
+                { p: 'new bullet', n: 'bullet' },
+                { p: 'scratch that', n: 'scratch' },
+                { p: 'all caps', n: 'allcaps' },
+                { p: 'question mark', n: 'punct', v: '?', eos: true },
+                { p: 'exclamation point', n: 'punct', v: '!', eos: true },
+                { p: 'exclamation mark', n: 'punct', v: '!', eos: true },
+                { p: 'full stop', n: 'punct', v: '.', eos: true },
+                { p: 'end underline', n: 'fmt', v: 'underline', on: false },
+                { p: 'end bold', n: 'fmt', v: 'bold', on: false },
+                { p: 'end italic', n: 'fmt', v: 'italic', on: false },
+                { p: 'underline', n: 'fmt', v: 'underline', on: true },
+                { p: 'bold', n: 'fmt', v: 'bold', on: true },
+                { p: 'italic', n: 'fmt', v: 'italic', on: true },
+                { p: 'period', n: 'punct', v: '.', eos: true },
+                { p: 'comma', n: 'punct', v: ',' },
+                { p: 'colon', n: 'punct', v: ':' },
+                { p: 'semicolon', n: 'punct', v: ';' },
+                { p: 'cap', n: 'cap' },
+            ];
+
+            function normalize(s) {
+                return String(s == null ? '' : s)
+                    .toLowerCase()
+                    .replace(/[^\w\s'-]/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+            }
+
+            // PURE: turn a finalized segment into a token stream.
+            // Returns [{type:'text', value}, {type:'cmd', n, v?, on?, eos?}, ...]
+            function parseSegment(text) {
+                const words = normalize(text).split(' ').filter(Boolean);
+                const tokens = [];
+                let buf = [];
+                const flush = () => { if (buf.length) { tokens.push({ type: 'text', value: buf.join(' ') }); buf = []; } };
+                let i = 0;
+                while (i < words.length) {
+                    let matched = null;
+                    for (const c of CMD_LIST) {
+                        const pw = c.p.split(' ');
+                        if (i + pw.length > words.length) continue;
+                        let ok = true;
+                        for (let k = 0; k < pw.length; k++) { if (words[i + k] !== pw[k]) { ok = false; break; } }
+                        if (ok) { matched = { c, len: pw.length }; break; }
+                    }
+                    if (matched) { flush(); tokens.push(Object.assign({ type: 'cmd' }, matched.c)); i += matched.len; }
+                    else { buf.push(words[i]); i++; }
+                }
+                flush();
+                return tokens;
+            }
+
+            // ── runtime state (DOM side) ──
+            let active = false;
+            let unsubs = [];
+            let saveTimer = null;
+            const marks = { bold: false, italic: false, underline: false };
+            const st = { capNext: true, capOne: false, upperOne: false, lastChar: '', headingActive: false, lastLen: 0 };
+
+            function editorEl() { return document.getElementById(EDITOR_ID); }
+            function toast(msg, kind) { try { if (typeof showToast === 'function') showToast(msg, kind || 'info'); } catch (_) {} }
+            function isActive() { return active; }
+
+            function _resetState() {
+                marks.bold = marks.italic = marks.underline = false;
+                st.capNext = true; st.capOne = false; st.upperOne = false;
+                st.lastChar = ''; st.headingActive = false; st.lastLen = 0;
+            }
+
+            function _placeCaretEnd(el) {
                 try {
-                    navigator.clipboard.writeText(header + '\n\n' + file.transcript);
-                    if (typeof showToast === 'function') showToast('Open the Reports tab, then paste — transcript copied', 'info');
-                } catch (e) {
-                    if (typeof showToast === 'function') showToast('Open the Reports tab to insert the transcript', 'info');
+                    el.focus();
+                    const r = document.createRange();
+                    r.selectNodeContents(el); r.collapse(false);
+                    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+                } catch (_) {}
+            }
+
+            function _insertText(str, noSpace) {
+                let out = String(str);
+                if (st.upperOne) { out = out.toUpperCase(); st.upperOne = false; }
+                else if (st.capOne) { out = out.charAt(0).toUpperCase() + out.slice(1); st.capOne = false; st.capNext = false; }
+                else if (st.capNext) { out = out.charAt(0).toUpperCase() + out.slice(1); st.capNext = false; }
+                const atStart = st.lastChar === '' || st.lastChar === '\n' || st.lastChar === ' ' || st.lastChar === '(' || st.lastChar === '"';
+                if (!noSpace && !atStart) out = ' ' + out;
+                document.execCommand('insertText', false, out);
+                st.lastChar = out.slice(-1);
+                st.lastLen = out.length;
+            }
+
+            function _applyTokens(tokens) {
+                const el = editorEl();
+                if (!el) return;
+                el.focus();
+                for (const t of tokens) {
+                    if (t.type === 'text') { _insertText(t.value, false); continue; }
+                    switch (t.n) {
+                        case 'paragraph':
+                            if (st.headingActive) { document.execCommand('insertParagraph'); try { document.execCommand('formatBlock', false, 'p'); } catch (_) {} st.headingActive = false; }
+                            else document.execCommand('insertParagraph');
+                            st.capNext = true; st.lastChar = ''; break;
+                        case 'newline':
+                            document.execCommand('insertHTML', false, '<br>');
+                            st.capNext = true; st.lastChar = ''; break;
+                        case 'heading':
+                            document.execCommand('insertParagraph');
+                            try { document.execCommand('formatBlock', false, 'h2'); } catch (_) {}
+                            st.headingActive = true; st.capNext = true; st.lastChar = ''; break;
+                        case 'bullet':
+                            try { document.execCommand('insertUnorderedList'); } catch (_) {}
+                            st.capNext = true; st.lastChar = ''; break;
+                        case 'fmt': {
+                            const key = t.v;
+                            if (t.on && !marks[key]) { document.execCommand(key); marks[key] = true; }
+                            else if (!t.on && marks[key]) { document.execCommand(key); marks[key] = false; }
+                            break;
+                        }
+                        case 'punct':
+                            _insertText(t.v, true);
+                            if (t.eos) st.capNext = true;
+                            break;
+                        case 'cap': st.capOne = true; break;
+                        case 'allcaps': st.upperOne = true; break;
+                        case 'scratch':
+                            if (st.lastLen > 0) { for (let k = 0; k < st.lastLen; k++) document.execCommand('delete'); st.lastLen = 0; st.lastChar = ''; }
+                            break;
+                        case 'stop': stop(); return;
+                        default: break;
+                    }
+                }
+                try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+                if (saveTimer) clearTimeout(saveTimer);
+                saveTimer = setTimeout(() => { try { saveReport(true); } catch (_) {} }, 1500);
+            }
+
+            // ── indicator pill (listening + interim partial) ──
+            function _indicator() { return document.getElementById('dictationIndicator'); }
+            function _renderIndicator() {
+                if (_indicator()) return;
+                const pill = document.createElement('div');
+                pill.id = 'dictationIndicator';
+                pill.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:99990;max-width:420px;'
+                    + 'background:#1a2332;border:1px solid rgba(124,58,237,0.5);border-radius:12px;'
+                    + 'padding:12px 14px;box-shadow:0 12px 40px rgba(0,0,0,0.5);color:#e2e8f0;font-size:13px;';
+                pill.innerHTML =
+                    '<div style="display:flex;align-items:center;gap:8px;">'
+                    + '<span style="width:10px;height:10px;border-radius:50%;background:#ef4444;box-shadow:0 0 0 0 rgba(239,68,68,0.6);animation:vd-pulse 1.4s infinite;"></span>'
+                    + '<strong style="color:#a78bfa;">Dictating…</strong>'
+                    + '<button id="dictationStopBtn" style="margin-left:auto;padding:3px 10px;border-radius:6px;font-size:12px;'
+                    + 'background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);color:#f87171;cursor:pointer;">Stop</button>'
+                    + '</div>'
+                    + '<div id="dictationInterim" style="margin-top:6px;color:#94a3b8;font-style:italic;min-height:16px;word-break:break-word;"></div>';
+                document.body.appendChild(pill);
+                if (!document.getElementById('vd-pulse-style')) {
+                    const s = document.createElement('style'); s.id = 'vd-pulse-style';
+                    s.textContent = '@keyframes vd-pulse{0%{box-shadow:0 0 0 0 rgba(239,68,68,0.6)}70%{box-shadow:0 0 0 8px rgba(239,68,68,0)}100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}}';
+                    document.head.appendChild(s);
+                }
+                const sb = document.getElementById('dictationStopBtn');
+                if (sb) sb.onclick = () => stop();
+            }
+            function _removeIndicator() { const p = _indicator(); if (p && p.parentNode) p.parentNode.removeChild(p); }
+            function _setInterim(text) { const n = document.getElementById('dictationInterim'); if (n) n.textContent = text || ''; }
+
+            function _updateButton() {
+                const b = document.getElementById('dictateBtn');
+                if (!b) return;
+                if (active) {
+                    b.classList.add('bg-red-500/20', 'text-red-400', 'border-red-500/40');
+                    b.classList.remove('text-gray-300');
+                    b.setAttribute('title', 'Stop dictation');
+                    const lbl = b.querySelector('.dictate-label'); if (lbl) lbl.textContent = 'Stop Dictation';
+                } else {
+                    b.classList.remove('bg-red-500/20', 'text-red-400', 'border-red-500/40');
+                    b.classList.add('text-gray-300');
+                    b.setAttribute('title', 'Dictate (voice → report)');
+                    const lbl = b.querySelector('.dictate-label'); if (lbl) lbl.textContent = 'Dictate';
                 }
             }
-        }
+
+            function _wire() {
+                const api = window.electronAPI || {};
+                if (api.onDictationFinal) unsubs.push(api.onDictationFinal((p) => {
+                    if (!active) return;
+                    _setInterim('');
+                    try { _applyTokens(parseSegment(p && p.text)); } catch (e) { console.error('dictation apply', e); }
+                }));
+                if (api.onDictationPartial) unsubs.push(api.onDictationPartial((p) => {
+                    if (active) _setInterim(p && p.text ? p.text : '');
+                }));
+                if (api.onDictationEnded) unsubs.push(api.onDictationEnded((p) => {
+                    if (!active) return;
+                    active = false; _unwire(); _removeIndicator(); _updateButton();
+                    if (p && p.reason === 'error') toast('Dictation stopped: ' + (p.error || 'engine error'), 'error');
+                }));
+            }
+            function _unwire() { unsubs.forEach(u => { try { u(); } catch (_) {} }); unsubs = []; }
+
+            async function start() {
+                const el = editorEl();
+                if (!el) { toast('Open the Reports tab to dictate', 'info'); return; }
+                const api = window.electronAPI || {};
+                if (!api.dictationStart) { toast('Dictation not available in this build', 'error'); return; }
+                let status = null;
+                try { status = await api.dictationStatus(); } catch (_) {}
+                if (!status || !status.enginePresent) { toast('Dictation engine (whisper-stream.exe) is not installed in this build', 'error'); return; }
+                if (!status.modelPresent) { toast('No dictation model is installed', 'error'); return; }
+                let res = null;
+                try { res = await api.dictationStart({ language: 'en' }); } catch (e) { res = { success: false, error: e.message }; }
+                if (!res || !res.success) { toast((res && res.error) || 'Failed to start dictation', 'error'); return; }
+                active = true; _resetState(); _wire(); _renderIndicator(); _updateButton();
+                _placeCaretEnd(el);
+            }
+            async function stop() {
+                const api = window.electronAPI || {};
+                try { if (api.dictationStop) await api.dictationStop(); } catch (_) {}
+                active = false; _unwire(); _removeIndicator(); _updateButton();
+                try { saveReport(true); } catch (_) {}
+            }
+            function toggle() { active ? stop() : start(); }
+
+            return { parseSegment, toggle, start, stop, isActive, CMD_LIST };
+        })();
+        try { window.ViperDictation = ViperDictation; } catch (_) {}
 
         function renderEvidenceFiles(evidence) {
             if (!evidence.files || evidence.files.length === 0) {

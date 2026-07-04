@@ -4551,8 +4551,14 @@ ipcMain.handle('whisper-status', async () => {
 // overridable per-call (the renderer can pass a custom URL); otherwise it
 // falls back to WHISPER_ENGINE_PACK_URL. "Install from file…" supports fully
 // offline / air-gapped deployment.
+//
+// The engine (~2.4 GB) exceeds GitHub's 2 GB per-asset limit, so it is hosted
+// as a small manifest.json + multiple .zip.NNN parts. When the URL points at a
+// .json manifest, the parts are downloaded in order and concatenated back into
+// one .zip before extraction. A direct .zip URL is still supported (single
+// file) for custom/self-hosted sources.
 const WHISPER_ENGINE_PACK_URL =
-  'https://github.com/exhonorated999/project-viper/releases/download/whisper-engines/viper-whisper-engines.zip';
+  'https://github.com/exhonorated999/project-viper/releases/download/whisper-engines/viper-whisper-engines.manifest.json';
 
 let _engineBusy = false;
 
@@ -4599,7 +4605,9 @@ function _engineStatus() {
 ipcMain.handle('whisper-engine-status', async () => _engineStatus());
 
 // Download a file over http(s) with redirect handling + progress callback.
-function _downloadTo(url, destPath, onProgress, redirects = 0) {
+// `append` opens the destination in append mode (used to concatenate the
+// multi-part engine pack into a single .zip).
+function _downloadTo(url, destPath, onProgress, redirects = 0, append = false) {
   return new Promise((resolve, reject) => {
     if (redirects > 6) return reject(new Error('Too many redirects'));
     let mod;
@@ -4611,7 +4619,7 @@ function _downloadTo(url, destPath, onProgress, redirects = 0) {
         let next;
         try { next = new URL(res.headers.location, url).toString(); }
         catch (e) { return reject(e); }
-        return resolve(_downloadTo(next, destPath, onProgress, redirects + 1));
+        return resolve(_downloadTo(next, destPath, onProgress, redirects + 1, append));
       }
       if (res.statusCode !== 200) {
         res.resume();
@@ -4619,7 +4627,7 @@ function _downloadTo(url, destPath, onProgress, redirects = 0) {
       }
       const total = parseInt(res.headers['content-length'] || '0', 10);
       let received = 0;
-      const out = fs.createWriteStream(destPath);
+      const out = fs.createWriteStream(destPath, append ? { flags: 'a' } : undefined);
       res.on('data', (chunk) => { received += chunk.length; if (onProgress) onProgress(received, total); });
       res.pipe(out);
       out.on('finish', () => out.close(() => resolve({ received, total })));
@@ -4645,6 +4653,52 @@ function _extractZip(zipPath, destDir) {
     ps.on('error', reject);
     ps.on('close', (code) => code === 0 ? resolve() : reject(new Error('Zip extract failed (' + code + '). ' + err.slice(-300))));
   });
+}
+
+// Fetch a small text resource (the pack manifest) over http(s) with redirects.
+function _fetchText(url, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirects > 6) return reject(new Error('Too many redirects'));
+    let mod;
+    try { mod = url.startsWith('https:') ? require('https') : require('http'); }
+    catch (e) { return reject(e); }
+    const req = mod.get(url, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        let next; try { next = new URL(res.headers.location, url).toString(); } catch (e) { return reject(e); }
+        return resolve(_fetchText(next, redirects + 1));
+      }
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error('HTTP ' + res.statusCode)); }
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => resolve(data));
+    });
+    req.on('error', reject);
+    req.setTimeout(30000, () => req.destroy(new Error('Manifest fetch timed out.')));
+  });
+}
+
+// Download the engine pack into `tmpZip`. Supports either a .json manifest
+// (multi-part: parts are concatenated in order) or a direct single .zip.
+// onProgress(receivedCumulative, total) reports overall bytes.
+async function _downloadEnginePack(url, tmpZip, onProgress) {
+  try { fs.rmSync(tmpZip, { force: true }); } catch (_) {}
+  const isManifest = /\.json(\?|$)/i.test(url);
+  if (!isManifest) {
+    await _downloadTo(url, tmpZip, onProgress);
+    return;
+  }
+  const man = JSON.parse(await _fetchText(url));
+  const parts = Array.isArray(man.parts) ? man.parts : [];
+  if (!parts.length) throw new Error('Engine manifest has no parts.');
+  const total = Number(man.totalSize) || 0;
+  let base = 0;
+  for (const part of parts) {
+    const purl = new URL(part, url).toString();
+    const r = await _downloadTo(purl, tmpZip, (rr) => onProgress(base + rr, total), 0, true /* append */);
+    base += r.received;
+  }
 }
 
 // Extract a local zip into engines/, moving whisper[-stream]/ into place.
@@ -4696,7 +4750,7 @@ ipcMain.handle('whisper-engine-download', async (event, opts = {}) => {
   try {
     send('downloading', { received: 0, total: 0, pct: 0 });
     let lastPct = -1;
-    await _downloadTo(url, tmpZip, (received, total) => {
+    await _downloadEnginePack(url, tmpZip, (received, total) => {
       const pct = total ? Math.floor((received / total) * 100) : 0;
       if (pct !== lastPct) { lastPct = pct; send('downloading', { received, total, pct }); }
     });

@@ -11,9 +11,12 @@
 # pack whose top level contains "whisper\" and "whisper-stream\", which the
 # in-app installer (electron-main.js whisper-engine-* handlers) extracts.
 #
-# By default the pack is CPU-only: the ~2.9 GB of CUDA GPU DLLs inside
-# Faster-Whisper-XXL's bundled torch are stripped (transcription runs on CPU
-# via CTranslate2). Pass -IncludeCuda to keep GPU acceleration (much larger).
+# By default the pack removes only the lazily-loaded GPU libraries that are
+# NOT needed for CPU transcription (cuDNN + onnxruntime CUDA/TensorRT
+# providers, ~1 GB). This keeps the engine fully working (torch is a CUDA
+# build that hard-loads c10_cuda/torch_cuda + cudart/cublas/etc. at import,
+# so those MUST stay) while getting the pack under GitHub's 2 GB asset limit.
+# Pass -IncludeCuda to keep every GPU library (larger; may exceed 2 GB).
 #
 # Usage (from repo root, in PowerShell):
 #   powershell -ExecutionPolicy Bypass -File tools\whisper\pack-engines.ps1
@@ -66,13 +69,17 @@ try {
     if (-not $IncludeCuda) {
         $torchLib = Join-Path $staging 'whisper\_xxl_data\torch\lib'
         if (Test-Path $torchLib) {
-            Write-Host "Stripping CUDA GPU DLLs (CPU-only pack) ..."
-            # GPU-only libraries. torch_cpu.dll is KEPT (needed for CPU path).
-            $cudaPatterns = @(
-                'torch_cuda*.dll', 'cudnn*.dll', 'cublas*.dll', 'cufft*.dll',
-                'curand*.dll', 'cusolver*.dll', 'cusparse*.dll', 'nvrtc*.dll',
-                'nvToolsExt*.dll', 'cupti*.dll', 'cudart*.dll', 'nvJitLink*.dll'
-            )
+            Write-Host "Removing lazily-loaded GPU libraries (keeps CPU transcription) ..."
+            # IMPORTANT: this torch is a CUDA build. torch\__init__ hard-loads
+            # c10_cuda.dll / torch_cuda.dll (and their deps cudart/cublas/cufft/
+            # cusolver/cusparse/curand) AT IMPORT TIME. Removing any of those
+            # breaks the engine with 'WinError 126: specified module not found'.
+            # So we ONLY remove libraries that are dlopen'd on demand and are
+            # never needed for CPU transcription:
+            #   - cuDNN (GPU convolution)               ~0.85 GB
+            #   - onnxruntime CUDA / TensorRT providers ~0.10 GB
+            # This keeps the pack a single working file under GitHub's 2 GB limit.
+            $cudaPatterns = @( 'cudnn*.dll' )
             $freed = 0
             foreach ($pat in $cudaPatterns) {
                 Get-ChildItem -Path $torchLib -Filter $pat -ErrorAction SilentlyContinue | ForEach-Object {
@@ -90,12 +97,12 @@ try {
                     $freed += $_.Length; Remove-Item $_.FullName -Force
                 }
             }
-            Write-Host ("Removed {0:N1} GB of GPU libraries." -f ($freed / 1GB))
+            Write-Host ("Removed {0:N1} GB of on-demand GPU libraries." -f ($freed / 1GB))
         } else {
             Write-Warning "torch\lib not found - nothing to strip."
         }
     } else {
-        Write-Host "Keeping CUDA GPU libraries (-IncludeCuda)."
+        Write-Host "Keeping ALL GPU libraries (-IncludeCuda)."
     }
 
     # Compress with .NET ZipFile (zip64-capable -> handles >2 GB).

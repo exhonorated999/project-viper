@@ -4448,10 +4448,30 @@ ipcMain.handle('read-evidence-file', async (event, filePath) => {
 // Encrypted evidence: media is decrypted to a temp file for the engine,
 // transcript sidecars are re-encrypted into the case Evidence/ tree.
 // ═══════════════════════════════════════════════════════════════════════
+// On-demand engines are installed here (user-writable, survives app updates):
+//   <userData>/engines/whisper          (faster-whisper-xxl.exe + _models + _xxl_data)
+//   <userData>/engines/whisper-stream   (whisper-stream.exe + _models/ggml-*.bin)
+function _engineInstallRoot() {
+  return path.join(app.getPath('userData'), 'engines');
+}
+
+// Resolve the active base dir for an engine that may be installed on demand.
+// Priority: userData/engines/<name> (downloaded) → bundled resources (legacy
+// installs that still shipped the engine) → dev build/<name>. `marker` is the
+// executable that proves a real install; if nothing is found we return the
+// userData candidate so install + spawn paths stay stable.
+function _resolveEngineBase(name, marker) {
+  const userDir = path.join(_engineInstallRoot(), name);
+  const legacyDir = app.isPackaged
+    ? path.join(process.resourcesPath, name)
+    : path.join(__dirname, 'build', name);
+  try { if (fs.existsSync(path.join(userDir, marker))) return userDir; } catch (_) {}
+  try { if (fs.existsSync(path.join(legacyDir, marker))) return legacyDir; } catch (_) {}
+  return userDir;
+}
+
 function _whisperPaths() {
-  const base = app.isPackaged
-    ? path.join(process.resourcesPath, 'whisper')
-    : path.join(__dirname, 'build', 'whisper');
+  const base = _resolveEngineBase('whisper', 'faster-whisper-xxl.exe');
   return {
     base,
     exe: path.join(base, 'faster-whisper-xxl.exe'),
@@ -4518,7 +4538,222 @@ ipcMain.handle('whisper-status', async () => {
   };
 });
 
-// Transcribe one media file. Returns { success, text, txtPath, srtPath, jsonPath }.
+// ═══════════════════════════════════════════════════════════════════════
+// ON-DEMAND WHISPER ENGINE MANAGER
+// ═══════════════════════════════════════════════════════════════════════
+// The Whisper engines are NOT bundled in the installer (they are multi-GB and
+// broke the NSIS build). They are downloaded on demand from Settings → Voice
+// Dictation & Transcription and installed into <userData>/engines/.
+//
+// Distributable pack = a .zip whose contents include `whisper/` and/or
+// `whisper-stream/` folders (either at the top level or inside one wrapper
+// dir). Build it with tools/whisper/pack-engines.ps1. Default source URL is
+// overridable per-call (the renderer can pass a custom URL); otherwise it
+// falls back to WHISPER_ENGINE_PACK_URL. "Install from file…" supports fully
+// offline / air-gapped deployment.
+const WHISPER_ENGINE_PACK_URL =
+  'https://github.com/exhonorated999/project-viper/releases/download/whisper-engines/viper-whisper-engines.zip';
+
+let _engineBusy = false;
+
+function _dirSize(dir) {
+  let total = 0;
+  try {
+    for (const n of fs.readdirSync(dir)) {
+      const fp = path.join(dir, n);
+      let st; try { st = fs.statSync(fp); } catch (_) { continue; }
+      total += st.isDirectory() ? _dirSize(fp) : st.size;
+    }
+  } catch (_) {}
+  return total;
+}
+
+// Aggregate install status for the renderer (Settings card + feature gating).
+function _engineStatus() {
+  const wp = _whisperPaths();
+  const sp = _whisperStreamPaths();
+  const batchPresent = fs.existsSync(wp.exe);
+  const livePresent = fs.existsSync(sp.exe);
+  const root = _engineInstallRoot();
+  return {
+    installRoot: root,
+    batch: {
+      enginePresent: batchPresent,
+      base: wp.base,
+      models: { small: !!_whisperModelDir('small'), medium: !!_whisperModelDir('medium') },
+    },
+    live: {
+      enginePresent: livePresent,
+      base: sp.base,
+      modelPresent: !!_dictationModelPath(),
+    },
+    // "installed" = the batch engine (media transcription + record→transcribe
+    // dictation) is available. Live streaming is an optional extra.
+    installed: batchPresent,
+    sizeBytes: _dirSize(root),
+    busy: _engineBusy,
+    defaultUrl: WHISPER_ENGINE_PACK_URL,
+  };
+}
+
+ipcMain.handle('whisper-engine-status', async () => _engineStatus());
+
+// Download a file over http(s) with redirect handling + progress callback.
+function _downloadTo(url, destPath, onProgress, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirects > 6) return reject(new Error('Too many redirects'));
+    let mod;
+    try { mod = url.startsWith('https:') ? require('https') : require('http'); }
+    catch (e) { return reject(e); }
+    const req = mod.get(url, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        let next;
+        try { next = new URL(res.headers.location, url).toString(); }
+        catch (e) { return reject(e); }
+        return resolve(_downloadTo(next, destPath, onProgress, redirects + 1));
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        return reject(new Error('HTTP ' + res.statusCode));
+      }
+      const total = parseInt(res.headers['content-length'] || '0', 10);
+      let received = 0;
+      const out = fs.createWriteStream(destPath);
+      res.on('data', (chunk) => { received += chunk.length; if (onProgress) onProgress(received, total); });
+      res.pipe(out);
+      out.on('finish', () => out.close(() => resolve({ received, total })));
+      out.on('error', reject);
+    });
+    req.on('error', reject);
+    req.setTimeout(120000, () => req.destroy(new Error('Download stalled (timeout).')));
+  });
+}
+
+// Extract a .zip via .NET ZipFile through PowerShell (no native dep; handles
+// zip64 / >2 GB archives reliably, unlike Expand-Archive). Windows-only, which
+// matches VIPER's build targets. `destDir` must be empty/non-existent.
+function _extractZip(zipPath, destDir) {
+  return new Promise((resolve, reject) => {
+    const script =
+      'Add-Type -AssemblyName System.IO.Compression.FileSystem; ' +
+      '[System.IO.Compression.ZipFile]::ExtractToDirectory(' +
+      JSON.stringify(zipPath) + ', ' + JSON.stringify(destDir) + ')';
+    const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true });
+    let err = '';
+    if (ps.stderr) ps.stderr.on('data', (d) => { err += d.toString(); });
+    ps.on('error', reject);
+    ps.on('close', (code) => code === 0 ? resolve() : reject(new Error('Zip extract failed (' + code + '). ' + err.slice(-300))));
+  });
+}
+
+// Extract a local zip into engines/, moving whisper[-stream]/ into place.
+async function _installEnginePackFromZip(zipPath, sender) {
+  const root = _engineInstallRoot();
+  fs.mkdirSync(root, { recursive: true });
+  const send = (phase, extra) => {
+    try { if (sender && !sender.isDestroyed()) sender.send('whisper-engine-progress', Object.assign({ phase }, extra || {})); } catch (_) {}
+  };
+  send('extracting');
+  const staging = path.join(root, '.staging-' + Date.now());
+  fs.mkdirSync(staging, { recursive: true });
+  try {
+    await _extractZip(zipPath, staging);
+    // Pack may put engine folders at the top level OR inside one wrapper dir.
+    let srcRoot = staging;
+    const entries = fs.readdirSync(staging).filter((n) => !n.startsWith('.'));
+    if (!entries.includes('whisper') && !entries.includes('whisper-stream') && entries.length === 1) {
+      const inner = path.join(staging, entries[0]);
+      try { if (fs.statSync(inner).isDirectory()) srcRoot = inner; } catch (_) {}
+    }
+    let moved = 0;
+    for (const name of ['whisper', 'whisper-stream']) {
+      const from = path.join(srcRoot, name);
+      if (fs.existsSync(from)) {
+        const to = path.join(root, name);
+        send('installing', { engine: name });
+        try { fs.rmSync(to, { recursive: true, force: true }); } catch (_) {}
+        fs.renameSync(from, to);
+        moved++;
+      }
+    }
+    if (!moved) throw new Error('No whisper/ or whisper-stream/ folder found inside the pack.');
+  } finally {
+    try { fs.rmSync(staging, { recursive: true, force: true }); } catch (_) {}
+  }
+  send('done');
+  return _engineStatus();
+}
+
+// Download the engine pack from a URL and install it.
+ipcMain.handle('whisper-engine-download', async (event, opts = {}) => {
+  if (_engineBusy) return { success: false, code: 'BUSY', error: 'An engine operation is already in progress.' };
+  const url = (opts && opts.url) || WHISPER_ENGINE_PACK_URL;
+  const sender = event.sender;
+  const send = (phase, extra) => { try { if (sender && !sender.isDestroyed()) sender.send('whisper-engine-progress', Object.assign({ phase }, extra || {})); } catch (_) {} };
+  _engineBusy = true;
+  const tmpZip = path.join(os.tmpdir(), 'viper-whisper-pack-' + Date.now() + '.zip');
+  try {
+    send('downloading', { received: 0, total: 0, pct: 0 });
+    let lastPct = -1;
+    await _downloadTo(url, tmpZip, (received, total) => {
+      const pct = total ? Math.floor((received / total) * 100) : 0;
+      if (pct !== lastPct) { lastPct = pct; send('downloading', { received, total, pct }); }
+    });
+    const status = await _installEnginePackFromZip(tmpZip, sender);
+    if (!status.installed) return { success: false, code: 'VERIFY_FAILED', error: 'Pack installed but the engine was not found.' };
+    return { success: true, status };
+  } catch (error) {
+    send('error', { error: error.message });
+    return { success: false, code: 'DOWNLOAD_FAILED', error: error.message };
+  } finally {
+    try { fs.rmSync(tmpZip, { force: true }); } catch (_) {}
+    _engineBusy = false;
+  }
+});
+
+// Install from a local .zip the user already downloaded (offline / air-gapped).
+ipcMain.handle('whisper-engine-install-file', async (event, opts = {}) => {
+  if (_engineBusy) return { success: false, code: 'BUSY', error: 'An engine operation is already in progress.' };
+  let zipPath = opts && opts.filePath;
+  _engineBusy = true;
+  try {
+    if (!zipPath) {
+      const res = await dialog.showOpenDialog(mainWindow || undefined, {
+        title: 'Select the VIPER Whisper engine pack (.zip)',
+        properties: ['openFile'],
+        filters: [{ name: 'Zip archive', extensions: ['zip'] }],
+      });
+      if (res.canceled || !res.filePaths || !res.filePaths[0]) return { success: false, code: 'CANCELLED' };
+      zipPath = res.filePaths[0];
+    }
+    if (!fs.existsSync(zipPath)) return { success: false, code: 'NO_FILE', error: 'File not found.' };
+    const status = await _installEnginePackFromZip(zipPath, event.sender);
+    if (!status.installed) return { success: false, code: 'VERIFY_FAILED', error: 'Pack installed but the engine was not found.' };
+    return { success: true, status };
+  } catch (error) {
+    return { success: false, code: 'INSTALL_FAILED', error: error.message };
+  } finally {
+    _engineBusy = false;
+  }
+});
+
+// Remove the downloaded engines (frees disk; features revert to "not installed").
+ipcMain.handle('whisper-engine-remove', async () => {
+  if (_engineBusy) return { success: false, code: 'BUSY', error: 'An engine operation is already in progress.' };
+  _engineBusy = true;
+  try {
+    const root = _engineInstallRoot();
+    for (const name of ['whisper', 'whisper-stream']) {
+      try { fs.rmSync(path.join(root, name), { recursive: true, force: true }); } catch (_) {}
+    }
+    return { success: true, status: _engineStatus() };
+  } catch (error) {
+    return { success: false, error: error.message };
+  } finally {
+    _engineBusy = false;
+  }
+});
 ipcMain.handle('whisper-transcribe', async (event, opts = {}) => {
   const {
     mediaPath,
@@ -4822,9 +5057,7 @@ ipcMain.handle('whisper-download-model', async (event, opts = {}) => {
 // command grammar decides whether each final segment is a command or text.
 // ───────────────────────────────────────────────────────────────────────
 function _whisperStreamPaths() {
-  const base = app.isPackaged
-    ? path.join(process.resourcesPath, 'whisper-stream')
-    : path.join(__dirname, 'build', 'whisper-stream');
+  const base = _resolveEngineBase('whisper-stream', 'whisper-stream.exe');
   return {
     base,
     exe: path.join(base, 'whisper-stream.exe'),

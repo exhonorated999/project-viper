@@ -261,6 +261,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('dictation-ended', listener);
   },
 
+  // ── On-demand Whisper engine manager (download / install / remove) ──
+  // The Whisper engines are not bundled in the installer; they are fetched on
+  // demand from Settings and installed into <userData>/engines. See
+  // electron-main.js whisper-engine-* handlers.
+  whisperEngineStatus: () => ipcRenderer.invoke('whisper-engine-status'),
+  whisperEngineDownload: (opts) => ipcRenderer.invoke('whisper-engine-download', opts),
+  whisperEngineInstallFile: (opts) => ipcRenderer.invoke('whisper-engine-install-file', opts),
+  whisperEngineRemove: () => ipcRenderer.invoke('whisper-engine-remove'),
+  onWhisperEngineProgress: (callback) => {
+    const listener = (_evt, payload) => { try { callback(payload); } catch (e) { console.error(e); } };
+    ipcRenderer.on('whisper-engine-progress', listener);
+    return () => ipcRenderer.removeListener('whisper-engine-progress', listener);
+  },
+
   // Resource Hub download interception — route downloads from Flock /
   // ICACCOPS / ICAC Data System / etc. straight into a case's Evidence
   // or Warrants/Production folder instead of bouncing through Downloads.

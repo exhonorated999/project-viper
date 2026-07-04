@@ -34,23 +34,21 @@ files:
   - "!build/whisper-stream/**"
 asarUnpack:
   - "build/**"
-# ─── Bundled offline transcription engine (Faster-Whisper-XXL + small model) ───
-# Copied verbatim into resources/whisper/ so the main process can spawn
-# resources/whisper/faster-whisper-xxl.exe. Fetched at build time by
-# tools/whisper/fetch-whisper.ps1 (not committed to git; see .gitignore).
-extraResources:
-  - from: build/whisper
-    to: whisper
-    filter:
-      - "**/*"
-  # ─── Live dictation engine (whisper.cpp stream.exe + ggml model) ───
-  # Copied into resources/whisper-stream/ so main can spawn
-  # resources/whisper-stream/stream.exe with _models/ggml-*.bin.
-  # Provisioned separately (binary + ggml model not committed to git).
-  - from: build/whisper-stream
-    to: whisper-stream
-    filter:
-      - "**/*"
+# ─── On-demand Whisper engines (NOT bundled in the installer) ───────────────
+# The Faster-Whisper-XXL batch engine and the whisper.cpp live-dictation engine
+# are large (multi-GB) and are NO LONGER shipped inside the installer — bundling
+# them pushed the NSIS app archive past makensis's ~2 GB memory-map limit and
+# broke the Setup.exe/Portable.exe build.
+#
+# Instead they are downloaded on demand from Settings → Voice Dictation &
+# Transcription and installed to the user-writable engine directory:
+#     %APPDATA%\V.I.P.E.R.\engines\whisper        (faster-whisper-xxl.exe + model)
+#     %APPDATA%\V.I.P.E.R.\engines\whisper-stream  (whisper-stream.exe + ggml model)
+# The main process resolves those userData paths first, then falls back to any
+# legacy bundled resources/whisper[-stream] (older installs). See
+# electron-main.js _whisperPaths()/_whisperStreamPaths() and the
+# whisper-engine-* IPC handlers. Build the distributable pack with
+# tools/whisper/pack-engines.ps1.
 win:
   # ─── Build targets (multi-modal deployment for LE / agency IT) ───
   #

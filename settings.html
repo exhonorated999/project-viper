@@ -630,6 +630,51 @@
                                 Recognition is not perfect — always proofread dictated narratives and generated transcripts before relying on them
                                 in a report or as evidence.
                             </p>
+
+                            <!-- On-demand engine: enable toggle + install manager -->
+                            <div id="whisperEngineCard" class="mt-4 rounded-lg bg-viper-card/40 border border-gray-700/60 p-4 space-y-3">
+                                <div class="flex items-center justify-between gap-3">
+                                    <div>
+                                        <p class="text-sm font-medium text-gray-200">Enable Whisper features</p>
+                                        <p class="text-xs text-gray-500">Turn dictation &amp; media transcription on or off.</p>
+                                    </div>
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" id="whisperEnabledToggle" class="sr-only peer" onchange="setWhisperEnabled(this.checked)">
+                                        <div class="w-11 h-6 bg-gray-600 rounded-full peer peer-checked:bg-viper-purple transition-colors"></div>
+                                        <div class="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+                                    </label>
+                                </div>
+
+                                <div class="pt-3 border-t border-gray-700/50">
+                                    <div class="flex items-center gap-2 mb-2">
+                                        <span id="whisperEngineDot" class="w-2.5 h-2.5 rounded-full bg-gray-500 flex-shrink-0"></span>
+                                        <p id="whisperEngineStatusText" class="text-sm text-gray-300">Checking engine…</p>
+                                    </div>
+                                    <p class="text-xs text-gray-500 mb-3">
+                                        The Whisper engine (~2&nbsp;GB) is not included in the installer. Download it once and VIPER uses it
+                                        automatically. It installs to your user-data folder and stays entirely on this device.
+                                    </p>
+
+                                    <div id="whisperEngineProgress" class="hidden mb-3">
+                                        <div class="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
+                                            <div id="whisperEngineBar" class="h-full bg-viper-purple transition-all" style="width:0%"></div>
+                                        </div>
+                                        <p id="whisperEngineProgressText" class="text-xs text-gray-400 mt-1">Preparing…</p>
+                                    </div>
+
+                                    <div class="flex flex-wrap gap-2">
+                                        <button id="whisperDownloadBtn" onclick="downloadWhisperEngine()" class="px-3 py-1.5 rounded-lg bg-viper-purple/20 text-viper-purple border border-viper-purple/40 hover:bg-viper-purple/30 transition-colors text-sm font-medium">Download engine</button>
+                                        <button id="whisperInstallFileBtn" onclick="installWhisperEngineFromFile()" class="px-3 py-1.5 rounded-lg bg-white/5 text-gray-300 border border-white/10 hover:bg-white/10 transition-colors text-sm">Install from file…</button>
+                                        <button id="whisperRemoveBtn" onclick="removeWhisperEngine()" class="px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20 transition-colors text-sm hidden">Remove</button>
+                                    </div>
+
+                                    <details class="mt-3">
+                                        <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-400">Advanced: custom download URL</summary>
+                                        <input id="whisperEngineUrl" type="text" class="mt-2 w-full px-2 py-1.5 bg-viper-card border border-gray-600 rounded text-gray-200 text-xs focus:border-viper-purple outline-none" placeholder="https://…/viper-whisper-engines.zip">
+                                        <p class="text-xs text-gray-600 mt-1">Leave blank to use the default source. For air-gapped machines, use “Install from file…”.</p>
+                                    </details>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2881,6 +2926,7 @@
             loadUserProfile();
             loadSecurityState();
             loadTelemetryState();
+            initWhisperEngineCard();
 
             // Telemetry init + lifecycle
             try {
@@ -2937,6 +2983,180 @@
         }
 
         // ── Telemetry helpers ──────────────────────────────────────────────
+        // ─── On-demand Whisper engine manager (Settings card) ───────────────
+        var _whisperEngineUnsub = null;
+
+        function _fmtBytes(n) {
+            n = Number(n) || 0;
+            if (n >= 1073741824) return (n / 1073741824).toFixed(1) + ' GB';
+            if (n >= 1048576) return (n / 1048576).toFixed(0) + ' MB';
+            if (n >= 1024) return (n / 1024).toFixed(0) + ' KB';
+            return n + ' B';
+        }
+
+        function isWhisperEnabled() {
+            var v = localStorage.getItem('viperWhisperEnabled');
+            return v === null ? true : v === 'true';
+        }
+
+        function setWhisperEnabled(on) {
+            localStorage.setItem('viperWhisperEnabled', on ? 'true' : 'false');
+            _applyWhisperEnabledUI(!!on);
+        }
+
+        function _applyWhisperEnabledUI(on) {
+            var card = document.getElementById('whisperEngineCard');
+            if (!card) return;
+            var controls = card.querySelectorAll('#whisperDownloadBtn, #whisperInstallFileBtn, #whisperRemoveBtn, #whisperEngineUrl');
+            controls.forEach(function (el) {
+                el.disabled = !on;
+                el.style.opacity = on ? '' : '0.5';
+                el.style.pointerEvents = on ? '' : 'none';
+            });
+        }
+
+        function _setEngineBusyUI(busy, label) {
+            var prog = document.getElementById('whisperEngineProgress');
+            var dl = document.getElementById('whisperDownloadBtn');
+            var inst = document.getElementById('whisperInstallFileBtn');
+            var rm = document.getElementById('whisperRemoveBtn');
+            if (prog) prog.classList.toggle('hidden', !busy);
+            [dl, inst, rm].forEach(function (b) { if (b) b.disabled = busy; });
+            if (busy && label) {
+                var t = document.getElementById('whisperEngineProgressText');
+                if (t) t.textContent = label;
+                var bar = document.getElementById('whisperEngineBar');
+                if (bar) bar.style.width = '0%';
+            }
+        }
+
+        function _renderEngineStatus(status) {
+            var dot = document.getElementById('whisperEngineDot');
+            var text = document.getElementById('whisperEngineStatusText');
+            var rm = document.getElementById('whisperRemoveBtn');
+            var dl = document.getElementById('whisperDownloadBtn');
+            if (!dot || !text) return;
+            var installed = !!(status && status.installed);
+            if (installed) {
+                dot.className = 'w-2.5 h-2.5 rounded-full bg-green-500 flex-shrink-0';
+                var extras = [];
+                if (status.live && status.live.enginePresent) extras.push('live dictation');
+                var sz = status.sizeBytes ? ' • ' + _fmtBytes(status.sizeBytes) : '';
+                text.textContent = 'Engine installed' + (extras.length ? ' (+ ' + extras.join(', ') + ')' : '') + sz;
+                if (rm) rm.classList.remove('hidden');
+                if (dl) dl.textContent = 'Re-download / update';
+            } else {
+                dot.className = 'w-2.5 h-2.5 rounded-full bg-gray-500 flex-shrink-0';
+                text.textContent = 'Engine not installed';
+                if (rm) rm.classList.add('hidden');
+                if (dl) dl.textContent = 'Download engine';
+            }
+        }
+
+        async function refreshWhisperEngineStatus() {
+            if (!(window.electronAPI && window.electronAPI.whisperEngineStatus)) {
+                var t = document.getElementById('whisperEngineStatusText');
+                if (t) t.textContent = 'Engine management unavailable in this build.';
+                return;
+            }
+            try {
+                var status = await window.electronAPI.whisperEngineStatus();
+                _renderEngineStatus(status);
+            } catch (e) {
+                var el = document.getElementById('whisperEngineStatusText');
+                if (el) el.textContent = 'Could not read engine status.';
+            }
+        }
+
+        function initWhisperEngineCard() {
+            var toggle = document.getElementById('whisperEnabledToggle');
+            var on = isWhisperEnabled();
+            if (toggle) toggle.checked = on;
+            _applyWhisperEnabledUI(on);
+            // Live progress events from the main process.
+            if (window.electronAPI && window.electronAPI.onWhisperEngineProgress && !_whisperEngineUnsub) {
+                _whisperEngineUnsub = window.electronAPI.onWhisperEngineProgress(function (p) {
+                    if (!p) return;
+                    var bar = document.getElementById('whisperEngineBar');
+                    var txt = document.getElementById('whisperEngineProgressText');
+                    if (p.phase === 'downloading') {
+                        if (bar) bar.style.width = (p.pct || 0) + '%';
+                        if (txt) txt.textContent = p.total
+                            ? 'Downloading… ' + (p.pct || 0) + '% (' + _fmtBytes(p.received) + ' / ' + _fmtBytes(p.total) + ')'
+                            : 'Downloading… ' + _fmtBytes(p.received || 0);
+                    } else if (p.phase === 'extracting') {
+                        if (bar) bar.style.width = '100%';
+                        if (txt) txt.textContent = 'Extracting…';
+                    } else if (p.phase === 'installing') {
+                        if (txt) txt.textContent = 'Installing ' + (p.engine || 'engine') + '…';
+                    } else if (p.phase === 'done') {
+                        if (txt) txt.textContent = 'Done.';
+                    } else if (p.phase === 'error') {
+                        if (txt) txt.textContent = 'Error: ' + (p.error || 'unknown');
+                    }
+                });
+            }
+            refreshWhisperEngineStatus();
+        }
+
+        async function downloadWhisperEngine() {
+            if (!isWhisperEnabled()) return;
+            if (!(window.electronAPI && window.electronAPI.whisperEngineDownload)) return;
+            var urlEl = document.getElementById('whisperEngineUrl');
+            var url = urlEl && urlEl.value.trim() ? urlEl.value.trim() : undefined;
+            _setEngineBusyUI(true, 'Preparing download…');
+            try {
+                var res = await window.electronAPI.whisperEngineDownload({ url: url });
+                if (res && res.success) {
+                    _renderEngineStatus(res.status);
+                    if (typeof showToast === 'function') showToast('Whisper engine installed.', 'success');
+                } else {
+                    if (typeof showToast === 'function') showToast('Download failed: ' + ((res && res.error) || 'unknown'), 'error');
+                }
+            } catch (e) {
+                if (typeof showToast === 'function') showToast('Download failed: ' + e.message, 'error');
+            } finally {
+                _setEngineBusyUI(false);
+                refreshWhisperEngineStatus();
+            }
+        }
+
+        async function installWhisperEngineFromFile() {
+            if (!isWhisperEnabled()) return;
+            if (!(window.electronAPI && window.electronAPI.whisperEngineInstallFile)) return;
+            _setEngineBusyUI(true, 'Waiting for file…');
+            try {
+                var res = await window.electronAPI.whisperEngineInstallFile({});
+                if (res && res.success) {
+                    _renderEngineStatus(res.status);
+                    if (typeof showToast === 'function') showToast('Whisper engine installed.', 'success');
+                } else if (res && res.code !== 'CANCELLED') {
+                    if (typeof showToast === 'function') showToast('Install failed: ' + ((res && res.error) || 'unknown'), 'error');
+                }
+            } catch (e) {
+                if (typeof showToast === 'function') showToast('Install failed: ' + e.message, 'error');
+            } finally {
+                _setEngineBusyUI(false);
+                refreshWhisperEngineStatus();
+            }
+        }
+
+        async function removeWhisperEngine() {
+            if (!(window.electronAPI && window.electronAPI.whisperEngineRemove)) return;
+            if (!confirm('Remove the downloaded Whisper engine? Dictation and media transcription will be disabled until you download it again.')) return;
+            try {
+                var res = await window.electronAPI.whisperEngineRemove();
+                if (res && res.success) {
+                    _renderEngineStatus(res.status);
+                    if (typeof showToast === 'function') showToast('Whisper engine removed.', 'info');
+                }
+            } catch (e) {
+                if (typeof showToast === 'function') showToast('Remove failed: ' + e.message, 'error');
+            } finally {
+                refreshWhisperEngineStatus();
+            }
+        }
+
         function loadTelemetryState() {
             try {
                 var toggle = document.getElementById('telemetryConsentToggle');

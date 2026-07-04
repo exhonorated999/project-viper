@@ -9368,8 +9368,12 @@
 
             let status = null;
             try { status = await window.electronAPI.whisperStatus(); } catch (e) { status = null; }
+            if (((localStorage.getItem('viperWhisperEnabled') ?? 'true') !== 'true')) {
+                container.innerHTML = `<div class="text-xs text-viper-orange">Whisper is turned off. Enable it in <strong>Settings → Voice Dictation &amp; Transcription</strong>.</div>`;
+                return;
+            }
             if (!status || !status.enginePresent) {
-                container.innerHTML = `<div class="text-xs text-viper-orange">Transcription engine is not installed in this build.</div>`;
+                container.innerHTML = `<div class="text-xs text-viper-orange">Transcription engine isn't installed yet. Open <strong>Settings → Voice Dictation &amp; Transcription</strong> and click <strong>Download engine</strong>.</div>`;
                 return;
             }
             const model = (status.models && status.models.small) ? 'small'
@@ -9876,11 +9880,14 @@
                 if (active) return;
                 const api = window.electronAPI || {};
                 if (!api.dictationTranscribe) { toast('Dictation not available in this build', 'error'); return; }
+                if (((localStorage.getItem('viperWhisperEnabled') ?? 'true') !== 'true')) {
+                    toast('Whisper is turned off — enable it in Settings → Voice Dictation & Transcription', 'info'); return;
+                }
                 // Verify the batch engine + model are present.
                 let status = null;
                 try { status = await api.whisperStatus(); } catch (_) {}
-                if (!status || !status.enginePresent) { toast('Transcription engine is not installed in this build', 'error'); return; }
-                if (!status.models || !status.models.small) { toast('The transcription model is not installed', 'error'); return; }
+                if (!status || !status.enginePresent) { toast('Transcription engine isn\'t installed — download it in Settings → Voice Dictation & Transcription', 'error'); return; }
+                if (!status.models || !status.models.small) { toast('The transcription model isn\'t installed — download the engine in Settings', 'error'); return; }
                 // Open the mic.
                 try {
                     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });

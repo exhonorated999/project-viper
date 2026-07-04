@@ -1,0 +1,118 @@
+# ============================================================================
+# pack-engines.ps1 - build the distributable VIPER Whisper engine pack (.zip)
+# ============================================================================
+# The Whisper engines are NO LONGER bundled in the installer (they are multi-GB
+# and broke the NSIS build). Instead they are downloaded on demand from
+# Settings -> Voice Dictation and Transcription and installed into
+#   %APPDATA%\V.I.P.E.R.\engines\  (whisper\ + whisper-stream\)
+#
+# This script zips the local build\whisper (Faster-Whisper-XXL + model) and
+# build\whisper-stream (whisper.cpp live engine + ggml model) into a single
+# pack whose top level contains "whisper\" and "whisper-stream\", which the
+# in-app installer (electron-main.js whisper-engine-* handlers) extracts.
+#
+# By default the pack is CPU-only: the ~2.9 GB of CUDA GPU DLLs inside
+# Faster-Whisper-XXL's bundled torch are stripped (transcription runs on CPU
+# via CTranslate2). Pass -IncludeCuda to keep GPU acceleration (much larger).
+#
+# Usage (from repo root, in PowerShell):
+#   powershell -ExecutionPolicy Bypass -File tools\whisper\pack-engines.ps1
+#   powershell -ExecutionPolicy Bypass -File tools\whisper\pack-engines.ps1 -IncludeCuda
+#   powershell -ExecutionPolicy Bypass -File tools\whisper\pack-engines.ps1 -Out C:\path\pack.zip
+#
+# Upload the resulting zip to the download source referenced by
+# WHISPER_ENGINE_PACK_URL in electron-main.js (or point the Settings
+# "Advanced: custom download URL" field at it), or hand it to users for the
+# offline "Install from file..." path.
+# ============================================================================
+
+param(
+    [switch]$IncludeCuda,
+    [string]$Out
+)
+
+$ErrorActionPreference = 'Stop'
+
+# Repo root = two levels up from tools\whisper
+$repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$whisperSrc = Join-Path $repo 'build\whisper'
+$streamSrc  = Join-Path $repo 'build\whisper-stream'
+$distDir    = Join-Path $repo 'dist'
+
+if (-not (Test-Path $whisperSrc)) {
+    throw "build\whisper not found ($whisperSrc). Run tools\whisper\fetch-whisper.ps1 first."
+}
+if (-not $Out) {
+    New-Item -ItemType Directory -Force -Path $distDir | Out-Null
+    $Out = Join-Path $distDir 'viper-whisper-engines.zip'
+}
+
+# Stage into a temp dir so we can trim without touching the real build.
+$staging = Join-Path $env:TEMP ("viper-engine-pack-" + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $staging | Out-Null
+Write-Host "Staging in $staging"
+
+try {
+    Write-Host "Copying build\whisper ..."
+    Copy-Item -Path $whisperSrc -Destination (Join-Path $staging 'whisper') -Recurse -Force
+
+    if (Test-Path $streamSrc) {
+        Write-Host "Copying build\whisper-stream ..."
+        Copy-Item -Path $streamSrc -Destination (Join-Path $staging 'whisper-stream') -Recurse -Force
+    } else {
+        Write-Warning "build\whisper-stream not found - live dictation engine will NOT be in the pack."
+    }
+
+    if (-not $IncludeCuda) {
+        $torchLib = Join-Path $staging 'whisper\_xxl_data\torch\lib'
+        if (Test-Path $torchLib) {
+            Write-Host "Stripping CUDA GPU DLLs (CPU-only pack) ..."
+            # GPU-only libraries. torch_cpu.dll is KEPT (needed for CPU path).
+            $cudaPatterns = @(
+                'torch_cuda*.dll', 'cudnn*.dll', 'cublas*.dll', 'cufft*.dll',
+                'curand*.dll', 'cusolver*.dll', 'cusparse*.dll', 'nvrtc*.dll',
+                'nvToolsExt*.dll', 'cupti*.dll', 'cudart*.dll', 'nvJitLink*.dll'
+            )
+            $freed = 0
+            foreach ($pat in $cudaPatterns) {
+                Get-ChildItem -Path $torchLib -Filter $pat -ErrorAction SilentlyContinue | ForEach-Object {
+                    $freed += $_.Length
+                    Remove-Item $_.FullName -Force
+                }
+            }
+            # Also drop onnxruntime CUDA/TensorRT providers if present (GPU-only).
+            $onnx = Join-Path $staging 'whisper\_xxl_data\onnxruntime\capi'
+            if (Test-Path $onnx) {
+                Get-ChildItem -Path $onnx -Filter 'onnxruntime_providers_cuda*.dll' -ErrorAction SilentlyContinue | ForEach-Object {
+                    $freed += $_.Length; Remove-Item $_.FullName -Force
+                }
+                Get-ChildItem -Path $onnx -Filter 'onnxruntime_providers_tensorrt*.dll' -ErrorAction SilentlyContinue | ForEach-Object {
+                    $freed += $_.Length; Remove-Item $_.FullName -Force
+                }
+            }
+            Write-Host ("Removed {0:N1} GB of GPU libraries." -f ($freed / 1GB))
+        } else {
+            Write-Warning "torch\lib not found - nothing to strip."
+        }
+    } else {
+        Write-Host "Keeping CUDA GPU libraries (-IncludeCuda)."
+    }
+
+    # Compress with .NET ZipFile (zip64-capable -> handles >2 GB).
+    if (Test-Path $Out) { Remove-Item $Out -Force }
+    Write-Host "Compressing to $Out (this can take several minutes) ..."
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::CreateFromDirectory(
+        $staging, $Out,
+        [System.IO.Compression.CompressionLevel]::Optimal,
+        $false
+    )
+
+    $sizeGb = (Get-Item $Out).Length / 1GB
+    Write-Host ""
+    Write-Host ("DONE  ->  {0}  ({1:N2} GB)" -f $Out, $sizeGb) -ForegroundColor Green
+    Write-Host "Upload this zip to your download source, or use it with 'Install from file...'."
+}
+finally {
+    if (Test-Path $staging) { Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue }
+}

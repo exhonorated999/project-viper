@@ -23402,6 +23402,38 @@
             return localStorage.getItem('viper_api_key') || null;
         }
 
+        // Canvas API calls self-heal a stale api key the same way parser
+        // submissions do.  Every VIPER (re)install rotates the api key
+        // server-side (POST /api/register matches the customer by email,
+        // keeps the paid license, and returns a FRESH key).  If this install's
+        // locally-stored viper_api_key is stale, the dashboard rejects it with
+        // "Invalid or inactive API key".  ViperLicensing.refreshApiKey()
+        // silently re-registers by the stored email/name to mint a valid key
+        // WITHOUT disturbing license_key/type/expiry, then we retry once.
+        function _looksLikeBadCanvasKey(msg) {
+            return /invalid or inactive api key|missing api key/i.test(String(msg || ''));
+        }
+
+        // fn receives the api key and returns a promise. Retries once on a
+        // stale-key rejection after refreshing. Throws if no key can be minted.
+        async function _canvasCallWithKey(fn) {
+            let apiKey = _getViperApiKey();
+            if (!apiKey && window.ViperLicensing && window.ViperLicensing.refreshApiKey) {
+                apiKey = await window.ViperLicensing.refreshApiKey();
+            }
+            if (!apiKey) throw new Error('Not registered — activate your VIPER license in Settings.');
+            try {
+                return await fn(apiKey);
+            } catch (err) {
+                const msg = String(err && err.message || err);
+                if (_looksLikeBadCanvasKey(msg) && window.ViperLicensing && window.ViperLicensing.refreshApiKey) {
+                    const fresh = await window.ViperLicensing.refreshApiKey();
+                    return await fn(fresh);
+                }
+                throw err;
+            }
+        }
+
         function ensureCanvasFormsLoaded() {
             if (!_canvasFormsLoaded && currentCase) {
                 activeCanvasForms = _lsParse(`canvasForms_${currentCase.id}`, []);
@@ -23445,7 +23477,7 @@
                 if (_isFormExpired(form)) { form._expired = true; continue; }
                 if (!apiKey) continue;
                 try {
-                    const info = await window.electronAPI.canvasFormGetInfo({ apiKey, formId: form.formId });
+                    const info = await _canvasCallWithKey((key) => window.electronAPI.canvasFormGetInfo({ apiKey: key, formId: form.formId }));
                     form.submissionCount = info.submission_count;
                     form._expired = false;
                 } catch {
@@ -23590,17 +23622,20 @@
             if (!title) { viperToast('Form title is required', 'error'); return; }
 
             const apiKey = _getViperApiKey();
-            if (!apiKey) { viperToast('VIPER not registered — cannot create forms', 'error'); return; }
+            if (!apiKey && !(window.ViperLicensing && window.ViperLicensing.refreshApiKey)) {
+                viperToast('VIPER not registered — cannot create forms', 'error');
+                return;
+            }
 
             try {
                 viperToast('Creating canvas form...', 'info');
 
-                const result = await window.electronAPI.canvasFormCreate({
-                    apiKey,
+                const result = await _canvasCallWithKey((key) => window.electronAPI.canvasFormCreate({
+                    apiKey: key,
                     title,
                     caseRef,
                     fields,
-                });
+                }));
 
                 // Store form reference locally
                 activeCanvasForms.push({
@@ -23626,15 +23661,18 @@
             } catch (error) {
                 console.error('Failed to create canvas form:', error);
                 const msg = String(error && error.message || error);
-                // Make the "Invalid or inactive API key" error actionable —
-                // it almost always means the dashboard customer record is
-                // inactive or the locally-stored key no longer matches.
-                if (/invalid or inactive api key/i.test(msg)) {
+                // We already self-heal a stale key (refreshApiKey + retry). If
+                // it STILL fails as a bad key, the re-register couldn't mint a
+                // valid key — usually the stored registration email is missing
+                // or the customer record is genuinely inactive on the dashboard.
+                if (/invalid or inactive api key|missing api key/i.test(msg)) {
                     viperToast(
-                        'Canvas form rejected: your VIPER license key isn\'t accepted by the Intellect Dashboard. ' +
+                        'Canvas form rejected: could not validate your VIPER license with the Intellect Dashboard. ' +
                         'Open Settings → Licensing and re-activate, or contact admin to confirm your customer record is active.',
                         'error'
                     );
+                } else if (/no registration email|re-register/i.test(msg)) {
+                    viperToast('VIPER needs to re-sync its license — Settings → Licensing → Re-activate.', 'error');
                 } else if (/not registered/i.test(msg)) {
                     viperToast('VIPER is not registered yet — Settings → Licensing → Activate.', 'error');
                 } else {
@@ -23677,10 +23715,8 @@
 
         async function refreshCanvasFormCount(formId) {
             if (!window.electronAPI) return;
-            const apiKey = _getViperApiKey();
-            if (!apiKey) return;
             try {
-                const info = await window.electronAPI.canvasFormGetInfo({ apiKey, formId });
+                const info = await _canvasCallWithKey((key) => window.electronAPI.canvasFormGetInfo({ apiKey: key, formId }));
                 const el = document.getElementById(`formCount_${formId}`);
                 if (el) el.textContent = info.submission_count;
                 // Update local store
@@ -23693,12 +23729,10 @@
 
         async function downloadCanvasFormResults(formId, idx) {
             if (!window.electronAPI) return;
-            const apiKey = _getViperApiKey();
-            if (!apiKey) { viperToast('VIPER not registered', 'error'); return; }
 
             try {
                 // Download results (server deletes them after retrieval)
-                const result = await window.electronAPI.canvasFormDownload({ apiKey, formId });
+                const result = await _canvasCallWithKey((key) => window.electronAPI.canvasFormDownload({ apiKey: key, formId }));
                 if (!result.submissions || result.submissions.length === 0) {
                     viperToast('No submissions to download yet.', 'info');
                     return;
@@ -23748,7 +23782,7 @@
 
                     // Delete form from server (link goes dead immediately)
                     try {
-                        await window.electronAPI.canvasFormDelete({ apiKey, formId });
+                        await _canvasCallWithKey((key) => window.electronAPI.canvasFormDelete({ apiKey: key, formId }));
                     } catch { /* may already be expired */ }
 
                     // Remove from local store
@@ -23765,14 +23799,13 @@
         }
 
         async function closeCanvasForm(formId, idx) {
-            const apiKey = _getViperApiKey();
             const msg = 'Close and delete this canvas form? Any undownloaded submissions on the server will be lost.';
             if (!await viperConfirm(msg, { danger: true, okText: 'Close Form' })) return;
 
             // Delete from server
             try {
-                if (window.electronAPI && apiKey) {
-                    await window.electronAPI.canvasFormDelete({ apiKey, formId });
+                if (window.electronAPI) {
+                    await _canvasCallWithKey((key) => window.electronAPI.canvasFormDelete({ apiKey: key, formId }));
                 }
             } catch { /* ok — may already be expired */ }
 

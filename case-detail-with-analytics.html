@@ -2154,8 +2154,18 @@
                 warrantAuthor: { label: 'Warrant Author', icon: '✍️', type: 'mixed' }
             };
 
-            // Get active tabs (overview + enabled modules)
-            const activeTabs = ['overview', ...currentCase.modules].filter(tabId => allTabs[tabId]);
+            // Get active tabs (overview + enabled modules), PLUS any section
+            // that actually holds data even if its module flag was never
+            // activated on the case. Previously the export list was built
+            // solely from currentCase.modules, so populated-but-inactive
+            // sections (e.g. Involved Persons auto-routed from an RMS import,
+            // or imported CyberTips) were silently dropped from the DA export.
+            const moduleTabs = ['overview', ...(currentCase.modules || [])].filter(tabId => allTabs[tabId]);
+            const activeTabs = Object.keys(allTabs).filter(tabId => {
+                if (tabId === 'overview' || moduleTabs.includes(tabId)) return true;
+                // Include any tab that reports data, so nothing populated is missed.
+                try { return getTabItemCount(tabId) > 0; } catch (e) { return false; }
+            });
 
             const modalHTML = `
                 <div id="exportCaseModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id === 'exportCaseModal') closeExportCaseModal()">
@@ -3121,6 +3131,51 @@
                     });
                     break;
                 }
+                case 'involvedPersons': {
+                    const items = _readItems('involvedPersons', null);
+                    if (!items.length) { emptyMsg('No involved persons recorded.'); break; }
+                    items.forEach((p, i) => {
+                        const pname = p.name
+                            || [p.firstName, p.lastName].filter(Boolean).join(' ').trim()
+                            || 'Unknown';
+                        subjectBar(`Involved Person ${i+1}: ${pname}`);
+
+                        subTitle('Personal Information');
+                        addImageSafe(p.photo, 32, 32);
+                        fieldGrid([
+                            { label: 'Full Name',     value: pname },
+                            { label: 'Role',          value: p.role || p.rmsRole },
+                            { label: 'Date of Birth', value: p.dob ? formatDate(p.dob) : '' },
+                            { label: 'Sex', value: p.sex },
+                            { label: 'Height', value: p.height },
+                            { label: 'Weight', value: p.weight },
+                            { label: 'Hair', value: p.hairColor },
+                            { label: 'Eyes', value: p.eyeColor },
+                            { label: 'DL #', value: p.dlNumber },
+                            { label: 'Scars/Marks/Tattoos', value: p.scarsMarksTattoos }
+                        ]);
+                        gap(2);
+
+                        if (p.address || p.addressCityStateZip || p.phone || p.phone2 || p.email || p.email2) {
+                            subTitle('Contact / Address');
+                            fieldGrid([
+                                { label: 'Street Address',    value: p.address },
+                                { label: 'City, State, ZIP',  value: p.addressCityStateZip },
+                                { label: 'Phone',   value: p.phone || p.phone1 },
+                                { label: 'Phone 2', value: p.phone2 },
+                                { label: 'Email',   value: p.email },
+                                { label: 'Email 2', value: p.email2 }
+                            ]);
+                            gap(2);
+                        }
+
+                        if (p.relationship) fieldBold('Relationship', p.relationship);
+                        if (p.rmsSource)    fieldBold('Source', p.rmsSource);
+                        if (p.notes) { subTitle('Notes'); bodyText(p.notes); }
+                        gap(5);
+                    });
+                    break;
+                }
                 case 'vehicles': {
                     const items = _readItems('recoveredVehicles', caseVehicles);
                     if (!items.length) { emptyMsg('No vehicles recorded.'); break; }
@@ -3421,9 +3476,12 @@
                             ct.persons.forEach(p => {
                                 fieldBold(p.role, p.name || '(unnamed)');
                                 if (p.dob) fieldBold('DOB', p.dob);
-                                if (p.emails.length) fieldBold('Email', p.emails.join(', '));
-                                if (p.phones.length) fieldBold('Phone', p.phones.join(', '));
-                                if (p.ipAddresses.length) fieldBold('IPs', p.ipAddresses.map(ip => ip.address).join(', '));
+                                const emails = Array.isArray(p.emails) ? p.emails : [];
+                                const phones = Array.isArray(p.phones) ? p.phones : [];
+                                const ips = Array.isArray(p.ipAddresses) ? p.ipAddresses : [];
+                                if (emails.length) fieldBold('Email', emails.join(', '));
+                                if (phones.length) fieldBold('Phone', phones.join(', '));
+                                if (ips.length) fieldBold('IPs', ips.map(ip => (ip && ip.address) ? ip.address : ip).join(', '));
                                 if (p.estimatedLocation) fieldBold('Location', p.estimatedLocation);
                                 gap();
                             });
@@ -3489,7 +3547,14 @@
                 const label = getTabLabel(tab.id);
                 tocEntries.push({ label, page: pageNum });
                 sectionTitle(label);
-                await _renderTabPDF(tab.id);
+                // Isolate each section: a single malformed tab must not abort the
+                // entire DA export (or silently drop every section after it).
+                try {
+                    await _renderTabPDF(tab.id);
+                } catch (secErr) {
+                    console.error('[VIPER] DA export: section failed:', tab.id, secErr);
+                    try { emptyMsg('This section could not be rendered: ' + ((secErr && secErr.message) || secErr)); } catch (_) {}
+                }
             }
 
             // ========== CASE TIMELINE (summary in main body) ==========
@@ -3699,6 +3764,7 @@
                 victims: 'Victims',
                 victimBusiness: 'Victim Business',
                 witnesses: 'Witnesses',
+                involvedPersons: 'Involved Persons',
                 vehicles: 'Recovered Vehicles',
                 cargo: 'Cargo / Merchandise',
                 firearms: 'Firearms',
@@ -3713,7 +3779,9 @@
                 areacanvas: 'Area Canvas',
                 opsplan: 'OPS Plan',
                 traceImport: 'TRACE Import',
-                rmsImport: 'RMS Import'
+                rmsImport: 'RMS Import',
+                cyberTips: 'Cyber Tips',
+                oversightImport: 'Oversight'
             };
             return labels[tabId] || tabId;
         }

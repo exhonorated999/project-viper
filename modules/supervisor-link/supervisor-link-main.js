@@ -400,11 +400,49 @@ async function runDiagnostics(opts = {}) {
 async function ensureClient(opts = {}) {
   const url = opts.url || DEFAULT_URL;
   const identity = opts.identity || {};
-  if (!identity.name || !identity.badge) throw new Error('IDENTITY_REQUIRED');
+  if (!identity.name) throw new Error('IDENTITY_REQUIRED');
+  if (identity.badge == null) identity.badge = '';
   if (client && (client.url !== url || !client.sameIdentity(identity))) { client.close(); client = null; }
   if (!client) client = new SupervisorLinkClient(url, identity);
   await client.connect();
   return client;
+}
+
+// ── Persistent receiver (ICAC assignment loop) ──────────────────────────────
+// To RECEIVE supervisor -> investigator assignments the investigator must hold
+// a live session even when it is not actively pushing. We keep a persistent
+// connection open (identity + url supplied by the renderer once the feature is
+// enabled) and run a lightweight reconnect loop so dropped links recover.
+// A null listenUrl means AUTO-DISCOVER via UDP broadcast (matches push).
+let wantListening = false;
+let listenIdentity = null;
+let listenUrl = null;
+let reconnectTimer = null;
+
+async function resolveListenUrl(explicit) {
+  const u = (explicit || listenUrl || '').trim();
+  if (u) return u;
+  try {
+    const nodes = await discoverNodes(1500);
+    if (nodes && nodes.length) return nodes[0].url;
+  } catch (_) { /* fall through */ }
+  return DEFAULT_URL;
+}
+
+async function ensureListening() {
+  if (!wantListening || !listenIdentity) return;
+  if (client && client.isReady()) return;
+  try {
+    const url = await resolveListenUrl();
+    await ensureClient({ url, identity: listenIdentity });
+    broadcastToRenderer('supervisor-link:state', { state: 'connected' });
+  } catch (_) { /* loop will retry */ }
+}
+
+function startReconnectLoop() {
+  if (reconnectTimer) return;
+  reconnectTimer = setInterval(() => { ensureListening(); }, 5000);
+  if (reconnectTimer.unref) reconnectTimer.unref();
 }
 
 function registerIpc(ipcMain) {
@@ -477,6 +515,57 @@ function registerIpc(ipcMain) {
   ipcMain.handle('supervisor-link:disconnect', async () => {
     if (client) { client.close(); client = null; }
     return { ok: true };
+  });
+
+  // ── ICAC assignment receiver (supervisor -> investigator) ──────────────
+  // Start a persistent receiver so this investigator can be ASSIGNED CyberTips
+  // by a supervisor even when idle. Renderer supplies identity; url optional
+  // (blank => auto-discover on the LAN).
+  ipcMain.handle('supervisor-link:listen', async (_e, opts = {}) => {
+    const identity = opts.identity || {};
+    if (!identity.name) return { ok: false, error: 'IDENTITY_REQUIRED' };
+    if (identity.badge == null) identity.badge = '';
+    wantListening = true;
+    listenIdentity = identity;
+    listenUrl = (opts.url || '').trim() || null; // null => auto-discover
+    startReconnectLoop();
+    await ensureListening();
+    return { ok: true, state: client ? client.state : 'idle', deviceId: deviceIdentity().deviceId };
+  });
+
+  ipcMain.handle('supervisor-link:stop-listen', async () => {
+    wantListening = false;
+    if (reconnectTimer) { clearInterval(reconnectTimer); reconnectTimer = null; }
+    return { ok: true };
+  });
+
+  // Acknowledge an ICAC assignment (routes the ack back to the supervisor).
+  // Optionally reports the case number the investigator opened.
+  ipcMain.handle('supervisor-link:icac-ack', async (_e, opts = {}) => {
+    try {
+      const identity = opts.identity || listenIdentity;
+      const url = await resolveListenUrl(opts.url);
+      const c = await ensureClient({ url, identity });
+      const res = await c.rpc('action:icac:ack', {
+        assignmentId: opts.assignmentId, caseNumber: opts.caseNumber || null,
+      });
+      return { ok: true, ...res };
+    } catch (e) {
+      return { ok: false, error: String(e && e.message || e) };
+    }
+  });
+
+  // Pull this investigator's assignments from the node (on reconnect / paint).
+  ipcMain.handle('supervisor-link:icac-assignments', async (_e, opts = {}) => {
+    try {
+      const identity = opts.identity || listenIdentity;
+      const url = await resolveListenUrl(opts.url);
+      const c = await ensureClient({ url, identity });
+      const list = await c.rpc('get:icac:assignments');
+      return { ok: true, assignments: list || [] };
+    } catch (e) {
+      return { ok: false, error: String(e && e.message || e), assignments: [] };
+    }
   });
 
   // Forget the pinned node key for the current/given URL (re-TOFU next time).

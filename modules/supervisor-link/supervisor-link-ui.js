@@ -605,5 +605,254 @@
     throw new Error((built && built.error) || 'PDF_BUILD_FAILED');
   }
 
-  window.SupervisorLink = { getIdentity, openPushDialog, buildStatsSnapshot, buildCaseDigest };
+  // ── ICAC assignment receiver + inbox ────────────────────────────────────
+  // Supervisor -> investigator direction. A supervisor pushes a CyberTip
+  // NUMBER (never PII); we surface it as a dashboard alert. The investigator
+  // acknowledges and launches a case in their OWN app, then downloads the
+  // report contents from their ICAC system. The ack is routed back so the
+  // supervisor can document that the assignment was received.
+  const INBOX_KEY = 'viperIcacAssignments';
+  let inboxPanelEl = null;
+
+  function inboxGet() { return lsJSON(INBOX_KEY, []); }
+  function inboxSave(list) { try { localStorage.setItem(INBOX_KEY, JSON.stringify(list)); } catch (_) {} }
+  function pendingCount() { return inboxGet().filter((a) => a.status !== 'acknowledged').length; }
+
+  function toast(msg, kind) {
+    if (typeof window.viperToast === 'function') { try { window.viperToast(msg, kind || 'info'); return; } catch (_) {} }
+    console.log('[SupervisorLink]', msg);
+  }
+
+  function upsertAssignment(a) {
+    const list = inboxGet();
+    const i = list.findIndex((x) => x.id === a.id);
+    if (i >= 0) list[i] = { ...list[i], ...a };
+    else list.unshift(a);
+    inboxSave(list);
+    renderInboxBadge();
+    if (inboxPanelEl) renderInboxList();
+  }
+
+  function renderInboxBadge() {
+    let btn = document.getElementById('icacInboxBtn');
+    const n = pendingCount();
+    if (!btn) {
+      btn = el('button', `position:fixed;right:18px;bottom:18px;z-index:99990;
+        width:52px;height:52px;border-radius:50%;border:1px solid ${C.cyan};cursor:pointer;
+        background:${C.panel};color:${C.cyan};box-shadow:0 6px 24px rgba(0,0,0,.5);
+        font-size:20px;display:flex;align-items:center;justify-content:center;`, { id: 'icacInboxBtn', title: 'CyberTip assignments' });
+      btn.innerHTML = '&#128232;';
+      btn.addEventListener('click', openInbox);
+      const badge = el('span', `position:absolute;top:-4px;right:-4px;min-width:20px;height:20px;
+        border-radius:10px;background:${C.red};color:#fff;font-size:11px;font-weight:700;
+        display:none;align-items:center;justify-content:center;padding:0 5px;`, { id: 'icacInboxCount' });
+      btn.appendChild(badge);
+      document.body.appendChild(btn);
+    }
+    const badge = document.getElementById('icacInboxCount');
+    if (badge) {
+      badge.textContent = String(n);
+      badge.style.display = n > 0 ? 'flex' : 'none';
+    }
+    // Only show the bell when there is at least one assignment on record.
+    btn.style.display = inboxGet().length ? 'flex' : 'none';
+  }
+
+  function priBadge(p) {
+    const c = p === 'High' ? C.red : p === 'Low' ? C.faint : C.amber;
+    return `<span style="border:1px solid ${c};color:${c};border-radius:6px;padding:1px 7px;font-size:11px;">${p || 'Medium'}</span>`;
+  }
+
+  function renderInboxList() {
+    if (!inboxPanelEl) return;
+    const body = inboxPanelEl.querySelector('#icacInboxBody');
+    if (!body) return;
+    const list = inboxGet();
+    if (!list.length) {
+      body.innerHTML = `<div style="color:${C.dim};font-size:13px;padding:16px 4px;">No CyberTip assignments yet.</div>`;
+      return;
+    }
+    body.innerHTML = '';
+    for (const a of list) {
+      const ackd = a.status === 'acknowledged';
+      const row = el('div', `border:1px solid ${C.border};border-radius:10px;padding:12px 14px;
+        margin-bottom:10px;background:${C.panel2};`);
+      row.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-family:ui-monospace,Consolas,monospace;color:#fff;font-size:15px;">${a.cybertipNumber || '—'}</span>
+          ${priBadge(a.priority)}
+          <span style="margin-left:auto;color:${ackd ? C.green : C.amber};font-size:12px;">${ackd ? '✓ Acknowledged' : 'Pending'}</span>
+        </div>
+        <div style="color:${C.dim};font-size:12px;margin-top:6px;">From ${a.from || 'Supervisor'} · ${a.sentAt ? new Date(a.sentAt).toLocaleString() : ''}</div>
+        ${a.note ? `<div style="color:${C.text};font-size:12.5px;margin-top:6px;">${escapeHtml(a.note)}</div>` : ''}
+        ${a.caseNumber ? `<div style="color:${C.cyan};font-size:12px;margin-top:6px;">Case ${escapeHtml(a.caseNumber)}</div>` : ''}
+      `;
+      if (!ackd) {
+        const actions = el('div', 'display:flex;gap:8px;margin-top:10px;');
+        const launch = el('button', `flex:1;padding:7px;border-radius:8px;border:1px solid ${C.cyan};
+          background:rgba(0,183,195,.16);color:${C.cyan};cursor:pointer;font-size:12.5px;`, { textContent: 'Acknowledge & Launch Case' });
+        launch.addEventListener('click', () => acknowledge(a.id, true));
+        const ackOnly = el('button', `padding:7px 12px;border-radius:8px;border:1px solid ${C.border};
+          background:transparent;color:${C.dim};cursor:pointer;font-size:12.5px;`, { textContent: 'Acknowledge' });
+        ackOnly.addEventListener('click', () => acknowledge(a.id, false));
+        actions.appendChild(launch); actions.appendChild(ackOnly);
+        row.appendChild(actions);
+      }
+      body.appendChild(row);
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+  }
+
+  function openInbox() {
+    if (inboxPanelEl) { closeInbox(); return; }
+    inboxPanelEl = el('div', `position:fixed;right:18px;bottom:80px;z-index:99991;width:min(380px,92vw);
+      max-height:70vh;overflow:auto;background:${C.panel};border:1px solid ${C.border};border-radius:14px;
+      box-shadow:0 12px 40px rgba(0,0,0,.6);font-family:'Segoe UI',system-ui,sans-serif;padding:16px;`);
+    const head = el('div', 'display:flex;align-items:center;gap:8px;margin-bottom:12px;');
+    head.innerHTML = `<div style="color:#fff;font-weight:600;font-size:15px;">CyberTip Assignments</div>`;
+    const x = el('button', `margin-left:auto;background:transparent;border:none;color:${C.dim};font-size:18px;cursor:pointer;`, { textContent: '✕' });
+    x.addEventListener('click', closeInbox);
+    head.appendChild(x);
+    const body = el('div', '', { id: 'icacInboxBody' });
+    inboxPanelEl.appendChild(head);
+    inboxPanelEl.appendChild(body);
+    document.body.appendChild(inboxPanelEl);
+    renderInboxList();
+  }
+
+  function closeInbox() {
+    if (inboxPanelEl && inboxPanelEl.parentNode) inboxPanelEl.parentNode.removeChild(inboxPanelEl);
+    inboxPanelEl = null;
+  }
+
+  // Create a local case for the CyberTip (investigator opens it in their app).
+  function launchCaseForTip(a) {
+    const cases = lsJSON('viperCases', []);
+    let caseNumber = 'CT-' + (a.cybertipNumber || Date.now());
+    let n = 1;
+    while (cases.find((c) => c.caseNumber === caseNumber)) caseNumber = 'CT-' + a.cybertipNumber + '-' + (++n);
+    const now = new Date().toISOString();
+    const newCase = {
+      id: Date.now(),
+      caseNumber,
+      synopsis: `ICAC CyberTip ${a.cybertipNumber} assigned by ${a.from || 'Supervisor'}.` + (a.note ? ` Note: ${a.note}` : ''),
+      cybertipNumber: a.cybertipNumber || '',
+      status: 'active',
+      priority: a.priority === 'High' ? 3 : a.priority === 'Low' ? 1 : 2,
+      modules: [],
+      tabOrder: ['overview'],
+      createdAt: now,
+      createdBy: lsGet('viper_customer_name') || 'Investigator',
+      lastModified: now,
+    };
+    cases.push(newCase);
+    try { localStorage.setItem('viperCases', JSON.stringify(cases)); } catch (_) {}
+    if (typeof window.updateDashboardCaseData === 'function') { try { window.updateDashboardCaseData(); } catch (_) {} }
+    return newCase;
+  }
+
+  async function acknowledge(assignmentId, launch) {
+    const list = inboxGet();
+    const a = list.find((x) => x.id === assignmentId);
+    if (!a) return;
+    let caseNumber = a.caseNumber || null;
+    let newCase = null;
+    if (launch) {
+      newCase = launchCaseForTip(a);
+      caseNumber = newCase.caseNumber;
+    }
+    // Route the acknowledgement back to the supervisor.
+    if (api()) {
+      try {
+        const res = await api().icacAck({
+          assignmentId, caseNumber,
+          identity: getIdentity(),
+          url: getNodeUrl() || undefined,
+        });
+        if (!res || !res.ok) toast('Acknowledged locally — could not reach supervisor: ' + ((res && res.error) || 'offline'), 'warning');
+        else toast('CyberTip ' + a.cybertipNumber + ' acknowledged', 'success');
+      } catch (e) {
+        toast('Acknowledged locally — supervisor unreachable', 'warning');
+      }
+    }
+    a.status = 'acknowledged';
+    a.caseNumber = caseNumber;
+    a.acknowledgedAt = new Date().toISOString();
+    inboxSave(list);
+    renderInboxBadge();
+    if (inboxPanelEl) renderInboxList();
+    if (launch && newCase && typeof window.openCaseDetail === 'function') {
+      closeInbox();
+      try { window.openCaseDetail(newCase.id); } catch (_) {}
+    }
+  }
+
+  let receiverStarted = false;
+  function initAssignmentReceiver() {
+    if (receiverStarted) return;
+    // Receiving supervisor assignments is ON by default in the desktop app;
+    // only an explicit opt-out disables it.
+    if (lsGet('viperSupervisorLinkEnabled') === 'false') return;
+    if (!api()) return;
+    receiverStarted = true;
+
+    // Start the persistent receiver so assignments arrive while idle.
+    // Blank node url ('') => undefined => main process auto-discovers.
+    api().listen({ identity: getIdentity(), url: getNodeUrl() || undefined }).catch(() => {});
+
+    // Fold live assignment events into the inbox.
+    api().onEvent((evt) => {
+      if (!evt || evt.kind !== 'icac:assign:new') return;
+      const p = evt.payload || {};
+      upsertAssignment({
+        id: p.id,
+        cybertipNumber: p.cybertipNumber,
+        priority: p.priority || null,
+        note: p.note || '',
+        from: p.from || 'Supervisor',
+        fromBadge: p.fromBadge || '',
+        sentAt: p.sentAt || new Date().toISOString(),
+        status: 'pending',
+      });
+      toast('New CyberTip assigned: ' + (p.cybertipNumber || ''), 'info');
+    });
+
+    // Reconcile with the node on paint (offline-queued assignments, etc.).
+    api().icacAssignments({ identity: getIdentity(), url: getNodeUrl() || undefined })
+      .then((r) => {
+        if (!r || !r.ok) return;
+        for (const a of r.assignments || []) {
+          upsertAssignment({
+            id: a.id,
+            cybertipNumber: a.cybertipNumber,
+            priority: a.priority || null,
+            note: a.note || '',
+            from: a.fromName || 'Supervisor',
+            sentAt: a.sentAt,
+            status: a.status === 'acknowledged' ? 'acknowledged' : 'pending',
+            caseNumber: a.caseNumber || null,
+          });
+        }
+      })
+      .catch(() => {});
+
+    renderInboxBadge();
+  }
+
+  // Boot the receiver once the DOM is ready, and react to the feature toggle.
+  function bootReceiver() {
+    initAssignmentReceiver();
+    window.addEventListener('storage', (e) => {
+      if (e && e.key === 'viperSupervisorLinkEnabled' && e.newValue !== 'false') initAssignmentReceiver();
+    });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootReceiver);
+  else bootReceiver();
+
+  window.SupervisorLink = { getIdentity, openPushDialog, buildStatsSnapshot, buildCaseDigest, openInbox };
 })();

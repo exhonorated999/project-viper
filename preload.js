@@ -489,6 +489,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     buildOpsPdf: (ops) => ipcRenderer.invoke('supervisor-link:build-ops-pdf', ops || {}),
     resetPin: (opts) => ipcRenderer.invoke('supervisor-link:reset-pin', opts || {}),
     disconnect: () => ipcRenderer.invoke('supervisor-link:disconnect'),
+    // ICAC assignment loop (supervisor -> investigator receive/acknowledge).
+    listen: (opts) => ipcRenderer.invoke('supervisor-link:listen', opts || {}),
+    stopListen: () => ipcRenderer.invoke('supervisor-link:stop-listen'),
+    icacAck: (opts) => ipcRenderer.invoke('supervisor-link:icac-ack', opts || {}),
+    icacAssignments: (opts) => ipcRenderer.invoke('supervisor-link:icac-assignments', opts || {}),
     onEvent: (cb) => {
       const handler = (_e, evt) => { try { cb(evt); } catch (_) {} };
       ipcRenderer.on('supervisor-link:event', handler);

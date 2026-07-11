@@ -5375,10 +5375,10 @@
             });
         }
 
-        document.addEventListener('DOMContentLoaded', function() {
-            // Migrate existing data to central storage (one-time sync)
-            migrateExistingDataToCentralStorage();
-            
+        // ── Unit-wide metric computation (shared by dashboard load + the
+        //    Supervisor Link stats push). Recomputes every dashboardMetrics
+        //    value from localStorage, then callers read the fresh numbers.
+        function viperComputeAllMetrics() {
             // Update new cases assigned (lifetime + this month)
             dashboardMetrics['new_cases_assigned'].value   = getTotalNewCases();
             dashboardMetrics['new_cases_assigned'].monthly = getNewCasesThisMonth();
@@ -5426,11 +5426,41 @@
             dashboardMetrics['arrests'].monthly = getMonthlyArrests();
 
             // Synthesize user-defined Custom Metrics into dashboardMetrics
-            // so they appear in card dropdowns + Quick Stats picker.
             syncCustomMetricsIntoDashboard();
 
-            // Update case data on dashboard
+            // Update case data on dashboard (open/closed/transferred/inactive…)
             updateDashboardCaseData();
+        }
+
+        // Fresh, numeric { key -> number } snapshot of all built-in metrics for
+        // the Supervisor Link stats push. Coerces '$1,234' / multi-unit objects
+        // to plain numbers; skips custom_* metrics.
+        window.viperMetricsSnapshot = function () {
+            try { viperComputeAllMetrics(); } catch (_) {}
+            const toNum = (v) => {
+                if (typeof v === 'number') return isFinite(v) ? v : 0;
+                if (v && typeof v === 'object') {
+                    let s = 0;
+                    for (const k in v) { const n = parseFloat(v[k]); if (!isNaN(n)) s += n; }
+                    return s;
+                }
+                const n = parseInt(String(v == null ? '' : v).replace(/[^0-9-]/g, ''), 10);
+                return isNaN(n) ? 0 : n;
+            };
+            const out = {};
+            for (const k in dashboardMetrics) {
+                if (k.startsWith('custom_')) continue;
+                out[k] = toNum(dashboardMetrics[k].value);
+            }
+            return out;
+        };
+
+        document.addEventListener('DOMContentLoaded', function() {
+            // Migrate existing data to central storage (one-time sync)
+            migrateExistingDataToCentralStorage();
+            
+            // Compute all unit metrics from localStorage.
+            viperComputeAllMetrics();
             
             // Update warrant alerts on dashboard
             updateWarrantAlerts();

@@ -100,6 +100,15 @@
     const clearance = total ? Math.round((closed / total) * 100) : 0;
 
     const id = getIdentity();
+    // Full unit-metric map for the supervisor's configurable stat cards /
+    // Quick Stats. Present only on the dashboard page (index.html); omitted on
+    // pages without it — the supervisor backfills from the headline in that case.
+    let metrics;
+    try {
+      if (typeof window !== 'undefined' && typeof window.viperMetricsSnapshot === 'function') {
+        metrics = window.viperMetricsSnapshot();
+      }
+    } catch (_) { metrics = undefined; }
     return {
       manifest: {
         title: `Stats Snapshot — ${id.name}`,
@@ -116,6 +125,7 @@
         ],
         byStatus: Object.entries(byStatus).map(([label, count]) => ({ label, count })),
         byType: Object.entries(byPriority).map(([label, count]) => ({ label, count })),
+        metrics,
         investigator: id.name,
         badge: id.badge,
       },

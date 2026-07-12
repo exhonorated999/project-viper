@@ -802,9 +802,175 @@
     }
   }
 
+  // ── Case assignment receiver + inbox ────────────────────────────────────
+  // Supervisor -> investigator direction, mirror of the ICAC CyberTip inbox
+  // but for supervisor-authored CASE assignments. Only the case NUMBER + the
+  // supervisor's own description/note/priority cross the wire — never the
+  // investigator's own case content. The bell sits just above the CyberTip one.
+  const CASE_INBOX_KEY = 'viperCaseAssignments';
+  let caseInboxPanelEl = null;
+  function caseInboxGet() { return lsJSON(CASE_INBOX_KEY, []); }
+  function caseInboxSave(list) { try { localStorage.setItem(CASE_INBOX_KEY, JSON.stringify(list)); } catch (_) {} }
+  function casePendingCount() { return caseInboxGet().filter((a) => a.status !== 'acknowledged').length; }
+
+  function upsertCaseAssignment(a) {
+    const list = caseInboxGet();
+    const i = list.findIndex((x) => x.id === a.id);
+    if (i >= 0) list[i] = { ...list[i], ...a };
+    else list.unshift(a);
+    caseInboxSave(list);
+    renderCaseInboxBadge();
+    if (caseInboxPanelEl) renderCaseInboxList();
+  }
+
+  function renderCaseInboxBadge() {
+    let btn = document.getElementById('caseInboxBtn');
+    const n = casePendingCount();
+    if (!btn) {
+      btn = el('button', `position:fixed;right:18px;bottom:80px;z-index:99990;
+        width:52px;height:52px;border-radius:50%;border:1px solid ${C.amber};cursor:pointer;
+        background:${C.panel};color:${C.amber};box-shadow:0 6px 24px rgba(0,0,0,.5);
+        font-size:20px;display:flex;align-items:center;justify-content:center;`, { id: 'caseInboxBtn', title: 'Case assignments' });
+      btn.innerHTML = '&#128193;';
+      btn.addEventListener('click', openCaseInbox);
+      const badge = el('span', `position:absolute;top:-4px;right:-4px;min-width:20px;height:20px;
+        border-radius:10px;background:${C.red};color:#fff;font-size:11px;font-weight:700;
+        display:none;align-items:center;justify-content:center;padding:0 5px;`, { id: 'caseInboxCount' });
+      btn.appendChild(badge);
+      document.body.appendChild(btn);
+    }
+    const badge = document.getElementById('caseInboxCount');
+    if (badge) {
+      badge.textContent = String(n);
+      badge.style.display = n > 0 ? 'flex' : 'none';
+    }
+    btn.style.display = caseInboxGet().length ? 'flex' : 'none';
+  }
+
+  function renderCaseInboxList() {
+    if (!caseInboxPanelEl) return;
+    const body = caseInboxPanelEl.querySelector('#caseInboxBody');
+    if (!body) return;
+    const list = caseInboxGet();
+    if (!list.length) {
+      body.innerHTML = `<div style="color:${C.dim};font-size:13px;padding:16px 4px;">No case assignments yet.</div>`;
+      return;
+    }
+    body.innerHTML = '';
+    for (const a of list) {
+      const ackd = a.status === 'acknowledged';
+      const row = el('div', `border:1px solid ${C.border};border-radius:10px;padding:12px 14px;
+        margin-bottom:10px;background:${C.panel2};`);
+      row.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-family:ui-monospace,Consolas,monospace;color:#fff;font-size:15px;">${escapeHtml(a.caseNumber || '—')}</span>
+          ${priBadge(a.priority)}
+          <span style="margin-left:auto;color:${ackd ? C.green : C.amber};font-size:12px;">${ackd ? '✓ Acknowledged' : 'Pending'}</span>
+        </div>
+        <div style="color:${C.dim};font-size:12px;margin-top:6px;">From ${escapeHtml(a.from || 'Supervisor')} · ${a.sentAt ? new Date(a.sentAt).toLocaleString() : ''}</div>
+        ${a.description ? `<div style="color:${C.text};font-size:12.5px;margin-top:6px;">${escapeHtml(a.description)}</div>` : ''}
+        ${a.note ? `<div style="color:${C.dim};font-size:12px;margin-top:4px;">${escapeHtml(a.note)}</div>` : ''}
+        ${a.openedCaseNumber ? `<div style="color:${C.cyan};font-size:12px;margin-top:6px;">Opened ${escapeHtml(a.openedCaseNumber)}</div>` : ''}
+      `;
+      if (!ackd) {
+        const actions = el('div', 'display:flex;gap:8px;margin-top:10px;');
+        const launch = el('button', `flex:1;padding:7px;border-radius:8px;border:1px solid ${C.cyan};
+          background:rgba(0,183,195,.16);color:${C.cyan};cursor:pointer;font-size:12.5px;`, { textContent: 'Acknowledge & Launch Case' });
+        launch.addEventListener('click', () => caseAcknowledge(a.id, true));
+        const ackOnly = el('button', `padding:7px 12px;border-radius:8px;border:1px solid ${C.border};
+          background:transparent;color:${C.dim};cursor:pointer;font-size:12.5px;`, { textContent: 'Acknowledge' });
+        ackOnly.addEventListener('click', () => caseAcknowledge(a.id, false));
+        actions.appendChild(launch); actions.appendChild(ackOnly);
+        row.appendChild(actions);
+      }
+      body.appendChild(row);
+    }
+  }
+
+  function openCaseInbox() {
+    if (caseInboxPanelEl) { closeCaseInbox(); return; }
+    caseInboxPanelEl = el('div', `position:fixed;right:18px;bottom:142px;z-index:99991;width:min(380px,92vw);
+      max-height:70vh;overflow:auto;background:${C.panel};border:1px solid ${C.border};border-radius:14px;
+      box-shadow:0 12px 40px rgba(0,0,0,.6);font-family:'Segoe UI',system-ui,sans-serif;padding:16px;`);
+    const head = el('div', 'display:flex;align-items:center;gap:8px;margin-bottom:12px;');
+    head.innerHTML = `<div style="color:#fff;font-weight:600;font-size:15px;">Case Assignments</div>`;
+    const x = el('button', `margin-left:auto;background:transparent;border:none;color:${C.dim};font-size:18px;cursor:pointer;`, { textContent: '✕' });
+    x.addEventListener('click', closeCaseInbox);
+    head.appendChild(x);
+    const body = el('div', '', { id: 'caseInboxBody' });
+    caseInboxPanelEl.appendChild(head);
+    caseInboxPanelEl.appendChild(body);
+    document.body.appendChild(caseInboxPanelEl);
+    renderCaseInboxList();
+  }
+
+  function closeCaseInbox() {
+    if (caseInboxPanelEl && caseInboxPanelEl.parentNode) caseInboxPanelEl.parentNode.removeChild(caseInboxPanelEl);
+    caseInboxPanelEl = null;
+  }
+
+  // Open a local case for the assignment, using the SUPERVISOR's case number.
+  function launchCaseForAssignment(a) {
+    const cases = lsJSON('viperCases', []);
+    let caseNumber = a.caseNumber || ('MC-' + Date.now());
+    const base = caseNumber;
+    let n = 1;
+    while (cases.find((c) => c.caseNumber === caseNumber)) caseNumber = base + '-' + (++n);
+    const now = new Date().toISOString();
+    const newCase = {
+      id: Date.now(),
+      caseNumber,
+      synopsis: (a.description || ('Case ' + caseNumber + ' assigned by ' + (a.from || 'Supervisor') + '.')) + (a.note ? ' Note: ' + a.note : ''),
+      status: 'active',
+      priority: a.priority === 'High' ? 3 : a.priority === 'Low' ? 1 : 2,
+      modules: [],
+      tabOrder: ['overview'],
+      createdAt: now,
+      createdBy: lsGet('viper_customer_name') || 'Investigator',
+      lastModified: now,
+    };
+    cases.push(newCase);
+    try { localStorage.setItem('viperCases', JSON.stringify(cases)); } catch (_) {}
+    if (typeof window.updateDashboardCaseData === 'function') { try { window.updateDashboardCaseData(); } catch (_) {} }
+    return newCase;
+  }
+
+  async function caseAcknowledge(assignmentId, launch) {
+    const list = caseInboxGet();
+    const a = list.find((x) => x.id === assignmentId);
+    if (!a) return;
+    let openedCaseNumber = a.openedCaseNumber || null;
+    let newCase = null;
+    if (launch) {
+      newCase = launchCaseForAssignment(a);
+      openedCaseNumber = newCase.caseNumber;
+    }
+    if (api()) {
+      try {
+        const res = await api().caseAck({
+          assignmentId, caseNumber: openedCaseNumber,
+          identity: getIdentity(), url: getNodeUrl() || undefined,
+        });
+        if (!res || !res.ok) toast('Acknowledged locally — could not reach supervisor: ' + ((res && res.error) || 'offline'), 'warning');
+        else toast('Case ' + (a.caseNumber || '') + ' acknowledged', 'success');
+      } catch (e) {
+        toast('Acknowledged locally — supervisor unreachable', 'warning');
+      }
+    }
+    a.status = 'acknowledged';
+    a.openedCaseNumber = openedCaseNumber;
+    a.acknowledgedAt = new Date().toISOString();
+    caseInboxSave(list);
+    renderCaseInboxBadge();
+    if (caseInboxPanelEl) renderCaseInboxList();
+    if (launch && newCase && typeof window.openCaseDetail === 'function') {
+      closeCaseInbox();
+      try { window.openCaseDetail(newCase.id); } catch (_) {}
+    }
+  }
+
   let receiverStarted = false;
   function initAssignmentReceiver() {
-    if (receiverStarted) return;
     // Receiving supervisor assignments is ON by default in the desktop app;
     // only an explicit opt-out disables it.
     if (lsGet('viperSupervisorLinkEnabled') === 'false') return;
@@ -817,19 +983,38 @@
 
     // Fold live assignment events into the inbox.
     api().onEvent((evt) => {
-      if (!evt || evt.kind !== 'icac:assign:new') return;
-      const p = evt.payload || {};
-      upsertAssignment({
-        id: p.id,
-        cybertipNumber: p.cybertipNumber,
-        priority: p.priority || null,
-        note: p.note || '',
-        from: p.from || 'Supervisor',
-        fromBadge: p.fromBadge || '',
-        sentAt: p.sentAt || new Date().toISOString(),
-        status: 'pending',
-      });
-      toast('New CyberTip assigned: ' + (p.cybertipNumber || ''), 'info');
+      if (!evt) return;
+      if (evt.kind === 'icac:assign:new') {
+        const p = evt.payload || {};
+        upsertAssignment({
+          id: p.id,
+          cybertipNumber: p.cybertipNumber,
+          priority: p.priority || null,
+          note: p.note || '',
+          from: p.from || 'Supervisor',
+          fromBadge: p.fromBadge || '',
+          sentAt: p.sentAt || new Date().toISOString(),
+          status: 'pending',
+        });
+        toast('New CyberTip assigned: ' + (p.cybertipNumber || ''), 'info');
+        return;
+      }
+      if (evt.kind === 'case:assign:new') {
+        const p = evt.payload || {};
+        upsertCaseAssignment({
+          id: p.id,
+          caseNumber: p.caseNumber,
+          description: p.description || '',
+          priority: p.priority || null,
+          note: p.note || '',
+          from: p.from || 'Supervisor',
+          fromBadge: p.fromBadge || '',
+          sentAt: p.sentAt || new Date().toISOString(),
+          status: 'pending',
+        });
+        toast('New case assigned: ' + (p.caseNumber || ''), 'info');
+        return;
+      }
     });
 
     // Reconcile with the node on paint (offline-queued assignments, etc.).
@@ -851,7 +1036,28 @@
       })
       .catch(() => {});
 
+    // Reconcile CASE assignments with the node on paint (offline-queued, etc.).
+    api().caseAssignments({ identity: getIdentity(), url: getNodeUrl() || undefined })
+      .then((r) => {
+        if (!r || !r.ok) return;
+        for (const a of r.assignments || []) {
+          upsertCaseAssignment({
+            id: a.id,
+            caseNumber: a.caseNumber,
+            description: a.description || '',
+            priority: a.priority || null,
+            note: a.note || '',
+            from: a.fromName || 'Supervisor',
+            sentAt: a.sentAt,
+            status: a.status === 'acknowledged' ? 'acknowledged' : 'pending',
+            openedCaseNumber: a.ackCaseNumber || null,
+          });
+        }
+      })
+      .catch(() => {});
+
     renderInboxBadge();
+    renderCaseInboxBadge();
   }
 
   // Boot the receiver once the DOM is ready, and react to the feature toggle.

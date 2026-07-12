@@ -5110,7 +5110,13 @@
         // Update notification badge
         function updateNotificationBadge() {
             const overdueCount = checkOverdueWarrants();
-            const total = overdueCount;
+            let supPending = 0;
+            try {
+                if (window.SupervisorLink && SupervisorLink.getInboxCounts) {
+                    supPending = SupervisorLink.getInboxCounts().totalPending || 0;
+                }
+            } catch (_) {}
+            const total = overdueCount + supPending;
             const badge = document.querySelector('.notification-badge');
             if (badge) {
                 if (total > 0) {
@@ -5121,6 +5127,15 @@
                 }
             }
         }
+
+        // Keep the bell badge + open dropdown in sync when supervisor
+        // assignments arrive/are acknowledged live.
+        window.addEventListener('supervisor-inbox-updated', () => {
+            try { updateNotificationBadge(); } catch (_) {}
+            if (document.getElementById('bellDropdown')) {
+                try { renderBellDropdown(); } catch (_) {}
+            }
+        });
 
         // FMCSA + TRACE dashboard panels removed — now in Resource Hub drawer
 
@@ -5606,49 +5621,145 @@
         }
         
         async function showNotifications() {
+            toggleBellDropdown();
+        }
+
+        // ── Unified notification bell dropdown ─────────────────────────────
+        // Folds Overdue Warrants + Supervisor CyberTip/Case assignments into a
+        // single dropdown anchored to the top bell.  Replaces the old floating
+        // bottom-right supervisor buttons (they overlapped the Resource Hub
+        // magnifier).
+        function getOverdueWarrantsList() {
             const allWarrants = JSON.parse(localStorage.getItem('viperCaseWarrants')) || {};
             const allCases = JSON.parse(localStorage.getItem('viperCases')) || [];
-            const overdueWarrants = [];
-            
+            const overdue = [];
             Object.entries(allWarrants).forEach(([caseNumber, warrants]) => {
-                warrants.forEach(warrant => {
+                (warrants || []).forEach(warrant => {
                     if (warrant.dueDate && !warrant.returnReceived && new Date(warrant.dueDate + 'T00:00:00') < new Date()) {
                         const caseInfo = allCases.find(c => c.caseNumber === caseNumber);
-                        overdueWarrants.push({
-                            caseNumber: caseNumber,
-                            warrant: warrant,
-                            caseId: caseInfo ? caseInfo.id : null
-                        });
+                        overdue.push({ caseNumber, warrant, caseId: caseInfo ? caseInfo.id : null });
                     }
                 });
             });
+            return overdue;
+        }
 
-            // GenLogs alerts (disabled — need upgraded plan)
-            const glAlerts = [];
-            
-            if (overdueWarrants.length === 0 && glAlerts.length === 0) {
-                viperToast('No notifications', 'info');
-                return;
+        function closeBellDropdown() {
+            const el = document.getElementById('bellDropdown');
+            if (el && el.parentNode) el.parentNode.removeChild(el);
+            document.removeEventListener('mousedown', _bellOutsideHandler, true);
+        }
+
+        function _bellOutsideHandler(e) {
+            const dd = document.getElementById('bellDropdown');
+            const bell = document.querySelector('.notification-bell');
+            if (!dd) return;
+            if (dd.contains(e.target) || (bell && bell.contains(e.target))) return;
+            closeBellDropdown();
+        }
+
+        function toggleBellDropdown() {
+            if (document.getElementById('bellDropdown')) { closeBellDropdown(); return; }
+
+            const dd = document.createElement('div');
+            dd.id = 'bellDropdown';
+            dd.style.cssText = 'position:fixed;top:74px;right:24px;z-index:99991;width:min(400px,92vw);'
+                + 'max-height:74vh;overflow:auto;background:#0f1420;border:1px solid rgba(0,183,195,.28);'
+                + 'border-radius:14px;box-shadow:0 16px 48px rgba(0,0,0,.6);'
+                + "font-family:'Segoe UI',system-ui,sans-serif;padding:14px 16px;";
+
+            const head = document.createElement('div');
+            head.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:10px;';
+            head.innerHTML = '<div style="color:#fff;font-weight:600;font-size:15px;">Notifications</div>';
+            const x = document.createElement('button');
+            x.textContent = '✕';
+            x.style.cssText = 'margin-left:auto;background:transparent;border:none;color:#8a94a6;font-size:18px;cursor:pointer;';
+            x.addEventListener('click', closeBellDropdown);
+            head.appendChild(x);
+            dd.appendChild(head);
+
+            const bodyWrap = document.createElement('div');
+            bodyWrap.id = 'bellDropdownBody';
+            dd.appendChild(bodyWrap);
+
+            document.body.appendChild(dd);
+            renderBellDropdown();
+
+            // Close on outside click (defer so this same click doesn't close it).
+            setTimeout(() => document.addEventListener('mousedown', _bellOutsideHandler, true), 0);
+        }
+
+        function _bellSectionTitle(text) {
+            const t = document.createElement('div');
+            t.style.cssText = 'color:#9aa4b2;font-size:11px;font-weight:700;letter-spacing:.06em;'
+                + 'text-transform:uppercase;margin:12px 2px 8px;';
+            t.textContent = text;
+            return t;
+        }
+
+        function renderBellDropdown() {
+            const body = document.getElementById('bellDropdownBody');
+            if (!body) return;
+            body.innerHTML = '';
+
+            const overdue = getOverdueWarrantsList();
+            const counts = (window.SupervisorLink && SupervisorLink.getInboxCounts)
+                ? SupervisorLink.getInboxCounts()
+                : { cyberTotal: 0, caseTotal: 0 };
+
+            let anything = false;
+
+            // Overdue warrants
+            if (overdue.length) {
+                anything = true;
+                body.appendChild(_bellSectionTitle('Overdue Warrants (' + overdue.length + ')'));
+                overdue.forEach(item => {
+                    const days = Math.ceil((new Date() - new Date(item.warrant.dueDate)) / 86400000);
+                    const row = document.createElement('div');
+                    row.style.cssText = 'border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:11px 13px;'
+                        + 'margin-bottom:9px;background:#151b28;cursor:pointer;';
+                    row.innerHTML = '<div style="display:flex;align-items:center;gap:8px;">'
+                        + '<span style="color:#f59e0b;">&#9888;</span>'
+                        + '<span style="color:#fff;font-size:13.5px;font-weight:600;">Case ' + item.caseNumber + '</span>'
+                        + '<span style="margin-left:auto;color:#f87171;font-size:12px;">' + days + 'd overdue</span></div>'
+                        + '<div style="color:#9aa4b2;font-size:12px;margin-top:5px;">'
+                        + String(item.warrant.type || 'Warrant').toUpperCase()
+                        + (item.warrant.issuedTo ? ' to ' + item.warrant.issuedTo : '') + '</div>';
+                    row.addEventListener('click', () => {
+                        if (item.caseId) {
+                            localStorage.setItem('currentCaseId', item.caseId);
+                            window.location.href = 'case-detail-with-analytics.html';
+                        }
+                    });
+                    body.appendChild(row);
+                });
             }
-            
-            let message = '';
-            if (overdueWarrants.length > 0) {
-                message += `OVERDUE WARRANTS (${overdueWarrants.length}):\n\n`;
-                message += overdueWarrants.map(item => {
-                    const daysOverdue = Math.ceil((new Date() - new Date(item.warrant.dueDate)) / (1000 * 60 * 60 * 24));
-                    return `⚠️ Case ${item.caseNumber}: ${item.warrant.type.toUpperCase()} ${item.warrant.issuedTo ? 'to ' + item.warrant.issuedTo : ''}\n   ${daysOverdue} days overdue`;
-                }).join('\n\n');
+
+            // Supervisor — CyberTip assignments
+            if (counts.cyberTotal && window.SupervisorLink && SupervisorLink.renderInboxInto) {
+                anything = true;
+                body.appendChild(_bellSectionTitle('CyberTip Assignments'
+                    + (counts.cyberPending ? ' (' + counts.cyberPending + ' new)' : '')));
+                const c = document.createElement('div');
+                body.appendChild(c);
+                try { SupervisorLink.renderInboxInto(c); } catch (_) {}
             }
-            
-            if (overdueWarrants.length > 0) {
-                if (await viperConfirm(message + '\n\nGo to warrants to review?')) {
-                    if (overdueWarrants[0].caseId) {
-                        localStorage.setItem('currentCaseId', overdueWarrants[0].caseId);
-                        window.location.href = 'case-detail-with-analytics.html';
-                    }
-                }
-            } else {
-                viperToast(message, 'info');
+
+            // Supervisor — Case assignments
+            if (counts.caseTotal && window.SupervisorLink && SupervisorLink.renderCaseInboxInto) {
+                anything = true;
+                body.appendChild(_bellSectionTitle('Case Assignments'
+                    + (counts.casePending ? ' (' + counts.casePending + ' new)' : '')));
+                const c = document.createElement('div');
+                body.appendChild(c);
+                try { SupervisorLink.renderCaseInboxInto(c); } catch (_) {}
+            }
+
+            if (!anything) {
+                const empty = document.createElement('div');
+                empty.style.cssText = 'color:#8a94a6;font-size:13px;padding:14px 4px;text-align:center;';
+                empty.textContent = 'No notifications';
+                body.appendChild(empty);
             }
         }
 

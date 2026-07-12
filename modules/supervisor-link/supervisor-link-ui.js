@@ -643,29 +643,30 @@
     if (inboxPanelEl) renderInboxList();
   }
 
+  // Inbox counts are surfaced through the Dashboard's top notification bell
+  // (see index.html showNotifications).  No floating bottom-right button — it
+  // used to overlap the Resource Hub magnifier.  We just recompute counts,
+  // refresh any host-owned dropdown that's listening, and (for backward-compat)
+  // any legacy floating panel that happens to be open.
+  function emitInboxUpdate() {
+    try {
+      window.dispatchEvent(new CustomEvent('supervisor-inbox-updated', { detail: getInboxCounts() }));
+    } catch (_) {}
+  }
+
+  function getInboxCounts() {
+    return {
+      cyberPending: pendingCount(),
+      cyberTotal: inboxGet().length,
+      casePending: casePendingCount(),
+      caseTotal: caseInboxGet().length,
+      totalPending: pendingCount() + casePendingCount(),
+    };
+  }
+
   function renderInboxBadge() {
-    let btn = document.getElementById('icacInboxBtn');
-    const n = pendingCount();
-    if (!btn) {
-      btn = el('button', `position:fixed;right:18px;bottom:18px;z-index:99990;
-        width:52px;height:52px;border-radius:50%;border:1px solid ${C.cyan};cursor:pointer;
-        background:${C.panel};color:${C.cyan};box-shadow:0 6px 24px rgba(0,0,0,.5);
-        font-size:20px;display:flex;align-items:center;justify-content:center;`, { id: 'icacInboxBtn', title: 'CyberTip assignments' });
-      btn.innerHTML = '&#128232;';
-      btn.addEventListener('click', openInbox);
-      const badge = el('span', `position:absolute;top:-4px;right:-4px;min-width:20px;height:20px;
-        border-radius:10px;background:${C.red};color:#fff;font-size:11px;font-weight:700;
-        display:none;align-items:center;justify-content:center;padding:0 5px;`, { id: 'icacInboxCount' });
-      btn.appendChild(badge);
-      document.body.appendChild(btn);
-    }
-    const badge = document.getElementById('icacInboxCount');
-    if (badge) {
-      badge.textContent = String(n);
-      badge.style.display = n > 0 ? 'flex' : 'none';
-    }
-    // Only show the bell when there is at least one assignment on record.
-    btn.style.display = inboxGet().length ? 'flex' : 'none';
+    if (inboxPanelEl) renderInboxList();
+    emitInboxUpdate();
   }
 
   function priBadge(p) {
@@ -673,9 +674,8 @@
     return `<span style="border:1px solid ${c};color:${c};border-radius:6px;padding:1px 7px;font-size:11px;">${p || 'Medium'}</span>`;
   }
 
-  function renderInboxList() {
-    if (!inboxPanelEl) return;
-    const body = inboxPanelEl.querySelector('#icacInboxBody');
+  function renderInboxList(body) {
+    body = body || (inboxPanelEl && inboxPanelEl.querySelector('#icacInboxBody'));
     if (!body) return;
     const list = inboxGet();
     if (!list.length) {
@@ -824,32 +824,12 @@
   }
 
   function renderCaseInboxBadge() {
-    let btn = document.getElementById('caseInboxBtn');
-    const n = casePendingCount();
-    if (!btn) {
-      btn = el('button', `position:fixed;right:18px;bottom:80px;z-index:99990;
-        width:52px;height:52px;border-radius:50%;border:1px solid ${C.amber};cursor:pointer;
-        background:${C.panel};color:${C.amber};box-shadow:0 6px 24px rgba(0,0,0,.5);
-        font-size:20px;display:flex;align-items:center;justify-content:center;`, { id: 'caseInboxBtn', title: 'Case assignments' });
-      btn.innerHTML = '&#128193;';
-      btn.addEventListener('click', openCaseInbox);
-      const badge = el('span', `position:absolute;top:-4px;right:-4px;min-width:20px;height:20px;
-        border-radius:10px;background:${C.red};color:#fff;font-size:11px;font-weight:700;
-        display:none;align-items:center;justify-content:center;padding:0 5px;`, { id: 'caseInboxCount' });
-      btn.appendChild(badge);
-      document.body.appendChild(btn);
-    }
-    const badge = document.getElementById('caseInboxCount');
-    if (badge) {
-      badge.textContent = String(n);
-      badge.style.display = n > 0 ? 'flex' : 'none';
-    }
-    btn.style.display = caseInboxGet().length ? 'flex' : 'none';
+    if (caseInboxPanelEl) renderCaseInboxList();
+    emitInboxUpdate();
   }
 
-  function renderCaseInboxList() {
-    if (!caseInboxPanelEl) return;
-    const body = caseInboxPanelEl.querySelector('#caseInboxBody');
+  function renderCaseInboxList(body) {
+    body = body || (caseInboxPanelEl && caseInboxPanelEl.querySelector('#caseInboxBody'));
     if (!body) return;
     const list = caseInboxGet();
     if (!list.length) {
@@ -1070,5 +1050,15 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootReceiver);
   else bootReceiver();
 
-  window.SupervisorLink = { getIdentity, openPushDialog, buildStatsSnapshot, buildCaseDigest, openInbox };
+  // Host-owned rendering: the Dashboard bell dropdown passes in its own
+  // container elements and we render the assignment rows (with working
+  // Acknowledge / Launch buttons) directly into them.
+  function renderInboxInto(container) { renderInboxList(container); }
+  function renderCaseInboxInto(container) { renderCaseInboxList(container); }
+
+  window.SupervisorLink = {
+    getIdentity, openPushDialog, buildStatsSnapshot, buildCaseDigest,
+    openInbox, openCaseInbox,
+    getInboxCounts, renderInboxInto, renderCaseInboxInto,
+  };
 })();

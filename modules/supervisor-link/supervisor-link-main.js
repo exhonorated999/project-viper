@@ -568,6 +568,36 @@ function registerIpc(ipcMain) {
     }
   });
 
+  // Acknowledge a CASE assignment (supervisor -> investigator). Mirror of the
+  // ICAC ack: routes the acknowledgement (and any local case number the
+  // investigator opened) back to the supervisor.
+  ipcMain.handle('supervisor-link:case-ack', async (_e, opts = {}) => {
+    try {
+      const identity = opts.identity || listenIdentity;
+      const url = await resolveListenUrl(opts.url);
+      const c = await ensureClient({ url, identity });
+      const res = await c.rpc('action:case:ack', {
+        assignmentId: opts.assignmentId, caseNumber: opts.caseNumber || null,
+      });
+      return { ok: true, ...res };
+    } catch (e) {
+      return { ok: false, error: String(e && e.message || e) };
+    }
+  });
+
+  // Pull this investigator's CASE assignments from the node (reconnect / paint).
+  ipcMain.handle('supervisor-link:case-assignments', async (_e, opts = {}) => {
+    try {
+      const identity = opts.identity || listenIdentity;
+      const url = await resolveListenUrl(opts.url);
+      const c = await ensureClient({ url, identity });
+      const list = await c.rpc('get:case:assignments');
+      return { ok: true, assignments: list || [] };
+    } catch (e) {
+      return { ok: false, error: String(e && e.message || e), assignments: [] };
+    }
+  });
+
   // Forget the pinned node key for the current/given URL (re-TOFU next time).
   ipcMain.handle('supervisor-link:reset-pin', async (_e, opts = {}) => {
     const s = loadStore();

@@ -824,6 +824,377 @@ footer {
     section { padding: 70px 0; }
     .hero { min-height: auto; padding: 120px 0 60px; }
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   SUPERVISOR EDITION  (cyan-accented companion block)
+   ══════════════════════════════════════════════════════════════════ */
+#supervisor {
+    --sup-cyan: #22d3ee;
+    --sup-cyan-dim: #0bb6d6;
+    --sup-glow: rgba(34,211,238,0.35);
+    --sup-border: rgba(34,211,238,0.16);
+    --sup-border-hover: rgba(34,211,238,0.45);
+    --sup-card: rgba(8,20,26,0.70);
+    --sup-card-hover: rgba(12,30,38,0.85);
+    position: relative;
+    overflow: hidden;
+}
+#supervisor::before {
+    content: '';
+    position: absolute;
+    top: -10%; left: 50%; transform: translateX(-50%);
+    width: 900px; height: 700px;
+    background: radial-gradient(ellipse at center, rgba(34,211,238,0.05) 0%, transparent 65%);
+    pointer-events: none;
+}
+#supervisor .container { position: relative; z-index: 1; }
+#supervisor .section-tag { color: var(--sup-cyan); }
+#supervisor .section-tag::before { background: var(--sup-cyan); box-shadow: 0 0 8px var(--sup-glow); }
+#supervisor .text-cyan { color: var(--sup-cyan); }
+.sup-head { text-align: center; max-width: 820px; margin: 0 auto; }
+.sup-head .section-tag { justify-content: center; }
+.sup-title {
+    font-size: clamp(34px, 4vw, 56px);
+    line-height: 1.1;
+    margin-bottom: 10px;
+}
+.sup-title .cyan-glow {
+    color: var(--sup-cyan);
+    text-shadow: 0 0 18px rgba(34,211,238,0.35), 0 0 40px rgba(34,211,238,0.12);
+}
+.beta-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    vertical-align: middle;
+    margin-left: 14px;
+    padding: 5px 13px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 2px;
+    color: var(--sup-cyan);
+    border: 1px solid var(--sup-border-hover);
+    border-radius: 50px;
+    background: rgba(34,211,238,0.06);
+    text-shadow: none;
+}
+.beta-pill .pulse-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--sup-cyan);
+    box-shadow: 0 0 8px var(--sup-glow);
+    animation: pulse 2s ease-in-out infinite;
+}
+.sup-sub {
+    color: var(--text-secondary);
+    font-size: 17px;
+    line-height: 1.8;
+    margin: 18px auto 0;
+}
+.sup-meta-row {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 26px;
+}
+.sup-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 9px 18px;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-primary);
+    background: var(--sup-card);
+    border: 1px solid var(--sup-border);
+    border-radius: 50px;
+}
+.sup-chip svg { width: 15px; height: 15px; stroke: var(--sup-cyan); }
+
+/* framed screenshots */
+.sup-shot {
+    position: relative;
+    border: 1px solid var(--sup-border);
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--sup-card);
+    box-shadow: 0 24px 70px rgba(0,0,0,0.5), 0 0 46px rgba(34,211,238,0.06);
+}
+.sup-shot img { display: block; width: 100%; }
+.sup-shot .shot-cap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 18px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-secondary);
+    border-top: 1px solid var(--sup-border);
+    background: rgba(4,12,16,0.6);
+}
+.sup-shot .shot-cap::before {
+    content: '';
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--sup-cyan);
+    box-shadow: 0 0 8px var(--sup-glow);
+    flex-shrink: 0;
+}
+.sup-hero-shot { margin: 54px auto 0; max-width: 1000px; }
+
+/* integration action chips band */
+.sup-actions-band {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-top: 40px;
+}
+.sup-action {
+    padding: 24px 20px;
+    text-align: center;
+    background: var(--sup-card);
+    border: 1px solid var(--sup-border);
+    border-radius: 12px;
+    transition: all 0.35s ease;
+}
+.sup-action:hover {
+    border-color: var(--sup-border-hover);
+    background: var(--sup-card-hover);
+    transform: translateY(-3px);
+    box-shadow: 0 12px 34px rgba(0,0,0,0.35), 0 0 22px rgba(34,211,238,0.07);
+}
+.sup-action .a-icon {
+    width: 46px; height: 46px;
+    margin: 0 auto 14px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 11px;
+    background: rgba(34,211,238,0.07);
+    border: 1px solid var(--sup-border);
+}
+.sup-action .a-icon svg { width: 22px; height: 22px; stroke: var(--sup-cyan); }
+.sup-action h4 { font-size: 15px; color: var(--text-primary); margin-bottom: 6px; }
+.sup-action p { font-size: 12.5px; color: var(--text-secondary); line-height: 1.6; }
+
+/* feature grid (reuse look, cyan) */
+.sup-features-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 22px;
+    margin-top: 30px;
+}
+.sup-feature {
+    padding: 30px 26px;
+    background: var(--sup-card);
+    border: 1px solid var(--sup-border);
+    border-radius: 12px;
+    transition: all 0.35s ease;
+}
+.sup-feature:hover {
+    border-color: var(--sup-border-hover);
+    background: var(--sup-card-hover);
+    transform: translateY(-3px);
+    box-shadow: 0 12px 34px rgba(0,0,0,0.35);
+}
+.sup-feature .f-ico {
+    font-size: 26px;
+    margin-bottom: 14px;
+    display: block;
+    filter: drop-shadow(0 0 6px rgba(34,211,238,0.25));
+}
+.sup-feature h4 { font-size: 17px; color: var(--sup-cyan); margin-bottom: 9px; }
+.sup-feature p { font-size: 14px; color: var(--text-secondary); line-height: 1.7; }
+
+/* split layouts */
+.sup-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 60px;
+    align-items: center;
+    margin-top: 30px;
+}
+.sup-split.reverse .sup-split-text { order: 2; }
+.sup-split-text h3 {
+    font-size: clamp(24px, 2.6vw, 34px);
+    margin-bottom: 18px;
+    line-height: 1.2;
+}
+.sup-split-text p {
+    color: var(--text-secondary);
+    font-size: 15.5px;
+    line-height: 1.8;
+    margin-bottom: 14px;
+}
+.sup-list { list-style: none; margin-top: 18px; }
+.sup-list li {
+    display: flex;
+    gap: 12px;
+    padding: 9px 0;
+    font-size: 14.5px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+.sup-list li strong { color: var(--text-primary); font-weight: 600; }
+.sup-list li::before {
+    content: '';
+    flex-shrink: 0;
+    margin-top: 7px;
+    width: 8px; height: 8px;
+    border-radius: 2px;
+    background: var(--sup-cyan);
+    box-shadow: 0 0 8px var(--sup-glow);
+}
+
+/* LAN / printer analogy diagram */
+.sup-lan-box {
+    margin-top: 26px;
+    padding: 28px;
+    background: rgba(34,211,238,0.04);
+    border: 1px solid var(--sup-border);
+    border-left: 3px solid var(--sup-cyan);
+    border-radius: 0 12px 12px 0;
+}
+.lan-flow {
+    display: flex;
+    align-items: stretch;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+.lan-node {
+    flex: 1;
+    min-width: 150px;
+    padding: 18px;
+    text-align: center;
+    background: var(--sup-card);
+    border: 1px solid var(--sup-border);
+    border-radius: 10px;
+}
+.lan-node .ln-ico { font-size: 26px; display: block; margin-bottom: 8px; }
+.lan-node .ln-title { font-family: var(--font-display); font-weight: 700; font-size: 14px; color: var(--text-primary); }
+.lan-node .ln-desc { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+.lan-arrow {
+    display: flex; align-items: center; justify-content: center;
+    color: var(--sup-cyan);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-align: center;
+    min-width: 92px;
+    flex-direction: column;
+    gap: 4px;
+}
+.lan-arrow span:first-child { font-size: 20px; line-height: 1; }
+.lan-note {
+    margin-top: 18px;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--sup-cyan);
+    display: flex; align-items: center; gap: 9px;
+}
+.lan-note svg { width: 16px; height: 16px; stroke: var(--sup-cyan); flex-shrink: 0; }
+
+/* ICAC gallery */
+.sup-gallery {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-top: 30px;
+}
+.sup-gallery .span-2 { grid-column: 1 / -1; }
+
+/* warrant callout */
+.sup-warrant {
+    margin-top: 30px;
+    display: grid;
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: 40px;
+    align-items: center;
+    padding: 34px;
+    background: var(--sup-card);
+    border: 1px solid var(--sup-border);
+    border-radius: 16px;
+}
+
+/* download CTA */
+.sup-download {
+    margin-top: 54px;
+    text-align: center;
+    padding: 56px 40px;
+    background: linear-gradient(180deg, rgba(34,211,238,0.05), rgba(8,20,26,0.4));
+    border: 1px solid var(--sup-border);
+    border-radius: 20px;
+    position: relative;
+    overflow: hidden;
+}
+.sup-download::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, transparent, var(--sup-cyan), transparent);
+    box-shadow: 0 0 16px var(--sup-glow);
+}
+.sup-download h3 { font-size: clamp(26px, 3vw, 40px); margin-bottom: 14px; }
+.sup-download p { color: var(--text-secondary); font-size: 16px; max-width: 560px; margin: 0 auto 30px; }
+.btn-cyan {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 38px;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 16px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: #04141a;
+    background: var(--sup-cyan-dim);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.3s;
+    box-shadow: 0 0 14px rgba(34,211,238,0.25), 0 4px 15px rgba(0,0,0,0.35);
+}
+.btn-cyan:hover {
+    background: var(--sup-cyan);
+    color: #04141a;
+    transform: translateY(-2px);
+    box-shadow: 0 0 28px rgba(34,211,238,0.4), 0 6px 22px rgba(0,0,0,0.45);
+    text-shadow: none;
+}
+.sup-usb {
+    margin-top: 22px;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 20px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text-secondary);
+    background: rgba(4,12,16,0.5);
+    border: 1px dashed var(--sup-border-hover);
+    border-radius: 10px;
+}
+.sup-usb svg { width: 16px; height: 16px; stroke: var(--sup-cyan); flex-shrink: 0; }
+.sup-dl-meta {
+    margin-top: 18px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-dim);
+}
+
+@media (max-width: 1024px) {
+    .sup-actions-band { grid-template-columns: repeat(2, 1fr); }
+    .sup-features-grid { grid-template-columns: 1fr; }
+    .sup-split { grid-template-columns: 1fr; gap: 34px; }
+    .sup-split.reverse .sup-split-text { order: 0; }
+    .sup-warrant { grid-template-columns: 1fr; gap: 28px; }
+    .sup-gallery { grid-template-columns: 1fr; }
+}
+@media (max-width: 768px) {
+    .sup-actions-band { grid-template-columns: 1fr; }
+    .lan-arrow { transform: rotate(90deg); min-width: auto; padding: 6px 0; }
+    .lan-flow { flex-direction: column; }
+    .beta-pill { display: inline-flex; margin: 12px 0 0; }
+}
     </style>
 </head>
 <body>
@@ -847,6 +1218,7 @@ footer {
                 <a href="#manifesto">Manifesto</a>
                 <a href="#features">Features</a>
                 <a href="#courtroom">Workflow</a>
+                <a href="#supervisor">Supervisor</a>
                 <a href="#audience">Who It's For</a>
                 <a href="#pricing">Pricing</a>
                 <a href="#download" class="nav-cta">⬇ Download Demo</a>
@@ -874,7 +1246,7 @@ footer {
                     <a href="#download" class="btn-primary">⬇ Download Free Demo</a>
                     <a href="#features" class="btn-secondary">Explore Features</a>
                 </div>
-                <p class="hero-meta">Version 3.9.9 · Windows 10/11 · 60-Day Free Trial</p>
+                <p class="hero-meta">Version 4.0.5 · Windows 10/11 · 60-Day Free Trial</p>
             </div>
             <div class="hero-image">
                 <img src="assets/hero-banner.png" alt="V.I.P.E.R. — Visual Intelligence Platform for Evidence and Reporting">
@@ -1043,6 +1415,251 @@ footer {
 
     <div class="section-divider"></div>
 
+    <!-- ═══════════════ SUPERVISOR EDITION ═══════════════ -->
+    <section id="supervisor">
+        <div class="container">
+            <div class="sup-head">
+                <div class="section-tag reveal">Command-Level Oversight</div>
+                <h2 class="sup-title reveal">
+                    V.I.P.E.R. <span class="cyan-glow">Supervisor Edition</span>
+                    <span class="beta-pill"><span class="pulse-dot"></span>BETA</span>
+                </h2>
+                <p class="sup-sub reveal">
+                    A dedicated command dashboard for sergeants, lieutenants, and unit commanders — built to sit
+                    beside every investigator running Project VIPER. See the whole unit at a glance, assign work,
+                    approve operations, and run a full ICAC intelligence center. <strong class="text-cyan">Completely
+                    free, completely offline.</strong>
+                </p>
+                <div class="sup-meta-row reveal reveal-delay-1">
+                    <span class="sup-chip">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v6m0 0 3-3m-3 3L9 4"/><rect x="4" y="9" width="16" height="12" rx="2"/></svg>
+                        Free Download
+                    </span>
+                    <span class="sup-chip">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/><circle cx="12" cy="12" r="10"/></svg>
+                        100% Offline
+                    </span>
+                    <span class="sup-chip">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+                        Runs from USB
+                    </span>
+                    <span class="sup-chip">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 6v6c0 5 3.4 8.5 8 10 4.6-1.5 8-5 8-10V6l-8-4Z"/></svg>
+                        Data Stays Local
+                    </span>
+                </div>
+            </div>
+
+            <div class="sup-hero-shot reveal reveal-delay-1">
+                <div class="sup-shot">
+                    <img src="assets/supervisor/sup-dashboard.png" alt="V.I.P.E.R. Supervisor Edition — unit dashboard" loading="lazy">
+                    <div class="shot-cap">supervisor_dashboard.exe — real-time unit activity, workload &amp; OPS approvals</div>
+                </div>
+            </div>
+
+            <!-- Integration with Project VIPER -->
+            <div style="margin-top:80px;">
+                <div class="section-tag reveal" style="justify-content:center; text-align:center;">Integrates With Project V.I.P.E.R.</div>
+                <h3 class="reveal" style="font-size:clamp(26px,3vw,38px); text-align:center; max-width:760px; margin:0 auto;">
+                    Your investigators keep working in VIPER. You get the <span class="text-cyan">command view.</span>
+                </h3>
+                <p class="reveal text-dim" style="font-size:15px; text-align:center; max-width:640px; margin:16px auto 0; color:var(--text-secondary);">
+                    Supervisor Edition speaks directly to Project VIPER over your local network — no re-entry, no
+                    exports, no cloud. Everything an investigator does surfaces on your desk in real time.
+                </p>
+                <div class="sup-actions-band">
+                    <div class="sup-action reveal reveal-delay-1">
+                        <div class="a-icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M21 3 9 15"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg></div>
+                        <h4>Assign Cases</h4>
+                        <p>Push cases and CyberTip assignments straight to the right investigator.</p>
+                    </div>
+                    <div class="sup-action reveal reveal-delay-2">
+                        <div class="a-icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg></div>
+                        <h4>Approve Warrants &amp; OPS</h4>
+                        <p>Review and sign off on search warrants and operations plans before they run.</p>
+                    </div>
+                    <div class="sup-action reveal reveal-delay-3">
+                        <div class="a-icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
+                        <h4>Check Case Status</h4>
+                        <p>Live status on every open case — warrants served, evidence logged, cadence.</p>
+                    </div>
+                    <div class="sup-action reveal reveal-delay-4">
+                        <div class="a-icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg></div>
+                        <h4>Investigator Workload</h4>
+                        <p>Balance the unit — see who's heavy, who's light, and who's aging out cases.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LAN sharing / printer analogy -->
+            <div class="sup-split reverse" style="margin-top:80px;">
+                <div class="sup-split-text">
+                    <div class="section-tag reveal">Secure LAN Sharing</div>
+                    <h3 class="reveal">As simple as printing to the <span class="text-cyan">office printer.</span></h3>
+                    <p class="reveal">
+                        There's no server to stand up and no account to create. Supervisor Edition finds VIPER
+                        investigators on the same network the exact same way your computer finds a shared printer down
+                        the hall — automatically, locally, and only inside your own walls.
+                    </p>
+                    <div class="sup-lan-box reveal">
+                        <div class="lan-flow">
+                            <div class="lan-node">
+                                <span class="ln-ico">🖥️</span>
+                                <div class="ln-title">Investigator</div>
+                                <div class="ln-desc">Project VIPER</div>
+                            </div>
+                            <div class="lan-arrow"><span>⇄</span><span>LOCAL LAN</span></div>
+                            <div class="lan-node">
+                                <span class="ln-ico">🛰️</span>
+                                <div class="ln-title">Supervisor</div>
+                                <div class="ln-desc">Command Dashboard</div>
+                            </div>
+                        </div>
+                        <div class="lan-note">
+                            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                            Encrypted, mutually-authenticated — and case content, evidence &amp; media <strong>never leave the investigator's machine.</strong>
+                        </div>
+                    </div>
+                    <p class="reveal" style="margin-top:18px;">
+                        Only redacted, metadata-only rollups cross the wire: totals, status, and cadence. Enough to
+                        supervise — never enough to compromise a case.
+                    </p>
+                </div>
+                <div class="reveal reveal-delay-1">
+                    <div class="sup-shot">
+                        <img src="assets/supervisor/sup-case-activity.png" alt="Case activity — metadata only, no case content" loading="lazy">
+                        <div class="shot-cap">case_activity — metadata only · no case content crosses the network</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Core capabilities feature grid -->
+            <div style="margin-top:80px;">
+                <div class="section-tag reveal" style="justify-content:center;">Built For Command</div>
+                <h3 class="reveal" style="font-size:clamp(26px,3vw,38px); text-align:center;">
+                    Everything a unit lead needs — <span class="text-cyan">nothing they don't.</span>
+                </h3>
+                <div class="sup-features-grid">
+                    <div class="sup-feature reveal reveal-delay-1">
+                        <span class="f-ico">📊</span>
+                        <h4>Unit Dashboard</h4>
+                        <p>Open cases, closures, arrests, new assignments and workload balance across the whole unit — one pane of glass, updated live.</p>
+                    </div>
+                    <div class="sup-feature reveal reveal-delay-2">
+                        <span class="f-ico">📋</span>
+                        <h4>OPS Plan Approvals</h4>
+                        <p>Operations plans route to you for review with risk level, location and date. Approve or send back — the investigator gets it instantly.</p>
+                    </div>
+                    <div class="sup-feature reveal reveal-delay-3">
+                        <span class="f-ico">🗂️</span>
+                        <h4>Mirrored Case Board</h4>
+                        <p>Every investigator's caseload mirrored as read-only, clickable cards — drill into activity without ever touching evidence.</p>
+                    </div>
+                    <div class="sup-feature reveal reveal-delay-4">
+                        <span class="f-ico">🛡️</span>
+                        <h4>Role-Based Access</h4>
+                        <p>Supervisors are read-only on case content; investigators can't self-assign. Clean chain of command, enforced by design.</p>
+                    </div>
+                    <div class="sup-feature reveal reveal-delay-5">
+                        <span class="f-ico">📈</span>
+                        <h4>Reports &amp; Stats</h4>
+                        <p>Month-to-date and year-to-date unit performance — cases opened, closed, arrests and seizures — ready for the weekly brief.</p>
+                    </div>
+                    <div class="sup-feature reveal reveal-delay-6">
+                        <span class="f-ico">🐞</span>
+                        <h4>Built-In Bug Reports</h4>
+                        <p>One click to report an issue straight from the app. We see it, we fix it, you get the update. No email threads.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ICAC intelligence -->
+            <div style="margin-top:80px;">
+                <div class="section-tag reveal" style="justify-content:center;">Purpose-Built ICAC Center</div>
+                <h3 class="reveal" style="font-size:clamp(26px,3vw,38px); text-align:center; max-width:820px; margin:0 auto;">
+                    A complete <span class="text-cyan">Internet Crimes Against Children</span> intelligence workflow.
+                </h3>
+                <p class="reveal text-dim" style="font-size:15px; text-align:center; max-width:660px; margin:16px auto 0; color:var(--text-secondary);">
+                    Turn a pile of NCMEC CyberTips into an organized, cross-referenced, court-ready intelligence store —
+                    entirely on your own machine.
+                </p>
+
+                <div class="sup-split" style="margin-top:36px;">
+                    <div class="reveal">
+                        <div class="sup-shot">
+                            <img src="assets/supervisor/sup-icac.png" alt="ICAC Supervisor Dashboard" loading="lazy">
+                            <div class="shot-cap">icac_dashboard — timeline, provider intel, assignment queue &amp; export</div>
+                        </div>
+                    </div>
+                    <div class="sup-split-text">
+                        <h3 class="reveal">From CyberTip pile to <span class="text-cyan">prioritized queue.</span></h3>
+                        <ul class="sup-list">
+                            <li class="reveal reveal-delay-1"><span><strong>Bulk-import CyberTips</strong> — drop in the ZIPs, and VIPER parses every PDF automatically: provider, incident type, dates, identifiers.</span></li>
+                            <li class="reveal reveal-delay-2"><span><strong>Cross-reference identifiers</strong> — phones, IPs and ESP user IDs are extracted and linked, surfacing repeat suspects across separate tips.</span></li>
+                            <li class="reveal reveal-delay-3"><span><strong>Categorize by severity</strong> — sort and triage by NCMEC category (A1, A2, B1…) so the worst rises to the top first.</span></li>
+                            <li class="reveal reveal-delay-4"><span><strong>Categorize by media volume</strong> — rank tips by number of provided files, so high-contraband cases don't get buried.</span></li>
+                            <li class="reveal reveal-delay-5"><span><strong>Assign over LAN</strong> — route a tip to an investigator by CyberTip number only; the media never moves.</span></li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="sup-warrant reveal">
+                    <div class="sup-split-text">
+                        <h3><span class="text-cyan">Wilson warrants,</span> linked to the batch.</h3>
+                        <p>
+                            Working a bulk download from the ICAC Data System? Attach the signed Wilson warrant PDF right
+                            in the staging tray — it's saved and permanently linked to every CyberTip in that batch.
+                        </p>
+                        <ul class="sup-list">
+                            <li><span><strong>Attach once, cover the batch</strong> — one warrant applies to the whole import.</span></li>
+                            <li><span><strong>Preserved for recall</strong> — PDFs are stored in a dedicated back-end folder, retrievable any time.</span></li>
+                            <li><span><strong>Embedded IDS browser</strong> — pull ZIPs from ICACdatasystem.com into staging without leaving the app.</span></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <div class="sup-shot">
+                            <img src="assets/supervisor/sup-ids-warrant.png" alt="Embedded IDS browser with Wilson warrant staging" loading="lazy">
+                            <div class="shot-cap">ids_staging — attach signed Wilson warrant to the whole batch</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="sup-gallery">
+                    <div class="reveal">
+                        <div class="sup-shot">
+                            <img src="assets/supervisor/sup-cybertip.png" alt="CyberTip detail — identifiers and contraband metadata" loading="lazy">
+                            <div class="shot-cap">cybertip_detail — identifiers &amp; contraband (metadata only)</div>
+                        </div>
+                    </div>
+                    <div class="reveal reveal-delay-1">
+                        <div class="sup-shot">
+                            <img src="assets/supervisor/sup-ops-plans.png" alt="OPS plan pending approval" loading="lazy">
+                            <div class="shot-cap">ops_plans — review &amp; approve operations plans</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Download CTA -->
+            <div class="sup-download reveal">
+                <h3><span class="cyan-glow">Download</span> Supervisor Edition</h3>
+                <p>Free during beta. No account, no cloud, no cost — install it on your command workstation in minutes.</p>
+                <a href="#" class="btn-cyan" id="supDownloadBtn" onclick="handleSupervisorDownload(event)">
+                    ⬇ Download Supervisor Edition (Beta)
+                </a>
+                <div style="margin-top:22px;">
+                    <span class="sup-usb">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="9" width="12" height="13" rx="2"/><path d="M12 9V3m0 0-2 2m2-2 2 2"/><circle cx="12" cy="15" r="1.5"/></svg>
+                        No room on the C:\ drive? Install and run it entirely from a USB stick.
+                    </span>
+                </div>
+                <p class="sup-dl-meta">Version 0.1.0 (Beta) · Windows 10/11 · Unsigned installer · ~98 MB</p>
+            </div>
+        </div>
+    </section>
+
+    <div class="section-divider"></div>
+
     <!-- ═══════════════ WHO IS VIPER FOR ═══════════════ -->
     <section id="audience">
         <div class="container">
@@ -1124,10 +1741,10 @@ footer {
             <p class="reveal">60-day free trial. No credit card. No obligation. Full access to every feature.</p>
             <div class="cta-actions reveal">
                 <a href="#" class="btn-primary" id="downloadBtn" onclick="handleDownload(event)">
-                    ⬇ Download V.I.P.E.R. v3.9.9
+                    ⬇ Download V.I.P.E.R. v4.0.5
                 </a>
             </div>
-            <p class="download-meta reveal">Version 3.9.9 · Windows 10/11 · ~130 MB</p>
+            <p class="download-meta reveal">Version 4.0.5 · Windows 10/11 · ~130 MB</p>
         </div>
     </section>
 
@@ -1339,9 +1956,16 @@ document.querySelectorAll('a[href^="#"]').forEach(link => {
    DOWNLOAD HANDLER
    ────────────────────────────────────────────── */
 function handleDownload(e) {
-    const downloadUrl = 'https://github.com/exhonorated999/project-viper/releases/download/v3.9.9/V.I.P.E.R-3.9.9-Setup.exe';
+    const downloadUrl = 'https://github.com/exhonorated999/project-viper/releases/download/v4.0.5/V.I.P.E.R-4.0.5-Setup.exe';
     // Track download click
     _iq('download_click');
+    window.location.href = downloadUrl;
+}
+function handleSupervisorDownload(e) {
+    if (e) e.preventDefault();
+    const downloadUrl = 'https://github.com/exhonorated999/viper-supervisor-edition/releases/download/v0.1.0/VIPER-Supervisor-Edition-Setup-0.1.0.exe';
+    // Track supervisor download click
+    if (window._iq) _iq('supervisor_download_click');
     window.location.href = downloadUrl;
 }
 </script>

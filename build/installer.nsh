@@ -26,7 +26,8 @@
 ;   - customInstall    : restore portable data AFTER new files are placed
 ;   - customUnInit     : preserve portable data BEFORE uninstaller removes $INSTDIR
 ;   - customUnInstall  : (intentionally inert — see policy above)
-;   - customRemoveFiles: explicit guard so default RMDir /r doesn't touch userdata/cases
+;   - customRemoveFiles: resilient removal (kill + retry) replacing the stock
+;                        atomic-rename that hard-aborts on a single locked file
 ;
 ;  Cross-drive support: CopyFiles (NOT Rename) so USB → C:\Temp works.
 ; ─────────────────────────────────────────────────────────────────────────
@@ -197,4 +198,51 @@
   ; If a user wants to remove their data, they do it from inside the app
   ; or by manually deleting the folders themselves. The installer must
   ; never make that decision for them.
+!macroend
+
+; ── Resilient file removal override ──────────────────────────────────────
+;
+; Replaces electron-builder's DEFAULT file-removal path in the uninstall
+; section. The stock path, during an update, calls un.atomicRMDir: it RENAMES
+; every file in $INSTDIR in one shot and HARD-ABORTS ("Can't rename $INSTDIR")
+; if even a SINGLE file is still locked at that instant. The old uninstaller
+; then exits with code 2, and the new installer surfaces it as:
+;
+;     "Failed to uninstall old application files. Please try running the
+;      installer again.: 2"
+;
+; On machines with aggressive endpoint protection, AV can hold a handle on a
+; freshly-touched EXE/DLL just long enough to trip that all-or-nothing abort,
+; blocking the whole update even though VIPER itself is closed — the isolated
+; "hidden process blocks the installer" report.
+;
+; Instead we force-kill any stragglers, then RMDir /r inside a retry loop.
+; RMDir /r SKIPS locked files rather than aborting, and retrying lets a
+; transient AV lock clear. If a stray file somehow survives all retries, the
+; fresh install simply overwrites it — no hard failure, no error dialog.
+;
+; DATA SAFETY: customUnInit has ALREADY moved userdata/cases up to
+; VIPER-Data-Preserved BEFORE this section runs, and standard-install data
+; lives in %APPDATA%\viper-electron (outside $INSTDIR). Nothing here can
+; reach user data — see the policy at the top of this file.
+!macro customRemoveFiles
+  !insertmacro KillViperAndWait "removefiles"
+
+  ; Move out of $INSTDIR so it can be deleted, then delete with retries.
+  SetOutPath "$TEMP"
+
+  StrCpy $R4 0
+  viperRemove_loop:
+    RMDir /r "$INSTDIR"
+    ; If nothing remains, we're done.
+    IfFileExists "$INSTDIR\*.*" 0 viperRemove_done
+    IntOp $R4 $R4 + 1
+    ${If} $R4 >= 10
+      ; Give up gracefully — do NOT abort. Any stray leftover file is
+      ; harmless; the fresh install overwrites it.
+      Goto viperRemove_done
+    ${EndIf}
+    Sleep 1000
+    Goto viperRemove_loop
+  viperRemove_done:
 !macroend

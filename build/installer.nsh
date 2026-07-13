@@ -82,6 +82,32 @@
     Sleep 2000
 !macroend
 
+; ── App-running check override ───────────────────────────────────────────
+;
+; Replaces electron-builder's DEFAULT "is the app running?" check. The stock
+; check sends a polite WM_CLOSE and, if the process does not exit, pops the
+; blocking dialog:
+;
+;     "V.I.P.E.R. cannot be closed. Please close it manually and click
+;      Retry to continue."
+;
+; That default check runs BEFORE customInit, so the KillViperAndWait force-
+; terminate in customInit never got a chance to run — the installer was stuck
+; at the Retry dialog first. On most machines the polite close succeeds; but
+; Electron spawns several V.I.P.E.R.exe children (GPU / renderer / utility /
+; crashpad) and if ANY one is wedged (bad GPU driver, hung renderer) or an
+; endpoint-protection engine is still holding a file handle, WM_CLOSE is
+; ignored and the user is trapped at the dialog even though no VIPER window
+; is visible — exactly the isolated "hidden process blocks the installer"
+; report. Force-killing the whole process tree here makes the assisted and
+; silent (auto-update) installs proceed reliably.
+;
+; DATA SAFETY: this only terminates processes. It never touches userdata /
+; cases / %APPDATA% — see the policy at the top of this file.
+!macro customCheckAppRunning
+  !insertmacro KillViperAndWait "checkrun"
+!macroend
+
 ; ── INSTALL FLOW ─────────────────────────────────────────────────────────
 
 !macro customInit

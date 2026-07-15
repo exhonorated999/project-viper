@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://api.wigle.net https://api.genlogs.io https://trace-broker-production.up.railway.app; font-src 'self' data:; frame-src https: http:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: uc-photo:; connect-src 'self' http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://api.wigle.net https://api.genlogs.io https://trace-broker-production.up.railway.app; font-src 'self' data:; frame-src https: http:;">
     <title>V.I.P.E.R. - Settings</title>
     <script src="modules/viper-ui.js"></script>
     <script src="modules/viper-prefs.js"></script>
@@ -537,13 +537,16 @@
 
                 <!-- Display & Accessibility -->
                 <div class="glass-card rounded-xl p-6">
-                    <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
-                        <svg class="w-6 h-6 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-                        </svg>
-                        Display & Accessibility
-                    </h3>
-                    <div class="space-y-4">
+                    <div class="flex items-center justify-between cursor-pointer" onclick="toggleDisplayAccessibility()">
+                        <h3 class="text-xl font-bold flex items-center gap-2">
+                            <svg class="w-6 h-6 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                            </svg>
+                            Display & Accessibility
+                        </h3>
+                        <svg id="displayAccessibilityChevron" class="w-5 h-5 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </div>
+                    <div id="displayAccessibilityBody" class="hidden mt-4 space-y-4">
                         <div>
                             <label class="block text-sm font-medium text-gray-300 mb-2">Interface Font Size</label>
                             <p class="text-xs text-gray-500 mb-3">Adjusts text size across all modules, tabs, and data views. Does not affect the main dashboard.</p>
@@ -683,13 +686,17 @@
 
                 <!-- Storage Locations Section -->
                 <div class="glass-card rounded-xl p-6">
-                    <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
-                        <svg class="w-6 h-6 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
-                        </svg>
-                        Storage Locations
-                    </h3>
+                    <div class="flex items-center justify-between cursor-pointer" onclick="toggleStorageLocations()">
+                        <h3 class="text-xl font-bold flex items-center gap-2">
+                            <svg class="w-6 h-6 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                            </svg>
+                            Storage Locations
+                        </h3>
+                        <svg id="storageLocationsChevron" class="w-5 h-5 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </div>
 
+                    <div id="storageLocationsBody" class="hidden mt-4">
                     <p id="storagePortableNotice" class="hidden text-xs text-amber-400 bg-amber-900/20 border border-amber-700/40 rounded px-3 py-2 mb-4">
                         Portable mode is active — paths are locked to the USB drive and cannot be overridden.
                     </p>
@@ -735,6 +742,7 @@
                             </div>
                             <p class="text-[11px] text-emerald-400/80 mt-2">✓ VIPER can carry your license, settings, and security vault to the new location — you'll be asked how to migrate before the change is applied.</p>
                         </div>
+                    </div>
                     </div>
                 </div>
 
@@ -940,6 +948,29 @@
                             <button onclick="saveOpsTemplates(); this.textContent='✓ Saved'; setTimeout(() => this.textContent='Save Templates', 1500)" class="px-6 py-2 bg-viper-cyan hover:bg-viper-cyan/80 rounded-lg text-black font-semibold text-sm transition">
                                 Save Templates
                             </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- UC Chat Operations -->
+                <div class="glass-card rounded-xl p-6">
+                    <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                        <div class="flex items-start gap-3">
+                            <div class="w-10 h-10 rounded-lg bg-viper-purple/10 flex items-center justify-center flex-shrink-0">
+                                <svg class="w-5 h-5 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                                </svg>
+                            </div>
+                            <div class="flex-1">
+                                <div class="flex items-center justify-between">
+                                    <h4 class="text-white font-semibold text-sm">UC Chat Operations</h4>
+                                    <button id="ucChatToggleBtn" onclick="toggleUcChat()" class="relative w-11 h-6 rounded-full transition-colors bg-gray-600 flex-shrink-0" role="switch" aria-label="Toggle UC Chat Operations">
+                                        <div id="ucChatToggleKnob" class="absolute w-4 h-4 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
+                                    </button>
+                                </div>
+                                <p class="text-xs text-gray-400 mt-1 leading-relaxed">Undercover chat workspace with per-persona logins, embedded platform browsers (Discord, Telegram, Instagram, WhatsApp, Snapchat, Messenger, MeetMe, Sniffies), a persona photo library, case linking, alert toasts, Discreet Mode, and one-click HTML/PDF evidence capture with chain-of-custody hashing. When enabled, a purple chat button appears next to the investigative-tools button.</p>
+                                <span id="ucChatToggleLabel" class="text-xs text-gray-500 mt-1 block"></span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2637,12 +2668,16 @@
 
                 <!-- Media Player Toggle -->
                 <div class="glass-card rounded-xl p-6">
-                    <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
-                        <svg class="w-6 h-6 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"/>
-                        </svg>
-                        Media Player
-                    </h3>
+                    <div class="flex items-center justify-between cursor-pointer" onclick="toggleMediaPlayerCard()">
+                        <h3 class="text-xl font-bold flex items-center gap-2">
+                            <svg class="w-6 h-6 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"/>
+                            </svg>
+                            Media Player
+                        </h3>
+                        <svg id="mediaPlayerCardChevron" class="w-5 h-5 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </div>
+                    <div id="mediaPlayerCardBody" class="hidden mt-4">
                     <p class="text-gray-400 text-sm mb-4">
                         Embedded streaming player for Spotify, SiriusXM, YouTube and more. Appears in the sidebar on all pages.
                     </p>
@@ -2664,18 +2699,23 @@
                             <div id="mediaToggleKnob" class="absolute w-5 h-5 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
                         </button>
                     </div>
+                    </div>
                 </div>
 
                 <!-- GenLogs and TRACE are now in the Investigative Tools section below -->
 
                 <!-- Supervisor Link Toggle -->
                 <div class="glass-card rounded-xl p-6">
-                    <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
-                        <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"/>
-                        </svg>
-                        Supervisor Link
-                    </h3>
+                    <div class="flex items-center justify-between cursor-pointer" onclick="toggleSupervisorLinkCard()">
+                        <h3 class="text-xl font-bold flex items-center gap-2">
+                            <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"/>
+                            </svg>
+                            Supervisor Link
+                        </h3>
+                        <svg id="supervisorLinkCardChevron" class="w-5 h-5 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </div>
+                    <div id="supervisorLinkCardBody" class="hidden mt-4">
                     <p class="text-gray-400 text-sm mb-4 leading-relaxed">
                         Lets investigators push case stats, case status, and operations plans to a supervisor for review and digital approval over the local network — using
                         <span class="text-blue-300 font-medium">Project V.I.P.E.R. Supervisor Edition</span>, a <span class="text-blue-300 font-medium">free</span> companion app for agencies already running Project V.I.P.E.R. It runs entirely on your agency LAN (no cloud) with per-device encrypted, mutually-authenticated sessions.
@@ -2702,6 +2742,7 @@
                         >
                             <div id="supervisorToggleKnob" class="absolute w-5 h-5 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
                         </button>
+                    </div>
                     </div>
                 </div>
 
@@ -2852,14 +2893,17 @@
 
                 <!-- Telemetry Section -->
                 <div class="glass-card rounded-xl p-6" id="telemetrySection">
-                    <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
-                        <svg class="w-6 h-6 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
-                        </svg>
-                        Telemetry
-                    </h3>
+                    <div class="flex items-center justify-between cursor-pointer" onclick="toggleTelemetryCard()">
+                        <h3 class="text-xl font-bold flex items-center gap-2">
+                            <svg class="w-6 h-6 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                            </svg>
+                            Telemetry
+                        </h3>
+                        <svg id="telemetryCardChevron" class="w-5 h-5 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </div>
 
-                    <div class="space-y-4">
+                    <div id="telemetryBody" class="hidden mt-4 space-y-4">
                         <!-- License-locked notice (shown only when a paid license is active) -->
                         <div id="telemetryLicensedNotice" class="hidden bg-emerald-900/20 border border-emerald-700/40 rounded-lg p-3 text-xs text-emerald-300 flex items-start gap-2">
                             <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -5358,6 +5402,7 @@
     <script src="modules/genlogs-api.js"></script>
     <script src="modules/trace-search-api.js"></script>
     <script src="modules/resource-hub.js"></script>
+    <script src="modules/uc-chat/uc-chat-ops.js"></script>
     <script>
     // ── GenLogs Settings ─────────────────────────────────────────────────
     function initGenlogsUI() {
@@ -5927,6 +5972,31 @@
         loadCallyoCredentials();
     }
 
+    /* ── UC Chat Operations (opt-out; default enabled) ─────── */
+    function toggleUcChat() {
+        // Default (unset) = enabled. Flip based on current effective state.
+        const currentlyEnabled = localStorage.getItem('ucChatEnabled') !== 'false';
+        const next = !currentlyEnabled;
+        localStorage.setItem('ucChatEnabled', next ? 'true' : 'false');
+        updateUcChatToggleUI(next);
+        // Live-update the FAB on this page (and other windows via storage event).
+        try { window.dispatchEvent(new CustomEvent('uc-chat-enabled-changed', { detail: { enabled: next } })); } catch (_) {}
+    }
+
+    function updateUcChatToggleUI(enabled) {
+        const label = document.getElementById('ucChatToggleLabel');
+        const btn = document.getElementById('ucChatToggleBtn');
+        const knob = document.getElementById('ucChatToggleKnob');
+        if (label) label.textContent = enabled ? 'Enabled — chat button visible across the app' : 'Disabled';
+        if (btn) btn.className = 'relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ' + (enabled ? 'bg-viper-purple' : 'bg-gray-600');
+        if (knob) knob.className = 'absolute w-4 h-4 bg-white rounded-full top-1 transition-transform ' + (enabled ? 'translate-x-6' : 'translate-x-1');
+    }
+
+    function initUcChatSettings() {
+        const enabled = localStorage.getItem('ucChatEnabled') !== 'false';
+        updateUcChatToggleUI(enabled);
+    }
+
     function loadCallyoCredentials() {
         const username = localStorage.getItem('callyoUsername') || '';
         const password = localStorage.getItem('callyoPassword') || '';
@@ -6165,6 +6235,7 @@
     initGridcopSettings();
     initCargonetSettings();
     initCallyoSettings();
+    initUcChatSettings();
 
     /* ── CargoNet ─────────────────────────────────────────── */
     async function refreshCargonetUI() {
@@ -6264,6 +6335,20 @@
         body.classList.toggle('hidden');
         chevron.style.transform = body.classList.contains('hidden') ? '' : 'rotate(180deg)';
     }
+
+    // Generic collapsible-card helper for the settings cards converted to expand/collapse.
+    function toggleSettingsCard(bodyId, chevronId) {
+        const body = document.getElementById(bodyId);
+        const chevron = document.getElementById(chevronId);
+        if (!body) return;
+        body.classList.toggle('hidden');
+        if (chevron) chevron.style.transform = body.classList.contains('hidden') ? '' : 'rotate(180deg)';
+    }
+    function toggleDisplayAccessibility() { toggleSettingsCard('displayAccessibilityBody', 'displayAccessibilityChevron'); }
+    function toggleStorageLocations()     { toggleSettingsCard('storageLocationsBody', 'storageLocationsChevron'); }
+    function toggleMediaPlayerCard()      { toggleSettingsCard('mediaPlayerCardBody', 'mediaPlayerCardChevron'); }
+    function toggleSupervisorLinkCard()   { toggleSettingsCard('supervisorLinkCardBody', 'supervisorLinkCardChevron'); }
+    function toggleTelemetryCard()        { toggleSettingsCard('telemetryBody', 'telemetryCardChevron'); }
 
     // ============================================
     // TRACE NETWORK SEARCH

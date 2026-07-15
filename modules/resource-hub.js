@@ -794,6 +794,11 @@
     // Hide ALL BrowserViews so the modal isn't covered by the native
     // overlay.  Restored in _rhDlAction's finally block.
     hideAllBVs();
+    // Other modules own their own BrowserViews (e.g. UC Chat's embedded
+    // platform view).  Native BVs render above ALL DOM regardless of
+    // z-index, so broadcast a suspend request so they hide too — otherwise
+    // this routing modal opens *behind* them and can't be reached.
+    try { window.dispatchEvent(new CustomEvent('pulse:bv-suspend', { detail: { source: 'rh-download-router' } })); } catch (_) {}
 
     const router = document.getElementById('rhDlRouter');
     router.classList.remove('hidden');
@@ -921,6 +926,8 @@
           requestAnimationFrame(() => positionBV(rhActiveTab));
         }
       } catch (_) {}
+      // Let other modules (e.g. UC Chat) restore their own BrowserViews.
+      try { window.dispatchEvent(new CustomEvent('pulse:bv-resume', { detail: { source: 'rh-download-router' } })); } catch (_) {}
     }
   }
   window._rhDlAction = _rhDlAction;

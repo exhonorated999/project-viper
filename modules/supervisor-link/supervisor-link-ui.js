@@ -416,6 +416,7 @@
       lines.push('3) Handshake  ' + yn(s.handshake && s.handshake.ok) + '  ' + ((s.handshake && s.handshake.ms) || 0) + 'ms  state=' + ((s.handshake && s.handshake.state) || '—') + (s.handshake && s.handshake.rosterCount != null ? '  roster=' + s.handshake.rosterCount : '') + (s.handshake && s.handshake.error ? '  ' + s.handshake.error : ''));
       lines.push('');
       lines.push('VERDICT   ' + (r.summary || '—'));
+      if (r.hint) { lines.push(''); lines.push('HINT      ' + r.hint); }
       return lines.join('\n');
     }
 

@@ -296,6 +296,14 @@ function parseWsHostPort(url) {
   }
 }
 
+// A loopback address only ever reaches a node running on THIS machine, so a
+// pinned loopback host is the #1 misconfiguration when the Supervisor node
+// lives on another machine on the LAN.
+function isLoopbackHost(host) {
+  const h = String(host || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
+  return h === '127.0.0.1' || h === 'localhost' || h === '::1' || h.startsWith('127.');
+}
+
 function tcpProbe(host, port, timeoutMs = 5000) {
   return new Promise((resolve) => {
     const t0 = Date.now();
@@ -345,6 +353,7 @@ async function runDiagnostics(opts = {}) {
     field: { input: (opts.url || '').trim() },
     discovery: { ran: false, nodes: [], error: null },
     target: { url: null, host: null, port: null },
+    hint: null,
     steps: {
       tcp: { ok: false, ms: 0, error: 'skipped' },
       ws: { ok: false, ms: 0, opened: false, helloReceived: false, error: 'skipped' },
@@ -366,6 +375,17 @@ async function runDiagnostics(opts = {}) {
   const { host, port } = parseWsHostPort(url);
   report.target = { url, host, port };
   report.pins[url] = s.pins[url] || null;
+
+  // Flag the classic "pinned to my own PC" mistake: an explicitly-entered
+  // loopback address can only reach a node on THIS machine. When discovery also
+  // found real nodes on the LAN, point the user straight at one of them.
+  const pinnedLoopback = !!report.field.input && isLoopbackHost(host);
+  if (pinnedLoopback) {
+    const suggestion = report.discovery.nodes.length
+      ? `Clear the address to auto-detect it, or use the node found on your LAN: ${report.discovery.nodes[0].url}`
+      : "Clear the address to auto-detect the node on your LAN, or enter the Supervisor's LAN IP, e.g. ws://192.168.1.52:7071";
+    report.hint = `The address is pinned to this PC (loopback ${host}). The Supervisor node runs on another machine, so it can't be reached here. ${suggestion}`;
+  }
 
   // Step 1 — raw TCP reachability.
   if (host) report.steps.tcp = await tcpProbe(host, port);
@@ -389,7 +409,9 @@ async function runDiagnostics(opts = {}) {
 
   // Verdict.
   if (report.steps.handshake.ok) report.summary = `OK — secure link established (${report.steps.handshake.rosterCount} supervisor(s) online) at ${url}.`;
-  else if (!report.steps.tcp.ok) report.summary = `BLOCKED at TCP — cannot open ${host}:${port} (${report.steps.tcp.error}). Check the address, that the Supervisor node is running, and firewalls.`;
+  else if (!report.steps.tcp.ok) report.summary = pinnedLoopback
+    ? `BLOCKED — address pinned to this PC (loopback ${host}:${port}); a Supervisor on another machine can't be reached here. See HINT below.`
+    : `BLOCKED at TCP — cannot open ${host}:${port} (${report.steps.tcp.error}). Check the address, that the Supervisor node is running, and firewalls.`;
   else if (!report.steps.ws.ok) report.summary = `TCP ok but WebSocket failed (${report.steps.ws.error}) — node may not be the V.I.P.E.R. node, or a proxy is interfering.`;
   else if (!report.identity.present) report.summary = `Network ok (TCP+WS+hello) but no investigator identity set — fill in name/badge.`;
   else report.summary = `Network ok (TCP+WS+hello) but handshake failed: ${report.steps.handshake.error}.`;

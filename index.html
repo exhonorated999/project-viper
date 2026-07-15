@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://api.genlogs.io https://trace-broker-production.up.railway.app; font-src 'self' data:; frame-src https: http:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: uc-photo:; connect-src 'self' http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://api.genlogs.io https://trace-broker-production.up.railway.app; font-src 'self' data:; frame-src https: http:;">
     <title>V.I.P.E.R. - Dashboard</title>
     <script src="modules/viper-ui.js"></script>
     <script src="modules/viper-prefs.js"></script>
@@ -4909,13 +4909,37 @@
             const listElement = document.getElementById('warrantAlertsList');
             
             if (!countElement || !listElement) return;
-            
-            if (overdueWarrants.length === 0) {
-                countElement.textContent = '0 Active';
-                listElement.innerHTML = '<div class="text-center py-4 text-gray-400 text-sm">No overdue warrants</div>';
+
+            // Stale-case alerts (Case Activity Timer). Per-case opt-in stored
+            // in viperCaseActivityTimers { caseNumber: { enabled, days } }.
+            // "Worked on" = case.lastModified (fallback lastUpdated/createdAt).
+            // Closed/inactive cases are excluded.
+            const activityTimers = JSON.parse(localStorage.getItem('viperCaseActivityTimers') || '{}');
+            const closedStatuses = new Set(['closed', 'closed-arrest', 'transferred', 'inactive']);
+            const staleCases = [];
+            allCases.forEach(c => {
+                const t = activityTimers[c.caseNumber];
+                if (!t || !t.enabled) return;
+                if (closedStatuses.has(c.status)) return;
+                const ref = c.lastModified || c.lastUpdated || c.createdAt;
+                if (!ref) return;
+                const refMs = new Date(ref).getTime();
+                if (isNaN(refMs)) return;
+                const days = Math.floor((Date.now() - refMs) / 86400000);
+                const threshold = t.days || 14;
+                if (days >= threshold) {
+                    staleCases.push({ caseNumber: c.caseNumber, caseId: c.id, days, threshold });
+                }
+            });
+            staleCases.sort((a, b) => b.days - a.days);
+
+            const totalAlerts = overdueWarrants.length + staleCases.length;
+            countElement.textContent = `${totalAlerts} Active`;
+
+            if (totalAlerts === 0) {
+                listElement.innerHTML = '<div class="text-center py-4 text-gray-400 text-sm">No active alerts</div>';
             } else {
-                countElement.textContent = `${overdueWarrants.length} Active`;
-                listElement.innerHTML = overdueWarrants.slice(0, 3).map(item => `
+                let html = overdueWarrants.slice(0, 3).map(item => `
                     <div class="mb-3 p-3 bg-viper-orange/10 border border-viper-orange/30 rounded-lg text-left cursor-pointer hover:bg-viper-orange/20 transition-colors" onclick="openCaseDetail(${item.caseId})">
                         <div class="flex items-center justify-between mb-1">
                             <span class="text-sm font-medium text-viper-orange">Case ${item.caseNumber}</span>
@@ -4925,10 +4949,23 @@
                         <div class="text-xs text-gray-400 mt-1">Due: ${new Date(item.warrant.dueDate).toLocaleDateString()}</div>
                     </div>
                 `).join('');
-                
                 if (overdueWarrants.length > 3) {
-                    listElement.innerHTML += `<div class="text-center text-xs text-viper-orange mt-2">+${overdueWarrants.length - 3} more</div>`;
+                    html += `<div class="text-center text-xs text-viper-orange mb-3">+${overdueWarrants.length - 3} more warrants</div>`;
                 }
+                html += staleCases.slice(0, 3).map(item => `
+                    <div class="mb-3 p-3 bg-viper-cyan/10 border border-viper-cyan/30 rounded-lg text-left cursor-pointer hover:bg-viper-cyan/20 transition-colors" onclick="openCaseDetail(${item.caseId})">
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="text-sm font-medium text-viper-cyan">Case ${item.caseNumber}</span>
+                            <span class="text-xs text-viper-cyan">${item.days}d inactive</span>
+                        </div>
+                        <div class="text-xs text-gray-300">No case activity in ${item.days} days</div>
+                        <div class="text-xs text-gray-400 mt-1">Alerts after ${item.threshold}d of inactivity</div>
+                    </div>
+                `).join('');
+                if (staleCases.length > 3) {
+                    html += `<div class="text-center text-xs text-viper-cyan mt-2">+${staleCases.length - 3} more stale cases</div>`;
+                }
+                listElement.innerHTML = html;
             }
         }
         
@@ -6031,6 +6068,30 @@
             const vals = getCaseMetricsData(c.id);
             return defs.filter(m => m.type === 'checkbox' && !!vals[m.id]).length;
         }
+        // ═══ Case Activity Timer — stale indicator (All Cases table) ═══
+        // Returns the number of idle days if the case's activity timer is
+        // enabled and the case has gone unworked past its threshold; else null.
+        // "Worked on" = case.lastModified (fallback lastUpdated/createdAt).
+        function getCaseStaleDays(c) {
+            try {
+                const timers = JSON.parse(localStorage.getItem('viperCaseActivityTimers') || '{}');
+                const t = timers[c.caseNumber];
+                if (!t || !t.enabled) return null;
+                const closed = new Set(['closed', 'closed-arrest', 'transferred', 'inactive']);
+                if (closed.has(c.status)) return null;
+                const ref = c.lastModified || c.lastUpdated || c.createdAt;
+                if (!ref) return null;
+                const refMs = new Date(ref).getTime();
+                if (isNaN(refMs)) return null;
+                const days = Math.floor((Date.now() - refMs) / 86400000);
+                return days >= (t.days || 14) ? days : null;
+            } catch (_) { return null; }
+        }
+        function renderStaleBadge(c) {
+            const d = getCaseStaleDays(c);
+            if (d == null) return '';
+            return '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-viper-cyan/15 text-viper-cyan border border-viper-cyan/40 text-[10px] font-medium whitespace-nowrap" title="No case activity in ' + d + ' days">\u23F1 ' + d + 'd idle</span>';
+        }
         function renderFlagsCell(c) {
             const defs = getCustomMetricDefs();
             if (defs.length === 0) return '';
@@ -6383,7 +6444,7 @@
                 const cells = visCols.map(col => {
                     switch(col) {
                         case 'caseNumber':
-                            return '<td class="px-5 py-4 text-sm font-semibold text-viper-cyan whitespace-nowrap">' + c.caseNumber + '</td>';
+                            return '<td class="px-5 py-4 text-sm whitespace-nowrap"><div class="flex items-center gap-2"><span class="font-semibold text-viper-cyan">' + c.caseNumber + '</span>' + renderStaleBadge(c) + '</div></td>';
                         case 'synopsis':
                             const syn = (c.synopsis||'').length > 70 ? c.synopsis.substring(0,70)+'…' : (c.synopsis||'');
                             const ctTag = c.cybertipNumber
@@ -7846,6 +7907,8 @@
 
     <!-- Resource Hub (unified investigative resources drawer) -->
     <script src="modules/resource-hub.js"></script>
+    <!-- UC Chat Operations (undercover chat workspace) -->
+    <script src="modules/uc-chat/uc-chat-ops.js"></script>
 
 
     <script>

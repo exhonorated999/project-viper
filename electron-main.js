@@ -8,6 +8,11 @@ const { spawn } = require('child_process');
 const os = require('os');
 const crypto = require('crypto');
 
+// UC Chat Operations (undercover chat workspace) — main-process logic.
+// Lazily opens <userData>/viper-uc.db on first IPC call; registerUcIpc() is
+// invoked once after the main window is created (see app.whenReady below).
+const ucChat = require('./modules/uc-chat/uc-chat-main.js');
+
 // ─────────────────────────────────────────────────────────────────────
 // DIAGNOSTIC MODE — initialized FIRST, before anything else can run.
 // Activated by ANY of:
@@ -68,6 +73,18 @@ protocol.registerSchemesAsPrivileged([
       secure: true,
       supportFetchAPI: true,
       stream: true,
+      bypassCSP: true,
+      corsEnabled: true
+    }
+  },
+  {
+    // UC Chat Operations persona photo library — serves <userData>/uc_photos
+    // files without exposing absolute paths, and safe to use as <img src>.
+    scheme: 'uc-photo',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
       bypassCSP: true,
       corsEnabled: true
     }
@@ -669,6 +686,34 @@ app.whenReady().then(async () => {
       }
     });
 
+    // Register uc-photo:// — serves UC persona photos from <userData>/uc_photos.
+    // Fallback for the data: URL primary path. URL format:
+    //   uc-photo://f/<persona_id>/<filename>   (path-traversal sandboxed)
+    // Note: the persona id is kept OUT of the host — a numeric host on a
+    // standard scheme gets normalized to an IPv4 address by Chromium
+    // (e.g. host "1" -> "0.0.0.1"), which broke path resolution.
+    protocol.handle('uc-photo', async (request) => {
+      try {
+        const reqUrl = new URL(request.url);
+        const parts = decodeURIComponent(reqUrl.pathname).split('/').filter(Boolean);
+        const personaId = String(parts[0] || '').replace(/[^0-9]/g, '');
+        const fileName = parts[1] || '';
+        if (!personaId || !fileName || fileName.includes('..') || /[\\/]/.test(fileName)) {
+          return new Response('Bad Request', { status: 400 });
+        }
+        const root = path.join(app.getPath('userData'), 'uc_photos');
+        const abs = path.join(root, personaId, fileName);
+        // Sandbox: fileName is already free of separators/..; confirm containment.
+        if (!abs.startsWith(root + path.sep) || !fs.existsSync(abs)) {
+          return new Response('Not Found', { status: 404 });
+        }
+        return net.fetch('file:///' + abs.replace(/\\/g, '/'));
+      } catch (err) {
+        console.error('uc-photo protocol error:', err);
+        return new Response('Error: ' + err.message, { status: 500 });
+      }
+    });
+
     // Initialize security manager (uses userData for config + vault)
     const secDir = app.getPath('userData');
     if (!fs.existsSync(secDir)) fs.mkdirSync(secDir, { recursive: true });
@@ -716,6 +761,14 @@ app.whenReady().then(async () => {
 
     await startServer();
     createWindow();
+
+    // UC Chat Operations — register persona/chat/link/event IPC handlers.
+    try {
+      ucChat.registerUcIpc({ getMainWindow: () => mainWindow });
+      console.log('UC Chat Operations: IPC registered');
+    } catch (e) {
+      console.error('UC Chat Operations init failed:', e && e.message);
+    }
 
     // Media player permissions (audio/video/DRM for streaming services)
     const allowedPerms = ['media', 'mediaKeySystem', 'fullscreen'];
@@ -4411,6 +4464,133 @@ ipcMain.handle('rh-capture-html', async (_e, payload) => {
     return { success: true, fileName, size: stat.size };
   } catch (err) {
     console.error('[rh-capture-html]', err);
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
+// ========== UC Chat Operations — evidence capture (PDF + SingleFile HTML) ==========
+// Captures the live undercover chat BrowserView (managed by the uc-chat
+// module) to a court-defensible artifact. Faithful parity with ICAC PULSE:
+// stage the file, write a chain-of-custody row into the UC evidence_log
+// (SHA-256 hashed), append a 'capture' chat event, then hand the staged
+// file to VIPER's existing rh-download-ready routing modal so the officer
+// can file it into the linked case folder.
+function _ucCaptureTarget(chatId) {
+  try {
+    const bv = ucChat.getChatView(chatId);
+    if (!bv || !bv.webContents || bv.webContents.isDestroyed()) {
+      return { error: 'UC chat view not open — open the chat first.' };
+    }
+    return { bv };
+  } catch (e) {
+    return { error: `UC chat lookup failed: ${e && e.message || e}` };
+  }
+}
+
+async function _ucStageCapture(chatId, ext, writeFn) {
+  const t = _ucCaptureTarget(chatId);
+  if (t.error) return { success: false, error: t.error };
+  const wc = t.bv.webContents;
+  const url = wc.getURL() || '';
+  let title = '';
+  try { title = await wc.executeJavaScript('document.title || ""'); } catch (_) {}
+  const label = `UC Chat #${chatId}`;
+  const safeTitle = _sanitizeNameSafe((title || label).replace(/\s+/g, '_')).slice(0, 80);
+  const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+  const fileName = `UC-Chat-${chatId}_${safeTitle || 'capture'}_${ts}.${ext}`;
+  const tempName = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}-${fileName}`;
+  const tempPath = path.join(rhDownloadTmpDir, tempName);
+  if (!fs.existsSync(rhDownloadTmpDir)) fs.mkdirSync(rhDownloadTmpDir, { recursive: true });
+
+  await writeFn(wc, tempPath);   // throws on failure
+  const stat = fs.statSync(tempPath);
+  const mime = ext === 'pdf' ? 'application/pdf' : 'text/html';
+
+  // Chain-of-custody — hash + log the captured artifact against the chat
+  // (and its primary case, if linked).
+  let chat = null;
+  try { chat = ucChat.getChat(chatId); } catch (_) {}
+  try {
+    await ucChat.evlog.recordEvidenceLog({
+      chatId,
+      caseId: (chat && chat.primary_case_id) || null,
+      action: 'create',
+      filePath: tempPath,
+      meta: { kind: 'uc_chat_capture', format: ext, source_url: url, title: title || null, label },
+    });
+  } catch (e) { console.warn('[uc-capture-evlog]', e && e.message); }
+
+  // Timeline event for the chat.
+  try {
+    ucChat.appendEvent(chatId, 'capture', { format: ext, file_name: fileName, source_url: url, size_bytes: stat.size });
+  } catch (e) { console.warn('[uc-capture-event]', e && e.message); }
+
+  // Hand to the existing routing modal so it can be filed into a case.
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('rh-download-ready', {
+        success: true,
+        tempPath,
+        fileName,
+        size: stat.size,
+        mime,
+        sourceUrl: url,
+        resource: label,
+        defaultTag: 'UC-Chat-Captures',
+        capture: true,
+        ucChatId: chatId,
+      });
+    }
+  } catch (e) { console.warn('[uc-capture-route]', e && e.message); }
+
+  return { success: true, fileName, size: stat.size };
+}
+
+ipcMain.handle('uc-chat-capture-pdf', async (_e, args) => {
+  const chatId = args && (args.chatId != null ? args.chatId : args);
+  if (chatId == null) return { success: false, error: 'chatId required' };
+  try {
+    return await _ucStageCapture(chatId, 'pdf', async (wc, tempPath) => {
+      const pdfBuf = await wc.printToPDF({
+        printBackground: true,
+        pageSize: 'Letter',
+        margins: { marginType: 'custom', top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 },
+      });
+      fs.writeFileSync(tempPath, pdfBuf);
+    });
+  } catch (err) {
+    console.error('[uc-chat-capture-pdf]', err);
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
+ipcMain.handle('uc-chat-capture-html', async (_e, args) => {
+  const chatId = args && (args.chatId != null ? args.chatId : args);
+  if (chatId == null) return { success: false, error: 'chatId required' };
+  try {
+    return await _ucStageCapture(chatId, 'html', async (wc, tempPath) => {
+      const sfScript = await _loadSingleFileScript();
+      await wc.executeJavaScript(sfScript, /* userGesture */ true);
+      const html = await wc.executeJavaScript(`
+        (async () => {
+          try {
+            const opts = {
+              removeHiddenElements: false, removeUnusedStyles: false, removeUnusedFonts: false,
+              removeImports: false, blockScripts: true, blockVideos: false, blockAudios: false,
+              saveFavicon: true, removeFrames: false, compressHTML: true, backgroundSave: false,
+              networkTimeout: 30000,
+            };
+            const pd = await singlefile.getPageData(opts);
+            return pd && pd.content ? pd.content : '';
+          } catch (e) { return '__SF_ERR__:' + (e && e.message ? e.message : String(e)); }
+        })()
+      `, /* userGesture */ true);
+      if (typeof html !== 'string' || !html) throw new Error('SingleFile returned empty content');
+      if (html.startsWith('__SF_ERR__:')) throw new Error(html.slice('__SF_ERR__:'.length));
+      fs.writeFileSync(tempPath, html, 'utf8');
+    });
+  } catch (err) {
+    console.error('[uc-chat-capture-html]', err);
     return { success: false, error: err.message || String(err) };
   }
 });

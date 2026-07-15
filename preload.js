@@ -508,4 +508,61 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('supervisor-link:state', handler);
     },
   },
+
+  // ═══════════════ UC Chat Operations (undercover chat workspace) ═══════════════
+  // Personas
+  ucPersonaList: (args) => ipcRenderer.invoke('uc-persona-list', args || {}),
+  ucPersonaGet: (id) => ipcRenderer.invoke('uc-persona-get', id),
+  ucPersonaCreate: (input) => ipcRenderer.invoke('uc-persona-create', input),
+  ucPersonaUpdate: (id, input) => ipcRenderer.invoke('uc-persona-update', { id, input }),
+  ucPersonaArchive: (id) => ipcRenderer.invoke('uc-persona-archive', id),
+  ucPersonaUnarchive: (id) => ipcRenderer.invoke('uc-persona-unarchive', id),
+  // Chats
+  ucChatList: (args) => ipcRenderer.invoke('uc-chat-list', args || {}),
+  ucChatGet: (id) => ipcRenderer.invoke('uc-chat-get', id),
+  ucChatCreate: (input) => ipcRenderer.invoke('uc-chat-create', input),
+  ucChatUpdate: (id, input) => ipcRenderer.invoke('uc-chat-update', { id, input }),
+  ucChatArchive: (id) => ipcRenderer.invoke('uc-chat-archive', id),
+  ucChatUnarchive: (id) => ipcRenderer.invoke('uc-chat-unarchive', id),
+  ucChatMarkRead: (id) => ipcRenderer.invoke('uc-chat-mark-read', id),
+  // Case links
+  ucChatLinkCase: (chatId, caseId, role) => ipcRenderer.invoke('uc-chat-link-case', { chatId, caseId, role }),
+  ucChatUnlinkCase: (chatId, caseId) => ipcRenderer.invoke('uc-chat-unlink-case', { chatId, caseId }),
+  ucChatCaseLinks: (chatId) => ipcRenderer.invoke('uc-chat-case-links', chatId),
+  // Events
+  ucChatEvents: (chatId, limit) => ipcRenderer.invoke('uc-chat-events', { chatId, limit }),
+  // BrowserViews (create = invoke; positioning/lifecycle = fire-and-forget)
+  ucChatBvCreate: (chatId, personaId, url) => ipcRenderer.invoke('uc-chat-bv-create', { chatId, personaId, url }),
+  ucChatBvSetBounds: (chatId, bounds) => ipcRenderer.send('uc-chat-bv-set-bounds', { chatId, bounds }),
+  ucChatBvSetVisible: (chatId, visible) => ipcRenderer.send('uc-chat-bv-set-visible', { chatId, visible }),
+  ucChatBvLoadUrl: (chatId, url) => ipcRenderer.send('uc-chat-bv-load-url', { chatId, url }),
+  ucChatBvReload: (chatId) => ipcRenderer.send('uc-chat-bv-reload', chatId),
+  ucChatBvBack: (chatId) => ipcRenderer.send('uc-chat-bv-back', chatId),
+  ucChatBvDestroy: (chatId) => ipcRenderer.send('uc-chat-bv-destroy', chatId),
+  ucChatBvHideAll: () => ipcRenderer.send('uc-chat-bv-hide-all'),
+  // Alerts (main -> renderer broadcast). Returns an unsubscribe fn.
+  ucOnAlert: (cb) => {
+    const handler = (_e, payload) => { try { cb(payload); } catch (_) {} };
+    ipcRenderer.on('uc-alert', handler);
+    return () => ipcRenderer.removeListener('uc-alert', handler);
+  },
+  // Discreet mode
+  ucDiscreetModeGet: () => ipcRenderer.invoke('uc-discreet-mode-get'),
+  ucDiscreetModeSet: (on) => ipcRenderer.invoke('uc-discreet-mode-set', on),
+  // Persona photo library
+  ucPhotoList: (personaId, includeArchived) => ipcRenderer.invoke('uc-photo-list', { personaId, includeArchived }),
+  ucPhotoAdd: (personaId, srcPath, caption) => ipcRenderer.invoke('uc-photo-add', { personaId, srcPath, caption }),
+  ucPhotoUpdate: (id, input) => ipcRenderer.invoke('uc-photo-update', { id, input }),
+  ucPhotoArchive: (id) => ipcRenderer.invoke('uc-photo-archive', id),
+  ucPhotoUnarchive: (id) => ipcRenderer.invoke('uc-photo-unarchive', id),
+  ucPhotoUses: (photoId) => ipcRenderer.invoke('uc-photo-uses', photoId),
+  ucPhotoCopyToClipboard: (photoId, chatId) => ipcRenderer.invoke('uc-photo-copy-to-clipboard', { photoId, chatId }),
+  ucPhotoPickAndAdd: (personaId) => ipcRenderer.invoke('uc-photo-pick-and-add', { personaId }),
+  ucPhotoPickFiles: () => ipcRenderer.invoke('uc-photo-pick-files'),
+  // Evidence log (chain-of-custody)
+  ucEvidenceLogList: (filter) => ipcRenderer.invoke('uc-evidence-log-list', filter || {}),
+  ucEvidenceLogVerify: (id) => ipcRenderer.invoke('uc-evidence-log-verify', id),
+  // Chat capture (PDF / SingleFile HTML) → chain-of-custody + routing modal
+  ucChatCapturePdf: (chatId) => ipcRenderer.invoke('uc-chat-capture-pdf', { chatId }),
+  ucChatCaptureHtml: (chatId) => ipcRenderer.invoke('uc-chat-capture-html', { chatId }),
 });

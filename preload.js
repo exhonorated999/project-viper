@@ -40,6 +40,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   restartApp: () => ipcRenderer.invoke('restart-app'),
 
+  // PULSE (.pulse) case import — ICAC P.U.L.S.E. → VIPER migration
+  pulsePickFile: () => ipcRenderer.invoke('pulse-pick-file'),
+  pulseValidate: (args) => ipcRenderer.invoke('pulse-validate', args),
+  pulseImport: (args) => ipcRenderer.invoke('pulse-import', args),
+  onPulseImportProgress: (handler) => {
+    ipcRenderer.removeAllListeners('pulse-import-progress');
+    ipcRenderer.on('pulse-import-progress', (_e, data) => handler(data));
+  },
+
   deleteCaseFolder: (caseNumber) => ipcRenderer.invoke('delete-case-folder', caseNumber),
   createCaseFolder: (caseNumber) => ipcRenderer.invoke('create-case-folder', caseNumber),
   caseFolderExists: (caseNumber) => ipcRenderer.invoke('case-folder-exists', caseNumber),

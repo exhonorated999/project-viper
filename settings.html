@@ -746,6 +746,55 @@
                     </div>
                 </div>
 
+                <!-- Import Cases from PULSE (ICAC P.U.L.S.E. → VIPER) -->
+                <div class="glass-card rounded-xl p-6">
+                    <div class="flex items-center justify-between cursor-pointer" onclick="togglePulseImport()">
+                        <h3 class="text-xl font-bold flex items-center gap-2">
+                            <svg class="w-6 h-6 text-viper-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                            </svg>
+                            Import Cases from PULSE
+                        </h3>
+                        <svg id="pulseImportChevron" class="w-5 h-5 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </div>
+
+                    <div id="pulseImportBody" class="hidden mt-4">
+                        <p class="text-xs text-gray-500 mb-4">Import a case exported from ICAC&nbsp;P.U.L.S.E. (a <code class="px-1 bg-viper-dark rounded">.pulse</code> file). VIPER decrypts it with the export password, translates the case into VIPER's format, and copies its files. The original PULSE audit trail is preserved on the imported case.</p>
+
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50 space-y-3">
+                            <!-- File picker -->
+                            <div>
+                                <label class="text-xs font-medium text-gray-300">PULSE export file</label>
+                                <div class="flex items-center gap-2 mt-1">
+                                    <button id="pulsePickBtn" type="button" class="text-xs px-3 py-1.5 rounded bg-viper-orange/20 text-viper-orange border border-viper-orange/40 hover:bg-viper-orange/30 transition whitespace-nowrap">Choose .pulse file…</button>
+                                    <code id="pulseFileName" class="flex-1 text-xs text-gray-400 font-mono bg-viper-dark rounded px-3 py-2 border border-gray-700 truncate">No file selected</code>
+                                </div>
+                            </div>
+                            <!-- Password -->
+                            <div>
+                                <label class="text-xs font-medium text-gray-300" for="pulsePassword">Export password</label>
+                                <input id="pulsePassword" type="password" autocomplete="off" class="w-full mt-1 text-sm bg-viper-dark border border-gray-700 rounded px-3 py-2 text-white focus:border-viper-orange focus:outline-none" placeholder="Password used when the .pulse was created">
+                            </div>
+                            <!-- Actions -->
+                            <div class="flex items-center gap-2">
+                                <button id="pulseImportBtn" type="button" disabled class="text-xs px-4 py-2 rounded bg-viper-green/20 text-viper-green border border-viper-green/40 hover:bg-viper-green/30 transition disabled:opacity-40 disabled:cursor-not-allowed">Import case</button>
+                                <span id="pulseImportSpinner" class="hidden items-center gap-1 text-xs text-gray-400">
+                                    <svg class="w-4 h-4 text-viper-orange animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="2" stroke-dasharray="40" stroke-linecap="round"/></svg>
+                                    <span id="pulseSpinnerText">Working…</span>
+                                </span>
+                            </div>
+                            <!-- Progress bar -->
+                            <div id="pulseProgressWrap" class="hidden">
+                                <div class="w-full bg-viper-dark rounded-full h-2 overflow-hidden border border-gray-700">
+                                    <div id="pulseProgressBar" class="bg-gradient-to-r from-viper-orange to-viper-green h-full transition-all duration-200" style="width:0%"></div>
+                                </div>
+                            </div>
+                            <!-- Inline message (settings.html has no toast) -->
+                            <p id="pulseImportMsg" class="text-xs mt-1 hidden"></p>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Cases migration dialog (Copy / Move / Leave) -->
                 <div id="casesMigrateDialog" class="hidden fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
                     <div class="glass-card rounded-xl p-6 max-w-lg w-full border border-viper-cyan/40">
@@ -6346,6 +6395,126 @@
     }
     function toggleDisplayAccessibility() { toggleSettingsCard('displayAccessibilityBody', 'displayAccessibilityChevron'); }
     function toggleStorageLocations()     { toggleSettingsCard('storageLocationsBody', 'storageLocationsChevron'); }
+    function togglePulseImport()          { toggleSettingsCard('pulseImportBody', 'pulseImportChevron'); }
+
+    // ── PULSE (.pulse) case import controller ────────────────────────────
+    (function initPulseImport() {
+        let selectedPath = null;
+
+        function el(id) { return document.getElementById(id); }
+        function setMsg(text, kind) {
+            const m = el('pulseImportMsg');
+            if (!m) return;
+            m.textContent = text || '';
+            m.classList.toggle('hidden', !text);
+            m.classList.remove('text-red-400', 'text-viper-green', 'text-gray-400', 'text-amber-400');
+            m.classList.add(kind === 'error' ? 'text-red-400'
+                          : kind === 'ok' ? 'text-viper-green'
+                          : kind === 'warn' ? 'text-amber-400' : 'text-gray-400');
+        }
+        function refreshBtn() {
+            const btn = el('pulseImportBtn');
+            if (btn) btn.disabled = !(selectedPath && el('pulsePassword').value);
+        }
+        function busy(on, label) {
+            const sp = el('pulseImportSpinner');
+            if (sp) sp.classList.toggle('hidden', !on);
+            if (sp) sp.classList.toggle('flex', on);
+            if (on && label) el('pulseSpinnerText').textContent = label;
+            el('pulsePickBtn').disabled = on;
+            el('pulseImportBtn').disabled = on || !(selectedPath && el('pulsePassword').value);
+            el('pulsePassword').disabled = on;
+        }
+        function setProgress(pct) {
+            el('pulseProgressWrap').classList.toggle('hidden', pct == null);
+            if (pct != null) el('pulseProgressBar').style.width = Math.max(0, Math.min(100, pct)) + '%';
+        }
+
+        function wire() {
+            const pickBtn = el('pulsePickBtn');
+            const importBtn = el('pulseImportBtn');
+            const pw = el('pulsePassword');
+            if (!pickBtn || !importBtn || !pw) return false;
+
+            pw.addEventListener('input', refreshBtn);
+
+            pickBtn.addEventListener('click', async () => {
+                if (!window.electronAPI || !window.electronAPI.pulsePickFile) {
+                    setMsg('Import is only available in the desktop app.', 'error'); return;
+                }
+                const res = await window.electronAPI.pulsePickFile();
+                if (res && res.canceled) return;
+                if (res && res.filePath) {
+                    selectedPath = res.filePath;
+                    el('pulseFileName').textContent = res.filePath.split(/[\\/]/).pop();
+                    setMsg('', null);
+                    refreshBtn();
+                }
+            });
+
+            if (window.electronAPI && window.electronAPI.onPulseImportProgress) {
+                window.electronAPI.onPulseImportProgress((p) => {
+                    if (p && p.total) setProgress(Math.round((p.current / p.total) * 100));
+                    if (p && p.message) el('pulseSpinnerText').textContent = p.message;
+                });
+            }
+
+            importBtn.addEventListener('click', async () => {
+                if (!selectedPath || !pw.value) return;
+                setMsg('', null);
+                busy(true, 'Validating…');
+                setProgress(0);
+                try {
+                    const v = await window.electronAPI.pulseValidate({ filePath: selectedPath, password: pw.value });
+                    if (!v || !v.valid) {
+                        setMsg(v && v.error ? v.error : 'Could not read that PULSE file.', 'error');
+                        busy(false); setProgress(null); return;
+                    }
+                    let overwrite = false;
+                    if (v.alreadyExists) {
+                        overwrite = confirm(`A case ${v.caseNumber} already exists in VIPER.\n\nOverwrite its snapshot with the PULSE import?`);
+                        if (!overwrite) { setMsg('Import cancelled — case already exists.', 'warn'); busy(false); setProgress(null); return; }
+                    }
+                    busy(true, 'Importing…');
+                    const r = await window.electronAPI.pulseImport({ filePath: selectedPath, password: pw.value, overwrite });
+                    if (!r || !r.success) {
+                        setMsg(r && r.error ? r.error : 'Import failed.', 'error');
+                        busy(false); setProgress(null); return;
+                    }
+                    setProgress(100);
+                    const s = r.stats || {};
+                    const bits = [];
+                    if (s.suspects) bits.push(s.suspects + ' suspect');
+                    if (s.notes) bits.push(s.notes + ' note(s)');
+                    if (s.evidence) bits.push(s.evidence + ' evidence');
+                    if (s.warrants) bits.push(s.warrants + ' warrant(s)');
+                    if (s.timeline) bits.push(s.timeline + ' timeline');
+                    if (s.files) bits.push(s.files + ' file(s)');
+                    let msg = `Imported case ${r.caseNumber}` + (bits.length ? ' — ' + bits.join(', ') : '') +
+                              '. Open the Dashboard to view it.';
+                    setMsg(msg, 'ok');
+                    if (r.warnings && r.warnings.length) {
+                        console.warn('[PULSE import] warnings:', r.warnings);
+                    }
+                    // Reset for the next import
+                    selectedPath = null;
+                    el('pulseFileName').textContent = 'No file selected';
+                    pw.value = '';
+                } catch (e) {
+                    setMsg('Import error: ' + (e && e.message ? e.message : e), 'error');
+                } finally {
+                    busy(false);
+                }
+            });
+            return true;
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', wire);
+        } else {
+            wire();
+        }
+    })();
     function toggleMediaPlayerCard()      { toggleSettingsCard('mediaPlayerCardBody', 'mediaPlayerCardChevron'); }
     function toggleSupervisorLinkCard()   { toggleSettingsCard('supervisorLinkCardBody', 'supervisorLinkCardChevron'); }
     function toggleTelemetryCard()        { toggleSettingsCard('telemetryBody', 'telemetryCardChevron'); }

@@ -10185,3 +10185,20 @@ try {
 } catch (e) {
   console.error('[SupervisorLink] Failed to register IPC handlers:', e);
 }
+
+// ─── PULSE Import (ICAC P.U.L.S.E. → VIPER case migration) IPC ───────────
+// Lets the handful of remaining PULSE users import their cases as PULSE is
+// sunset. Decrypts the .pulse (AES-256-CBC) envelope, translates PULSE's
+// relational schema into a VIPER per-case snapshot (ingested by
+// case-snapshot.js recover()), and extracts case files to disk.
+// Plan: plans/2026-07-18_10-00-00_pulse-import/plan.md
+try {
+  const PulseImport = require('./modules/pulse-import/pulse-import-main');
+  PulseImport.setSecurityManager(security);
+  PulseImport.setCasesDirGetter(() => casesDir);
+  if (mainWindow) PulseImport.setMainWindow(mainWindow);
+  PulseImport.registerIpc(ipcMain);
+  console.log('[PulseImport] .pulse import IPC registered (mainWindow wired:', !!mainWindow, ')');
+} catch (e) {
+  console.error('[PulseImport] Failed to register IPC handlers:', e);
+}

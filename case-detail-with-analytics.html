@@ -342,6 +342,18 @@
             box-shadow: 0 0 0 4px rgba(0, 217, 255, 0.25);
             cursor: pointer;
         }
+        /* Drag-to-resize handle for a selected editor image (bottom-right corner). */
+        .viper-img-resize-handle {
+            position: fixed;
+            width: 14px;
+            height: 14px;
+            background: #00d9ff;
+            border: 2px solid #0a0e14;
+            border-radius: 3px;
+            cursor: nwse-resize;
+            z-index: 10050;
+            box-shadow: 0 0 0 1px rgba(0, 217, 255, 0.6);
+        }
         #reportEditor img,
         #noteEditor img {
             cursor: pointer;
@@ -2333,11 +2345,19 @@
         }
 
         function getTabItemCount(tabId) {
+            // Count Pattern-2 (`<key>_${caseId}`, the source of truth) first, then
+            // fall back to the in-memory Pattern-1 var (only populated once a tab
+            // has been visited). Without the Pattern-2 read, native cases whose
+            // tabs were never opened report 0 and get dropped from the DA export.
+            const _c = (k, arr) => {
+                try { const p2 = _lsParse(`${k}_${currentCase.id}`, []); if (Array.isArray(p2) && p2.length) return p2.length; } catch (_) {}
+                return Array.isArray(arr) ? arr.length : 0;
+            };
             // Return count of items in each tab
             switch(tabId) {
-                case 'suspects': return caseSuspects.length;
-                case 'victims': return caseVictims ? caseVictims.length : 0;
-                case 'witnesses': return caseWitnesses ? caseWitnesses.length : 0;
+                case 'suspects': return _c('suspects', caseSuspects);
+                case 'victims': return _c('victims', caseVictims);
+                case 'witnesses': return _c('witnesses', caseWitnesses);
                 case 'involvedPersons': {
                     const ip = _lsParse(`involvedPersons_${currentCase.id}`, []);
                     return ip.length;
@@ -2346,15 +2366,15 @@
                 case 'evidence': return caseEvidence.length;
                 case 'warrants': return caseWarrants.length;
                 case 'forensics': return (caseForensicDevices || []).length;
-                case 'vehicles': return caseVehicles ? caseVehicles.length : 0;
-                case 'firearms': return caseFirearms ? caseFirearms.length : 0;
-                case 'narcotics': return caseNarcotics ? caseNarcotics.length : 0;
-                case 'money': return caseMoney ? caseMoney.length : 0;
-                case 'missingpersons': return caseMissingPersons ? caseMissingPersons.length : 0;
-                case 'areacanvas': return caseCanvasEntries ? caseCanvasEntries.length : 0;
+                case 'vehicles': return _c('recoveredVehicles', caseVehicles);
+                case 'firearms': return _c('firearms', caseFirearms);
+                case 'narcotics': return _c('narcotics', caseNarcotics);
+                case 'money': return _c('money', caseMoney);
+                case 'missingpersons': return _c('missingpersons', caseMissingPersons);
+                case 'areacanvas': return _c('areacanvas', caseCanvasEntries);
                 case 'prosecution': return caseProsecution ? caseProsecution.length : 0;
-                case 'victimBusiness': return caseVictimBusinesses ? caseVictimBusinesses.length : 0;
-                case 'cargo': return caseCargo ? caseCargo.length : 0;
+                case 'victimBusiness': return _c('victimBusinesses', caseVictimBusinesses);
+                case 'cargo': return _c('cargo', caseCargo);
                 case 'traceImport': {
                     const ti = _lsParse('viperTraceImports', {});
                     const arr = ti[currentCase.caseNumber];
@@ -2579,15 +2599,26 @@
                 doc.line(M, y, PW - M, y); y += 8;
             }
             function fieldBold(label, value) {
-                if (!value) return;
-                need(7);
-                doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...BLACK);
-                doc.text(`${label}: `, M + 2, y);
-                const lw = doc.getTextWidth(`${label}: `);
-                doc.setFont(undefined, 'normal'); doc.setTextColor(...BLACK);
+                if (value === undefined || value === null || value === '') return;
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'bold'); doc.setTextColor(...BLACK);
+                const labelStr = `${label}: `;
+                const lw = doc.getTextWidth(labelStr);
+                doc.setFont(undefined, 'normal');
                 const lines = doc.splitTextToSize(String(value), CW - lw - 4);
-                doc.text(lines, M + 2 + lw, y);
-                y += lines.length * 5 + 1;
+                // Draw line-by-line with a page-break check per line so long values
+                // (e.g. offense lists, narratives) never spill past the page bottom.
+                for (let i = 0; i < lines.length; i++) {
+                    need(6);
+                    if (i === 0) {
+                        doc.setFont(undefined, 'bold'); doc.setTextColor(...BLACK);
+                        doc.text(labelStr, M + 2, y);
+                        doc.setFont(undefined, 'normal');
+                    }
+                    doc.text(lines[i], M + 2 + lw, y);
+                    y += 5;
+                }
+                y += 1;
             }
             function bodyText(text) {
                 if (!text) return;
@@ -2882,11 +2913,11 @@
             doc.setDrawColor(...ACCENT); doc.setLineWidth(0.4);
             doc.roundedRect(M + 20, 140, CW - 40, 40, 3, 3, 'S');
             doc.setFontSize(10); doc.setTextColor(...BLACK);
-            doc.text(`Case Type: ${currentCase.type || 'N/A'}`, PW / 2, 152, { align: 'center' });
+            doc.text(`Case Type: ${currentCase.primaryOffense || currentCase.type || 'N/A'}`, PW / 2, 152, { align: 'center' });
             doc.text(`Status: ${currentCase.status || 'N/A'}`, PW / 2, 160, { align: 'center' });
-            doc.text(`Created: ${formatDate(currentCase.createdDate)}`, PW / 2, 168, { align: 'center' });
+            doc.text(`Created: ${formatDate(currentCase.createdAt || currentCase.createdDate)}`, PW / 2, 168, { align: 'center' });
             // Investigator
-            const investigator = currentCase.investigator || localStorage.getItem('viper_customer_name') || '';
+            const investigator = currentCase.investigator || currentCase.createdBy || localStorage.getItem('viper_customer_name') || '';
             if (investigator) { doc.text(`Investigator: ${investigator}`, PW / 2, 176, { align: 'center' }); }
             // Footer
             doc.setFontSize(8); doc.setTextColor(...LGRAY);
@@ -2922,8 +2953,9 @@
                     fieldBold('Status', currentCase.status);
                     fieldBold('Type', currentCase.type);
                     fieldBold('Category', currentCase.category);
-                    fieldBold('Created', formatDate(currentCase.createdDate));
-                    fieldBold('Investigator', currentCase.investigator);
+                    fieldBold('CyberTip #', currentCase.cybertipNumber);
+                    fieldBold('Created', formatDate(currentCase.createdAt || currentCase.createdDate));
+                    fieldBold('Investigator', currentCase.investigator || currentCase.createdBy);
                     if (currentCase.synopsis) { gap(); itemHeading('Synopsis'); bodyText(currentCase.synopsis); }
                     if (currentCase.description) { gap(); itemHeading('Description'); bodyText(currentCase.description); }
                     {
@@ -3452,7 +3484,7 @@
                     if (!imports.length) { emptyMsg('No RMS imports.'); break; }
                     imports.forEach((imp, i) => {
                         itemHeading(`RMS Report ${i+1}: ${imp.reportNumber || imp.fileName || 'Unknown'}`);
-                        fieldBold('Agency', imp.agency); fieldBold('Date', imp.eventDate);
+                        fieldBold('Agency', imp.agencyName || imp.agency); fieldBold('Date', imp.reportDate || imp.eventDate);
                         if (imp.offenses && imp.offenses.length) fieldBold('Offenses', imp.offenses.map(o => o.description || o.charge).join('; '));
                         if (imp.narratives && imp.narratives.length) {
                             gap(); imp.narratives.forEach(n => {
@@ -5648,6 +5680,7 @@
             editingNoteId = null;
             pendingNoteAttachments = [];
             savedNoteAttachments = [];
+            _hideImgResize();
             document.getElementById('noteForm').classList.add('hidden');
             const ed = document.getElementById('noteEditor');
             if (ed) ed.innerHTML = '';
@@ -5742,7 +5775,7 @@
                 editor.querySelectorAll('img.viper-img-selected').forEach(el => {
                     if (el !== img) el.classList.remove('viper-img-selected');
                 });
-                if (!img) return;
+                if (!img) { _hideImgResize(); return; }
                 e.preventDefault();
                 const sel = window.getSelection();
                 const range = document.createRange();
@@ -5751,6 +5784,7 @@
                 sel.addRange(range);
                 img.classList.add('viper-img-selected');
                 editor.focus();
+                _showImgResize(editor, img);   // show drag-to-resize handle
             });
 
             editor.addEventListener('keydown', function(e) {
@@ -5759,9 +5793,72 @@
                 if (!selected) return;
                 e.preventDefault();
                 selected.remove();
+                _hideImgResize();
                 // Place caret where the image used to be (best-effort: at start of editor)
                 editor.focus();
             });
+
+            // Hide the resize handle when the editor loses focus / scrolls away.
+            editor.addEventListener('scroll', function() { const h = document.getElementById('viperImgResizeHandle'); if (h && h._place) h._place(); });
+        }
+
+        // ── Image drag-to-resize (shared by #noteEditor and #reportEditor) ──
+        // A single fixed-position handle follows the currently selected image's
+        // bottom-right corner. Dragging sets an inline width (height:auto keeps
+        // aspect ratio) which persists in the saved note/report HTML.
+        function _getImgResizeHandle() {
+            let h = document.getElementById('viperImgResizeHandle');
+            if (h) return h;
+            h = document.createElement('div');
+            h.id = 'viperImgResizeHandle';
+            h.className = 'viper-img-resize-handle';
+            h.style.display = 'none';
+            document.body.appendChild(h);
+            const st = { target: null, editor: null, dragging: false, startX: 0, startW: 0 };
+            h._state = st;
+            function place() {
+                if (!st.target || !document.body.contains(st.target)) { h.style.display = 'none'; st.target = null; return; }
+                const r = st.target.getBoundingClientRect();
+                h.style.left = (r.right - 7) + 'px';
+                h.style.top = (r.bottom - 7) + 'px';
+                h.style.display = 'block';
+            }
+            h._place = place;
+            h.addEventListener('mousedown', function(e) {
+                if (!st.target) return;
+                e.preventDefault(); e.stopPropagation();
+                st.dragging = true;
+                st.startX = e.clientX;
+                st.startW = st.target.getBoundingClientRect().width;
+                document.body.style.userSelect = 'none';
+            });
+            window.addEventListener('mousemove', function(e) {
+                if (!st.dragging || !st.target) return;
+                const dx = e.clientX - st.startX;
+                let w = Math.max(40, st.startW + dx);
+                const maxW = (st.editor ? st.editor.clientWidth : 800) - 8;
+                if (w > maxW) w = maxW;
+                st.target.style.width = w + 'px';
+                st.target.style.maxWidth = '100%';
+                st.target.style.height = 'auto';
+                place();
+            });
+            window.addEventListener('mouseup', function() {
+                if (st.dragging) { st.dragging = false; document.body.style.userSelect = ''; }
+            });
+            window.addEventListener('scroll', place, true);
+            window.addEventListener('resize', place);
+            return h;
+        }
+        function _showImgResize(editor, img) {
+            const h = _getImgResizeHandle();
+            h._state.target = img;
+            h._state.editor = editor;
+            h._place();
+        }
+        function _hideImgResize() {
+            const h = document.getElementById('viperImgResizeHandle');
+            if (h) { h._state.target = null; h.style.display = 'none'; }
         }
 
         function formatNoteText(command) {

@@ -115,7 +115,7 @@ async function importPulse(args) {
     const { zip, manifest } = core.openPulse(buf, password);
 
     progress('translating', 2, 5, 'Translating case data…');
-    const result = core.translate(zip, manifest, {});
+    const result = core.translate(zip, manifest, { casesDir: casesDir() });
     const caseNumber = safeCaseNumber(result.caseNumber);
     if (!caseNumber) return { success: false, error: 'Invalid case number in export.' };
 

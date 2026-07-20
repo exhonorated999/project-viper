@@ -14,6 +14,7 @@
 // =====================================================================
 
 const crypto = require('crypto');
+const path = require('path');
 let AdmZip = null;
 try { AdmZip = require('adm-zip'); } catch (_) { /* resolved by caller env */ }
 
@@ -388,18 +389,63 @@ function translate(zip, manifest, opts) {
   }
 
   // ---- Evidence → viperCaseEvidence (Pattern 1) -----------------------
+  // VIPER's viewer resolves evidence via `file.path` as an ABSOLUTE path
+  // (read-evidence-file → fs.statSync). PULSE ships files_json entries whose
+  // location field is `relPath` (case-relative). We therefore normalize each
+  // file to { name, path (absolute), relPath, size, type } so the imported
+  // evidence previews/open correctly. Files were extracted to
+  // <casesDir>/<caseNumber>/<relPath> by the caller's file plan.
+  const evCasesDir = opts.casesDir || '';
+  // Normalize a PULSE file reference to a path relative to the case folder.
+  // New PULSE exports (schema >= 3) are already case-relative. Older exports
+  // prefixed evidence paths with "<caseNumber>/" while their file_inventory
+  // (and thus the extracted layout) did NOT — so strip that prefix for
+  // backward compatibility, otherwise old packages 404.
+  const stripCasePrefix = (rel) => {
+    const pfx = String(caseNumber).replace(/\\/g, '/') + '/';
+    return rel.startsWith(pfx) ? rel.slice(pfx.length) : rel;
+  };
+  const toRel = (f) => stripCasePrefix(
+    String(f.relPath || f.path || f.relative_path || '')
+      .replace(/\\/g, '/').replace(/^\/+/, '')
+  );
+  const toAbs = (rel, orig) => {
+    if (!rel) return orig || '';
+    if (orig && path.isAbsolute(orig)) return orig; // legacy external reference
+    return evCasesDir ? path.join(evCasesDir, caseNumber, rel) : rel;
+  };
   const evidence = toArr(data.evidence).map(ev => {
-    let files = [];
-    try { files = ev.files_json ? JSON.parse(ev.files_json) : []; } catch (_) { files = []; }
+    let rawFiles = [];
+    try { rawFiles = ev.files_json ? JSON.parse(ev.files_json) : []; } catch (_) { rawFiles = []; }
     let meta = {};
     try { meta = ev.meta_json ? JSON.parse(ev.meta_json) : {}; } catch (_) { meta = {}; }
+    const files = (Array.isArray(rawFiles) ? rawFiles : []).map(f => {
+      const rel = toRel(f);
+      const orig = f.relPath || f.path || f.relative_path || '';
+      return {
+        name: f.name || (rel ? rel.split('/').pop() : ''),
+        path: toAbs(rel, orig),                 // ABSOLUTE — what the viewer needs
+        relPath: rel,                           // keep case-relative for reference
+        size: f.size || 0,
+        type: f.type || f.mimeType || ''
+      };
+    });
+    // Resolve the evidence folder file_path to absolute as well.
+    const fpRel = stripCasePrefix(
+      String(ev.file_path || '').replace(/\\/g, '/').replace(/^\/+/, '')
+    );
+    const filePathAbs = fpRel
+      ? (path.isAbsolute(ev.file_path) ? ev.file_path
+          : (evCasesDir ? path.join(evCasesDir, caseNumber, fpRel) : fpRel))
+      : '';
     return {
       id: ev.id || (Date.now() + Math.floor(Math.random() * 100000)),
       description: s(ev.description),
       type: s(ev.type),
       category: s(ev.category),
       tag: s(ev.tag),
-      filePath: s(ev.file_path),
+      filePath: filePathAbs,
+      filePathRel: fpRel,
       storageMode: s(ev.storage_mode),
       fileCount: ev.file_count || files.length,
       totalSize: ev.total_size || 0,

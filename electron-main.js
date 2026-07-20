@@ -3152,15 +3152,23 @@ ipcMain.handle('open-case-import', async () => {
     title: 'Import Case Package',
     properties: ['openFile'],
     filters: [
-      { name: 'VIPER Files', extensions: ['vcase', 'json', 'vbak'] },
+      { name: 'Importable Case Files', extensions: ['vcase', 'json', 'vbak', 'pulse'] },
       { name: 'VIPER Case Package', extensions: ['vcase'] },
-      { name: 'VIPER Backup', extensions: ['json', 'vbak'] }
+      { name: 'VIPER Backup', extensions: ['json', 'vbak'] },
+      { name: 'PULSE Export', extensions: ['pulse'] }
     ]
   });
   restoreFocus();
   if (result.canceled || !result.filePaths.length) return null;
 
   const filePath = result.filePaths[0];
+
+  // .pulse = ICAC PULSE export — encrypted, needs a password. Cannot be read
+  // as text here; return a sentinel so the renderer routes to the PULSE
+  // import flow (prompt for password → validate → translate → import).
+  if (filePath.toLowerCase().endsWith('.pulse')) {
+    return JSON.stringify({ _pulseImport: true, filePath });
+  }
 
   // .vbak = ZIP backup — extract localStorage JSON, case files restored by main process
   if (filePath.endsWith('.vbak')) {
@@ -4203,6 +4211,53 @@ ipcMain.handle('save-evidence-file', async (event, data) => {
   } catch (error) {
     console.error('Failed to save evidence file:', error);
     throw error;
+  }
+});
+
+// --- App-level (non-case) file storage for ICAC resource features ---
+// Used by Public Outreach materials + Resources (ported from ICAC P.U.L.S.E.).
+// Files are copied into <casesDir>/_appdata/<subdir>/ with a unique,
+// collision-safe name. Returns the ABSOLUTE path (stored in localStorage
+// alongside the metadata record). Written PLAIN (these are shareable
+// training materials, not case evidence); open-file still reads them fine.
+ipcMain.handle('save-appdata-file', async (event, data) => {
+  try {
+    const { subdir, fileName, fileData } = data || {};
+    const safeSub = String(subdir || 'misc').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const dir = path.join(casesDir, '_appdata', safeSub);
+    fs.mkdirSync(dir, { recursive: true });
+
+    // Collision-safe unique name: <base>__<timestamp><ext>
+    const base = path.basename(String(fileName || 'file'));
+    const ext = path.extname(base);
+    const stem = base.slice(0, base.length - ext.length) || 'file';
+    const unique = `${stem}__${Date.now()}${ext}`;
+    const filePath = path.join(dir, unique);
+
+    fs.writeFileSync(filePath, Buffer.from(fileData));
+    console.log(`App-data file saved: ${filePath}`);
+    return { success: true, path: filePath, fileName: base };
+  } catch (error) {
+    console.error('Failed to save app-data file:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// --- Delete an app-level file (Public Outreach material / Resource) ---
+// Safety: only allow deletion inside <casesDir>/_appdata/.
+ipcMain.handle('delete-appdata-file', async (event, filePath) => {
+  try {
+    if (!filePath) return { success: true };
+    const root = path.resolve(path.join(casesDir, '_appdata'));
+    const resolved = path.resolve(String(filePath));
+    if (!resolved.startsWith(root)) {
+      return { success: false, error: 'Refusing to delete file outside _appdata' };
+    }
+    if (fs.existsSync(resolved)) fs.unlinkSync(resolved);
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to delete app-data file:', error);
+    return { success: false, error: error.message };
   }
 });
 

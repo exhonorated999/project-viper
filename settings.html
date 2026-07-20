@@ -1707,6 +1707,47 @@
                             </div>
                         </div>
 
+                        <!-- Public Outreach (ICAC resource feature) -->
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-start gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-viper-green/10 flex items-center justify-center flex-shrink-0">
+                                    <svg class="w-5 h-5 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 10-4-4 4 4 0 004 4zm6 0a3 3 0 10-2.83-4M7 8a3 3 0 10-2.83 4"/>
+                                    </svg>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <h4 class="text-white font-semibold text-sm">Public Outreach</h4>
+                                        <button id="publicOutreachToggleBtn" onclick="togglePublicOutreach()" class="relative w-11 h-6 rounded-full transition-colors bg-gray-600 flex-shrink-0">
+                                            <div id="publicOutreachToggleKnob" class="absolute w-4 h-4 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-gray-400 mt-1 leading-relaxed">Track community education and law-enforcement training events, attendee counts, and outreach materials (presentations, handouts). When enabled, a "Public Outreach" item appears in the left menu.</p>
+                                    <span id="publicOutreachToggleLabel" class="text-xs text-gray-500 mt-1 block"></span>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Resources (ICAC resource feature) -->
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-start gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-viper-cyan/10 flex items-center justify-center flex-shrink-0">
+                                    <svg class="w-5 h-5 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a2 2 0 012-2h4l2 2h6a2 2 0 012 2v9a2 2 0 01-2 2H6a2 2 0 01-2-2V5z"/>
+                                    </svg>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <h4 class="text-white font-semibold text-sm">Resources</h4>
+                                        <button id="resourcesToggleBtn" onclick="toggleResources()" class="relative w-11 h-6 rounded-full transition-colors bg-gray-600 flex-shrink-0">
+                                            <div id="resourcesToggleKnob" class="absolute w-4 h-4 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-gray-400 mt-1 leading-relaxed">Manage training materials, documents, and software — a central library of files for your unit. When enabled, a "Resources" item appears in the left menu.</p>
+                                    <span id="resourcesToggleLabel" class="text-xs text-gray-500 mt-1 block"></span>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- ── Cargo Theft ── -->
                         <div class="flex items-center gap-2 pt-2 first:pt-0">
                             <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -6285,6 +6326,45 @@
     initCargonetSettings();
     initCallyoSettings();
     initUcChatSettings();
+    initPublicOutreachSettings();
+    initResourcesSettings();
+
+    /* ── ICAC Resource Features: Public Outreach + Resources ──── */
+    function togglePublicOutreach() {
+        const enabled = localStorage.getItem('publicOutreachEnabled') !== 'true';
+        localStorage.setItem('publicOutreachEnabled', String(enabled));
+        updatePublicOutreachToggleUI(enabled);
+    }
+    function updatePublicOutreachToggleUI(enabled) {
+        const label = document.getElementById('publicOutreachToggleLabel');
+        const btn = document.getElementById('publicOutreachToggleBtn');
+        const knob = document.getElementById('publicOutreachToggleKnob');
+        if (label) label.textContent = enabled ? 'Enabled — shown in the left menu' : 'Disabled';
+        if (btn) btn.className = 'relative w-11 h-6 rounded-full transition-colors ' + (enabled ? 'bg-viper-green' : 'bg-gray-600');
+        if (knob) knob.className = 'absolute w-4 h-4 bg-white rounded-full top-1 transition-transform ' + (enabled ? 'translate-x-6' : 'translate-x-1');
+    }
+    function initPublicOutreachSettings() {
+        updatePublicOutreachToggleUI(localStorage.getItem('publicOutreachEnabled') === 'true');
+    }
+    window.togglePublicOutreach = togglePublicOutreach;
+
+    function toggleResources() {
+        const enabled = localStorage.getItem('resourcesEnabled') !== 'true';
+        localStorage.setItem('resourcesEnabled', String(enabled));
+        updateResourcesToggleUI(enabled);
+    }
+    function updateResourcesToggleUI(enabled) {
+        const label = document.getElementById('resourcesToggleLabel');
+        const btn = document.getElementById('resourcesToggleBtn');
+        const knob = document.getElementById('resourcesToggleKnob');
+        if (label) label.textContent = enabled ? 'Enabled — shown in the left menu' : 'Disabled';
+        if (btn) btn.className = 'relative w-11 h-6 rounded-full transition-colors ' + (enabled ? 'bg-viper-cyan' : 'bg-gray-600');
+        if (knob) knob.className = 'absolute w-4 h-4 bg-white rounded-full top-1 transition-transform ' + (enabled ? 'translate-x-6' : 'translate-x-1');
+    }
+    function initResourcesSettings() {
+        updateResourcesToggleUI(localStorage.getItem('resourcesEnabled') === 'true');
+    }
+    window.toggleResources = toggleResources;
 
     /* ── CargoNet ─────────────────────────────────────────── */
     async function refreshCargonetUI() {

@@ -233,6 +233,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectEvidenceFiles: (data) => ipcRenderer.invoke('select-evidence-files', data),
   copyEvidenceFile: (data) => ipcRenderer.invoke('copy-evidence-file', data),
   saveEvidenceFile: (data) => ipcRenderer.invoke('save-evidence-file', data),
+  saveAppDataFile: (data) => ipcRenderer.invoke('save-appdata-file', data),
+  deleteAppDataFile: (filePath) => ipcRenderer.invoke('delete-appdata-file', filePath),
   readEvidenceFile: (filePath) => ipcRenderer.invoke('read-evidence-file', filePath),
 
   // ── Whisper on-device transcription (Faster-Whisper-XXL) ──

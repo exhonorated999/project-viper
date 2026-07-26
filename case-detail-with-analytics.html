@@ -25,6 +25,8 @@
     <link rel="stylesheet" href="libs/MarkerCluster.css" />
     <link rel="stylesheet" href="libs/MarkerCluster.Default.css" />
     <script src="libs/leaflet.markercluster.js"></script>
+    <link rel="stylesheet" href="modules/connection-board/connection-board.css" />
+    <script src="modules/connection-board/connection-board.js" defer></script>
     <!-- Analytics CDR Libraries -->
     <script src="libs/papaparse.min.js"></script>
     <script src="libs/d3.v7.min.js"></script>
@@ -820,6 +822,12 @@
                         <div class="px-4 py-2 rounded-lg border" id="statusBadge">
                             <span class="font-medium">-</span>
                         </div>
+                        <button onclick="openConnectionBoard()" id="connectionBoardBtn" class="px-4 py-2 rounded-lg border transition flex items-center gap-2" title="Case Connection Board — map out how people, places and things connect">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 114 0 2 2 0 01-4 0zm12 0a2 2 0 114 0 2 2 0 01-4 0zM8 18a2 2 0 114 0 2 2 0 01-4 0zM7.5 7l3.5 9m5-9l-3.5 9"/>
+                            </svg>
+                            Connection Board
+                        </button>
                         <button onclick="saveCase()" class="px-4 py-2 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green transition flex items-center gap-2" id="saveCaseBtn">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/>
@@ -2268,7 +2276,7 @@
                 'money', 'opsplan', 'rmsImports', 'oversightImport',
                 'canvasForms', 'cyberTips', 'timelineEvents', 'consentSearches',
                 'googleWarrant', 'metaWarrant', 'kikWarrant', 'snapchatWarrant', 'xWarrant', 'discordWarrant', 'datapilot', 'caseMetrics',
-                'cellebriteImport'
+                'cellebriteImport', 'connectionBoard'
             ];
             const moduleData = {};
             moduleKeys.forEach(k => {
@@ -5121,6 +5129,10 @@
                                 </div>
                                 ` : ''}
                                 <div class="col-span-2">
+                                    <label class="text-sm text-gray-400">Location of Occurrence</label>
+                                    <p class="text-white mt-1">${currentCase.locationOfOccurrence ? String(currentCase.locationOfOccurrence).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '<span class="text-gray-500 italic">Not set</span>'}</p>
+                                </div>
+                                <div class="col-span-2">
                                     <label class="text-sm text-gray-400">Synopsis</label>
                                     <p class="text-white mt-2 leading-relaxed">${currentCase.synopsis || '<span class="text-gray-500 italic">No synopsis</span>'}</p>
                                 </div>
@@ -5227,6 +5239,10 @@
                                 <div class="col-span-2">
                                     <label class="text-sm text-gray-400 block mb-1">CyberTip # <span class="text-gray-600">(optional)</span></label>
                                     <input type="text" id="editCaseCybertip" value="${String(currentCase.cybertipNumber || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}" placeholder="e.g. NCMEC CyberTip report number" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
+                                </div>
+                                <div class="col-span-2">
+                                    <label class="text-sm text-gray-400 block mb-1">Location of Occurrence <span class="text-gray-600">(optional)</span></label>
+                                    <input type="text" id="editCaseLocationOfOccurrence" value="${String(currentCase.locationOfOccurrence || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}" placeholder="e.g. 123 Main St, Springfield, IL 62704" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
                                 </div>
                                 <div class="col-span-2">
                                     <label class="text-sm text-gray-400 block mb-1">Synopsis</label>
@@ -6998,6 +7014,12 @@
                                     <label class="block text-sm font-medium text-gray-300 mb-2">Description *</label>
                                     <textarea id="evidenceDescription" required rows="3" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none text-white placeholder-gray-500 resize-none" placeholder="Describe the evidence, chain of custody, collection details..."></textarea>
                                 </div>
+
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Location Obtained <span class="text-gray-500 font-normal">(optional)</span></label>
+                                    <input type="text" id="evidenceLocation" placeholder="e.g., 1420 Main St, Springfield — QuickMart, surveillance footage" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none text-white placeholder-gray-500">
+                                    <p class="text-xs text-gray-500 mt-1">📍 Where this evidence was collected from (business, residence, individual). Addresses can be imported &amp; mapped on the Connection Board.</p>
+                                </div>
                                 
                                 <div id="evidenceUploadSection">
                                     <label class="block text-sm font-medium text-gray-300 mb-2">Upload Files</label>
@@ -7327,6 +7349,7 @@
             document.getElementById('evidenceType').value = '';
             document.getElementById('evidenceTag').value = '';
             document.getElementById('evidenceDescription').value = '';
+            var _evLoc = document.getElementById('evidenceLocation'); if (_evLoc) _evLoc.value = '';
             clearEvidenceFiles();
             onEvidenceTypeChange('');
             document.getElementById('evidenceForm').classList.remove('hidden');
@@ -7662,6 +7685,7 @@
             document.getElementById('evidenceType').value = evidence.type;
             document.getElementById('evidenceTag').value = evidence.tag || '';
             document.getElementById('evidenceDescription').value = evidence.description;
+            var _evLocEdit = document.getElementById('evidenceLocation'); if (_evLocEdit) _evLocEdit.value = evidence.location || '';
             
             document.getElementById('evidenceForm').classList.remove('hidden');
             document.getElementById('evidenceForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -7917,6 +7941,7 @@
             const type = document.getElementById('evidenceType').value;
             const tag = document.getElementById('evidenceTag').value;
             const description = document.getElementById('evidenceDescription').value;
+            const location = (document.getElementById('evidenceLocation')?.value || '').trim();
             
             console.log('Evidence details:', { type, tag, description, filesCount: evidenceFiles.length });
             
@@ -7927,6 +7952,7 @@
                     evidence.type = type;
                     evidence.tag = tag;
                     evidence.description = description;
+                    evidence.location = location;
                     evidence.lastModified = new Date().toISOString();
                 }
                 
@@ -7963,6 +7989,7 @@
                             type: 'cellebrite',
                             tag: tag,
                             description: description,
+                            location: location,
                             fileCount: result.fileCount,
                             totalSize: result.totalSize,
                             files: result.files,
@@ -8068,6 +8095,7 @@
                             type: 'datapilot',
                             tag: tag,
                             description: description,
+                            location: location,
                             // For copy mode use real file count from the copy result; for ref mode fall back to stats.
                             fileCount: storageMode === 'copy'
                                 ? copiedFileCount
@@ -8160,6 +8188,7 @@
                             type: type,
                             tag: tag,
                             description: description,
+                            location: location,
                             fileCount: files.length,
                             totalSize: totalSize,
                             files: files,
@@ -8279,6 +8308,7 @@
                     type: type,
                     tag: tag,
                     description: description,
+                    location: location,
                     fileCount: files.length,
                     totalSize: totalSize,
                     files: files,
@@ -12595,11 +12625,6 @@
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                                     Search Accurint
                                 </button>` : ''}
-                                ${isWhoosterEnabled() && suspect.name ? `
-                                <button onclick="event.stopPropagation(); openWhoosterPanel('${(suspect.name.split(' ')[0]||'').replace(/'/g,"\\'")}', '${(suspect.name.split(' ').slice(1).join(' ')||'').replace(/'/g,"\\'")}', '')" class="px-4 py-2 bg-fuchsia-500/20 hover:bg-fuchsia-500/30 border border-fuchsia-500 rounded-lg text-fuchsia-400 transition flex items-center gap-2">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                                    Search Whooster
-                                </button>` : ''}
                                 <button onclick="deleteSuspect(${index})" class="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500 rounded-lg text-red-500 transition">
                                     Delete
                                 </button>
@@ -16803,6 +16828,7 @@
         });
 
         function renderFlockButton(plate, state, small) {
+            return ''; // removed — use the Investigative Tools drawer instead
             if (!isFlockEnabled()) return '';
             if (!plate) return '';
             const sz = small ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-xs';
@@ -16950,6 +16976,7 @@
         });
 
         function renderTloButton(firstName, lastName, state) {
+            return ''; // removed — use the Investigative Tools drawer instead
             if (!isTloEnabled()) return '';
             if (!firstName && !lastName) return '';
             const fn = (firstName||'').replace(/'/g, "\\'");
@@ -17220,6 +17247,7 @@
         });
 
         function renderWhoosterButton(firstName, lastName, state) {
+            return ''; // removed — use the Investigative Tools drawer instead
             if (!isWhoosterEnabled()) return '';
             if (!firstName && !lastName) return '';
             const fn = (firstName||'').replace(/'/g, "\\'");
@@ -29811,6 +29839,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const newCreatedBy = document.getElementById('editCaseCreatedBy').value.trim();
             const newSynopsis = document.getElementById('editCaseSynopsis').value.trim();
             const newCybertip = (document.getElementById('editCaseCybertip')?.value || '').trim();
+            const newLocationOfOccurrence = (document.getElementById('editCaseLocationOfOccurrence')?.value || '').trim();
             const newDateAssigned = document.getElementById('editDateAssigned')?.value || '';
             const offenses = _readOffensesFromEditor();
             const newPrimaryOffense = offenses.primary;
@@ -29827,6 +29856,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             currentCase.createdBy = newCreatedBy;
             currentCase.synopsis = newSynopsis;
             currentCase.cybertipNumber = newCybertip;
+            currentCase.locationOfOccurrence = newLocationOfOccurrence;
             currentCase.dateAssigned = newDateAssigned || null;
             currentCase.primaryOffense = newPrimaryOffense || null;
             currentCase.additionalOffenses = newAdditionalOffenses;

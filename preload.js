@@ -327,6 +327,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   launchAperture: (caseData) => ipcRenderer.invoke('launch-aperture', caseData),
   openFile: (filePath) => ipcRenderer.invoke('open-file', filePath),
 
+  // Connection Board — self-contained HTML export (save dialog + write file)
+  exportConnectionBoard: (data) => ipcRenderer.invoke('export-connection-board', data),
+
   // Aperture: data loading
   apertureLoadEmails: (caseId) => ipcRenderer.invoke('aperture-load-emails', caseId),
   apertureLoadSources: (caseId) => ipcRenderer.invoke('aperture-load-sources', caseId),

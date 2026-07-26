@@ -3,7 +3,7 @@
 
 **Product:** V.I.P.E.R. (Versatile Investigative Platform for Enforcement Records)
 **Vendor:** Intellect LE, LLC
-**Document Version:** 1.1
+**Document Version:** 1.2
 **Aligned to:** NIST CSF v1.1 / MS-ISAC Policy Template Guide (2020)
 **Status:** Template — agencies should customize sections marked **[AGENCY-SPECIFIC]**
 
@@ -137,16 +137,38 @@ This policy does **not** apply to, and does not modify:
 
 ### ID.AM-4 — External information systems are catalogued.
 
-**VIPER Control:** VIPER's documented external dependencies are limited to:
-- Intellect Dashboard API (`https://<dashboard-host>/api/`) — license validation, update check, canvas form hosting
-- GitHub Releases (`https://github.com/exhonorated999/project-viper`) — installer + `latest.yml`
-- ARIN WHOIS (`https://whois.arin.net/`) — IP enrichment for warrant returns
-- OpenStreetMap Nominatim (`https://nominatim.openstreetmap.org`) — geocoding for case maps
-- Optional: VIN decoder, ALPR provider, agency RMS endpoints — disabled by default
+**VIPER Control:** VIPER's external connections fall into four clearly-bounded categories. **No category transmits case content, subject identities, evidence, warrant returns, or narrative text to any Intellect LE–controlled infrastructure.** A complete, canonical inventory (with exact hostnames, what is transmitted, and CJI classification) is maintained in the companion document **`VIPER_Data_Flow_and_Integrations.md`**; the summary below is authoritative for this control.
 
-The Content-Security-Policy meta tag in every page restricts outbound fetches to this whitelist.
+**Category A — Vendor infrastructure (licensing / software distribution).** No CJI.
+- Intellect Dashboard API (`https://intellect-unified-dashboard-production.up.railway.app/api/`) — license validation/registration and update check. Transmits organization name, license-key hash, product version, machine fingerprint, and request IP only.
+- GitHub Releases (`https://github.com/exhonorated999/project-viper`) — signed installer, `latest.yml`, and on-demand Whisper engine download. Inbound download only.
 
-**Policy Statement:** VIPER's outbound network access is restricted to the dependency list above. Agencies may further restrict via firewall to exclude any of the optional endpoints not in use.
+**Category B — Vendor-hosted privacy-preserving broker (opt-in).** No plaintext CJI.
+- TRACE Network broker (`https://trace-broker-production.up.railway.app`) — optional cross-agency deconfliction. Transmits **one-way SHA-256 token hashes only** (e.g. of a plate or name), never the plaintext value, plus token type/tier/case-type. Disabled until the agency explicitly enables and registers for the TRACE Network.
+
+**Category C — Agency-authenticated embedded browser panels (third-party services the agency already licenses).** VIPER renders the vendor's own website inside an isolated session partition; the officer signs in with the **agency's own account** and traffic flows **directly between that session and the third party** — VIPER does not proxy, relay, store, or transform it. Functionally equivalent to opening the site in Edge/Chrome. Each service uses a dedicated, isolated session partition (`persist:<service>`):
+- Flock Safety LPR — `search-2.flocksafety.com`
+- TLOxp — `tloxp.tlo.com`
+- Accurint (LexisNexis) — `secure.accurint.com`
+- Whooster — `app.whooster.com`
+- Vigilant / Motorola VehicleManager — `vm.motorolasolutions.com`
+- ICAC Data System — `icacdatasystem.com`
+- ICAC COPS — `icaccops.com`
+- GridCop — `gridcop.com`
+- Callyo — `callyo.com`
+
+**Category D — Officer-initiated OSINT / enrichment lookups (query terms only, using the agency's own API credentials where applicable).**
+- WiGLE (`api.wigle.net`) — Wi-Fi/BT/cell geolocation; transmits BSSID/SSID.
+- GenLogs (`api.genlogs.io`) — commercial-vehicle sightings; transmits USDOT/MC/plate.
+- ARIN WHOIS (`whois.arin.net`) — transmits an IP address.
+- FMCSA SAFER (`safer.fmcsa.dot.gov`) — transmits a carrier name/number.
+- IP geolocation (`ip-api.com`) — transmits an IP address.
+- OpenStreetMap Nominatim (`nominatim.openstreetmap.org`) — geocoding; transmits an address string.
+- Map tiles / routing (`*.tile.openstreetmap.org`, `*.basemaps.cartocdn.com`, `router.project-osrm.org`) — transmits coordinates only.
+
+**Enforcement:** Each application page ships a `Content-Security-Policy` meta tag whose `connect-src` directive whitelists the Category A/B/D endpoints above; renderer fetches to any other origin are blocked by the browser engine. Category C services are loaded in dedicated `BrowserView` session partitions (isolated cookies/storage per service) rather than via renderer fetch. Categories B, C, and D are **opt-in / user-initiated** and can be individually disabled by the agency.
+
+**Policy Statement:** VIPER's outbound network access is limited to the four categories above. Agencies may further restrict via firewall/proxy to exclude any Category C or Category D endpoint not in use, and may disable the TRACE Network (Category B) entirely. The agency's existing CJIS agreements with the Category C service providers (Flock, LexisNexis/Accurint, TLOxp, Motorola/Vigilant, etc.) remain the controlling authority for data exchanged with those services; VIPER neither expands nor alters those relationships.
 
 **References:** System and Communications Protection Policy
 
@@ -789,6 +811,7 @@ Before placing VIPER into operational use, the agency shall confirm:
 |---|---|---|
 | 1.0 | 2026-05-06 | Initial release. Aligned to MS-ISAC NIST CSF Policy Template Guide (2020-07-20). Covers VIPER v3.1.0. |
 | 1.1 | 2026-05-07 | Added "Vendor Boundary & Offline Architecture" section. Reframed RS (Respond) and RC (Recover) Functions to make explicit that all incident response, breach notification, and recovery are agency obligations under the agency's CJIS Security Policy. Removed any language implying vendor-side incident response, vendor-led notifications, or vendor coordination as a prerequisite to agency action. Added explicit CJIS §5.3 / state breach-notification-statute references. Expanded Appendix B with vendor-boundary acknowledgments. |
+| 1.2 | 2026-07-24 | Rewrote **ID.AM-4** with the complete, code-verified external-connection inventory, organized into four bounded categories (vendor infrastructure; privacy-preserving TRACE broker; agency-authenticated embedded browser panels; officer-initiated OSINT lookups) with exact hostnames and per-endpoint data-transmission/CJI classification. Documented the embedded-panel model (isolated `BrowserView` session partitions, agency's own credentials, direct agency↔vendor traffic — not a vendor data integration) and clarified that CSP `connect-src` enforcement covers renderer fetches while Category C services load in isolated partitions. Introduced companion documents `VIPER_Data_Flow_and_Integrations.md` and `VIPER_Architecture_and_Security.md`. Covers VIPER v4.0.8. |
 
 ---
 

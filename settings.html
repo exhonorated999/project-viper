@@ -2105,6 +2105,21 @@
                         </div>
                     </div>
 
+                    <!-- Connection Board Toggle -->
+                    <div class="mb-6 p-4 bg-viper-dark/50 rounded-lg border border-gray-700/50">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h4 class="text-white font-semibold text-sm">Case Connection Board</h4>
+                                <p class="text-xs text-gray-400 mt-1">Adds a pull-down "Connection Board" button in the case header — a digital red-string map to connect people, places, vehicles and locations. On by default.</p>
+                            </div>
+                            <button id="connBoardToggleBtn" onclick="toggleConnectionBoard()"
+                                class="relative inline-flex items-center h-6 rounded-full w-11 transition-colors focus:outline-none bg-gray-700"
+                                aria-label="Toggle connection board">
+                                <span id="connBoardToggleIndicator" class="inline-block w-4 h-4 transform transition-transform bg-white rounded-full translate-x-1"></span>
+                            </button>
+                        </div>
+                    </div>
+
                     <!-- Custom Case Statuses -->
                     <div class="p-4 bg-viper-dark/50 rounded-lg border border-gray-700/50">
                         <div class="flex items-center justify-between mb-3">
@@ -4838,7 +4853,7 @@
                     'areacanvas_', 'prosecution_', 'narcotics_', 'firearms_',
                     'money_', 'opsplan_', 'rmsImports_', 'oversightImport_',
                     'canvasForms_', 'cyberTips_', 'timelineEvents_', 'consentSearches_',
-                    'googleWarrant_', 'metaWarrant_', 'kikWarrant_', 'snapchatWarrant_', 'caseMetrics_'
+                    'googleWarrant_', 'metaWarrant_', 'kikWarrant_', 'snapchatWarrant_', 'caseMetrics_', 'connectionBoard_'
                 ];
                 for (let i = 0; i < localStorage.length; i++) {
                     const key = localStorage.key(i);
@@ -8187,6 +8202,29 @@
         }
     }
 
+    // Connection Board — default ON (enabled unless explicitly 'false')
+    function isConnectionBoardEnabled() {
+        return localStorage.getItem('viperConnectionBoardEnabled') !== 'false';
+    }
+    function toggleConnectionBoard() {
+        const enabled = !isConnectionBoardEnabled();
+        localStorage.setItem('viperConnectionBoardEnabled', enabled ? 'true' : 'false');
+        refreshConnectionBoardUI();
+    }
+    function refreshConnectionBoardUI() {
+        const enabled = isConnectionBoardEnabled();
+        const btn = document.getElementById('connBoardToggleBtn');
+        const ind = document.getElementById('connBoardToggleIndicator');
+        if (!btn || !ind) return;
+        if (enabled) {
+            btn.classList.remove('bg-gray-700'); btn.classList.add('bg-viper-green');
+            ind.classList.remove('translate-x-1'); ind.classList.add('translate-x-6');
+        } else {
+            btn.classList.add('bg-gray-700'); btn.classList.remove('bg-viper-green');
+            ind.classList.add('translate-x-1'); ind.classList.remove('translate-x-6');
+        }
+    }
+
     function toggleCustomStatuses() {
         const enabled = !isCustomStatusesEnabled();
         localStorage.setItem('viperCustomStatusesEnabled', enabled ? 'true' : 'false');
@@ -8583,6 +8621,7 @@
     document.addEventListener('DOMContentLoaded', () => {
         refreshPriorityUI();
         refreshCustomStatusUI();
+        refreshConnectionBoardUI();
         refreshCustomMetricsUI();
         try { renderAgencyProfileFields(); } catch (e) { console.warn('Agency Profile render failed:', e); }
         try { _renderProviderTypeFilters(); renderProviderDirectory(); } catch (e) { console.warn('Provider Directory render failed:', e); }

@@ -477,6 +477,97 @@ nav .container {
 }
 
 /* ══════════════════════════════════════════════════════════════════
+   FEATURE SHOWCASE DECK (slide deck)
+   ══════════════════════════════════════════════════════════════════ */
+.showcase-deck { margin-top: 44px; }
+.deck-tabs {
+    display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 22px;
+}
+.deck-tab {
+    font-family: var(--font-display); font-weight: 600; font-size: 12.5px;
+    letter-spacing: 1px; text-transform: uppercase;
+    color: var(--text-secondary);
+    background: var(--bg-card); border: 1px solid var(--border-green);
+    border-radius: 8px; padding: 8px 14px; cursor: pointer;
+    transition: all .25s ease; white-space: nowrap;
+}
+.deck-tab:hover { border-color: var(--border-green-hover); color: var(--text-primary); }
+.deck-tab.active {
+    color: #050a05; background: var(--viper-green);
+    border-color: var(--viper-green); box-shadow: 0 0 18px var(--viper-glow);
+}
+.deck-stage {
+    border: 1px solid var(--border-green); border-radius: 14px;
+    overflow: hidden; background: #0a140a;
+    box-shadow: 0 20px 60px rgba(0,0,0,.45);
+}
+.deck-frame {
+    position: relative; aspect-ratio: 16 / 9; background: #050a05;
+    overflow: hidden;
+}
+.deck-slides { position: absolute; inset: 0; }
+.deck-slide {
+    position: absolute; inset: 0; opacity: 0; visibility: hidden;
+    transition: opacity .5s ease;
+    display: flex; align-items: center; justify-content: center;
+}
+.deck-slide.active { opacity: 1; visibility: visible; }
+.deck-slide img {
+    width: 100%; height: 100%; object-fit: contain; object-position: center;
+    cursor: zoom-in; display: block;
+}
+.deck-badge {
+    position: absolute; top: 14px; left: 14px; z-index: 3;
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 1px;
+    color: var(--viper-green); background: rgba(5,10,5,.78);
+    border: 1px solid var(--border-green); border-radius: 6px; padding: 4px 10px;
+}
+.deck-nav {
+    position: absolute; top: 50%; transform: translateY(-50%); z-index: 4;
+    width: 44px; height: 44px; border-radius: 50%;
+    background: rgba(5,10,5,.7); border: 1px solid var(--border-green);
+    color: var(--viper-green); font-size: 22px; line-height: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all .25s ease;
+}
+.deck-nav:hover { background: var(--viper-green); color: #050a05; box-shadow: 0 0 18px var(--viper-glow); }
+.deck-nav.prev { left: 14px; }
+.deck-nav.next { right: 14px; }
+.deck-caption {
+    padding: 22px 26px; border-top: 1px solid var(--border-green);
+    background: var(--bg-card);
+}
+.deck-caption h4 {
+    font-family: var(--font-display); font-size: 22px; color: var(--text-primary);
+    margin-bottom: 8px; display: flex; align-items: center; gap: 10px;
+}
+.deck-caption .cap-ico { font-size: 22px; }
+.deck-caption p { color: var(--text-secondary); font-size: 15px; line-height: 1.7; max-width: 820px; }
+.deck-dots { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 22px; }
+.deck-dot {
+    width: 9px; height: 9px; border-radius: 50%; cursor: pointer;
+    background: var(--border-green-hover); border: none; padding: 0;
+    transition: all .25s ease;
+}
+.deck-dot.active { background: var(--viper-green); box-shadow: 0 0 10px var(--viper-glow); transform: scale(1.25); }
+.deck-counter { text-align: center; font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); margin-top: 12px; }
+.deck-lightbox {
+    position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,.92);
+    display: none; align-items: center; justify-content: center; padding: 30px; cursor: zoom-out;
+}
+.deck-lightbox.open { display: flex; }
+.deck-lightbox img { max-width: 96vw; max-height: 92vh; border: 1px solid var(--border-green-hover); border-radius: 8px; }
+.deck-lightbox .lb-close {
+    position: absolute; top: 18px; right: 26px; color: var(--viper-green);
+    font-size: 32px; cursor: pointer; font-family: var(--font-display); line-height: 1;
+}
+@media (max-width: 640px) {
+    .deck-caption h4 { font-size: 18px; }
+    .deck-caption p { font-size: 14px; }
+    .deck-nav { width: 36px; height: 36px; font-size: 18px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
    COURTROOM SECTION (split layout)
    ══════════════════════════════════════════════════════════════════ */
 .split-section .container {
@@ -1217,6 +1308,7 @@ footer {
             <div class="nav-links" id="navLinks">
                 <a href="#manifesto">Manifesto</a>
                 <a href="#features">Features</a>
+                <a href="#showcase">Showcase</a>
                 <a href="#courtroom">Workflow</a>
                 <a href="#supervisor">Supervisor</a>
                 <a href="#audience">Who It's For</a>
@@ -1367,6 +1459,37 @@ footer {
             </div>
         </div>
     </section>
+
+    <div class="section-divider"></div>
+
+    <!-- ═══════════════ FEATURE SHOWCASE (slide deck) ═══════════════ -->
+    <section id="showcase">
+        <div class="container">
+            <div class="section-tag reveal">See It In Action</div>
+            <h2 class="reveal" style="font-size:clamp(32px,3.5vw,48px); max-width:820px;">
+                One platform, <span class="text-green">every stage</span> of the investigation.
+            </h2>
+            <p class="reveal text-dim" style="font-size:16px; max-width:720px; margin-top:16px;">
+                Flip through the deck — from intake and mobile forensics to link analysis, transcription, and court-ready warrants. Click any screen to enlarge it.
+            </p>
+
+            <div class="showcase-deck reveal reveal-delay-1">
+                <div class="deck-tabs" id="deckTabs"></div>
+                <div class="deck-stage">
+                    <div class="deck-frame">
+                        <div class="deck-slides" id="deckSlides"></div>
+                        <span class="deck-badge" id="deckBadge"></span>
+                        <button class="deck-nav prev" id="deckPrev" aria-label="Previous">&#8249;</button>
+                        <button class="deck-nav next" id="deckNext" aria-label="Next">&#8250;</button>
+                    </div>
+                    <div class="deck-caption" id="deckCaption"></div>
+                </div>
+                <div class="deck-dots" id="deckDots"></div>
+                <div class="deck-counter" id="deckCounter"></div>
+            </div>
+        </div>
+    </section>
+    <div class="deck-lightbox" id="deckLightbox"><span class="lb-close">&#10005;</span><img alt="V.I.P.E.R. screenshot enlarged"></div>
 
     <div class="section-divider"></div>
 
@@ -1936,6 +2059,107 @@ const observer = new IntersectionObserver((entries) => {
 }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
 
 document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+/* ──────────────────────────────────────────────
+   FEATURE SHOWCASE DECK
+   ────────────────────────────────────────────── */
+(function () {
+    const slides = [
+        { tab: 'Dashboard', badge: '01 · Overview', ico: '📊', title: 'Unified Command Dashboard',
+          img: 'assets/screenshots/viper-dashboard.png',
+          desc: 'A customizable single pane of glass — track new assignments, arrests, recovered property and firearms, warrant alerts, and your full caseload the moment you log in.' },
+        { tab: 'Modular Tools', badge: '02 · Investigative Tools', ico: '🧰', title: 'Modular Investigative Tools Tray',
+          img: 'assets/screenshots/viper-case-modules.png',
+          desc: 'Build every case from only the modules you need. Toggle CDR cell-tower analysis, email forensics, WiGLE geolocation, RMS import, and TRACE — plus one-click access to third-party tools like TLO, Whooster, and Vigilant.' },
+        { tab: 'RMS Import', badge: '03 · Intake', ico: '📋', title: 'RMS Import & Report Parsing',
+          img: 'assets/screenshots/viper-rms-import.png',
+          desc: "Drop in an agency RMS PDF and VIPER extracts the incident, offenses, involved persons, vehicles, and narratives automatically — structured and ready to work." },
+        { tab: 'Connection Board', badge: '04 · Link Analysis', ico: '🔗', title: 'Case Connection Board',
+          img: 'assets/screenshots/viper-connection-board.png',
+          desc: 'Map and web link-analysis in one workspace. Pin suspects, victims, witnesses, evidence, and locations, draw the connections between them, then export a self-contained briefing file for any screen.' },
+        { tab: 'Mobile Forensics', badge: '05 · Digital Evidence', ico: '📱', title: 'Datapilot & Cellebrite Parsing',
+          img: 'assets/screenshots/viper-datapilot-subject.png',
+          desc: 'Import mobile forensic extractions from Datapilot and Cellebrite. VIPER summarizes contacts, messages, calls, photos, videos, apps, and locations into a single reviewable subject profile.' },
+        { tab: 'Comms Intel', badge: '06 · Analytics', ico: '🧠', title: 'Comms Intelligence & Anomaly Detection',
+          img: 'assets/screenshots/viper-datapilot-insights.png',
+          desc: 'The Insights Coach reads the extraction for you — surfacing communication-baseline outliers, deletion and data-wipe patterns, and 90-day activity so you spend time on leads, not spreadsheets.' },
+        { tab: 'Timeline', badge: '07 · Chronology', ico: '🕒', title: 'Automatic Case Timeline',
+          img: 'assets/screenshots/viper-case-timeline.png',
+          desc: 'Every report, investigative action, and forensic event lands on a multi-lane, zoomable timeline — full case, week, or day — so the sequence of events tells the story.' },
+        { tab: 'Transcription', badge: '08 · AI Transcription', ico: '🎙️', title: 'Whisper Dictation & Transcription',
+          img: 'assets/screenshots/viper-whisper-transcription.png',
+          desc: 'On-device AI transcription for interviews and audio/video evidence. Timestamped transcripts let you click to jump, copy, or insert straight into a report — no cloud, no uploads.' },
+        { tab: 'Warrant Author', badge: '09 · Legal Process', ico: '⚖️', title: 'Warrant Authoring & Returns',
+          img: 'assets/screenshots/viper-warrant-author.png',
+          desc: 'Draft search warrants and legal-process demands from provider templates with auto-fill from case data, a live preview, and validation that flags dangling fields before you file — then track the returns.' }
+    ];
+
+    const slidesEl = document.getElementById('deckSlides');
+    if (!slidesEl) return;
+    const tabsEl = document.getElementById('deckTabs');
+    const dotsEl = document.getElementById('deckDots');
+    const capEl = document.getElementById('deckCaption');
+    const badgeEl = document.getElementById('deckBadge');
+    const counterEl = document.getElementById('deckCounter');
+    const deckSection = document.getElementById('showcase');
+    let cur = 0;
+
+    slides.forEach((s, i) => {
+        const sl = document.createElement('div');
+        sl.className = 'deck-slide' + (i === 0 ? ' active' : '');
+        const im = document.createElement('img');
+        im.src = s.img; im.alt = s.title; im.loading = 'lazy';
+        sl.appendChild(im); slidesEl.appendChild(sl);
+
+        const tab = document.createElement('button');
+        tab.className = 'deck-tab' + (i === 0 ? ' active' : '');
+        tab.textContent = s.tab; tab.addEventListener('click', () => go(i));
+        tabsEl.appendChild(tab);
+
+        const dot = document.createElement('button');
+        dot.className = 'deck-dot' + (i === 0 ? ' active' : '');
+        dot.setAttribute('aria-label', 'Slide ' + (i + 1));
+        dot.addEventListener('click', () => go(i));
+        dotsEl.appendChild(dot);
+    });
+
+    function render() {
+        const kids = slidesEl.children, tabs = tabsEl.children, dots = dotsEl.children;
+        for (let i = 0; i < slides.length; i++) {
+            kids[i].classList.toggle('active', i === cur);
+            tabs[i].classList.toggle('active', i === cur);
+            dots[i].classList.toggle('active', i === cur);
+        }
+        const s = slides[cur];
+        capEl.innerHTML = '<h4><span class="cap-ico">' + s.ico + '</span>' + s.title + '</h4><p>' + s.desc + '</p>';
+        badgeEl.textContent = s.badge;
+        counterEl.textContent = (cur + 1) + ' / ' + slides.length;
+        try { tabs[cur].scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' }); } catch (e) {}
+    }
+    function go(i) { cur = (i + slides.length) % slides.length; render(); }
+
+    document.getElementById('deckPrev').addEventListener('click', () => go(cur - 1));
+    document.getElementById('deckNext').addEventListener('click', () => go(cur + 1));
+
+    // Lightbox
+    const lb = document.getElementById('deckLightbox');
+    const lbImg = lb.querySelector('img');
+    slidesEl.addEventListener('click', (e) => {
+        if (e.target.tagName === 'IMG') { lbImg.src = e.target.src; lb.classList.add('open'); }
+    });
+    lb.addEventListener('click', () => lb.classList.remove('open'));
+
+    // Arrow-key nav when the deck is on screen (Left/Right don't scroll the page)
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && lb.classList.contains('open')) { lb.classList.remove('open'); return; }
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+        const r = deckSection.getBoundingClientRect();
+        if (r.bottom < 0 || r.top > window.innerHeight) return;
+        if (e.key === 'ArrowLeft') go(cur - 1); else go(cur + 1);
+    });
+
+    render();
+})();
 
 /* ──────────────────────────────────────────────
    SMOOTH SCROLL (nav links)

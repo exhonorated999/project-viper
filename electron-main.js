@@ -4671,6 +4671,30 @@ ipcMain.handle('read-evidence-file', async (event, filePath) => {
   }
 });
 
+// Connection Board → self-contained HTML export. The renderer builds a fully
+// inlined single-file briefing document (pins, strings, photos, and embedded
+// evidence media as data URLs). We just show a Save dialog and write it to
+// disk so the detective can email it / drop it on a USB stick.
+ipcMain.handle('export-connection-board', async (event, payload) => {
+  try {
+    const { html, defaultFileName } = payload || {};
+    if (!html) return { success: false, error: 'No HTML content to export' };
+    const safeName = String(defaultFileName || 'connection-board.html').replace(/[<>:"|?*\x00-\x1F\\/]/g, '_');
+    const res = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export Connection Board',
+      defaultPath: safeName,
+      filters: [{ name: 'HTML Document', extensions: ['html'] }]
+    });
+    restoreFocus && restoreFocus();
+    if (res.canceled || !res.filePath) return { success: false, canceled: true };
+    fs.writeFileSync(res.filePath, html, 'utf8');
+    return { success: true, filePath: res.filePath };
+  } catch (e) {
+    console.error('export-connection-board failed:', e);
+    return { success: false, error: e.message };
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════════════
 // WHISPER — On-device audio/video transcription (Faster-Whisper-XXL)
 //

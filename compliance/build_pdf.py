@@ -1,14 +1,17 @@
-"""Convert VIPER NIST CSF Policy Guide markdown to PDF."""
+"""Convert VIPER compliance markdown documents to PDF."""
 from pathlib import Path
 from markdown_pdf import MarkdownPdf, Section
 
 HERE = Path(__file__).parent
-md_path = HERE / "VIPER_NIST_CSF_Policy_Guide.md"
-pdf_path = HERE / "VIPER_NIST_CSF_Policy_Guide.pdf"
 
-md_text = md_path.read_text(encoding="utf-8")
-
-pdf = MarkdownPdf(toc_level=2, optimize=True)
+DOCS = [
+    ("VIPER_NIST_CSF_Policy_Guide.md",       "VIPER NIST CSF Policy Guide",
+     "NIST Cybersecurity Framework Policy Template (aligned to MS-ISAC guide)"),
+    ("VIPER_Data_Flow_and_Integrations.md",  "VIPER Data-Flow & Third-Party Integration Disclosure",
+     "Source-verified inventory of every VIPER network connection and its CJI classification"),
+    ("VIPER_Architecture_and_Security.md",   "VIPER Architecture & Security Overview",
+     "Runtime architecture, data-at-rest/in-transit posture, auditing, and trust boundaries"),
+]
 
 css = """
 body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 10.5pt; line-height: 1.45; color: #1a1a1a; }
@@ -28,11 +31,14 @@ strong { color: #0b3d91; }
 hr { border: none; border-top: 1px solid #cbd5e1; margin: 14px 0; }
 """
 
-pdf.add_section(Section(md_text, toc=True), user_css=css)
-
-pdf.meta["title"] = "VIPER NIST CSF Policy Guide"
-pdf.meta["author"] = "Intellect Law Enforcement"
-pdf.meta["subject"] = "NIST Cybersecurity Framework Policy Template (aligned to MS-ISAC guide)"
-
-pdf.save(pdf_path)
-print(f"Wrote {pdf_path} ({pdf_path.stat().st_size:,} bytes)")
+for md_name, title, subject in DOCS:
+    md_path = HERE / md_name
+    pdf_path = md_path.with_suffix(".pdf")
+    md_text = md_path.read_text(encoding="utf-8")
+    pdf = MarkdownPdf(toc_level=2, optimize=True)
+    pdf.add_section(Section(md_text, toc=True), user_css=css)
+    pdf.meta["title"] = title
+    pdf.meta["author"] = "Intellect LE, LLC"
+    pdf.meta["subject"] = subject
+    pdf.save(pdf_path)
+    print(f"Wrote {pdf_path} ({pdf_path.stat().st_size:,} bytes)")

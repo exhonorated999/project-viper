@@ -1446,6 +1446,13 @@
                     </select>
                 </div>
                 
+                <!-- Location of Occurrence (optional) -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">Location of Occurrence <span class="text-gray-500 font-normal">(optional)</span></label>
+                    <input type="text" id="caseLocationOfOccurrence" placeholder="e.g. 123 Main St, Springfield, IL 62704" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none text-white placeholder-gray-500">
+                    <p class="text-xs text-gray-500 mt-1">Address where the incident occurred</p>
+                </div>
+
                 <!-- CyberTip # (optional) -->
                 <div>
                     <label class="block text-sm font-medium text-gray-300 mb-2">CyberTip # <span class="text-gray-500 font-normal">(optional)</span></label>
@@ -2683,7 +2690,7 @@
                     'areacanvas', 'prosecution', 'narcotics', 'firearms',
                     'money', 'opsplan', 'rmsImports', 'oversightImport',
                     'canvasForms', 'cyberTips', 'timelineEvents', 'consentSearches',
-                    'googleWarrant', 'metaWarrant', 'kikWarrant', 'snapchatWarrant', 'discordWarrant', 'datapilot', 'cellebriteImport'
+                    'googleWarrant', 'metaWarrant', 'kikWarrant', 'snapchatWarrant', 'discordWarrant', 'datapilot', 'cellebriteImport', 'connectionBoard'
                 ];
                 pattern2Keys.forEach(k => {
                     const val = backupData[`${k}_${oldId}`];
@@ -3049,6 +3056,7 @@
                 const caseNumber = document.getElementById('caseNumber').value;
                 const synopsis = document.getElementById('caseSynopsis').value;
                 const cybertipNumber = (document.getElementById('caseCybertip')?.value || '').trim();
+                const locationOfOccurrence = (document.getElementById('caseLocationOfOccurrence')?.value || '').trim();
                 const selectedModules = Array.from(document.querySelectorAll('.case-module:checked'))
                     .map(cb => cb.value);
                 
@@ -3063,6 +3071,7 @@
                     caseNumber: caseNumber,
                     synopsis: synopsis,
                     cybertipNumber: cybertipNumber,
+                    locationOfOccurrence: locationOfOccurrence,
                     status: 'active',
                     priority: parseInt(document.getElementById('newCasePriority')?.value) || 0,
                     modules: selectedModules,
@@ -7173,7 +7182,7 @@
                     // 3. Clean localStorage — Pattern 2 (per-case keys by case.id)
                     const p2Prefixes = ['suspects_','victims_','victimBusinesses_','cargo_','witnesses_',
                         'involvedPersons_','recoveredVehicles_','missingpersons_','areacanvas_','prosecution_','narcotics_',
-                        'firearms_','money_','opsplan_','rmsImports_','oversightImport_','canvasForms_','cyberTips_','timelineEvents_','consentSearches_','googleWarrant_','metaWarrant_','kikWarrant_','snapchatWarrant_','discordWarrant_','datapilot_','cellebriteImport_'];
+                        'firearms_','money_','opsplan_','rmsImports_','oversightImport_','canvasForms_','cyberTips_','timelineEvents_','consentSearches_','googleWarrant_','metaWarrant_','kikWarrant_','snapchatWarrant_','discordWarrant_','datapilot_','cellebriteImport_','connectionBoard_'];
                     for (const prefix of p2Prefixes) {
                         localStorage.removeItem(prefix + c.id);
                     }

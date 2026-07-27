@@ -91,10 +91,82 @@ class DatapilotReport {
             this._flagged(imp);
         }
 
-        // Save
+        // Save — write into the case Evidence folder (desktop) so it shows up
+        // in the Evidence tab. Falls back to a browser download in web mode.
         const fname = `MobileEvidenceReport_${(imp.deviceInfo && imp.deviceInfo.model || 'device').replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`;
-        doc.save(fname);
-        if (typeof showToast === 'function') showToast('Mobile Evidence Report saved', 'success');
+        await this._save(doc, fname, imp);
+    }
+
+    /**
+     * Persist the generated PDF.  On the desktop app the report is written
+     * into cases/<caseNumber>/Evidence/Datapilot Reports/ via the standard
+     * save-evidence-file IPC and registered as an Evidence record so it shows
+     * up in the Evidence tab immediately.  (Previously this used jsPDF's
+     * doc.save(), which relies on a browser download that Electron doesn't
+     * route anywhere — so the file silently went nowhere.)
+     */
+    async _save(doc, fname, imp) {
+        const caseNumber = this.module && this.module.caseNumber;
+        const canEvidence = caseNumber && window.electronAPI && typeof window.electronAPI.saveEvidenceFile === 'function';
+
+        if (!canEvidence) {
+            doc.save(fname);
+            if (typeof showToast === 'function') showToast('Mobile Evidence Report downloaded', 'success');
+            return;
+        }
+
+        const evidenceTag = 'Datapilot Reports';
+        const ab = doc.output('arraybuffer');
+        const bytes = Array.from(new Uint8Array(ab));
+
+        let savedPath;
+        try {
+            savedPath = await window.electronAPI.saveEvidenceFile({
+                caseNumber,
+                evidenceTag,
+                fileName: fname,
+                fileData: bytes
+            });
+        } catch (e) {
+            console.error('Evidence save failed, falling back to download:', e);
+            try {
+                doc.save(fname);
+                if (typeof showToast === 'function') showToast('Report downloaded (could not save to Evidence)', 'info');
+            } catch (e2) {
+                if (typeof showToast === 'function') showToast('PDF save failed: ' + e.message, 'error');
+            }
+            return;
+        }
+
+        // Register an Evidence record so it appears in the Evidence tab.
+        try {
+            const all = JSON.parse(localStorage.getItem('viperCaseEvidence') || '{}');
+            const list = Array.isArray(all[caseNumber]) ? all[caseNumber] : [];
+            const now = new Date().toISOString();
+            list.push({
+                id: Date.now(),
+                tag: evidenceTag,
+                type: 'digital',
+                description: `Datapilot Mobile Evidence Report — ${imp.fileName || (imp.deviceInfo && imp.deviceInfo.model) || 'device'}`,
+                fileCount: 1,
+                totalSize: bytes.length,
+                files: [{ name: fname, path: savedPath, size: bytes.length, type: 'application/pdf' }],
+                source: 'Datapilot Module',
+                collectedDate: now.split('T')[0],
+                createdAt: now,
+                dateAdded: now,
+                metadata: { kind: 'datapilot-report', fileName: imp.fileName || '', deviceInfo: imp.deviceInfo || {} }
+            });
+            all[caseNumber] = list;
+            localStorage.setItem('viperCaseEvidence', JSON.stringify(all));
+            if (typeof window.refreshCaseEvidenceFromStorage === 'function') window.refreshCaseEvidenceFromStorage();
+        } catch (recErr) {
+            console.warn('Report saved to disk but Evidence record not written:', recErr);
+        }
+
+        if (typeof showToast === 'function') {
+            showToast(`Mobile Evidence Report saved to Evidence — "${evidenceTag}"`, 'success');
+        }
     }
 
     // ─── Page primitives ───────────────────────────────────────────────
@@ -389,7 +461,7 @@ class DatapilotReport {
         const totalAnoms = Object.values(a).reduce((sum, x) => sum + x.alerts.length, 0);
         const counts = coach._addressCounts(imp);
         const topAddr = counts[0] ? counts[0].address : null;
-        const photos = coach._photoDates(imp);
+        const photos = (coach._photoDates(imp) || []).map(d => new Date(d)).filter(d => !isNaN(d.getTime())).sort((a, b) => a - b);
         const span = photos.length ? `${photos[0].toLocaleDateString()} to ${photos[photos.length - 1].toLocaleDateString()}` : 'unknown';
         const gpsPoints = coach._gpsPoints(imp);
         const gpsSummary = gpsPoints.length ? `${gpsPoints.length} GPS-tagged photos clustered in ${coach._clusterPoints(gpsPoints, 0.5).length} distinct locations` : 'no GPS data';

@@ -1153,6 +1153,77 @@
                             </div>
                         </div>
 
+                        <!-- Outlook Email -->
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-start gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-sky-500/10 flex items-center justify-center flex-shrink-0">
+                                    <svg class="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                                    </svg>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <h4 class="text-white font-semibold text-sm">Outlook Email — Microsoft Mailbox</h4>
+                                        <button id="outlookToggleBtn" onclick="toggleOutlook()" class="relative w-11 h-6 rounded-full transition-colors bg-gray-600 flex-shrink-0">
+                                            <div id="outlookToggleKnob" class="absolute w-4 h-4 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-gray-400 mt-1 leading-relaxed">Open your Outlook mailbox (Outlook on the Web) inside VIPER from the Investigative Resources tray. Supports both personal outlook.com / Hotmail / Live accounts and Microsoft 365 work or school accounts. Microsoft handles sign-in and any multi-factor authentication; your credentials are only used to auto-fill the Microsoft sign-in page and are never sent anywhere but Microsoft.</p>
+                                    <span id="outlookToggleLabel" class="text-xs text-gray-500 mt-1 block"></span>
+                                    <div class="mt-2">
+                                        <a href="https://outlook.office.com/mail/" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 text-xs text-sky-400 hover:underline">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                            Open Site
+                                        </a>
+                                    </div>
+
+                                    <!-- Collapsible credentials -->
+                                    <details class="mt-3" id="outlookDetails">
+                                        <summary class="cursor-pointer text-xs text-sky-400 hover:opacity-80 select-none flex items-center gap-1.5 font-medium">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+                                            Login Credentials (auto-fill)
+                                        </summary>
+                                        <div id="outlookCredentialsPanel" class="mt-3 space-y-3 p-3 rounded-lg bg-sky-500/5 border border-sky-500/10">
+                                            <div>
+                                                <label class="block text-xs text-gray-400 mb-1">Account type</label>
+                                                <div class="flex gap-4">
+                                                    <label class="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer">
+                                                        <input type="radio" name="outlookAccountType" value="work" class="accent-sky-400"> Work or school (Microsoft 365)
+                                                    </label>
+                                                    <label class="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer">
+                                                        <input type="radio" name="outlookAccountType" value="personal" class="accent-sky-400"> Personal (outlook.com)
+                                                    </label>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs text-gray-400 mb-1">Email</label>
+                                                <input type="text" id="outlookUsername" placeholder="you@example.com" autocomplete="off"
+                                                    class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-sky-400 focus:outline-none">
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs text-gray-400 mb-1">Password</label>
+                                                <div class="relative">
+                                                    <input type="password" id="outlookPassword" placeholder="••••••••" autocomplete="off"
+                                                        class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-sky-400 focus:outline-none pr-10">
+                                                    <button onclick="toggleOutlookPasswordVisibility()" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:opacity-80 transition">
+                                                        <svg id="outlookEyeIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="flex gap-2">
+                                                <button onclick="saveOutlookCredentials()" class="px-3 py-1.5 bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400 rounded-lg text-sky-300 text-xs font-medium transition">
+                                                    Save Credentials
+                                                </button>
+                                                <button onclick="clearOutlookCredentials()" class="px-3 py-1.5 bg-gray-600/20 hover:bg-gray-600/30 border border-gray-600 rounded-lg text-gray-400 text-xs font-medium transition">
+                                                    Clear
+                                                </button>
+                                            </div>
+                                            <p class="text-xs text-gray-500 leading-relaxed">Credentials are stored locally and used to auto-fill the Microsoft sign-in page. They are never sent anywhere but Microsoft. Because Microsoft may require multi-factor authentication, you may still need to approve sign-in on your device.</p>
+                                        </div>
+                                    </details>
+                                </div>
+                            </div>
+                        </div>
                         <!-- Email Verifier -->
                         <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
                             <div class="flex items-start gap-3">
@@ -6153,6 +6224,84 @@
             : '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>';
     }
 
+    /* ── Outlook Email ─────────────────────────────────────── */
+    function toggleOutlook() {
+        const enabled = localStorage.getItem('outlookEnabled') !== 'true';
+        localStorage.setItem('outlookEnabled', String(enabled));
+        updateOutlookToggleUI(enabled);
+    }
+
+    function updateOutlookToggleUI(enabled) {
+        const label = document.getElementById('outlookToggleLabel');
+        const btn = document.getElementById('outlookToggleBtn');
+        const knob = document.getElementById('outlookToggleKnob');
+        if (label) label.textContent = enabled ? 'Enabled — Available in Investigative Resources Hub' : 'Disabled';
+        if (btn) btn.className = 'relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ' + (enabled ? 'bg-sky-500' : 'bg-gray-600');
+        if (knob) knob.className = 'absolute w-4 h-4 bg-white rounded-full top-1 transition-transform ' + (enabled ? 'translate-x-6' : 'translate-x-1');
+    }
+
+    function initOutlookSettings() {
+        const enabled = localStorage.getItem('outlookEnabled') === 'true';
+        updateOutlookToggleUI(enabled);
+        loadOutlookCredentials();
+    }
+
+    function loadOutlookCredentials() {
+        const username = localStorage.getItem('outlookUsername') || '';
+        const password = localStorage.getItem('outlookPassword') || '';
+        const type = localStorage.getItem('outlookAccountType') || 'work';
+        const userEl = document.getElementById('outlookUsername');
+        const passEl = document.getElementById('outlookPassword');
+        if (userEl) userEl.value = username;
+        if (passEl) passEl.value = password;
+        const radio = document.querySelector('input[name="outlookAccountType"][value="' + type + '"]');
+        if (radio) radio.checked = true;
+    }
+
+    function saveOutlookCredentials() {
+        const username = (document.getElementById('outlookUsername')?.value || '').trim();
+        const password = document.getElementById('outlookPassword')?.value || '';
+        const typeEl = document.querySelector('input[name="outlookAccountType"]:checked');
+        localStorage.setItem('outlookUsername', username);
+        localStorage.setItem('outlookPassword', password);
+        localStorage.setItem('outlookAccountType', typeEl ? typeEl.value : 'work');
+        showOutlookCredentialStatus('Credentials saved');
+    }
+
+    function clearOutlookCredentials() {
+        localStorage.removeItem('outlookUsername');
+        localStorage.removeItem('outlookPassword');
+        const userEl = document.getElementById('outlookUsername');
+        const passEl = document.getElementById('outlookPassword');
+        if (userEl) userEl.value = '';
+        if (passEl) passEl.value = '';
+        showOutlookCredentialStatus('Credentials cleared');
+    }
+
+    function showOutlookCredentialStatus(msg) {
+        const panel = document.getElementById('outlookCredentialsPanel');
+        if (!panel) return;
+        let status = panel.querySelector('.outlook-status');
+        if (!status) {
+            status = document.createElement('p');
+            status.className = 'outlook-status text-xs text-sky-300 font-medium mt-1';
+            panel.appendChild(status);
+        }
+        status.textContent = '✓ ' + msg;
+        setTimeout(() => { if (status.parentNode) status.remove(); }, 3000);
+    }
+
+    function toggleOutlookPasswordVisibility() {
+        const passEl = document.getElementById('outlookPassword');
+        const icon = document.getElementById('outlookEyeIcon');
+        if (!passEl) return;
+        const show = passEl.type === 'password';
+        passEl.type = show ? 'text' : 'password';
+        if (icon) icon.innerHTML = show
+            ? '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.59 6.59m7.532 7.532l3.29 3.29M3 3l18 18"/>'
+            : '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>';
+    }
+
     /* ── Vigilant / Motorola VehicleManager LPR ──────────────── */
     function toggleVigilant() {
         const enabled = localStorage.getItem('vigilantEnabled') !== 'true';
@@ -6340,6 +6489,7 @@
     initGridcopSettings();
     initCargonetSettings();
     initCallyoSettings();
+    initOutlookSettings();
     initUcChatSettings();
     initPublicOutreachSettings();
     initResourcesSettings();

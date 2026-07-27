@@ -25,7 +25,7 @@ class DatapilotModule {
 
     async init(containerId) {
         this.containerId = containerId;
-        this.loadData();
+        await this.loadData();
 
         // Lazy-construct UI + analytics
         if (typeof DatapilotUI === 'function') {
@@ -44,15 +44,64 @@ class DatapilotModule {
     }
 
     loadData() {
+        // Legacy note: DataPilot data used to live entirely in
+        // localStorage[`datapilot_${caseId}`].  A full extraction blows past
+        // the browser's ~5 MB quota, so the full payload now lives on disk
+        // (userData/datapilot-store/…) via IPC, and only a small metadata
+        // index is kept in localStorage for synchronous readers (badge
+        // counts, forensic-link pickers).  This method is async: init() and
+        // any caller that needs the loaded data must await it.
+        return this._loadDataAsync();
+    }
+
+    async _loadDataAsync() {
+        let raw = null;
+
+        // 1) Preferred source: on-disk store (Electron).
         try {
-            const raw = localStorage.getItem(`datapilot_${this.caseId}`);
+            if (window.electronAPI && window.electronAPI.datapilotLoadData) {
+                const res = await window.electronAPI.datapilotLoadData({ caseId: this.caseId });
+                if (res && res.success && res.data) raw = res.data;
+            }
+        } catch (e) {
+            console.warn('Datapilot disk load failed, will try legacy localStorage:', e);
+        }
+
+        // 2) Migration: older builds stored the FULL blob in localStorage.
+        //    If disk had nothing, adopt the legacy blob, persist it to disk,
+        //    then shrink the localStorage entry down to the slim index.
+        if (raw == null) {
+            let legacy = null;
+            try { legacy = localStorage.getItem(`datapilot_${this.caseId}`); } catch (_) {}
+            if (legacy) {
+                raw = legacy;
+                try {
+                    const parsedLegacy = JSON.parse(legacy);
+                    if (parsedLegacy && typeof parsedLegacy === 'object') {
+                        // Only migrate if it actually carries full data (heavy arrays),
+                        // otherwise it's already just a slim index — leave it be.
+                        const imps = Array.isArray(parsedLegacy.imports) ? parsedLegacy.imports : [];
+                        const hasFull = imps.some(i => i && (Array.isArray(i.messages) || Array.isArray(i.contacts) || Array.isArray(i.media)));
+                        if (hasFull && window.electronAPI && window.electronAPI.datapilotSaveData) {
+                            await window.electronAPI.datapilotSaveData({ caseId: this.caseId, json: legacy });
+                            // Replace the oversized entry with the slim index.
+                            try { this._writeSlimIndex(parsedLegacy.imports || []); } catch (_) {}
+                        }
+                    }
+                } catch (_) { /* fall through to parse below */ }
+            }
+        }
+
+        try {
             if (raw) {
                 const parsed = JSON.parse(raw);
                 this.data = parsed && typeof parsed === 'object' ? parsed : { imports: [] };
                 if (!Array.isArray(this.data.imports)) this.data.imports = [];
+            } else {
+                this.data = { imports: [] };
             }
         } catch (e) {
-            console.error('Datapilot loadData error:', e);
+            console.error('Datapilot loadData parse error:', e);
             this.data = { imports: [] };
         }
         if (!this.activeImportId && this.data.imports.length) {
@@ -60,9 +109,67 @@ class DatapilotModule {
         }
     }
 
-    saveData() {
+    /**
+     * Build a metadata-only projection of the imports for localStorage.
+     * Excludes the heavy arrays (messages, contacts, media, calls, calendar,
+     * apps, files, deleted, appDataIndex, photoExifByHash, flagged, chats) so
+     * the localStorage entry stays a few KB.  Keeps the small fields that
+     * synchronous readers elsewhere in the app rely on (import count, device
+     * info, stats, labels).
+     */
+    _slimImport(imp) {
+        if (!imp || typeof imp !== 'object') return imp;
+        return {
+            id: imp.id,
+            fileName: imp.fileName,
+            folderPath: imp.folderPath,
+            format: imp.format,
+            importedAt: imp.importedAt,
+            lastRescanAt: imp.lastRescanAt,
+            label: imp.label,
+            deviceName: imp.deviceName,
+            folderName: imp.folderName,
+            deviceInfo: imp.deviceInfo,
+            stats: imp.stats,
+        };
+    }
+
+    _writeSlimIndex(imports) {
+        const slim = { imports: (imports || []).map(i => this._slimImport(i)), _diskBacked: true };
         try {
-            localStorage.setItem(`datapilot_${this.caseId}`, JSON.stringify(this.data));
+            localStorage.setItem(`datapilot_${this.caseId}`, JSON.stringify(slim));
+        } catch (e) {
+            // Even the slim index shouldn't overflow, but never let it break a save.
+            console.warn('Datapilot slim-index write failed:', e);
+            try { localStorage.removeItem(`datapilot_${this.caseId}`); } catch (_) {}
+        }
+    }
+
+    async saveData() {
+        const json = JSON.stringify(this.data);
+
+        // Primary: on-disk store (no size cap).
+        if (window.electronAPI && window.electronAPI.datapilotSaveData) {
+            try {
+                const res = await window.electronAPI.datapilotSaveData({ caseId: this.caseId, json });
+                if (res && res.success) {
+                    // Keep a tiny back-compat index in localStorage for sync readers.
+                    this._writeSlimIndex(this.data.imports);
+                    return;
+                }
+                throw new Error((res && res.error) || 'disk save failed');
+            } catch (e) {
+                console.error('Datapilot disk save error:', e);
+                if (typeof showToast === 'function') {
+                    showToast('Failed to save Datapilot data to disk: ' + e.message, 'error');
+                }
+                return;
+            }
+        }
+
+        // Fallback (non-Electron / API missing): localStorage. May hit quota.
+        try {
+            localStorage.setItem(`datapilot_${this.caseId}`, json);
         } catch (e) {
             console.error('Datapilot saveData error:', e);
             if (typeof showToast === 'function') {

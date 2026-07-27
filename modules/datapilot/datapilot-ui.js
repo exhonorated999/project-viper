@@ -1844,7 +1844,7 @@ class DatapilotUI {
         }
     }
 
-    _generatePdf() {
+    async _generatePdf() {
         if (typeof DatapilotReport !== 'function') {
             if (typeof showToast === 'function') showToast('Report generator not loaded', 'error');
             return;
@@ -1853,7 +1853,7 @@ class DatapilotUI {
         if (!imp) return;
         try {
             const r = new DatapilotReport(this.module, imp);
-            r.generate();
+            await r.generate();
         } catch (e) {
             console.error(e);
             if (typeof showToast === 'function') showToast('PDF generation failed: ' + e.message, 'error');

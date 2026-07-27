@@ -130,6 +130,47 @@
     return isNaN(d.getTime()) ? null : d;
   }
 
+  // ---- Input helpers (UTC-aware entry) --------------------------------
+  // These support the "Time is UTC" per-entry checkbox: forms let the user
+  // enter a wall-clock date/time and flag whether it is UTC or machine-local.
+  // Everything is still STORED as a normal ISO/UTC timestamp — these only
+  // govern how the typed value is interpreted (parseInput) and how a stored
+  // timestamp is shown back in the date/time inputs when editing (splitInput).
+
+  function _pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  // Build an ISO timestamp from separate <input type=date> + <input type=time>
+  // string values.
+  //   isUTC=true  -> interpret the entered wall-clock time as UTC.
+  //   isUTC=false -> interpret as the machine-local timezone (legacy behavior).
+  // Returns an ISO string, or null when the date is missing/invalid.
+  function parseInput(dateStr, timeStr, isUTC) {
+    if (!dateStr) return null;
+    var t = (timeStr != null && String(timeStr).length) ? String(timeStr) : '00:00';
+    if (t.length <= 5) t += ':00';               // HH:MM -> HH:MM:SS
+    var d = new Date(dateStr + 'T' + t + (isUTC ? 'Z' : ''));
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+
+  // Split a stored ISO/Date/epoch back into {date:'YYYY-MM-DD', time:'HH:MM'}
+  // suitable for populating date/time inputs when editing.
+  //   utc=true  -> use the UTC calendar parts.
+  //   utc=false -> use the machine-local calendar parts.
+  function splitInput(ts, utc) {
+    var d = _toDate(ts);
+    if (!d) return { date: '', time: '' };
+    if (utc) {
+      return {
+        date: d.getUTCFullYear() + '-' + _pad2(d.getUTCMonth() + 1) + '-' + _pad2(d.getUTCDate()),
+        time: _pad2(d.getUTCHours()) + ':' + _pad2(d.getUTCMinutes()),
+      };
+    }
+    return {
+      date: d.getFullYear() + '-' + _pad2(d.getMonth() + 1) + '-' + _pad2(d.getDate()),
+      time: _pad2(d.getHours()) + ':' + _pad2(d.getMinutes()),
+    };
+  }
+
   // Build (and memoize) an Intl.DateTimeFormat for a given options object.
   // Key includes tz + hour12 so cache invalidates when settings change.
   var _fmtCache = {};
@@ -209,6 +250,8 @@
     formatTime: formatTime,
     formatDateTime: formatDateTime,
     format: format,
+    parseInput: parseInput,
+    splitInput: splitInput,
     onChange: onChange,
   };
 })();

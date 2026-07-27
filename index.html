@@ -1472,6 +1472,9 @@ footer {
             <p class="reveal text-dim" style="font-size:16px; max-width:720px; margin-top:16px;">
                 Flip through the deck — from intake and mobile forensics to link analysis, transcription, and court-ready warrants. Click any screen to enlarge it.
             </p>
+            <p class="reveal" style="font-size:13px; max-width:720px; margin-top:10px; color:var(--text-dim); font-style:italic;">
+                Note: all names, phone numbers, dates of birth, and other personal details shown are fictional sample data for demonstration only — not real people or numbers.
+            </p>
 
             <div class="showcase-deck reveal reveal-delay-1">
                 <div class="deck-tabs" id="deckTabs"></div>
@@ -2091,7 +2094,13 @@ document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
           desc: 'On-device AI transcription for interviews and audio/video evidence. Timestamped transcripts let you click to jump, copy, or insert straight into a report — no cloud, no uploads.' },
         { tab: 'Warrant Author', badge: '09 · Legal Process', ico: '⚖️', title: 'Warrant Authoring & Returns',
           img: 'assets/screenshots/viper-warrant-author.png',
-          desc: 'Draft search warrants and legal-process demands from provider templates with auto-fill from case data, a live preview, and validation that flags dangling fields before you file — then track the returns.' }
+          desc: 'Draft search warrants and legal-process demands from provider templates with auto-fill from case data, a live preview, and validation that flags dangling fields before you file — then track the returns.' },
+        { tab: 'Undercover Chat', badge: '10 · Covert Ops', ico: '🕵️', title: 'Undercover Chat Operations',
+          img: 'assets/screenshots/viper-undercover-chat.png',
+          desc: 'Run covert online conversations from managed personas across Discord, Snapchat, and more — each with a persona cheat sheet (name, age, hometown, backstory) and reusable persona photos. Every chat links to the case and archives to PDF/HTML for court.' },
+        { tab: 'ICAC & CyberTips', badge: '11 · ICAC Integration', ico: '🛡️', title: 'ICAC Integration & CyberTips',
+          img: 'assets/screenshots/viper-icac-integration.png',
+          desc: 'Purpose-built for ICAC task forces: work NCMEC CyberTipline reports alongside integrated investigative resources — ICAC Data System, ICACCOPS, and Gridcop — plus Flock Safety, Whooster, and FMCSA carrier lookups in one docked panel.' }
     ];
 
     const slidesEl = document.getElementById('deckSlides');

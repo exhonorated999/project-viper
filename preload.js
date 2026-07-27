@@ -165,6 +165,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   datapilotScan: (data) => ipcRenderer.invoke('datapilot-scan', data),
   datapilotPickFolder: () => ipcRenderer.invoke('datapilot-pick-folder'),
   datapilotImport: (data) => ipcRenderer.invoke('datapilot-import', data),
+  datapilotLoadData: (data) => ipcRenderer.invoke('datapilot-load-data', data),
+  datapilotSaveData: (data) => ipcRenderer.invoke('datapilot-save-data', data),
+  datapilotDeleteData: (data) => ipcRenderer.invoke('datapilot-delete-data', data),
   datapilotReadMedia: (data) => ipcRenderer.invoke('datapilot-read-media', data),
   datapilotGetMediaUrl: (data) => ipcRenderer.invoke('datapilot-get-media-url', data),
   datapilotExportFlagsBundle: (data) => ipcRenderer.invoke('datapilot-export-flags-bundle', data),
@@ -486,6 +489,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Callyo (persistent BrowserView)
   callyoSetBounds: (bounds) => ipcRenderer.send('callyo-set-bounds', bounds),
   callyoSetVisible: (visible) => ipcRenderer.send('callyo-set-visible', visible),
+
+  // Outlook Email (persistent BrowserView)
+  outlookSetBounds: (bounds) => ipcRenderer.send('outlook-set-bounds', bounds),
+  outlookSetVisible: (visible) => ipcRenderer.send('outlook-set-visible', visible),
 
   // Resource Hub generic per-BV zoom factor (0.5 .. 2.0)
   rhSetZoom: (resId, factor) => ipcRenderer.send('rh-set-zoom', { resId, factor }),

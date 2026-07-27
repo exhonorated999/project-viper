@@ -70,6 +70,23 @@ class DatapilotCoach {
         });
     }
 
+    /**
+     * Report helper: run the five anomaly rules and return them keyed by id,
+     * each shaped { alerts: [...] }.  runAllRules() returns a flat array for
+     * the Coach UI; DatapilotReport (_anomalies / _narrative) needs the object
+     * form, so this bridges the two without duplicating rule logic.
+     */
+    _computeAnomalies(imp) {
+        const mk = (res) => ({ alerts: (res && Array.isArray(res.alerts)) ? res.alerts : [] });
+        return {
+            baselineOutlier: mk(this._ruleBaselineOutlier(imp)),
+            newContactBurst: mk(this._ruleNewContactBurst(imp)),
+            deletionBurst:   mk(this._ruleDeletionBurst(imp)),
+            locationOutlier: mk(this._ruleLocationOutlier(imp)),
+            appInstallBurst: mk(this._ruleAppInstallBurst(imp)),
+        };
+    }
+
     // ─── render ────────────────────────────────────────────────
 
     render(rootEl) {

@@ -1911,6 +1911,9 @@
                     <div>
                         <label class="block text-sm font-medium text-gray-300 mb-2">Time (Optional)</label>
                         <input type="time" id="taskTime" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none text-white">
+                        <label class="flex items-center gap-1.5 text-[11px] text-gray-400 cursor-pointer mt-1" title="Record this time as UTC rather than local time.">
+                            <input type="checkbox" id="taskTimeUTC" class="accent-viper-cyan"> UTC
+                        </label>
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-300 mb-2">Priority *</label>
@@ -3706,13 +3709,13 @@
             document.getElementById('fileButtonText').textContent = 'Click to upload PDF';
         }
         
-        function formatDate(dateStr, timeStr) {
+        function formatDate(dateStr, timeStr, timeUTC) {
             const date = new Date(dateStr);
             const options = { month: 'short', day: 'numeric', year: 'numeric' };
             let formatted = date.toLocaleDateString('en-US', options);
             
             if (timeStr) {
-                formatted += ` at ${timeStr}`;
+                formatted += ` at ${timeStr}${timeUTC ? ' UTC' : ''}`;
             }
             
             return formatted;
@@ -3898,7 +3901,7 @@
                                         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
                                         </svg>
-                                        <span class="${overdue && !task.completed ? 'text-red-400 font-medium' : ''}">${formatDate(task.date, task.time)}</span>
+                                        <span class="${overdue && !task.completed ? 'text-red-400 font-medium' : ''}">${formatDate(task.date, task.time, task.timeUTC)}</span>
                                     </span>
                                     ${task.caseId ? `
                                         <span class="flex items-center space-x-1 text-viper-cyan">
@@ -4133,7 +4136,7 @@
                                 <h4 class="text-sm font-semibold ${task.completed ? 'line-through text-gray-500' : 'text-white'}">${safeTitle}</h4>
                                 <div class="flex items-center flex-wrap gap-1.5 mt-1.5 text-[11px]">
                                     <span class="px-2 py-0.5 rounded-full bg-${colors.badge} text-${colors.badgeText} border border-${colors.badgeBorder} font-medium">${label}</span>
-                                    ${task.time ? `<span class="flex items-center gap-0.5 ${overdue && !task.completed ? 'text-red-400 font-medium' : 'text-gray-300'}"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>${task.time}${overdue && !task.completed ? ' · OVERDUE' : ''}</span>` : ''}
+                                    ${task.time ? `<span class="flex items-center gap-0.5 ${overdue && !task.completed ? 'text-red-400 font-medium' : 'text-gray-300'}"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>${task.time}${task.timeUTC ? ' UTC' : ''}${overdue && !task.completed ? ' · OVERDUE' : ''}</span>` : ''}
                                     ${task.caseId ? `<span class="flex items-center gap-0.5 text-viper-cyan"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>Case ${task.caseId}</span>` : ''}
                                     ${task.hasFile ? `<span class="flex items-center gap-0.5 text-viper-purple" title="${(task.fileName||'').replace(/"/g,'&quot;')}"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>PDF</span>` : ''}
                                 </div>
@@ -4187,6 +4190,7 @@
                     title: document.getElementById('taskTitle').value,
                     date: document.getElementById('taskDate').value,
                     time: document.getElementById('taskTime').value,
+                    timeUTC: document.getElementById('taskTimeUTC').checked,
                     priority: document.getElementById('taskPriority').value,
                     notes: document.getElementById('taskNotes').value,
                     caseId: caseId || null,
@@ -7186,6 +7190,14 @@
                     for (const prefix of p2Prefixes) {
                         localStorage.removeItem(prefix + c.id);
                     }
+
+                    // 3b. DataPilot full payload lives on disk (userData/datapilot-store),
+                    //     not localStorage — remove that file too.
+                    try {
+                        if (window.electronAPI && window.electronAPI.datapilotDeleteData) {
+                            await window.electronAPI.datapilotDeleteData({ caseId: c.id });
+                        }
+                    } catch (_) { /* best-effort cleanup */ }
 
                     // 4. Clean tasks
                     const allTasks = JSON.parse(localStorage.getItem('viperTasks') || '[]');

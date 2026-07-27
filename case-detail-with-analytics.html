@@ -1835,7 +1835,7 @@
                 victimBusiness: { label: 'Victim Business', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4' },
                 witnesses: { label: 'Witnesses', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z' },
                 involvedPersons: { label: 'Involved Persons', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z' },
-                vehicles: { label: 'Recovered Vehicles', icon: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4' },
+                vehicles: { label: 'Vehicles', icon: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4' },
                 cargo: { label: 'Cargo / Merchandise', icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4' },
                 firearms: { label: 'Firearms', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' },
                 evidence: { label: 'Evidence', icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10' },
@@ -1984,7 +1984,7 @@
                 victimBusiness: { label: 'Victim Business', icon: '🏢' },
                 witnesses: { label: 'Witnesses', icon: '👁️' },
                 involvedPersons: { label: 'Involved Persons', icon: '👤' },
-                vehicles: { label: 'Recovered Vehicles', icon: '🚗' },
+                vehicles: { label: 'Vehicles', icon: '🚗' },
                 cargo: { label: 'Cargo / Merchandise', icon: '📦' },
                 firearms: { label: 'Firearms', icon: '🔫' },
                 evidence: { label: 'Evidence', icon: '📦' },
@@ -2097,7 +2097,7 @@
         async function removeModuleFromCase(moduleId) {
             const moduleConfig = {
                 suspects:'Suspects', victims:'Victims', victimBusiness:'Victim Business',
-                witnesses:'Witnesses', involvedPersons:'Involved Persons', vehicles:'Recovered Vehicles', cargo:'Cargo / Merchandise',
+                witnesses:'Witnesses', involvedPersons:'Involved Persons', vehicles:'Vehicles', cargo:'Cargo / Merchandise',
                 firearms:'Firearms', evidence:'Evidence', warrants:'Warrants', reports:'Reports',
                 notes:'Case Notes', prosecution:'Prosecution', narcotics:'Narcotics Seized',
                 money:'Money Seized', missingpersons:'Missing Persons', areacanvas:'Area Canvas',
@@ -2144,7 +2144,7 @@
                 victimBusiness: { label: 'Victim Business', icon: '🏢', type: 'data' },
                 witnesses: { label: 'Witnesses', icon: '👁️', type: 'data' },
                 involvedPersons: { label: 'Involved Persons', icon: '👤', type: 'data' },
-                vehicles: { label: 'Recovered Vehicles', icon: '🚗', type: 'data' },
+                vehicles: { label: 'Vehicles', icon: '🚗', type: 'data' },
                 cargo: { label: 'Cargo / Merchandise', icon: '📦', type: 'data' },
                 firearms: { label: 'Firearms', icon: '🔫', type: 'data' },
                 evidence: { label: 'Evidence Files', icon: '📦', type: 'files' },
@@ -3438,7 +3438,7 @@
                     if (!od) { emptyMsg('No operational plan recorded.'); break; }
                     // v2 format
                     if (od._version === 2) {
-                        if (od.date || od.time) fieldBold('Date/Time', [od.date, od.time].filter(Boolean).join(' '));
+                        if (od.date || od.time) fieldBold('Date/Time', [od.date, od.time ? od.time + (od.timeUTC ? ' UTC' : '') : ''].filter(Boolean).join(' '));
                         if (od.reportNumber) fieldBold('Report #', od.reportNumber);
                         if (od.caseAgent) fieldBold('Case Agent', od.caseAgent);
                         if (od.operationType) {
@@ -3806,7 +3806,7 @@
                 victimBusiness: 'Victim Business',
                 witnesses: 'Witnesses',
                 involvedPersons: 'Involved Persons',
-                vehicles: 'Recovered Vehicles',
+                vehicles: 'Vehicles',
                 cargo: 'Cargo / Merchandise',
                 firearms: 'Firearms',
                 evidence: 'Evidence',
@@ -4280,7 +4280,7 @@
                         };
 
                         if (opsDataRaw._version === 2) {
-                            if (opsDataRaw.date) pdfField('Date/Time', [opsDataRaw.date, opsDataRaw.time].filter(Boolean).join(' '));
+                            if (opsDataRaw.date) pdfField('Date/Time', [opsDataRaw.date, opsDataRaw.time ? opsDataRaw.time + (opsDataRaw.timeUTC ? ' UTC' : '') : ''].filter(Boolean).join(' '));
                             if (opsDataRaw.caseAgent) pdfField('Case Agent', opsDataRaw.caseAgent);
                             if (opsDataRaw.location) pdfField('Location', opsDataRaw.location);
                             if (opsDataRaw.suspectInfo) pdfField('Suspect Information', opsDataRaw.suspectInfo);
@@ -5476,7 +5476,7 @@
                                         <div class="flex items-start justify-between">
                                             <div class="flex-1">
                                                 <h4 class="font-medium">${task.title}</h4>
-                                                <p class="text-xs text-gray-400 mt-1">Due: ${formatDate(task.date)} ${task.time ? 'at ' + task.time : ''}</p>
+                                                <p class="text-xs text-gray-400 mt-1">Due: ${formatDate(task.date)} ${task.time ? 'at ' + task.time + (task.timeUTC ? ' UTC' : '') : ''}</p>
                                                 ${task.notes ? `<p class="text-xs text-gray-400 mt-2 italic">${task.notes}</p>` : ''}
                                             </div>
                                         </div>
@@ -18809,7 +18809,7 @@
             return `
                 <div>
                     <div class="flex justify-between items-center mb-6">
-                        <h2 class="text-2xl font-bold text-white">Recovered Vehicles</h2>
+                        <h2 class="text-2xl font-bold text-white">Vehicles</h2>
                         <div class="flex gap-3">
                             <button onclick="addNewRecoveredVehicle()" class="px-4 py-2 bg-viper-orange/20 hover:bg-viper-orange/30 border border-viper-orange rounded-lg text-viper-orange transition flex items-center gap-2">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -18833,7 +18833,7 @@
                             <svg class="w-20 h-20 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
                             </svg>
-                            <h3 class="text-2xl font-bold text-gray-300 mb-2">No Recovered Vehicles</h3>
+                            <h3 class="text-2xl font-bold text-gray-300 mb-2">No Vehicles</h3>
                             <p class="text-gray-400 mb-6">Add recovered vehicles to this case</p>
                             <button onclick="addNewRecoveredVehicle()" class="px-6 py-3 bg-viper-orange/20 hover:bg-viper-orange/30 border border-viper-orange rounded-lg text-viper-orange transition">
                                 Add First Vehicle
@@ -18857,6 +18857,7 @@
                         <img ${_S}="${photoUrl}" alt="${vehicle.makeModel || 'Vehicle'}" class="w-full h-full object-cover">
                     </div>
                     <h3 class="text-xl font-bold text-white mb-2">${vehicle.makeModel || 'Unknown Vehicle'}</h3>
+                    ${Array.isArray(vehicle.status) && vehicle.status.length ? `<div class="flex flex-wrap gap-1.5 mb-2">${vehicle.status.map(s => `<span class="text-xs px-2 py-0.5 rounded-full bg-viper-orange/20 text-viper-orange border border-viper-orange/40">${s}</span>`).join('')}</div>` : ''}
                     <div class="space-y-1 text-sm text-gray-400">
                         ${vehicle.licensePlate ? `<div class="flex items-center gap-2"><p class="text-viper-orange">Plate: ${vehicle.licensePlate}</p>${renderFlockButton(vehicle.licensePlate, vehicle.plateState, true)}</div>` : ''}
                         ${vehicle.vin ? `<p>VIN: ${vehicle.vin}</p>` : ''}
@@ -18926,6 +18927,13 @@
                                 ${renderField('Recovery Date', vehicle.recoveryDate)}
                                 ${renderField('Recovery Location', vehicle.recoveryLocation)}
                             </div>
+                            ${Array.isArray(vehicle.status) && vehicle.status.length ? `
+                            <div class="mt-4 pt-4 border-t border-gray-700">
+                                <p class="text-xs text-gray-400 mb-2 uppercase tracking-wider">Status</p>
+                                <div class="flex flex-wrap gap-2">
+                                    ${vehicle.status.map(s => `<span class="text-sm px-3 py-1 rounded-full bg-viper-orange/20 text-viper-orange border border-viper-orange/40">${s}</span>`).join('')}
+                                </div>
+                            </div>` : ''}
                             ${vehicle.licensePlate && isFlockEnabled() ? `
                             <div class="mt-5 pt-4 border-t border-teal-500/20">
                                 <div class="flex items-center gap-2 mb-3">
@@ -18975,6 +18983,9 @@
         function showRecoveredVehicleModal(editIndex = null) {
             const vehicle = editIndex !== null ? recoveredVehicles[editIndex] : {};
             const isEdit = editIndex !== null;
+            // Vehicle status flags — the dashboard will pull stats from these.
+            const VEHICLE_STATUSES = ['Stolen', 'Recovered', 'Involved', 'Damaged'];
+            const _vehStatus = Array.isArray(vehicle.status) ? vehicle.status : [];
             
             const modal = document.createElement('div');
             modal.className = 'fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4';
@@ -18985,7 +18996,7 @@
             modal.innerHTML = `
                 <div class="glass-card rounded-xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()">
                     <div class="flex justify-between items-center mb-6">
-                        <h2 class="text-2xl font-bold text-white">${isEdit ? 'Edit' : 'Add'} Recovered Vehicle</h2>
+                        <h2 class="text-2xl font-bold text-white">${isEdit ? 'Edit' : 'Add'} Vehicle</h2>
                         <button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-white">
                             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -19009,7 +19020,20 @@
                                 </div>
                             </div>
                         </div>
-                        
+
+                        <!-- Status -->
+                        <div>
+                            <h3 class="text-lg font-bold text-viper-orange mb-3">Status <span class="text-xs font-normal text-gray-500">(select all that apply)</span></h3>
+                            <div class="flex flex-wrap gap-3">
+                                ${VEHICLE_STATUSES.map(s => `
+                                    <label class="flex items-center gap-2 bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 cursor-pointer hover:border-viper-orange transition">
+                                        <input type="checkbox" name="status" value="${s}" ${_vehStatus.includes(s) ? 'checked' : ''} class="accent-viper-orange w-4 h-4">
+                                        <span class="text-white text-sm">${s}</span>
+                                    </label>
+                                `).join('')}
+                            </div>
+                        </div>
+
                         <!-- Photo -->
                         <div>
                             <h3 class="text-lg font-bold text-viper-orange mb-3">Vehicle Photo</h3>
@@ -19054,6 +19078,7 @@
                     year: formData.get('year'),
                     recoveryDate: formData.get('recoveryDate'),
                     recoveryLocation: formData.get('recoveryLocation'),
+                    status: formData.getAll('status'),
                     photo: formData.get('photo'),
                     notes: formData.get('notes')
                 };
@@ -19079,7 +19104,7 @@
             
             modal.innerHTML = `
                 <div class="glass-card rounded-xl p-6 max-w-md w-full" onclick="event.stopPropagation()">
-                    <h3 class="text-xl font-bold text-white mb-4">Export Recovered Vehicles to PDF</h3>
+                    <h3 class="text-xl font-bold text-white mb-4">Export Vehicles to PDF</h3>
                     <p class="text-gray-400 mb-4">Choose which vehicles to include:</p>
                     <div class="space-y-3 mb-6">
                         <label class="flex items-center gap-3 p-3 bg-viper-dark rounded-lg cursor-pointer hover:bg-viper-dark/70">
@@ -19155,7 +19180,7 @@
                 <html>
                 <head>
                     <meta charset="UTF-8">
-                    <title>Recovered Vehicles Report - Case ${currentCase.caseNumber}</title>
+                    <title>Vehicles Report - Case ${currentCase.caseNumber}</title>
                     <style>
                         @media print {
                             .no-print { display: none; }
@@ -19274,7 +19299,7 @@
                     <button class="no-print" onclick="window.print()">Print / Save as PDF</button>
                     
                     <div class="header">
-                        <h1>Recovered Vehicles Report</h1>
+                        <h1>Vehicles Report</h1>
                         <div class="header-info">
                             <div class="header-field">
                                 <label>Case Number:</label>
@@ -19342,6 +19367,10 @@
                                     <div class="field" style="grid-column: 1 / -1;">
                                         <label>Recovery Location:</label>
                                         <div>${vehicle.recoveryLocation || 'N/A'}</div>
+                                    </div>
+                                    <div class="field" style="grid-column: 1 / -1;">
+                                        <label>Status:</label>
+                                        <div>${Array.isArray(vehicle.status) && vehicle.status.length ? vehicle.status.join(', ') : 'N/A'}</div>
                                     </div>
                                 </div>
                             </div>
@@ -26728,6 +26757,7 @@
             opsPlanData._version = 2;
             opsPlanData.date            = document.getElementById('ops_date')?.value || '';
             opsPlanData.time            = document.getElementById('ops_time')?.value || '';
+            opsPlanData.timeUTC         = document.getElementById('ops_timeUTC')?.checked || false;
             opsPlanData.reportNumber    = document.getElementById('ops_reportNumber')?.value || '';
             opsPlanData.caseAgent       = document.getElementById('ops_caseAgent')?.value || '';
             // Operation type checkboxes
@@ -27038,6 +27068,9 @@
                                 <div>
                                     <label class="text-xs text-gray-400 block mb-1">Time</label>
                                     <input type="time" id="ops_time" value="${d.time || ''}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none">
+                                    <label class="flex items-center gap-1.5 text-[11px] text-gray-400 cursor-pointer mt-1" title="Record this time as UTC rather than local time.">
+                                        <input type="checkbox" id="ops_timeUTC" class="accent-viper-cyan" ${d.timeUTC ? 'checked' : ''}> UTC
+                                    </label>
                                 </div>
                                 <div>
                                     <label class="text-xs text-gray-400 block mb-1">Report #</label>
@@ -27850,7 +27883,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         <h2>${agency || 'Law Enforcement Agency'}</h2>
         <div class="cover-meta">
             <div><label>Case Number</label><span>${d.reportNumber || currentCase.caseNumber || '—'}</span></div>
-            <div><label>Date / Time</label><span>${d.date || '—'}${d.time ? ' ' + d.time : ''}</span></div>
+            <div><label>Date / Time</label><span>${d.date || '—'}${d.time ? ' ' + d.time + (d.timeUTC ? ' UTC' : '') : ''}</span></div>
             <div><label>Case Agent</label><span>${d.caseAgent || userName || '—'}${badge ? ' #' + badge : ''}</span></div>
             <div><label>Operation Type</label><span>${opTypes.length ? opTypes.join(', ') : '—'}</span></div>
             <div><label>Location</label><span>${d.location || '—'}</span></div>
@@ -27877,7 +27910,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
     <div id="ops-info" class="section-header"><span class="num">1</span> Operation Information</div>
     <div class="field-row">
         <div class="field"><label>Date</label><span>${d.date || '—'}</span></div>
-        <div class="field"><label>Time</label><span>${d.time || '—'}</span></div>
+        <div class="field"><label>Time</label><span>${d.time ? d.time + (d.timeUTC ? ' UTC' : '') : '—'}</span></div>
     </div>
     <div class="field-row">
         <div class="field"><label>Report Number</label><span>${d.reportNumber || currentCase.caseNumber || '—'}</span></div>
@@ -28898,7 +28931,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 suspects: 'Suspects',
                 victims: 'Victims',
                 witnesses: 'Witnesses',
-                vehicles: 'Recovered Vehicles',
+                vehicles: 'Vehicles',
                 firearms: 'Firearms',
                 evidence: 'Evidence',
                 warrants: 'Warrants',
@@ -29423,7 +29456,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 { id: 'victimBusiness', label: 'Victim Business', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4' },
                 { id: 'witnesses', label: 'Witnesses', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z' },
                 { id: 'involvedPersons', label: 'Involved Persons', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z' },
-                { id: 'vehicles', label: 'Recovered Vehicles', icon: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4' },
+                { id: 'vehicles', label: 'Vehicles', icon: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4' },
                 { id: 'cargo', label: 'Cargo / Merchandise', icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4' },
                 { id: 'firearms', label: 'Firearms', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' },
                 { id: 'evidence', label: 'Evidence', icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10' },
@@ -30925,9 +30958,14 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         function showTimelineEventModal(editId) {
             const evt = editId ? timelineEvents.find(e => e.id === editId) : null;
             const isEdit = !!evt;
-            const ts = evt ? new Date(evt.timestamp) : new Date();
-            const dateVal = evt ? ts.toISOString().slice(0, 10) : '';
-            const timeVal = evt ? ts.toTimeString().slice(0, 5) : '';
+            const utcMode = evt ? (evt.tzInput === 'utc') : false;
+            const _parts = evt
+                ? (window.ViperDateTime
+                    ? ViperDateTime.splitInput(evt.timestamp, utcMode)
+                    : { date: new Date(evt.timestamp).toISOString().slice(0, 10), time: new Date(evt.timestamp).toISOString().slice(11, 16) })
+                : { date: '', time: '' };
+            const dateVal = _parts.date;
+            const timeVal = _parts.time;
 
             const modalHTML = `
             <div id="timelineEventModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id==='timelineEventModal')closeTimelineEventModal()">
@@ -30944,6 +30982,10 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                 <input type="time" id="tl_time" value="${timeVal}" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan outline-none">
                             </div>
                         </div>
+                        <label class="flex items-center gap-2 text-xs text-gray-400 cursor-pointer -mt-1" title="Interpret the entered date/time as UTC instead of your local timezone. NCMEC CyberTips are always in UTC.">
+                            <input type="checkbox" id="tl_utc" class="accent-viper-cyan" ${utcMode ? 'checked' : ''}>
+                            Time is UTC <span class="text-gray-500">(e.g. NCMEC CyberTips)</span>
+                        </label>
                         <div>
                             <label class="block text-sm text-gray-400 mb-1">Title *</label>
                             <input type="text" id="tl_title" value="${evt ? evt.title : ''}" required class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan outline-none" placeholder="e.g., Search Warrant Executed">
@@ -31005,6 +31047,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 const rawTime = document.getElementById('tl_time').value || '00:00';
                 // Normalize time — browser may return HH:MM or HH:MM:SS; always use HH:MM:SS
                 const time = rawTime.length <= 5 ? rawTime + ':00' : rawTime;
+                const isUTC = !!(document.getElementById('tl_utc') && document.getElementById('tl_utc').checked);
                 const title = document.getElementById('tl_title').value.trim();
                 const lane = document.getElementById('tl_lane').value;
                 const category = document.getElementById('tl_category').value;
@@ -31014,14 +31057,19 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 const desc = document.getElementById('tl_desc').value.trim();
 
                 if (!date || !title) { viperToast('Date and Title are required.', 'warning'); return; }
-                const parsed = new Date(`${date}T${time}`);
-                if (isNaN(parsed.getTime())) { viperToast('Invalid date/time. Please check your entry.', 'warning'); return; }
-                const timestamp = parsed.toISOString();
+                // UTC-aware parse: when "Time is UTC" is checked, the entered wall-clock
+                // time is treated as UTC; otherwise as the machine-local timezone.
+                const timestamp = window.ViperDateTime
+                    ? ViperDateTime.parseInput(date, time, isUTC)
+                    : new Date(`${date}T${time}${isUTC ? 'Z' : ''}`).toISOString();
+                if (!timestamp || isNaN(new Date(timestamp).getTime())) { viperToast('Invalid date/time. Please check your entry.', 'warning'); return; }
+                const tzInput = isUTC ? 'utc' : 'local';
 
             if (editId) {
                 const evt = timelineEvents.find(e => e.id === editId);
                 if (evt) {
                     evt.timestamp = timestamp;
+                    evt.tzInput = tzInput;
                     evt.title = title;
                     evt.lane = lane;
                     evt.category = category;
@@ -31032,7 +31080,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             } else {
                 timelineEvents.push({
                     id: 'tl_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-                    timestamp, endTimestamp: null,
+                    timestamp, endTimestamp: null, tzInput,
                     title, description: desc, lane, category, significance,
                     entityLink: entity,
                     sourceType: 'manual', sourceId: null, color: null,

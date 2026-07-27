@@ -158,6 +158,9 @@ let lastGridcopBounds = null;
 let callyoBrowserView = null;
 let callyoViewVisible = false;
 let lastCallyoBounds = null;
+let outlookBrowserView = null;
+let outlookViewVisible = false;
+let lastOutlookBounds = null;
 
 // Icon path: use unpacked asar path in production, normal path in dev
 const iconPath = app.isPackaged
@@ -899,6 +902,7 @@ app.whenReady().then(async () => {
       if (icacCopsViewVisible && lastIcacCopsBounds) icacCopsBrowserView.setBounds(lastIcacCopsBounds);
       if (gridcopViewVisible && lastGridcopBounds) gridcopBrowserView.setBounds(lastGridcopBounds);
       if (callyoViewVisible && lastCallyoBounds) callyoBrowserView.setBounds(lastCallyoBounds);
+      if (outlookViewVisible && lastOutlookBounds) outlookBrowserView.setBounds(lastOutlookBounds);
     });
 
     // Create persistent BrowserView for TLO (TransUnion) — people search / skip tracing
@@ -1402,6 +1406,81 @@ app.whenReady().then(async () => {
       console.error('[CALLYO] render-process-gone', details);
     });
 
+    // Create persistent BrowserView for Outlook Email (Outlook on the Web)
+    outlookBrowserView = new BrowserView({
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        partition: 'persist:outlook',
+      },
+    });
+    outlookBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    outlookBrowserView.setAutoResize({ width: false, height: false });
+    outlookBrowserView.webContents.on('did-finish-load', () => {
+      if (!outlookViewVisible) mainWindow.webContents.focus();
+      outlookBrowserView.webContents.insertCSS(`
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0d1117; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+      `).catch(() => {});
+
+      // Auto-fill credentials on the Microsoft sign-in page. Microsoft uses a
+      // multi-step wizard (email → Next → password), so we run a short polling
+      // loop that fills each field as it appears and advances past the email
+      // step once. We never submit the final step — the user reviews and
+      // completes MFA themselves.
+      const url = outlookBrowserView.webContents.getURL();
+      const looksLikeLogin = /login\.live\.com|login\.microsoftonline\.com|login\.microsoft\.com|signin|sign-in|oauth|authenticate/i.test(url);
+      if (!looksLikeLogin) return;
+      mainWindow.webContents.executeJavaScript(
+        `JSON.stringify({ username: localStorage.getItem('outlookUsername') || '', password: localStorage.getItem('outlookPassword') || '' })`
+      ).then(json => {
+        const creds = JSON.parse(json);
+        if (!creds.username && !creds.password) return;
+        outlookBrowserView.webContents.executeJavaScript(`
+          (function() {
+            function setVal(el, val) {
+              if (!el || !val) return;
+              const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+              nativeSetter.call(el, val);
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              el.dispatchEvent(new Event('blur', { bubbles: true }));
+            }
+            const USER = ${JSON.stringify(creds.username)};
+            const PASS = ${JSON.stringify(creds.password)};
+            let tries = 0, advanced = false, filledPass = false;
+            const iv = setInterval(function() {
+              tries++;
+              const pass = document.querySelector('input[name="passwd"], input#i0118, input[type="password"]');
+              if (pass) {
+                setVal(pass, PASS);
+                filledPass = true;
+                clearInterval(iv);
+                return;
+              }
+              const user = document.querySelector('input[name="loginfmt"], input#i0116, input[type="email"], input[autocomplete="username"]');
+              if (user) {
+                setVal(user, USER);
+                if (!advanced && USER) {
+                  advanced = true;
+                  const next = document.querySelector('#idSIButton9, input[type="submit"], button[type="submit"]');
+                  if (next) setTimeout(function() { try { next.click(); } catch (_) {} }, 350);
+                }
+              }
+              if (tries > 40 || filledPass) clearInterval(iv);   // ~20s cap
+            }, 500);
+          })();
+        `).catch(() => {});
+      }).catch(() => {});
+    });
+    outlookBrowserView.webContents.on('did-fail-load', (_e, code, desc, url, isMain) => {
+      if (isMain) console.error('[OUTLOOK] did-fail-load', code, desc, url);
+    });
+    outlookBrowserView.webContents.on('render-process-gone', (_e, details) => {
+      console.error('[OUTLOOK] render-process-gone', details);
+    });
+
     // ── Resource-Hub download interceptor ────────────────────────────
     // Intercept file downloads that originate INSIDE a Resource Hub
     // BrowserView (Flock, ICACCOPS, ICAC Data System, etc.) and route
@@ -1422,6 +1501,7 @@ app.whenReady().then(async () => {
       { partition: 'persist:icacCops',       label: 'ICACCOPS',         defaultTag: 'ICACCOPS-Reports' },
       { partition: 'persist:gridcop',        label: 'Gridcop',          defaultTag: 'Gridcop-Reports'  },
       { partition: 'persist:callyo',         label: 'Callyo',           defaultTag: 'Callyo-Reports'   },
+      { partition: 'persist:outlook',        label: 'Outlook Email',    defaultTag: 'Outlook-Reports'  },
     ];
 
     const _sanitizeDlName = (n) => String(n || 'download').replace(/[\\/:*?"<>|\r\n]+/g, '_').slice(0, 180) || 'download';
@@ -1482,7 +1562,7 @@ app.whenReady().then(async () => {
     // on the next page. Media player is handled by its own show/hide via reportBounds().
     mainWindow.webContents.on('did-start-navigation', (_event, _url, isInPlace) => {
       if (isInPlace) return; // ignore hash/pushState navigations
-      const pageViews = [flockBrowserView, tloBrowserView, accurintBrowserView, whoosterBrowserView, vigilantBrowserView, icacDataSystemBrowserView, icacCopsBrowserView, gridcopBrowserView, callyoBrowserView];
+      const pageViews = [flockBrowserView, tloBrowserView, accurintBrowserView, whoosterBrowserView, vigilantBrowserView, icacDataSystemBrowserView, icacCopsBrowserView, gridcopBrowserView, callyoBrowserView, outlookBrowserView];
       for (const bv of pageViews) {
         if (!bv) continue;
         try { mainWindow.removeBrowserView(bv); } catch (_) {}
@@ -1497,6 +1577,7 @@ app.whenReady().then(async () => {
       icacCopsViewVisible = false;
       gridcopViewVisible = false;
       callyoViewVisible = false;
+      outlookViewVisible = false;
     });
 
     // When the renderer page finishes loading, ask it to report media bounds
@@ -4378,6 +4459,7 @@ const _rhResourceMap = () => ({
   icacCops:       { bv: icacCopsBrowserView,       label: 'ICACCOPS',         defaultTag: 'ICACCOPS-Reports' },
   gridcop:        { bv: gridcopBrowserView,        label: 'Gridcop',          defaultTag: 'Gridcop-Reports'  },
   callyo:         { bv: callyoBrowserView,         label: 'Callyo',           defaultTag: 'Callyo-Reports'   },
+  outlook:        { bv: outlookBrowserView,        label: 'Outlook Email',    defaultTag: 'Outlook-Reports'  },
 });
 
 ipcMain.handle('rh-capture-pdf', async (_e, payload) => {
@@ -8073,6 +8155,42 @@ ipcMain.on('callyo-set-visible', (_event, visible) => {
   }
 });
 
+// ── Outlook Email IPC ───────────────────────────────────────────────
+ipcMain.on('outlook-set-bounds', (_event, bounds) => {
+  if (!outlookBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  const b = { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) };
+  if (b.width < 10 || b.height < 10) return;
+  lastOutlookBounds = b;
+  if (outlookViewVisible) outlookBrowserView.setBounds(b);
+});
+ipcMain.on('outlook-set-visible', (_event, visible) => {
+  if (!outlookBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  outlookViewVisible = visible;
+  if (visible && lastOutlookBounds) {
+    const currentUrl = outlookBrowserView.webContents.getURL();
+    if (!currentUrl || currentUrl === 'about:blank') {
+      // Choose the mailbox entry point by account type (personal vs work/school).
+      // Personal outlook.com/Hotmail/Live -> outlook.live.com; Microsoft 365
+      // work or school -> outlook.office.com. Defaults to work if unset.
+      mainWindow.webContents.executeJavaScript(
+        `localStorage.getItem('outlookAccountType') || ''`
+      ).then(type => {
+        const url = (String(type).toLowerCase() === 'personal')
+          ? 'https://outlook.live.com/mail/0/'
+          : 'https://outlook.office.com/mail/';
+        try { outlookBrowserView.webContents.loadURL(url); } catch (_) {}
+      }).catch(() => {
+        try { outlookBrowserView.webContents.loadURL('https://outlook.office.com/mail/'); } catch (_) {}
+      });
+    }
+    try { mainWindow.addBrowserView(outlookBrowserView); } catch (_) {}
+    outlookBrowserView.setBounds(lastOutlookBounds);
+  } else {
+    outlookBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    try { mainWindow.removeBrowserView(outlookBrowserView); } catch (_) {}
+  }
+});
+
 // Generic zoom factor control for the Resource Hub BrowserViews.
 // Renderer sends a resource id ('flock' | 'tlo' | 'accurint' | 'vigilant')
 // and a zoom factor (0.5 .. 2.0). Persists across visibility toggles
@@ -8091,6 +8209,7 @@ ipcMain.on('rh-set-zoom', (_event, payload) => {
     else if (resId === 'icacCops') bv = icacCopsBrowserView;
     else if (resId === 'gridcop') bv = gridcopBrowserView;
     else if (resId === 'callyo') bv = callyoBrowserView;
+    else if (resId === 'outlook') bv = outlookBrowserView;
     if (bv && bv.webContents && !bv.webContents.isDestroyed()) {
       bv.webContents.setZoomFactor(f);
     }
@@ -9167,6 +9286,67 @@ ipcMain.handle('datapilot-import', async (event, { folderPath }) => {
     return { success: true, data };
   } catch (error) {
     console.error('Datapilot import error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * On-disk persistence for the Datapilot module.
+ *
+ * A full phone extraction (messages + contacts + media metadata + EXIF +
+ * appDataIndex) serialized to JSON routinely exceeds the browser's ~5 MB
+ * localStorage quota — which was throwing
+ *   "Failed to execute 'setItem' on 'Storage': ... exceeded the quota".
+ * So the full parsed payload is written to a per-case JSON file in userData
+ * instead. (The renderer still keeps a tiny metadata-only index in
+ * localStorage for the badge counts / forensic-link pickers that read it
+ * synchronously.)
+ */
+function _datapilotStoreDir() {
+  const dir = path.join(app.getPath('userData'), 'datapilot-store');
+  try { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+  return dir;
+}
+function _datapilotStorePath(caseId) {
+  const safe = String(caseId == null ? '' : caseId).replace(/[^A-Za-z0-9_-]/g, '_') || 'unknown';
+  return path.join(_datapilotStoreDir(), `datapilot_${safe}.json`);
+}
+
+ipcMain.handle('datapilot-load-data', async (event, { caseId } = {}) => {
+  try {
+    const fp = _datapilotStorePath(caseId);
+    if (!fs.existsSync(fp)) return { success: true, data: null };
+    const raw = fs.readFileSync(fp, 'utf8');
+    return { success: true, data: raw };
+  } catch (error) {
+    console.error('Datapilot load-data error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('datapilot-save-data', async (event, { caseId, json } = {}) => {
+  try {
+    if (typeof json !== 'string') return { success: false, error: 'json must be a string' };
+    const fp = _datapilotStorePath(caseId);
+    const tmp = fp + '.tmp';
+    // Write to a temp file then rename so a crash mid-write can't corrupt the store.
+    fs.writeFileSync(tmp, json, 'utf8');
+    fs.renameSync(tmp, fp);
+    return { success: true, bytes: Buffer.byteLength(json, 'utf8') };
+  } catch (error) {
+    console.error('Datapilot save-data error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('datapilot-delete-data', async (event, { caseId } = {}) => {
+  try {
+    const fp = _datapilotStorePath(caseId);
+    if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    try { if (fs.existsSync(fp + '.tmp')) fs.unlinkSync(fp + '.tmp'); } catch (_) {}
+    return { success: true };
+  } catch (error) {
+    console.error('Datapilot delete-data error:', error);
     return { success: false, error: error.message };
   }
 });

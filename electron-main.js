@@ -2272,6 +2272,15 @@ if (autoUpdater) {
   autoUpdater.autoInstallOnAppQuit = false;  // user must click "Install & Restart"
   autoUpdater.allowDowngrade = false;
 
+  // Always pull the full signed installer in ONE request instead of the
+  // default blockmap-based differential download. Differential updates fire
+  // many HTTP range requests against the release-asset CDN; AV / Windows
+  // Defender / corporate proxies routinely reset those mid-stream while
+  // scanning a signed .exe, surfacing as net::ERR_CONNECTION_RESET and a
+  // failed update. A single full GET is far more robust for our ~130 MB
+  // installer, and the NSIS backup/restore still preserves userdata/cases.
+  autoUpdater.disableDifferentialDownload = true;
+
   // ─────────────────────────────────────────────────────────────────────
   // CRITICAL: let the app actually EXIT when an update is being applied.
   //

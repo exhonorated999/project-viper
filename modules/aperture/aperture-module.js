@@ -251,6 +251,38 @@ class ApertureModule {
     }
 
     /**
+     * ARIN / RDAP registration lookup — who owns the IP block.
+     * Returns { ...fields } on success or { error } on failure.
+     */
+    async arinLookup(ipAddress) {
+        try {
+            const result = await window.electronAPI.apertureArinLookup({ ipAddress });
+            return result.success ? result.arin : { error: (result && result.error) || 'Lookup failed' };
+        } catch (error) {
+            console.error('ARIN lookup error:', error);
+            return { error: error.message || 'Lookup failed' };
+        }
+    }
+
+    /**
+     * Persist analysis results (geo / ARIN) onto an email so they appear
+     * in the exported report. Updates in-memory copy + disk.
+     */
+    async persistEmailAnalysis(emailId, updates) {
+        const email = this.getEmail(emailId);
+        if (email) Object.assign(email, updates);
+        try {
+            await window.electronAPI.apertureUpdateEmail({
+                caseId: this.caseId,
+                emailId: emailId,
+                updates: updates
+            });
+        } catch (error) {
+            console.error('Error persisting email analysis:', error);
+        }
+    }
+
+    /**
      * Open attachment externally
      */
     async openAttachment(emailId, attachment) {

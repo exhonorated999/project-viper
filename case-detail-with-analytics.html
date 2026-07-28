@@ -19471,6 +19471,8 @@
                         ${person.weight ? `<p>Weight: ${person.weight} lbs</p>` : ''}
                         ${person.hairColor ? `<p>Hair: ${person.hairColor}</p>` : ''}
                         ${person.eyeColor ? `<p>Eyes: ${person.eyeColor}</p>` : ''}
+                        ${person.homeAddress ? `<p class="text-viper-cyan/90 truncate" title="${(person.homeAddress || '').replace(/"/g, '&quot;')}">🏠 ${person.homeAddress}</p>` : ''}
+                        ${person.knownAcquaintances && person.knownAcquaintances.length ? `<p>👥 ${person.knownAcquaintances.length} known acquaintance${person.knownAcquaintances.length > 1 ? 's' : ''}</p>` : ''}
                     </div>
                 </div>
             `;
@@ -19479,6 +19481,94 @@
         function viewMissingPersonDetail(index) {
             currentMissingPersonView = index;
             renderTabContent('missingpersons');
+        }
+
+        // --- Known Acquaintances (detail view) ---
+        function renderMpAcquaintanceCard(acq, personIndex, acqIdx) {
+            acq = acq || {};
+            return `
+                <div class="bg-viper-dark/50 p-3 rounded-lg border border-gray-700 hover:border-gray-600 transition flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <p class="text-white font-medium text-sm">${acq.name || 'Unnamed'}</p>
+                        ${acq.address ? `<p class="text-sm text-gray-300 mt-0.5">📍 ${acq.address}</p>` : ''}
+                        ${acq.phone ? `<p class="text-xs text-gray-400 mt-0.5">☎ ${acq.phone}</p>` : ''}
+                    </div>
+                    <div class="flex items-center gap-1 shrink-0">
+                        <button onclick="editMissingPersonAcquaintanceEntry(${personIndex}, ${acqIdx})"
+                                class="px-2 py-1 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded text-viper-purple text-xs transition" title="Edit">✏️</button>
+                        <button onclick="deleteMissingPersonAcquaintanceEntry(${personIndex}, ${acqIdx})"
+                                class="px-2 py-1 bg-red-500/20 hover:bg-red-500/30 border border-red-500 rounded text-red-500 text-xs transition" title="Delete">🗑️</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function addMissingPersonAcquaintance(personIndex) {
+            _mpAcquaintanceModal(personIndex, null);
+        }
+
+        function editMissingPersonAcquaintanceEntry(personIndex, acqIdx) {
+            _mpAcquaintanceModal(personIndex, acqIdx);
+        }
+
+        function _mpAcquaintanceModal(personIndex, acqIdx) {
+            const person = missingPersons[personIndex];
+            if (!person.knownAcquaintances) person.knownAcquaintances = [];
+            const editing = acqIdx != null;
+            const acq = editing ? (person.knownAcquaintances[acqIdx] || {}) : { name: '', address: '', phone: '' };
+            const esc = (v) => String(v == null ? '' : v).replace(/"/g, '&quot;');
+
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4';
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+            modal.innerHTML = `
+                <div class="glass-card rounded-xl p-6 max-w-lg w-full" onclick="event.stopPropagation()">
+                    <h3 class="text-2xl font-bold text-viper-orange mb-4">${editing ? 'Edit' : 'Add'} Acquaintance</h3>
+                    <form id="mpAcqForm" class="space-y-4">
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Name</label>
+                            <input type="text" id="mpAcqName" value="${esc(acq.name)}" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-orange focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Address</label>
+                            <input type="text" id="mpAcqAddress" value="${esc(acq.address)}" placeholder="Street, City, State" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-orange focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Phone</label>
+                            <input type="tel" id="mpAcqPhone" value="${esc(acq.phone)}" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-orange focus:outline-none">
+                        </div>
+                        <div class="flex gap-3 pt-4 border-t border-gray-700">
+                            <button type="button" onclick="this.closest('.fixed').remove()" class="flex-1 px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white transition">Cancel</button>
+                            <button type="submit" class="flex-1 px-4 py-2 bg-viper-orange hover:bg-viper-orange/80 rounded-lg text-white font-semibold transition">${editing ? 'Save Changes' : 'Add'}</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+            document.body.appendChild(modal);
+
+            document.getElementById('mpAcqForm').onsubmit = (e) => {
+                e.preventDefault();
+                const entry = {
+                    name: document.getElementById('mpAcqName').value.trim(),
+                    address: document.getElementById('mpAcqAddress').value.trim(),
+                    phone: document.getElementById('mpAcqPhone').value.trim()
+                };
+                if (!entry.name && !entry.address && !entry.phone) { modal.remove(); return; }
+                if (editing) person.knownAcquaintances[acqIdx] = entry;
+                else person.knownAcquaintances.push(entry);
+                saveMissingPersons();
+                modal.remove();
+                renderTabContent('missingpersons');
+            };
+        }
+
+        async function deleteMissingPersonAcquaintanceEntry(personIndex, acqIdx) {
+            if (await viperConfirm('Remove this acquaintance?', { danger: true, okText: 'Remove' })) {
+                const person = missingPersons[personIndex];
+                if (person.knownAcquaintances) person.knownAcquaintances.splice(acqIdx, 1);
+                saveMissingPersons();
+                renderTabContent('missingpersons');
+            }
         }
 
         function renderMissingPersonDetail(index) {
@@ -19577,7 +19667,7 @@
                                 <div class="space-y-4">
                                     ${renderEditableFieldMissing('Cell Phone', 'cellPhone', person.cellPhone, index)}
                                     ${renderEditableFieldMissing('Home Phone', 'homePhone', person.homePhone, index)}
-                                    ${renderEditableFieldMissing('Acquaintance Phone', 'acquaintancePhone', person.acquaintancePhone, index)}
+                                    ${renderEditableFieldMissing('Home Address', 'homeAddress', person.homeAddress, index, 'textarea')}
                                 </div>
                             </div>
 
@@ -19603,56 +19693,26 @@
                             </div>
                         </div>
 
-                        <!-- Location Information & Map -->
+                        <!-- Known Acquaintances -->
                         <div class="glass-card rounded-xl p-6">
                             <div class="flex items-center justify-between mb-4">
-                                <h3 class="text-xl font-bold text-viper-orange">Location Information & Map</h3>
-                                <button onclick="addMissingPersonLocation(${index})" 
+                                <h3 class="text-xl font-bold text-viper-orange">Known Acquaintances</h3>
+                                <button onclick="addMissingPersonAcquaintance(${index})"
                                         class="px-3 py-1.5 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan text-sm transition flex items-center gap-2">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
                                     </svg>
-                                    Add Location
+                                    Add
                                 </button>
                             </div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div>
-                                    <div class="space-y-3 mb-4" id="locationsList${index}">
-                                        ${person.locations && person.locations.length > 0 ? 
-                                            person.locations.map((loc, locIdx) => renderLocationCard(loc, index, locIdx)).join('') : 
-                                            '<p class="text-gray-400 text-sm">No locations added yet. Click "Add Location" to begin.</p>'
-                                        }
-                                    </div>
-                                    
-                                    <button onclick="geocodeAllMissingPersonLocations(${index})" 
-                                            class="w-full px-4 py-2 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green transition flex items-center justify-center gap-2">
-                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
-                                        </svg>
-                                        Plot All Locations on Map
-                                    </button>
-                                    
-                                    <div class="mt-4 p-3 bg-viper-dark/30 rounded-lg border border-gray-700">
-                                        <p class="text-xs text-gray-400">
-                                            <strong class="text-viper-cyan">Color Legend:</strong><br>
-                                            🔵 Home • 🟢 Family • 🟣 Friend • 🟠 Last Seen • 🔴 Work/School • ⚪ Other
-                                        </p>
-                                    </div>
-                                </div>
-                                <div>
-                                    <label class="text-sm text-gray-400 mb-2 block">Interactive Map</label>
-                                    <div id="missingPersonMap${index}" class="w-full h-[600px] bg-viper-dark rounded-lg border border-gray-700 relative">
-                                        <div id="mapLoading${index}" class="map-loading hidden">
-                                            <div class="flex items-center gap-3">
-                                                <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-viper-cyan"></div>
-                                                <span class="text-white">Geocoding addresses...</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <p class="text-xs text-gray-400 mt-2">Click "Locate" buttons to geocode and plot addresses on the map</p>
-                                </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3" id="acquaintancesList${index}">
+                                ${person.knownAcquaintances && person.knownAcquaintances.length > 0 ?
+                                    person.knownAcquaintances.map((acq, acqIdx) => renderMpAcquaintanceCard(acq, index, acqIdx)).join('') :
+                                    '<p class="text-gray-400 text-sm">No acquaintances added yet. Click "Add" to begin.</p>'
+                                }
                             </div>
                         </div>
+
                     </div>
                 </div>
             `;
@@ -20110,12 +20170,60 @@
         
         async function geocodeAllMissingPersonLocations(personIndex) {
             const person = missingPersons[personIndex];
-            
-            if (!person.locations || person.locations.length === 0) {
-                viperToast('No locations to plot. Click "Add Location" to begin.', 'info');
+
+            // Merge the manually-added map locations with the addresses captured on
+            // the intake form (home address + each known acquaintance) so the
+            // "Plot All" button reflects everything the user entered. Manual coords
+            // on person.locations are preserved; the synthesized entries are geocoded.
+            const allLocations = [];
+            // Location of Occurrence from the case file = where the incident occurred
+            // (effectively the "last seen" point for a missing person). Plot it in orange.
+            try {
+                const loc = currentCase && currentCase.locationOfOccurrence ? String(currentCase.locationOfOccurrence).trim() : '';
+                if (loc) {
+                    allLocations.push({
+                        type: 'lastseen',
+                        label: 'Location of Occurrence',
+                        address: loc,
+                        latitude: null,
+                        longitude: null,
+                        notes: currentCase && currentCase.caseNumber ? `Case ${currentCase.caseNumber}` : ''
+                    });
+                }
+            } catch (_) {}
+            if (person.homeAddress && String(person.homeAddress).trim()) {
+                allLocations.push({
+                    type: 'home',
+                    label: person.name ? `${person.name} (Home)` : 'Home',
+                    address: String(person.homeAddress).trim(),
+                    latitude: null,
+                    longitude: null,
+                    notes: ''
+                });
+            }
+            if (Array.isArray(person.knownAcquaintances)) {
+                person.knownAcquaintances.forEach(acq => {
+                    if (acq && acq.address && String(acq.address).trim()) {
+                        allLocations.push({
+                            type: 'friend',
+                            label: acq.name || 'Acquaintance',
+                            address: String(acq.address).trim(),
+                            latitude: null,
+                            longitude: null,
+                            notes: acq.phone ? `☎ ${acq.phone}` : ''
+                        });
+                    }
+                });
+            }
+            if (Array.isArray(person.locations)) {
+                person.locations.forEach(l => { if (l) allLocations.push(l); });
+            }
+
+            if (allLocations.length === 0) {
+                viperToast('No addresses to plot. Add a Home Address, acquaintances, or a location first.', 'info');
                 return;
             }
-            
+
             const loadingId = `mapLoading${personIndex}`;
             const loading = document.getElementById(loadingId);
             
@@ -20132,14 +20240,14 @@
             const failedAddrs = [];
             // Count remaining geocode lookups (excluding ones with manual coords).
             let needsGeocodeCount = 0;
-            for (const lc of person.locations) {
+            for (const lc of allLocations) {
                 if (!lc) continue;
                 const hasManual = lc.latitude && lc.longitude && !isNaN(parseFloat(lc.latitude)) && !isNaN(parseFloat(lc.longitude));
                 if (!hasManual && lc.address) needsGeocodeCount++;
             }
 
             // Process all locations
-            for (const loc of person.locations) {
+            for (const loc of allLocations) {
                 let lat, lon, display_name;
                 
                 // Use manual coordinates if provided, otherwise geocode
@@ -20215,7 +20323,7 @@
                 map.setView([locations[0].lat, locations[0].lon], 15);
             }
             
-            viperToast(`Successfully plotted ${locations.length} out of ${person.locations.length} locations on the map`, 'success');
+            viperToast(`Successfully plotted ${locations.length} out of ${allLocations.length} locations on the map`, 'success');
         }
         
         // Legacy function for backward compatibility with old data
@@ -20389,19 +20497,25 @@
 
                             <!-- Location Information -->
                             <div class="glass-card rounded-lg p-4">
-                                <h4 class="text-lg font-bold text-viper-orange mb-4">Location Information</h4>
+                                <h4 class="text-lg font-bold text-viper-orange mb-4">Location & Associates</h4>
                                 <div class="space-y-4">
                                     <div>
                                         <label class="block text-sm text-gray-400 mb-2">Home Address</label>
-                                        <textarea id="mp_homeAddress" rows="2" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-orange focus:outline-none"></textarea>
+                                        <textarea id="mp_homeAddress" rows="2" placeholder="Street, City, State, ZIP" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-orange focus:outline-none"></textarea>
                                     </div>
                                     <div>
-                                        <label class="block text-sm text-gray-400 mb-2">Known Acquaintances (JSON format: [{"name": "John Doe", "address": "123 Main St"}])</label>
-                                        <textarea id="mp_knownAcquaintances" rows="3" placeholder='[{"name": "Name", "address": "Address"}]' class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-orange focus:outline-none font-mono text-sm"></textarea>
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm text-gray-400 mb-2">Previous Locations (JSON format: [{"address": "Location", "date": "2024-01-01"}])</label>
-                                        <textarea id="mp_previousLocations" rows="3" placeholder='[{"address": "Address", "date": "YYYY-MM-DD"}]' class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-orange focus:outline-none font-mono text-sm"></textarea>
+                                        <div class="flex items-center justify-between mb-2">
+                                            <label class="block text-sm text-gray-400">Known Acquaintances</label>
+                                            <button type="button" onclick="addAcquaintanceRow('mp_acquaintancesList')" class="px-3 py-1 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan text-sm font-semibold transition">+ Add Acquaintance</button>
+                                        </div>
+                                        <div class="hidden md:grid md:grid-cols-12 gap-2 px-1 mb-1">
+                                            <span class="md:col-span-3 text-xs text-gray-500">Name</span>
+                                            <span class="md:col-span-5 text-xs text-gray-500">Address</span>
+                                            <span class="md:col-span-3 text-xs text-gray-500">Phone</span>
+                                            <span class="md:col-span-1"></span>
+                                        </div>
+                                        <div id="mp_acquaintancesList"></div>
+                                        <p class="text-xs text-gray-500 mt-1">Enter each associate's name, address and phone. Use "+ Add Acquaintance" to add more.</p>
                                     </div>
                                 </div>
                             </div>
@@ -20453,6 +20567,9 @@
             
             document.body.insertAdjacentHTML('beforeend', modalHTML);
 
+            // Seed one blank acquaintance row so the structured builder is ready to fill.
+            try { addAcquaintanceRow('mp_acquaintancesList'); } catch (_) {}
+
             // A-4: live duplicate-person hints (Missing Person uses mp_name / mp_dob)
             try {
                 const modalEl = document.getElementById('missingPersonModal');
@@ -20494,26 +20611,42 @@
             }
         }
 
+        // --- Structured acquaintance builder (replaces old JSON textareas) ---
+        // Appends one Name / Address / Phone row to the given container. Optionally
+        // pre-fills from a {name, address, phone} object.
+        function addAcquaintanceRow(containerId, data) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            data = data || {};
+            const esc = (v) => String(v == null ? '' : v).replace(/"/g, '&quot;');
+            const row = document.createElement('div');
+            row.className = 'mp-acq-row grid grid-cols-1 md:grid-cols-12 gap-2 items-center mb-2';
+            row.innerHTML = `
+                <input type="text" class="mp-acq-name md:col-span-3 px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-orange focus:outline-none" placeholder="Name" value="${esc(data.name)}">
+                <input type="text" class="mp-acq-address md:col-span-5 px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-orange focus:outline-none" placeholder="Address" value="${esc(data.address)}">
+                <input type="tel" class="mp-acq-phone md:col-span-3 px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-orange focus:outline-none" placeholder="Phone" value="${esc(data.phone)}">
+                <button type="button" onclick="this.closest('.mp-acq-row').remove()" class="md:col-span-1 px-2 py-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500 rounded-lg text-red-400 transition" title="Remove">✕</button>
+            `;
+            container.appendChild(row);
+        }
+
+        // Reads all acquaintance rows from a container into an array of
+        // {name, address, phone}, skipping rows that are completely empty.
+        function collectAcquaintances(containerId) {
+            const container = document.getElementById(containerId);
+            if (!container) return [];
+            const out = [];
+            container.querySelectorAll('.mp-acq-row').forEach(r => {
+                const name = (r.querySelector('.mp-acq-name')?.value || '').trim();
+                const address = (r.querySelector('.mp-acq-address')?.value || '').trim();
+                const phone = (r.querySelector('.mp-acq-phone')?.value || '').trim();
+                if (name || address || phone) out.push({ name, address, phone });
+            });
+            return out;
+        }
+
         function saveMissingPersonForm(event) {
             event.preventDefault();
-            
-            // Parse JSON fields
-            let knownAcquaintances = [];
-            let previousLocations = [];
-            
-            try {
-                const acqValue = document.getElementById('mp_knownAcquaintances').value.trim();
-                if (acqValue) knownAcquaintances = JSON.parse(acqValue);
-            } catch (e) {
-                console.error('Invalid JSON for acquaintances');
-            }
-            
-            try {
-                const locValue = document.getElementById('mp_previousLocations').value.trim();
-                if (locValue) previousLocations = JSON.parse(locValue);
-            } catch (e) {
-                console.error('Invalid JSON for previous locations');
-            }
 
             // Get photo
             let photo = null;
@@ -20552,18 +20685,8 @@
                     };
                 }
 
-                let knownAcquaintances = [];
+                let knownAcquaintances = collectAcquaintances('mp_acquaintancesList');
                 let previousLocations = [];
-                
-                try {
-                    const acqValue = document.getElementById('mp_knownAcquaintances').value.trim();
-                    if (acqValue) knownAcquaintances = JSON.parse(acqValue);
-                } catch (e) {}
-                
-                try {
-                    const locValue = document.getElementById('mp_previousLocations').value.trim();
-                    if (locValue) previousLocations = JSON.parse(locValue);
-                } catch (e) {}
 
                 const newPerson = {
                     id: Date.now(),
@@ -20637,6 +20760,8 @@
             person.cellPhone = document.getElementById(`field-missing-cellPhone-${index}`)?.value || '';
             person.homePhone = document.getElementById(`field-missing-homePhone-${index}`)?.value || '';
             person.acquaintancePhone = document.getElementById(`field-missing-acquaintancePhone-${index}`)?.value || '';
+            const _homeAddrEl = document.getElementById(`field-missing-homeAddress-${index}`);
+            if (_homeAddrEl) person.homeAddress = _homeAddrEl.value;
             
             // Check for photo updates
             const photoImg = document.getElementById(`missing-photo-${index}`);
@@ -21086,9 +21211,10 @@
                         
                         <div>
                             <label class="block text-sm text-gray-400 mb-2">Last Seen Location</label>
-                            <input type="text" id="last_seen_location" value="${person.lastSeenLocation || ''}" 
+                            <input type="text" id="last_seen_location" value="${String(person.lastSeenLocation || (currentCase && currentCase.locationOfOccurrence) || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}" 
                                    placeholder="e.g., 123 Main St, City, State" 
                                    class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-orange focus:outline-none">
+                            <p class="text-xs text-gray-500 mt-1">Auto-filled from the case Location of Occurrence — edit if the last-seen spot differs.</p>
                         </div>
                         
                         <div>

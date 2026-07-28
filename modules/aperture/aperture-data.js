@@ -466,8 +466,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .notes h4 { color: #ffa726; margin: 0 0 8px; font-size: 0.85em; }
 .note-item { background: #1a233288; padding: 8px 12px; border-radius: 6px; margin-bottom: 6px; font-size: 0.85em; }
 .note-item .ts { color: #6b7280; font-size: 0.8em; }
+.hdr-analysis { padding: 12px 16px; border-top: 1px solid #ffffff10; background: #0d131c; }
+.hdr-analysis h4 { color: #00d9ff; margin: 0 0 8px; font-size: 0.85em; }
+.hdr-analysis .hdr-sub { color: #9ca3af; font-size: 0.78em; text-transform: uppercase; letter-spacing: .04em; margin: 10px 0 4px; }
+.hdr-warn { background: #ffa72618; border: 1px solid #ffa72655; border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; font-size: 0.82em; color: #ffcc80; }
+.hdr-warn ul { margin: 4px 0 0; padding-left: 18px; }
+.hdr-tbl { width: 100%; border-collapse: collapse; font-size: 0.82em; }
+.hdr-tbl th { text-align: left; color: #6b7280; font-weight: 500; padding: 2px 12px 2px 0; white-space: nowrap; vertical-align: top; width: 130px; }
+.hdr-tbl td { color: #e5e7eb; padding: 2px 0; }
+.hdr-hops { margin: 4px 0 0; padding-left: 18px; font-size: 0.82em; color: #cbd5e1; }
+.hdr-hops li { margin-bottom: 4px; }
+.hdr-hops .hop-when { color: #6b7280; font-size: 0.92em; }
 .footer { text-align: center; padding: 20px; color: #6b7280; font-size: 0.8em; border-top: 1px solid #ffffff10; margin-top: 30px; }
-@media print { body { background: #fff; color: #1a1a1a; } .email-card { border: 1px solid #ccc; } .header h1 { color: #0077b6; } }
+@media print { body { background: #fff; color: #1a1a1a; } .email-card { border: 1px solid #ccc; } .header h1 { color: #0077b6; } .hdr-analysis { background: #f5f7fa; } .hdr-tbl td, .hdr-hops { color: #1a1a1a; } }
 </style></head><body>
 <div class="header">
 <h1>🔍 APERTURE — Email Analysis Report</h1>
@@ -492,6 +503,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 ${email.originating_ip ? `<span>IP: <span class="cyan">${email.originating_ip.ip_address}</span> (${email.originating_ip.classification})</span>` : ''}
 </div>
 </div>
+${this._repHeaderAnalysis(email)}
 <div class="email-body">${email.body_html || (email.body_text || '').replace(/\n/g, '<br>') || '<em>No content</em>'}</div>`;
             
             if (emailNotes.length > 0) {
@@ -514,6 +526,138 @@ ${email.originating_ip ? `<span>IP: <span class="cyan">${email.originating_ip.ip
     _esc(str) {
         if (!str) return '';
         return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // ── Report header-analysis helpers (server-side, no DOM) ──
+    _repHdr(email, name) {
+        if (!email || !Array.isArray(email.headers)) return '';
+        const lc = name.toLowerCase();
+        const h = email.headers.find(x => (x.key || '').toLowerCase() === lc);
+        return h ? String(h.value || '') : '';
+    }
+
+    _repHdrAll(email, name) {
+        if (!email || !Array.isArray(email.headers)) return [];
+        const lc = name.toLowerCase();
+        return email.headers.filter(x => (x.key || '').toLowerCase() === lc).map(x => String(x.value || ''));
+    }
+
+    _repAuth(email) {
+        const blob = [
+            this._repHdr(email, 'authentication-results'),
+            this._repHdr(email, 'arc-authentication-results'),
+            this._repHdr(email, 'received-spf')
+        ].join(' ; ').toLowerCase();
+        const pick = (re) => { const m = blob.match(re); return m ? m[1] : ''; };
+        return { spf: pick(/spf=(\w+)/), dkim: pick(/dkim=(\w+)/), dmarc: pick(/dmarc=(\w+)/) };
+    }
+
+    _repSplitAddr(s) {
+        s = String(s || '').trim();
+        const m = s.match(/^(.*?)<([^>]+)>\s*$/);
+        if (m) return { name: m[1].replace(/["']/g, '').trim(), addr: m[2].trim() };
+        return { name: '', addr: s };
+    }
+
+    _repReceivedChain(email) {
+        const raw = this._repHdrAll(email, 'received');
+        if (!raw.length) return [];
+        return raw.slice().reverse().map((line) => {
+            const from = (line.match(/from\s+([^\s;()]+)/i) || [])[1] || '';
+            const by = (line.match(/\bby\s+([^\s;()]+)/i) || [])[1] || '';
+            const ipm = line.match(/\[?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]?/);
+            const ip = ipm ? ipm[1] : '';
+            const datem = line.match(/;\s*(.+)$/);
+            let when = '';
+            if (datem) { const d = new Date(datem[1].trim()); when = isNaN(d) ? datem[1].trim() : d.toLocaleString(); }
+            return { from, by, ip, when };
+        });
+    }
+
+    _repAuthRow(kind, result) {
+        if (!result) return '';
+        const r = result.toLowerCase();
+        const color = (r === 'pass') ? '#22c55e' : (['fail', 'softfail', 'permerror', 'temperror'].includes(r) ? '#ef4444' : '#9ca3af');
+        const labels = {
+            spf: { pass: 'The sending server is authorized to send mail for this domain.', fail: 'WARNING: sending server is NOT authorized — possible spoofing.', softfail: 'Caution: sending server is probably not authorized.', default: 'Could not verify the sending server against the domain.' },
+            dkim: { pass: 'Valid signature — content was not altered in transit.', fail: 'WARNING: invalid signature — content may be altered or forged.', default: 'No valid cryptographic signature was verified.' },
+            dmarc: { pass: 'Passed the domain anti-spoofing policy.', fail: 'WARNING: failed the domain anti-spoofing policy.', default: 'Domain anti-spoofing policy was not evaluated.' }
+        };
+        const set = labels[kind] || {};
+        const plain = set[r] || set.default || '';
+        return `<tr><td style="padding:2px 8px;white-space:nowrap"><span style="color:${color};font-weight:700;text-transform:uppercase">${kind.toUpperCase()} ${this._esc(result)}</span></td><td style="padding:2px 8px;color:#cbd5e1">${this._esc(plain)}</td></tr>`;
+    }
+
+    _repHeaderAnalysis(email) {
+        const from = this._repSplitAddr(email.from);
+        const returnPath = this._repSplitAddr(this._repHdr(email, 'return-path'));
+        const replyTo = this._repSplitAddr(this._repHdr(email, 'reply-to'));
+        const mailer = this._repHdr(email, 'x-mailer') || this._repHdr(email, 'user-agent');
+        const auth = this._repAuth(email);
+        const hops = this._repReceivedChain(email);
+        const ip = email.originating_ip;
+        const geo = email.geo_info;
+        const arin = email.arin_info;
+
+        const warnings = [];
+        if (replyTo.addr && from.addr && replyTo.addr.toLowerCase() !== from.addr.toLowerCase())
+            warnings.push(`Replies would go to a different address (${this._esc(replyTo.addr)}) than the sender shown (${this._esc(from.addr)}). Common in phishing.`);
+        if (returnPath.addr && from.addr && returnPath.addr.toLowerCase() !== from.addr.toLowerCase())
+            warnings.push(`The technical return address (${this._esc(returnPath.addr)}) does not match the sender shown (${this._esc(from.addr)}).`);
+        if ((auth.spf && auth.spf.toLowerCase() !== 'pass') || (auth.dkim && auth.dkim.toLowerCase() === 'fail') || (auth.dmarc && auth.dmarc.toLowerCase() === 'fail'))
+            warnings.push('One or more sender-authentication checks did not pass — the sender may be forged.');
+
+        const authRows = [this._repAuthRow('spf', auth.spf), this._repAuthRow('dkim', auth.dkim), this._repAuthRow('dmarc', auth.dmarc)].join('');
+
+        let out = `<div class="hdr-analysis"><h4>🔎 Header Analysis</h4>`;
+
+        if (warnings.length) {
+            out += `<div class="hdr-warn"><strong>⚠️ Things to check</strong><ul>${warnings.map(w => `<li>${w}</li>`).join('')}</ul></div>`;
+        }
+
+        out += `<table class="hdr-tbl">`;
+        if (from.name) out += `<tr><th>Display name</th><td>${this._esc(from.name)}</td></tr>`;
+        if (from.addr) out += `<tr><th>Email address</th><td>${this._esc(from.addr)}</td></tr>`;
+        if (replyTo.addr) out += `<tr><th>Replies go to</th><td>${this._esc(replyTo.addr)}</td></tr>`;
+        if (returnPath.addr) out += `<tr><th>Return path</th><td>${this._esc(returnPath.addr)}</td></tr>`;
+        if (mailer) out += `<tr><th>Sent using</th><td>${this._esc(mailer)}</td></tr>`;
+        if (ip && ip.ip_address) out += `<tr><th>Sender IP</th><td><span class="cyan">${this._esc(ip.ip_address)}</span> (${this._esc((ip.classification || '').replace(/_/g, ' '))})</td></tr>`;
+        out += `</table>`;
+
+        if (authRows) out += `<div class="hdr-sub">Sender authentication</div><table class="hdr-tbl">${authRows}</table>`;
+
+        if (geo && !geo.error) {
+            const loc = [geo.city, geo.region, geo.country].filter(Boolean).join(', ');
+            out += `<div class="hdr-sub">Geolocation (approx.)</div><table class="hdr-tbl">`;
+            if (loc) out += `<tr><th>Location</th><td>${this._esc(loc)}</td></tr>`;
+            if (geo.isp) out += `<tr><th>ISP</th><td>${this._esc(geo.isp)}</td></tr>`;
+            if (geo.org) out += `<tr><th>Org</th><td>${this._esc(geo.org)}</td></tr>`;
+            if (geo.asn) out += `<tr><th>ASN</th><td>${this._esc(geo.asn)}</td></tr>`;
+            out += `</table>`;
+        }
+
+        if (arin && !arin.error) {
+            out += `<div class="hdr-sub">🏛️ IP Block Ownership (Registry)</div><table class="hdr-tbl">`;
+            if (arin.orgName) out += `<tr><th>Owner / Org</th><td>${this._esc(arin.orgName)}</td></tr>`;
+            if (arin.orgAddress) out += `<tr><th>Address</th><td>${this._esc(arin.orgAddress)}</td></tr>`;
+            if (arin.netName) out += `<tr><th>Network name</th><td>${this._esc(arin.netName)}</td></tr>`;
+            if (arin.cidr) out += `<tr><th>IP block</th><td>${this._esc(arin.cidr)}</td></tr>`;
+            if (arin.abuseEmail) out += `<tr><th>Abuse contact</th><td>${this._esc(arin.abuseEmail)}</td></tr>`;
+            if (arin.registered) out += `<tr><th>Registered</th><td>${this._esc(new Date(arin.registered).toLocaleDateString())}</td></tr>`;
+            if (arin.registry) out += `<tr><th>Registry</th><td>${this._esc(arin.registry)}</td></tr>`;
+            out += `</table>`;
+        }
+
+        if (hops.length) {
+            out += `<div class="hdr-sub">Delivery path — ${hops.length} hop${hops.length === 1 ? '' : 's'} (oldest first)</div><ol class="hdr-hops">`;
+            hops.forEach((h) => {
+                out += `<li>${h.from ? `from ${this._esc(h.from)}` : '(origin)'}${h.ip ? ` <span class="cyan">[${this._esc(h.ip)}]</span>` : ''}${h.by ? ` → received by ${this._esc(h.by)}` : ''}${h.when ? `<div class="hop-when">${this._esc(h.when)}</div>` : ''}</li>`;
+            });
+            out += `</ol>`;
+        }
+
+        out += `</div>`;
+        return out;
     }
 
     /**

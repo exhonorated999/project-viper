@@ -354,6 +354,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Aperture: IP lookup
   apertureLookupIp: (data) => ipcRenderer.invoke('aperture-lookup-ip', data),
+  apertureArinLookup: (data) => ipcRenderer.invoke('aperture-arin-lookup', data),
 
   // Aperture: attachments
   apertureOpenAttachment: (data) => ipcRenderer.invoke('aperture-open-attachment', data),

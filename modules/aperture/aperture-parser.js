@@ -144,46 +144,52 @@ class ApertureParser {
     static extractOriginatingIp(headers) {
         if (!headers) return null;
 
-        // Look for Received headers
+        // Collect Received headers (stored newest-first as they appear top-to-bottom)
         const receivedHeaders = [];
         for (const [key, value] of headers) {
             if (key.toLowerCase() === 'received') {
-                receivedHeaders.push(value);
+                if (Array.isArray(value)) value.forEach(v => receivedHeaders.push(String(v)));
+                else receivedHeaders.push(String(value));
             }
         }
 
         if (receivedHeaders.length === 0) return null;
 
-        // Get the first (oldest) Received header - usually the originating server
-        const firstReceived = Array.isArray(receivedHeaders[0]) 
-            ? receivedHeaders[0][0] 
-            : receivedHeaders[0];
-
-        // Extract IP address using regex
-        // Matches IPv4 addresses in brackets or after 'from'
-        const ipv4Regex = /\[?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]?/;
-        const match = String(firstReceived).match(ipv4Regex);
-
-        if (match && match[1]) {
-            // Basic validation - check it's not a private IP
-            const ip = match[1];
-            const parts = ip.split('.').map(Number);
-            
-            // Skip localhost and private IPs for external lookups
-            const isPrivate = (
-                parts[0] === 10 ||
-                parts[0] === 127 ||
-                (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
-                (parts[0] === 192 && parts[1] === 168)
+        const isPrivateIp = (ip) => {
+            const p = ip.split('.').map(Number);
+            return (
+                p[0] === 10 ||
+                p[0] === 127 ||
+                p[0] === 0 ||
+                p[0] === 169 && p[1] === 254 ||
+                (p[0] === 172 && p[1] >= 16 && p[1] <= 31) ||
+                (p[0] === 192 && p[1] === 168) ||
+                (p[0] === 100 && p[1] >= 64 && p[1] <= 127) // CGNAT
             );
+        };
+        const ipv4Global = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/g;
 
-            return {
-                ip_address: ip,
-                classification: isPrivate ? 'private' : 'public',
-                confidence: isPrivate ? 1.0 : 0.7
-            };
+        // Walk from the OLDEST hop (bottom of the chain) upward — the
+        // originating server is at the end of the Received chain. Return the
+        // first PUBLIC IPv4 we encounter; remember any private one as a fallback.
+        let privateFallback = null;
+        for (let i = receivedHeaders.length - 1; i >= 0; i--) {
+            const line = receivedHeaders[i];
+            const matches = line.match(ipv4Global) || [];
+            for (const ip of matches) {
+                const parts = ip.split('.').map(Number);
+                if (parts.some(n => n > 255)) continue; // invalid octet
+                if (isPrivateIp(ip)) {
+                    if (!privateFallback) privateFallback = ip;
+                } else {
+                    return { ip_address: ip, classification: 'public', confidence: 0.8 };
+                }
+            }
         }
 
+        if (privateFallback) {
+            return { ip_address: privateFallback, classification: 'private', confidence: 1.0 };
+        }
         return null;
     }
 

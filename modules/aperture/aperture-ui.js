@@ -355,9 +355,12 @@ class ApertureUI {
                     <div class="flex"><span class="text-gray-500 w-16 font-medium">Date:</span><span class="text-white">${dateStr}</span></div>
                 </div>
 
-                <!-- Headers toggle -->
-                <button onclick="apertureUI.toggleHeaders()" class="text-xs text-viper-cyan hover:text-viper-green mb-3 inline-block">
-                    ${this.showHeaders ? '▼ Hide Headers' : '▶ Show Full Headers'}
+                <!-- Plain-English header analysis -->
+                ${this.renderHeaderSummary(email)}
+
+                <!-- Raw headers toggle (technical) -->
+                <button onclick="apertureUI.toggleHeaders()" class="text-xs text-gray-500 hover:text-viper-cyan mt-3 mb-3 inline-block">
+                    ${this.showHeaders ? '▼ Hide raw headers' : '▶ Show raw headers (technical)'}
                 </button>
                 ${this.showHeaders && email.headers ? `
                 <div class="mb-4 bg-viper-dark p-3 rounded-lg text-xs font-mono overflow-x-auto max-h-60 overflow-y-auto">
@@ -365,7 +368,7 @@ class ApertureUI {
                 </div>` : ''}
 
                 <!-- IP Analysis -->
-                ${email.originating_ip ? this.renderIpSection(email.originating_ip) : ''}
+                ${(() => { const ip = email.originating_ip || this._deriveOriginatingIp(email); return ip ? this.renderIpSection(ip) : ''; })()}
 
                 <!-- Attachments -->
                 ${email.attachments && email.attachments.length > 0 ? this.renderAttachments(email) : ''}
@@ -379,6 +382,220 @@ class ApertureUI {
                             : `<div class="p-4 bg-viper-dark text-gray-300 prose prose-invert max-w-none">${this.textToHtml(email.body_text)}</div>`
                         }
                     </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /* ═══════════════════════════════════════════════════
+       HEADER SUMMARY (plain-English)
+    ═══════════════════════════════════════════════════ */
+
+    // Case-insensitive single-header lookup from email.headers [{key,value}]
+    _hdr(email, name) {
+        if (!email || !Array.isArray(email.headers)) return '';
+        const lc = name.toLowerCase();
+        const h = email.headers.find(x => (x.key || '').toLowerCase() === lc);
+        return h ? String(h.value || '') : '';
+    }
+
+    _hdrAll(email, name) {
+        if (!email || !Array.isArray(email.headers)) return [];
+        const lc = name.toLowerCase();
+        return email.headers.filter(x => (x.key || '').toLowerCase() === lc).map(x => String(x.value || ''));
+    }
+
+    // Parse SPF/DKIM/DMARC results into {result, plain}
+    _authResults(email) {
+        const blob = [
+            this._hdr(email, 'authentication-results'),
+            this._hdr(email, 'arc-authentication-results'),
+            this._hdr(email, 'received-spf')
+        ].join(' ; ').toLowerCase();
+
+        const pick = (re) => { const m = blob.match(re); return m ? m[1] : ''; };
+        const out = {};
+        out.spf = pick(/spf=(\w+)/) || (/received-spf:?\s*(\w+)/.test(blob) ? RegExp.$1 : '');
+        out.dkim = pick(/dkim=(\w+)/);
+        out.dmarc = pick(/dmarc=(\w+)/);
+        return out;
+    }
+
+    _authBadge(kind, result) {
+        if (!result) return '';
+        const r = result.toLowerCase();
+        let color, plain;
+        if (r === 'pass') {
+            color = 'bg-green-500/20 text-green-400 border-green-500/40';
+        } else if (r === 'fail' || r === 'softfail' || r === 'permerror' || r === 'temperror') {
+            color = 'bg-red-500/20 text-red-400 border-red-500/40';
+        } else {
+            color = 'bg-gray-500/20 text-gray-300 border-gray-500/40';
+        }
+        const labels = {
+            spf: { pass: 'The sending server is authorized to send mail for this domain.',
+                   fail: 'WARNING: sending server is NOT authorized for this domain — possible spoofing.',
+                   softfail: 'Caution: sending server is probably not authorized for this domain.',
+                   default: 'Could not verify the sending server against the domain.' },
+            dkim: { pass: 'The message carries a valid signature — content was not altered in transit.',
+                    fail: 'WARNING: the message signature is invalid — content may have been altered or forged.',
+                    default: 'No valid cryptographic signature was verified.' },
+            dmarc: { pass: 'The domain\'s anti-spoofing policy passed.',
+                     fail: 'WARNING: failed the domain\'s anti-spoofing policy — treat sender with suspicion.',
+                     default: 'Domain anti-spoofing policy was not evaluated.' }
+        };
+        const set = labels[kind] || {};
+        plain = set[r] || set.default || '';
+        const name = kind.toUpperCase();
+        return `
+            <div class="flex items-start gap-2 mb-1.5">
+                <span class="text-[10px] px-1.5 py-0.5 rounded border ${color} font-semibold uppercase flex-shrink-0 mt-0.5">${name} ${this.esc(result)}</span>
+                <span class="text-xs text-gray-300">${this.esc(plain)}</span>
+            </div>
+        `;
+    }
+
+    // Split "Name <addr@x>" into {name, addr}
+    _splitAddr(s) {
+        s = String(s || '').trim();
+        const m = s.match(/^(.*?)<([^>]+)>\s*$/);
+        if (m) return { name: m[1].replace(/["']/g, '').trim(), addr: m[2].trim() };
+        return { name: '', addr: s };
+    }
+
+    // Build a simplified Received hop chain (oldest → newest)
+    _receivedChain(email) {
+        const raw = this._hdrAll(email, 'received');
+        if (!raw.length) return [];
+        // Received headers are stored newest-first; reverse to chronological.
+        const hops = raw.slice().reverse().map((line) => {
+            const from = (line.match(/from\s+([^\s;()]+)/i) || [])[1] || '';
+            const by = (line.match(/\bby\s+([^\s;()]+)/i) || [])[1] || '';
+            const ipm = line.match(/\[?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]?/);
+            const ip = ipm ? ipm[1] : '';
+            const datem = line.match(/;\s*(.+)$/);
+            let when = '';
+            if (datem) { const d = new Date(datem[1].trim()); when = isNaN(d) ? datem[1].trim() : d.toLocaleString(); }
+            return { from, by, ip, when };
+        });
+        return hops;
+    }
+
+    // Derive an originating IP from the Received chain when the parser
+    // didn't set one (e.g. emails imported before the extractor was improved).
+    _deriveOriginatingIp(email) {
+        const isPrivate = (ip) => {
+            const p = ip.split('.').map(Number);
+            return (p[0] === 10 || p[0] === 127 || p[0] === 0 ||
+                (p[0] === 169 && p[1] === 254) ||
+                (p[0] === 172 && p[1] >= 16 && p[1] <= 31) ||
+                (p[0] === 192 && p[1] === 168) ||
+                (p[0] === 100 && p[1] >= 64 && p[1] <= 127));
+        };
+        const hops = this._receivedChain(email); // oldest → newest
+        let privateFallback = null;
+        for (const h of hops) {
+            if (!h.ip) continue;
+            if (h.ip.split('.').some(n => Number(n) > 255)) continue;
+            if (isPrivate(h.ip)) { if (!privateFallback) privateFallback = h.ip; }
+            else return { ip_address: h.ip, classification: 'public', confidence: 0.7 };
+        }
+        if (privateFallback) return { ip_address: privateFallback, classification: 'private', confidence: 1.0 };
+        return null;
+    }
+
+    renderHeaderSummary(email) {
+        const from = this._splitAddr(email.from);
+        const returnPath = this._splitAddr(this._hdr(email, 'return-path'));
+        const replyTo = this._splitAddr(this._hdr(email, 'reply-to'));
+        const mailer = this._hdr(email, 'x-mailer') || this._hdr(email, 'user-agent');
+        const auth = this._authResults(email);
+        const hops = this._receivedChain(email);
+        const ip = email.originating_ip || this._deriveOriginatingIp(email);
+
+        // Mismatch warnings a non-technical user can act on
+        const warnings = [];
+        if (replyTo.addr && from.addr && replyTo.addr.toLowerCase() !== from.addr.toLowerCase()) {
+            warnings.push(`Replies would go to a <strong>different address</strong> (${this.esc(replyTo.addr)}) than the sender shown (${this.esc(from.addr)}). Common in phishing.`);
+        }
+        if (returnPath.addr && from.addr && returnPath.addr.toLowerCase() !== from.addr.toLowerCase()) {
+            warnings.push(`The technical return address (${this.esc(returnPath.addr)}) does not match the sender shown (${this.esc(from.addr)}).`);
+        }
+        if ((auth.spf && auth.spf.toLowerCase() !== 'pass') || (auth.dkim && auth.dkim.toLowerCase() === 'fail') || (auth.dmarc && auth.dmarc.toLowerCase() === 'fail')) {
+            warnings.push(`One or more sender-authentication checks did not pass — the sender may be forged.`);
+        }
+
+        const authBadges = [
+            this._authBadge('spf', auth.spf),
+            this._authBadge('dkim', auth.dkim),
+            this._authBadge('dmarc', auth.dmarc)
+        ].join('');
+
+        return `
+            <div class="mb-4 rounded-lg border border-viper-cyan/20 bg-viper-dark/60 overflow-hidden">
+                <div class="px-3 py-2 bg-viper-cyan/10 border-b border-viper-cyan/20 flex items-center gap-2">
+                    <span class="text-viper-cyan text-xs font-semibold uppercase tracking-wide">🔎 Header Analysis</span>
+                    <span class="text-[10px] text-gray-500">Plain-English breakdown of the technical email header</span>
+                </div>
+
+                <div class="p-3 space-y-3">
+                    ${warnings.length ? `
+                    <div class="rounded-md border border-orange-500/40 bg-orange-500/10 p-2.5">
+                        <div class="text-xs font-semibold text-orange-400 mb-1">⚠️ Things to check</div>
+                        <ul class="list-disc list-inside space-y-1 text-xs text-orange-200">
+                            ${warnings.map(w => `<li>${w}</li>`).join('')}
+                        </ul>
+                    </div>` : ''}
+
+                    <!-- Who sent it -->
+                    <div>
+                        <div class="text-[11px] text-gray-500 uppercase tracking-wide mb-1">Who sent it</div>
+                        <div class="grid grid-cols-2 gap-2 text-xs">
+                            ${from.name ? `<div><span class="text-gray-500">Display name:</span> <span class="text-white">${this.esc(from.name)}</span></div>` : ''}
+                            ${from.addr ? `<div><span class="text-gray-500">Email address:</span> <span class="text-viper-cyan">${this.esc(from.addr)}</span></div>` : ''}
+                            ${replyTo.addr ? `<div><span class="text-gray-500">Replies go to:</span> <span class="text-white">${this.esc(replyTo.addr)}</span></div>` : ''}
+                            ${returnPath.addr ? `<div><span class="text-gray-500">Return path:</span> <span class="text-gray-300">${this.esc(returnPath.addr)}</span></div>` : ''}
+                            ${mailer ? `<div><span class="text-gray-500">Sent using:</span> <span class="text-gray-300">${this.esc(mailer)}</span></div>` : ''}
+                        </div>
+                    </div>
+
+                    <!-- Sending IP -->
+                    <div>
+                        <div class="text-[11px] text-gray-500 uppercase tracking-wide mb-1">Sender IP address</div>
+                        ${ip && ip.ip_address ? `
+                            <div class="flex items-center gap-2 text-sm">
+                                <span class="font-mono text-white bg-viper-card px-2 py-0.5 rounded border border-viper-cyan/30">${this.esc(ip.ip_address)}</span>
+                                <span class="text-[10px] px-1.5 py-0.5 rounded ${ip.classification === 'private' ? 'bg-blue-500/20 text-blue-400' : 'bg-orange-500/20 text-orange-400'}">${(ip.classification || '').replace(/_/g, ' ')}</span>
+                            </div>
+                            <div class="text-xs text-gray-400 mt-1">${ip.classification === 'private'
+                                ? 'This address is internal to the mail provider and does not identify the public sender.'
+                                : 'This is the public network address the message came from. Use the buttons below to find where it is and who owns it.'}</div>
+                        ` : `<div class="text-xs text-gray-500">No originating IP address could be extracted from the header.</div>`}
+                    </div>
+
+                    <!-- Authentication -->
+                    ${authBadges ? `
+                    <div>
+                        <div class="text-[11px] text-gray-500 uppercase tracking-wide mb-1">Is the sender genuine? (authentication)</div>
+                        ${authBadges}
+                    </div>` : ''}
+
+                    <!-- Delivery path -->
+                    ${hops.length ? `
+                    <details class="text-xs">
+                        <summary class="cursor-pointer text-gray-400 hover:text-viper-cyan select-none">Delivery path — ${hops.length} hop${hops.length === 1 ? '' : 's'} (oldest first)</summary>
+                        <ol class="mt-2 space-y-1.5 border-l border-gray-700 pl-3">
+                            ${hops.map((h, i) => `
+                                <li class="relative">
+                                    <span class="absolute -left-[15px] top-1 w-2 h-2 rounded-full ${i === 0 ? 'bg-orange-400' : 'bg-viper-cyan/60'}"></span>
+                                    <div class="text-gray-300">${h.from ? `<span class="text-gray-500">from</span> ${this.esc(h.from)}` : '<span class="text-gray-500">(origin)</span>'}${h.ip ? ` <span class="font-mono text-viper-cyan">[${this.esc(h.ip)}]</span>` : ''}</div>
+                                    ${h.by ? `<div class="text-gray-500">→ received by ${this.esc(h.by)}</div>` : ''}
+                                    ${h.when ? `<div class="text-gray-600">${this.esc(h.when)}</div>` : ''}
+                                </li>
+                            `).join('')}
+                        </ol>
+                        <div class="text-gray-600 mt-1.5">The orange dot is the first server that handled the message — closest to the real sender.</div>
+                    </details>` : ''}
                 </div>
             </div>
         `;
@@ -400,8 +617,14 @@ class ApertureUI {
                         ${this._flagBtn('ips', ipInfo.ip_address)}
                         <button onclick="apertureUI.lookupIp('${ipInfo.ip_address}')"
                                 class="px-2 py-1 text-xs bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/50 rounded hover:bg-viper-cyan/30 transition-all ${this.lookingUpIp ? 'opacity-50' : ''}">
-                            ${this.lookingUpIp ? '...' : '🌐 Lookup'}
+                            ${this.lookingUpIp ? '...' : '🌐 Geolocate'}
                         </button>
+                        ${ipInfo.classification === 'private' ? '' : `
+                        <button onclick="apertureUI.arinLookup('${ipInfo.ip_address}')"
+                                class="px-2 py-1 text-xs bg-viper-purple/20 text-viper-purple border border-viper-purple/50 rounded hover:bg-viper-purple/30 transition-all ${this.lookingUpArin ? 'opacity-50' : ''}"
+                                title="Look up who owns this IP block in the regional internet registry (ARIN/RIPE/APNIC)">
+                            ${this.lookingUpArin ? '...' : '🏛️ Who owns this IP?'}
+                        </button>`}
                     </div>
                 </div>
                 <div class="grid grid-cols-3 gap-2">
@@ -422,7 +645,11 @@ class ApertureUI {
                         <div class="text-sm text-white">${Math.round((ipInfo.confidence || 0) * 100)}%</div>
                     </div>
                 </div>
+                ${ipInfo.classification === 'private'
+                    ? '<div class="mt-2 text-xs text-gray-400">This is a private/internal network address — it identifies a machine inside a mail provider, not the public sender. Registry lookups do not apply.</div>'
+                    : ''}
                 ${this.ipGeoInfo ? this.renderGeoInfo(this.ipGeoInfo) : ''}
+                ${this.arinInfo ? this.renderArinInfo(this.arinInfo) : ''}
             </div>
         `;
     }
@@ -449,7 +676,61 @@ class ApertureUI {
         const geo = await this.module.lookupIp(ipAddress);
         this.ipGeoInfo = geo;
         this.lookingUpIp = false;
+        if (geo && this.selectedEmail) {
+            this.selectedEmail.geo_info = geo;
+            this.module.persistEmailAnalysis(this.selectedEmail.id, { geo_info: geo });
+        }
         this.refreshDetailView();
+    }
+
+    async arinLookup(ipAddress) {
+        this.lookingUpArin = true;
+        this.refreshDetailView();
+
+        const arin = await this.module.arinLookup(ipAddress);
+        this.arinInfo = arin;
+        this.lookingUpArin = false;
+        if (arin && !arin.error && this.selectedEmail) {
+            this.selectedEmail.arin_info = arin;
+            this.module.persistEmailAnalysis(this.selectedEmail.id, { arin_info: arin });
+        }
+        this.refreshDetailView();
+    }
+
+    renderArinInfo(arin) {
+        if (arin && arin.error) {
+            return `
+                <div class="mt-3 pt-3 border-t border-viper-purple/20 text-xs text-orange-400">
+                    ⚠️ Registry lookup failed: ${this.esc(arin.error)}
+                </div>
+            `;
+        }
+        const rows = [];
+        const add = (label, val) => { if (val) rows.push(`<div><span class="text-gray-500">${label}:</span> <span class="text-white">${this.esc(String(val))}</span></div>`); };
+        const fmtDate = (d) => { if (!d) return ''; const t = new Date(d); return isNaN(t) ? String(d) : t.toLocaleDateString(); };
+
+        add('Owner / Organization', arin.orgName);
+        add('Address', arin.orgAddress);
+        add('Country', arin.country);
+        add('Network name', arin.netName);
+        add('IP block', arin.cidr);
+        add('Abuse contact', arin.abuseEmail);
+        add('Registered', fmtDate(arin.registered));
+        add('Last updated', fmtDate(arin.updated));
+        add('Registry', arin.registry);
+
+        return `
+            <div class="mt-3 pt-3 border-t border-viper-purple/20">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-viper-purple text-xs font-semibold uppercase tracking-wide">🏛️ IP Block Ownership (Registry)</span>
+                </div>
+                <div class="grid grid-cols-2 gap-2 text-xs">
+                    ${rows.join('')}
+                </div>
+                ${arin.remarks ? `<div class="mt-2 text-xs text-gray-400">${this.esc(arin.remarks)}</div>` : ''}
+                <div class="mt-2 text-xs text-gray-500">The organization above owns the network this email was sent through — often an internet provider, hosting company, or corporate network. For an actual subscriber name you may need a legal request to that provider.</div>
+            </div>
+        `;
     }
 
     /* ═══════════════════════════════════════════════════
@@ -660,8 +941,10 @@ class ApertureUI {
     async selectEmail(emailId) {
         this.selectedEmail = this.module.getEmail(emailId);
         this.showHeaders = false;
-        this.ipGeoInfo = null;
+        this.ipGeoInfo = (this.selectedEmail && this.selectedEmail.geo_info) || null;
         this.lookingUpIp = false;
+        this.arinInfo = (this.selectedEmail && this.selectedEmail.arin_info) || null;
+        this.lookingUpArin = false;
 
         // Load notes for this email
         await this.loadNotes();

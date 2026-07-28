@@ -7473,6 +7473,128 @@ ipcMain.handle('aperture-lookup-ip', async (event, data) => {
   }
 });
 
+// --- Aperture: ARIN / RDAP registration lookup (who owns the IP block) ---
+ipcMain.handle('aperture-arin-lookup', async (event, data) => {
+  try {
+    const { net } = require('electron');
+    const ipAddress = String(data.ipAddress || '').trim();
+    if (!ipAddress) return { success: false, error: 'No IP address provided' };
+
+    // ARIN RDAP. For non-ARIN space, ARIN returns a redirect to the
+    // authoritative RIR (RIPE/APNIC/LACNIC/AFRINIC) and net.request follows it.
+    const fetchRdap = (url) => new Promise((resolve, reject) => {
+      const request = net.request({ method: 'GET', url, redirect: 'follow' });
+      request.setHeader('Accept', 'application/rdap+json');
+      let body = '';
+      request.on('response', (response) => {
+        response.on('data', (chunk) => { body += chunk; });
+        response.on('end', () => {
+          try { resolve({ status: response.statusCode, json: JSON.parse(body) }); }
+          catch (e) { reject(new Error('Invalid RDAP response')); }
+        });
+      });
+      request.on('error', reject);
+      request.end();
+    });
+
+    const { status, json } = await fetchRdap(`https://rdap.arin.net/registry/ip/${encodeURIComponent(ipAddress)}`);
+    if (status && status >= 400) {
+      return { success: false, error: `Registry returned HTTP ${status}` };
+    }
+
+    // ── Parse RDAP JSON into plain-English fields ──
+    const getVcard = (entity) => {
+      // vcardArray = ["vcard", [ ["fn",{},"text","Name"], ["adr",{label:"..."},...], ... ]]
+      const out = { name: '', org: '', address: '', email: '', kind: '' };
+      const arr = entity && entity.vcardArray && entity.vcardArray[1];
+      if (!Array.isArray(arr)) return out;
+      arr.forEach((f) => {
+        if (!Array.isArray(f)) return;
+        const key = f[0];
+        const params = f[1] || {};
+        const val = f[3];
+        if (key === 'fn') out.name = Array.isArray(val) ? val.join(' ') : String(val || '');
+        else if (key === 'org') out.org = Array.isArray(val) ? val.join(' ') : String(val || '');
+        else if (key === 'kind') out.kind = String(val || '');
+        else if (key === 'email') out.email = Array.isArray(val) ? val[0] : String(val || '');
+        else if (key === 'adr') {
+          if (params && params.label) {
+            out.address = String(params.label).replace(/\r?\n/g, ', ').replace(/,\s*,/g, ', ').trim();
+          } else if (Array.isArray(val)) {
+            out.address = val.filter(Boolean).join(', ');
+          }
+        }
+      });
+      return out;
+    };
+
+    // Walk entities (may be nested) collecting registrant + abuse contacts.
+    let registrant = null, abuseEmail = '';
+    const walkEntities = (entities) => {
+      if (!Array.isArray(entities)) return;
+      entities.forEach((ent) => {
+        const roles = ent.roles || [];
+        const card = getVcard(ent);
+        if (!registrant && (roles.includes('registrant') || roles.includes('administrative') || roles.includes('technical'))) {
+          if (card.name || card.org) registrant = card;
+        }
+        if (!abuseEmail && roles.includes('abuse') && card.email) abuseEmail = card.email;
+        if (Array.isArray(ent.entities)) walkEntities(ent.entities);
+      });
+    };
+    walkEntities(json.entities);
+
+    // CIDR / range
+    let cidr = '';
+    if (Array.isArray(json.cidr0_cidrs) && json.cidr0_cidrs.length) {
+      cidr = json.cidr0_cidrs.map(c => (c.v4prefix || c.v6prefix) + '/' + c.length).join(', ');
+    } else if (json.startAddress && json.endAddress) {
+      cidr = `${json.startAddress} – ${json.endAddress}`;
+    }
+
+    // Events (registration / last changed)
+    let registered = '', updated = '';
+    (json.events || []).forEach((ev) => {
+      if (ev.eventAction === 'registration') registered = ev.eventDate;
+      if (ev.eventAction === 'last changed') updated = ev.eventDate;
+    });
+
+    // Registry / source
+    let registry = json.port43 || '';
+    if (!registry && Array.isArray(json.links)) {
+      const self = json.links.find(l => l.rel === 'self');
+      if (self && self.href) { try { registry = new URL(self.href).hostname; } catch (_) {} }
+    }
+
+    const remarks = (json.remarks || [])
+      .map(r => (r.description || []).join(' '))
+      .filter(Boolean)
+      .join(' · ');
+
+    return {
+      success: true,
+      arin: {
+        ip: ipAddress,
+        netName: json.name || '',
+        netType: json.type || '',
+        handle: json.handle || '',
+        cidr: cidr,
+        country: json.country || (registrant && registrant.kind ? '' : ''),
+        orgName: (registrant && (registrant.org || registrant.name)) || '',
+        orgAddress: (registrant && registrant.address) || '',
+        abuseEmail: abuseEmail,
+        registered: registered,
+        updated: updated,
+        registry: registry,
+        remarks: remarks
+      }
+    };
+  } catch (error) {
+    console.error('ARIN lookup error:', error);
+    return { success: false, error: error.message || 'Lookup failed' };
+  }
+});
+
 // --- Aperture: Save attachment to temp and open ---
 ipcMain.handle('aperture-open-attachment', async (event, data) => {
   try {

@@ -164,15 +164,24 @@
 }
 .cb-loc .cb-loc-locate:hover { background: rgba(6,182,212,0.25); }
 .cb-loc .cb-loc-locate:disabled { opacity: 0.5; cursor: default; }
+.cb-loc .cb-loc-del {
+  flex: 0 0 auto; font-size: 0.78rem; line-height: 1; color: #8a93a6;
+  background: transparent; border: 1px solid transparent;
+  border-radius: 5px; padding: 3px 6px; cursor: pointer; opacity: 0.55; transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+.cb-loc:hover .cb-loc-del { opacity: 1; }
+.cb-loc .cb-loc-del:hover { background: rgba(239,68,68,0.15); color: #ef4444; border-color: rgba(239,68,68,0.4); }
 
 .cb-stage-wrap { flex: 1 1 auto; position: relative; min-width: 0; background: #05070a; }
 #cbMapStage, #cbWebStage { position: absolute; inset: 0; }
-#cbWebStage { background: #05070a; overflow: auto; }
+#cbWebStage { background: #05070a; overflow: auto; cursor: grab; }
+#cbWebStage.cb-panning { cursor: grabbing; }
+#cbWebStage.cb-panning .cb-web-card { pointer-events: none; }
 #cbMapStage.cb-hidden, #cbWebStage.cb-hidden { display: none; }
 #cbWebViewport { position: relative; width: 100%; height: 100%; }
 /* zoom control (web view only) */
 #cbWebZoomCtl {
-    position: absolute; right: 14px; bottom: 14px;
+    position: absolute; right: 18px; bottom: 44px;
     display: flex; gap: 4px;
     background: rgba(13,17,23,0.92);
     border: 1px solid rgba(255,255,255,0.15);
@@ -251,7 +260,7 @@
     pointer-events: none;
     overflow: visible;
 }
-#cbWebLines line { pointer-events: stroke; cursor: pointer; }
+#cbWebLines line, #cbWebLines path { pointer-events: stroke; cursor: pointer; }
 .cb-web-linelabel {
     fill: #cdd6e0; font-size: 10px; font-weight: 600;
     paint-order: stroke; stroke: #05070a; stroke-width: 4px; stroke-linejoin: round;

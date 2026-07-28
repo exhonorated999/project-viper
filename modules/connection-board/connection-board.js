@@ -30,6 +30,7 @@
     suspect:  { color: '#f59e0b', glyph: '\uD83D\uDEA8', label: 'Suspect' },
     victim:   { color: '#22c55e', glyph: '\uD83C\uDD98', label: 'Victim' },
     witness:  { color: '#06b6d4', glyph: '\uD83D\uDC41', label: 'Witness' },
+    involved: { color: '#6366f1', glyph: '\uD83D\uDC65', label: 'Involved' },
     missing:  { color: '#ec4899', glyph: '\uD83D\uDD0E', label: 'Missing' },
     vehicle:  { color: '#a855f7', glyph: '\uD83D\uDE97', label: 'Vehicle' },
     location: { color: '#22c55e', glyph: '\uD83D\uDCCD', label: 'Location' },
@@ -425,6 +426,32 @@
     return str;
   }
 
+  // Always create a NEW string between two assets (does NOT dedupe like
+  // ensureString) so users can draw multiple connections between the same pair.
+  // Each additional string on a pair is auto-assigned a distinct color so they
+  // stay visually separable; drawWebLines/renderMap fan them out so they never overlap.
+  function addManualString(fromId, toId, label, color, style, viewName) {
+    var vn = viewName || 'map';
+    var used = {};
+    board.strings.forEach(function (s) {
+      if ((s.view || 'map') !== vn) return;
+      if ((s.from === fromId && s.to === toId) || (s.from === toId && s.to === fromId)) {
+        if (s.color) used[String(s.color).toLowerCase()] = true;
+      }
+    });
+    var chosen = color;
+    if (!chosen || used[String(chosen).toLowerCase()]) {
+      chosen = null;
+      for (var i = 0; i < COLORS.length; i++) {
+        if (!used[COLORS[i].toLowerCase()]) { chosen = COLORS[i]; break; }
+      }
+      if (!chosen) chosen = COLORS[Object.keys(used).length % COLORS.length];
+    }
+    var str = { id: uid('str'), from: fromId, to: toId, label: label || '', color: chosen, style: style || 'solid', manual: true, view: vn };
+    board.strings.push(str);
+    return str;
+  }
+
   // ---- always-on: sync the Scene pin from the overview Location of Occurrence ----
   // Runs on every open (not just first seed) so the incident location is always
   // imported when available, and updates if it was edited in the overview tab.
@@ -479,10 +506,18 @@
     put('suspect', susp);
     put('victim', lsParse('victims_' + cid, []));
     put('witness', lsParse('witnesses_' + cid, []));
+    put('involved', lsParse('involvedPersons_' + cid, []));
     var mps = lsParse('missingpersons_' + cid, []);
     put('missing', mps);
     keys['lastseen'] = {};
     mps.forEach(function (p, idx) { if (p.lastSeenLocation) keys['lastseen'][String(p.id != null ? p.id : idx)] = true; });
+    keys['acquaintance'] = {};
+    mps.forEach(function (p, idx) {
+      var pid = (p.id != null ? p.id : idx);
+      (Array.isArray(p.knownAcquaintances) ? p.knownAcquaintances : []).forEach(function (acq, aidx) {
+        keys['acquaintance'][pid + ':' + aidx] = true;
+      });
+    });
     put('canvas', lsParse('areacanvas_' + cid, []));
     keys['vehicle'] = {};
     susp.forEach(function (s, sidx) { (s.vehicles || []).forEach(function (v, vidx) { keys['vehicle'][sidx + ':' + vidx] = true; }); });
@@ -523,7 +558,7 @@
   // Which "Add from case data" imports already have pins on the board, so a sync
   // refreshes exactly the sources the user opted into (not every possible type).
   function _presentDataTypes() {
-    var map = { victim: 'victims', witness: 'witnesses', missing: 'missing', lastseen: 'missing', vehicle: 'vehicles', canvas: 'canvas', evidence: 'evidence', crosscase: 'crosscase' };
+    var map = { victim: 'victims', witness: 'witnesses', involved: 'involved', missing: 'missing', lastseen: 'missing', vehicle: 'vehicles', canvas: 'canvas', evidence: 'evidence', crosscase: 'crosscase' };
     var types = {};
     board.pins.forEach(function (p) { if (p.sourceType && map[p.sourceType]) types[map[p.sourceType]] = true; });
     return Object.keys(types);
@@ -534,7 +569,7 @@
   // party — victims, witnesses, missing persons — plus located evidence pulls
   // in automatically. Vehicles/canvas/crosscase stay opt-in via "Add from case
   // data" and are refreshed only when already present (_presentDataTypes).
-  var ALWAYS_IMPORT = ['victims', 'witnesses', 'missing', 'evidence'];
+  var ALWAYS_IMPORT = ['victims', 'witnesses', 'involved', 'missing', 'evidence'];
 
   function syncFromCase(silent) {
     if (!currentCase) return;
@@ -573,15 +608,33 @@
 
     if (type === 'victims') addPerson(lsParse('victims_' + cid, []), 'victim', 'victims');
     else if (type === 'witnesses') addPerson(lsParse('witnesses_' + cid, []), 'witness', 'witnesses');
+    else if (type === 'involved') addPerson(lsParse('involvedPersons_' + cid, []), 'involved', 'involvedPersons');
     else if (type === 'missing') {
       var mps = lsParse('missingpersons_' + cid, []);
       mps.forEach(function (p, idx) {
-        var pPin = upsertAutoPin({ type: 'missing', label: p.name || ('Missing ' + (idx + 1)), sourceType: 'missing', sourceId: (p.id != null ? p.id : idx), photo: p.photo || '', data: { name: p.name, sourceTab: 'missingpersons', sourceIndex: idx } });
+        var pid = (p.id != null ? p.id : idx);
+        var homeAddr = (p.homeAddress != null ? String(p.homeAddress).trim() : '');
+        var pPin = upsertAutoPin({ type: 'missing', label: p.name || ('Missing ' + (idx + 1)), sourceType: 'missing', sourceId: pid, photo: p.photo || '', address: homeAddr, data: { name: p.name, homeAddress: homeAddr, sourceTab: 'missingpersons', sourceIndex: idx } });
         added++;
+        if (homeAddr && pPin.lat == null) {
+          jobs.push(geocode(homeAddr).then(function (g) { if (g) { pPin.lat = g.lat; pPin.lng = g.lng; pPin.approx = !!g.approx; scheduleRefresh(); } }));
+        }
+        // Legacy "last seen" support (older data model)
         if (p.lastSeenLocation) {
-          var lsPin = upsertAutoPin({ type: 'location', label: 'Last seen: ' + (p.name || ''), sourceType: 'lastseen', sourceId: (p.id != null ? p.id : idx), address: p.lastSeenLocation, data: { time: p.lastSeenTime } });
+          var lsPin = upsertAutoPin({ type: 'location', label: 'Last seen: ' + (p.name || ''), sourceType: 'lastseen', sourceId: pid, address: p.lastSeenLocation, data: { time: p.lastSeenTime } });
           jobs.push(geocode(p.lastSeenLocation).then(function (g) { if (g) { lsPin.lat = g.lat; lsPin.lng = g.lng; scheduleRefresh(); } }));
         }
+        // Known acquaintances -> associate pins (name + address + phone)
+        (Array.isArray(p.knownAcquaintances) ? p.knownAcquaintances : []).forEach(function (acq, aidx) {
+          if (!acq) return;
+          var aAddr = (acq.address != null ? String(acq.address).trim() : '');
+          var aLabel = acq.name || ('Acquaintance ' + (aidx + 1));
+          var aPin = upsertAutoPin({ type: 'associate', label: aLabel, sourceType: 'acquaintance', sourceId: pid + ':' + aidx, address: aAddr, data: { name: acq.name, phone: acq.phone, ofPerson: p.name, sourceTab: 'missingpersons', sourceIndex: idx } });
+          added++;
+          if (aAddr && aPin.lat == null) {
+            jobs.push(geocode(aAddr).then(function (g) { if (g) { aPin.lat = g.lat; aPin.lng = g.lng; aPin.approx = !!g.approx; scheduleRefresh(); } }));
+          }
+        });
       });
     }
     else if (type === 'vehicles') {
@@ -761,6 +814,38 @@
       setWebZoom(webZoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
     }, { passive: false });
 
+    // ---- pan the web board by grabbing empty space and dragging ----
+    // Lets the detective reach cards that sit off the visible page without
+    // fighting the scrollbars. Ignores drags that start on a card (those move
+    // the card) and drags in Connect mode (those draw strings).
+    (function () {
+      var panning = false, sx = 0, sy = 0, sl = 0, st = 0, pid = null;
+      webStage.addEventListener('pointerdown', function (e) {
+        if (view !== 'web' || e.button !== 0) return;
+        if (connectMode) return;
+        if (e.target.closest('.cb-web-card')) return;
+        if (e.target.closest('#cbWebZoomCtl')) return;
+        panning = true; pid = e.pointerId;
+        sx = e.clientX; sy = e.clientY;
+        sl = webStage.scrollLeft; st = webStage.scrollTop;
+        webStage.classList.add('cb-panning');
+        try { webStage.setPointerCapture(e.pointerId); } catch (_) {}
+      });
+      webStage.addEventListener('pointermove', function (e) {
+        if (!panning) return;
+        webStage.scrollLeft = sl - (e.clientX - sx);
+        webStage.scrollTop = st - (e.clientY - sy);
+      });
+      function endPan(e) {
+        if (!panning) return;
+        panning = false;
+        webStage.classList.remove('cb-panning');
+        try { webStage.releasePointerCapture(pid); } catch (_) {}
+      }
+      webStage.addEventListener('pointerup', endPan);
+      webStage.addEventListener('pointercancel', endPan);
+    })();
+
     // Keep the board reactive: re-lay out cards/lines when the window resizes so
     // nothing gets stranded off-screen when the app window shrinks.
     var _rzTimer = null;
@@ -853,6 +938,7 @@
   // ============================================================
   //  MAP VIEW (Leaflet)
   // ============================================================
+  var _restoringView = false; // true while WE set the view programmatically
   function initMap() {
     if (map) return;
     map = L.map('cbMapStage', { zoomControl: true, attributionControl: true });
@@ -860,6 +946,27 @@
       maxZoom: 19, attribution: '&copy; OpenStreetMap &copy; CARTO'
     }).addTo(map);
     map.on('click', onMapClick);
+    // Persist the detective's exact zoom/pan so the board reopens exactly where
+    // they left it, and keep curved strings crisp: the curves are baked into
+    // lat/lng at draw time, so they must be recomputed (at the current zoom's
+    // pixel scale) whenever the view changes — otherwise they distort and
+    // balloon across the map when zooming in/out.
+    map.on('moveend zoomend', function () {
+      if (!map) return;
+      if (!_restoringView) _saveMapView();
+      drawMapStrings();
+    });
+  }
+
+  function _saveMapView() {
+    if (!map || !map._loaded) return;
+    try {
+      var c = map.getCenter();
+      board.view = board.view || {};
+      board.view.mapCenter = [c.lat, c.lng];
+      board.view.mapZoom = map.getZoom();
+      saveBoard();
+    } catch (_) {}
   }
 
   function markerIcon(pin) {
@@ -890,39 +997,68 @@
     openAssetForm(e.latlng);
   }
 
+  // Build a (possibly curved) latlng path between two pins. peakPx is the
+  // perpendicular offset in screen pixels at the curve's midpoint; 0 => straight.
+  // Used to fan out multiple strings between the same pair so they never overlap.
+  function curvedLatLngs(a, b, peakPx) {
+    if (!map || !map._loaded || !peakPx || Math.abs(peakPx) < 0.01) return [[a.lat, a.lng], [b.lat, b.lng]];
+    try {
+      var pA = map.latLngToContainerPoint([a.lat, a.lng]);
+      var pB = map.latLngToContainerPoint([b.lat, b.lng]);
+      var dx = pB.x - pA.x, dy = pB.y - pA.y;
+      var len = Math.sqrt(dx * dx + dy * dy) || 1;
+      var perpx = -dy / len, perpy = dx / len;
+      var mx = (pA.x + pB.x) / 2, my = (pA.y + pB.y) / 2;
+      var cx = mx + perpx * peakPx * 2, cy = my + perpy * peakPx * 2; // control point
+      var pts = [];
+      for (var t = 0; t <= 1.0001; t += 1 / 16) {
+        var it = 1 - t;
+        var x = it * it * pA.x + 2 * it * t * cx + t * t * pB.x;
+        var y = it * it * pA.y + 2 * it * t * cy + t * t * pB.y;
+        var ll = map.containerPointToLatLng([x, y]);
+        pts.push([ll.lat, ll.lng]);
+      }
+      return pts;
+    } catch (e) {
+      // projection not ready (map has no view yet) — fall back to a straight line
+      return [[a.lat, a.lng], [b.lat, b.lng]];
+    }
+  }
+
   function renderMap() {
     initMap();
     setTimeout(function () { if (map) map.invalidateSize(); }, 60);
 
-    // clear old layers
+    // clear old markers (strings are cleared/redrawn by drawMapStrings)
     Object.keys(markers).forEach(function (k) { map.removeLayer(markers[k]); });
-    Object.keys(polylines).forEach(function (k) { map.removeLayer(polylines[k]); });
-    markers = {}; polylines = {};
+    markers = {};
 
-    var placed = board.pins.filter(function (p) { return p.lat != null && p.lng != null; });
+    var placed = board.pins.filter(function (p) { return p.lat != null && p.lng != null && !p.hidden; });
 
-    // strings first (under markers) — only strings drawn in the MAP view
-    board.strings.forEach(function (s) {
-      if ((s.view || 'map') !== 'map') return;
-      var a = findPin(s.from), b = findPin(s.to);
-      if (!a || !b || a.lat == null || b.lat == null) return;
-      var pl = L.polyline([[a.lat, a.lng], [b.lat, b.lng]], {
-        color: s.color || '#9ca3af', weight: 3, opacity: 0.85,
-        dashArray: s.style === 'dashed' ? '6,8' : null
-      }).addTo(map);
-      var mi = haversineMi(a, b);
-      var lbl = (s.label || '') + (mi != null ? (s.label ? ' \u00B7 ' : '') + mi.toFixed(1) + ' mi' : '');
-      // Wide, invisible hit-area so the thin line is easy to click/delete, and an
-      // interactive tooltip so clicking the label opens the edit/delete modal too.
-      var hit = L.polyline([[a.lat, a.lng], [b.lat, b.lng]], {
-        color: '#000', weight: 16, opacity: 0, interactive: true
-      }).addTo(map);
-      if (lbl) hit.bindTooltip(lbl, { permanent: true, direction: 'center', className: 'cb-string-label', interactive: true });
-      hit.on('click', function () { editString(s); });
-      pl.on('click', function () { editString(s); });
-      polylines[s.id] = pl;
-      polylines[s.id + '_hit'] = hit;
-    });
+    // Set the map view FIRST so pixel projection is available before we draw
+    // any curved strings (curvedLatLngs needs a loaded map; otherwise Leaflet
+    // throws and aborts the whole render → blank map).
+    //
+    // Persistence: if the detective already positioned the map, restore that
+    // exact center/zoom instead of re-fitting (re-fitting on every reopen/sync
+    // was yanking them back to a zoomed-out overview). Only auto-fit the FIRST
+    // time (no saved view yet).
+    _restoringView = true;
+    try {
+      var savedC = board.view && board.view.mapCenter;
+      var savedZ = board.view && board.view.mapZoom;
+      if (savedC && typeof savedZ === 'number') {
+        map.setView(savedC, savedZ, { animate: false });
+      } else if (placed.length === 1) {
+        map.setView([placed[0].lat, placed[0].lng], 14, { animate: false });
+      } else if (placed.length > 1) {
+        map.fitBounds(placed.map(function (p) { return [p.lat, p.lng]; }), { padding: [60, 60], maxZoom: 15, animate: false });
+      } else if (!map._loaded) {
+        map.setView([39.5, -98.35], 4, { animate: false });
+      }
+    } catch (_) {}
+    _restoringView = false;
+    _saveMapView(); // capture the (possibly first-time auto-fitted) view
 
     // markers
     placed.forEach(function (pin) {
@@ -932,11 +1068,8 @@
       markers[pin.id] = m;
     });
 
-    // fit
-    if (placed.length === 1) { map.setView([placed[0].lat, placed[0].lng], 14); }
-    else if (placed.length > 1) {
-      map.fitBounds(placed.map(function (p) { return [p.lat, p.lng]; }), { padding: [60, 60], maxZoom: 15 });
-    } else if (!map._loaded) { map.setView([39.5, -98.35], 4); }
+    // strings (under markers conceptually; drawn after view is set)
+    drawMapStrings();
 
     var empty = document.querySelector('#cbMapStage .cb-empty');
     if (!placed.length) {
@@ -946,6 +1079,77 @@
         document.getElementById('cbMapStage').appendChild(empty);
       }
     } else if (empty) empty.remove();
+  }
+
+  // Draw (or re-draw) the MAP-view strings. Kept separate from renderMap so we
+  // can re-run it on every zoom/pan — the fanned curves are computed in pixel
+  // space at the CURRENT zoom, so redrawing keeps their bow constant on screen
+  // instead of ballooning as you zoom in.
+  function drawMapStrings() {
+    if (!map) return;
+    Object.keys(polylines).forEach(function (k) { try { map.removeLayer(polylines[k]); } catch (_) {} });
+    polylines = {};
+
+    // Group by unordered pair so multiple strings between the same two pins
+    // fan out into separate curves instead of overlapping on one straight line.
+    var mapGroups = {};
+    board.strings.forEach(function (s) {
+      if ((s.view || 'map') !== 'map') return;
+      var a = findPin(s.from), b = findPin(s.to);
+      if (!a || !b || a.lat == null || b.lat == null || a.hidden || b.hidden) return;
+      var key = (String(s.from) < String(s.to) ? s.from + '|' + s.to : s.to + '|' + s.from);
+      (mapGroups[key] = mapGroups[key] || []).push(s);
+    });
+    Object.keys(mapGroups).forEach(function (key) {
+      var arr = mapGroups[key];
+      arr.sort(function (p, q) { return String(p.id).localeCompare(String(q.id)); });
+      var n = arr.length;
+      // Draw every string in the group with ONE fixed endpoint orientation
+      // (the canonical lo|hi order from the pair key). curvedLatLngs bows the
+      // curve perpendicular to the a->b direction, so if strings in the same
+      // group used their own (mixed) from/to order, a reversed string would bow
+      // to the opposite side and land on top of a normal one — that's why 4
+      // strings showed as only 2 lines. Canonical endpoints keep the whole fan
+      // on a consistent axis so every lane is distinct.
+      var parts = key.split('|');
+      var ca = findPin(parts[0]), cb = findPin(parts[1]);
+      if (!ca || !cb) return;
+      // Lane spacing scales with the on-screen distance between the two pins so
+      // parallel strings stay visibly separated along their whole length. A
+      // fixed pixel bow looks fine on the web board (cards are close together)
+      // but collapses on the map when pins are far apart — the curves converge
+      // and overlap. Floor keeps short lines readable; cap avoids absurd arcs.
+      var gap = 46;
+      if (n > 1 && map && map._loaded) {
+        try {
+          var pa = map.latLngToContainerPoint([ca.lat, ca.lng]);
+          var pb = map.latLngToContainerPoint([cb.lat, cb.lng]);
+          var len = Math.sqrt(Math.pow(pb.x - pa.x, 2) + Math.pow(pb.y - pa.y, 2));
+          gap = Math.min(Math.max(len * 0.16, 34), 150);
+        } catch (_) {}
+      }
+      arr.forEach(function (s, i) {
+        var peak = (n > 1) ? (i - (n - 1) / 2) * gap : 0; // px offset; single strings stay straight
+        var latlngs = curvedLatLngs(ca, cb, peak);
+        var pl = L.polyline(latlngs, {
+          color: s.color || '#9ca3af', weight: 3, opacity: 0.85,
+          dashArray: s.style === 'dashed' ? '6,8' : null
+        }).addTo(map);
+        var mi = haversineMi(ca, cb);
+        var lbl = (s.label || '') + (mi != null ? (s.label ? ' \u00B7 ' : '') + mi.toFixed(1) + ' mi' : '');
+        // Wide, invisible hit-area so the thin line is easy to click/delete.
+        var hit = L.polyline(latlngs, {
+          color: '#000', weight: 16, opacity: 0, interactive: true
+        }).addTo(map);
+        if (lbl) hit.bindTooltip(lbl, { permanent: true, direction: 'center', className: 'cb-string-label', interactive: true });
+        (function (str) {
+          hit.on('click', function () { editString(str); });
+          pl.on('click', function () { editString(str); });
+        })(s);
+        polylines[s.id] = pl;
+        polylines[s.id + '_hit'] = hit;
+      });
+    });
   }
 
   // ============================================================
@@ -966,38 +1170,78 @@
     var labels = document.getElementById('cbWebLabels');
     while (svg.firstChild) svg.removeChild(svg.firstChild);
     if (labels) labels.innerHTML = '';
+
+    // Group web strings by unordered pair so multiple connections between the
+    // same two cards can be fanned out into separate, non-overlapping curves.
+    var groups = {};
     board.strings.forEach(function (s) {
       if ((s.view || 'map') !== 'web') return; // only strings drawn in the WEB view
-      var a = webCards[s.from], b = webCards[s.to];
-      if (!a || !b) return;
-      var ax = a.offsetLeft + a.offsetWidth / 2, ay = a.offsetTop + a.offsetHeight / 2;
-      var bx = b.offsetLeft + b.offsetWidth / 2, by = b.offsetTop + b.offsetHeight / 2;
-      var line = document.createElementNS(SVGNS, 'line');
-      line.setAttribute('x1', ax); line.setAttribute('y1', ay);
-      line.setAttribute('x2', bx); line.setAttribute('y2', by);
-      line.setAttribute('stroke', s.color || '#9ca3af');
-      line.setAttribute('stroke-width', '2.5');
-      line.setAttribute('stroke-opacity', '0.85');
-      if (s.style === 'dashed') line.setAttribute('stroke-dasharray', '6,7');
-      line.addEventListener('click', function () { editString(s); });
-      svg.appendChild(line);
-      var fromPin = findPin(s.from), toPin = findPin(s.to);
-      var mi = (fromPin && toPin && fromPin.lat != null && toPin.lat != null) ? haversineMi(fromPin, toPin) : null;
-      var lbl = (s.label || '') + (mi != null ? (s.label ? ' \u00B7 ' : '') + mi.toFixed(1) + ' mi' : '');
-      // Labels are floating HTML pills ABOVE the cards (not SVG text behind them),
-      // so long relationship notes are never clipped by an adjacent card. The pill
-      // truncates with an ellipsis and expands to the full text on hover.
-      if (lbl && labels) {
-        var pill = document.createElement('div');
-        pill.className = 'cb-web-linelabel-pill';
-        pill.style.left = ((ax + bx) / 2) + 'px';
-        pill.style.top = ((ay + by) / 2) + 'px';
-        if (s.color) pill.style.borderColor = s.color;
-        pill.textContent = lbl;
-        pill.title = lbl;
-        pill.addEventListener('click', function () { editString(s); });
-        labels.appendChild(pill);
-      }
+      if (!webCards[s.from] || !webCards[s.to]) return;
+      var key = (String(s.from) < String(s.to) ? s.from + '|' + s.to : s.to + '|' + s.from);
+      (groups[key] = groups[key] || []).push(s);
+    });
+
+    Object.keys(groups).forEach(function (key) {
+      var arr = groups[key];
+      // stable ordering => consistent offsets across redraws
+      arr.sort(function (p, q) { return String(p.id).localeCompare(String(q.id)); });
+      var n = arr.length;
+      arr.forEach(function (s, i) {
+        var a = webCards[s.from], b = webCards[s.to];
+        var ax = a.offsetLeft + a.offsetWidth / 2, ay = a.offsetTop + a.offsetHeight / 2;
+        var bx = b.offsetLeft + b.offsetWidth / 2, by = b.offsetTop + b.offsetHeight / 2;
+        var dx = bx - ax, dy = by - ay;
+        var len = Math.sqrt(dx * dx + dy * dy) || 1;
+        var perpx = -dy / len, perpy = dx / len;          // unit perpendicular
+        var peak;
+        if (n > 1) {
+          peak = (i - (n - 1) / 2) * 44;                  // symmetric fan for true duplicates
+        } else {
+          // Lone string: a gentle, deterministic bow (varied by string id) so
+          // every web string reads as a curve like the map, and connections
+          // leaving a shared node in the same direction don't perfectly overlap.
+          var h = 0, sid = String(s.id);
+          for (var _c = 0; _c < sid.length; _c++) h = (h * 31 + sid.charCodeAt(_c)) & 0xffff;
+          var buckets = [-30, -18, 18, 30];
+          peak = buckets[h % buckets.length];
+        }
+        var mx = (ax + bx) / 2, my = (ay + by) / 2;
+        var lx = mx + perpx * peak, ly = my + perpy * peak; // label rides the curve peak
+
+        var el;
+        if (Math.abs(peak) < 0.01) {
+          el = document.createElementNS(SVGNS, 'line');
+          el.setAttribute('x1', ax); el.setAttribute('y1', ay);
+          el.setAttribute('x2', bx); el.setAttribute('y2', by);
+        } else {
+          // quadratic Bézier; control offset = 2*peak so the curve peak == peak
+          var cx = mx + perpx * peak * 2, cy = my + perpy * peak * 2;
+          el = document.createElementNS(SVGNS, 'path');
+          el.setAttribute('d', 'M ' + ax + ' ' + ay + ' Q ' + cx + ' ' + cy + ' ' + bx + ' ' + by);
+          el.setAttribute('fill', 'none');
+        }
+        el.setAttribute('stroke', s.color || '#9ca3af');
+        el.setAttribute('stroke-width', '2.5');
+        el.setAttribute('stroke-opacity', '0.9');
+        if (s.style === 'dashed') el.setAttribute('stroke-dasharray', '6,7');
+        (function (str) { el.addEventListener('click', function () { editString(str); }); })(s);
+        svg.appendChild(el);
+
+        var fromPin = findPin(s.from), toPin = findPin(s.to);
+        var mi = (fromPin && toPin && fromPin.lat != null && toPin.lat != null) ? haversineMi(fromPin, toPin) : null;
+        var lbl = (s.label || '') + (mi != null ? (s.label ? ' \u00B7 ' : '') + mi.toFixed(1) + ' mi' : '');
+        if (lbl && labels) {
+          var pill = document.createElement('div');
+          pill.className = 'cb-web-linelabel-pill';
+          pill.style.left = lx + 'px';
+          pill.style.top = ly + 'px';
+          if (s.color) pill.style.borderColor = s.color;
+          pill.textContent = lbl;
+          pill.title = lbl;
+          (function (str) { pill.addEventListener('click', function () { editString(str); }); })(s);
+          labels.appendChild(pill);
+        }
+      });
     });
   }
 
@@ -1193,8 +1437,7 @@
         if (webCards[fromId]) webCards[fromId].classList.remove('cb-connect-src');
         cbPrompt('Relationship label (optional)', '', 'e.g. resides at, seen with, owns').then(function (label) {
           if (label === null) return;
-          var s = ensureString(fromId, pin.id, label, currentColor, 'solid', from);
-          s.manual = true; s.color = currentColor; s.view = from; if (label) s.label = label;
+          addManualString(fromId, pin.id, label, currentColor, 'solid', from);
           saveBoard(); renderCurrentView(); renderLocPanel();
         });
       }
@@ -1393,7 +1636,7 @@
       '<div class="cb-card-actions">' +
         '<button class="cb-btn cb-card-edit">\u270E Rename</button>' +
         mapBtn + boardBtn + videoBtn + jumpBtn +
-        '<button class="cb-btn cb-btn-danger cb-card-del">\uD83D\uDDD1 Remove</button>' +
+        '<button class="cb-btn cb-card-del" title="Take this off the map & web board — it stays in the asset list so you can add it back later">\u21A9 Remove from board</button>' +
       '</div>';
 
     makeDetailDraggable(el);
@@ -1405,14 +1648,19 @@
       cbPrompt('Rename', pin.label).then(function (nm) { if (nm != null) { pin.label = nm; pin._labelOverride = true; saveBoard(); renderCurrentView(); renderLocPanel(); renderDetailInner(el, pin, from); } });
     };
     el.querySelector('.cb-card-del').onclick = function () {
-      cbConfirm('Remove "' + pin.label + '" and its connections?').then(function (ok) {
-        if (!ok) return;
-        board.pins = board.pins.filter(function (p) { return p.id !== pin.id; });
-        board.strings = board.strings.filter(function (s) { return s.from !== pin.id && s.to !== pin.id; });
-        saveBoard(); if (el.parentNode) el.parentNode.removeChild(el); persistOpenCards(); renderCurrentView(); renderLocPanel();
-      });
+      // Take the asset OFF both boards (web + map) but keep it in the asset list
+      // and preserve its connections, so it can be re-added later.
+      pin.x = null; pin.y = null; pin.hidden = true;
+      saveBoard();
+      // Explicitly drop its live layers so it vanishes immediately regardless of
+      // where the map is currently panned (the pin may be off-screen).
+      if (markers[pin.id]) { if (map) map.removeLayer(markers[pin.id]); delete markers[pin.id]; }
+      var wc = webCards[pin.id]; if (wc && wc.parentNode) { wc.parentNode.removeChild(wc); delete webCards[pin.id]; }
+      if (el.parentNode) el.parentNode.removeChild(el);
+      persistOpenCards(); renderCurrentView(); renderLocPanel();
+      toast('Removed "' + pin.label + '" from the board \u2014 still in the asset list (use the \uD83D\uDDD1 to delete it)', 'info');
     };
-    if (el.querySelector('.cb-card-center')) el.querySelector('.cb-card-center').onclick = function () { if (map && pin.lat != null) { setView('map'); map.setView([pin.lat, pin.lng], 15); } };
+    if (el.querySelector('.cb-card-center')) el.querySelector('.cb-card-center').onclick = function () { if (map && pin.lat != null) { pin.hidden = false; saveBoard(); setView('map'); renderMap(); map.setView([pin.lat, pin.lng], 15); renderLocPanel(); } };
     if (el.querySelector('.cb-card-toboard')) el.querySelector('.cb-card-toboard').onclick = function () {
       var stage = document.getElementById('cbWebStage');
       pin.x = (stage ? stage.scrollLeft : 0) + 60; pin.y = (stage ? stage.scrollTop : 0) + 60;
@@ -1494,10 +1742,11 @@
       var sub = placed ? (p.address || (p.lat.toFixed(4) + ', ' + p.lng.toFixed(4))) : (p.address || 'No address');
       var locateBtn = (!placed && p.address) ? '<button class="cb-loc-locate" data-locate="' + p.id + '" title="Retry address lookup">Locate</button>' : '';
       var onboardBadge = onboard ? '<span class="cb-loc-onboard" title="On the Web board">web</span>' : '';
+      var delBtn = '<button class="cb-loc-del" data-del="' + p.id + '" title="Delete from the case board entirely (removes it and its connections)">\uD83D\uDDD1</button>';
       return '<div class="cb-loc' + (placed ? '' : ' cb-unplaced') + (onboard ? ' cb-onboard' : '') + '" draggable="true" data-pin="' + p.id + '" title="Drag onto the Web board to place">' +
         '<span class="cb-dot" style="background:' + (p.color || typeColor(p.type)) + '"></span>' +
         '<div class="cb-loc-body"><div class="cb-loc-name">' + esc(p.label) + '</div><div class="cb-loc-sub">' + esc(sub) + '</div></div>' +
-        onboardBadge + locateBtn +
+        onboardBadge + locateBtn + delBtn +
         '</div>';
     }).join('');
     list.querySelectorAll('.cb-loc').forEach(function (el) {
@@ -1520,7 +1769,10 @@
           onPinActivate(pin, 'web');
           return;
         }
-        if (pin.lat != null && view === 'map') { map.setView([pin.lat, pin.lng], 15); }
+        if (view === 'map') {
+          if (pin.hidden && pin.lat != null) { pin.hidden = false; saveBoard(); renderMap(); renderLocPanel(); }
+          if (pin.lat != null && map) { map.setView([pin.lat, pin.lng], 15); }
+        }
         onPinActivate(pin, view);
       };
     });
@@ -1542,6 +1794,22 @@
         });
       };
     });
+    list.querySelectorAll('.cb-loc-del').forEach(function (btn) {
+      btn.onclick = function (e) {
+        e.stopPropagation();
+        var pin = findPin(btn.getAttribute('data-del')); if (!pin) return;
+        cbConfirm('Delete "' + pin.label + '" from the board entirely? This also removes its connections. (To just take it off the map/web, open it and use "Remove from board".)').then(function (ok) {
+          if (!ok) return;
+          board.pins = board.pins.filter(function (p) { return p.id !== pin.id; });
+          board.strings = board.strings.filter(function (s) { return s.from !== pin.id && s.to !== pin.id; });
+          var wc = webCards[pin.id]; if (wc && wc.parentNode) wc.parentNode.removeChild(wc); delete webCards[pin.id];
+          var dc = document.querySelector('#cbCards .cb-detail-card[data-pin="' + pin.id + '"]'); if (dc && dc.parentNode) dc.parentNode.removeChild(dc);
+          if (selectedPinId === pin.id) selectedPinId = null;
+          saveBoard(); renderCurrentView(); renderLocPanel();
+          toast('Deleted "' + pin.label + '" from the board', 'info');
+        });
+      };
+    });
   }
 
   // ============================================================
@@ -1549,7 +1817,7 @@
   // ============================================================
   function openAddMenu() {
     var opts = [
-      ['victims', 'Victims'], ['witnesses', 'Witnesses'], ['missing', 'Missing Persons (last seen)'],
+      ['victims', 'Victims'], ['witnesses', 'Witnesses'], ['involved', 'Other Involved Persons'], ['missing', 'Missing Persons (last seen)'],
       ['vehicles', 'Vehicles / Plates'], ['canvas', 'Area Canvas locations'], ['evidence', 'Evidence (with location)'], ['crosscase', 'Related cases (shared suspects)']
     ];
     var wrap = document.getElementById('cbAddMenuWrap');
@@ -1951,16 +2219,21 @@
     'function pcolor(p){return p.color||meta(p).color;}function glyph(p){return meta(p).glyph;}' +
     'function hasAddr(a){return /[a-z0-9]/i.test(a||"");}' +
     'function hav(a,b){if(!a||!b||a.lat==null||b.lat==null)return null;var R=3958.8,dLa=(b.lat-a.lat)*Math.PI/180,dLo=(b.lng-a.lng)*Math.PI/180,l1=a.lat*Math.PI/180,l2=b.lat*Math.PI/180;var h=Math.sin(dLa/2)*Math.sin(dLa/2)+Math.sin(dLo/2)*Math.sin(dLo/2)*Math.cos(l1)*Math.cos(l2);return R*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));}' +
-    'var map=null,mapLayers=[];' +
-    'function initMap(){if(map)return;map=L.map("map",{zoomControl:true});L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{maxZoom:19,attribution:"&copy; OpenStreetMap &copy; CARTO"}).addTo(map);}' +
+    'var map=null,mapLayers=[],strLayers=[];' +
+    'function initMap(){if(map)return;map=L.map("map",{zoomControl:true});L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{maxZoom:19,attribution:"&copy; OpenStreetMap &copy; CARTO"}).addTo(map);map.on("zoomend moveend",function(){drawMapStrings();});}' +
     'function micon(p){var inner=p.photo?"<img src=\\""+esc(p.photo)+"\\">":"<span class=\\"mg\\">"+glyph(p)+"</span>";return L.divIcon({className:"",iconSize:[44,44],iconAnchor:[22,22],html:"<div class=\\"mk\\" style=\\"border-color:"+pcolor(p)+"\\">"+inner+"</div>"});}' +
+    'function curveLL(a,b,pk){if(!map||!map._loaded||!pk||Math.abs(pk)<.01)return[[a.lat,a.lng],[b.lat,b.lng]];try{var pa=map.latLngToContainerPoint([a.lat,a.lng]),pb=map.latLngToContainerPoint([b.lat,b.lng]),dx=pb.x-pa.x,dy=pb.y-pa.y,ln=Math.sqrt(dx*dx+dy*dy)||1,px=-dy/ln,py=dx/ln,mx=(pa.x+pb.x)/2,my=(pa.y+pb.y)/2,cx=mx+px*pk*2,cy=my+py*pk*2,pts=[];for(var t=0;t<=1.0001;t+=1/16){var it=1-t,x=it*it*pa.x+2*it*t*cx+t*t*pb.x,y=it*it*pa.y+2*it*t*cy+t*t*pb.y,l=map.containerPointToLatLng([x,y]);pts.push([l.lat,l.lng]);}return pts;}catch(e){return[[a.lat,a.lng],[b.lat,b.lng]];}}' +
+    'function drawMapStrings(){if(!map)return;strLayers.forEach(function(l){try{map.removeLayer(l);}catch(e){}});strLayers=[];' +
+    'var mg={};D.strings.forEach(function(s){if((s.view||"web")!=="map")return;var a=byId[s.from],b=byId[s.to];if(!a||!b||a.lat==null||b.lat==null)return;var k=String(s.from)<String(s.to)?s.from+"|"+s.to:s.to+"|"+s.from;(mg[k]=mg[k]||[]).push(s);});' +
+    'Object.keys(mg).forEach(function(k){var ar=mg[k];ar.sort(function(p,q){return String(p.id).localeCompare(String(q.id));});var n=ar.length;var kp=k.split("|"),ca=byId[kp[0]],cb=byId[kp[1]];if(!ca||!cb)return;var gap=46;if(n>1&&map&&map._loaded){try{var ga=map.latLngToContainerPoint([ca.lat,ca.lng]),gb=map.latLngToContainerPoint([cb.lat,cb.lng]),gl=Math.sqrt(Math.pow(gb.x-ga.x,2)+Math.pow(gb.y-ga.y,2));gap=Math.min(Math.max(gl*.16,34),150);}catch(e){}}ar.forEach(function(s,i){var pk=n>1?(i-(n-1)/2)*gap:0,ll=curveLL(ca,cb,pk);' +
+    'var pl=L.polyline(ll,{color:s.color||"#9ca3af",weight:3,opacity:.85,dashArray:s.style==="dashed"?"6,8":null}).addTo(map);strLayers.push(pl);' +
+    'var mi=hav(ca,cb),lbl=(s.label||"")+(mi!=null?((s.label?" \u00B7 ":"")+mi.toFixed(1)+" mi"):"");if(lbl)pl.bindTooltip(lbl,{permanent:true,direction:"center",className:"sl"});});});}' +
     'function renderMap(){initMap();setTimeout(function(){if(map)map.invalidateSize();},60);mapLayers.forEach(function(l){map.removeLayer(l);});mapLayers=[];' +
     'var placed=D.pins.filter(function(p){return p.lat!=null&&p.lng!=null;});' +
-    'D.strings.forEach(function(s){if((s.view||"web")!=="map")return;var a=byId[s.from],b=byId[s.to];if(!a||!b||a.lat==null||b.lat==null)return;' +
-    'var pl=L.polyline([[a.lat,a.lng],[b.lat,b.lng]],{color:s.color||"#9ca3af",weight:3,opacity:.85,dashArray:s.style==="dashed"?"6,8":null}).addTo(map);mapLayers.push(pl);' +
-    'var mi=hav(a,b),lbl=(s.label||"")+(mi!=null?((s.label?" \u00B7 ":"")+mi.toFixed(1)+" mi"):"");if(lbl)pl.bindTooltip(lbl,{permanent:true,direction:"center",className:"sl"});});' +
+    'if(placed.length===1)map.setView([placed[0].lat,placed[0].lng],14);else if(placed.length>1)map.fitBounds(placed.map(function(p){return[p.lat,p.lng];}),{padding:[60,60],maxZoom:15});else map.setView([39.5,-98.35],4);' +
     'placed.forEach(function(p){var m=L.marker([p.lat,p.lng],{icon:micon(p)}).addTo(map);m.on("click",function(){openDetail(p);});mapLayers.push(m);});' +
-    'if(placed.length===1)map.setView([placed[0].lat,placed[0].lng],14);else if(placed.length>1)map.fitBounds(placed.map(function(p){return[p.lat,p.lng];}),{padding:[60,60],maxZoom:15});else map.setView([39.5,-98.35],4);}' +
+    'drawMapStrings();' +
+    '}' +
     'var webCards={};' +
     'function cardHtml(p){var m=meta(p),img=p.photo?"<img class=\\"wc-img\\" src=\\""+esc(p.photo)+"\\">":"";var rows="";' +
     'if(hasAddr(p.address))rows+="<div class=\\"wc-row\\">\uD83D\uDCCD "+esc(p.address)+"</div>";' +
@@ -1977,11 +2250,16 @@
     'var maxX=0,maxY=0;placed.forEach(function(p){var el=document.createElement("div");el.className="wc";el.style.left=p.x+"px";el.style.top=p.y+"px";el.style.borderTopColor=pcolor(p);el.innerHTML=cardHtml(p);el.onclick=function(){openDetail(p);};canvas.appendChild(el);webCards[p.id]=el;maxX=Math.max(maxX,p.x+260);maxY=Math.max(maxY,p.y+260);});' +
     'canvas.style.width=Math.max(stage.clientWidth,maxX)+"px";canvas.style.height=Math.max(stage.clientHeight,maxY)+"px";layoutLines();}' +
     'function layoutLines(){var svg=document.getElementById("webLines");if(!svg)return;while(svg.firstChild)svg.removeChild(svg.firstChild);var labels=document.getElementById("webLabels");if(labels)labels.innerHTML="";' +
-    'D.strings.forEach(function(s){if((s.view||"web")!=="web")return;var a=webCards[s.from],b=webCards[s.to];if(!a||!b)return;' +
+    'var g={};D.strings.forEach(function(s){if((s.view||"web")!=="web")return;if(!webCards[s.from]||!webCards[s.to])return;var k=String(s.from)<String(s.to)?s.from+"|"+s.to:s.to+"|"+s.from;(g[k]=g[k]||[]).push(s);});' +
+    'Object.keys(g).forEach(function(k){var ar=g[k];ar.sort(function(p,q){return String(p.id).localeCompare(String(q.id));});var n=ar.length;ar.forEach(function(s,i){var a=webCards[s.from],b=webCards[s.to];' +
     'var ax=a.offsetLeft+a.offsetWidth/2,ay=a.offsetTop+a.offsetHeight/2,bx=b.offsetLeft+b.offsetWidth/2,by=b.offsetTop+b.offsetHeight/2;' +
-    'var ln=document.createElementNS("http://www.w3.org/2000/svg","line");ln.setAttribute("x1",ax);ln.setAttribute("y1",ay);ln.setAttribute("x2",bx);ln.setAttribute("y2",by);ln.setAttribute("stroke",s.color||"#9ca3af");ln.setAttribute("stroke-width","2.5");ln.setAttribute("stroke-opacity",".85");if(s.style==="dashed")ln.setAttribute("stroke-dasharray","6,7");svg.appendChild(ln);' +
+    'var dx=bx-ax,dy=by-ay,ln2=Math.sqrt(dx*dx+dy*dy)||1,px=-dy/ln2,py=dx/ln2,mx=(ax+bx)/2,my=(ay+by)/2,pk;' +
+    'if(n>1){pk=(i-(n-1)/2)*44;}else{var h=0,sid=String(s.id);for(var _c=0;_c<sid.length;_c++)h=(h*31+sid.charCodeAt(_c))&0xffff;var bk=[-30,-18,18,30];pk=bk[h%bk.length];}' +
+    'var lx=mx+px*pk,ly=my+py*pk,el;' +
+    'if(Math.abs(pk)<.01){el=document.createElementNS("http://www.w3.org/2000/svg","line");el.setAttribute("x1",ax);el.setAttribute("y1",ay);el.setAttribute("x2",bx);el.setAttribute("y2",by);}else{var cx=mx+px*pk*2,cy=my+py*pk*2;el=document.createElementNS("http://www.w3.org/2000/svg","path");el.setAttribute("d","M "+ax+" "+ay+" Q "+cx+" "+cy+" "+bx+" "+by);el.setAttribute("fill","none");}' +
+    'el.setAttribute("stroke",s.color||"#9ca3af");el.setAttribute("stroke-width","2.5");el.setAttribute("stroke-opacity",".9");if(s.style==="dashed")el.setAttribute("stroke-dasharray","6,7");svg.appendChild(el);' +
     'var fa=byId[s.from],fb=byId[s.to],mi=hav(fa,fb),lbl=(s.label||"")+(mi!=null?((s.label?" \u00B7 ":"")+mi.toFixed(1)+" mi"):"");' +
-    'if(lbl&&labels){var pill=document.createElement("div");pill.className="ll-pill";pill.style.left=((ax+bx)/2)+"px";pill.style.top=((ay+by)/2)+"px";if(s.color)pill.style.borderColor=s.color;pill.textContent=lbl;pill.title=lbl;labels.appendChild(pill);}});}' +
+    'if(lbl&&labels){var pill=document.createElement("div");pill.className="ll-pill";pill.style.left=lx+"px";pill.style.top=ly+"px";if(s.color)pill.style.borderColor=s.color;pill.textContent=lbl;pill.title=lbl;labels.appendChild(pill);}});});}' +
     'function mediaHtml(p){if(!p.media||!p.media.length)return "";var h="<div class=\\"d-media\\">";p.media.forEach(function(m){h+="<div class=\\"d-mi\\"><div class=\\"d-mn\\">"+esc(m.name||m.kind)+"</div>";' +
     'if(m.src&&m.kind==="image")h+="<img class=\\"d-me\\" src=\\""+m.src+"\\">";' +
     'else if(m.src&&m.kind==="video")h+="<video class=\\"d-me\\" controls preload=\\"metadata\\" src=\\""+m.src+"\\"></video>";' +

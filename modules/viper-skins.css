@@ -1,0 +1,308 @@
+/* ==========================================================================
+   V.I.P.E.R. — Skins
+   --------------------------------------------------------------------------
+   COLOR-ONLY theming. Nothing here changes structure, layout, spacing,
+   typography or behaviour — only the values behind the palette.
+
+   HOW IT WORKS
+   ------------
+   Every VIPER Tailwind color is declared in each page's tailwind.config as
+       'viper-cyan': 'rgb(var(--vp-cyan) / <alpha-value>)'
+   so all utilities (bg-, text-, border-, ring-, shadow-, gradients) — including
+   opacity modifiers like bg-viper-cyan/20 — resolve through the RGB channel
+   triples defined below. Swapping a skin therefore means redefining ~8
+   variables; no utility classes or markup change.
+
+   The `:root` block below is the CLASSIC skin and its values are byte-identical
+   to the hex codes that used to be hard-coded in tailwind.config, so the default
+   look is unchanged.
+
+   Skins are selected with `data-skin` on <html> (set before first paint by a
+   tiny inline script in each page) and are deliberately scoped OUT of light
+   mode: light mode already ships its own complete `--lm-*` palette.
+
+   ADDING A SKIN
+   -------------
+   1. Add a block:  html[data-skin="yourskin"] body:not(.light-mode) { ...tokens... }
+   2. Add the option to the Skin picker in settings.html (VIPER_SKINS).
+   ========================================================================== */
+
+/* ─── CLASSIC (default — matches the original hard-coded palette) ───────── */
+:root,
+body {
+    --vp-dark:    10 14 20;      /* #0a0e14 */
+    --vp-card:    26 35 50;      /* #1a2332 */
+    --vp-cyan:     0 217 255;    /* #00d9ff */
+    --vp-green:    0 255 136;    /* #00ff88 */
+    --vp-purple: 157 78 221;     /* #9d4edd */
+    --vp-orange: 255 167 38;     /* #ffa726 */
+    --vp-yellow: 251 191 36;     /* #fbbf24 */
+    --vp-red:    239 68 68;      /* #ef4444 */
+}
+
+/* ─── SUPERVISOR EDITION ────────────────────────────────────────────────────
+   Palette lifted verbatim from the Supervisor Edition stylesheet
+   (viper_supervisor_edition/src/styles.css :root, "RFP §5.1"):
+     bg #0e1117 · panel #1a1f27 · panel-3 #161a21 · blue #0078d4
+     cyan #00b7c3 · green #4caf50 · amber #ffc107 · red #ef5350
+     border #262d38 · border-soft #1f2530
+   VIPER's primary accent token is `viper-cyan`, and it is used both as a
+   background (with black text) and as body text on a near-black page. Neither
+   #0078d4 nor #00b7c3 is legible in both roles, so the accent is the
+   Supervisor blue lifted two stops for contrast — it reads unmistakably blue
+   like the Supervisor dashboard while keeping black-on-accent buttons and
+   cyan-on-dark links readable.
+   ------------------------------------------------------------------------- */
+html[data-skin="supervisor"] body:not(.light-mode) {
+    --vp-dark:    14 17 23;      /* #0e1117  bg          */
+    --vp-card:    26 31 39;      /* #1a1f27  panel       */
+    --vp-cyan:    43 159 227;    /* #2b9fe3  accent blue */
+    --vp-green:   76 175 80;     /* #4caf50               */
+    --vp-purple: 139 92 246;     /* #8b5cf6               */
+    --vp-orange: 240 136 62;     /* #f0883e               */
+    --vp-yellow: 255 193 7;      /* #ffc107  amber        */
+    --vp-red:    239 83 80;      /* #ef5350               */
+
+    /* Chrome tints used by the overrides further down. */
+    --vp-sv-blue:        0 120 212;   /* #0078d4 true Supervisor blue */
+    --vp-sv-border:     38 45 56;     /* #262d38 */
+    --vp-sv-border-soft: 31 37 48;    /* #1f2530 */
+    --vp-sv-panel-3:    22 26 33;     /* #161a21 */
+}
+
+/* ── Supervisor chrome ──────────────────────────────────────────────────────
+   A handful of shared classes hard-code the classic cyan glow / navy glass in
+   each page's inline <style>. These rules restate them with the Supervisor
+   palette: flat bordered panels and a soft blue depth instead of a cyan bloom.
+   Scoped to the skin, so the classic look is untouched.
+   ------------------------------------------------------------------------- */
+
+/* Page background: swap the cyan graph-paper grid for the Supervisor's
+   atmospheric blue/cyan radials over #0e1117. */
+html[data-skin="supervisor"] body:not(.light-mode) {
+    background-color: rgb(var(--vp-dark)) !important;
+    background-image:
+        radial-gradient(1200px 600px at 78% -10%, rgba(0, 120, 212, 0.08), transparent 60%),
+        radial-gradient(900px 500px at 0% 100%, rgba(0, 183, 195, 0.05), transparent 55%) !important;
+}
+
+/* The hex watermark is a cyan-stroked SVG data URI — drop it for the flat
+   Supervisor surface. */
+html[data-skin="supervisor"] body:not(.light-mode) .hex-pattern {
+    background-image: none !important;
+}
+
+/* Panels: Supervisor uses solid panels with a 1px neutral border and no glow. */
+html[data-skin="supervisor"] body:not(.light-mode) .glass-card {
+    background: rgba(var(--vp-card) / 0.92) !important;
+    border: 1px solid rgb(var(--vp-sv-border)) !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35) !important;
+}
+
+html[data-skin="supervisor"] body:not(.light-mode) .glow-border {
+    box-shadow: 0 0 0 1px rgba(var(--vp-sv-blue) / 0.35),
+                0 0 16px rgba(var(--vp-sv-blue) / 0.18) !important;
+}
+
+html[data-skin="supervisor"] body:not(.light-mode) .stat-card:hover {
+    box-shadow: 0 0 0 1px rgba(var(--vp-sv-blue) / 0.35),
+                0 0 18px rgba(var(--vp-sv-blue) / 0.18) !important;
+}
+
+/* Scrollbars — exact Supervisor values (#2a323d / #364150). */
+html[data-skin="supervisor"] body:not(.light-mode) ::-webkit-scrollbar-thumb {
+    background: #2a323d !important;
+    border-radius: 6px;
+}
+html[data-skin="supervisor"] body:not(.light-mode) ::-webkit-scrollbar-thumb:hover {
+    background: #364150 !important;
+}
+
+/* Sidebar: Supervisor uses a subtle vertical gradient panel with a hard
+   right border rather than a translucent glass card. */
+html[data-skin="supervisor"] body:not(.light-mode) .w-64.glass-card,
+html[data-skin="supervisor"] body:not(.light-mode) .sidebar-shell {
+    background: linear-gradient(180deg, #141821 0%, #11151d 100%) !important;
+    border-right: 1px solid rgb(var(--vp-sv-border)) !important;
+    box-shadow: none !important;
+}
+
+/* Inputs / selects sit on the darker panel-3 in Supervisor. */
+html[data-skin="supervisor"] body:not(.light-mode) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html[data-skin="supervisor"] body:not(.light-mode) textarea,
+html[data-skin="supervisor"] body:not(.light-mode) select {
+    background-color: rgb(var(--vp-sv-panel-3)) !important;
+    border-color: rgb(var(--vp-sv-border)) !important;
+}
+
+/* Table header bands and hairlines read neutral, not cyan. */
+html[data-skin="supervisor"] body:not(.light-mode) .inv-thead-solid th {
+    background: rgb(var(--vp-sv-panel-3)) !important;
+    border-bottom: 1px solid rgb(var(--vp-sv-border)) !important;
+}
+
+/* ─── CYBER OBSIDIAN ────────────────────────────────────────────────────────
+   The Intellect LE house theme shared by Project Oversight and Hindsight PLUS.
+   Palette lifted from hindsight_plus/src/index.css (":root — Cyber Obsidian"):
+     bg #0a0612 obsidian · card #181124 · popover #120d1d · border #2a1f3d
+     hexgrid #1f1630 · violet #8a2be2 · hot pink #e00070 · orange #ff5e00
+     amber #ff6a00 · emerald #10b981 · muted text #9a8fb5
+   Signature accent is the 135deg orange -> hot pink -> violet gradient over a
+   purple-tinted hex canvas.
+
+   As with Supervisor, the primary accent token (`viper-cyan`) has to work BOTH
+   as a button background with near-black text and as body text on a near-black
+   page. #8a2be2 fails the second role, so the accent is that violet lifted to
+   #b06bff — unmistakably the same hue, legible in both roles. `viper-purple`
+   takes the hot pink so the two-tone brand gradients (cyan -> purple in VIPER's
+   markup) render as violet -> magenta, exactly like the brand gradient.
+   ------------------------------------------------------------------------- */
+html[data-skin="obsidian"] body:not(.light-mode) {
+    --vp-dark:    10 6 18;       /* #0a0612  obsidian canvas   */
+    --vp-card:    24 17 36;      /* #181124  panel             */
+    --vp-cyan:   176 107 255;    /* #b06bff  violet accent     */
+    --vp-green:   16 185 129;    /* #10b981  emerald / verified */
+    --vp-purple: 255 45 146;     /* #ff2d92  hot pink          */
+    --vp-orange: 255 106 0;      /* #ff6a00  tactical flag     */
+    --vp-yellow: 245 178 58;     /* #f5b23a  amber             */
+    --vp-red:    240 71 71;      /* #f04747                    */
+
+    /* Chrome tints used by the overrides further down. */
+    --vp-ob-violet:  138 43 226;   /* #8a2be2 true brand violet */
+    --vp-ob-pink:    224 0 112;    /* #e00070 true brand pink   */
+    --vp-ob-border:   42 31 61;    /* #2a1f3d                   */
+    --vp-ob-panel-3:  18 13 29;    /* #120d1d popover / inputs  */
+}
+
+/* ── Obsidian chrome ─────────────────────────────────────────────────────── */
+
+/* Page background: obsidian with the violet/pink atmospheric radials in place
+   of the cyan graph-paper grid. */
+html[data-skin="obsidian"] body:not(.light-mode) {
+    background-color: rgb(var(--vp-dark)) !important;
+    background-image:
+        radial-gradient(1200px 600px at 80% -10%, rgba(var(--vp-ob-violet) / 0.10), transparent 60%),
+        radial-gradient(900px 500px at -10% 110%, rgba(var(--vp-ob-pink) / 0.07), transparent 60%) !important;
+}
+
+/* Keep VIPER's own hex watermark — just re-stroke it in brand violet. */
+html[data-skin="obsidian"] body:not(.light-mode) .hex-pattern {
+    background-image: url("data:image/svg+xml,%3Csvg width='50' height='43.4' viewBox='0 0 50 43.4' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M25 0l12.5 21.7L25 43.4 12.5 21.7z' fill='none' stroke='rgba(150,90,240,0.10)' stroke-width='1'/%3E%3C/svg%3E") !important;
+}
+
+/* Panels: translucent obsidian glass with a violet-gray hairline and a soft
+   violet lift instead of the cyan bloom. */
+html[data-skin="obsidian"] body:not(.light-mode) .glass-card {
+    background: rgba(var(--vp-card) / 0.78) !important;
+    border: 1px solid rgb(var(--vp-ob-border)) !important;
+    box-shadow: 0 8px 30px rgba(var(--vp-ob-violet) / 0.12) !important;
+}
+
+html[data-skin="obsidian"] body:not(.light-mode) .glow-border {
+    box-shadow: 0 0 0 1px rgba(var(--vp-cyan) / 0.40),
+                0 8px 30px rgba(var(--vp-ob-violet) / 0.20) !important;
+}
+
+html[data-skin="obsidian"] body:not(.light-mode) .stat-card:hover {
+    box-shadow: 0 0 0 1px rgba(var(--vp-cyan) / 0.40),
+                0 10px 34px rgba(var(--vp-ob-violet) / 0.28) !important;
+}
+
+/* Scrollbars — exact Hindsight values (hsl(262 33% 22%) / hsl(271 76% 40%)). */
+html[data-skin="obsidian"] body:not(.light-mode) ::-webkit-scrollbar-thumb {
+    background: #33264b !important;
+    border-radius: 6px;
+}
+html[data-skin="obsidian"] body:not(.light-mode) ::-webkit-scrollbar-thumb:hover {
+    background: #6918b4 !important;
+}
+
+/* Sidebar rail: the deep violet-black column both apps use. */
+html[data-skin="obsidian"] body:not(.light-mode) .w-64.glass-card,
+html[data-skin="obsidian"] body:not(.light-mode) .sidebar-shell {
+    background: linear-gradient(180deg, #170f28 0%, #0e0a19 100%) !important;
+    border-right: 1px solid rgb(var(--vp-ob-border)) !important;
+    box-shadow: none !important;
+}
+
+/* Inputs / selects sit on the popover surface. */
+html[data-skin="obsidian"] body:not(.light-mode) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html[data-skin="obsidian"] body:not(.light-mode) textarea,
+html[data-skin="obsidian"] body:not(.light-mode) select {
+    background-color: rgb(var(--vp-ob-panel-3)) !important;
+    border-color: rgb(var(--vp-ob-border)) !important;
+}
+
+/* Sticky table header band becomes the brand violet -> magenta sweep. */
+html[data-skin="obsidian"] body:not(.light-mode) .inv-thead-solid th {
+    background-color: rgb(var(--vp-card)) !important;
+    background-image: linear-gradient(to right, rgba(var(--vp-ob-violet) / 0.32), rgba(var(--vp-ob-pink) / 0.26)) !important;
+    box-shadow: inset 0 -1px 0 0 rgba(var(--vp-cyan) / 0.35) !important;
+}
+
+/* Segmented view toggles hard-code cyan in each page's inline style. */
+html[data-skin="obsidian"] body:not(.light-mode) .view-toggle-active {
+    background: rgba(var(--vp-cyan) / 0.20) !important;
+    color: rgb(var(--vp-cyan)) !important;
+    border: 1px solid rgba(var(--vp-cyan) / 0.35) !important;
+}
+
+/* ─── SHARED: accent-following chrome ───────────────────────────────────────
+   A few pieces of chrome hard-code the classic cyan in a page's inline <style>
+   (or, for the sidebar toggle, in a runtime-injected <style> from
+   modules/viper-prefs.js). They are restated here in terms of the ACTIVE
+   accent token so they follow whichever skin is on.
+
+   `html[data-skin]` matches only when a non-classic skin is set, so Classic
+   keeps its original declarations verbatim. Light mode is excluded as always.
+   ------------------------------------------------------------------------- */
+
+/* Sidebar rail items (settings.html `.sidebar-item`). */
+html[data-skin] body:not(.light-mode) .sidebar-item:hover {
+    background: rgba(var(--vp-cyan) / 0.10) !important;
+    border-left: 3px solid rgb(var(--vp-cyan)) !important;
+}
+html[data-skin] body:not(.light-mode) .sidebar-item.active {
+    background: rgba(var(--vp-cyan) / 0.15) !important;
+    border-left: 3px solid rgb(var(--vp-cyan)) !important;
+}
+
+/* Floating sidebar collapse button (injected by modules/viper-prefs.js). */
+html[data-skin] body:not(.light-mode) #viperSidebarToggle {
+    background: rgba(var(--vp-card) / 0.85) !important;
+    border-color: rgba(var(--vp-cyan) / 0.35) !important;
+    color: rgb(var(--vp-cyan)) !important;
+}
+html[data-skin] body:not(.light-mode) #viperSidebarToggle:hover {
+    background: rgba(var(--vp-cyan) / 0.15) !important;
+    border-color: rgb(var(--vp-cyan)) !important;
+    box-shadow: 0 0 12px rgba(var(--vp-cyan) / 0.45) !important;
+}
+
+/* Segmented "view toggle" pills. */
+html[data-skin] body:not(.light-mode) .view-toggle-active {
+    background: rgba(var(--vp-cyan) / 0.20) !important;
+    color: rgb(var(--vp-cyan)) !important;
+    border: 1px solid rgba(var(--vp-cyan) / 0.35) !important;
+}
+
+/* Scrollbar track (settings.html pins it to the classic card colour). */
+html[data-skin] body:not(.light-mode) ::-webkit-scrollbar-track {
+    background: rgba(var(--vp-card) / 0.5) !important;
+}
+
+/* Dashboard quick-stat cards + their gear dropdowns carry the classic navy
+   glass as an INLINE style attribute (index.html ~L964-1050), so they ignore
+   the token layer entirely and keep reading slate-blue under any skin.
+   Restate them here — inline styles lose to `!important` from a stylesheet.
+   Card 4 is deliberately the green-accented one, so keep that distinction. */
+html[data-skin] body:not(.light-mode) .stat-card {
+    background: rgba(var(--vp-card) / 0.78) !important;
+    border: 1px solid rgba(var(--vp-cyan) / 0.20) !important;
+}
+html[data-skin] body:not(.light-mode) .stat-card.glow-border {
+    border-color: rgba(var(--vp-green) / 0.30) !important;
+}
+html[data-skin] body:not(.light-mode) .dropdown-menu {
+    background: rgba(var(--vp-card) / 0.95) !important;
+}

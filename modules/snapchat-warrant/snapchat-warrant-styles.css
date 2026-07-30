@@ -268,6 +268,27 @@
     transition: all 0.15s;
 }
 .swp-media-card:hover { border-color: rgba(255,252,0,0.3); transform: translateY(-2px); }
+.swp-media-card.swp-media-flagged {
+    border-color: #fffc00;
+    box-shadow: 0 0 0 2px rgba(255, 252, 0, 0.35);
+}
+/* Flag button floats over the thumbnail; stopPropagation keeps the card click intact. */
+.swp-media-thumb-wrap { position: relative; }
+.swp-media-flag-overlay {
+    position: absolute;
+    top: 6px; right: 6px;
+    z-index: 3;
+    opacity: 0.75;
+    transition: opacity 0.15s;
+}
+.swp-media-card:hover .swp-media-flag-overlay { opacity: 1; }
+.swp-media-flag-overlay .swp-flag-btn {
+    background: rgba(0,0,0,0.65);
+    backdrop-filter: blur(2px);
+}
+.swp-media-card.swp-media-flagged .swp-media-flag-overlay { opacity: 1; }
+.swp-title-flagcount { font-size: 0.7em; color: #fffc00; margin-left: 8px; font-weight: 500; }
+.swp-lightbox-flag { margin-top: 12px; width: 100%; justify-content: center; }
 .swp-media-thumb {
     width: 100%; aspect-ratio: 1;
     object-fit: cover;
@@ -643,6 +664,9 @@ body.light-mode .swp-msg-media-missing { color: #b45309 !important; }
 /* Media gallery */
 body.light-mode .swp-media-card { background: var(--lm-card, #fff) !important; border-color: var(--lm-card-border, #dde3ea) !important; }
 body.light-mode .swp-media-card:hover { border-color: rgba(8,145,178,0.30) !important; }
+body.light-mode .swp-media-card.swp-media-flagged { border-color: var(--lm-accent, #0891b2) !important; box-shadow: 0 0 0 2px rgba(8,145,178,0.25) !important; }
+body.light-mode .swp-media-flag-overlay .swp-flag-btn { background: rgba(255,255,255,0.9) !important; }
+body.light-mode .swp-title-flagcount { color: var(--lm-accent, #0891b2) !important; }
 body.light-mode .swp-media-thumb { background: var(--lm-inset, #f0f3f6) !important; }
 body.light-mode .swp-media-video-thumb { background: linear-gradient(135deg, #e8ecf0, #dde3ea) !important; }
 body.light-mode .swp-video-play-icon { background: var(--lm-accent, #0891b2) !important; color: #fff !important; }

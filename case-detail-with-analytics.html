@@ -30,17 +30,20 @@
     <!-- Analytics CDR Libraries -->
     <script src="libs/papaparse.min.js"></script>
     <script src="libs/d3.v7.min.js"></script>
+    <link rel="stylesheet" href="modules/viper-skins.css">
+    <script src="modules/viper-skins.js"></script>
     <script>
         tailwind.config = {
             theme: {
                 extend: {
                     colors: {
-                        'viper-dark': '#0a0e14',
-                        'viper-card': '#1a2332',
-                        'viper-cyan': '#00d9ff',
-                        'viper-green': '#00ff88',
-                        'viper-purple': '#9d4edd',
-                        'viper-orange': '#ffa726',
+                        // Skin-driven palette — triples live in modules/viper-skins.css.
+                        'viper-dark':   'rgb(var(--vp-dark) / <alpha-value>)',
+                        'viper-card':   'rgb(var(--vp-card) / <alpha-value>)',
+                        'viper-cyan':   'rgb(var(--vp-cyan) / <alpha-value>)',
+                        'viper-green':  'rgb(var(--vp-green) / <alpha-value>)',
+                        'viper-purple': 'rgb(var(--vp-purple) / <alpha-value>)',
+                        'viper-orange': 'rgb(var(--vp-orange) / <alpha-value>)',
                     }
                 }
             }
@@ -2965,6 +2968,7 @@
                     fieldBold('Created', formatDate(currentCase.createdAt || currentCase.createdDate));
                     fieldBold('Investigator', currentCase.investigator || currentCase.createdBy);
                     if (currentCase.synopsis) { gap(); itemHeading('Synopsis'); bodyText(currentCase.synopsis); }
+                    if (currentCase.dispositionSummary) { gap(); itemHeading('Disposition Summary'); bodyText(currentCase.dispositionSummary); }
                     if (currentCase.description) { gap(); itemHeading('Description'); bodyText(currentCase.description); }
                     {
                         // Unified offenses: primary (with offenseType) + additional [{offense,type}], with legacy fallbacks
@@ -3841,6 +3845,10 @@
                     yPos += 6;
                     doc.text(`Type: ${currentCase.type}`, margin, yPos);
                     yPos += 6;
+                    if (currentCase.category) {
+                        doc.text(`Category: ${currentCase.category}`, margin, yPos);
+                        yPos += 6;
+                    }
                     doc.text(`Created: ${formatDate(currentCase.createdDate)}`, margin, yPos);
                     yPos += 6;
                     if (currentCase.synopsis) {
@@ -3852,6 +3860,16 @@
                         const synLines = doc.splitTextToSize(currentCase.synopsis, contentWidth);
                         doc.text(synLines, margin, yPos);
                         yPos += synLines.length * 5;
+                    }
+                    if (currentCase.dispositionSummary) {
+                        yPos += 3;
+                        doc.setFont(undefined, 'bold');
+                        doc.text('Disposition Summary:', margin, yPos);
+                        yPos += 6;
+                        doc.setFont(undefined, 'normal');
+                        const dispLines = doc.splitTextToSize(currentCase.dispositionSummary, contentWidth);
+                        doc.text(dispLines, margin, yPos);
+                        yPos += dispLines.length * 5;
                     }
                     if (currentCase.description) {
                         yPos += 3;
@@ -5133,9 +5151,24 @@
                                     <p class="text-white mt-1">${currentCase.locationOfOccurrence ? String(currentCase.locationOfOccurrence).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '<span class="text-gray-500 italic">Not set</span>'}</p>
                                 </div>
                                 <div class="col-span-2">
+                                    <label class="text-sm text-gray-400">Category</label>
+                                    <p class="text-white mt-1">${currentCase.category
+                                        ? String(currentCase.category).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                                        : '<span class="text-gray-500 italic">Not set — shown in the Category column on the dashboard</span>'}</p>
+                                </div>
+                                <div class="col-span-2">
                                     <label class="text-sm text-gray-400">Synopsis</label>
                                     <p class="text-white mt-2 leading-relaxed">${currentCase.synopsis || '<span class="text-gray-500 italic">No synopsis</span>'}</p>
                                 </div>
+                                ${(isCaseStatusInactive(currentCase.status) || currentCase.dispositionSummary) ? `
+                                <div class="col-span-2">
+                                    <label class="text-sm text-gray-400">Disposition Summary</label>
+                                    <p class="text-white mt-2 leading-relaxed">${currentCase.dispositionSummary
+                                        ? String(currentCase.dispositionSummary).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')
+                                        : '<span class="text-gray-500 italic">No disposition recorded — why was this case closed or inactivated?</span>'}</p>
+                                    ${currentCase.dispositionUpdatedAt ? `<p class="text-xs text-gray-500 mt-1">Recorded ${new Date(currentCase.dispositionUpdatedAt).toLocaleString()}</p>` : ''}
+                                </div>
+                                ` : ''}
                                 <div>
                                     <label class="text-sm text-gray-400">Created By</label>
                                     <p class="text-white mt-1">${currentCase.createdBy}</p>
@@ -5245,8 +5278,17 @@
                                     <input type="text" id="editCaseLocationOfOccurrence" value="${String(currentCase.locationOfOccurrence || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}" placeholder="e.g. 123 Main St, Springfield, IL 62704" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
                                 </div>
                                 <div class="col-span-2">
-                                    <label class="text-sm text-gray-400 block mb-1">Synopsis</label>
-                                    <textarea id="editCaseSynopsis" rows="4" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none resize-y">${currentCase.synopsis || ''}</textarea>
+                                    <label class="text-sm text-gray-400 block mb-1">Category <span class="text-gray-600">(short label shown on the dashboard)</span></label>
+                                    <input type="text" id="editCaseCategory" maxlength="60" list="editCaseCategoryOptions" value="${_esc(currentCase.category || '')}" placeholder="e.g. CSAM Possession, Fraud, Missing Person" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
+                                    <datalist id="editCaseCategoryOptions">${buildCategorySuggestions()}</datalist>
+                                </div>
+                                <div class="col-span-2">
+                                    <label class="text-sm text-gray-400 block mb-1">Synopsis <span class="text-gray-600">(your own detail — not shown on the dashboard)</span></label>
+                                    <textarea id="editCaseSynopsis" rows="4" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none resize-y">${_esc(currentCase.synopsis || '')}</textarea>
+                                </div>
+                                <div class="col-span-2">
+                                    <label class="text-sm text-gray-400 block mb-1">Disposition Summary <span class="text-gray-600">(why the case was closed / inactivated)</span></label>
+                                    <textarea id="editCaseDisposition" rows="3" placeholder="e.g. Unfounded — no corroborating evidence; complainant declined to prosecute." class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none resize-y">${_esc(currentCase.dispositionSummary || '')}</textarea>
                                 </div>
                             </div>
                             <div class="flex justify-end gap-3 mt-4 pt-4 border-t border-gray-700">
@@ -29997,6 +30039,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const newStatus = document.getElementById('editCaseStatus').value;
             const newCreatedBy = document.getElementById('editCaseCreatedBy').value.trim();
             const newSynopsis = document.getElementById('editCaseSynopsis').value.trim();
+            const newCategory = (document.getElementById('editCaseCategory')?.value || '').trim().slice(0, 60);
+            const newDisposition = (document.getElementById('editCaseDisposition')?.value || '').trim();
             const newCybertip = (document.getElementById('editCaseCybertip')?.value || '').trim();
             const newLocationOfOccurrence = (document.getElementById('editCaseLocationOfOccurrence')?.value || '').trim();
             const newDateAssigned = document.getElementById('editDateAssigned')?.value || '';
@@ -30014,6 +30058,11 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             currentCase.status = newStatus;
             currentCase.createdBy = newCreatedBy;
             currentCase.synopsis = newSynopsis;
+            currentCase.category = newCategory;
+            if (newDisposition !== (currentCase.dispositionSummary || '')) {
+                currentCase.dispositionSummary = newDisposition;
+                currentCase.dispositionUpdatedAt = new Date().toISOString();
+            }
             currentCase.cybertipNumber = newCybertip;
             currentCase.locationOfOccurrence = newLocationOfOccurrence;
             currentCase.dateAssigned = newDateAssigned || null;
@@ -30031,10 +30080,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             // Custom statuses with category 'active' are NOT inactive.
             // Stored as YYYY-MM-DD so the dashboard/All Cases renderers
             // (which append 'T00:00' before parsing) can read it.
-            const inactiveStatuses = ['closed', 'closed-arrest', 'transferred', 'inactive'];
-            const customStatuses = _lsParse('viperCustomStatuses', []);
-            customStatuses.forEach(s => { if (s.category !== 'active') inactiveStatuses.push(s.id); });
-            if (inactiveStatuses.includes(newStatus) && !inactiveStatuses.includes(oldStatus)) {
+            const inactiveStatuses = getInactiveStatusIds();
+            const becameInactive = inactiveStatuses.includes(newStatus) && !inactiveStatuses.includes(oldStatus);
+            if (becameInactive) {
                 currentCase.dateClosed = new Date().toISOString().split('T')[0];
             } else if (!inactiveStatuses.includes(newStatus)) {
                 currentCase.dateClosed = null;
@@ -30044,6 +30092,19 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             renderCaseHeader();
             renderTabContent('overview');
             showToast('Case information updated', 'success');
+
+            // Status just left active and no disposition was typed in the form —
+            // ask for it now rather than losing the reasoning.
+            if (becameInactive && !currentCase.dispositionSummary) {
+                promptDispositionSummary(_statusDisplayLabel(newStatus)).then(text => {
+                    if (text === null) return;
+                    currentCase.dispositionSummary = text;
+                    currentCase.dispositionUpdatedAt = new Date().toISOString();
+                    saveCase();
+                    renderTabContent('overview');
+                    if (text) showToast('Disposition summary saved', 'success');
+                });
+            }
 
             // Update URL param if case number changed
             if (oldCaseNumber !== newCaseNumber) {
@@ -30061,21 +30122,127 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             // Auto-set dateClosed when moving to inactive status.
             // Custom statuses with category 'active' are NOT inactive.
             // Stored as YYYY-MM-DD (see note above).
-            const inactiveStatuses = ['closed', 'closed-arrest', 'transferred', 'inactive'];
-            const customStatuses = _lsParse('viperCustomStatuses', []);
-            customStatuses.forEach(s => { if (s.category !== 'active') inactiveStatuses.push(s.id); });
-            if (inactiveStatuses.includes(newStatus) && !inactiveStatuses.includes(oldStatus)) {
+            const inactiveStatuses = getInactiveStatusIds();
+            const becameInactive = inactiveStatuses.includes(newStatus) && !inactiveStatuses.includes(oldStatus);
+            if (becameInactive) {
                 currentCase.dateClosed = new Date().toISOString().split('T')[0];
             } else if (!inactiveStatuses.includes(newStatus)) {
                 currentCase.dateClosed = null;
             }
-            
+
+            _persistCurrentCase();
+            renderCaseHeader();
+
+            // Ask for a disposition summary the moment the case leaves active
+            // status — that is when the reasoning is still fresh.
+            if (becameInactive) {
+                const label = _statusDisplayLabel(newStatus);
+                promptDispositionSummary(label).then(text => {
+                    if (text === null) return;              // skipped
+                    currentCase.dispositionSummary = text;
+                    currentCase.dispositionUpdatedAt = new Date().toISOString();
+                    currentCase.lastModified = currentCase.dispositionUpdatedAt;
+                    _persistCurrentCase();
+                    renderTabContent('overview');
+                    if (text) showToast('Disposition summary saved', 'success');
+                });
+            }
+        }
+
+        /** Human-readable label for a built-in or custom status id. */
+        function _statusDisplayLabel(status) {
+            const builtins = {
+                active: 'Active', inactive: 'Inactive', closed: 'Closed',
+                'closed-arrest': 'Closed with Arrest', transferred: 'Transferred'
+            };
+            if (builtins[status]) return builtins[status];
+            const cs = _lsParse('viperCustomStatuses', []).find(s => s && s.id === status);
+            return (cs && cs.label) ? cs.label : String(status || '');
+        }
+
+        /** Write currentCase back into the viperCases array. */
+        function _persistCurrentCase() {
             const cases = _lsParse('viperCases', []);
             const index = cases.findIndex(c => c.id === currentCase.id);
-            cases[index] = currentCase;
+            if (index >= 0) cases[index] = currentCase;
+            else cases.push(currentCase);
             localStorage.setItem('viperCases', JSON.stringify(cases));
-            
-            renderCaseHeader();
+        }
+
+        // ─── Case status classification + Category / Disposition helpers ────
+        // A status is "inactive" if it is one of the built-in closure statuses
+        // or a custom status whose category is anything other than 'active'.
+        function getInactiveStatusIds() {
+            const ids = ['closed', 'closed-arrest', 'transferred', 'inactive'];
+            _lsParse('viperCustomStatuses', []).forEach(s => {
+                if (s && s.category !== 'active' && s.id) ids.push(s.id);
+            });
+            return ids;
+        }
+        function isCaseStatusInactive(status) {
+            return getInactiveStatusIds().includes(status);
+        }
+
+        /** <option> list of categories already used on other cases. */
+        function buildCategorySuggestions() {
+            try {
+                const all = _lsParse('viperCases', []);
+                const used = [...new Set(all.map(c => (c && c.category ? String(c.category).trim() : '')).filter(Boolean))].sort();
+                return used.map(v =>
+                    '<option value="' + v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;') + '"></option>'
+                ).join('');
+            } catch (_) { return ''; }
+        }
+
+        /**
+         * Prompt for a disposition summary when a case leaves active status.
+         * Resolves with the entered text, or null if skipped / superseded.
+         */
+        let _dispositionPromptPending = null;
+        function promptDispositionSummary(statusLabel) {
+            return new Promise(resolve => {
+                // If a prompt is already open, settle its promise before
+                // replacing it so the earlier caller never hangs forever.
+                const existing = document.getElementById('dispositionPromptModal');
+                if (existing) existing.remove();
+                if (_dispositionPromptPending) {
+                    const stale = _dispositionPromptPending;
+                    _dispositionPromptPending = null;
+                    stale(null);
+                }
+                const modal = document.createElement('div');
+                modal.id = 'dispositionPromptModal';
+                modal.className = 'fixed inset-0 bg-black/70 flex items-center justify-center z-[100]';
+                modal.innerHTML = `
+                    <div class="bg-viper-card border border-gray-700 rounded-xl w-full max-w-lg mx-4 shadow-2xl overflow-hidden">
+                        <div class="border-b border-gray-700 px-6 py-4">
+                            <h3 class="text-lg font-bold text-white">Disposition Summary</h3>
+                            <p class="text-xs text-gray-400 mt-1">This case is now <span class="text-viper-cyan font-medium">${_esc(statusLabel || '')}</span>. Note why, so it makes sense months from now.</p>
+                        </div>
+                        <div class="px-6 py-4">
+                            <textarea id="dispositionPromptText" rows="4" placeholder="e.g. Unfounded — no corroborating evidence; complainant declined to prosecute."
+                                      class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none resize-y">${_esc(currentCase.dispositionSummary || '')}</textarea>
+                            <p class="text-xs text-gray-500 mt-2">Appears in the case Overview and the optional Disposition column on the dashboard / All Cases.</p>
+                        </div>
+                        <div class="flex justify-end gap-3 px-6 py-4 border-t border-gray-700">
+                            <button id="dispositionPromptSkip" class="px-5 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white transition">Skip</button>
+                            <button id="dispositionPromptSave" class="px-5 py-2 bg-viper-cyan hover:bg-viper-cyan/80 rounded-lg text-black font-semibold transition">Save</button>
+                        </div>
+                    </div>`;
+                document.body.appendChild(modal);
+                _dispositionPromptPending = resolve;
+                const ta = modal.querySelector('#dispositionPromptText');
+                const finish = (val) => {
+                    if (_dispositionPromptPending !== resolve) { modal.remove(); return; }
+                    _dispositionPromptPending = null;
+                    modal.remove();
+                    resolve(val);
+                };
+                modal.querySelector('#dispositionPromptSave').onclick = () => finish((ta.value || '').trim());
+                modal.querySelector('#dispositionPromptSkip').onclick = () => finish(null);
+                modal.onclick = (e) => { if (e.target === modal) finish(null); };
+                setTimeout(() => { try { ta.focus(); } catch (_) {} }, 30);
+            });
         }
 
         function buildStatusOptions(currentStatus) {
@@ -38901,8 +39068,22 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
         function initializeSnapchatWarrant() {
             if (window.SnapchatWarrantModule) {
+                const cid = String(currentCase.id);
+                // Re-use the live module when the user simply navigated away and
+                // came back to the tab within the same case. Re-constructing it
+                // threw away the parsed production (forcing a re-import) plus the
+                // active section, page position and unsaved flags.
+                const existing = window.snapchatWarrantModule;
+                if (existing && String(existing.caseId) === cid && existing.ui) {
+                    existing.ui.containerId = 'snapchat-warrant-tab-container';
+                    window.snapchatWarrantUI = existing.ui;
+                    existing.ui.render();
+                    existing.scanForWarrants().catch(err =>
+                        console.warn('Snapchat warrant re-scan error:', err));
+                    return;
+                }
                 window.snapchatWarrantModule = new SnapchatWarrantModule(
-                    String(currentCase.id),
+                    cid,
                     String(currentCase.caseNumber || currentCase.id),
                     currentCase.title || currentCase.name || currentCase.caseNumber
                 );

@@ -14,7 +14,7 @@ class SnapchatWarrantModule {
     }
 
     async init(containerId) {
-        this.loadData();
+        await this.loadData();
         this.ui = new SnapchatWarrantUI(containerId, this);
         window.snapchatWarrantUI = this.ui;
         this.ui.render();
@@ -24,23 +24,184 @@ class SnapchatWarrantModule {
         return this;
     }
 
-    loadData() {
+    // ═══════════════════════════════════════════════════════════════════
+    // Persistence — DISK-BACKED (see electron-main snapchat-warrant-*-data)
+    //
+    // A Snapchat production is far too big for localStorage (~8 MB+ vs a ~5 MB
+    // quota). The full payload therefore lives in a per-case JSON file in
+    // userData, and localStorage keeps only a slim metadata index for the
+    // handful of synchronous readers (module badge counts, Warrant Author
+    // subject harvesting). Before this, every save threw QuotaExceededError:
+    // flags could not be set and the import disappeared the moment the user
+    // left the tab, forcing a re-import.
+    // ═══════════════════════════════════════════════════════════════════
+
+    _lsKey() { return `snapchatWarrant_${this.caseId}`; }
+
+    /** Metadata-only projection of an import — safe to keep in localStorage. */
+    _slimImport(i) {
+        return {
+            id: i.id,
+            fileName: i.fileName,
+            filePath: i.filePath,
+            isFolder: !!i.isFolder,
+            importedAt: i.importedAt,
+            targetUsername: i.targetUsername || null,
+            email: i.email || null,
+            userId: i.userId || null,
+            dateRange: i.dateRange || null,
+            stats: i.stats || {},
+            parts: i.parts || [],
+            // Warrant Author harvests subject identifiers from this.
+            subscriberInfo: i.subscriberInfo || null,
+            subject: {
+                username: i.targetUsername || null,
+                email: i.email || null,
+                userId: i.userId || null
+            },
+            counts: {
+                conversations: (i.conversations || []).length,
+                geoLocations: (i.geoLocations || []).length,
+                memories: (i.memories || []).length,
+                media: Object.keys(i.mediaFiles || {}).length
+            },
+            _diskBacked: true
+        };
+    }
+
+    _saveSlimIndex() {
         try {
-            const raw = localStorage.getItem(`snapchatWarrant_${this.caseId}`);
+            localStorage.setItem(this._lsKey(), JSON.stringify({
+                imports: this.imports.map(i => this._slimImport(i)),
+                _diskBacked: true
+            }));
+        } catch (e) {
+            console.warn('Snapchat warrant: slim index write failed.', e && e.message);
+        }
+    }
+
+    async loadData() {
+        // 1. Preferred source: the on-disk store.
+        try {
+            if (window.electronAPI?.snapchatWarrantLoadData) {
+                const res = await window.electronAPI.snapchatWarrantLoadData({ caseId: this.caseId });
+                if (res && res.success && res.data) {
+                    const parsed = JSON.parse(res.data);
+                    this.imports = parsed.imports || [];
+                    this._loadFlags();
+                    this._saveSlimIndex();
+                    return;
+                }
+            }
+        } catch (e) {
+            console.warn('Snapchat warrant: disk load failed, falling back to localStorage.', e && e.message);
+        }
+
+        // 2. Legacy / fallback: whatever is in localStorage. A pre-existing FULL
+        //    blob (small production saved by an older build) is migrated to disk
+        //    once and replaced by the slim index.
+        try {
+            const raw = localStorage.getItem(this._lsKey());
             if (raw) {
                 const data = JSON.parse(raw);
-                this.imports = data.imports || [];
+                const isSlim = data._diskBacked === true;
+                if (isSlim) {
+                    // Slim records carry metadata only — the bulk payload lives on
+                    // disk. If we got here the disk read failed or is unavailable,
+                    // so show the import prompt rather than hollow 0-item sections.
+                    console.warn('Snapchat warrant: disk store unavailable — slim index cannot be rendered.');
+                    this.imports = [];
+                } else {
+                    this.imports = data.imports || [];
+                    if (this.imports.length) {
+                        // Legacy full blob from an older build — migrate to disk once.
+                        await this._writeDisk();
+                        this._saveSlimIndex();
+                    }
+                }
+            } else {
+                this.imports = [];
             }
         } catch (e) {
             console.error('Error loading Snapchat warrant data:', e);
             this.imports = [];
         }
+        this._loadFlags();
     }
 
+    /** Write the full payload to the on-disk store. */
+    async _writeDisk() {
+        if (!window.electronAPI?.snapchatWarrantSaveData) return false;
+        try {
+            const res = await window.electronAPI.snapchatWarrantSaveData({
+                caseId: this.caseId,
+                json: JSON.stringify({ imports: this.imports })
+            });
+            if (!res || !res.success) {
+                console.warn('Snapchat warrant: disk save failed —', res && res.error);
+                return false;
+            }
+            return true;
+        } catch (e) {
+            console.warn('Snapchat warrant: disk save threw —', e && e.message);
+            return false;
+        }
+    }
+
+    /**
+     * Persist everything. Never throws: the slim index cannot realistically
+     * exceed the quota, and the bulk payload goes to disk.
+     */
     saveData() {
-        localStorage.setItem(`snapchatWarrant_${this.caseId}`, JSON.stringify({
-            imports: this.imports
-        }));
+        this._saveSlimIndex();
+        this._saveFlags();
+        // Fire-and-forget the disk write; callers that need to await it can use
+        // _writeDisk() directly (importWarrant does).
+        return this._writeDisk();
+    }
+
+    // ─── Flag persistence (tiny, independent of the bulk data blob) ─────
+
+    _flagsKey() { return `snapchatWarrantFlags_${this.caseId}`; }
+
+    /**
+     * Flags are keyed by the production's FILE PATH, not the import record id.
+     * Import ids are regenerated on every re-import, and huge productions that
+     * blow the localStorage quota are not cached at all — so they get re-imported
+     * (and re-id'd) on the next launch. filePath is stable across all of that.
+     */
+    _flagIdentity(imp) {
+        return String((imp && (imp.filePath || imp.id)) || '');
+    }
+
+    _saveFlags() {
+        try {
+            const map = {};
+            for (const imp of this.imports) {
+                const idk = this._flagIdentity(imp);
+                if (idk && imp.flagged && Object.keys(imp.flagged).length) {
+                    map[idk] = imp.flagged;
+                }
+            }
+            localStorage.setItem(this._flagsKey(), JSON.stringify(map));
+        } catch (e) {
+            console.warn('Snapchat warrant: could not persist flags.', e && e.message);
+        }
+    }
+
+    _loadFlags() {
+        try {
+            const raw = localStorage.getItem(this._flagsKey());
+            if (!raw) return;
+            const map = JSON.parse(raw) || {};
+            for (const imp of this.imports) {
+                if (!imp) continue;
+                // Accept the legacy id-keyed entries too, so flags saved before
+                // this change still reattach.
+                const hit = map[this._flagIdentity(imp)] || map[imp.id];
+                if (hit) imp.flagged = hit;
+            }
+        } catch (e) { /* ignore */ }
     }
 
     async scanForWarrants() {
@@ -133,7 +294,13 @@ class SnapchatWarrantModule {
             this.imports.push(importRecord);
         }
 
-        this.saveData();
+        // Re-attach any flags previously saved for this production, keyed by
+        // filePath so they survive re-imports and new import ids.
+        this._loadFlags();
+
+        this._saveSlimIndex();
+        this._saveFlags();
+        await this._writeDisk();
         await this.scanForWarrants();
         return importRecord;
     }
@@ -148,9 +315,15 @@ class SnapchatWarrantModule {
         return this.importWarrant(result.path, fileName, !!result.isFolder);
     }
 
-    deleteImport(importId) {
+    async deleteImport(importId) {
         this.imports = this.imports.filter(i => i.id !== importId);
-        this.saveData();
+        this._saveSlimIndex();
+        this._saveFlags();
+        if (this.imports.length === 0 && window.electronAPI?.snapchatWarrantDeleteData) {
+            try { await window.electronAPI.snapchatWarrantDeleteData({ caseId: this.caseId }); } catch (_) {}
+            return;
+        }
+        await this._writeDisk();
     }
 
     async readMedia(diskPath) {
@@ -183,7 +356,9 @@ class SnapchatWarrantModule {
     }
 
     toggleFlag(section, key) {
-        return WarrantFlags.toggle(this.getActiveImport(), section, key, () => this.saveData());
+        // Persist through the tiny flags key only — the bulk blob write can
+        // legitimately fail on huge productions and must not break flagging.
+        return WarrantFlags.toggle(this.getActiveImport(), section, key, () => this._saveFlags());
     }
     isFlagged(section, key) {
         return WarrantFlags.isFlagged(this.getActiveImport(), section, key);
@@ -196,13 +371,15 @@ class SnapchatWarrantModule {
     }
     clearFlags() {
         WarrantFlags.clear(this.getActiveImport());
-        this.saveData();
+        this._saveFlags();
     }
 
     /**
      * Resolve flag keys → full data objects ready to write into the bundle.
+     * Async because flagged media images are read off disk and inlined into the
+     * report as data URIs (see _resolveFlaggedMedia).
      */
-    _resolveFlagged(imp) {
+    async _resolveFlagged(imp) {
         const f = imp.flagged || {};
         const out = {
             conversations: [],
@@ -211,7 +388,8 @@ class SnapchatWarrantModule {
             devices: [],
             friends: [],
             snapHistory: [],
-            memories: []
+            memories: [],
+            media: []
         };
 
         // Conversations — flag key = message composite key via WarrantFlagsKey.snapchatMessage
@@ -310,7 +488,75 @@ class SnapchatWarrantModule {
             });
         }
 
+        // Media — flag key = file name via WarrantFlagsKey.snapchatMedia
+        out.media = await this._resolveFlaggedMedia(imp, f.media || []);
+
         return out;
+    }
+
+    /**
+     * Build the flagged-media rows for the report. Images are read back through
+     * the main process (which transparently decrypts VIPENC files) and inlined
+     * as data URIs so report.html is self-contained — it renders correctly even
+     * when case security is on and the bundle files themselves are encrypted.
+     * Videos are never inlined; they are listed with their source path instead.
+     */
+    async _resolveFlaggedMedia(imp, flaggedKeys) {
+        const MAX_IMAGE_BYTES = 4 * 1024 * 1024;      // skip absurdly large single images
+        const MAX_TOTAL_BYTES = 80 * 1024 * 1024;     // keep report.html openable
+        const keys = new Set((flaggedKeys || []).map(String));
+        if (keys.size === 0) return [];
+
+        const files = imp.mediaFiles || {};
+        const rows = [];
+        // Deterministic order: newest first, matching the gallery.
+        const names = Object.keys(files)
+            .filter(n => keys.has(String(n)))
+            .sort((a, b) => String((files[b] || {}).timestamp || '').localeCompare(String((files[a] || {}).timestamp || '')));
+
+        let embedded = 0;
+        for (const name of names) {
+            const info = files[name] || {};
+            const isImage = String(info.mimeType || '').startsWith('image/');
+            const isVideo = String(info.mimeType || '').startsWith('video/');
+            const row = {
+                key: name,
+                fileName: name,
+                timestamp: info.timestamp || '',
+                sender: info.sender || '',
+                recipient: info.recipient || '',
+                mimeType: info.mimeType || '',
+                saved: info.savedFlag || '',
+                size: info.size
+                    ? (info.size >= 1048576
+                        ? (info.size / 1048576).toFixed(2) + ' MB'
+                        : Math.max(1, Math.round(info.size / 1024)) + ' KB')
+                    : '',
+                part: info.partFolder || '',
+                sourcePath: info.diskPath || '',
+                preview: '',
+                note: ''
+            };
+            if (isImage && info.diskPath && (!info.size || info.size <= MAX_IMAGE_BYTES) && embedded < MAX_TOTAL_BYTES) {
+                try {
+                    const res = await this.readMedia(info.diskPath);
+                    if (res && res.data) {
+                        row.preview = 'data:' + (res.mimeType || info.mimeType || 'image/jpeg') + ';base64,' + res.data;
+                        embedded += res.data.length;
+                    } else {
+                        row.note = 'Image could not be read from the production.';
+                    }
+                } catch (e) {
+                    row.note = 'Image could not be read: ' + (e && e.message ? e.message : 'unknown error');
+                }
+            } else if (isVideo) {
+                row.note = 'Video not embedded — open the source file from the production.';
+            } else if (isImage) {
+                row.note = 'Image too large to embed — see source file.';
+            }
+            rows.push(row);
+        }
+        return rows;
     }
 
     _buildSubjectInfo(imp) {
@@ -437,6 +683,27 @@ class SnapchatWarrantModule {
                 ],
                 items: resolved.memories,
                 emptyText: 'No memories flagged.'
+            },
+            {
+                id: 'media',
+                title: 'Media',
+                icon: '📷',
+                renderHint: 'gallery',
+                columns: [
+                    { label: 'Preview',   field: 'preview',   type: 'image' },
+                    { label: 'File Name', field: 'fileName',  type: 'mono' },
+                    { label: 'Captured',  field: 'timestamp', type: 'date' },
+                    { label: 'Sender',    field: 'sender' },
+                    { label: 'Recipient', field: 'recipient' },
+                    { label: 'Type',      field: 'mimeType' },
+                    { label: 'Saved',     field: 'saved' },
+                    { label: 'Size',      field: 'size' },
+                    { label: 'Part',      field: 'part' },
+                    { label: 'Source',    field: 'sourcePath', type: 'mono' },
+                    { label: 'Note',      field: 'note' }
+                ],
+                items: resolved.media,
+                emptyText: 'No media flagged.'
             }
         ];
     }
@@ -485,6 +752,10 @@ window.WarrantFlagsKey.snapchatSnap = function (s) {
 };
 window.WarrantFlagsKey.snapchatMemory = function (mm) {
     return [mm.timestamp || '', mm.source_type || '', (mm.media_id || mm.id || '').slice(0, 24)].join('|');
+};
+// Media file names are unique within a production, so they make a stable key.
+window.WarrantFlagsKey.snapchatMedia = function (m) {
+    return String((m && (m.name || m.fileName)) || '');
 };
 
 window.SnapchatWarrantModule = SnapchatWarrantModule;

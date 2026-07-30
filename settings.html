@@ -17,17 +17,20 @@
     <script src="modules/warrant-author/boilerplate-library.js"></script>
     <script src="case-snapshot.js"></script>
     <script src="libs/tailwindcss.js"></script>
+    <link rel="stylesheet" href="modules/viper-skins.css">
+    <script src="modules/viper-skins.js"></script>
     <script>
         tailwind.config = {
             theme: {
                 extend: {
                     colors: {
-                        'viper-dark': '#0a0e14',
-                        'viper-card': '#1a2332',
-                        'viper-cyan': '#00d9ff',
-                        'viper-green': '#00ff88',
-                        'viper-purple': '#9d4edd',
-                        'viper-orange': '#ffa726',
+                        // Skin-driven palette — triples live in modules/viper-skins.css.
+                        'viper-dark':   'rgb(var(--vp-dark) / <alpha-value>)',
+                        'viper-card':   'rgb(var(--vp-card) / <alpha-value>)',
+                        'viper-cyan':   'rgb(var(--vp-cyan) / <alpha-value>)',
+                        'viper-green':  'rgb(var(--vp-green) / <alpha-value>)',
+                        'viper-purple': 'rgb(var(--vp-purple) / <alpha-value>)',
+                        'viper-orange': 'rgb(var(--vp-orange) / <alpha-value>)',
                     }
                 }
             }
@@ -559,6 +562,14 @@
                                 </div>
                                 <span class="text-xs text-gray-500" id="fontSizePreview">Current: Medium</span>
                             </div>
+                        </div>
+
+                        <!-- Interface Skin -->
+                        <div class="pt-4 border-t border-gray-700/50">
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Interface Skin</label>
+                            <p class="text-xs text-gray-500 mb-3">Recolors the dark interface. Layout, spacing and text stay exactly the same — only the palette changes. Light mode is unaffected.</p>
+                            <div id="skinPickerRow" class="flex flex-wrap gap-3"></div>
+                            <p class="text-xs text-gray-500 mt-3">Open windows pick up the new skin when they next load.</p>
                         </div>
 
                         <!-- Sidebar Auto-Hide -->
@@ -5397,6 +5408,45 @@
         }
 
         // Init license UI on load
+        /* ---------- Interface Skin ---------- */
+        // Colour-only theming. ViperSkins (modules/viper-skins.js) owns the
+        // list + storage; the palette itself is CSS variables in
+        // modules/viper-skins.css. Nothing here touches layout.
+        function renderSkinPicker() {
+            const row = document.getElementById('skinPickerRow');
+            if (!row || !window.ViperSkins) return;
+            const active = window.ViperSkins.get();
+            row.innerHTML = window.ViperSkins.list().map(s => {
+                const on = s.id === active;
+                const swatches = s.swatches.map(c =>
+                    `<span style="background:${c}" class="inline-block w-3.5 h-3.5 rounded-full ring-1 ring-black/40"></span>`
+                ).join('');
+                return `
+                    <button type="button" onclick="setViperSkin('${s.id}')"
+                            class="skin-option text-left px-4 py-3 rounded-lg border transition-colors ${on
+                                ? 'border-viper-purple bg-viper-purple/10'
+                                : 'border-gray-600 hover:border-viper-purple'}"
+                            style="min-width:240px" aria-pressed="${on ? 'true' : 'false'}">
+                        <div class="flex items-center justify-between gap-3 mb-1.5">
+                            <span class="text-sm font-medium ${on ? 'text-viper-purple' : 'text-gray-300'}">${s.label}</span>
+                            ${on ? '<span class="text-[10px] uppercase tracking-wide text-viper-purple font-semibold">Active</span>' : ''}
+                        </div>
+                        <div class="flex items-center gap-1.5 mb-1.5">${swatches}</div>
+                        <div class="text-xs text-gray-500 leading-snug">${s.description}</div>
+                    </button>`;
+            }).join('');
+        }
+
+        function setViperSkin(id) {
+            if (!window.ViperSkins) return;
+            window.ViperSkins.set(id);
+            renderSkinPicker();
+            const meta = window.ViperSkins.meta(id);
+            if (typeof showToast === 'function') {
+                showToast('Skin set to ' + meta.label, 'success');
+            }
+        }
+
         /* ---------- Font Size ---------- */
         const FONT_SIZES = { small: '13px', medium: '15px', large: '17px', 'x-large': '20px' };
         function setViperFontSize(size) {
@@ -5468,6 +5518,7 @@
             doCheckUpdate();
             applyViperFontSize(localStorage.getItem('viperFontSize') || 'medium');
             initViperDateTimePref();
+            renderSkinPicker();
         });
     </script>
     <script src="/modules/security-ui.js"></script>

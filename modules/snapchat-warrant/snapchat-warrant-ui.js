@@ -139,7 +139,13 @@ class SnapchatWarrantUI {
     }
 
     _onFlagClick(section, key) {
-        this.module.toggleFlag(section, key);
+        try {
+            this.module.toggleFlag(section, key);
+        } catch (e) {
+            // The flag itself lives in memory on the import record, so a
+            // persistence failure must never stop the UI from updating.
+            console.warn('Snapchat warrant: flag persist warning —', e && e.message);
+        }
         this._refreshFlagToolbar();
         const content = document.getElementById('swp-content-area');
         if (content) {
@@ -150,9 +156,17 @@ class SnapchatWarrantUI {
 
     _flagBtn(section, key, label) {
         const on = this.module.isFlagged(section, key);
+        // Keys embed real message text, so they can contain quotes, newlines
+        // and tabs. These must survive as an IDENTICAL string inside the
+        // inline onclick JS literal, otherwise the handler throws a syntax
+        // error and the click appears to do nothing.
         const safeKey = String(key)
             .replace(/\\/g, '\\\\')
             .replace(/'/g, "\\'")
+            .replace(/\r/g, '\\r')
+            .replace(/\n/g, '\\n')
+            .replace(/\t/g, '\\t')
+            .replace(/&/g, '&amp;')
             .replace(/"/g, '&quot;');
         return `<button class="swp-flag-btn ${on ? 'on' : ''}"
                         title="${on ? 'Unflag' : 'Flag for evidence bundle'}"
@@ -235,7 +249,10 @@ class SnapchatWarrantUI {
         const imp = this.currentImport;
         if (!imp) return;
         if (!confirm(`Delete import "${imp.fileName}"?`)) return;
-        this.module.deleteImport(imp.id);
+        // Disk write is async; the in-memory list is already updated so the
+        // re-render below is accurate either way.
+        Promise.resolve(this.module.deleteImport(imp.id)).catch(err =>
+            console.warn('Snapchat warrant: delete persist warning —', err && err.message));
         this.activeImportIdx = 0;
         this.activeSection = 'overview';
         this.render();
@@ -575,36 +592,51 @@ class SnapchatWarrantUI {
         const filtered = all.filter(m => {
             if (this._mediaFilterType === 'image') return (m.mimeType || '').startsWith('image/');
             if (this._mediaFilterType === 'video') return (m.mimeType || '').startsWith('video/');
+            if (this._mediaFilterType === 'flagged') {
+                return this.module.isFlagged('media', window.WarrantFlagsKey.snapchatMedia(m));
+            }
             return true;
         });
         // Sort by timestamp desc (timestamp comes from filename)
         filtered.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
 
         const total = filtered.length;
+        const flaggedTotal = this.module.flagCountFor('media');
         const start = this._mediaPage * this._mediaPageSize;
         const pageItems = filtered.slice(start, start + this._mediaPageSize);
 
         return `
             <div class="swp-section">
-                <h2 class="swp-section-title">📷 Media (${total.toLocaleString()})</h2>
+                <h2 class="swp-section-title">📷 Media (${total.toLocaleString()})${flaggedTotal ? ` <span class="swp-title-flagcount">🚩 ${flaggedTotal.toLocaleString()} flagged</span>` : ''}</h2>
                 <div class="swp-toolbar">
                     <div class="swp-filter-tabs">
-                        ${['all', 'image', 'video'].map(t => `
+                        ${['all', 'image', 'video', 'flagged'].map(t => `
                             <button class="swp-filter-tab ${this._mediaFilterType === t ? 'active' : ''}"
                                 onclick="window.snapchatWarrantUI._mediaFilterType='${t}'; window.snapchatWarrantUI._mediaPage=0; window.snapchatWarrantUI.rerenderSection()">
-                                ${t === 'all' ? 'All' : t === 'image' ? '🖼️ Images' : '🎬 Videos'}
+                                ${t === 'all' ? 'All' : t === 'image' ? '🖼️ Images' : t === 'video' ? '🎬 Videos' : '🚩 Flagged'}
                             </button>
                         `).join('')}
                     </div>
+                    ${pageItems.length ? `
+                    <button class="swp-btn-sm" title="Flag every item shown on this page"
+                            onclick="window.snapchatWarrantUI.flagMediaPage(true)">🚩 Flag page</button>
+                    <button class="swp-btn-sm" title="Remove flags from every item shown on this page"
+                            onclick="window.snapchatWarrantUI.flagMediaPage(false)">Unflag page</button>
+                    ` : ''}
                 </div>
                 <div class="swp-media-grid">
                     ${pageItems.map(m => {
                         const isVideo = (m.mimeType || '').startsWith('video/');
+                        const k = window.WarrantFlagsKey.snapchatMedia(m);
+                        const on = this.module.isFlagged('media', k);
                         return `
-                            <div class="swp-media-card" onclick="window.snapchatWarrantUI.showMediaDetail('${this._escJs(m.name)}')">
-                                ${isVideo
-                                    ? `<div class="swp-media-video-thumb"><span class="swp-video-play-icon">▶</span><div class="swp-media-placeholder">🎬</div></div>`
-                                    : `<img class="swp-media-thumb swp-lazy-img" data-disk-path="${this._esc(m.diskPath)}" loading="lazy">`}
+                            <div class="swp-media-card ${on ? 'swp-media-flagged' : ''}" onclick="window.snapchatWarrantUI.showMediaDetail('${this._escJs(m.name)}')">
+                                <div class="swp-media-thumb-wrap">
+                                    ${isVideo
+                                        ? `<div class="swp-media-video-thumb"><span class="swp-video-play-icon">▶</span><div class="swp-media-placeholder">🎬</div></div>`
+                                        : `<img class="swp-media-thumb swp-lazy-img" data-disk-path="${this._esc(m.diskPath)}" loading="lazy">`}
+                                    <div class="swp-media-flag-overlay">${this._flagBtn('media', k)}</div>
+                                </div>
                                 <div class="swp-media-info">
                                     <div class="swp-media-time">${this._esc(this._formatSnapTimestamp(m.timestamp))}</div>
                                     <div class="swp-media-people">${this._esc(m.sender || '')} ${m.recipient ? '→ ' + this._esc(m.recipient) : ''}</div>
@@ -617,6 +649,67 @@ class SnapchatWarrantUI {
                 ${this._renderPagination(total, this._mediaPage, this._mediaPageSize, 'media')}
             </div>
         `;
+    }
+
+    /** Current media page, using the exact same filter/sort/paging as _renderMedia. */
+    _currentMediaPageItems() {
+        const imp = this.currentImport;
+        if (!imp) return [];
+        const all = Object.entries(imp.mediaFiles || {}).map(([name, info]) => ({ name, ...info }));
+        const filtered = all.filter(m => {
+            if (this._mediaFilterType === 'image') return (m.mimeType || '').startsWith('image/');
+            if (this._mediaFilterType === 'video') return (m.mimeType || '').startsWith('video/');
+            if (this._mediaFilterType === 'flagged') {
+                return this.module.isFlagged('media', window.WarrantFlagsKey.snapchatMedia(m));
+            }
+            return true;
+        });
+        filtered.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+        const start = this._mediaPage * this._mediaPageSize;
+        return filtered.slice(start, start + this._mediaPageSize);
+    }
+
+    /** Bulk flag / unflag every media item on the current page. */
+    flagMediaPage(on) {
+        const items = this._currentMediaPageItems();
+        let changed = 0;
+        items.forEach(m => {
+            const k = window.WarrantFlagsKey.snapchatMedia(m);
+            if (this.module.isFlagged('media', k) !== !!on) {
+                try { this.module.toggleFlag('media', k); changed++; } catch (_) {}
+            }
+        });
+        this._refreshFlagToolbar();
+        const content = document.getElementById('swp-content-area');
+        if (content) {
+            content.innerHTML = this._renderSection();
+            if (typeof this._loadLazyImages === 'function') this._loadLazyImages(content);
+        }
+        this._toast(`${on ? 'Flagged' : 'Unflagged'} ${changed} media item${changed === 1 ? '' : 's'}`, 'info');
+    }
+
+    /** Flag toggle from inside the media lightbox. */
+    toggleMediaFlagFromLightbox(fileName, btn) {
+        const imp = this.currentImport;
+        if (!imp) return;
+        const info = (imp.mediaFiles || {})[fileName];
+        if (!info) return;
+        const k = window.WarrantFlagsKey.snapchatMedia({ name: fileName, ...info });
+        try { this.module.toggleFlag('media', k); } catch (e) {
+            console.warn('Snapchat warrant: flag persist warning —', e && e.message);
+        }
+        const on = this.module.isFlagged('media', k);
+        if (btn) {
+            btn.classList.toggle('on', on);
+            btn.textContent = on ? '🚩 Flagged for evidence' : '🚩 Flag for evidence';
+        }
+        this._refreshFlagToolbar();
+        // Keep the gallery behind the lightbox in sync.
+        const content = document.getElementById('swp-content-area');
+        if (content && this.activeSection === 'media') {
+            content.innerHTML = this._renderSection();
+            if (typeof this._loadLazyImages === 'function') this._loadLazyImages(content);
+        }
     }
 
     showMediaDetail(fileName) {
@@ -646,6 +739,10 @@ class SnapchatWarrantUI {
                         ${this._kvRow('Size', info.size ? `${(info.size / 1024 / 1024).toFixed(2)} MB` : null)}
                         ${this._kvRow('Part', info.partFolder)}
                     </div>
+                    <button class="swp-lightbox-flag swp-flag-btn ${this.module.isFlagged('media', window.WarrantFlagsKey.snapchatMedia({ name: fileName, ...info })) ? 'on' : ''}"
+                            onclick="window.snapchatWarrantUI.toggleMediaFlagFromLightbox('${this._escJs(fileName)}', this)">
+                        ${this.module.isFlagged('media', window.WarrantFlagsKey.snapchatMedia({ name: fileName, ...info })) ? '🚩 Flagged for evidence' : '🚩 Flag for evidence'}
+                    </button>
                 </div>
             </div>
         `;

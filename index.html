@@ -17,6 +17,8 @@
     <script src="modules/supervisor-link/supervisor-link-ui.js"></script>
     <script src="case-snapshot.js"></script>
     <script src="libs/tailwindcss.js"></script>
+    <link rel="stylesheet" href="modules/viper-skins.css">
+    <script src="modules/viper-skins.js"></script>
     <script src="libs/chart.min.js"></script>
     <script src="libs/jspdf.umd.min.js"></script>
     <script src="libs/jspdf.plugin.autotable.min.js"></script>
@@ -168,14 +170,17 @@
             theme: {
                 extend: {
                     colors: {
-                        'viper-dark': '#0a0e14',
-                        'viper-card': '#1a2332',
-                        'viper-cyan': '#00d9ff',
-                        'viper-green': '#00ff88',
-                        'viper-purple': '#9d4edd',
-                        'viper-orange': '#ffa726',
-                        'viper-yellow': '#fbbf24',
-                        'viper-red':    '#ef4444',
+                        // Skin-driven palette — the channel triples live in
+                        // modules/viper-skins.css (:root = VIPER Classic).
+                        // <alpha-value> keeps utilities like bg-viper-cyan/20 working.
+                        'viper-dark':   'rgb(var(--vp-dark) / <alpha-value>)',
+                        'viper-card':   'rgb(var(--vp-card) / <alpha-value>)',
+                        'viper-cyan':   'rgb(var(--vp-cyan) / <alpha-value>)',
+                        'viper-green':  'rgb(var(--vp-green) / <alpha-value>)',
+                        'viper-purple': 'rgb(var(--vp-purple) / <alpha-value>)',
+                        'viper-orange': 'rgb(var(--vp-orange) / <alpha-value>)',
+                        'viper-yellow': 'rgb(var(--vp-yellow) / <alpha-value>)',
+                        'viper-red':    'rgb(var(--vp-red) / <alpha-value>)',
                     }
                 }
             }
@@ -1457,6 +1462,14 @@
                 <div>
                     <label class="block text-sm font-medium text-gray-300 mb-2">CyberTip # <span class="text-gray-500 font-normal">(optional)</span></label>
                     <input type="text" id="caseCybertip" placeholder="e.g. NCMEC CyberTip report number" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none text-white placeholder-gray-500">
+                </div>
+
+                <!-- Category (short label shown on the dashboard) -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">Category <span class="text-gray-500 font-normal">(optional)</span></label>
+                    <input type="text" id="caseCategory" maxlength="60" list="caseCategoryOptions" placeholder="e.g. CSAM Possession, Fraud, Missing Person" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none text-white placeholder-gray-500">
+                    <datalist id="caseCategoryOptions"></datalist>
+                    <p class="text-xs text-gray-500 mt-1">Short label shown in the Category column on the dashboard. Keep the Synopsis for your own detail.</p>
                 </div>
 
                 <!-- Synopsis -->
@@ -2988,6 +3001,16 @@
                     el.style.display = waEnabled ? '' : 'none';
                 });
             } catch (_) {}
+            // Offer previously used categories as autocomplete suggestions.
+            try {
+                const dl = document.getElementById('caseCategoryOptions');
+                if (dl) {
+                    const used = [...new Set(cases.map(c => (c.category || '').trim()).filter(Boolean))].sort();
+                    dl.innerHTML = used.map(v =>
+                        '<option value="' + String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;') + '"></option>'
+                    ).join('');
+                }
+            } catch (_) {}
             document.getElementById('createCaseModal').classList.add('show');
         }
         
@@ -3058,6 +3081,7 @@
                 
                 const caseNumber = document.getElementById('caseNumber').value;
                 const synopsis = document.getElementById('caseSynopsis').value;
+                const category = (document.getElementById('caseCategory')?.value || '').trim().slice(0, 60);
                 const cybertipNumber = (document.getElementById('caseCybertip')?.value || '').trim();
                 const locationOfOccurrence = (document.getElementById('caseLocationOfOccurrence')?.value || '').trim();
                 const selectedModules = Array.from(document.querySelectorAll('.case-module:checked'))
@@ -3072,6 +3096,7 @@
                 const newCase = {
                     id: Date.now(),
                     caseNumber: caseNumber,
+                    category: category,
                     synopsis: synopsis,
                     cybertipNumber: cybertipNumber,
                     locationOfOccurrence: locationOfOccurrence,
@@ -4699,11 +4724,13 @@
         }
 
         // ═══ Active Investigations — column customization ═══
-        // Columns reuse ALL_CASES_COLUMNS but show different default labels (e.g. "Case ID" / "Category"
-        // instead of "Case Number" / "Synopsis") to match the tighter dashboard styling.
+        // Columns reuse ALL_CASES_COLUMNS but show different default labels (e.g. "Case ID"
+        // instead of "Case Number") to match the tighter dashboard styling.
         const INV_COL_LABELS = {
             caseNumber: 'Case ID',
-            synopsis:   'Category',
+            category:   'Category',
+            synopsis:   'Synopsis',
+            disposition: 'Disposition',
             createdBy:  'Investigator',
             priority:   'Priority',
             status:     'Status',
@@ -4716,11 +4743,26 @@
             victims:    'Victim(s)',
             flags:      'Flags',
         };
-        const INV_DEFAULT_COLS = ['caseNumber', 'synopsis', 'createdBy', 'priority', 'status'];
+        const INV_DEFAULT_COLS = ['caseNumber', 'category', 'createdBy', 'priority', 'status'];
         function getInvVisibleCols() {
             try {
                 const saved = JSON.parse(localStorage.getItem('viperInvestigationsCols') || 'null');
-                if (Array.isArray(saved) && saved.length > 0) return saved;
+                if (Array.isArray(saved) && saved.length > 0) {
+                    // One-time migration: the dashboard's "Category" column used to be the
+                    // synopsis field. Now that cases carry a real short `category`, point
+                    // the saved column at it (the cell still falls back to synopsis).
+                    if (localStorage.getItem('viperInvColsCategoryMigrated') !== 'true') {
+                        const migrated = saved.includes('synopsis') && !saved.includes('category')
+                            ? saved.map(k => (k === 'synopsis' ? 'category' : k))
+                            : saved;
+                        localStorage.setItem('viperInvColsCategoryMigrated', 'true');
+                        if (migrated !== saved) {
+                            localStorage.setItem('viperInvestigationsCols', JSON.stringify(migrated));
+                            return migrated;
+                        }
+                    }
+                    return saved;
+                }
             } catch {}
             return [...INV_DEFAULT_COLS];
         }
@@ -4856,6 +4898,8 @@
             if (query) {
                 filtered = filtered.filter(c =>
                     (c.caseNumber || '').toLowerCase().includes(query) ||
+                    (c.category || '').toLowerCase().includes(query) ||
+                    (c.dispositionSummary || '').toLowerCase().includes(query) ||
                     (c.synopsis || '').toLowerCase().includes(query) ||
                     (c.cybertipNumber || '').toLowerCase().includes(query) ||
                     (c.createdBy || '').toLowerCase().includes(query) ||
@@ -4922,6 +4966,13 @@
             return `<span class="px-3 py-1 rounded-full text-xs font-medium border" style="background:${bg};color:${color};border-color:${border}">${label}</span>`;
         }
 
+        // Shared HTML escaper for free-text case fields rendered into table cells.
+        function caseTextEsc(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
         function updateActiveInvestigationsTable(filteredCases, status) {
             const tbody = document.getElementById('investigationsTableBody');
             const thead = document.getElementById('investigationsTableHead');
@@ -4933,7 +4984,7 @@
             if (!priorityEnabled) visCols = visCols.filter(k => k !== 'priority');
             // Render header from visible columns + a fixed Actions column.
             if (thead) {
-                const sortable = new Set(['caseNumber', 'synopsis', 'createdBy', 'priority']);
+                const sortable = new Set(['caseNumber', 'category', 'synopsis', 'createdBy', 'priority']);
                 thead.innerHTML = visCols.map(key => {
                     const col = ALL_CASES_COLUMNS.find(c => c.key === key);
                     if (!col) return '';
@@ -4978,6 +5029,22 @@
                                     : '')
                                 + '<span class="font-medium text-viper-cyan">' + (caseItem.caseNumber || '') + '</span>'
                                 + '</div></td>';
+                        case 'category': {
+                            // Falls back to synopsis so cases created before the Category
+                            // field existed still read the way they always did.
+                            const cat = (caseItem.category || '').trim();
+                            const body = cat
+                                ? '<span class="text-gray-200">' + caseTextEsc(cat) + '</span>'
+                                : ((caseItem.synopsis || '').trim()
+                                    ? '<span class="text-gray-400">' + caseTextEsc(caseItem.synopsis) + '</span>'
+                                    : '<span class="text-gray-600">—</span>');
+                            return '<td class="py-4 px-4"><div class="text-sm">' + body + '</div></td>';
+                        }
+                        case 'disposition': {
+                            const d = (caseItem.dispositionSummary || '').trim();
+                            return '<td class="py-4 px-4"><div class="text-sm text-gray-300 max-w-[260px]">'
+                                + (d ? caseTextEsc(d) : '<span class="text-gray-600">—</span>') + '</div></td>';
+                        }
                         case 'synopsis':
                             return '<td class="py-4 px-4"><div class="text-sm text-gray-300">' + (caseItem.synopsis || 'No synopsis') + '</div></td>';
                         case 'createdBy':
@@ -5972,7 +6039,9 @@
         // ============================================
         const ALL_CASES_COLUMNS = [
             { key: 'caseNumber',     label: 'Case Number',     default: true,  sortType: 'text' },
+            { key: 'category',       label: 'Category',        default: true,  sortType: 'text' },
             { key: 'synopsis',       label: 'Synopsis',        default: true,  sortType: 'text' },
+            { key: 'disposition',    label: 'Disposition',     default: false, sortType: 'text' },
             { key: 'cybertip',       label: 'CyberTip #',      default: false, sortType: 'text' },
             { key: 'status',         label: 'Status',          default: true,  sortType: 'text' },
             { key: 'created',        label: 'Created',         default: true,  sortType: 'date' },
@@ -6272,6 +6341,8 @@
         function getCellValue(c, col, extras) {
             switch(col) {
                 case 'caseNumber':     return c.caseNumber || '';
+                case 'category':       return (c.category || c.synopsis || '');
+                case 'disposition':    return c.dispositionSummary || '';
                 case 'synopsis':       return c.synopsis || '';
                 case 'cybertip':       return c.cybertipNumber || '';
                 case 'status':         return c.status || '';
@@ -6499,6 +6570,8 @@
                 filtered = filtered.filter(c => {
                     const ex = extrasMap[c.id];
                     return c.caseNumber.toLowerCase().includes(searchTerm) ||
+                           (c.category||'').toLowerCase().includes(searchTerm) ||
+                           (c.dispositionSummary||'').toLowerCase().includes(searchTerm) ||
                            (c.synopsis||'').toLowerCase().includes(searchTerm) ||
                            (c.cybertipNumber||'').toLowerCase().includes(searchTerm) ||
                            (c.primaryOffense||'').toLowerCase().includes(searchTerm) ||
@@ -6578,6 +6651,19 @@
                     switch(col) {
                         case 'caseNumber':
                             return '<td class="px-5 py-4 text-sm whitespace-nowrap"><div class="flex items-center gap-2"><span class="font-semibold text-viper-cyan">' + c.caseNumber + '</span>' + renderStaleBadge(c) + '</div></td>';
+                        case 'category': {
+                            const cat = (c.category || '').trim();
+                            const txt = cat || (c.synopsis || '').trim();
+                            const clipped = txt.length > 48 ? txt.substring(0, 48) + '…' : txt;
+                            return '<td class="px-5 py-4 text-sm max-w-[220px]"><div class="truncate ' + (cat ? 'text-white' : 'text-gray-400') + '" title="' + caseTextEsc(txt) + '">'
+                                + (clipped ? caseTextEsc(clipped) : '<span class="text-gray-600">—</span>') + '</div></td>';
+                        }
+                        case 'disposition': {
+                            const d = (c.dispositionSummary || '').trim();
+                            const clipped = d.length > 70 ? d.substring(0, 70) + '…' : d;
+                            return '<td class="px-5 py-4 text-sm text-white max-w-xs"><div class="truncate" title="' + caseTextEsc(d) + '">'
+                                + (clipped ? caseTextEsc(clipped) : '<span class="text-gray-600">—</span>') + '</div></td>';
+                        }
                         case 'synopsis':
                             const syn = (c.synopsis||'').length > 70 ? c.synopsis.substring(0,70)+'…' : (c.synopsis||'');
                             const ctTag = c.cybertipNumber
@@ -8416,6 +8502,7 @@
             const newCase = {
                 id: 'case_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
                 caseNumber: alert.agency?.reportNumber || alert.incidentNumber || ('CN-' + Date.now().toString().slice(-6)),
+                category: String(alert.alertType || 'Cargo Theft').slice(0, 60),
                 synopsis: alert.incidentDescription || `${alert.alertType || 'CargoNet Alert'} — ${alert.subjectCargo || alert.cargo?.description || ''} stolen from ${alert.location?.city || ''}, ${alert.location?.state || ''}`,
                 status: 'Open',
                 priority: 1,

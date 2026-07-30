@@ -751,6 +751,7 @@
     const newCase = {
       id: Date.now(),
       caseNumber,
+      category: 'ICAC CyberTip',
       synopsis: `ICAC CyberTip ${a.cybertipNumber} assigned by ${a.from || 'Supervisor'}.` + (a.note ? ` Note: ${a.note}` : ''),
       cybertipNumber: a.cybertipNumber || '',
       status: 'active',
@@ -901,6 +902,7 @@
     const newCase = {
       id: Date.now(),
       caseNumber,
+      category: String(a.caseType || a.category || 'Assigned Case').slice(0, 60),
       synopsis: (a.description || ('Case ' + caseNumber + ' assigned by ' + (a.from || 'Supervisor') + '.')) + (a.note ? ' Note: ' + a.note : ''),
       status: 'active',
       priority: a.priority === 'High' ? 3 : a.priority === 'Low' ? 1 : 2,

@@ -8998,8 +8998,67 @@ ipcMain.handle('snapchat-warrant-read-media', async (event, { filePath }) => {
   }
 });
 
-// ─── X / Twitter Warrant Parser IPC ─────────────────────────────────
+/**
+ * On-disk persistence for the Snapchat Warrant module.
+ *
+ * A Snapchat production (tens of thousands of messages + geo rows + a media
+ * index) serialized to JSON routinely exceeds the renderer's ~5 MB localStorage
+ * quota, which made every setItem throw. The visible symptoms were: flags could
+ * not be set, and the whole import vanished whenever the user left the tab — so
+ * they had to re-import and lost their place. The full payload now lives in a
+ * per-case JSON file in userData; the renderer keeps only a tiny metadata index
+ * in localStorage for the few synchronous readers (module badge counts,
+ * Warrant Author subject harvesting).
+ */
+function _snapchatStoreDir() {
+  const dir = path.join(app.getPath('userData'), 'snapchat-warrant-store');
+  try { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+  return dir;
+}
+function _snapchatStorePath(caseId) {
+  const safe = String(caseId == null ? '' : caseId).replace(/[^A-Za-z0-9_-]/g, '_') || 'unknown';
+  return path.join(_snapchatStoreDir(), `snapchat_${safe}.json`);
+}
 
+ipcMain.handle('snapchat-warrant-load-data', async (event, { caseId } = {}) => {
+  try {
+    const fp = _snapchatStorePath(caseId);
+    if (!fs.existsSync(fp)) return { success: true, data: null };
+    return { success: true, data: fs.readFileSync(fp, 'utf8') };
+  } catch (error) {
+    console.error('Snapchat warrant load-data error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('snapchat-warrant-save-data', async (event, { caseId, json } = {}) => {
+  try {
+    if (typeof json !== 'string') return { success: false, error: 'json must be a string' };
+    const fp = _snapchatStorePath(caseId);
+    const tmp = fp + '.tmp';
+    // Temp file + rename so a crash mid-write cannot corrupt the store.
+    fs.writeFileSync(tmp, json, 'utf8');
+    fs.renameSync(tmp, fp);
+    return { success: true, bytes: Buffer.byteLength(json, 'utf8') };
+  } catch (error) {
+    console.error('Snapchat warrant save-data error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('snapchat-warrant-delete-data', async (event, { caseId } = {}) => {
+  try {
+    const fp = _snapchatStorePath(caseId);
+    if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    try { if (fs.existsSync(fp + '.tmp')) fs.unlinkSync(fp + '.tmp'); } catch (_) {}
+    return { success: true };
+  } catch (error) {
+    console.error('Snapchat warrant delete-data error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// ─── X / Twitter Warrant Parser IPC ─────────────────────────────────
 const XWarrantParser = require('./modules/x-warrant/x-warrant-parser');
 const xwParser = new XWarrantParser();
 
@@ -10411,6 +10470,31 @@ function _buildWarrantReportHtml(report) {
         <div class="card-grid">${html}</div>`;
     }
 
+    if (hint === 'gallery') {
+      // Media grid: inlined data-URI preview (if the module supplied one) plus
+      // the remaining columns as a metadata list underneath each thumbnail.
+      const previewF = (cols.find(c => c.type === 'image') || {}).field;
+      const metaCols = cols.filter(c => c.type !== 'image');
+      const html = items.map(item => {
+        const src = previewF ? item[previewF] : '';
+        const thumb = src
+          ? `<a href="${esc(src)}" target="_blank" rel="noopener"><img class="gal-img" src="${esc(src)}" loading="lazy" alt=""/></a>`
+          : `<div class="gal-noimg">${/^video\//i.test(String(item.mimeType || '')) ? '🎬' : '📄'}</div>`;
+        return `<div class="gal-card">
+          ${thumb}
+          <div class="gal-meta">
+            ${metaCols.map(c => {
+              const v = item[c.field];
+              if (v == null || v === '') return '';
+              return `<div class="kv-row"><div class="kv-label">${esc(c.label)}</div><div class="kv-value">${fmtCell(v, c.type)}</div></div>`;
+            }).join('')}
+          </div>
+        </div>`;
+      }).join('');
+      return `<h2>${title} <span class="count">(${items.length})</span></h2>
+        <div class="gal-grid">${html}</div>`;
+    }
+
     if (hint === 'pre') {
       const html = items.map(item => `<pre class="pre-cell">${esc(JSON.stringify(item, null, 2))}</pre>`).join('');
       return `<h2>${title} <span class="count">(${items.length})</span></h2>${html}`;
@@ -10482,7 +10566,14 @@ function _buildWarrantReportHtml(report) {
   .kv-label { font-weight: 600; color: #6b7280; min-width: 110px; text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; }
   .kv-value { flex: 1; word-break: break-word; }
   .empty { color: #9ca3af; font-size: 13px; padding: 12px; background: #fff; border: 1px dashed #d1d5db; border-radius: 8px; text-align: center; }
-  @media print { body { background: #fff; padding: 0.5in; } .warrant-card, .msg, table, .subject-card { break-inside: avoid; } }
+  /* Media gallery sections (renderHint: 'gallery') */
+  .gal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+  .gal-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+  .gal-img { width: 100%; max-height: 320px; object-fit: contain; background: #111827; display: block; }
+  .gal-noimg { width: 100%; height: 150px; display: flex; align-items: center; justify-content: center; font-size: 40px; background: #f3f4f6; color: #9ca3af; }
+  .gal-meta { padding: 10px 12px; }
+  .gal-meta .kv-label { min-width: 80px; }
+  @media print { body { background: #fff; padding: 0.5in; } .warrant-card, .msg, table, .subject-card, .gal-card { break-inside: avoid; } }
 </style>
 </head><body>
 

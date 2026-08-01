@@ -498,6 +498,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   outlookSetBounds: (bounds) => ipcRenderer.send('outlook-set-bounds', bounds),
   outlookSetVisible: (visible) => ipcRenderer.send('outlook-set-visible', visible),
 
+  // LeadsOnline (persistent BrowserView)
+  leadsOnlineSetBounds: (bounds) => ipcRenderer.send('leads-online-set-bounds', bounds),
+  leadsOnlineSetVisible: (visible) => ipcRenderer.send('leads-online-set-visible', visible),
+
+  // ISO ClaimSearch / NICB (persistent BrowserView)
+  claimSearchSetBounds: (bounds) => ipcRenderer.send('claim-search-set-bounds', bounds),
+  claimSearchSetVisible: (visible) => ipcRenderer.send('claim-search-set-visible', visible),
+
+  // OSINT Industries (persistent BrowserView)
+  osintIndustriesSetBounds: (bounds) => ipcRenderer.send('osint-industries-set-bounds', bounds),
+  osintIndustriesSetVisible: (visible) => ipcRenderer.send('osint-industries-set-visible', visible),
+
+  // idiCORE / IdiData (persistent BrowserView)
+  idiCoreSetBounds: (bounds) => ipcRenderer.send('idi-core-set-bounds', bounds),
+  idiCoreSetVisible: (visible) => ipcRenderer.send('idi-core-set-visible', visible),
+
   // Resource Hub generic per-BV zoom factor (0.5 .. 2.0)
   rhSetZoom: (resId, factor) => ipcRenderer.send('rh-set-zoom', { resId, factor }),
 

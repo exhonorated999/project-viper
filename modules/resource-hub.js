@@ -23,6 +23,10 @@
     { id: 'gridcop',        label: 'Gridcop',           enabledKey: 'gridcopEnabled',        isBV: true },
     { id: 'callyo',         label: 'Callyo',            enabledKey: 'callyoEnabled',         isBV: true },
     { id: 'outlook',        label: 'Outlook Email',     enabledKey: 'outlookEnabled',        isBV: true },
+    { id: 'leadsOnline',    label: 'LeadsOnline',       enabledKey: 'leadsOnlineEnabled',    isBV: true },
+    { id: 'claimSearch',    label: 'ISO ClaimSearch',   enabledKey: 'claimSearchEnabled',    isBV: true },
+    { id: 'osintIndustries',label: 'OSINT Industries',  enabledKey: 'osintIndustriesEnabled',isBV: true },
+    { id: 'idiCore',        label: 'idiCORE',           enabledKey: 'idiCoreEnabled',        isBV: true },
     { id: 'trace',    label: 'TRACE Network',       enabledKey: 'traceSearch_enabled', isBV: false },
     { id: 'fmcsa',    label: 'FMCSA Carrier',       enabledKey: 'fmcsaEnabled',        isBV: false },
   ];
@@ -63,6 +67,10 @@
       .rh-tab[data-res=gridcop].rh-active::after{width:100%;background:#a855f7}
       .rh-tab[data-res=callyo].rh-active::after{width:100%;background:#fb923c}
       .rh-tab[data-res=outlook].rh-active::after{width:100%;background:#38bdf8}
+      .rh-tab[data-res=leadsOnline].rh-active::after{width:100%;background:#f59e0b}
+      .rh-tab[data-res=claimSearch].rh-active::after{width:100%;background:#34d399}
+      .rh-tab[data-res=osintIndustries].rh-active::after{width:100%;background:#c084fc}
+      .rh-tab[data-res=idiCore].rh-active::after{width:100%;background:#f87171}
       .rh-bv-placeholder{background:rgba(10,15,28,.5);border:1px dashed rgba(255,255,255,.08);border-radius:8px}
       .rh-result-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:14px;transition:border-color .15s}
       .rh-result-card:hover{border-color:rgba(255,255,255,.12)}
@@ -156,6 +164,18 @@
           </div>
           <div id="rhPanel_outlook" class="absolute inset-0 hidden">
             <div id="rhBV_outlook" class="rh-bv-placeholder w-full h-full flex items-center justify-center"><p class="text-gray-600 text-xs">Loading Outlook Email…</p></div>
+          </div>
+          <div id="rhPanel_leadsOnline" class="absolute inset-0 hidden">
+            <div id="rhBV_leadsOnline" class="rh-bv-placeholder w-full h-full flex items-center justify-center"><p class="text-gray-600 text-xs">Loading LeadsOnline…</p></div>
+          </div>
+          <div id="rhPanel_claimSearch" class="absolute inset-0 hidden">
+            <div id="rhBV_claimSearch" class="rh-bv-placeholder w-full h-full flex items-center justify-center"><p class="text-gray-600 text-xs">Loading ISO ClaimSearch…</p></div>
+          </div>
+          <div id="rhPanel_osintIndustries" class="absolute inset-0 hidden">
+            <div id="rhBV_osintIndustries" class="rh-bv-placeholder w-full h-full flex items-center justify-center"><p class="text-gray-600 text-xs">Loading OSINT Industries…</p></div>
+          </div>
+          <div id="rhPanel_idiCore" class="absolute inset-0 hidden">
+            <div id="rhBV_idiCore" class="rh-bv-placeholder w-full h-full flex items-center justify-center"><p class="text-gray-600 text-xs">Loading idiCORE…</p></div>
           </div>
           <div id="rhPanel_trace" class="absolute inset-0 hidden overflow-y-auto">
             <div class="p-5 space-y-4">
@@ -305,6 +325,10 @@
     if (resId === 'gridcop')        { window.electronAPI.gridcopSetBounds(b);        window.electronAPI.gridcopSetVisible(true); }
     if (resId === 'callyo')         { window.electronAPI.callyoSetBounds(b);         window.electronAPI.callyoSetVisible(true); }
     if (resId === 'outlook')        { window.electronAPI.outlookSetBounds(b);        window.electronAPI.outlookSetVisible(true); }
+    if (resId === 'leadsOnline')    { window.electronAPI.leadsOnlineSetBounds(b);    window.electronAPI.leadsOnlineSetVisible(true); }
+    if (resId === 'claimSearch')    { window.electronAPI.claimSearchSetBounds(b);    window.electronAPI.claimSearchSetVisible(true); }
+    if (resId === 'osintIndustries'){ window.electronAPI.osintIndustriesSetBounds(b); window.electronAPI.osintIndustriesSetVisible(true); }
+    if (resId === 'idiCore')        { window.electronAPI.idiCoreSetBounds(b);        window.electronAPI.idiCoreSetVisible(true); }
     // Re-assert the persisted per-BV zoom every time a BV is shown so it
     // survives reloads, lazy-init, and tab switches.
     if (window.electronAPI && window.electronAPI.rhSetZoom) {
@@ -324,6 +348,10 @@
     if (resId === 'gridcop')        window.electronAPI.gridcopSetVisible(false);
     if (resId === 'callyo')         window.electronAPI.callyoSetVisible(false);
     if (resId === 'outlook')        window.electronAPI.outlookSetVisible(false);
+    if (resId === 'leadsOnline')    window.electronAPI.leadsOnlineSetVisible(false);
+    if (resId === 'claimSearch')    window.electronAPI.claimSearchSetVisible(false);
+    if (resId === 'osintIndustries')window.electronAPI.osintIndustriesSetVisible(false);
+    if (resId === 'idiCore')        window.electronAPI.idiCoreSetVisible(false);
   }
 
   function hideAllBVs() { RESOURCES.filter(r => r.isBV).forEach(r => hideBV(r.id)); }

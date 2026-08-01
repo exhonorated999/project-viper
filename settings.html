@@ -1305,55 +1305,177 @@
                             </div>
                         </div>
 
-                        <!-- TLO / TransUnion -->
+                        <!-- idiCORE (LexisNexis) -->
                         <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
                             <div class="flex items-start gap-3">
-                                <div class="w-10 h-10 rounded-lg bg-indigo-500/10 flex items-center justify-center flex-shrink-0">
-                                    <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                                <div class="w-10 h-10 rounded-lg bg-viper-red/10 flex items-center justify-center flex-shrink-0">
+                                    <svg class="w-5 h-5 text-viper-red" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
                                     </svg>
                                 </div>
                                 <div class="flex-1">
                                     <div class="flex items-center justify-between">
-                                        <h4 class="text-white font-semibold text-sm">TLO — TransUnion People Search</h4>
-                                        <button id="tloToggleBtn" onclick="toggleTlo()" class="relative w-11 h-6 rounded-full transition-colors bg-gray-600 flex-shrink-0">
-                                            <div id="tloToggleKnob" class="absolute w-4 h-4 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
+                                        <h4 class="text-white font-semibold text-sm">idiCORE (LexisNexis) — People &amp; Asset Search</h4>
+                                        <button id="idiCoreToggleBtn" onclick="toggleIdiCore()" class="relative w-11 h-6 rounded-full transition-colors bg-gray-600 flex-shrink-0">
+                                            <div id="idiCoreToggleKnob" class="absolute w-4 h-4 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
                                         </button>
                                     </div>
-                                    <p class="text-xs text-gray-400 mt-1 leading-relaxed">Search TLO's comprehensive people database directly from suspect profiles. Look up individuals by name for addresses, phone numbers, associates, assets, and more. Requires an active TLOxp account.</p>
-                                    <span id="tloToggleLabel" class="text-xs text-gray-500 mt-1 block"></span>
-
-                                    <!-- Collapsible credentials -->
-                                    <details class="mt-3" id="tloDetails">
-                                        <summary class="cursor-pointer text-xs text-indigo-400 hover:text-indigo-300 select-none flex items-center gap-1.5 font-medium">
+                                    <p class="text-xs text-gray-400 mt-1 leading-relaxed">idiCORE (IdiData / LexisNexis Risk Solutions) is a comprehensive people-search and skip-tracing platform covering addresses, relatives, associates, assets, and contact data for subject location.</p>
+                                    <span id="idiCoreToggleLabel" class="text-xs text-gray-500 mt-1 block"></span>
+                                    <div class="mt-2">
+                                        <a href="https://login.idicore.com/" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 text-xs text-viper-red hover:underline">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                            Open Portal
+                                        </a>
+                                    </div>
+                                    <details class="mt-3" id="idiCoreDetails">
+                                        <summary class="cursor-pointer text-xs text-viper-red hover:opacity-80 select-none flex items-center gap-1.5 font-medium">
                                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
                                             Login Credentials (auto-fill)
                                         </summary>
-                                        <div id="tloCredentialsPanel" class="mt-3 space-y-3 p-3 rounded-lg bg-indigo-500/5 border border-indigo-500/10">
+                                        <div id="idiCoreCredentialsPanel" class="mt-3 space-y-3 p-3 rounded-lg bg-viper-red/5 border border-viper-red/10">
                                             <div>
                                                 <label class="block text-xs text-gray-400 mb-1">Username</label>
-                                                <input type="text" id="tloUsername" placeholder="TLOxp username" autocomplete="off"
-                                                    class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-indigo-500 focus:outline-none">
+                                                <input type="text" id="idiCoreUsername" placeholder="idiCORE / LexisNexis username" autocomplete="off"
+                                                    class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-red focus:outline-none">
                                             </div>
                                             <div>
                                                 <label class="block text-xs text-gray-400 mb-1">Password</label>
                                                 <div class="relative">
-                                                    <input type="password" id="tloPassword" placeholder="••••••••" autocomplete="off"
-                                                        class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-indigo-500 focus:outline-none pr-10">
-                                                    <button onclick="toggleTloPasswordVisibility()" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-indigo-400 transition">
-                                                        <svg id="tloEyeIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                                    <input type="password" id="idiCorePassword" placeholder="••••••••" autocomplete="off"
+                                                        class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-red focus:outline-none pr-10">
+                                                    <button onclick="toggleIdiCorePasswordVisibility()" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:opacity-80 transition">
+                                                        <svg id="idiCoreEyeIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
                                                     </button>
                                                 </div>
                                             </div>
                                             <div class="flex gap-2">
-                                                <button onclick="saveTloCredentials()" class="px-3 py-1.5 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500 rounded-lg text-indigo-400 text-xs font-medium transition">
+                                                <button onclick="saveIdiCoreCredentials()" class="px-3 py-1.5 bg-viper-red/20 hover:bg-viper-red/30 border border-viper-red rounded-lg text-viper-red text-xs font-medium transition">
                                                     Save Credentials
                                                 </button>
-                                                <button onclick="clearTloCredentials()" class="px-3 py-1.5 bg-gray-600/20 hover:bg-gray-600/30 border border-gray-600 rounded-lg text-gray-400 text-xs font-medium transition">
+                                                <button onclick="clearIdiCoreCredentials()" class="px-3 py-1.5 bg-gray-600/20 hover:bg-gray-600/30 border border-gray-600 rounded-lg text-gray-400 text-xs font-medium transition">
                                                     Clear
                                                 </button>
                                             </div>
-                                            <p class="text-xs text-gray-500 leading-relaxed">Credentials are stored locally and used to auto-fill the TLO login form. They are never sent anywhere else.</p>
+                                            <p class="text-xs text-gray-500 leading-relaxed">Credentials are stored locally and used to auto-fill the idiCORE login form. They are never sent anywhere else.</p>
+                                        </div>
+                                    </details>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ISO ClaimSearch (NICB) -->
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-start gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-viper-green/10 flex items-center justify-center flex-shrink-0">
+                                    <svg class="w-5 h-5 text-viper-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                    </svg>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <h4 class="text-white font-semibold text-sm">ISO ClaimSearch (NICB) — Insurance Claims</h4>
+                                        <button id="claimSearchToggleBtn" onclick="toggleClaimSearch()" class="relative w-11 h-6 rounded-full transition-colors bg-gray-600 flex-shrink-0">
+                                            <div id="claimSearchToggleKnob" class="absolute w-4 h-4 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-gray-400 mt-1 leading-relaxed">NICB's ISO ClaimSearch is the national insurance-claims database used to detect fraud, link claims across carriers, and surface prior loss history for vehicles, property, and persons of interest.</p>
+                                    <span id="claimSearchToggleLabel" class="text-xs text-gray-500 mt-1 block"></span>
+                                    <div class="mt-2">
+                                        <a href="https://claimsearch.iso.com" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 text-xs text-viper-green hover:underline">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                            Open Portal
+                                        </a>
+                                    </div>
+                                    <details class="mt-3" id="claimSearchDetails">
+                                        <summary class="cursor-pointer text-xs text-viper-green hover:opacity-80 select-none flex items-center gap-1.5 font-medium">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+                                            Login Credentials (auto-fill)
+                                        </summary>
+                                        <div id="claimSearchCredentialsPanel" class="mt-3 space-y-3 p-3 rounded-lg bg-viper-green/5 border border-viper-green/10">
+                                            <div>
+                                                <label class="block text-xs text-gray-400 mb-1">Username</label>
+                                                <input type="text" id="claimSearchUsername" placeholder="ISO ClaimSearch username" autocomplete="off"
+                                                    class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-green focus:outline-none">
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs text-gray-400 mb-1">Password</label>
+                                                <div class="relative">
+                                                    <input type="password" id="claimSearchPassword" placeholder="••••••••" autocomplete="off"
+                                                        class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-green focus:outline-none pr-10">
+                                                    <button onclick="toggleClaimSearchPasswordVisibility()" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:opacity-80 transition">
+                                                        <svg id="claimSearchEyeIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="flex gap-2">
+                                                <button onclick="saveClaimSearchCredentials()" class="px-3 py-1.5 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green text-xs font-medium transition">
+                                                    Save Credentials
+                                                </button>
+                                                <button onclick="clearClaimSearchCredentials()" class="px-3 py-1.5 bg-gray-600/20 hover:bg-gray-600/30 border border-gray-600 rounded-lg text-gray-400 text-xs font-medium transition">
+                                                    Clear
+                                                </button>
+                                            </div>
+                                            <p class="text-xs text-gray-500 leading-relaxed">Credentials are stored locally and used to auto-fill the ISO ClaimSearch login form. They are never sent anywhere else.</p>
+                                        </div>
+                                    </details>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- LeadsOnline -->
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-start gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-viper-orange/10 flex items-center justify-center flex-shrink-0">
+                                    <svg class="w-5 h-5 text-viper-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+                                    </svg>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <h4 class="text-white font-semibold text-sm">LeadsOnline — Pawn &amp; Secondhand Records</h4>
+                                        <button id="leadsOnlineToggleBtn" onclick="toggleLeadsOnline()" class="relative w-11 h-6 rounded-full transition-colors bg-gray-600 flex-shrink-0">
+                                            <div id="leadsOnlineToggleKnob" class="absolute w-4 h-4 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-gray-400 mt-1 leading-relaxed">LeadsOnline aggregates transaction records from pawnshops, secondhand dealers, and scrap-metal recyclers nationwide. Search for stolen property, identify sellers, and generate reports for recovery investigations.</p>
+                                    <span id="leadsOnlineToggleLabel" class="text-xs text-gray-500 mt-1 block"></span>
+                                    <div class="mt-2">
+                                        <a href="https://w4.leadsonline.com/Account/Login" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 text-xs text-viper-orange hover:underline">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                            Open Site
+                                        </a>
+                                    </div>
+                                    <details class="mt-3" id="leadsOnlineDetails">
+                                        <summary class="cursor-pointer text-xs text-viper-orange hover:opacity-80 select-none flex items-center gap-1.5 font-medium">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+                                            Login Credentials (auto-fill)
+                                        </summary>
+                                        <div id="leadsOnlineCredentialsPanel" class="mt-3 space-y-3 p-3 rounded-lg bg-viper-orange/5 border border-viper-orange/10">
+                                            <div>
+                                                <label class="block text-xs text-gray-400 mb-1">Username</label>
+                                                <input type="text" id="leadsOnlineUsername" placeholder="LeadsOnline username or email" autocomplete="off"
+                                                    class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-orange focus:outline-none">
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs text-gray-400 mb-1">Password</label>
+                                                <div class="relative">
+                                                    <input type="password" id="leadsOnlinePassword" placeholder="••••••••" autocomplete="off"
+                                                        class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-orange focus:outline-none pr-10">
+                                                    <button onclick="toggleLeadsOnlinePasswordVisibility()" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:opacity-80 transition">
+                                                        <svg id="leadsOnlineEyeIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="flex gap-2">
+                                                <button onclick="saveLeadsOnlineCredentials()" class="px-3 py-1.5 bg-viper-orange/20 hover:bg-viper-orange/30 border border-viper-orange rounded-lg text-viper-orange text-xs font-medium transition">
+                                                    Save Credentials
+                                                </button>
+                                                <button onclick="clearLeadsOnlineCredentials()" class="px-3 py-1.5 bg-gray-600/20 hover:bg-gray-600/30 border border-gray-600 rounded-lg text-gray-400 text-xs font-medium transition">
+                                                    Clear
+                                                </button>
+                                            </div>
+                                            <p class="text-xs text-gray-500 leading-relaxed">Credentials are stored locally and used to auto-fill the LeadsOnline login form. They are never sent anywhere else.</p>
                                         </div>
                                     </details>
                                 </div>
@@ -1409,6 +1531,120 @@
                                                 </button>
                                             </div>
                                             <p class="text-xs text-gray-500 leading-relaxed">Credentials are stored locally and used to auto-fill the Accurint login form. They are never sent anywhere else.</p>
+                                        </div>
+                                    </details>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- OSINT Industries -->
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-start gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-viper-purple/10 flex items-center justify-center flex-shrink-0">
+                                    <svg class="w-5 h-5 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                                    </svg>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <h4 class="text-white font-semibold text-sm">OSINT Industries — Email &amp; Phone OSINT</h4>
+                                        <button id="osintIndustriesToggleBtn" onclick="toggleOsintIndustries()" class="relative w-11 h-6 rounded-full transition-colors bg-gray-600 flex-shrink-0">
+                                            <div id="osintIndustriesToggleKnob" class="absolute w-4 h-4 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-gray-400 mt-1 leading-relaxed">OSINT Industries reverse-searches an email address or phone number across hundreds of platforms to reveal linked accounts, registration data, and digital footprints for subject identification.</p>
+                                    <span id="osintIndustriesToggleLabel" class="text-xs text-gray-500 mt-1 block"></span>
+                                    <div class="mt-2">
+                                        <a href="https://app.osint.industries/login" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 text-xs text-viper-purple hover:underline">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                            Open Site
+                                        </a>
+                                    </div>
+                                    <details class="mt-3" id="osintIndustriesDetails">
+                                        <summary class="cursor-pointer text-xs text-viper-purple hover:opacity-80 select-none flex items-center gap-1.5 font-medium">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+                                            Login Credentials (auto-fill)
+                                        </summary>
+                                        <div id="osintIndustriesCredentialsPanel" class="mt-3 space-y-3 p-3 rounded-lg bg-viper-purple/5 border border-viper-purple/10">
+                                            <div>
+                                                <label class="block text-xs text-gray-400 mb-1">Username</label>
+                                                <input type="text" id="osintIndustriesUsername" placeholder="OSINT Industries email" autocomplete="off"
+                                                    class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-purple focus:outline-none">
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs text-gray-400 mb-1">Password</label>
+                                                <div class="relative">
+                                                    <input type="password" id="osintIndustriesPassword" placeholder="••••••••" autocomplete="off"
+                                                        class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-purple focus:outline-none pr-10">
+                                                    <button onclick="toggleOsintIndustriesPasswordVisibility()" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:opacity-80 transition">
+                                                        <svg id="osintIndustriesEyeIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="flex gap-2">
+                                                <button onclick="saveOsintIndustriesCredentials()" class="px-3 py-1.5 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded-lg text-viper-purple text-xs font-medium transition">
+                                                    Save Credentials
+                                                </button>
+                                                <button onclick="clearOsintIndustriesCredentials()" class="px-3 py-1.5 bg-gray-600/20 hover:bg-gray-600/30 border border-gray-600 rounded-lg text-gray-400 text-xs font-medium transition">
+                                                    Clear
+                                                </button>
+                                            </div>
+                                            <p class="text-xs text-gray-500 leading-relaxed">Credentials are stored locally and used to auto-fill the OSINT Industries login form. They are never sent anywhere else.</p>
+                                        </div>
+                                    </details>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- TLO / TransUnion -->
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-start gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-indigo-500/10 flex items-center justify-center flex-shrink-0">
+                                    <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                                    </svg>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <h4 class="text-white font-semibold text-sm">TLO — TransUnion People Search</h4>
+                                        <button id="tloToggleBtn" onclick="toggleTlo()" class="relative w-11 h-6 rounded-full transition-colors bg-gray-600 flex-shrink-0">
+                                            <div id="tloToggleKnob" class="absolute w-4 h-4 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-gray-400 mt-1 leading-relaxed">Search TLO's comprehensive people database directly from suspect profiles. Look up individuals by name for addresses, phone numbers, associates, assets, and more. Requires an active TLOxp account.</p>
+                                    <span id="tloToggleLabel" class="text-xs text-gray-500 mt-1 block"></span>
+
+                                    <!-- Collapsible credentials -->
+                                    <details class="mt-3" id="tloDetails">
+                                        <summary class="cursor-pointer text-xs text-indigo-400 hover:text-indigo-300 select-none flex items-center gap-1.5 font-medium">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+                                            Login Credentials (auto-fill)
+                                        </summary>
+                                        <div id="tloCredentialsPanel" class="mt-3 space-y-3 p-3 rounded-lg bg-indigo-500/5 border border-indigo-500/10">
+                                            <div>
+                                                <label class="block text-xs text-gray-400 mb-1">Username</label>
+                                                <input type="text" id="tloUsername" placeholder="TLOxp username" autocomplete="off"
+                                                    class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-indigo-500 focus:outline-none">
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs text-gray-400 mb-1">Password</label>
+                                                <div class="relative">
+                                                    <input type="password" id="tloPassword" placeholder="••••••••" autocomplete="off"
+                                                        class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-indigo-500 focus:outline-none pr-10">
+                                                    <button onclick="toggleTloPasswordVisibility()" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-indigo-400 transition">
+                                                        <svg id="tloEyeIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="flex gap-2">
+                                                <button onclick="saveTloCredentials()" class="px-3 py-1.5 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500 rounded-lg text-indigo-400 text-xs font-medium transition">
+                                                    Save Credentials
+                                                </button>
+                                                <button onclick="clearTloCredentials()" class="px-3 py-1.5 bg-gray-600/20 hover:bg-gray-600/30 border border-gray-600 rounded-lg text-gray-400 text-xs font-medium transition">
+                                                    Clear
+                                                </button>
+                                            </div>
+                                            <p class="text-xs text-gray-500 leading-relaxed">Credentials are stored locally and used to auto-fill the TLO login form. They are never sent anywhere else.</p>
                                         </div>
                                     </details>
                                 </div>
@@ -6544,6 +6780,82 @@
     initUcChatSettings();
     initPublicOutreachSettings();
     initResourcesSettings();
+
+    /* ── Resource Hub logins: LeadsOnline / ClaimSearch / OSINT / idiCORE ── */
+    function _rhMakeCredFns(cfg) {
+        // cfg: { id, accent, textAccent, enabledMsg }
+        const id = cfg.id;
+        const Cap = id.charAt(0).toUpperCase() + id.slice(1);
+        window['toggle' + Cap] = function () {
+            const enabled = localStorage.getItem(id + 'Enabled') !== 'true';
+            localStorage.setItem(id + 'Enabled', String(enabled));
+            window['update' + Cap + 'ToggleUI'](enabled);
+        };
+        window['update' + Cap + 'ToggleUI'] = function (enabled) {
+            const label = document.getElementById(id + 'ToggleLabel');
+            const btn = document.getElementById(id + 'ToggleBtn');
+            const knob = document.getElementById(id + 'ToggleKnob');
+            if (label) label.textContent = enabled ? cfg.enabledMsg : 'Disabled';
+            if (btn) btn.className = 'relative w-11 h-6 rounded-full transition-colors bg-gray-600 flex-shrink-0'.replace('bg-gray-600', enabled ? cfg.accent : 'bg-gray-600');
+            if (knob) knob.className = 'absolute w-4 h-4 bg-white rounded-full top-1 transition-transform ' + (enabled ? 'translate-x-6' : 'translate-x-1');
+        };
+        window['init' + Cap + 'Settings'] = function () {
+            window['update' + Cap + 'ToggleUI'](localStorage.getItem(id + 'Enabled') === 'true');
+            window['load' + Cap + 'Credentials']();
+        };
+        window['load' + Cap + 'Credentials'] = function () {
+            const userEl = document.getElementById(id + 'Username');
+            const passEl = document.getElementById(id + 'Password');
+            if (userEl) userEl.value = localStorage.getItem(id + 'Username') || '';
+            if (passEl) passEl.value = localStorage.getItem(id + 'Password') || '';
+        };
+        window['save' + Cap + 'Credentials'] = function () {
+            const username = (document.getElementById(id + 'Username')?.value || '').trim();
+            const password = document.getElementById(id + 'Password')?.value || '';
+            localStorage.setItem(id + 'Username', username);
+            localStorage.setItem(id + 'Password', password);
+            window['_show' + Cap + 'Status']('Credentials saved');
+        };
+        window['clear' + Cap + 'Credentials'] = function () {
+            localStorage.removeItem(id + 'Username');
+            localStorage.removeItem(id + 'Password');
+            const userEl = document.getElementById(id + 'Username');
+            const passEl = document.getElementById(id + 'Password');
+            if (userEl) userEl.value = '';
+            if (passEl) passEl.value = '';
+            window['_show' + Cap + 'Status']('Credentials cleared');
+        };
+        window['_show' + Cap + 'Status'] = function (msg) {
+            const panel = document.getElementById(id + 'CredentialsPanel');
+            if (!panel) return;
+            let status = panel.querySelector('.' + id + '-status');
+            if (!status) {
+                status = document.createElement('p');
+                status.className = id + '-status text-xs ' + cfg.textAccent + ' font-medium mt-1';
+                panel.appendChild(status);
+            }
+            status.textContent = '\u2713 ' + msg;
+            setTimeout(() => { if (status.parentNode) status.remove(); }, 3000);
+        };
+        window['toggle' + Cap + 'PasswordVisibility'] = function () {
+            const passEl = document.getElementById(id + 'Password');
+            const icon = document.getElementById(id + 'EyeIcon');
+            if (!passEl) return;
+            const show = passEl.type === 'password';
+            passEl.type = show ? 'text' : 'password';
+            if (icon) icon.innerHTML = show
+                ? '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.59 6.59m7.532 7.532l3.29 3.29M3 3l18 18"/>'
+                : '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>';
+        };
+    }
+    _rhMakeCredFns({ id: 'leadsOnline',     accent: 'bg-viper-orange', textAccent: 'text-viper-orange', enabledMsg: 'Enabled — Appears in the Investigative Resources tray' });
+    _rhMakeCredFns({ id: 'claimSearch',     accent: 'bg-viper-green',  textAccent: 'text-viper-green',  enabledMsg: 'Enabled — Appears in the Investigative Resources tray' });
+    _rhMakeCredFns({ id: 'osintIndustries', accent: 'bg-viper-purple', textAccent: 'text-viper-purple', enabledMsg: 'Enabled — Appears in the Investigative Resources tray' });
+    _rhMakeCredFns({ id: 'idiCore',         accent: 'bg-viper-red',    textAccent: 'text-viper-red',    enabledMsg: 'Enabled — Appears in the Investigative Resources tray' });
+    initLeadsOnlineSettings();
+    initClaimSearchSettings();
+    initOsintIndustriesSettings();
+    initIdiCoreSettings();
 
     /* ── ICAC Resource Features: Public Outreach + Resources ──── */
     function togglePublicOutreach() {

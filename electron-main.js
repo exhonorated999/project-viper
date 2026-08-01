@@ -161,6 +161,18 @@ let lastCallyoBounds = null;
 let outlookBrowserView = null;
 let outlookViewVisible = false;
 let lastOutlookBounds = null;
+let leadsOnlineBrowserView = null;
+let leadsOnlineViewVisible = false;
+let lastLeadsOnlineBounds = null;
+let claimSearchBrowserView = null;
+let claimSearchViewVisible = false;
+let lastClaimSearchBounds = null;
+let osintIndustriesBrowserView = null;
+let osintIndustriesViewVisible = false;
+let lastOsintIndustriesBounds = null;
+let idiCoreBrowserView = null;
+let idiCoreViewVisible = false;
+let lastIdiCoreBounds = null;
 
 // Icon path: use unpacked asar path in production, normal path in dev
 const iconPath = app.isPackaged
@@ -903,6 +915,10 @@ app.whenReady().then(async () => {
       if (gridcopViewVisible && lastGridcopBounds) gridcopBrowserView.setBounds(lastGridcopBounds);
       if (callyoViewVisible && lastCallyoBounds) callyoBrowserView.setBounds(lastCallyoBounds);
       if (outlookViewVisible && lastOutlookBounds) outlookBrowserView.setBounds(lastOutlookBounds);
+      if (leadsOnlineViewVisible && lastLeadsOnlineBounds) leadsOnlineBrowserView.setBounds(lastLeadsOnlineBounds);
+      if (claimSearchViewVisible && lastClaimSearchBounds) claimSearchBrowserView.setBounds(lastClaimSearchBounds);
+      if (osintIndustriesViewVisible && lastOsintIndustriesBounds) osintIndustriesBrowserView.setBounds(lastOsintIndustriesBounds);
+      if (idiCoreViewVisible && lastIdiCoreBounds) idiCoreBrowserView.setBounds(lastIdiCoreBounds);
     });
 
     // Create persistent BrowserView for TLO (TransUnion) — people search / skip tracing
@@ -1481,6 +1497,101 @@ app.whenReady().then(async () => {
       console.error('[OUTLOOK] render-process-gone', details);
     });
 
+    // ── Generic Resource-Hub BrowserViews (username/password auto-fill) ──
+    // LeadsOnline, ISO ClaimSearch, OSINT Industries, idiCORE all use a
+    // conventional single-page username + password login form, so they
+    // share one creation + auto-fill helper. Credentials are read from the
+    // renderer's localStorage on the login page and injected; nothing is
+    // ever submitted automatically — the user reviews and signs in.
+    function _makeResourceBV(getBV, setBV, opts) {
+      const bv = new BrowserView({
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          partition: opts.partition,
+        },
+      });
+      setBV(bv);
+      bv.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+      bv.setAutoResize({ width: false, height: false });
+      bv.webContents.on('did-finish-load', () => {
+        if (!opts.isVisible()) mainWindow.webContents.focus();
+        bv.webContents.insertCSS(`
+          ::-webkit-scrollbar { width: 8px; }
+          ::-webkit-scrollbar-track { background: #0d1117; }
+          ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+        `).catch(() => {});
+        const url = bv.webContents.getURL();
+        const looksLikeLogin = /login|signin|sign-in|authenticate|account|auth0|oauth/i.test(url) || url.endsWith('/') || opts.hostHint.test(url);
+        if (!looksLikeLogin) return;
+        mainWindow.webContents.executeJavaScript(
+          `JSON.stringify({ username: localStorage.getItem('${opts.userKey}') || '', password: localStorage.getItem('${opts.passKey}') || '' })`
+        ).then(json => {
+          const creds = JSON.parse(json);
+          if (!creds.username && !creds.password) return;
+          bv.webContents.executeJavaScript(`
+            (function() {
+              function setVal(el, val) {
+                if (!el || !val) return;
+                const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                nativeSetter.call(el, val);
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                el.dispatchEvent(new Event('blur', { bubbles: true }));
+              }
+              function pickUser() {
+                return document.querySelector('input[name="username"]')
+                    || document.querySelector('input#username')
+                    || document.querySelector('input[name="user"]')
+                    || document.querySelector('input[name="email"]')
+                    || document.querySelector('input[type="email"]')
+                    || document.querySelector('input[autocomplete="username"]')
+                    || (function() {
+                         const all = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
+                         return all.find(i => /user|email|login/i.test((i.name||'') + ' ' + (i.id||'') + ' ' + (i.placeholder||''))) || all[0] || null;
+                       })();
+              }
+              function pickPass() {
+                return document.querySelector('input[type="password"]')
+                    || document.querySelector('input[name="password"]')
+                    || document.querySelector('input#password');
+              }
+              function fill() {
+                setVal(pickUser(), ${JSON.stringify(creds.username)});
+                setVal(pickPass(), ${JSON.stringify(creds.password)});
+              }
+              setTimeout(fill, 400);
+              setTimeout(fill, 1200);
+              setTimeout(fill, 2500);
+            })();
+          `).catch(() => {});
+        }).catch(() => {});
+      });
+      bv.webContents.on('did-fail-load', (_e, code, desc, u, isMain) => {
+        if (isMain) console.error('[' + opts.tag + '] did-fail-load', code, desc, u);
+      });
+      bv.webContents.on('render-process-gone', (_e, details) => {
+        console.error('[' + opts.tag + '] render-process-gone', details);
+      });
+    }
+
+    _makeResourceBV(() => leadsOnlineBrowserView, (v) => { leadsOnlineBrowserView = v; }, {
+      partition: 'persist:leadsOnline', userKey: 'leadsOnlineUsername', passKey: 'leadsOnlinePassword',
+      hostHint: /leadsonline\.com/i, tag: 'LEADSONLINE', isVisible: () => leadsOnlineViewVisible,
+    });
+    _makeResourceBV(() => claimSearchBrowserView, (v) => { claimSearchBrowserView = v; }, {
+      partition: 'persist:claimSearch', userKey: 'claimSearchUsername', passKey: 'claimSearchPassword',
+      hostHint: /iso\.com|claimsearch/i, tag: 'CLAIMSEARCH', isVisible: () => claimSearchViewVisible,
+    });
+    _makeResourceBV(() => osintIndustriesBrowserView, (v) => { osintIndustriesBrowserView = v; }, {
+      partition: 'persist:osintIndustries', userKey: 'osintIndustriesUsername', passKey: 'osintIndustriesPassword',
+      hostHint: /osint\.industries/i, tag: 'OSINT-IND', isVisible: () => osintIndustriesViewVisible,
+    });
+    _makeResourceBV(() => idiCoreBrowserView, (v) => { idiCoreBrowserView = v; }, {
+      partition: 'persist:idiCore', userKey: 'idiCoreUsername', passKey: 'idiCorePassword',
+      hostHint: /ididata\.com|idicore/i, tag: 'IDICORE', isVisible: () => idiCoreViewVisible,
+    });
+
     // ── Resource-Hub download interceptor ────────────────────────────
     // Intercept file downloads that originate INSIDE a Resource Hub
     // BrowserView (Flock, ICACCOPS, ICAC Data System, etc.) and route
@@ -1502,6 +1613,10 @@ app.whenReady().then(async () => {
       { partition: 'persist:gridcop',        label: 'Gridcop',          defaultTag: 'Gridcop-Reports'  },
       { partition: 'persist:callyo',         label: 'Callyo',           defaultTag: 'Callyo-Reports'   },
       { partition: 'persist:outlook',        label: 'Outlook Email',    defaultTag: 'Outlook-Reports'  },
+      { partition: 'persist:leadsOnline',    label: 'LeadsOnline',      defaultTag: 'LeadsOnline-Reports' },
+      { partition: 'persist:claimSearch',    label: 'ISO ClaimSearch',  defaultTag: 'ClaimSearch-Reports' },
+      { partition: 'persist:osintIndustries',label: 'OSINT Industries', defaultTag: 'OSINT-Reports'    },
+      { partition: 'persist:idiCore',        label: 'idiCORE',          defaultTag: 'idiCORE-Reports'  },
     ];
 
     const _sanitizeDlName = (n) => String(n || 'download').replace(/[\\/:*?"<>|\r\n]+/g, '_').slice(0, 180) || 'download';
@@ -1562,7 +1677,7 @@ app.whenReady().then(async () => {
     // on the next page. Media player is handled by its own show/hide via reportBounds().
     mainWindow.webContents.on('did-start-navigation', (_event, _url, isInPlace) => {
       if (isInPlace) return; // ignore hash/pushState navigations
-      const pageViews = [flockBrowserView, tloBrowserView, accurintBrowserView, whoosterBrowserView, vigilantBrowserView, icacDataSystemBrowserView, icacCopsBrowserView, gridcopBrowserView, callyoBrowserView, outlookBrowserView];
+      const pageViews = [flockBrowserView, tloBrowserView, accurintBrowserView, whoosterBrowserView, vigilantBrowserView, icacDataSystemBrowserView, icacCopsBrowserView, gridcopBrowserView, callyoBrowserView, outlookBrowserView, leadsOnlineBrowserView, claimSearchBrowserView, osintIndustriesBrowserView, idiCoreBrowserView];
       for (const bv of pageViews) {
         if (!bv) continue;
         try { mainWindow.removeBrowserView(bv); } catch (_) {}
@@ -1578,6 +1693,10 @@ app.whenReady().then(async () => {
       gridcopViewVisible = false;
       callyoViewVisible = false;
       outlookViewVisible = false;
+      leadsOnlineViewVisible = false;
+      claimSearchViewVisible = false;
+      osintIndustriesViewVisible = false;
+      idiCoreViewVisible = false;
     });
 
     // When the renderer page finishes loading, ask it to report media bounds
@@ -4469,6 +4588,10 @@ const _rhResourceMap = () => ({
   gridcop:        { bv: gridcopBrowserView,        label: 'Gridcop',          defaultTag: 'Gridcop-Reports'  },
   callyo:         { bv: callyoBrowserView,         label: 'Callyo',           defaultTag: 'Callyo-Reports'   },
   outlook:        { bv: outlookBrowserView,        label: 'Outlook Email',    defaultTag: 'Outlook-Reports'  },
+  leadsOnline:    { bv: leadsOnlineBrowserView,    label: 'LeadsOnline',      defaultTag: 'LeadsOnline-Reports' },
+  claimSearch:    { bv: claimSearchBrowserView,    label: 'ISO ClaimSearch',  defaultTag: 'ClaimSearch-Reports' },
+  osintIndustries:{ bv: osintIndustriesBrowserView,label: 'OSINT Industries', defaultTag: 'OSINT-Reports'    },
+  idiCore:        { bv: idiCoreBrowserView,        label: 'idiCORE',          defaultTag: 'idiCORE-Reports'  },
 });
 
 ipcMain.handle('rh-capture-pdf', async (_e, payload) => {
@@ -8322,6 +8445,102 @@ ipcMain.on('outlook-set-visible', (_event, visible) => {
   }
 });
 
+// ── LeadsOnline IPC ─────────────────────────────────────────────────
+ipcMain.on('leads-online-set-bounds', (_event, bounds) => {
+  if (!leadsOnlineBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  const b = { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) };
+  if (b.width < 10 || b.height < 10) return;
+  lastLeadsOnlineBounds = b;
+  if (leadsOnlineViewVisible) leadsOnlineBrowserView.setBounds(b);
+});
+ipcMain.on('leads-online-set-visible', (_event, visible) => {
+  if (!leadsOnlineBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  leadsOnlineViewVisible = visible;
+  if (visible && lastLeadsOnlineBounds) {
+    const currentUrl = leadsOnlineBrowserView.webContents.getURL();
+    if (!currentUrl || currentUrl === 'about:blank') {
+      leadsOnlineBrowserView.webContents.loadURL('https://w4.leadsonline.com/Account/Login');
+    }
+    try { mainWindow.addBrowserView(leadsOnlineBrowserView); } catch (_) {}
+    leadsOnlineBrowserView.setBounds(lastLeadsOnlineBounds);
+  } else {
+    leadsOnlineBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    try { mainWindow.removeBrowserView(leadsOnlineBrowserView); } catch (_) {}
+  }
+});
+
+// ── ISO ClaimSearch IPC ─────────────────────────────────────────────
+ipcMain.on('claim-search-set-bounds', (_event, bounds) => {
+  if (!claimSearchBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  const b = { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) };
+  if (b.width < 10 || b.height < 10) return;
+  lastClaimSearchBounds = b;
+  if (claimSearchViewVisible) claimSearchBrowserView.setBounds(b);
+});
+ipcMain.on('claim-search-set-visible', (_event, visible) => {
+  if (!claimSearchBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  claimSearchViewVisible = visible;
+  if (visible && lastClaimSearchBounds) {
+    const currentUrl = claimSearchBrowserView.webContents.getURL();
+    if (!currentUrl || currentUrl === 'about:blank') {
+      claimSearchBrowserView.webContents.loadURL('https://claimsearch.iso.com');
+    }
+    try { mainWindow.addBrowserView(claimSearchBrowserView); } catch (_) {}
+    claimSearchBrowserView.setBounds(lastClaimSearchBounds);
+  } else {
+    claimSearchBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    try { mainWindow.removeBrowserView(claimSearchBrowserView); } catch (_) {}
+  }
+});
+
+// ── OSINT Industries IPC ────────────────────────────────────────────
+ipcMain.on('osint-industries-set-bounds', (_event, bounds) => {
+  if (!osintIndustriesBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  const b = { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) };
+  if (b.width < 10 || b.height < 10) return;
+  lastOsintIndustriesBounds = b;
+  if (osintIndustriesViewVisible) osintIndustriesBrowserView.setBounds(b);
+});
+ipcMain.on('osint-industries-set-visible', (_event, visible) => {
+  if (!osintIndustriesBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  osintIndustriesViewVisible = visible;
+  if (visible && lastOsintIndustriesBounds) {
+    const currentUrl = osintIndustriesBrowserView.webContents.getURL();
+    if (!currentUrl || currentUrl === 'about:blank') {
+      osintIndustriesBrowserView.webContents.loadURL('https://app.osint.industries/login');
+    }
+    try { mainWindow.addBrowserView(osintIndustriesBrowserView); } catch (_) {}
+    osintIndustriesBrowserView.setBounds(lastOsintIndustriesBounds);
+  } else {
+    osintIndustriesBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    try { mainWindow.removeBrowserView(osintIndustriesBrowserView); } catch (_) {}
+  }
+});
+
+// ── idiCORE IPC ─────────────────────────────────────────────────────
+ipcMain.on('idi-core-set-bounds', (_event, bounds) => {
+  if (!idiCoreBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  const b = { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) };
+  if (b.width < 10 || b.height < 10) return;
+  lastIdiCoreBounds = b;
+  if (idiCoreViewVisible) idiCoreBrowserView.setBounds(b);
+});
+ipcMain.on('idi-core-set-visible', (_event, visible) => {
+  if (!idiCoreBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
+  idiCoreViewVisible = visible;
+  if (visible && lastIdiCoreBounds) {
+    const currentUrl = idiCoreBrowserView.webContents.getURL();
+    if (!currentUrl || currentUrl === 'about:blank') {
+      idiCoreBrowserView.webContents.loadURL('https://login.idicore.com/');
+    }
+    try { mainWindow.addBrowserView(idiCoreBrowserView); } catch (_) {}
+    idiCoreBrowserView.setBounds(lastIdiCoreBounds);
+  } else {
+    idiCoreBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    try { mainWindow.removeBrowserView(idiCoreBrowserView); } catch (_) {}
+  }
+});
+
 // Generic zoom factor control for the Resource Hub BrowserViews.
 // Renderer sends a resource id ('flock' | 'tlo' | 'accurint' | 'vigilant')
 // and a zoom factor (0.5 .. 2.0). Persists across visibility toggles
@@ -8341,6 +8560,10 @@ ipcMain.on('rh-set-zoom', (_event, payload) => {
     else if (resId === 'gridcop') bv = gridcopBrowserView;
     else if (resId === 'callyo') bv = callyoBrowserView;
     else if (resId === 'outlook') bv = outlookBrowserView;
+    else if (resId === 'leadsOnline') bv = leadsOnlineBrowserView;
+    else if (resId === 'claimSearch') bv = claimSearchBrowserView;
+    else if (resId === 'osintIndustries') bv = osintIndustriesBrowserView;
+    else if (resId === 'idiCore') bv = idiCoreBrowserView;
     if (bv && bv.webContents && !bv.webContents.isDestroyed()) {
       bv.webContents.setZoomFactor(f);
     }

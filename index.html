@@ -4507,7 +4507,10 @@
                 .filter(s => s.category === 'cleared-arrest').map(s => s.id);
             const arrestStatuses = new Set(['closed-arrest', ...customArrestIds]);
             const arrestCasesThisMonth = cases.filter(c =>
-                arrestStatuses.has(c.status) && _inThisMonth(c.closedAt || c.lastUpdated || c.createdAt)
+                arrestStatuses.has(c.status) && _inThisMonth(
+                    c.dateClosed ? (String(c.dateClosed).slice(0, 10) + 'T00:00')
+                                 : (c.closedAt || c.lastModified || c.lastUpdated || c.createdAt)
+                )
             ).length;
             return Math.max(total, arrestCasesThisMonth);
         }
@@ -4593,8 +4596,14 @@
             dashboardMetrics['cases_closed'].value       = closedCases.length + closedWithArrestCases.length + otherClosureCases.length;
             dashboardMetrics['transferred_cases'].value  = cases.filter(c => c.status === 'transferred').length;
 
-            // Monthly counts for closure events — use case.closedAt / lastUpdated / createdAt fallback chain.
-            const _closedDate = c => c.closedAt || c.lastUpdated || c.createdAt;
+            // Monthly counts for closure events. The case-detail page records the
+            // actual closure date in case.dateClosed (YYYY-MM-DD) and bumps
+            // lastModified; fall back through those before createdAt. dateClosed is
+            // date-only, so append 'T00:00' to parse it in local time.
+            const _closedDate = c => (
+                c.dateClosed ? (String(c.dateClosed).slice(0, 10) + 'T00:00')
+                             : (c.closedAt || c.lastModified || c.lastUpdated || c.createdAt)
+            );
             dashboardMetrics['cases_closed'].monthly       = (closedCases.length + closedWithArrestCases.length + otherClosureCases.length) === 0 ? 0 :
                 [...closedCases, ...closedWithArrestCases, ...otherClosureCases].filter(c => _inThisMonth(_closedDate(c))).length;
             dashboardMetrics['closed_with_arrest'].monthly = closedWithArrestCases.filter(c => _inThisMonth(_closedDate(c))).length;

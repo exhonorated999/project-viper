@@ -893,6 +893,49 @@ app.whenReady().then(async () => {
       }
     });
 
+    // Route Flock popups (report-detail windows / external links) instead of
+    // letting Electron spawn an uncontrolled blank child window that can leave
+    // the search view in a broken state. Same-origin Flock/Auth0 popups load
+    // in-view; anything else goes to the OS browser.
+    flockBrowserView.webContents.setWindowOpenHandler(({ url }) => {
+      if (url && (url.startsWith('http:') || url.startsWith('https:'))) {
+        if (/flocksafety\.com|auth0\.com/i.test(url)) {
+          try { flockBrowserView.webContents.loadURL(url); } catch (_) {}
+        } else {
+          try { shell.openExternal(url); } catch (_) {}
+        }
+      }
+      return { action: 'deny' };
+    });
+
+    flockBrowserView.webContents.on('did-fail-load', (_e, code, desc, url, isMain) => {
+      if (isMain) console.error('[FLOCK] did-fail-load', code, desc, url);
+    });
+
+    // Recover from renderer crashes. The Flock search results view is a WebGL /
+    // map-heavy SPA; on some GPUs its renderer process dies, the BrowserView
+    // goes black, and because we re-attach the SAME dead webContents on every
+    // reopen it "never loads again". Reload once (guarded against loops) to
+    // bring it back instead of leaving a permanent black panel.
+    let _flockReloading = false;
+    flockBrowserView.webContents.on('render-process-gone', (_e, details) => {
+      console.error('[FLOCK] render-process-gone', details);
+      if (_flockReloading) return;
+      if (details && details.reason === 'clean-exit') return;
+      _flockReloading = true;
+      setTimeout(() => {
+        try {
+          flockBrowserView.webContents.reload();
+        } catch (_) {
+          try { flockBrowserView.webContents.loadURL('https://search-2.flocksafety.com/'); } catch (__) {}
+        }
+        setTimeout(() => { _flockReloading = false; }, 4000);
+      }, 300);
+    });
+    flockBrowserView.webContents.on('unresponsive', () => {
+      console.warn('[FLOCK] renderer unresponsive');
+    });
+
     // Re-position Flock BrowserView on window resize
     mainWindow.on('resize', () => {
       if (flockViewVisible && lastFlockBounds) {
@@ -7983,6 +8026,11 @@ ipcMain.on('flock-set-visible', (_event, visible) => {
     const currentUrl = flockBrowserView.webContents.getURL();
     if (!currentUrl || currentUrl === '' || currentUrl === 'about:blank') {
       flockBrowserView.webContents.loadURL('https://search-2.flocksafety.com/');
+    } else if (flockBrowserView.webContents.isCrashed()) {
+      // View died while hidden — recover on reopen so it isn't a black panel.
+      console.warn('[FLOCK] webContents crashed; reloading on show');
+      try { flockBrowserView.webContents.reload(); }
+      catch (_) { try { flockBrowserView.webContents.loadURL('https://search-2.flocksafety.com/'); } catch (__) {} }
     }
     try { mainWindow.addBrowserView(flockBrowserView); } catch (_) {}
     flockBrowserView.setBounds(lastFlockBounds);

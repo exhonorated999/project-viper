@@ -1596,6 +1596,75 @@
                             </div>
                         </div>
 
+                        <!-- OSINT Username Search (Maigret) -->
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-start gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-viper-purple/10 flex items-center justify-center flex-shrink-0">
+                                    <svg class="w-5 h-5 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+                                    </svg>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <h4 class="text-white font-semibold text-sm">OSINT Username Search — Maigret</h4>
+                                        <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                                            <input type="checkbox" id="osintEnabledToggle" class="sr-only peer" onchange="setOsintEnabled(this.checked)">
+                                            <div class="w-11 h-6 bg-gray-600 rounded-full peer peer-checked:bg-viper-cyan transition-colors"></div>
+                                            <div class="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+                                        </label>
+                                    </div>
+                                    <p class="text-xs text-gray-400 mt-1 leading-relaxed">Hunt a person's usernames &amp; email handles across 3,000+ social/web sites using <span class="text-gray-300">Maigret</span>, an open-source OSINT tool. When enabled, a <span class="text-gray-300">Search OSINT</span> button appears on the Identifiers card of Suspects, Victims, Witnesses &amp; Other Parties.</p>
+
+                                    <div class="rounded-lg bg-amber-900/20 border border-amber-700/40 px-3 py-2 mt-3">
+                                        <p class="text-xs text-amber-300 leading-relaxed">⚠ This feature makes <strong>live requests over the internet</strong> from this machine (it is not offline like transcription). Results may contain <strong>false positives</strong> and are <strong>potential investigative leads, not evidence</strong>. Maigret is a third-party open-source tool; VIPER is not responsible for the tool or its results. Optionally route traffic through a proxy/Tor below so requests don't originate from your agency IP.</p>
+                                    </div>
+
+                                    <div id="osintEngineCard" class="mt-3 rounded-lg bg-viper-card/40 border border-gray-700/60 p-4 space-y-3">
+                                        <div class="flex items-center gap-2 mb-2">
+                                            <span id="osintEngineDot" class="w-2.5 h-2.5 rounded-full bg-gray-500 flex-shrink-0"></span>
+                                            <p id="osintEngineStatusText" class="text-sm text-gray-300">Checking engine…</p>
+                                        </div>
+                                        <p class="text-xs text-gray-500 mb-3">
+                                            The Maigret engine is not included in the installer. Download it once and VIPER uses it
+                                            automatically. It installs to your user-data folder and stays on this device.
+                                        </p>
+
+                                        <div id="osintEngineProgress" class="hidden mb-3">
+                                            <div class="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
+                                                <div id="osintEngineBar" class="h-full bg-viper-cyan transition-all" style="width:0%"></div>
+                                            </div>
+                                            <p id="osintEngineProgressText" class="text-xs text-gray-400 mt-1">Preparing…</p>
+                                        </div>
+
+                                        <div class="flex flex-wrap gap-2">
+                                            <button id="osintDownloadBtn" onclick="downloadOsintEngine()" class="px-3 py-1.5 rounded-lg bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/40 hover:bg-viper-cyan/30 transition-colors text-sm font-medium">Download engine</button>
+                                            <button id="osintInstallFileBtn" onclick="installOsintEngineFromFile()" class="px-3 py-1.5 rounded-lg bg-white/5 text-gray-300 border border-white/10 hover:bg-white/10 transition-colors text-sm">Install from file…</button>
+                                            <button id="osintRemoveBtn" onclick="removeOsintEngine()" class="px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20 transition-colors text-sm hidden">Remove</button>
+                                        </div>
+
+                                        <p id="osintEngineMsg" class="text-xs mt-2 hidden"></p>
+
+                                        <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                            <div>
+                                                <label class="block text-xs text-gray-500 mb-1">Proxy (optional)</label>
+                                                <input id="osintProxyInput" type="text" onchange="saveOsintProxy()" class="w-full px-2 py-1.5 bg-viper-card border border-gray-600 rounded text-gray-200 text-xs focus:border-viper-cyan outline-none" placeholder="http://host:port or socks5://host:port">
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs text-gray-500 mb-1">Tor proxy (optional, .onion)</label>
+                                                <input id="osintTorProxyInput" type="text" onchange="saveOsintProxy()" class="w-full px-2 py-1.5 bg-viper-card border border-gray-600 rounded text-gray-200 text-xs focus:border-viper-cyan outline-none" placeholder="socks5://127.0.0.1:9050">
+                                            </div>
+                                        </div>
+
+                                        <details class="mt-3">
+                                            <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-400">Advanced: custom download URL</summary>
+                                            <input id="osintEngineUrl" type="text" class="mt-2 w-full px-2 py-1.5 bg-viper-card border border-gray-600 rounded text-gray-200 text-xs focus:border-viper-cyan outline-none" placeholder="https://…/viper-maigret-engine.manifest.json">
+                                            <p class="text-xs text-gray-600 mt-1">Leave blank to use the default source. For air-gapped machines, use “Install from file…”.</p>
+                                        </details>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- TLO / TransUnion -->
                         <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
                             <div class="flex items-start gap-3">
@@ -3396,6 +3465,7 @@
             loadSecurityState();
             loadTelemetryState();
             initWhisperEngineCard();
+            initOsintEngineCard();
 
             // Telemetry init + lifecycle
             try {
@@ -3634,6 +3704,192 @@
                 _setEngineMsg('Remove failed: ' + e.message, 'error');
             } finally {
                 refreshWhisperEngineStatus();
+            }
+        }
+
+        // ─── On-demand OSINT (Maigret) engine manager (Settings card) ───────
+        var _osintEngineUnsub = null;
+
+        function _setOsintMsg(text, kind) {
+            var el = document.getElementById('osintEngineMsg');
+            if (!el) return;
+            if (!text) { el.classList.add('hidden'); el.textContent = ''; return; }
+            el.classList.remove('hidden');
+            el.textContent = text;
+            el.style.color = kind === 'error' ? '#f87171' : (kind === 'success' ? '#4ade80' : '#94a3b8');
+        }
+
+        function isOsintEnabled() {
+            return localStorage.getItem('osintEnabled') === 'true';
+        }
+
+        function setOsintEnabled(on) {
+            localStorage.setItem('osintEnabled', on ? 'true' : 'false');
+            _applyOsintEnabledUI(!!on);
+        }
+
+        function _applyOsintEnabledUI(on) {
+            var card = document.getElementById('osintEngineCard');
+            if (!card) return;
+            var controls = card.querySelectorAll('#osintDownloadBtn, #osintInstallFileBtn, #osintRemoveBtn, #osintEngineUrl, #osintProxyInput, #osintTorProxyInput');
+            controls.forEach(function (el) {
+                el.disabled = !on;
+                el.style.opacity = on ? '' : '0.5';
+                el.style.pointerEvents = on ? '' : 'none';
+            });
+        }
+
+        function _setOsintBusyUI(busy, label) {
+            var prog = document.getElementById('osintEngineProgress');
+            var dl = document.getElementById('osintDownloadBtn');
+            var inst = document.getElementById('osintInstallFileBtn');
+            var rm = document.getElementById('osintRemoveBtn');
+            if (prog) prog.classList.toggle('hidden', !busy);
+            [dl, inst, rm].forEach(function (b) { if (b) b.disabled = busy; });
+            if (busy && label) {
+                var t = document.getElementById('osintEngineProgressText');
+                if (t) t.textContent = label;
+                var bar = document.getElementById('osintEngineBar');
+                if (bar) bar.style.width = '0%';
+            }
+        }
+
+        function _renderOsintStatus(status) {
+            var dot = document.getElementById('osintEngineDot');
+            var text = document.getElementById('osintEngineStatusText');
+            var rm = document.getElementById('osintRemoveBtn');
+            var dl = document.getElementById('osintDownloadBtn');
+            if (!dot || !text) return;
+            var installed = !!(status && status.enginePresent);
+            if (installed) {
+                dot.className = 'w-2.5 h-2.5 rounded-full bg-green-500 flex-shrink-0';
+                var sz = status.sizeBytes ? ' • ' + _fmtBytes(status.sizeBytes) : '';
+                var db = status.dbPresent ? '' : ' • ⚠ site DB missing';
+                text.textContent = 'Engine installed' + sz + db;
+                if (rm) rm.classList.remove('hidden');
+                if (dl) dl.textContent = 'Re-download / update';
+            } else {
+                dot.className = 'w-2.5 h-2.5 rounded-full bg-gray-500 flex-shrink-0';
+                text.textContent = 'Engine not installed';
+                if (rm) rm.classList.add('hidden');
+                if (dl) dl.textContent = 'Download engine';
+            }
+        }
+
+        async function refreshOsintEngineStatus() {
+            if (!(window.electronAPI && window.electronAPI.osintEngineStatus)) {
+                var t = document.getElementById('osintEngineStatusText');
+                if (t) t.textContent = 'Engine management unavailable in this build.';
+                return;
+            }
+            try {
+                var status = await window.electronAPI.osintEngineStatus();
+                _renderOsintStatus(status);
+            } catch (e) {
+                var el = document.getElementById('osintEngineStatusText');
+                if (el) el.textContent = 'Could not read engine status.';
+            }
+        }
+
+        function saveOsintProxy() {
+            var p = document.getElementById('osintProxyInput');
+            var t = document.getElementById('osintTorProxyInput');
+            if (p) localStorage.setItem('osintProxy', p.value.trim());
+            if (t) localStorage.setItem('osintTorProxy', t.value.trim());
+        }
+
+        function initOsintEngineCard() {
+            var toggle = document.getElementById('osintEnabledToggle');
+            var on = isOsintEnabled();
+            if (toggle) toggle.checked = on;
+            _applyOsintEnabledUI(on);
+            var p = document.getElementById('osintProxyInput');
+            var t = document.getElementById('osintTorProxyInput');
+            if (p) p.value = localStorage.getItem('osintProxy') || '';
+            if (t) t.value = localStorage.getItem('osintTorProxy') || '';
+            if (window.electronAPI && window.electronAPI.onOsintEngineProgress && !_osintEngineUnsub) {
+                _osintEngineUnsub = window.electronAPI.onOsintEngineProgress(function (pr) {
+                    if (!pr) return;
+                    var bar = document.getElementById('osintEngineBar');
+                    var txt = document.getElementById('osintEngineProgressText');
+                    if (pr.phase === 'downloading') {
+                        if (bar) bar.style.width = (pr.pct || 0) + '%';
+                        if (txt) txt.textContent = pr.total
+                            ? 'Downloading… ' + (pr.pct || 0) + '% (' + _fmtBytes(pr.received) + ' / ' + _fmtBytes(pr.total) + ')'
+                            : 'Downloading… ' + _fmtBytes(pr.received || 0);
+                    } else if (pr.phase === 'verifying') {
+                        if (txt) txt.textContent = 'Verifying…';
+                    } else if (pr.phase === 'extracting') {
+                        if (bar) bar.style.width = '100%';
+                        if (txt) txt.textContent = 'Extracting…';
+                    } else if (pr.phase === 'installing') {
+                        if (txt) txt.textContent = 'Installing engine…';
+                    } else if (pr.phase === 'done') {
+                        if (txt) txt.textContent = 'Done.';
+                    } else if (pr.phase === 'error') {
+                        if (txt) txt.textContent = 'Error: ' + (pr.error || 'unknown');
+                    }
+                });
+            }
+            refreshOsintEngineStatus();
+        }
+
+        async function downloadOsintEngine() {
+            if (!isOsintEnabled()) return;
+            if (!(window.electronAPI && window.electronAPI.osintEngineDownload)) return;
+            var urlEl = document.getElementById('osintEngineUrl');
+            var url = urlEl && urlEl.value.trim() ? urlEl.value.trim() : undefined;
+            _setOsintMsg('Starting download…', 'info');
+            _setOsintBusyUI(true, 'Preparing download…');
+            try {
+                var res = await window.electronAPI.osintEngineDownload({ url: url });
+                if (res && res.success) {
+                    _renderOsintStatus(res.status);
+                    _setOsintMsg('OSINT engine installed.', 'success');
+                } else {
+                    _setOsintMsg('Download failed: ' + ((res && res.error) || 'unknown') + '. If the source isn\u2019t hosted yet, use “Install from file…”.', 'error');
+                }
+            } catch (e) {
+                _setOsintMsg('Download failed: ' + e.message, 'error');
+            } finally {
+                _setOsintBusyUI(false);
+                refreshOsintEngineStatus();
+            }
+        }
+
+        async function installOsintEngineFromFile() {
+            if (!isOsintEnabled()) return;
+            if (!(window.electronAPI && window.electronAPI.osintEngineInstallFile)) return;
+            _setOsintBusyUI(true, 'Waiting for file…');
+            try {
+                var res = await window.electronAPI.osintEngineInstallFile({});
+                if (res && res.success) {
+                    _renderOsintStatus(res.status);
+                    _setOsintMsg('OSINT engine installed.', 'success');
+                } else if (res && res.code !== 'CANCELLED') {
+                    _setOsintMsg('Install failed: ' + ((res && res.error) || 'unknown'), 'error');
+                }
+            } catch (e) {
+                _setOsintMsg('Install failed: ' + e.message, 'error');
+            } finally {
+                _setOsintBusyUI(false);
+                refreshOsintEngineStatus();
+            }
+        }
+
+        async function removeOsintEngine() {
+            if (!(window.electronAPI && window.electronAPI.osintEngineRemove)) return;
+            if (!confirm('Remove the downloaded OSINT (Maigret) engine? Username search will be disabled until you download it again.')) return;
+            try {
+                var res = await window.electronAPI.osintEngineRemove();
+                if (res && res.success) {
+                    _renderOsintStatus(res.status);
+                    _setOsintMsg('OSINT engine removed.', 'info');
+                }
+            } catch (e) {
+                _setOsintMsg('Remove failed: ' + e.message, 'error');
+            } finally {
+                refreshOsintEngineStatus();
             }
         }
 

@@ -33,6 +33,12 @@
             label: 'Cyber Obsidian',
             description: 'Violet-and-magenta obsidian, the Project Oversight / Hindsight PLUS house palette.',
             swatches: ['#0a0612', '#181124', '#b06bff', '#ff2d92', '#ff6a00']
+        },
+        {
+            id: 'ember',
+            label: 'Ember Protocol',
+            description: 'Molten gold-and-orange magma with cyber-violet over warm obsidian.',
+            swatches: ['#060608', '#131211', '#ffb020', '#a855f7', '#ff5a1f']
         }
     ];
 

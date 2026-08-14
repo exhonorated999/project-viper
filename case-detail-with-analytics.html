@@ -2746,6 +2746,30 @@
                     }
                 });
                 y = doc.lastAutoTable.finalY + 5;
+
+                // OSINT leads (unverified) — listed beneath the table for any
+                // identifier that has attached Maigret results.
+                const osintRows = rows.filter(r => r && r.osint && Array.isArray(r.osint.results) && r.osint.results.length);
+                if (osintRows.length) {
+                    need(12);
+                    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...LGRAY);
+                    doc.text('OSINT leads (unverified — investigative leads, not evidence):', M + 2, y); y += 4;
+                    doc.setFont(undefined, 'normal'); doc.setTextColor(...BLACK);
+                    osintRows.forEach(r => {
+                        need(8);
+                        doc.setFontSize(8); doc.setFont(undefined, 'bold');
+                        doc.text(String(r.value || '') + '  \u2192  ' + r.osint.results.length + ' account(s)', M + 4, y); y += 4;
+                        doc.setFont(undefined, 'normal');
+                        r.osint.results.slice(0, 25).forEach(h => {
+                            need(5);
+                            const line = '\u2022 ' + (h.site || '') + ' \u2014 ' + (h.url || '');
+                            const wrapped = doc.splitTextToSize(line, 170);
+                            doc.text(wrapped, M + 8, y); y += (wrapped.length * 3.6);
+                        });
+                        y += 2;
+                    });
+                    y += 2;
+                }
             }
             function gap(h = 4) { y += h; }
             function emptyMsg(msg) { doc.setFontSize(10); doc.setFont(undefined, 'italic'); doc.setTextColor(...LGRAY); doc.text(msg, M + 2, y); y += 6; }
@@ -10388,7 +10412,7 @@
                                         </div>
                                         <div class="bg-white rounded overflow-auto border border-white/10" style="max-height: 800px;">
                                             <iframe ${_S}="${fileUrl}" sandbox="allow-same-origin" frameborder="0" scrolling="auto"
-                                                onload="try{this.contentWindow.scrollTo(0,0);}catch(e){}"
+                                                onload="try{this.contentWindow.scrollTo(0,0);}catch(e){} try{_wireHtmlPreviewLinks(this);}catch(e){}"
                                                 style="width: 100%; min-width: 1400px; height: 800px; background: white; display: block; border: 0;"></iframe>
                                         </div>
                                     </div>
@@ -12741,9 +12765,12 @@
                         <div class="glass-card rounded-xl p-5">
                             <div class="flex justify-between items-center mb-3">
                                 <h3 class="text-lg font-bold text-viper-green">Identifiers</h3>
-                                <button onclick="addSuspectIdentifierInline(${index})" class="px-3 py-1 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green text-sm transition">
-                                    + Add Identifier
-                                </button>
+                                <div class="flex gap-2 items-center">
+                                    ${_osintHeaderBtn('suspect', index, suspect.identifiers)}
+                                    <button onclick="addSuspectIdentifierInline(${index})" class="px-3 py-1 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green text-sm transition">
+                                        + Add Identifier
+                                    </button>
+                                </div>
                             </div>
                             ${suspect.identifiers && suspect.identifiers.length > 0 ? `
                                 <div class="space-y-3">
@@ -12760,6 +12787,7 @@
                                                 <span class="text-white font-medium">${ident.value}</span>
                                                 ${ident.provider ? `<span class="px-2 py-0.5 rounded text-xs bg-green-500/20 text-green-400 border border-green-500/40">ISP: ${ident.provider}</span>` : ''}
                                                 ${ident.emailResult ? `<span class="px-2 py-0.5 rounded text-xs bg-${ident.emailResult.valid ? 'green' : 'red'}-500/20 text-${ident.emailResult.valid ? 'green' : 'red'}-400 border border-${ident.emailResult.valid ? 'green' : 'red'}-500/40">${ident.emailResult.status}</span>` : ''}
+                                                ${_osintIdentBadgeHtml('suspect', index, iIdx, ident)}
                                             </div>
                                             <div class="flex items-center gap-2">
                                                 ${ident.type === 'ip' ? `
@@ -13971,14 +13999,17 @@
         function renderPeopleIdentifiersSection(record, kind, index) {
             // kind: 'victim' | 'other'
             const items = Array.isArray(record.identifiers) ? record.identifiers : [];
-            const headerColor = kind === 'victim' ? 'text-viper-purple' : 'text-indigo-400';
-            const addBtn = `<button onclick="addPersonIdentifierInline('${kind}', ${index})" class="px-3 py-1 bg-${kind === 'victim' ? 'viper-purple' : 'indigo-500'}/20 hover:bg-${kind === 'victim' ? 'viper-purple' : 'indigo-500'}/30 border border-${kind === 'victim' ? 'viper-purple' : 'indigo-500'} rounded-lg ${headerColor} text-sm transition">+ Add Identifier</button>`;
+            const headerColor = kind === 'victim' ? 'text-viper-purple' : (kind === 'witness' ? 'text-viper-green' : 'text-indigo-400');
+            const accent = kind === 'victim' ? 'viper-purple' : (kind === 'witness' ? 'viper-green' : 'indigo-500');
+            const addBtn = `<button onclick="addPersonIdentifierInline('${kind}', ${index})" class="px-3 py-1 bg-${accent}/20 hover:bg-${accent}/30 border border-${accent} rounded-lg ${headerColor} text-sm transition">+ Add Identifier</button>`;
+            const osintBtn = _osintHeaderBtn(kind, index, items);
+            const hdrBtns = `<div class="flex gap-2 items-center">${osintBtn}${addBtn}</div>`;
             if (!items.length) {
                 return `
                 <div class="glass-card rounded-xl p-5">
                     <div class="flex justify-between items-center mb-3">
                         <h3 class="text-lg font-bold ${headerColor}">Identifiers</h3>
-                        ${addBtn}
+                        ${hdrBtns}
                     </div>
                     <p class="text-gray-500 text-sm">No identifiers added. Push from CyberTip module or click "+ Add Identifier".</p>
                 </div>`;
@@ -13991,6 +14022,7 @@
                 const sourceBadge = ident.source ? `<span class="px-1.5 py-0.5 rounded text-[10px] bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">via ${escHtmlSafe(ident.source)}</span>` : '';
                 const platformBadge = ident.platform ? `<span class="px-1.5 py-0.5 rounded text-[10px] bg-viper-purple/20 text-viper-purple border border-viper-purple/40">${escHtmlSafe(ident.platform)}</span>` : '';
                 const providerBadge = ident.provider ? `<span class="px-1.5 py-0.5 rounded text-[10px] bg-green-500/20 text-green-400 border border-green-500/40">ISP: ${escHtmlSafe(ident.provider)}</span>` : '';
+                const osintBadge = _osintIdentBadgeHtml(kind, index, iIdx, ident);
                 const arinBtn = ident.type === 'ip' ? `<button onclick="arinLookupPersonIdent('${kind}', ${index}, ${iIdx})" class="px-2 py-1 bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500 rounded text-yellow-400 text-xs transition" title="ARIN WHOIS Lookup">🌐 ARIN</button>` : '';
                 return `
                 <div class="bg-gradient-to-r from-${color}/10 to-transparent border border-${color}/20 rounded-lg p-3 flex items-center justify-between gap-3">
@@ -14001,6 +14033,7 @@
                         <span class="text-white font-medium break-all">${escHtmlSafe(ident.value)}</span>
                         ${providerBadge}
                         ${sourceBadge}
+                        ${osintBadge}
                     </div>
                     <div class="flex items-center gap-2 flex-shrink-0">
                         ${arinBtn}
@@ -14014,7 +14047,7 @@
             <div class="glass-card rounded-xl p-5">
                 <div class="flex justify-between items-center mb-3">
                     <h3 class="text-lg font-bold ${headerColor}">Identifiers <span class="text-xs font-normal text-gray-500">(${items.length})</span></h3>
-                    ${addBtn}
+                    ${hdrBtns}
                 </div>
                 <div class="space-y-2">${rowsHtml}</div>
             </div>`;
@@ -14022,6 +14055,7 @@
 
         function _ppGetList(kind) {
             if (kind === 'victim') return { storageKey: `victims_${currentCase.id}`, ref: 'victims' };
+            if (kind === 'witness') return { storageKey: `witnesses_${currentCase.id}`, ref: 'witnesses' };
             if (kind === 'other') return { storageKey: `involvedPersons_${currentCase.id}`, ref: 'involvedPersons' };
             return null;
         }
@@ -14042,12 +14076,14 @@
             // Refresh in-memory array
             try {
                 if (kind === 'victim' && typeof victims !== 'undefined') victims = records;
+                else if (kind === 'witness' && typeof witnesses !== 'undefined') witnesses = records;
                 else if (kind === 'other' && typeof involvedPersons !== 'undefined') involvedPersons = records;
             } catch (_) {}
         }
 
         function _ppRerender(kind) {
             if (kind === 'victim') renderTabContent('victims');
+            else if (kind === 'witness') renderTabContent('witnesses');
             else if (kind === 'other') renderTabContent('involvedPersons');
         }
 
@@ -14130,6 +14166,513 @@
                 _ppRerender(kind);
                 showToast(`Added ${type}: ${value}`, 'success');
             };
+        }
+
+        // ============================================================
+        // OSINT username search (Maigret) — opt-in, user-initiated.
+        // Runs a person's username/email identifiers against the on-demand
+        // Maigret engine (see electron-main.js osint-search) and attaches the
+        // discovered accounts to the identifier as `ident.osint`.
+        // Gated on localStorage.osintEnabled === 'true'. Results are labelled
+        // UNVERIFIED LEADS (not evidence). All rendered fields are escaped and
+        // result URLs open externally only.
+        // ============================================================
+        let _osintState = null;
+        let _osintSearchBusy = false;
+
+        function _osintEnabledUI() {
+            try { return localStorage.getItem('osintEnabled') === 'true'; } catch (_) { return false; }
+        }
+
+        // Escape a value for embedding inside a single-quoted JS string in an
+        // onclick attribute (URLs are pre-filtered to http(s)).
+        function _osintJsStr(s) {
+            return String(s == null ? '' : s).replace(/'/g, '%27').replace(/"/g, '%22');
+        }
+
+        // kind: 'suspect' | 'victim' | 'witness' | 'other'. Returns a unified
+        // accessor so the OSINT flow works across all four person types.
+        function _osintPersonCtx(kind, index) {
+            try {
+                if (kind === 'suspect') {
+                    if (typeof suspects === 'undefined') return null;
+                    const rec = suspects[index]; if (!rec) return null;
+                    return { record: rec, save: () => saveSuspects(), rerender: () => renderTabContent('suspects'), label: rec.name || ('Suspect ' + (index + 1)) };
+                }
+                const meta = _ppGetList(kind); if (!meta) return null;
+                const records = _lsParse(meta.storageKey, []);
+                const rec = records[index]; if (!rec) return null;
+                return { record: rec, records, save: () => _ppSave(kind, records), rerender: () => _ppRerender(kind), label: rec.name || (kind + ' ' + (index + 1)) };
+            } catch (_) { return null; }
+        }
+
+        // Identifiers eligible for a username hunt: usernames (as-is) and emails
+        // (local-part before @). Everything else is skipped.
+        function _osintEligible(identifiers) {
+            const out = [];
+            (Array.isArray(identifiers) ? identifiers : []).forEach((ident, identIdx) => {
+                if (!ident || !ident.value) return;
+                const t = String(ident.type || '').toLowerCase();
+                let q = '';
+                if (t === 'username') q = String(ident.value).trim();
+                else if (t === 'email') { const v = String(ident.value).trim(); q = v.indexOf('@') > 0 ? v.slice(0, v.indexOf('@')) : v; }
+                else return;
+                q = q.trim();
+                if (q && q.length <= 128) out.push({ identIdx, query: q, type: t, display: String(ident.value) });
+            });
+            return out;
+        }
+
+        function _osintHeaderBtn(kind, index, identifiers) {
+            if (!_osintEnabledUI()) return '';
+            const elig = _osintEligible(identifiers);
+            if (!elig.length) {
+                return `<button disabled class="px-3 py-1 rounded-lg bg-gray-600/10 border border-gray-600/40 text-gray-500 text-sm cursor-not-allowed" title="Add a username or email identifier to search">🕵 Search OSINT</button>`;
+            }
+            return `<button onclick="runOsintForPerson('${kind}', ${index})" class="px-3 py-1 rounded-lg bg-fuchsia-500/20 hover:bg-fuchsia-500/30 border border-fuchsia-500/50 text-fuchsia-300 text-sm transition" title="Search ${elig.length} identifier(s) across social/web sites (Maigret)">🕵 Search OSINT</button>`;
+        }
+
+        function _osintIdentBadgeHtml(kind, index, iIdx, ident) {
+            const n = (ident && ident.osint && Array.isArray(ident.osint.results)) ? ident.osint.results.length : 0;
+            if (!n) return '';
+            return `<button onclick="viewOsintForIdent('${kind}', ${index}, ${iIdx})" class="px-1.5 py-0.5 rounded text-[10px] bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40 hover:bg-fuchsia-500/30" title="View OSINT leads (unverified)">🕵 ${n} OSINT lead${n > 1 ? 's' : ''}</button>`;
+        }
+
+        function _osintOpenUrl(url) {
+            url = String(url || '');
+            if (!/^https?:\/\//i.test(url)) return;
+            try {
+                if (window.electronAPI && window.electronAPI.openExternalUrl) window.electronAPI.openExternalUrl(url);
+                else window.open(url, '_blank');
+            } catch (_) {}
+        }
+
+        function _osintShowDisclaimer() {
+            return new Promise((resolve) => {
+                try { if (sessionStorage.getItem('osintDisclaimerAck') === 'true') { resolve(true); return; } } catch (_) {}
+                const modal = document.createElement('div');
+                modal.className = 'fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4';
+                modal.innerHTML = `
+                    <div class="glass-card rounded-xl p-6 max-w-lg w-full" onclick="event.stopPropagation()">
+                        <h3 class="text-xl font-bold text-white mb-3 flex items-center gap-2">🕵 OSINT Search — Before You Continue</h3>
+                        <div class="text-sm text-gray-300 space-y-2 mb-4">
+                            <p>This runs the selected identifiers through <strong>Maigret</strong>, a third-party open-source OSINT tool, making <strong>live requests over the internet</strong> from this machine.</p>
+                            <p>Results may include <strong>false positives</strong> and are <strong>potential investigative leads, not evidence</strong> of any crime. Verify independently before relying on them.</p>
+                            <p class="text-gray-400">VIPER is not responsible for the third-party tool or its results.</p>
+                        </div>
+                        <label class="flex items-center gap-2 text-xs text-gray-400 mb-4"><input type="checkbox" id="osintDontShow" class="accent-fuchsia-500"> Don't show this again this session</label>
+                        <div class="flex justify-end gap-3">
+                            <button id="osintCancelBtn" class="px-4 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white transition">Cancel</button>
+                            <button id="osintProceedBtn" class="px-4 py-2 bg-fuchsia-500/80 hover:bg-fuchsia-500 rounded-lg text-white font-semibold transition">Proceed</button>
+                        </div>
+                    </div>`;
+                modal.onclick = (e) => { if (e.target === modal) { modal.remove(); resolve(false); } };
+                document.body.appendChild(modal);
+                modal.querySelector('#osintCancelBtn').onclick = () => { modal.remove(); resolve(false); };
+                modal.querySelector('#osintProceedBtn').onclick = () => {
+                    try { if (modal.querySelector('#osintDontShow').checked) sessionStorage.setItem('osintDisclaimerAck', 'true'); } catch (_) {}
+                    modal.remove(); resolve(true);
+                };
+            });
+        }
+
+        function _osintProgressOverlay(total) {
+            // Non-blocking status card pinned to the top-left corner. The user can keep
+            // working anywhere in VIPER while the search runs in the background; the
+            // results popup appears automatically when it finishes.
+            const el = document.createElement('div');
+            el.className = 'fixed top-4 left-4 z-[70] w-72 max-w-[calc(100vw-2rem)] transition-opacity duration-200';
+            el.innerHTML = `
+                <div class="glass-card rounded-xl p-4 shadow-2xl border border-fuchsia-500/30 relative">
+                    <button type="button" data-osint-dismiss title="Hide (search keeps running)"
+                        class="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center rounded-md text-gray-500 hover:text-white hover:bg-white/10 transition text-sm leading-none">✕</button>
+                    <div class="flex items-start gap-3 pr-5">
+                        <div class="animate-spin w-5 h-5 border-2 border-fuchsia-500 border-t-transparent rounded-full flex-shrink-0 mt-0.5"></div>
+                        <div class="min-w-0 flex-1">
+                            <p class="text-white font-semibold text-sm leading-tight">Running OSINT search…</p>
+                            <p id="osintProgressLine" class="text-xs text-gray-400 mt-0.5 break-words">Preparing ${total} quer${total > 1 ? 'ies' : 'y'}…</p>
+                        </div>
+                    </div>
+                    <p class="text-[10px] text-gray-600 mt-2 leading-snug">Running in the background — you can keep working. Results will pop up when it's done.</p>
+                </div>`;
+            try {
+                const dismissBtn = el.querySelector('[data-osint-dismiss]');
+                if (dismissBtn) dismissBtn.addEventListener('click', () => { try { el.remove(); } catch (_) {} });
+            } catch (_) {}
+            return { el, set: (t) => { const l = el.querySelector('#osintProgressLine'); if (l) l.textContent = t; } };
+        }
+
+        async function runOsintForPerson(kind, index) {
+            if (!_osintEnabledUI()) { showToast('OSINT search is disabled. Enable it in Settings.', 'info'); return; }
+            if (!(window.electronAPI && window.electronAPI.osintSearch)) { showToast('OSINT search is unavailable in this build.', 'error'); return; }
+            const ctx = _osintPersonCtx(kind, index);
+            if (!ctx) return;
+            const eligible = _osintEligible(ctx.record.identifiers);
+            if (!eligible.length) { showToast('No usernames or emails to search.', 'info'); return; }
+            if (_osintSearchBusy) { showToast('An OSINT search is already running. Please wait for it to finish.', 'info'); return; }
+            const ok = await _osintShowDisclaimer();
+            if (!ok) return;
+            const proxy = localStorage.getItem('osintProxy') || '';
+            const torProxy = localStorage.getItem('osintTorProxy') || '';
+            const overlay = _osintProgressOverlay(eligible.length);
+            document.body.appendChild(overlay.el);
+            _osintSearchBusy = true;
+            try {
+            // Ensure the engine is present. First use auto-downloads it silently (with a progress bar) so the user never has to visit Settings.
+            let engineReady = false;
+            try {
+                const st = await window.electronAPI.osintEngineStatus();
+                engineReady = !!(st && st.enginePresent);
+            } catch (_) {}
+            if (!engineReady) {
+                if (!(window.electronAPI && window.electronAPI.osintEngineDownload)) {
+                    overlay.el.remove();
+                    showToast('OSINT engine is unavailable in this build.', 'error');
+                    return;
+                }
+                overlay.set('Setting up the search engine (one-time)…');
+                let dlUnsub = null;
+                try {
+                    if (window.electronAPI.onOsintEngineProgress) {
+                        dlUnsub = window.electronAPI.onOsintEngineProgress((pr) => {
+                            if (!pr) return;
+                            if (pr.phase === 'downloading') {
+                                overlay.set(pr.total
+                                    ? `Setting up the search engine… ${pr.pct || 0}% (${_formatBytes(pr.received || 0)} / ${_formatBytes(pr.total)})`
+                                    : `Setting up the search engine… ${_formatBytes(pr.received || 0)}`);
+                            } else if (pr.phase === 'verifying') {
+                                overlay.set('Verifying the search engine…');
+                            } else if (pr.phase === 'extracting') {
+                                overlay.set('Extracting the search engine…');
+                            } else if (pr.phase === 'installing') {
+                                overlay.set('Installing the search engine…');
+                            }
+                        });
+                    }
+                    const dl = await window.electronAPI.osintEngineDownload({});
+                    if (dlUnsub) { try { dlUnsub(); } catch (_) {} dlUnsub = null; }
+                    if (!dl || !dl.success) {
+                        overlay.el.remove();
+                        showToast('Couldn\'t set up the OSINT engine automatically: ' + ((dl && dl.error) || 'unknown') + '. You can install it manually in Settings → OSINT Username Search.', 'error');
+                        return;
+                    }
+                } catch (e) {
+                    if (dlUnsub) { try { dlUnsub(); } catch (_) {} }
+                    overlay.el.remove();
+                    showToast('Engine setup error: ' + e.message + '. Install manually in Settings → OSINT Username Search.', 'error');
+                    return;
+                }
+                overlay.set(`Preparing ${eligible.length} quer${eligible.length > 1 ? 'ies' : 'y'}…`);
+            }
+            let unsub = null;
+            try {
+                if (window.electronAPI.onOsintProgress) {
+                    unsub = window.electronAPI.onOsintProgress((p) => {
+                        if (!p) return;
+                        if (p.stage === 'searching') overlay.set(`Searching “${p.query}” (${(p.index || 0) + 1}/${p.total || eligible.length})…`);
+                        else if (p.stage === 'done') overlay.set('Compiling results…');
+                    });
+                }
+                const res = await window.electronAPI.osintSearch({
+                    queries: eligible.map(e => e.query),
+                    caseNumber: currentCase.caseNumber,
+                    evidenceTag: 'OSINT',
+                    personLabel: ctx.label,
+                    proxy, torProxy,
+                });
+                if (unsub) { try { unsub(); } catch (_) {} unsub = null; }
+                overlay.el.remove();
+                if (!res || !res.success) {
+                    showToast('OSINT search failed: ' + ((res && res.error) || 'unknown') + '.', 'error');
+                    return;
+                }
+                _osintShowResults(kind, index, eligible, res);
+            } catch (e) {
+                if (unsub) { try { unsub(); } catch (_) {} }
+                overlay.el.remove();
+                showToast('OSINT search error: ' + e.message, 'error');
+            }
+            } finally {
+                _osintSearchBusy = false;
+            }
+        }
+
+        // Register a single generated VIPER OSINT report file (built from the
+        // investigator's SELECTED accounts) into the case Evidence manifest
+        // (viperCaseEvidence) so it appears in the Evidence tab.
+        function _osintRegisterReportEvidence(report, personLabel, accountCount) {
+            try {
+                if (!report || !report.path) return false;
+                if (typeof currentCase === 'undefined' || !currentCase || !currentCase.caseNumber) return false;
+                const files = [{
+                    name: report.name,
+                    path: report.path,
+                    size: report.size || 0,
+                    type: 'text/html',
+                    lastModified: Date.now(),
+                }];
+                const newEvidence = {
+                    id: Date.now(),
+                    type: 'osint',
+                    tag: 'OSINT',
+                    description: `OSINT report — ${accountCount} selected account${accountCount === 1 ? '' : 's'} for ${personLabel || 'subject'} (Maigret). Investigative leads — verify independently; not confirmed evidence.`,
+                    location: '',
+                    fileCount: 1,
+                    totalSize: report.size || 0,
+                    files,
+                    createdAt: new Date().toISOString(),
+                    osintGenerated: true,
+                };
+                const allEvidence = _lsParse('viperCaseEvidence', {});
+                const arr = Array.isArray(allEvidence[currentCase.caseNumber]) ? allEvidence[currentCase.caseNumber] : [];
+                arr.push(newEvidence);
+                allEvidence[currentCase.caseNumber] = arr;
+                localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
+                if (typeof caseEvidence !== 'undefined') caseEvidence = arr;
+                try {
+                    if (typeof audit === 'function') audit('evidence_added', {
+                        case_number: currentCase.caseNumber,
+                        case_id: currentCase.id,
+                        evidence_id: newEvidence.id,
+                        type: 'osint', tag: 'OSINT',
+                        file_count: 1, source: 'osint_selected_report',
+                    });
+                } catch (_) {}
+                try { if (typeof renderEvidenceItems === 'function') renderEvidenceItems(); } catch (_) {}
+                return true;
+            } catch (e) { console.warn('OSINT evidence register failed:', e); return false; }
+        }
+
+        // Pull a few human-friendly key facts out of a hit's ids blob for the
+        // results popup (so users can judge relevance before selecting).
+        // Sandboxed HTML previews (SingleFile archives, OSINT reports) block
+        // anchor navigation. Since the iframe is same-origin, rewire external
+        // links so a click routes through Electron's shell.openExternal.
+        function _wireHtmlPreviewLinks(iframe) {
+            try {
+                const doc = iframe && iframe.contentDocument;
+                if (!doc) return;
+                const anchors = doc.querySelectorAll('a[href]');
+                anchors.forEach((a) => {
+                    const href = a.getAttribute('href') || '';
+                    if (!/^https?:\/\//i.test(href)) return;
+                    a.style.cursor = 'pointer';
+                    a.addEventListener('click', (ev) => {
+                        ev.preventDefault();
+                        try {
+                            if (window.electronAPI && window.electronAPI.openExternalUrl) {
+                                window.electronAPI.openExternalUrl(href);
+                            }
+                        } catch (_) {}
+                    });
+                });
+            } catch (_) { /* cross-origin or unavailable — ignore */ }
+        }
+
+        function _osintKeyFacts(ids) {
+            if (!ids || typeof ids !== 'object') return [];
+            const facts = [];
+            const push = (label, val) => {
+                if (val === undefined || val === null || val === '') return;
+                let s = Array.isArray(val) ? val.join(', ') : String(val);
+                s = s.trim();
+                if (!s) return;
+                if (s.length > 80) s = s.slice(0, 79) + '…';
+                facts.push({ label, val: s });
+            };
+            const first = (...keys) => { for (const k of keys) { if (ids[k] !== undefined && ids[k] !== null && ids[k] !== '') return ids[k]; } return undefined; };
+            push('Name', first('fullname', 'name', 'full_name'));
+            push('Followers', first('follower_count', 'followers_count', 'followers'));
+            push('Following', first('following_count', 'following'));
+            push('Posts', first('posts_count', 'video_count', 'public_repos_count', 'media_count'));
+            push('Created', first('created_at', 'created_time', 'latest_activity_at'));
+            push('Location', first('location'));
+            const bio = first('bio', 'description', 'about');
+            if (bio) push('Bio', bio);
+            return facts.slice(0, 6);
+        }
+
+        function _osintShowResults(kind, index, eligible, res) {
+            _osintState = { kind, index, eligible, results: res.results || [] };
+            const groups = _osintState.results;
+            const totalHits = groups.reduce((n, g) => n + ((g.hits && g.hits.length) || 0), 0);
+            const groupsHtml = groups.map((g, gi) => {
+                const hits = Array.isArray(g.hits) ? g.hits : [];
+                const hitsHtml = hits.length ? hits.map((h, hi) => {
+                    const img = (typeof h.image === 'string' && /^https?:\/\//i.test(h.image)) ? h.image : '';
+                    const facts = _osintKeyFacts(h.ids);
+                    const factsHtml = facts.length ? `<div class="mt-1.5 grid grid-cols-[auto,1fr] gap-x-2 gap-y-0.5">${facts.map(f => `<span class="text-[10px] text-gray-500">${escHtmlSafe(f.label)}</span><span class="text-[11px] text-gray-300 truncate">${escHtmlSafe(f.val)}</span>`).join('')}</div>` : '';
+                    const tagsHtml = (Array.isArray(h.tags) && h.tags.length) ? `<div class="mt-1.5 flex flex-wrap gap-1">${h.tags.slice(0, 6).map(t => `<span class="px-1.5 py-0.5 rounded text-[10px] bg-gray-600/20 text-gray-400 border border-gray-600/40">${escHtmlSafe(t)}</span>`).join('')}</div>` : '';
+                    const avatar = img
+                        ? `<img src="${escHtmlSafe(img)}" alt="" referrerpolicy="no-referrer" loading="lazy" class="w-12 h-12 rounded-lg object-cover bg-viper-dark flex-shrink-0" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"><div class="w-12 h-12 rounded-lg bg-viper-dark flex-shrink-0 items-center justify-center text-gray-600 text-lg" style="display:none;">👤</div>`
+                        : `<div class="w-12 h-12 rounded-lg bg-viper-dark flex-shrink-0 flex items-center justify-center text-gray-600 text-lg">👤</div>`;
+                    return `
+                    <label class="flex items-start gap-3 bg-viper-dark/50 border border-gray-700/60 rounded-lg p-2.5 cursor-pointer hover:border-fuchsia-500/40">
+                        <input type="checkbox" data-osint-hit data-gi="${gi}" data-hi="${hi}" class="mt-1 accent-fuchsia-500 flex-shrink-0">
+                        ${avatar}
+                        <div class="min-w-0 flex-1">
+                            <p class="text-sm text-white font-medium">${escHtmlSafe(h.site || '(site)')}</p>
+                            <button type="button" onclick="_osintOpenUrl('${_osintJsStr(h.url)}')" class="text-xs text-fuchsia-300 hover:underline break-all text-left">${escHtmlSafe(h.url)}</button>
+                            ${factsHtml}
+                            ${tagsHtml}
+                        </div>
+                    </label>`;
+                }).join('') : `<p class="text-gray-500 text-sm px-1">No accounts found${g.engineOk ? '' : ' (engine error: ' + escHtmlSafe(g.note || 'unknown') + ')'}.</p>`;
+                return `
+                    <div class="mb-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="text-sm font-semibold text-white">${escHtmlSafe(g.query)}</span>
+                            <span class="text-xs text-gray-500">${hits.length} found</span>
+                        </div>
+                        <div class="space-y-2">${hitsHtml}</div>
+                    </div>`;
+            }).join('');
+            const modal = document.createElement('div');
+            modal.id = 'osintResultsModal';
+            modal.className = 'fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4';
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+            modal.innerHTML = `
+                <div class="glass-card rounded-xl p-6 max-w-2xl w-full max-h-[85vh] flex flex-col" onclick="event.stopPropagation()">
+                    <h3 class="text-xl font-bold text-white mb-1 flex items-center gap-2">🕵 OSINT Results <span class="text-sm font-normal text-gray-500">(${totalHits} account${totalHits === 1 ? '' : 's'})</span></h3>
+                    <div class="rounded-lg bg-amber-900/20 border border-amber-700/40 px-3 py-2 mb-3">
+                        <p class="text-[11px] text-amber-300 leading-relaxed">These matches may include <strong>false positives</strong> and are <strong>potential leads, not evidence</strong>. Review the photos and details, then <strong>select only the relevant accounts</strong>. Nothing is saved unless you select it.</p>
+                    </div>
+                    <div class="overflow-y-auto flex-1 pr-1">${groupsHtml || '<p class="text-gray-500">No results.</p>'}</div>
+                    <div class="flex justify-between items-center gap-3 mt-4 pt-3 border-t border-gray-700/50">
+                        <button onclick="_osintToggleAll()" class="text-xs text-gray-400 hover:text-white">Select all / none</button>
+                        <div class="flex gap-3">
+                            <button onclick="document.getElementById('osintResultsModal').remove()" class="px-4 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white transition">Close</button>
+                            <button id="osintSaveBtn" onclick="_osintSaveSelected(this)" class="px-4 py-2 bg-fuchsia-500/80 hover:bg-fuchsia-500 rounded-lg text-white font-semibold transition">Save selected to Evidence</button>
+                        </div>
+                    </div>
+                </div>`;
+            document.body.appendChild(modal);
+        }
+
+        function _osintToggleAll() {
+            const boxes = document.querySelectorAll('#osintResultsModal input[data-osint-hit]');
+            const anyUnchecked = Array.from(boxes).some(b => !b.checked);
+            boxes.forEach(b => { b.checked = anyUnchecked; });
+        }
+
+        async function _osintSaveSelected(btn) {
+            const st = _osintState; if (!st) return;
+            const ctx = _osintPersonCtx(st.kind, st.index); if (!ctx) return;
+            const checks = document.querySelectorAll('#osintResultsModal input[data-osint-hit]:checked');
+            if (!checks.length) { showToast('Select at least one account first.', 'info'); return; }
+
+            // Collect the selected hits with their full data, grouped by query.
+            const byGroup = {};
+            checks.forEach(cb => {
+                const gi = parseInt(cb.getAttribute('data-gi'), 10);
+                const hi = parseInt(cb.getAttribute('data-hi'), 10);
+                (byGroup[gi] = byGroup[gi] || []).push(hi);
+            });
+            const accounts = [];       // full detail → evidence report
+            let attachedCount = 0;
+            Object.keys(byGroup).forEach(giStr => {
+                const gi = parseInt(giStr, 10);
+                const group = st.results[gi]; if (!group) return;
+                const chosen = byGroup[gi].map(hi => (group.hits || [])[hi]).filter(Boolean);
+                if (!chosen.length) return;
+                chosen.forEach(h => accounts.push({
+                    query: group.query,
+                    site: h.site, url: h.url,
+                    tags: Array.isArray(h.tags) ? h.tags : [],
+                    ids: (h.ids && typeof h.ids === 'object') ? h.ids : {},
+                    image: h.image || '',
+                }));
+                // Attach lightweight leads to the matching identifier(s).
+                const leads = chosen.map(h => ({ site: h.site, url: h.url, tags: Array.isArray(h.tags) ? h.tags : [] }));
+                st.eligible.filter(e => e.query === group.query).forEach(e => {
+                    const ident = ctx.record.identifiers && ctx.record.identifiers[e.identIdx];
+                    if (!ident) return;
+                    const existing = (ident.osint && Array.isArray(ident.osint.results)) ? ident.osint.results : [];
+                    const merged = existing.slice();
+                    leads.forEach(h => { if (!merged.some(m => m.url === h.url)) merged.push(h); });
+                    ident.osint = { ranAt: new Date().toISOString(), engine: 'maigret', query: group.query, results: merged };
+                    attachedCount += leads.length;
+                });
+            });
+            if (!accounts.length) { showToast('Nothing selected.', 'info'); return; }
+
+            // Persist identifier leads immediately.
+            ctx.save();
+            ctx.rerender();
+
+            // Build + save the selected-only Evidence report (backend inlines photos).
+            const origLabel = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; btn.classList.add('opacity-60', 'cursor-wait'); }
+            let saved = false;
+            try {
+                if (window.electronAPI && window.electronAPI.osintBuildEvidenceReport) {
+                    const rep = await window.electronAPI.osintBuildEvidenceReport({
+                        caseNumber: currentCase.caseNumber,
+                        caseName: currentCase.caseName || currentCase.title || '',
+                        evidenceTag: 'OSINT',
+                        personLabel: ctx.label,
+                        accounts,
+                    });
+                    if (rep && rep.success) {
+                        saved = _osintRegisterReportEvidence(rep, ctx.label, accounts.length);
+                    } else {
+                        showToast('Could not build the Evidence report: ' + ((rep && rep.error) || 'unknown') + '.', 'error');
+                    }
+                } else {
+                    showToast('Report builder unavailable in this build; leads were still attached.', 'info');
+                }
+            } catch (e) {
+                showToast('Error saving Evidence report: ' + e.message, 'error');
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = origLabel; btn.classList.remove('opacity-60', 'cursor-wait'); }
+            }
+
+            const modal = document.getElementById('osintResultsModal'); if (modal) modal.remove();
+            if (saved) {
+                showToast(`Saved ${accounts.length} account${accounts.length === 1 ? '' : 's'} to Evidence (Evidence → OSINT) and attached ${attachedCount} lead${attachedCount === 1 ? '' : 's'}.`, 'success');
+            } else if (attachedCount) {
+                showToast(`Attached ${attachedCount} OSINT lead${attachedCount === 1 ? '' : 's'} to identifiers.`, 'success');
+            }
+        }
+
+        function viewOsintForIdent(kind, index, iIdx) {
+            const ctx = _osintPersonCtx(kind, index); if (!ctx) return;
+            const ident = ctx.record.identifiers && ctx.record.identifiers[iIdx]; if (!ident || !ident.osint) return;
+            const results = Array.isArray(ident.osint.results) ? ident.osint.results : [];
+            const rows = results.map((h, hi) => `
+                <div class="flex items-center justify-between gap-3 bg-viper-dark/50 border border-gray-700/60 rounded-lg p-2">
+                    <div class="min-w-0">
+                        <p class="text-sm text-white font-medium truncate">${escHtmlSafe(h.site || '(site)')}</p>
+                        <button onclick="_osintOpenUrl('${_osintJsStr(h.url)}')" class="text-xs text-fuchsia-300 hover:underline break-all text-left">${escHtmlSafe(h.url)}</button>
+                    </div>
+                    <button onclick="_osintRemoveHit('${kind}', ${index}, ${iIdx}, ${hi})" class="text-red-500 hover:text-red-400 p-1 flex-shrink-0" title="Remove lead">✕</button>
+                </div>`).join('');
+            const modal = document.createElement('div');
+            modal.id = 'osintViewModal';
+            modal.className = 'fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4';
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+            modal.innerHTML = `
+                <div class="glass-card rounded-xl p-6 max-w-lg w-full max-h-[80vh] flex flex-col" onclick="event.stopPropagation()">
+                    <h3 class="text-lg font-bold text-white mb-1">OSINT leads — ${escHtmlSafe(ident.value)}</h3>
+                    <p class="text-[11px] text-amber-300 mb-3">Unverified leads (possible false positives) — not evidence.${ident.osint.ranAt ? ' Searched ' + escHtmlSafe(new Date(ident.osint.ranAt).toLocaleString()) + '.' : ''}</p>
+                    <div class="space-y-2 overflow-y-auto">${rows || '<p class="text-gray-500 text-sm">No leads.</p>'}</div>
+                    <div class="flex justify-end mt-4"><button onclick="document.getElementById('osintViewModal').remove()" class="px-4 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white transition">Close</button></div>
+                </div>`;
+            document.body.appendChild(modal);
+        }
+
+        function _osintRemoveHit(kind, index, iIdx, hi) {
+            const ctx = _osintPersonCtx(kind, index); if (!ctx) return;
+            const ident = ctx.record.identifiers && ctx.record.identifiers[iIdx]; if (!ident || !ident.osint) return;
+            if (!Array.isArray(ident.osint.results)) return;
+            ident.osint.results.splice(hi, 1);
+            const remaining = ident.osint.results.length;
+            if (!remaining) delete ident.osint;
+            ctx.save();
+            const m = document.getElementById('osintViewModal'); if (m) m.remove();
+            ctx.rerender();
+            if (remaining) viewOsintForIdent(kind, index, iIdx);
+            showToast('Lead removed.', 'success');
         }
 
         function addSuspectIdentifierRow() {
@@ -17579,6 +18122,9 @@
                                 ` : '<p class="text-gray-400 text-base">No statement recorded</p>'}
                             `}
                         </div>
+
+                        <!-- Identifiers -->
+                        ${renderPeopleIdentifiersSection(witness, 'witness', index)}
                     </div>
                 </div>
             `;

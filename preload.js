@@ -292,6 +292,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('whisper-engine-progress', listener);
   },
 
+  // ── OSINT username search (Maigret) — opt-in, user-initiated.
+  // On-demand engine (not bundled), installed into <userData>/engines/maigret.
+  // See electron-main.js osint-engine-* and osint-search handlers.
+  osintEngineStatus: () => ipcRenderer.invoke('osint-engine-status'),
+  osintEngineDownload: (opts) => ipcRenderer.invoke('osint-engine-download', opts),
+  osintEngineInstallFile: (opts) => ipcRenderer.invoke('osint-engine-install-file', opts),
+  osintEngineRemove: () => ipcRenderer.invoke('osint-engine-remove'),
+  onOsintEngineProgress: (callback) => {
+    const listener = (_evt, payload) => { try { callback(payload); } catch (e) { console.error(e); } };
+    ipcRenderer.on('osint-engine-progress', listener);
+    return () => ipcRenderer.removeListener('osint-engine-progress', listener);
+  },
+  osintSearch: (opts) => ipcRenderer.invoke('osint-search', opts),
+  osintBuildEvidenceReport: (opts) => ipcRenderer.invoke('osint-build-evidence-report', opts),
+  osintCancel: (jobId) => ipcRenderer.invoke('osint-cancel', jobId),
+  onOsintProgress: (callback) => {
+    const listener = (_evt, payload) => { try { callback(payload); } catch (e) { console.error(e); } };
+    ipcRenderer.on('osint-progress', listener);
+    return () => ipcRenderer.removeListener('osint-progress', listener);
+  },
+
   // Resource Hub download interception — route downloads from Flock /
   // ICACCOPS / ICAC Data System / etc. straight into a case's Evidence
   // or Warrants/Production folder instead of bouncing through Downloads.

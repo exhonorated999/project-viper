@@ -547,18 +547,18 @@
             gap: 2px;
         }
         .cal-cell:hover {
-            background: rgba(0, 217, 255, 0.06);
-            border-color: rgba(0, 217, 255, 0.25);
+            background: rgba(var(--vp-cyan) / 0.06);
+            border-color: rgba(var(--vp-cyan) / 0.25);
             transform: translateY(-1px);
         }
         .cal-cell.is-outside { opacity: 0.35; }
         .cal-cell.is-today {
-            box-shadow: 0 0 0 1.5px rgba(0, 217, 255, 0.55), 0 0 12px rgba(0, 217, 255, 0.15);
-            background: rgba(0, 217, 255, 0.07);
+            box-shadow: 0 0 0 1.5px rgba(var(--vp-cyan) / 0.55), 0 0 12px rgba(var(--vp-cyan) / 0.15);
+            background: rgba(var(--vp-cyan) / 0.07);
         }
         .cal-cell.is-selected {
-            background: rgba(0, 217, 255, 0.12);
-            border-color: rgba(0, 217, 255, 0.55);
+            background: rgba(var(--vp-cyan) / 0.12);
+            border-color: rgba(var(--vp-cyan) / 0.55);
         }
         .cal-cell.has-overdue { box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.4); }
         .cal-cell .cal-daynum {
@@ -568,7 +568,7 @@
             line-height: 1;
             padding-left: 2px;
         }
-        .cal-cell.is-today .cal-daynum { color: #00d9ff; }
+        .cal-cell.is-today .cal-daynum { color: rgb(var(--vp-cyan)); }
         .cal-cell .cal-dots {
             display: flex;
             flex-wrap: wrap;
@@ -1234,7 +1234,7 @@
                 <!-- Active Investigations and Tasks -->
                 <div class="grid grid-cols-3 gap-6 relative" style="z-index: 1;">
                     <!-- Active Investigations -->
-                    <div class="col-span-2 glass-card rounded-xl p-6 flex flex-col" style="position: relative; z-index: 1; max-height: 600px;">
+                    <div id="investigationsCard" class="col-span-2 glass-card rounded-xl p-6 flex flex-col" style="position: relative; z-index: 1; max-height: 600px;">
                         <div class="flex items-center justify-between mb-6 flex-shrink-0">
                             <h3 class="text-xl font-bold" id="investigationsTitle">Active Investigations</h3>
                             <div class="flex items-center space-x-2">
@@ -1287,7 +1287,7 @@
                     </div>
                     
                     <!-- Tasks -->
-                    <div class="glass-card rounded-xl p-6 flex flex-col" style="position: relative; z-index: 1; max-height: 600px;">
+                    <div id="tasksCard" class="glass-card rounded-xl p-6 flex flex-col overflow-hidden" style="position: relative; z-index: 1; max-height: 600px;">
                         <div class="flex items-center justify-between mb-4">
                             <h3 class="text-xl font-bold">Tasks</h3>
                             <div class="flex items-center gap-2">
@@ -4210,6 +4210,14 @@
             currentTaskMode = mode;
             try { localStorage.setItem('viperTaskMode', mode); } catch(_) {}
 
+            // The Tasks card is capped at 600px for the (internally scrolling)
+            // list view. The calendar needs its full height (stats + toggles +
+            // 6-week grid + legend exceed 600px), so lift the cap in calendar
+            // mode. Combined with overflow-hidden on the card, this stops the grid
+            // bleeding past the card's rounded bottom corners.
+            const card = document.getElementById('tasksCard');
+            if (card) card.style.maxHeight = (mode === 'calendar') ? 'none' : '600px';
+
             const listBtn = document.getElementById('taskModeListBtn');
             const calBtn = document.getElementById('taskModeCalendarBtn');
             if (mode === 'list') {
@@ -4224,6 +4232,36 @@
                 listBtn.classList.add('text-gray-400', 'hover:text-white');
             }
             renderTasks();
+            _syncInvestigationsHeight();
+        }
+
+        // Keep the Active Investigations card the SAME height as the Tasks card so
+        // the dashboard row stays uniform. In list mode both are capped at 600px.
+        // In calendar mode the Tasks card grows to fit the calendar, so measure its
+        // rendered height and pin Active Investigations to match — its table scrolls
+        // internally, so it follows the calendar height instead of driving the row
+        // taller with many cases.
+        function _syncInvestigationsHeight() {
+            const card = document.getElementById('tasksCard');
+            const invCard = document.getElementById('investigationsCard');
+            if (!card || !invCard) return;
+            if (currentTaskMode === 'calendar') {
+                // IMPORTANT: give the investigations card a DEFINITE height first.
+                // Both cards live in the same grid row (align-items: stretch), so if
+                // the investigations card is left auto-height its full case table
+                // inflates the shared row and the calendar card gets dragged tall
+                // too. Pin it to the baseline height, then measure the calendar's
+                // real rendered height and match it — the table scrolls inside.
+                invCard.style.maxHeight = '';
+                invCard.style.height = '600px';
+                requestAnimationFrame(() => {
+                    const h = card.offsetHeight;
+                    invCard.style.height = h + 'px';
+                });
+            } else {
+                invCard.style.height = '';
+                invCard.style.maxHeight = '600px';
+            }
         }
 
         function _calDateKey(d) {
@@ -4327,7 +4365,14 @@
                 `);
             }
             grid.innerHTML = cells.join('');
+            _syncInvestigationsHeight();
         }
+
+        // Re-match the Active Investigations height if the window resizes while the
+        // calendar is showing (column widths change the card's rendered height).
+        window.addEventListener('resize', () => {
+            if (currentTaskMode === 'calendar') _syncInvestigationsHeight();
+        });
 
         function _calCellClick(key) {
             calendarSelectedDay = key;

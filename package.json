@@ -17,7 +17,7 @@
     "intelligence",
     "wigle"
   ],
-  "author": "",
+  "author": "Intellect LE, LLC",
   "license": "ISC",
   "devDependencies": {
     "@electron/rebuild": "^4.0.3",

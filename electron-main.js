@@ -5324,6 +5324,611 @@ ipcMain.handle('whisper-engine-remove', async () => {
     _engineBusy = false;
   }
 });
+// ═══════════════════════════════════════════════════════════════════════
+// OSINT USERNAME SEARCH — Maigret (on-demand engine, opt-in, user-initiated)
+// ═══════════════════════════════════════════════════════════════════════
+// Runs a person's identifiers (usernames / email local-parts) against Maigret
+// to discover social/web accounts. NOT bundled in the installer (PyInstaller
+// exes trip AV + bloat NSIS) — downloaded on demand into <userData>/engines/
+// maigret, exactly like the Whisper engine. Reuses _engineInstallRoot(),
+// _resolveEngineBase(), _downloadEnginePack(), _extractZip(), _dirSize().
+//
+// SECURITY (see plan): (1) engine pack is self-hosted + SHA-256-verified;
+// (2) run with a pinned bundled data.json (site DB) and --no-recursion so the
+// set of contacted endpoints is fixed and not remote-controlled; (3) spawn
+// with an argument array (shell:false) — identifier values are untrusted;
+// (4) the renderer escapes all result fields and opens result URLs externally.
+//
+// NOTE: this feature makes live network requests (unlike the offline Whisper
+// path). Optional --proxy / --tor-proxy egress control is passed from settings.
+const MAIGRET_ENGINE_PACK_URL =
+  'https://github.com/exhonorated999/project-viper/releases/download/osint-engines/viper-maigret-engine.manifest.json';
+// Pinned SHA-256 of the engine pack (.zip). Empty string = skip verification
+// (dev only). MUST be set to the real hash when the pack is published.
+const MAIGRET_PACK_SHA256 = 'fabf624a59eadd486100ff60a5c5701019bf469f1d7387b0e6db5d3bfa9a83ba';
+
+const _osintJobs = new Map(); // jobId -> child process
+
+function _maigretPaths() {
+  const base = _resolveEngineBase('maigret', 'maigret.exe');
+  return {
+    base,
+    exe: path.join(base, 'maigret.exe'),
+    dataJson: path.join(base, 'data.json'), // pinned site DB shipped in the pack
+  };
+}
+
+function _osintEngineStatus() {
+  const p = _maigretPaths();
+  const enginePresent = fs.existsSync(p.exe);
+  return {
+    installRoot: _engineInstallRoot(),
+    enginePresent,
+    base: p.base,
+    exe: p.exe,
+    dbPresent: fs.existsSync(p.dataJson),
+    sizeBytes: enginePresent ? _dirSize(p.base) : 0,
+    busy: _engineBusy,
+    defaultUrl: MAIGRET_ENGINE_PACK_URL,
+  };
+}
+
+// SHA-256 of a file (hex). Used to verify the downloaded engine pack.
+function _sha256File(filePath) {
+  return new Promise((resolve, reject) => {
+    try {
+      const crypto = require('crypto');
+      const h = crypto.createHash('sha256');
+      const s = fs.createReadStream(filePath);
+      s.on('error', reject);
+      s.on('data', (d) => h.update(d));
+      s.on('end', () => resolve(h.digest('hex')));
+    } catch (e) { reject(e); }
+  });
+}
+
+// Extract a maigret pack .zip into engines/maigret. The pack may hold
+// maigret.exe at the top level, inside a maigret/ folder, or inside one
+// wrapper directory. Requires maigret.exe to be present after extraction.
+async function _installMaigretFromZip(zipPath, sender) {
+  const root = _engineInstallRoot();
+  fs.mkdirSync(root, { recursive: true });
+  const send = (phase, extra) => {
+    try { if (sender && !sender.isDestroyed()) sender.send('osint-engine-progress', Object.assign({ phase }, extra || {})); } catch (_) {}
+  };
+  // Verify the pack hash BEFORE trusting its contents (supply-chain guard).
+  if (MAIGRET_PACK_SHA256) {
+    send('verifying');
+    let got = '';
+    try { got = (await _sha256File(zipPath)).toLowerCase(); } catch (_) {}
+    if (got !== MAIGRET_PACK_SHA256.toLowerCase()) {
+      throw new Error('Engine pack failed SHA-256 verification (expected ' +
+        MAIGRET_PACK_SHA256.slice(0, 12) + '…, got ' + (got.slice(0, 12) || 'none') + '…).');
+    }
+  }
+  send('extracting');
+  const staging = path.join(root, '.staging-maigret-' + Date.now());
+  fs.mkdirSync(staging, { recursive: true });
+  try {
+    await _extractZip(zipPath, staging);
+    let srcRoot = null;
+    const hasExe = (d) => { try { return fs.existsSync(path.join(d, 'maigret.exe')); } catch (_) { return false; } };
+    if (hasExe(staging)) srcRoot = staging;
+    else if (hasExe(path.join(staging, 'maigret'))) srcRoot = path.join(staging, 'maigret');
+    else {
+      const entries = fs.readdirSync(staging).filter((n) => !n.startsWith('.'));
+      if (entries.length === 1) {
+        const inner = path.join(staging, entries[0]);
+        try {
+          if (fs.statSync(inner).isDirectory()) {
+            if (hasExe(inner)) srcRoot = inner;
+            else if (hasExe(path.join(inner, 'maigret'))) srcRoot = path.join(inner, 'maigret');
+          }
+        } catch (_) {}
+      }
+    }
+    if (!srcRoot) throw new Error('maigret.exe not found inside the pack.');
+    const to = path.join(root, 'maigret');
+    send('installing', { engine: 'maigret' });
+    try { fs.rmSync(to, { recursive: true, force: true }); } catch (_) {}
+    fs.renameSync(srcRoot, to);
+  } finally {
+    try { fs.rmSync(staging, { recursive: true, force: true }); } catch (_) {}
+  }
+  send('done');
+  return _osintEngineStatus();
+}
+
+ipcMain.handle('osint-engine-status', async () => _osintEngineStatus());
+
+// Download the maigret engine pack from a URL and install it.
+ipcMain.handle('osint-engine-download', async (event, opts = {}) => {
+  if (_engineBusy) return { success: false, code: 'BUSY', error: 'An engine operation is already in progress.' };
+  const url = (opts && opts.url) || MAIGRET_ENGINE_PACK_URL;
+  const sender = event.sender;
+  const send = (phase, extra) => { try { if (sender && !sender.isDestroyed()) sender.send('osint-engine-progress', Object.assign({ phase }, extra || {})); } catch (_) {} };
+  _engineBusy = true;
+  const tmpZip = path.join(os.tmpdir(), 'viper-maigret-pack-' + Date.now() + '.zip');
+  try {
+    send('downloading', { received: 0, total: 0, pct: 0 });
+    let lastPct = -1;
+    await _downloadEnginePack(url, tmpZip, (received, total) => {
+      const pct = total ? Math.floor((received / total) * 100) : 0;
+      if (pct !== lastPct) { lastPct = pct; send('downloading', { received, total, pct }); }
+    });
+    const status = await _installMaigretFromZip(tmpZip, sender);
+    if (!status.enginePresent) return { success: false, code: 'VERIFY_FAILED', error: 'Pack installed but maigret.exe was not found.' };
+    return { success: true, status };
+  } catch (error) {
+    send('error', { error: error.message });
+    return { success: false, code: 'DOWNLOAD_FAILED', error: error.message };
+  } finally {
+    try { fs.rmSync(tmpZip, { force: true }); } catch (_) {}
+    _engineBusy = false;
+  }
+});
+
+// Install from a local .zip the user already downloaded (offline / air-gapped).
+ipcMain.handle('osint-engine-install-file', async (event, opts = {}) => {
+  if (_engineBusy) return { success: false, code: 'BUSY', error: 'An engine operation is already in progress.' };
+  let zipPath = opts && opts.filePath;
+  _engineBusy = true;
+  try {
+    if (!zipPath) {
+      const res = await dialog.showOpenDialog(mainWindow || undefined, {
+        title: 'Select the VIPER OSINT (Maigret) engine pack (.zip)',
+        properties: ['openFile'],
+        filters: [{ name: 'Zip archive', extensions: ['zip'] }],
+      });
+      if (res.canceled || !res.filePaths || !res.filePaths[0]) return { success: false, code: 'CANCELLED' };
+      zipPath = res.filePaths[0];
+    }
+    if (!fs.existsSync(zipPath)) return { success: false, code: 'NO_FILE', error: 'File not found.' };
+    const status = await _installMaigretFromZip(zipPath, event.sender);
+    if (!status.enginePresent) return { success: false, code: 'VERIFY_FAILED', error: 'Pack installed but maigret.exe was not found.' };
+    return { success: true, status };
+  } catch (error) {
+    return { success: false, code: 'INSTALL_FAILED', error: error.message };
+  } finally {
+    _engineBusy = false;
+  }
+});
+
+// Remove the downloaded maigret engine (frees disk; feature reverts to "not installed").
+ipcMain.handle('osint-engine-remove', async () => {
+  if (_engineBusy) return { success: false, code: 'BUSY', error: 'An engine operation is already in progress.' };
+  _engineBusy = true;
+  try {
+    try { fs.rmSync(path.join(_engineInstallRoot(), 'maigret'), { recursive: true, force: true }); } catch (_) {}
+    return { success: true, status: _osintEngineStatus() };
+  } catch (error) {
+    return { success: false, error: error.message };
+  } finally {
+    _engineBusy = false;
+  }
+});
+
+// Build the Maigret CLI args (centralised — verified against the documented
+// flags: -H/--html, -P/--pdf, -J/--json {simple,ndjson}, -fo/--folderoutput,
+// --no-recursion, --no-autoupdate, --db, --timeout, --top-sites, --proxy,
+// --tor-proxy).
+// SECURITY: --no-recursion keeps the contacted-endpoint set fixed. Maigret
+// DEFAULTS to an online database-update check at startup, so we force
+// --no-autoupdate AND pin --db to the data.json shipped inside the pack — this
+// guarantees the site/URL list is exactly what we vetted (no remote-controlled
+// targets). Per Maigret docs, a custom --db file also disables auto-update.
+// Do NOT add --force-update.
+function _maigretArgs({ username, outDir, dataJson = '', timeout = 30, topSites = 500, proxy = '', torProxy = '' }) {
+  const args = [
+    String(username),
+    '--no-recursion',
+    '--no-autoupdate',
+    '--timeout', String(timeout),
+    '-n', '50',
+    '--top-sites', String(topSites),
+    '-fo', outDir,
+    '-J', 'ndjson',
+  ];
+  // Pin the vetted, bundled site database when present.
+  try { if (dataJson && fs.existsSync(dataJson)) args.push('--db', dataJson); } catch (_) {}
+  if (proxy) args.push('--proxy', proxy);
+  if (torProxy) args.push('--tor-proxy', torProxy);
+  return args;
+}
+
+// Normalize a username the same way Maigret does for report filenames
+// (best-effort): lowercase, non-alphanumeric → underscore.
+function _osintSafeName(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+// Parse maigret JSON/ndjson reports in `dir` for `username` into normalized
+// hits [{site,url,tags,ids}]. Defensive: handles ndjson (line-delimited),
+// a dict-of-sites (simple), or an array. Only "found/claimed" accounts kept.
+// NOTE: verify the exact ndjson/simple schema against a real maigret report
+// during live testing; parsing is intentionally forgiving.
+function _parseMaigretReports(dir, username) {
+  const hits = [];
+  let files = [];
+  try { files = fs.readdirSync(dir); } catch (_) { return hits; }
+  const safe = _osintSafeName(username);
+  const jsonFiles = files.filter((f) => /\.(nd)?json$/i.test(f) &&
+    (f.toLowerCase().includes(safe) || f.toLowerCase().includes(String(username).toLowerCase())));
+  const seen = new Set();
+  const looksFound = (o) => {
+    if (o.is_found === true) return true;
+    const st = String((o.status && (o.status.status || o.status.value || o.status)) || o.status_text || '').toLowerCase();
+    if (st.includes('claim') || st.includes('found')) return true;
+    return false;
+  };
+  const pushHit = (site, url, o) => {
+    site = String(site || '').trim();
+    url = String(url || '').trim();
+    if (!/^https?:\/\//i.test(url)) return; // only real http(s) profile URLs
+    const key = site + '|' + url;
+    if (seen.has(key)) return;
+    seen.add(key);
+    // Tags: real ndjson puts them under site.tags (top-level `tags` is null).
+    let tags = [];
+    try {
+      const src = (Array.isArray(o.tags) && o.tags) ||
+                  (o.site && Array.isArray(o.site.tags) && o.site.tags) ||
+                  (o.status && Array.isArray(o.status.tags) && o.status.tags) || [];
+      tags = src.map(String);
+    } catch (_) {}
+    // Rich profile fields live under status.ids_data (this is what Maigret's own
+    // report template renders: fullname, follower counts, and the profile photo
+    // at .image). Fall back to status.ids / top-level ids_data / ids.
+    let ids = {};
+    try {
+      if (o.status && o.status.ids_data && typeof o.status.ids_data === 'object') ids = o.status.ids_data;
+      else if (o.ids_data && typeof o.ids_data === 'object') ids = o.ids_data;
+      else if (o.status && o.status.ids && typeof o.status.ids === 'object') ids = o.status.ids;
+      else if (o.ids && typeof o.ids === 'object') ids = o.ids;
+    } catch (_) {}
+    // Pull the profile photo URL out separately for convenient UI use.
+    let image = '';
+    try {
+      const cand = ids.image || ids.photo || ids.avatar || ids.picture || '';
+      if (typeof cand === 'string' && /^https?:\/\//i.test(cand)) image = cand;
+    } catch (_) {}
+    hits.push({ site, url, tags, ids, image });
+  };
+  const consider = (o) => {
+    if (!o || typeof o !== 'object') return;
+    const url = o.url_user || o.url || o.profile_url || (o.status && o.status.url) || '';
+    const site = o.sitename || (o.status && o.status.site_name) || o.name || '';
+    if (url && looksFound(o)) pushHit(site, url, o);
+  };
+  for (const f of jsonFiles) {
+    let txt = '';
+    try { txt = fs.readFileSync(path.join(dir, f), 'utf8'); } catch (_) { continue; }
+    let parsedWhole = null;
+    try { parsedWhole = JSON.parse(txt); } catch (_) { parsedWhole = null; }
+    if (parsedWhole && typeof parsedWhole === 'object') {
+      if (Array.isArray(parsedWhole)) parsedWhole.forEach(consider);
+      else {
+        // dict-of-sites: { "GitHub": {status, url_user, ...}, ... }
+        for (const [k, v] of Object.entries(parsedWhole)) {
+          if (v && typeof v === 'object' && !v.sitename && !v.site && !v.name) v = Object.assign({ sitename: k }, v);
+          consider(v);
+        }
+      }
+    } else {
+      // ndjson
+      for (const line of txt.split(/\r?\n/)) {
+        const t = line.trim();
+        if (!t) continue;
+        try { consider(JSON.parse(t)); } catch (_) {}
+      }
+    }
+  }
+  return hits;
+}
+
+// Copy the generated HTML + PDF reports into the case Evidence tree
+// (encrypted if security is on). Returns [{name, format, path}].
+function _stashOsintReports(srcDir, caseNumber, evidenceTag, personLabel) {
+  const out = [];
+  try {
+    const dest = path.join(casesDir, caseNumber, 'Evidence', evidenceTag, 'osint');
+    fs.mkdirSync(dest, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const safePerson = String(personLabel || 'subject').replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 40) || 'subject';
+    // Collect .html/.pdf from srcDir and any per-query subdirectories.
+    const collected = [];
+    const walk = (d) => {
+      let entries = [];
+      try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch (_) { return; }
+      for (const ent of entries) {
+        const full = path.join(d, ent.name);
+        if (ent.isDirectory()) { walk(full); continue; }
+        const ext = path.extname(ent.name).toLowerCase();
+        if (ext === '.html' || ext === '.pdf') collected.push(full);
+      }
+    };
+    walk(srcDir);
+    for (const src of collected) {
+      const f = path.basename(src);
+      const ext = path.extname(f).toLowerCase();
+      const buf = fs.readFileSync(src);
+      const destName = 'OSINT_' + safePerson + '_' + stamp + '_' + f;
+      const destPath = path.join(dest, destName);
+      if (security && security.isEnabled() && security.isUnlocked()) {
+        fs.writeFileSync(destPath, security.encryptBuffer(buf));
+      } else {
+        fs.writeFileSync(destPath, buf);
+      }
+      out.push({ name: destName, format: ext.slice(1), path: destPath, size: buf.length });
+    }
+  } catch (e) {
+    console.warn('[OSINT] failed to stash reports:', e.message);
+  }
+  return out;
+}
+
+// Run a Maigret search over one or more identifier queries.
+// opts: { queries:[...], caseNumber, evidenceTag, personLabel, proxy, torProxy,
+//         timeout, topSites, jobId }
+// Returns { success, results:[{query,hits,engineOk,note}], reports:[...] }.
+ipcMain.handle('osint-search', async (event, opts = {}) => {
+  const {
+    queries = [],
+    caseNumber,
+    evidenceTag,
+    personLabel = 'subject',
+    proxy = '',
+    torProxy = '',
+    timeout = 30,
+    topSites = 500,
+    jobId = 'osint-' + Date.now(),
+  } = opts;
+  const P = _maigretPaths();
+  const send = (channel, payload) => { try { if (event.sender && !event.sender.isDestroyed()) event.sender.send(channel, payload); } catch (_) {} };
+
+  if (!fs.existsSync(P.exe)) {
+    return { success: false, code: 'ENGINE_MISSING', error: 'The OSINT engine (Maigret) is not installed. Install it from Settings → Investigative Resources.' };
+  }
+
+  // Sanitize queries (untrusted identifier values). Array-spawn means no shell
+  // interpolation, but we still cap length and reject control characters.
+  const clean = [];
+  for (const q of queries) {
+    const s = String(q == null ? '' : q).trim();
+    if (!s || s.length > 128) continue;
+    if (/[\u0000-\u001F]/.test(s)) continue;
+    if (s.startsWith('-')) continue; // never let a value look like a flag
+    if (!clean.includes(s)) clean.push(s);
+  }
+  if (!clean.length) return { success: false, code: 'NO_QUERIES', error: 'No searchable identifiers (usernames or emails).' };
+
+  const workRoot = path.join(os.tmpdir(), 'viper-osint', jobId);
+  const outDir = path.join(workRoot, 'reports');
+  fs.mkdirSync(outDir, { recursive: true });
+  try {
+    const results = [];
+    for (let i = 0; i < clean.length; i++) {
+      const q = clean[i];
+      send('osint-progress', { jobId, stage: 'searching', index: i, total: clean.length, query: q });
+      // Per-query output directory so short usernames can't substring-collide
+      // with longer ones when we match report files by name.
+      const qDir = path.join(outDir, String(i));
+      try { fs.mkdirSync(qDir, { recursive: true }); } catch (_) {}
+      const args = _maigretArgs({ username: q, outDir: qDir, dataJson: P.dataJson, timeout, topSites, proxy, torProxy });
+      const runRes = await new Promise((resolve) => {
+        let child;
+        // Force UTF-8 I/O: the frozen exe already reconfigures stdout/stderr,
+        // but set these too so a captured pipe never falls back to cp1252.
+        const childEnv = Object.assign({}, process.env, { PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' });
+        try { child = spawn(P.exe, args, { cwd: P.base, windowsHide: true, shell: false, env: childEnv }); }
+        catch (e) { resolve({ ok: false, error: e.message }); return; }
+        _osintJobs.set(jobId, child);
+        let tail = '';
+        const onData = (b) => { tail = (tail + b.toString()).slice(-4000); };
+        if (child.stdout) child.stdout.on('data', onData);
+        if (child.stderr) child.stderr.on('data', onData);
+        child.on('error', (e) => { _osintJobs.delete(jobId); resolve({ ok: false, error: e.message }); });
+        child.on('close', (code) => {
+          _osintJobs.delete(jobId);
+          // Maigret can exit non-zero even with valid results; the parsed
+          // report is the source of truth, so don't hard-fail on exit code.
+          resolve({ ok: true, code, tail });
+        });
+      });
+      const hits = _parseMaigretReports(qDir, q);
+      results.push({ query: q, hits, engineOk: runRes.ok, note: runRes.error || '' });
+    }
+
+    // Nothing is auto-saved to Evidence. The renderer lets the user pick which
+    // accounts are relevant, then calls osint-build-evidence-report to write a
+    // clean VIPER report containing ONLY the selected accounts.
+    send('osint-progress', { jobId, stage: 'done' });
+    return { success: true, results };
+  } catch (error) {
+    console.error('[OSINT] search failed:', error);
+    return { success: false, code: 'EXCEPTION', error: error.message };
+  } finally {
+    try { fs.rmSync(workRoot, { recursive: true, force: true }); } catch (_) {}
+  }
+});
+
+ipcMain.handle('osint-cancel', async (_e, jobId) => {
+  const child = _osintJobs.get(jobId);
+  if (child) { try { child.kill(); } catch (_) {} _osintJobs.delete(jobId); return { success: true }; }
+  return { success: false, code: 'NO_JOB' };
+});
+
+// Fetch a remote image and return it as a base64 data URI (best-effort).
+// Used to make OSINT evidence reports self-contained so signed/expiring CDN
+// image URLs (Instagram/TikTok) still render weeks later. Resolves null on
+// any failure — the report then falls back to a placeholder.
+function _fetchImageDataUri(imgUrl, redirectsLeft = 3) {
+  return new Promise((resolve) => {
+    try {
+      if (!/^https?:\/\//i.test(imgUrl)) return resolve(null);
+      const mod = imgUrl.toLowerCase().startsWith('https:') ? require('https') : require('http');
+      const req = mod.get(imgUrl, { timeout: 6000, headers: { 'User-Agent': 'Mozilla/5.0 VIPER-OSINT' } }, (res) => {
+        // Follow redirects.
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirectsLeft > 0) {
+          res.resume();
+          let next = res.headers.location;
+          try { next = new URL(next, imgUrl).href; } catch (_) {}
+          return resolve(_fetchImageDataUri(next, redirectsLeft - 1));
+        }
+        if (res.statusCode !== 200) { res.resume(); return resolve(null); }
+        const ct = String(res.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+        if (!/^image\//.test(ct)) { res.resume(); return resolve(null); }
+        const chunks = [];
+        let total = 0;
+        const MAX = 3 * 1024 * 1024; // 3 MB cap
+        res.on('data', (c) => {
+          total += c.length;
+          if (total > MAX) { try { req.destroy(); } catch (_) {} return resolve(null); }
+          chunks.push(c);
+        });
+        res.on('end', () => {
+          try { resolve('data:' + ct + ';base64,' + Buffer.concat(chunks).toString('base64')); }
+          catch (_) { resolve(null); }
+        });
+        res.on('error', () => resolve(null));
+      });
+      req.on('timeout', () => { try { req.destroy(); } catch (_) {} resolve(null); });
+      req.on('error', () => resolve(null));
+    } catch (_) { resolve(null); }
+  });
+}
+
+function _osintHtmlEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function _osintTitleCase(k) {
+  return String(k || '').replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase()).trim();
+}
+
+// Build a self-contained HTML evidence report from the user's SELECTED accounts
+// and save it into the case Evidence tree (encrypted iff Field Security is on).
+// opts: { caseNumber, evidenceTag='OSINT', personLabel, caseName, accounts:[
+//   { query, site, url, tags:[], ids:{}, image } ] }
+// Returns { success, name, path, size } (renderer registers it in the manifest).
+ipcMain.handle('osint-build-evidence-report', async (_e, opts = {}) => {
+  try {
+    const caseNumber = _safeCaseNumber(opts && opts.caseNumber);
+    if (!caseNumber) return { success: false, error: 'Invalid case number' };
+    const evidenceTag = String((opts && opts.evidenceTag) || 'OSINT').replace(/[^A-Za-z0-9._-]+/g, '_') || 'OSINT';
+    const personLabel = String((opts && opts.personLabel) || 'subject');
+    const accounts = Array.isArray(opts && opts.accounts) ? opts.accounts : [];
+    if (!accounts.length) return { success: false, error: 'No accounts selected' };
+
+    // Inline images (best-effort, in parallel).
+    const dataUris = await Promise.all(accounts.map((a) => a && a.image ? _fetchImageDataUri(String(a.image)) : Promise.resolve(null)));
+
+    const generatedAt = new Date();
+    const HIDE_IDS = new Set(['image', 'photo', 'avatar', 'picture', '_extractor']);
+    const cardsHtml = accounts.map((a, i) => {
+      const site = _osintHtmlEsc(a.site || '(site)');
+      const url = String(a.url || '');
+      const urlSafe = /^https?:\/\//i.test(url) ? url : '';
+      const img = dataUris[i] || (typeof a.image === 'string' && /^https?:\/\//i.test(a.image) ? a.image : '');
+      const tags = Array.isArray(a.tags) ? a.tags.map(_osintHtmlEsc) : [];
+      const ids = (a.ids && typeof a.ids === 'object') ? a.ids : {};
+      const rows = Object.keys(ids)
+        .filter((k) => !HIDE_IDS.has(String(k).toLowerCase()))
+        .map((k) => {
+          let v = ids[k];
+          if (Array.isArray(v)) v = v.join(', ');
+          return `<tr><th>${_osintHtmlEsc(_osintTitleCase(k))}</th><td>${_osintHtmlEsc(v)}</td></tr>`;
+        }).join('');
+      const extractor = ids._extractor ? `<div class="src">Source: ${_osintHtmlEsc(ids._extractor)}</div>` : '';
+      return `
+      <div class="card">
+        <div class="card-head">
+          <div class="avatar">${img ? `<img src="${_osintHtmlEsc(img)}" alt="Profile photo">` : `<div class="noimg">no photo</div>`}</div>
+          <div class="head-meta">
+            <h2>${site}</h2>
+            <div class="query">Searched identifier: <strong>${_osintHtmlEsc(a.query || '')}</strong></div>
+            ${urlSafe ? `<a class="url" href="${_osintHtmlEsc(urlSafe)}">${_osintHtmlEsc(urlSafe)}</a>` : ''}
+            ${tags.length ? `<div class="tags">${tags.map((t) => `<span class="tag">${t}</span>`).join('')}</div>` : ''}
+          </div>
+        </div>
+        ${rows ? `<table class="ids"><tbody>${rows}</tbody></table>` : '<div class="noids">No additional profile details were extracted.</div>'}
+        ${extractor}
+      </div>`;
+    }).join('');
+
+    const caseName = _osintHtmlEsc((opts && opts.caseName) || '');
+    const html = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OSINT Report — ${_osintHtmlEsc(personLabel)} (${_osintHtmlEsc(caseNumber)})</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color: #1a1a1a; background: #f4f5f7; margin: 0; padding: 24px; }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  header.rpt { border-bottom: 3px solid #a21caf; padding-bottom: 12px; margin-bottom: 16px; }
+  header.rpt h1 { margin: 0 0 4px; font-size: 22px; color: #6b21a8; }
+  header.rpt .meta { font-size: 13px; color: #444; }
+  .disclaimer { background: #fff7ed; border: 1px solid #fdba74; color: #7c2d12; padding: 10px 14px; border-radius: 8px; font-size: 12.5px; line-height: 1.5; margin-bottom: 20px; }
+  .card { background: #fff; border: 1px solid #e2e4e9; border-radius: 10px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.04); page-break-inside: avoid; }
+  .card-head { display: flex; gap: 16px; align-items: flex-start; }
+  .avatar { flex: 0 0 96px; width: 96px; height: 96px; border-radius: 8px; overflow: hidden; background: #eef0f3; display: flex; align-items: center; justify-content: center; }
+  .avatar img { width: 100%; height: 100%; object-fit: cover; }
+  .avatar .noimg { font-size: 11px; color: #9aa0a6; }
+  .head-meta { min-width: 0; flex: 1; }
+  .head-meta h2 { margin: 0 0 4px; font-size: 18px; color: #111; }
+  .query { font-size: 12px; color: #555; margin-bottom: 4px; }
+  a.url { font-size: 13px; color: #1155cc; word-break: break-all; }
+  .tags { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .tag { font-size: 11px; background: #f0e6f5; color: #6b21a8; border: 1px solid #e2cdec; border-radius: 999px; padding: 2px 8px; }
+  table.ids { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 13px; }
+  table.ids th { text-align: left; width: 210px; color: #555; font-weight: 600; padding: 6px 10px; border-bottom: 1px solid #eef0f3; vertical-align: top; }
+  table.ids td { padding: 6px 10px; border-bottom: 1px solid #eef0f3; word-break: break-word; }
+  table.ids tr:nth-child(even) th, table.ids tr:nth-child(even) td { background: #fafbfc; }
+  .noids { margin-top: 12px; font-size: 12.5px; color: #888; }
+  .src { margin-top: 10px; font-size: 11px; color: #9aa0a6; }
+  footer.rpt { margin-top: 8px; font-size: 11px; color: #888; text-align: center; }
+  @media print { body { background: #fff; padding: 0; } .card { box-shadow: none; } }
+</style></head>
+<body><div class="wrap">
+  <header class="rpt">
+    <h1>OSINT Username Search — Report</h1>
+    <div class="meta">
+      <div><strong>Subject:</strong> ${_osintHtmlEsc(personLabel)}</div>
+      <div><strong>Case:</strong> ${_osintHtmlEsc(caseNumber)}${caseName ? ' — ' + caseName : ''}</div>
+      <div><strong>Generated:</strong> ${_osintHtmlEsc(generatedAt.toLocaleString())}</div>
+      <div><strong>Selected accounts:</strong> ${accounts.length}</div>
+      <div><strong>Engine:</strong> Maigret (via VIPER)</div>
+    </div>
+  </header>
+  <div class="disclaimer">
+    <strong>Investigative leads — not verified evidence.</strong> These matches were selected by the investigator from automated username-search results and may include <strong>false positives</strong> or accounts belonging to different individuals. Each result must be independently verified before being relied upon. Third-party site data is reproduced as retrieved; VIPER is not responsible for its accuracy.
+  </div>
+  ${cardsHtml}
+  <footer class="rpt">Generated by VIPER OSINT · ${_osintHtmlEsc(generatedAt.toISOString())}</footer>
+</div></body></html>`;
+
+    const dest = path.join(casesDir, caseNumber, 'Evidence', evidenceTag);
+    fs.mkdirSync(dest, { recursive: true });
+    const stamp = generatedAt.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const safePerson = personLabel.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 40) || 'subject';
+    const name = 'OSINT_' + safePerson + '_' + stamp + '.html';
+    const filePath = path.join(dest, name);
+    const buf = Buffer.from(html, 'utf8');
+    if (security && security.isEnabled() && security.isUnlocked()) {
+      fs.writeFileSync(filePath, security.encryptBuffer(buf));
+    } else {
+      fs.writeFileSync(filePath, buf);
+    }
+    return { success: true, name, path: filePath, size: buf.length, inlinedImages: dataUris.filter(Boolean).length };
+  } catch (error) {
+    console.error('[OSINT] build evidence report failed:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('whisper-transcribe', async (event, opts = {}) => {
   const {
     mediaPath,

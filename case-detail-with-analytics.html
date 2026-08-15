@@ -21725,6 +21725,11 @@
                 return;
             }
             
+            // Completing this modal is what confirms the person is located. Set the
+            // flag here authoritatively — do NOT rely on the in-memory flag from the
+            // checkbox toggle, since any intervening re-render reloads the array from
+            // storage (where located is still false) and would wipe it before save.
+            missingPersons[index].located = true;
             missingPersons[index].dateLocated = dateLocated;
             missingPersons[index].locatedNotes = locatedNotes;
             saveMissingPersons();

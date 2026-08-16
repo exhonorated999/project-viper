@@ -343,6 +343,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveCdrDumps: (data) => ipcRenderer.invoke('save-cdr-dumps', data),
   readCdrDumps: (data) => ipcRenderer.invoke('read-cdr-dumps', data),
 
+  // AMP .ampcase import (geocoded CDR / tower data)
+  ampcasePick: () => ipcRenderer.invoke('ampcase-pick'),
+  ampcaseImport: (data) => ipcRenderer.invoke('ampcase-import', data),
+
   // Department badge (single agency-wide image under userData/branding/)
   saveDeptBadge: (data) => ipcRenderer.invoke('save-dept-badge', data),
   readDeptBadge: () => ipcRenderer.invoke('read-dept-badge'),

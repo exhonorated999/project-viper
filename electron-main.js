@@ -3174,7 +3174,7 @@ ipcMain.handle('save-case-export', async (event, { fileName, data }) => {
 });
 
 // --- Export DA Package (ZIP with PDF + evidence files) ---
-ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber, excludeCsam, csamTags }) => {
+ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber, excludeCsam, csamTags, nonDiscoverableTags }) => {
   const result = await dialog.showSaveDialog(mainWindow, {
     title: 'Save DA Export Package',
     defaultPath: fileName,
@@ -3190,6 +3190,13 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
       .filter(t => typeof t === 'string' && t.length > 0)
   );
   const csamSkippedLog = [];
+
+  // Non-discoverable (investigative-only) evidence: ALWAYS excluded from the
+  // ZIP, independent of the CSAM toggle. Matched by evidence-tag folder name.
+  const nonDiscoverableSkipSet = new Set(
+    (Array.isArray(nonDiscoverableTags) ? nonDiscoverableTags : [])
+      .filter(t => typeof t === 'string' && t.length > 0)
+  );
 
   const archiver = (() => {
     try { return require('archiver'); } catch { return null; }
@@ -3347,12 +3354,20 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
       // 1. PDF report goes at archive root
       archive.append(Buffer.from(pdfBytes), { name: `${caseNumber}_DA_Report.pdf` });
 
-      // 2. Evidence (streamed from disk) — skip CSAM-flagged subfolders if requested
+      // 2. Evidence (streamed from disk) — skip Not-Discoverable
+      //    (investigative-only) subfolders, matched by evidence-tag folder
+      //    name. CSAM is NO LONGER special-cased: it is governed by the same
+      //    Discovery Status flag as all other evidence, so a Not-Discoverable
+      //    CSAM item arrives here inside nonDiscoverableSkipSet. csamExclude is
+      //    retained only for back-compat with older renderers (always false).
+      const evidenceSkipSet = new Set();
+      if (csamExclude) for (const t of csamSkipSet) evidenceSkipSet.add(t);
+      for (const t of nonDiscoverableSkipSet) evidenceSkipSet.add(t);
       addTreeToArchive(
         path.join(casesDir, caseNumber, 'Evidence'),
         'Evidence',
         archive,
-        { skipTopLevelDirs: csamExclude ? csamSkipSet : null }
+        { skipTopLevelDirs: evidenceSkipSet.size ? evidenceSkipSet : null }
       );
 
       // 3. Warrants (streamed from disk)
@@ -3367,17 +3382,22 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
         generatedAt: new Date().toISOString(),
         viperVersion: app.getVersion ? app.getVersion() : 'unknown',
         securityUnlocked: !!(security && security.isUnlocked()),
-        counts: { added: okCount, skipped: skipCount, errors: errCount, renamed: renameLog.length, csamFoldersSkipped: csamSkippedLog.length },
+        counts: { added: okCount, skipped: skipCount, errors: errCount, renamed: renameLog.length, evidenceFoldersSkipped: csamSkippedLog.length },
         logicalBytes: totalBytes,
         csamPolicy: {
-          excludeCsam: csamExclude,
-          requestedCsamTags: Array.from(csamSkipSet),
-          csamFoldersSkipped: csamSkippedLog,
-          note: csamExclude
-            ? 'CSAM-sensitive evidence folders were excluded from this DA export package by the exporting officer. Item descriptions remain in the PDF report; the media payload was deliberately withheld and must be obtained through law-enforcement channels.'
-            : (csamSkipSet.size > 0
-                ? 'CSAM-sensitive evidence was present in this case but the exporting officer chose to INCLUDE it in this package.'
-                : 'No CSAM-flagged evidence in this case.'),
+          csamItemTags: Array.from(csamSkipSet),
+          csamWithheld: Array.from(csamSkipSet).filter(t => nonDiscoverableSkipSet.has(t)),
+          csamIncluded: Array.from(csamSkipSet).filter(t => !nonDiscoverableSkipSet.has(t)),
+          note: csamSkipSet.size === 0
+            ? 'No CSAM-flagged evidence in this case.'
+            : 'CSAM-sensitive evidence is governed by the same per-item Discovery Status flag as all other evidence. Items marked Not Discoverable were withheld (omitted from the report and excluded from this package); items marked Discoverable were INCLUDED. The exporting officer is responsible for confirming their jurisdiction permits disclosure. See csamWithheld / csamIncluded.',
+        },
+        discoveryPolicy: {
+          requestedNonDiscoverableTags: Array.from(nonDiscoverableSkipSet),
+          note: nonDiscoverableSkipSet.size > 0
+            ? 'One or more evidence items were flagged NOT DISCOVERABLE (investigative-only, e.g. TLO reports, or CSAM in a non-disclosure jurisdiction) by the exporting officer. These items are omitted from the PDF report and their files were excluded from this package. They are not turned over in discovery. Folders physically skipped are listed under csamPolicy.csamFoldersSkipped-equivalent (evidenceFoldersSkipped).'
+            : 'No Not-Discoverable evidence flagged; all recorded evidence is discoverable.',
+          evidenceFoldersSkipped: csamSkippedLog,
         },
         notes: renameLog.length
           ? 'Some filenames were shortened to satisfy Windows MAX_PATH (260 chars) on extraction. See renameMap for original → archived.'
@@ -6661,6 +6681,37 @@ ipcMain.handle('read-cdr-dumps', async (event, { caseNumber }) => {
   } catch (error) {
     console.error('Failed to read CDR dumps:', error);
     return { success: false, error: error.message, dumps: [] };
+  }
+});
+
+// --- AMP .ampcase import (CDR / geospatial) ---------------------------------
+// Open a file picker for a .ampcase and parse it into a normalized VIPER CDR
+// payload (geocoded points + sector cones + comms + contacts + analyses).
+ipcMain.handle('ampcase-pick', async () => {
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Import AMP Case File',
+      properties: ['openFile'],
+      filters: [{ name: 'AMP Case', extensions: ['ampcase'] }, { name: 'All Files', extensions: ['*'] }]
+    });
+    try { restoreFocus(); } catch (_) {}
+    if (result.canceled || !result.filePaths.length) return { success: false, canceled: true };
+    return { success: true, path: result.filePaths[0] };
+  } catch (error) {
+    console.error('ampcase-pick error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('ampcase-import', async (event, { filePath } = {}) => {
+  try {
+    if (!filePath) return { success: false, error: 'No file path provided' };
+    const { parseAmpcase } = require('./modules/amp-import/amp-import');
+    const data = await parseAmpcase(filePath, { security });
+    return { success: true, data };
+  } catch (error) {
+    console.error('ampcase-import error:', error);
+    return { success: false, error: error.message };
   }
 });
 

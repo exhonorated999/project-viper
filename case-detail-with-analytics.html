@@ -2465,19 +2465,28 @@
             const dataTabs = selectedTabs.filter(tab => tab.type === 'data');
             const fileTabs = selectedTabs.filter(tab => tab.type === 'files');
 
-            // ── CSAM-sensitive evidence check ──
-            // If any evidence is flagged csamSensitive (e.g. NCMEC CyberTip),
-            // and the user is exporting files, prompt whether to include or
-            // exclude the media payload. Many jurisdictions prohibit sharing.
+            // ── CSAM-sensitive evidence ──
+            // CSAM (e.g. NCMEC CyberTip) is governed by the SAME Discovery
+            // Status flag as every other evidence item — no special popup.
+            // Some jurisdictions must turn it over, others must not, so the
+            // exporting officer marks each item Discoverable / Not Discoverable.
+            // A Not-Discoverable CSAM item is captured below by the generic
+            // non-discoverable collection. We still gather CSAM tags purely as
+            // informational metadata for the export manifest.
             const csamItems = (caseEvidence || []).filter(e => e && e.csamSensitive);
-            _daExportExcludeCsam = false;
-            _daExportCsamTags = [];
-            if (csamItems.length > 0 && fileTabs.length > 0) {
-                const choice = await promptCsamExclusion(csamItems);
-                if (choice === 'cancel') return;
-                _daExportExcludeCsam = (choice === 'exclude');
-                _daExportCsamTags = csamItems.map(e => e.tag).filter(Boolean);
-            }
+            _daExportExcludeCsam = false; // deprecated — retained only for manifest back-compat
+            _daExportCsamTags = csamItems.map(e => e.tag).filter(Boolean);
+
+            // ── Non-discoverable (investigative-only) evidence ──
+            // ALWAYS withheld from DA exports with no prompt: omitted from the
+            // report PDF listing AND excluded from the export ZIP. This is the
+            // exporting officer's discovery tag (e.g. TLO reports not turned
+            // over to defense, or CSAM in a non-disclosure jurisdiction).
+            // Files are matched by evidence-tag folder name.
+            _daExportNonDiscoverableTags = (caseEvidence || [])
+                .filter(e => e && e.discoverable === false)
+                .map(e => e.tag)
+                .filter(Boolean);
 
             closeExportCaseModal();
 
@@ -2500,56 +2509,15 @@
             }
         }
 
-        // CSAM-exclusion state for the in-flight DA export. Read by the two
-        // saveDAExport call sites (generateCaseReportPDF + bundleFilesOnly).
+        // CSAM export state (retained for manifest back-compat only). CSAM is
+        // now governed by the per-item Discovery Status flag, exactly like all
+        // other evidence — there is no separate CSAM include/exclude prompt.
+        // _daExportExcludeCsam stays false; _daExportCsamTags is informational.
         let _daExportExcludeCsam = false;
         let _daExportCsamTags = [];
-
-        // Returns 'exclude' | 'include' | 'cancel'
-        function promptCsamExclusion(csamItems) {
-            return new Promise((resolve) => {
-                const list = csamItems.map(e => {
-                    const mode = (e.ncmec && e.ncmec.uploadMode) ? e.ncmec.uploadMode.toUpperCase() : 'FILES';
-                    const tag = e.tag || `(no tag, id ${e.id})`;
-                    return `<li class="text-sm text-red-200">⚠ <strong>${tag}</strong> <span class="text-xs text-gray-400">(${mode}, ${(e.fileCount || (e.files && e.files.length) || 0)} files)</span></li>`;
-                }).join('');
-                const html = `
-                    <div id="csamPromptModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]">
-                        <div class="glass-card rounded-xl p-6 max-w-lg w-full mx-4 border-2 border-red-500/40">
-                            <div class="flex items-start gap-3 mb-4">
-                                <div class="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0">
-                                    <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0L3.16 16.25A2 2 0 005 19z"/>
-                                    </svg>
-                                </div>
-                                <div>
-                                    <h3 class="text-lg font-bold text-red-300">CSAM-Sensitive Evidence Detected</h3>
-                                    <p class="text-xs text-gray-400 mt-1">This case contains evidence flagged as potentially CSAM (NCMEC CyberTip). Many DA offices and jurisdictions prohibit transmitting these files outside law-enforcement chain-of-custody.</p>
-                                </div>
-                            </div>
-                            <ul class="space-y-1 mb-4 pl-2 border-l-2 border-red-400/40">${list}</ul>
-                            <p class="text-xs text-gray-300 mb-4">How should the DA export handle the media for these items?</p>
-                            <div class="space-y-2">
-                                <button id="csamPromptExclude" class="w-full px-4 py-3 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-400 text-red-200 font-medium text-left">
-                                    ✓ Exclude CSAM media <span class="text-xs text-red-300/70">(recommended — PDF report still lists the item)</span>
-                                </button>
-                                <button id="csamPromptInclude" class="w-full px-4 py-3 rounded-lg bg-viper-card/60 hover:bg-viper-card border border-gray-600 text-gray-200 font-medium text-left">
-                                    Include CSAM media <span class="text-xs text-gray-400">(only if your DA is authorized to receive it)</span>
-                                </button>
-                                <button id="csamPromptCancel" class="w-full px-4 py-2 rounded-lg text-gray-400 hover:text-white text-sm">
-                                    Cancel export
-                                </button>
-                            </div>
-                        </div>
-                    </div>`;
-                document.body.insertAdjacentHTML('beforeend', html);
-                const modal = document.getElementById('csamPromptModal');
-                const cleanup = (val) => { if (modal) modal.remove(); resolve(val); };
-                document.getElementById('csamPromptExclude').onclick = () => cleanup('exclude');
-                document.getElementById('csamPromptInclude').onclick = () => cleanup('include');
-                document.getElementById('csamPromptCancel').onclick = () => cleanup('cancel');
-            });
-        }
+        // Evidence tags flagged Not Discoverable — files excluded from the ZIP
+        // and items omitted from the report PDF. Set in exportCase().
+        let _daExportNonDiscoverableTags = [];
 
         function showExportProgress() {
             const progressHTML = `
@@ -3678,24 +3646,33 @@
                 newPage();
                 tocEntries.push({ label: 'Evidence & Warrant Files', page: doc.getNumberOfPages() });
                 sectionTitle('Evidence & Warrant Files');
-                if (caseEvidence && caseEvidence.length > 0) {
+                // Non-discoverable (investigative-only) items are withheld from
+                // the DA export entirely — not listed here and files excluded
+                // from the ZIP (see save-da-export). Filter them out first.
+                const _discoverableEvidence = (caseEvidence || []).filter(ev => ev.discoverable !== false);
+                if (_discoverableEvidence.length > 0) {
                     itemHeading('Evidence Files');
-                    caseEvidence.forEach((ev, i) => {
+                    _discoverableEvidence.forEach((ev, i) => {
                         need(18);
-                        fieldBold(`${i + 1}. ${ev.description || 'Evidence item'}`, '');
-                        fieldBold('   Type', ev.type); fieldBold('   Collected', formatDate(ev.collectionDate));
-                        fieldBold('   Location', ev.location);
-                        // Annotate CSAM-flagged items that were excluded from the bundle
+                        const _evType = ev.type ? String(ev.type) : '';
+                        fieldBold(`${i + 1}. ${ev.tag || 'Evidence item'}`, _evType ? `— ${_evType}` : '');
+                        // Include the full description in the itemized entry so the
+                        // reader doesn't have to cross-reference a separate appendix.
+                        if (ev.description) { fieldBold('   Description', ''); bodyText(ev.description); }
+                        const _evCollected = ev.collectionDate ? formatDate(ev.collectionDate)
+                                           : (ev.createdAt ? formatDate(ev.createdAt) : '');
+                        if (_evCollected) fieldBold('   Collected', _evCollected);
+                        if (ev.location) fieldBold('   Location', ev.location);
+                        if (ev.fileCount) fieldBold('   Files', `${ev.fileCount} file${ev.fileCount !== 1 ? 's' : ''}`);
+                        // CSAM items reaching this point are marked Discoverable
+                        // (Not-Discoverable items were filtered out above), so
+                        // their media is INCLUDED in this package.
                         if (ev.csamSensitive) {
-                            if (_daExportExcludeCsam) {
-                                fieldBold('   ⚠ Notice', 'CSAM media EXCLUDED from this DA package per jurisdictional policy. Item recorded for chain-of-custody; obtain media through law-enforcement channels.');
-                            } else {
-                                fieldBold('   ⚠ CSAM', 'NCMEC CyberTip — media INCLUDED in this DA package. Handle per agency CSAM policy.');
-                            }
+                            fieldBold('   ⚠ CSAM', 'NCMEC CyberTip — marked Discoverable; media INCLUDED in this DA package. Confirm your jurisdiction permits disclosure and handle per agency CSAM policy.');
                         }
                         gap();
                     });
-                } else emptyMsg('No evidence files recorded.');
+                } else emptyMsg('No discoverable evidence files recorded.');
                 gap(4);
                 if (caseWarrants && caseWarrants.length > 0) {
                     itemHeading('Search Warrants');
@@ -3808,10 +3785,12 @@
                         caseNumber: currentCase.caseNumber,
                         excludeCsam: !!_daExportExcludeCsam,
                         csamTags: Array.isArray(_daExportCsamTags) ? _daExportCsamTags : [],
+                        nonDiscoverableTags: Array.isArray(_daExportNonDiscoverableTags) ? _daExportNonDiscoverableTags : [],
                     });
                     if (savedPath) {
-                        const csamNote = _daExportExcludeCsam && _daExportCsamTags.length
-                            ? `\n\n⚠ CSAM media EXCLUDED for ${_daExportCsamTags.length} item(s): ${_daExportCsamTags.join(', ')}`
+                        const withheldTags = Array.isArray(_daExportNonDiscoverableTags) ? _daExportNonDiscoverableTags : [];
+                        const csamNote = withheldTags.length
+                            ? `\n\n🔒 ${withheldTags.length} Not-Discoverable item(s) withheld from report & ZIP: ${withheldTags.join(', ')}`
                             : '';
                         viperToast(`DA Export saved to:\n${savedPath}\n\nIncludes PDF report and all evidence files.${csamNote}`, 'success');
                     }
@@ -4369,10 +4348,12 @@
                     caseNumber: currentCase.caseNumber,
                     excludeCsam: !!_daExportExcludeCsam,
                     csamTags: Array.isArray(_daExportCsamTags) ? _daExportCsamTags : [],
+                    nonDiscoverableTags: Array.isArray(_daExportNonDiscoverableTags) ? _daExportNonDiscoverableTags : [],
                 });
                 if (savedPath) {
-                    const csamNote = _daExportExcludeCsam && _daExportCsamTags.length
-                        ? `\n⚠ CSAM media EXCLUDED for ${_daExportCsamTags.length} item(s)`
+                    const withheldTags = Array.isArray(_daExportNonDiscoverableTags) ? _daExportNonDiscoverableTags : [];
+                    const csamNote = withheldTags.length
+                        ? `\n🔒 ${withheldTags.length} Not-Discoverable item(s) withheld`
                         : '';
                     viperToast(`Evidence files saved to:\n${savedPath}${csamNote}`, 'success');
                 }
@@ -7086,6 +7067,15 @@
                                     <input type="text" id="evidenceLocation" placeholder="e.g., 1420 Main St, Springfield — QuickMart, surveillance footage" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none text-white placeholder-gray-500">
                                     <p class="text-xs text-gray-500 mt-1">📍 Where this evidence was collected from (business, residence, individual). Addresses can be imported &amp; mapped on the Connection Board.</p>
                                 </div>
+
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Discovery Status</label>
+                                    <select id="evidenceDiscoverable" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none text-white">
+                                        <option value="yes">Discoverable — turned over to the DA / defense (default)</option>
+                                        <option value="no">Not Discoverable — investigative only (e.g., TLO report)</option>
+                                    </select>
+                                    <p class="text-xs text-gray-500 mt-1">🔒 <span class="text-amber-300">Not Discoverable</span> items are <strong>omitted from the DA export report and excluded from the export ZIP</strong>. Use for investigative-only material not turned over in discovery.</p>
+                                </div>
                                 
                                 <div id="evidenceUploadSection">
                                     <label class="block text-sm font-medium text-gray-300 mb-2">Upload Files</label>
@@ -7373,7 +7363,7 @@
                         <div class="flex items-center space-x-2 flex-1">
                             <span class="text-xl">${typeIcons[item.type] || '📎'}</span>
                             <div class="flex-1 min-w-0">
-                                <h4 class="text-sm font-bold truncate">${item.tag || 'Evidence Item'}${item.csamSensitive ? ' <span class="text-[10px] px-1.5 py-0.5 ml-1 rounded bg-red-500/20 text-red-300 border border-red-400/40">CSAM</span>' : ''}</h4>
+                                <h4 class="text-sm font-bold truncate">${item.tag || 'Evidence Item'}${item.csamSensitive ? ' <span class="text-[10px] px-1.5 py-0.5 ml-1 rounded bg-red-500/20 text-red-300 border border-red-400/40">CSAM</span>' : ''}${item.discoverable === false ? ' <span class="text-[10px] px-1.5 py-0.5 ml-1 rounded bg-amber-500/20 text-amber-300 border border-amber-400/40" title="Investigative only — omitted from DA export report and ZIP">NOT DISCOVERABLE</span>' : ''}</h4>
                                 <p class="text-xs text-gray-400">${typeLabels[item.type] || item.type}</p>
                             </div>
                         </div>
@@ -7416,6 +7406,7 @@
             document.getElementById('evidenceTag').value = '';
             document.getElementById('evidenceDescription').value = '';
             var _evLoc = document.getElementById('evidenceLocation'); if (_evLoc) _evLoc.value = '';
+            var _evDisc = document.getElementById('evidenceDiscoverable'); if (_evDisc) _evDisc.value = 'yes';
             clearEvidenceFiles();
             onEvidenceTypeChange('');
             document.getElementById('evidenceForm').classList.remove('hidden');
@@ -7752,6 +7743,7 @@
             document.getElementById('evidenceTag').value = evidence.tag || '';
             document.getElementById('evidenceDescription').value = evidence.description;
             var _evLocEdit = document.getElementById('evidenceLocation'); if (_evLocEdit) _evLocEdit.value = evidence.location || '';
+            var _evDiscEdit = document.getElementById('evidenceDiscoverable'); if (_evDiscEdit) _evDiscEdit.value = (evidence.discoverable === false) ? 'no' : 'yes';
             
             document.getElementById('evidenceForm').classList.remove('hidden');
             document.getElementById('evidenceForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -8008,6 +8000,7 @@
             const tag = document.getElementById('evidenceTag').value;
             const description = document.getElementById('evidenceDescription').value;
             const location = (document.getElementById('evidenceLocation')?.value || '').trim();
+            const discoverable = ((document.getElementById('evidenceDiscoverable')?.value) || 'yes') !== 'no';
             
             console.log('Evidence details:', { type, tag, description, filesCount: evidenceFiles.length });
             
@@ -8019,6 +8012,7 @@
                     evidence.tag = tag;
                     evidence.description = description;
                     evidence.location = location;
+                    evidence.discoverable = discoverable;
                     evidence.lastModified = new Date().toISOString();
                 }
                 
@@ -8054,6 +8048,7 @@
                             id: Date.now(),
                             type: 'cellebrite',
                             tag: tag,
+                            discoverable: discoverable,
                             description: description,
                             location: location,
                             fileCount: result.fileCount,
@@ -8160,6 +8155,7 @@
                             id: Date.now(),
                             type: 'datapilot',
                             tag: tag,
+                            discoverable: discoverable,
                             description: description,
                             location: location,
                             // For copy mode use real file count from the copy result; for ref mode fall back to stats.
@@ -8253,6 +8249,7 @@
                             id: Date.now(),
                             type: type,
                             tag: tag,
+                            discoverable: discoverable,
                             description: description,
                             location: location,
                             fileCount: files.length,
@@ -8373,6 +8370,7 @@
                     id: Date.now(),
                     type: type,
                     tag: tag,
+                    discoverable: discoverable,
                     description: description,
                     location: location,
                     fileCount: files.length,
@@ -32200,6 +32198,12 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     <div class="flex justify-between items-center mb-6">
                         <h2 class="text-2xl font-bold text-white">📊 Analytics</h2>
                         <div class="flex gap-3">
+                            <button onclick="importAmpcaseFile()" class="px-4 py-2 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded-lg text-viper-purple transition flex items-center gap-2">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
+                                </svg>
+                                Import .ampcase
+                            </button>
                             <button onclick="uploadCDRFile()" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition flex items-center gap-2">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
@@ -32216,10 +32220,15 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             </svg>
                             <h3 class="text-2xl font-bold text-gray-300 mb-2">No CDR Data Uploaded</h3>
                             <p class="text-gray-400 mb-6">Upload Call Detail Records or Tower Dump files to begin analysis</p>
-                            <p class="text-sm text-gray-500 mb-6">Supported formats: CSV with call/SMS records, tower location data</p>
-                            <button onclick="uploadCDRFile()" class="px-6 py-3 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition">
-                                Upload First CDR File
-                            </button>
+                            <p class="text-sm text-gray-500 mb-6">Supported formats: CSV with call/SMS records, tower location data, or a geocoded AMP <span class="text-viper-purple">.ampcase</span> file</p>
+                            <div class="flex gap-3 justify-center">
+                                <button onclick="importAmpcaseFile()" class="px-6 py-3 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded-lg text-viper-purple transition">
+                                    Import .ampcase
+                                </button>
+                                <button onclick="uploadCDRFile()" class="px-6 py-3 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition">
+                                    Upload First CDR File
+                                </button>
+                            </div>
                         </div>
                     ` : `
                         <div id="analytics-workspace" class="flex-1 flex overflow-hidden">
@@ -32288,6 +32297,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         <button onclick="setAnalyticsMode('map')" class="w-full p-2 rounded text-left text-sm transition ${cdrAnalyticsMode === 'map' ? 'bg-viper-cyan/20 text-viper-cyan border border-viper-cyan' : 'bg-viper-card/50 text-gray-300 hover:bg-viper-card'}">
                             🗺️ Map View
                         </button>
+                        <button onclick="setAnalyticsMode('cross')" class="w-full p-2 rounded text-left text-sm transition ${cdrAnalyticsMode === 'cross' ? 'bg-viper-cyan/20 text-viper-cyan border border-viper-cyan' : 'bg-viper-card/50 text-gray-300 hover:bg-viper-card'}">
+                            🎯 Cross-Target
+                        </button>
                     </div>
                 </div>
                 
@@ -32335,6 +32347,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 return renderTimelineView();
             } else if (cdrAnalyticsMode === 'map') {
                 return renderMapView();
+            } else if (cdrAnalyticsMode === 'cross') {
+                return renderCrossTargetView();
             }
         }
 
@@ -32575,12 +32589,50 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 <div class="glass-card rounded-lg p-4">
                     <h3 class="text-lg font-bold text-white mb-3">🗺️ Geographic View</h3>
                     <div id="cdr-map" class="bg-viper-dark/30 rounded" style="height:450px;"></div>
+                    <div id="cdr-playback" class="mt-3"></div>
                     <div id="cdr-tower-list" class="mt-3 max-h-48 overflow-y-auto"></div>
                 </div>
             `;
         }
 
         let cdrMap = null;
+        let ampLayerGroups = {}; // datasetId -> L.layerGroup (ampcase map)
+
+        // Destination lat/lon given start point, distance (m) and bearing (deg, 0=N cw).
+        function _ampDestPoint(lat, lon, distM, bearingDeg) {
+            const R = 6378137;
+            const br = bearingDeg * Math.PI / 180;
+            const dr = distM / R;
+            const la = lat * Math.PI / 180, lo = lon * Math.PI / 180;
+            const la2 = Math.asin(Math.sin(la) * Math.cos(dr) + Math.cos(la) * Math.sin(dr) * Math.cos(br));
+            const lo2 = lo + Math.atan2(Math.sin(br) * Math.sin(dr) * Math.cos(la),
+                Math.cos(dr) - Math.sin(la) * Math.sin(la2));
+            return [la2 * 180 / Math.PI, lo2 * 180 / Math.PI];
+        }
+
+        // Build a sector-wedge polygon (arc from az-bw/2 to az+bw/2, inner->outer radius).
+        function _ampSectorLatLngs(lat, lon, az, bw, inner, outer) {
+            const beam = (bw == null || bw <= 0) ? 60 : Math.min(bw, 360);
+            const rOut = (outer == null || outer <= 0) ? 400 : outer;
+            const rIn = (inner == null || inner < 0) ? 0 : inner;
+            const start = az - beam / 2, end = az + beam / 2;
+            const steps = Math.max(6, Math.round(beam / 5));
+            const pts = [];
+            // Omni (>=360): draw a full ring/disc.
+            for (let i = 0; i <= steps; i++) {
+                const b = start + (end - start) * (i / steps);
+                pts.push(_ampDestPoint(lat, lon, rOut, b));
+            }
+            if (rIn > 0) {
+                for (let i = steps; i >= 0; i--) {
+                    const b = start + (end - start) * (i / steps);
+                    pts.push(_ampDestPoint(lat, lon, rIn, b));
+                }
+            } else if (beam < 360) {
+                pts.push([lat, lon]); // pie apex
+            }
+            return pts;
+        }
 
         function renderCDRMap() {
             const container = document.getElementById('cdr-map');
@@ -32589,7 +32641,15 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             if (!container || !currentCDRDump) return;
 
             // Clean up previous map
-            if (cdrMap) { cdrMap.remove(); cdrMap = null; }
+            if (cdrMap) { cdrMap.remove(); cdrMap = null; ampLayerGroups = {}; }
+            _ampStopPlayback();
+
+            // Geocoded dumps (ampcase, or a raw return with tower coords) get the
+            // real map — points + sector cones — instead of the faked rings.
+            if (Array.isArray(currentCDRDump.points) && currentCDRDump.points.length) {
+                renderAmpcaseMap(container);
+                return;
+            }
 
             const records = getFilteredCDRRecords();
 
@@ -32666,6 +32726,533 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
             // Fix map rendering glitch
             setTimeout(() => cdrMap.invalidateSize(), 200);
+        }
+
+        function renderAmpcaseMap(container) {
+            const dump = currentCDRDump;
+            const points = dump.points || [];
+            const datasets = dump.datasets || [];
+            const dsMeta = {};
+            datasets.forEach(d => { dsMeta[d.id] = d; });
+
+            const _ampEsc = (s) => String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+            // Center on data (fallback to demo AOI).
+            let sumLat = 0, sumLon = 0, n = 0;
+            points.forEach(p => { if (isFinite(p.lat) && isFinite(p.lon)) { sumLat += p.lat; sumLon += p.lon; n++; } });
+            const center = n ? [sumLat / n, sumLon / n] : [32.72, -96.63];
+
+            cdrMap = L.map(container, { zoomControl: true, preferCanvas: true }).setView(center, 11);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19
+            }).addTo(cdrMap);
+
+            // Group points by dataset; build a layerGroup per dataset.
+            ampLayerGroups = {};
+            const byDs = {};
+            points.forEach(p => { (byDs[p.datasetId] = byDs[p.datasetId] || []).push(p); });
+
+            const allBounds = [];
+            const visBounds = [];
+
+            Object.keys(byDs).forEach(dsId => {
+                const meta = dsMeta[dsId] || { color: '#00d9ff', visible: true, name: 'Dataset ' + dsId };
+                const color = meta.color || '#00d9ff';
+                const grp = L.layerGroup();
+                byDs[dsId].forEach(p => {
+                    const ll = [p.lat, p.lon];
+                    allBounds.push(ll);
+                    if (meta.visible !== false) visBounds.push(ll);
+
+                    const popup =
+                        (p.callout
+                            ? '<div style="white-space:pre-wrap;font-family:monospace;font-size:11px;max-width:320px">' + _ampEsc(p.callout) + '</div>'
+                            : '<strong>' + _ampEsc(p.label || meta.name) + '</strong>')
+                        + (p.accuracyM ? '<div style="font-size:11px;color:#9ca3af;margin-top:4px">Accuracy: ~' + Math.round(p.accuracyM) + ' m</div>' : '');
+
+                    if (p.sectorAz != null) {
+                        // Tower sector cone.
+                        const wedge = L.polygon(
+                            _ampSectorLatLngs(p.lat, p.lon, p.sectorAz, p.sectorBw, p.sectorInner, p.sectorOuter),
+                            { color: color, weight: 1, fillColor: color, fillOpacity: 0.18 }
+                        );
+                        wedge.bindPopup(popup);
+                        grp.addLayer(wedge);
+                        grp.addLayer(L.circleMarker(ll, { radius: 3, color: '#fff', weight: 1, fillColor: color, fillOpacity: 1 }));
+                    } else if (p.tower) {
+                        // Serving tower without sector geometry.
+                        const m = L.circleMarker(ll, { radius: 5, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 0.9 });
+                        m.bindPopup(popup);
+                        grp.addLayer(m);
+                    } else {
+                        // Device / confidence / radius point.
+                        const m = L.circleMarker(ll, { radius: 4, color: color, weight: 1, fillColor: color, fillOpacity: 0.7 });
+                        m.bindPopup(popup);
+                        grp.addLayer(m);
+                    }
+                });
+                ampLayerGroups[dsId] = grp;
+                if (meta.visible !== false) grp.addTo(cdrMap);
+            });
+
+            // Pins (case markers).
+            if (Array.isArray(dump.pins) && dump.pins.length) {
+                const pinGrp = L.layerGroup();
+                dump.pins.forEach(pin => {
+                    const m = L.circleMarker([pin.lat, pin.lon], { radius: 6, color: '#fff', weight: 2, fillColor: pin.color || '#ffd166', fillOpacity: 0.95 });
+                    m.bindPopup('<strong>📌 ' + _ampEsc(pin.name || 'Pin') + '</strong>'
+                        + (pin.address ? '<br>' + _ampEsc(pin.address) : '')
+                        + (pin.notes ? '<div style="font-size:11px;color:#9ca3af;margin-top:4px;white-space:pre-wrap">' + _ampEsc(pin.notes) + '</div>' : ''));
+                    pinGrp.addLayer(m);
+                    allBounds.push([pin.lat, pin.lon]);
+                    visBounds.push([pin.lat, pin.lon]);
+                });
+                ampLayerGroups['pins'] = pinGrp;
+                pinGrp.addTo(cdrMap);
+            }
+
+            const fitTo = visBounds.length ? visBounds : allBounds;
+            if (fitTo.length) { try { cdrMap.fitBounds(fitTo, { padding: [30, 30], maxZoom: 15 }); } catch (_) {} }
+
+            renderAmpLayerControl(dsMeta, byDs);
+            initAmpPlayback(dsMeta, byDs);
+            setTimeout(() => { try { cdrMap.invalidateSize(); } catch (_) {} }, 200);
+        }
+
+        // Layer toggle panel + integrity badge (rendered into #cdr-tower-list).
+        function renderAmpLayerControl(dsMeta, byDs) {
+            const el = document.getElementById('cdr-tower-list');
+            if (!el) return;
+            const dump = currentCDRDump;
+            const integ = dump.integrity || {};
+            const badge = integ.verified
+                ? '<span class="text-green-400 text-xs">🔒 SHA-256 verified</span>'
+                : (integ.files && integ.files.length
+                    ? '<span class="text-yellow-400 text-xs">⚠ integrity not verified</span>'
+                    : '');
+
+            const rows = Object.keys(byDs).map(dsId => {
+                const meta = dsMeta[dsId] || { color: '#00d9ff', name: 'Dataset ' + dsId, visible: true };
+                const checked = meta.visible !== false ? 'checked' : '';
+                const cnt = byDs[dsId].length;
+                return `
+                    <label class="flex items-center gap-2 px-2 py-1 bg-viper-dark/40 rounded text-xs cursor-pointer hover:bg-viper-cyan/10">
+                        <input type="checkbox" ${checked} onchange="toggleAmpDataset('${dsId}', this.checked)" class="accent-viper-cyan">
+                        <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${meta.color || '#00d9ff'}"></span>
+                        <span class="text-gray-300 flex-1 truncate" title="${(meta.name || '').replace(/"/g, '')}">${meta.name || ('Dataset ' + dsId)}</span>
+                        <span class="text-viper-cyan">${cnt.toLocaleString()}</span>
+                    </label>`;
+            }).join('');
+
+            el.innerHTML = `
+                <div class="flex justify-between items-center mb-2">
+                    <div class="text-xs text-gray-400 font-semibold">Layers (${Object.keys(byDs).length})</div>
+                    ${badge}
+                </div>
+                <div class="space-y-1">${rows}</div>
+                ${dump.ampMeta && dump.ampMeta.caseName ? `<div class="text-[10px] text-gray-500 mt-2">Source: ${(dump.ampMeta.app || 'AMP')} — ${dump.ampMeta.caseName}</div>` : ''}
+            `;
+        }
+
+        function toggleAmpDataset(dsId, on) {
+            const grp = ampLayerGroups[dsId];
+            if (!grp || !cdrMap) return;
+            if (on) grp.addTo(cdrMap); else cdrMap.removeLayer(grp);
+        }
+
+        // ── Timeline playback (map animation) ───────────────────────────────
+        // Traces ONE phone number's movement (points merged across that target's
+        // datasets), with even pacing, a comet tail and an optional chase camera.
+        let ampPB = {
+            raf: null, playing: false, prog: 0, n: 0,
+            baseSec: 120, speedMult: 1, chase: true,
+            trackKey: null, track: [], tracks: {}, _color: '#00e5ff',
+            marker: null, tail: null, lastFrame: 0
+        };
+
+        function _ampStopPlayback() {
+            if (ampPB.raf) { cancelAnimationFrame(ampPB.raf); ampPB.raf = null; }
+            ampPB.playing = false;
+            ampPB.marker = null; ampPB.tail = null;
+            ampPB.track = []; ampPB.tracks = {}; ampPB.prog = 0; ampPB.n = 0;
+        }
+
+        function _ampBuildTrack(points) {
+            return (points || [])
+                .filter(p => p.tUtcMs != null && isFinite(p.lat) && isFinite(p.lon))
+                .map(p => ({ t: p.tUtcMs, lat: p.lat, lon: p.lon, label: p.label, callout: p.callout }))
+                .sort((a, b) => a.t - b.t);
+        }
+
+        function _ampTrackColor(key) {
+            const ds = (currentCDRDump.datasets || []).find(d => String(d.target || '').trim() === String(key));
+            return (ds && ds.color) || '#00e5ff';
+        }
+
+        // Build a playback track per PHONE NUMBER (merged across that target's
+        // datasets) so you can trace one number's movement. Falls back to a
+        // per-dataset track when a layer has no target number.
+        function initAmpPlayback(dsMeta, byDs) {
+            const el = document.getElementById('cdr-playback');
+            if (!el) return;
+            _ampStopPlayback();
+
+            const dump = currentCDRDump;
+            const dsById = {}; (dump.datasets || []).forEach(d => { dsById[d.id] = d; });
+            const groups = {};
+            (dump.points || []).forEach(p => {
+                const ds = dsById[p.datasetId];
+                const tgt = ds && ds.target ? String(ds.target).trim() : '';
+                const key = tgt || ((ds && ds.name) || ('Dataset ' + p.datasetId));
+                if (!groups[key]) groups[key] = { isPhone: !!tgt, pts: [] };
+                groups[key].pts.push(p);
+            });
+
+            const tracks = {};
+            Object.keys(groups).forEach(key => {
+                const tr = _ampBuildTrack(groups[key].pts);
+                if (tr.length >= 2) tracks[key] = tr;
+            });
+
+            ampPB.tracks = tracks;
+            const keys = Object.keys(tracks).sort((a, b) => tracks[b].length - tracks[a].length);
+            if (!keys.length) { el.innerHTML = '<div class="text-xs text-gray-500 text-center py-2">No timestamped track to play back</div>'; return; }
+
+            const best = keys[0];
+            ampPB.trackKey = best;
+            ampPB.track = tracks[best];
+            ampPB.n = ampPB.track.length;
+            ampPB.prog = 0;
+            ampPB._color = _ampTrackColor(best);
+            ampPB.speedMult = 1;
+
+            const opts = keys.map(k => {
+                const isPhone = groups[k].isPhone;
+                return `<option value="${String(k).replace(/"/g, '')}" ${k === best ? 'selected' : ''}>${isPhone ? '📱 ' + k : k} (${tracks[k].length} pts)</option>`;
+            }).join('');
+
+            el.innerHTML = `
+                <div class="bg-viper-dark/50 border border-viper-cyan/20 rounded-lg p-3">
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <button id="cdr-play-btn" onclick="ampTogglePlay()" class="w-9 h-9 flex items-center justify-center bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded text-viper-cyan text-sm">▶</button>
+                        <div class="flex items-center gap-1">
+                            <span class="text-xs text-gray-400">Trace</span>
+                            <select onchange="ampSetTrack(this.value)" class="px-2 py-1 bg-viper-card border border-gray-600 rounded text-white text-xs max-w-[240px]" title="Phone number / track to follow">
+                                ${opts}
+                            </select>
+                        </div>
+                        <select onchange="ampSetSpeed(this.value)" class="px-2 py-1 bg-viper-card border border-gray-600 rounded text-white text-xs" title="Speed">
+                            <option value="0.25">0.25×</option>
+                            <option value="0.5">0.5×</option>
+                            <option value="1" selected>1×</option>
+                            <option value="2">2×</option>
+                            <option value="4">4×</option>
+                            <option value="8">8×</option>
+                        </select>
+                        <label class="flex items-center gap-1 text-xs text-gray-300 cursor-pointer" title="Keep the playhead centered">
+                            <input type="checkbox" ${ampPB.chase ? 'checked' : ''} onchange="ampSetChase(this.checked)" class="accent-viper-cyan"> Chase
+                        </label>
+                        <span id="cdr-time-label" class="text-xs font-mono text-viper-cyan ml-auto"></span>
+                    </div>
+                    <input id="cdr-scrub" type="range" min="0" max="1000" value="0" step="1" oninput="ampScrub(this.value)" class="w-full mt-2 accent-viper-cyan">
+                </div>
+            `;
+            _ampRenderPlayhead();
+        }
+
+        function ampSetTrack(key) {
+            const tr = ampPB.tracks[key];
+            if (!tr) return;
+            ampPB.trackKey = key;
+            ampPB.track = tr;
+            ampPB.n = tr.length;
+            ampPB.prog = 0;
+            ampPB._color = _ampTrackColor(key);
+            if (ampPB.tail) { try { cdrMap.removeLayer(ampPB.tail); } catch (_) {} ampPB.tail = null; }
+            const s = document.getElementById('cdr-scrub'); if (s) s.value = 0;
+            _ampRenderPlayhead();
+        }
+
+        function ampSetSpeed(mult) { ampPB.speedMult = parseFloat(mult) || 1; }
+        function ampSetChase(on) { ampPB.chase = !!on; }
+
+        function ampScrub(v) {
+            ampPB.prog = (parseFloat(v) / 1000) * Math.max(0, ampPB.n - 1);
+            _ampRenderPlayhead();
+        }
+
+        function ampTogglePlay() {
+            if (!ampPB.track.length) return;
+            ampPB.playing = !ampPB.playing;
+            const btn = document.getElementById('cdr-play-btn');
+            if (btn) btn.textContent = ampPB.playing ? '⏸' : '▶';
+            if (ampPB.playing) {
+                if (ampPB.prog >= ampPB.n - 1) ampPB.prog = 0; // restart at end
+                ampPB.lastFrame = performance.now();
+                ampPB.raf = requestAnimationFrame(_ampTick);
+            } else if (ampPB.raf) {
+                cancelAnimationFrame(ampPB.raf); ampPB.raf = null;
+            }
+        }
+
+        // Even pacing: advance a fixed number of track POINTS per second, so the
+        // playhead moves at a constant visual speed regardless of time gaps.
+        // Full track plays in baseSec at 1× (≈2 min); speed scales that.
+        function _ampTick(now) {
+            if (!ampPB.playing || !cdrMap || !document.getElementById('cdr-map')) { ampPB.raf = null; ampPB.playing = false; return; }
+            const dtReal = (now - ampPB.lastFrame) / 1000;
+            ampPB.lastFrame = now;
+            const pointsPerSec = Math.max(1, ampPB.n - 1) / ampPB.baseSec;
+            ampPB.prog += pointsPerSec * ampPB.speedMult * dtReal;
+            if (ampPB.prog >= ampPB.n - 1) {
+                ampPB.prog = ampPB.n - 1;
+                ampPB.playing = false;
+                const btn = document.getElementById('cdr-play-btn'); if (btn) btn.textContent = '▶';
+                _ampRenderPlayhead();
+                ampPB.raf = null;
+                return;
+            }
+            _ampRenderPlayhead();
+            ampPB.raf = requestAnimationFrame(_ampTick);
+        }
+
+        function _ampRenderPlayhead() {
+            if (!cdrMap || !ampPB.track.length) return;
+            const tr = ampPB.track, n = tr.length;
+            const prog = Math.max(0, Math.min(ampPB.prog, n - 1));
+            const i = Math.floor(prog), f = prog - i;
+            const a = tr[i], b = tr[Math.min(i + 1, n - 1)];
+            const lat = a.lat + (b.lat - a.lat) * f;
+            const lon = a.lon + (b.lon - a.lon) * f;
+            const t = a.t + (b.t - a.t) * f;
+            const color = ampPB._color || '#00e5ff';
+
+            // Comet tail: last N points up to current index (+ interpolated head).
+            const TAIL = 150;
+            const from = Math.max(0, i - TAIL);
+            const tailPts = tr.slice(from, i + 1).map(p => [p.lat, p.lon]);
+            tailPts.push([lat, lon]);
+            if (!ampPB.tail) {
+                ampPB.tail = L.polyline(tailPts, { color: color, weight: 3, opacity: 0.85 }).addTo(cdrMap);
+            } else {
+                ampPB.tail.setLatLngs(tailPts);
+                ampPB.tail.setStyle({ color: color });
+            }
+
+            const ll = [lat, lon];
+            if (!ampPB.marker) {
+                ampPB.marker = L.circleMarker(ll, { radius: 8, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1 }).addTo(cdrMap);
+            } else {
+                ampPB.marker.setLatLng(ll);
+                ampPB.marker.setStyle({ fillColor: color });
+            }
+            if (ampPB.chase) { try { cdrMap.panTo(ll, { animate: false }); } catch (_) {} }
+
+            const lbl = document.getElementById('cdr-time-label');
+            if (lbl) { let s = ''; try { s = new Date(t).toLocaleString(); } catch (_) { s = String(Math.round(t)); } lbl.textContent = s; }
+            const scrub = document.getElementById('cdr-scrub');
+            if (scrub && document.activeElement !== scrub) {
+                scrub.value = Math.round((prog / Math.max(1, n - 1)) * 1000);
+            }
+        }
+
+        // ── Cross-target analytics (case-wide, across all dumps) ────────────
+        function _cdrNormPhone(x) {
+            if (x == null) return '';
+            let d = String(x).replace(/\D/g, '');
+            if (d.length === 11 && d[0] === '1') d = d.slice(1);
+            return d.length > 10 ? d.slice(-10) : d;
+        }
+        function _cdrNamesKey() { return 'viperCdrNames_' + ((currentCase && currentCase.caseNumber) || 'x'); }
+        function getCdrNames() { try { return JSON.parse(localStorage.getItem(_cdrNamesKey()) || '{}'); } catch (_) { return {}; } }
+        function setCdrName(norm, name) {
+            const m = getCdrNames();
+            if (name && name.trim()) m[norm] = name.trim(); else delete m[norm];
+            try { localStorage.setItem(_cdrNamesKey(), JSON.stringify(m)); } catch (_) {}
+        }
+        function renameCdrContact(norm, name) {
+            setCdrName(norm, name);
+            if (typeof showToast === 'function') showToast(name && name.trim() ? 'Contact named' : 'Name cleared', 'success');
+            const c = document.getElementById('analytics-center-panel');
+            if (c) c.innerHTML = renderCrossTargetView();
+        }
+
+        function buildTowerDumpCrossMatch(dumps, nameMap) {
+            const dev = {};
+            dumps.forEach(d => {
+                (d.analyses || []).forEach(an => {
+                    (an.records || []).forEach(rec => {
+                        const phone = _cdrNormPhone(rec.Phone || rec.phone || '');
+                        const imei = rec.Imei || rec.IMEI || '';
+                        const imsi = rec.Imsi || rec.IMSI || '';
+                        const key = phone || imei || imsi;
+                        if (!key) return;
+                        const loc = (rec.LocationId != null ? rec.LocationId : rec.locationId);
+                        if (!dev[key]) dev[key] = { phone, imei, imsi, locs: new Set(), count: 0 };
+                        if (loc != null) dev[key].locs.add(String(loc));
+                        dev[key].count++;
+                    });
+                });
+            });
+            return Object.values(dev)
+                .filter(x => x.locs.size >= 2)
+                .map(x => ({ phone: x.phone, name: (nameMap[x.phone] || ''), imei: x.imei, imsi: x.imsi, locations: x.locs.size, hits: x.count }))
+                .sort((a, b) => b.locations - a.locations || b.hits - a.hits);
+        }
+
+        function buildCrossTargetData() {
+            const dumps = getCDRDumpsForCase();
+            const manual = getCdrNames();
+
+            // Merged known-name map (ampcase contacts first, manual overrides).
+            const nameMap = {};
+            dumps.forEach(d => {
+                if (d.contacts) Object.keys(d.contacts).forEach(k => {
+                    const n = _cdrNormPhone(k);
+                    if (n && d.contacts[k] && !nameMap[n]) nameMap[n] = d.contacts[k];
+                });
+            });
+            Object.keys(manual).forEach(n => { nameMap[n] = manual[n]; });
+
+            // Targets from dataset metadata across all dumps.
+            const targets = {};
+            dumps.forEach(d => {
+                (d.datasets || []).forEach(ds => {
+                    const t = _cdrNormPhone(ds.target);
+                    if (!t) return;
+                    if (!targets[t]) targets[t] = { display: ds.target, norm: t, imeis: new Set(), imsis: new Set(), sources: new Set(), contacts: new Map() };
+                    if (ds.imei) targets[t].imeis.add(String(ds.imei));
+                    if (ds.imsi) targets[t].imsis.add(String(ds.imsi));
+                    targets[t].sources.add(d.id);
+                });
+            });
+
+            // Contacts per target from records (other party).
+            dumps.forEach(d => {
+                const dsById = {}; (d.datasets || []).forEach(ds => { dsById[ds.id] = ds; });
+                (d.records || []).forEach(r => {
+                    if (r.datasetId == null || !dsById[r.datasetId]) return;
+                    const tnorm = _cdrNormPhone(dsById[r.datasetId].target);
+                    const a = _cdrNormPhone(r.phoneA), b = _cdrNormPhone(r.phoneB);
+                    const other = (a === tnorm) ? b : (b === tnorm ? a : (b || a));
+                    if (!tnorm || !other || other === tnorm || !targets[tnorm]) return;
+                    const m = targets[tnorm].contacts;
+                    m.set(other, (m.get(other) || 0) + 1);
+                });
+            });
+
+            // Common contacts: numbers contacted by >=2 distinct targets.
+            const contactToTargets = {};
+            Object.values(targets).forEach(tg => {
+                tg.contacts.forEach((cnt, other) => {
+                    (contactToTargets[other] = contactToTargets[other] || []).push({ target: tg.norm, display: tg.display, count: cnt });
+                });
+            });
+            const common = Object.keys(contactToTargets)
+                .filter(n => contactToTargets[n].length >= 2)
+                .map(n => ({ number: n, name: nameMap[n] || '', targets: contactToTargets[n], total: contactToTargets[n].reduce((s, x) => s + x.count, 0) }))
+                .sort((a, b) => b.targets.length - a.targets.length || b.total - a.total);
+
+            // Device correlation: targets sharing an IMEI or IMSI.
+            const byImei = {}, byImsi = {};
+            Object.values(targets).forEach(tg => {
+                tg.imeis.forEach(e => { (byImei[e] = byImei[e] || []).push(tg.display); });
+                tg.imsis.forEach(e => { (byImsi[e] = byImsi[e] || []).push(tg.display); });
+            });
+            const devMatches = [];
+            Object.keys(byImei).forEach(e => { const u = [...new Set(byImei[e])]; if (u.length > 1) devMatches.push({ type: 'IMEI', id: e, targets: u }); });
+            Object.keys(byImsi).forEach(e => { const u = [...new Set(byImsi[e])]; if (u.length > 1) devMatches.push({ type: 'IMSI', id: e, targets: u }); });
+
+            const towerLeads = buildTowerDumpCrossMatch(dumps, nameMap);
+
+            return { targets, common, devMatches, towerLeads, nameMap, targetCount: Object.keys(targets).length, dumpCount: dumps.length };
+        }
+
+        function renderCrossTargetView() {
+            const data = buildCrossTargetData();
+            const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            const fmtPhone = n => (n && n.length === 10) ? `(${n.slice(0, 3)}) ${n.slice(3, 6)}-${n.slice(6)}` : (n || '—');
+
+            const targetChips = Object.values(data.targets)
+                .map(t => `<span class="px-2 py-0.5 rounded bg-viper-cyan/15 text-viper-cyan text-xs font-mono">${esc(t.display)}</span>`).join(' ');
+
+            const commonRows = data.common.slice(0, 300).map(c => `
+                <tr class="border-b border-gray-700/40 hover:bg-viper-cyan/5">
+                    <td class="px-2 py-1 font-mono text-gray-200 whitespace-nowrap">${fmtPhone(c.number)}</td>
+                    <td class="px-2 py-1"><input value="${esc(c.name)}" onchange="renameCdrContact('${c.number}', this.value)" placeholder="name…" class="w-28 bg-viper-card/60 border border-gray-600 rounded px-1 py-0.5 text-xs text-white focus:border-viper-cyan outline-none"></td>
+                    <td class="px-2 py-1 text-center"><span class="px-2 py-0.5 rounded bg-viper-orange/20 text-viper-orange text-xs font-semibold">${c.targets.length}</span></td>
+                    <td class="px-2 py-1 text-xs text-gray-400">${c.targets.map(t => esc(t.display) + ' <span class="text-gray-500">(' + t.count + ')</span>').join(', ')}</td>
+                    <td class="px-2 py-1 text-center text-viper-cyan">${c.total}</td>
+                </tr>`).join('');
+
+            const devRows = data.devMatches.map(m => `
+                <tr class="border-b border-gray-700/40">
+                    <td class="px-2 py-1 text-xs"><span class="px-2 py-0.5 rounded bg-viper-purple/20 text-viper-purple font-semibold">${m.type}</span></td>
+                    <td class="px-2 py-1 font-mono text-gray-300 text-xs">${esc(m.id)}</td>
+                    <td class="px-2 py-1 text-xs text-gray-400">${m.targets.map(esc).join(', ')}</td>
+                </tr>`).join('');
+
+            const towerRows = data.towerLeads.slice(0, 300).map(x => `
+                <tr class="border-b border-gray-700/40 hover:bg-viper-cyan/5">
+                    <td class="px-2 py-1 font-mono text-gray-200 whitespace-nowrap">${fmtPhone(x.phone) || '—'}</td>
+                    <td class="px-2 py-1"><input value="${esc(x.name)}" onchange="renameCdrContact('${x.phone}', this.value)" placeholder="name…" class="w-28 bg-viper-card/60 border border-gray-600 rounded px-1 py-0.5 text-xs text-white focus:border-viper-cyan outline-none" ${x.phone ? '' : 'disabled'}></td>
+                    <td class="px-2 py-1 font-mono text-gray-400 text-xs">${esc(x.imei || '')}</td>
+                    <td class="px-2 py-1 text-center"><span class="px-2 py-0.5 rounded bg-viper-orange/20 text-viper-orange text-xs font-semibold">${x.locations} sites</span></td>
+                    <td class="px-2 py-1 text-center text-viper-cyan">${x.hits}</td>
+                </tr>`).join('');
+
+            const noTargets = data.targetCount < 2;
+
+            return `
+                <div class="space-y-5">
+                    <div>
+                        <h3 class="text-xl font-bold text-white mb-1">🎯 Cross-Target Analysis</h3>
+                        <p class="text-xs text-gray-400">Case-wide across ${data.dumpCount} dump${data.dumpCount === 1 ? '' : 's'} · ${data.targetCount} target${data.targetCount === 1 ? '' : 's'}</p>
+                        ${targetChips ? `<div class="mt-2 flex flex-wrap gap-1">${targetChips}</div>` : ''}
+                    </div>
+
+                    <div class="glass-card rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <h4 class="text-sm font-semibold text-viper-cyan">📇 Common Contacts <span class="text-gray-500 font-normal">— numbers shared by ≥2 targets</span></h4>
+                            <span class="text-xs text-gray-400">${data.common.length} found</span>
+                        </div>
+                        ${noTargets
+                    ? `<div class="text-gray-400 text-sm py-4 text-center">Needs ≥2 targets with dataset metadata (import an .ampcase, or multiple targets). Currently ${data.targetCount}.</div>`
+                    : (data.common.length
+                        ? `<div class="overflow-x-auto"><table class="w-full text-sm">
+                                    <thead><tr class="text-left text-xs text-gray-500 border-b border-gray-600">
+                                        <th class="px-2 py-1">Number</th><th class="px-2 py-1">Name</th><th class="px-2 py-1 text-center">Targets</th><th class="px-2 py-1">Who / count</th><th class="px-2 py-1 text-center">Total</th>
+                                    </tr></thead><tbody>${commonRows}</tbody></table></div>`
+                        : `<div class="text-gray-400 text-sm py-4 text-center">No numbers shared between targets.</div>`)}
+                    </div>
+
+                    <div class="glass-card rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <h4 class="text-sm font-semibold text-viper-cyan">📱 Device Correlation <span class="text-gray-500 font-normal">— targets sharing an IMEI/IMSI</span></h4>
+                            <span class="text-xs text-gray-400">${data.devMatches.length} found</span>
+                        </div>
+                        ${data.devMatches.length
+                    ? `<div class="overflow-x-auto"><table class="w-full text-sm">
+                                <thead><tr class="text-left text-xs text-gray-500 border-b border-gray-600"><th class="px-2 py-1">Type</th><th class="px-2 py-1">Identifier</th><th class="px-2 py-1">Shared by</th></tr></thead>
+                                <tbody>${devRows}</tbody></table></div>`
+                    : `<div class="text-gray-400 text-sm py-4 text-center">No shared device identifiers across targets.</div>`}
+                    </div>
+
+                    <div class="glass-card rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <h4 class="text-sm font-semibold text-viper-cyan">📡 Tower-Dump Cross-Match <span class="text-gray-500 font-normal">— devices seen at ≥2 searched locations</span></h4>
+                            <span class="text-xs text-gray-400">${data.towerLeads.length} leads</span>
+                        </div>
+                        ${data.towerLeads.length
+                    ? `<div class="overflow-x-auto"><table class="w-full text-sm">
+                                <thead><tr class="text-left text-xs text-gray-500 border-b border-gray-600">
+                                    <th class="px-2 py-1">Number</th><th class="px-2 py-1">Name</th><th class="px-2 py-1">IMEI</th><th class="px-2 py-1 text-center">Locations</th><th class="px-2 py-1 text-center">Hits</th>
+                                </tr></thead><tbody>${towerRows}</tbody></table></div>`
+                    : `<div class="text-gray-400 text-sm py-4 text-center">No tower-dump analyses with multi-location devices. (Populated from AMP tower-dump / area-search analyses.)</div>`}
+                    </div>
+                </div>
+            `;
         }
 
         function renderTowerList(towers) {
@@ -32970,6 +33557,75 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             input.click();
         }
 
+        // Import a geocoded AMP .ampcase file (GeoPackage bundle) via main process.
+        async function importAmpcaseFile() {
+            if (!window.electronAPI || !window.electronAPI.ampcasePick) {
+                showToast('AMP import requires the desktop app', 'error');
+                return;
+            }
+            if (!currentCase || !currentCase.caseNumber) {
+                showToast('Open a case first', 'error');
+                return;
+            }
+            try {
+                const pick = await window.electronAPI.ampcasePick();
+                if (!pick || !pick.success) {
+                    if (pick && pick.error) showToast('Could not open picker: ' + pick.error, 'error');
+                    return;
+                }
+                const filePath = pick.path;
+                const baseName = String(filePath).split(/[\\/]/).pop() || 'AMP case';
+                showToast('Parsing ' + baseName + ' …', 'info');
+                if (typeof showLoadingIndicator === 'function') showLoadingIndicator('Importing AMP case…');
+
+                const res = await window.electronAPI.ampcaseImport({ filePath });
+                if (typeof hideLoadingIndicator === 'function') hideLoadingIndicator();
+                if (!res || !res.success) {
+                    showToast('Import failed: ' + ((res && res.error) || 'unknown error'), 'error');
+                    return;
+                }
+                const data = res.data;
+
+                const dump = {
+                    id: `dump_${Date.now()}`,
+                    name: (data.ampMeta && data.ampMeta.caseName) || baseName.replace(/\.ampcase$/i, ''),
+                    uploadDate: new Date().toISOString(),
+                    format: 'ampcase',
+                    records: data.records || [],
+                    stats: calculateCDRStatistics(data.records || []),
+                    points: data.points || [],
+                    datasets: data.datasets || [],
+                    contacts: data.contacts || {},
+                    pins: data.pins || [],
+                    analyses: data.analyses || [],
+                    ampMeta: data.ampMeta || {},
+                    integrity: data.integrity || {},
+                    hasTowerData: true,
+                    hasGeo: (data.points || []).length > 0
+                };
+
+                const dumps = getCDRDumpsForCase();
+                dumps.push(dump);
+                await saveCDRDumps(dumps);
+                currentCDRDump = dump;
+                cdrAnalyticsMode = dump.hasGeo ? 'map' : 'dashboard';
+
+                const verified = dump.integrity && dump.integrity.verified;
+                showToast(
+                    `Imported ${dump.stats.totalRecords.toLocaleString()} records, ${(dump.points || []).length.toLocaleString()} mapped points`
+                    + (verified ? ' — SHA-256 verified' : ''),
+                    'success'
+                );
+                try { audit('cdr_ampcase_import', { name: dump.name, records: dump.stats.totalRecords, points: (dump.points || []).length, verified: !!verified }); } catch (_) {}
+
+                renderTabContent('analytics');
+            } catch (e) {
+                if (typeof hideLoadingIndicator === 'function') hideLoadingIndicator();
+                console.error('importAmpcaseFile error:', e);
+                showToast('Import error: ' + (e.message || e), 'error');
+            }
+        }
+
         function parseCDRFile(file) {
             // Read the file as text first to detect format
             const reader = new FileReader();
@@ -32988,6 +33644,17 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 // Store for later use
                 window._cdrRefLat = parsedRefLat;
                 window._cdrRefLon = parsedRefLon;
+
+                // Carrier hint from the first few lines (best-effort; used only
+                // to label the mapping modal — mapping itself is generic).
+                const head = lines.slice(0, 8).join('\n').toLowerCase();
+                let carrierHint = '';
+                if (/at&t|att\b|cingular/.test(head)) carrierHint = 'AT&T';
+                else if (/verizon|vzw/.test(head)) carrierHint = 'Verizon';
+                else if (/t-mobile|tmobile|t mobile|metropcs/.test(head)) carrierHint = 'T-Mobile';
+                else if (/us ?cellular|uscc/.test(head)) carrierHint = 'US Cellular';
+                else if (/sprint/.test(head)) carrierHint = 'Sprint';
+                window._cdrCarrierHint = carrierHint;
 
                 // Detect if this is AT&T format (has info lines before header)
                 let headerLineIndex = 0;
@@ -33032,15 +33699,60 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             reader.readAsText(file);
         }
 
+        // Generic multi-carrier column auto-detection. Maps common header
+        // variants across AT&T / Verizon / T-Mobile / US Cellular (and generic
+        // CDR/tower-dump exports) to VIPER fields, including geo columns so raw
+        // returns can plot on the real map. Exact matches win over substring;
+        // each source header is assigned to at most one field.
+        function autoDetectCdrColumns(headers) {
+            const defs = {
+                // Geo first so 'latitude'/'azimuth' aren't grabbed by towerA.
+                towerLat:  { exact: ['lat', 'latitude'],                     inc: ['tower lat', 'cell lat', 'site lat', 'latitude'] },
+                towerLon:  { exact: ['lon', 'lng', 'long', 'longitude'],     inc: ['tower lon', 'cell lon', 'site lon', 'longitude'] },
+                azimuth:   { exact: ['az', 'azimuth', 'bearing'],            inc: ['antenna azimuth', 'sector azimuth', 'azimuth'] },
+                beamwidth: { exact: ['bw', 'beamwidth'],                     inc: ['beam width', 'sector width', 'antenna beamwidth'] },
+                phoneA:    { exact: ['from', 'ani', 'mdn', 'msisdn', 'a party', 'a-number'], inc: ['originating number', 'origination number', 'calling number', 'caller', 'subscriber number', 'target number', 'orig number'] },
+                phoneB:    { exact: ['to', 'destination', 'b party', 'b-number'], inc: ['terminating number', 'dialed number', 'called number', 'callee', 'other party', 'dialed digits', 'destination number', 'term number'] },
+                datetime:  { exact: [], inc: ['date/time', 'date time', 'datetime', 'timestamp', 'local date', 'call datetime', 'event datetime', 'start datetime', 'date and time'] },
+                date:      { exact: ['date'], inc: ['conn date', 'call date', 'event date', 'start date', 'begin date', 'origination date', 'orig date'] },
+                time:      { exact: ['time'], inc: ['conn time', 'call time', 'event time', 'start time', 'orig time'] },
+                callType:  { exact: ['type', 'feature', 'direction'], inc: ['call type', 'activity type', 'usage type', 'record type', 'call direction', 'event type'] },
+                duration:  { exact: ['minutes', 'seconds', 'duration', 'dur', 'elapsed'], inc: ['call duration', 'duration (', 'elapsed time', 'duration in', 'total minutes', 'call length'] },
+                imei:      { exact: ['imei'], inc: ['equipment id', 'device imei', 'imei/'] },
+                imsi:      { exact: ['imsi'], inc: ['subscriber id', 'device imsi', 'imsi/'] },
+                towerA:    { exact: ['cell', 'cellid', 'cell id', 'cgi', 'ecgi', 'lac', 'cid', 'sector', 'site', 'tower', 'enodeb'], inc: ['cell site', 'serving cell', 'first cell', 'originating cell', 'cell identity', 'tower id', 'site id', 'cgi id', 'cell tower', 'start cell'] },
+                towerB:    { exact: [], inc: ['end cell', 'terminating cell', 'last cell', 'second cell'] },
+            };
+            const norm = headers.map(h => ({ h, l: String(h == null ? '' : h).trim().toLowerCase() }));
+            const used = new Set();
+            const out = {};
+            // Pass 1: exact matches.
+            for (const [field, d] of Object.entries(defs)) {
+                for (const { h, l } of norm) {
+                    if (used.has(h) || !l) continue;
+                    if (d.exact.includes(l)) { out[field] = h; used.add(h); break; }
+                }
+            }
+            // Pass 2: substring matches.
+            for (const [field, d] of Object.entries(defs)) {
+                if (out[field]) continue;
+                for (const { h, l } of norm) {
+                    if (used.has(h) || !l) continue;
+                    if (d.inc.some(s => l.includes(s))) { out[field] = h; used.add(h); break; }
+                }
+            }
+            return out;
+        }
+
         function showColumnMappingModal(fileName, parseResults, formatType) {
             const headers = parseResults.data[0];
             const sampleRows = parseResults.data.slice(1, 4);
-            
-            // Auto-detect AT&T column mappings
-            const autoMappings = {};
+
+            // Generic auto-detect for every format, then layer AT&T specifics.
+            const autoMappings = autoDetectCdrColumns(headers);
             if (formatType === 'ATT') {
-                headers.forEach((header, idx) => {
-                    const h = header.toLowerCase();
+                headers.forEach((header) => {
+                    const h = String(header).toLowerCase();
                     if (h === 'source') autoMappings.source = header;
                     if (h.includes('originating number')) autoMappings.phoneA = header;
                     if (h.includes('terminating number') || h.includes('dialed number')) autoMappings.phoneB = header;
@@ -33053,6 +33765,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     if (h.includes('tower') || h.includes('lac') || h.includes('cid')) autoMappings.towerA = header;
                 });
             }
+            const carrierLabel = (window._cdrCarrierHint || '').trim();
+            const detectedCount = Object.keys(autoMappings).length;
             
             const modalHTML = `
                 <div id="columnMappingModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id === 'columnMappingModal') closeColumnMappingModal()">
@@ -33088,20 +33802,34 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                 <div class="text-viper-cyan text-sm font-semibold mb-1">✓ AT&T Format Detected</div>
                                 <div class="text-gray-300 text-xs">Columns auto-mapped for AT&T tower dump format</div>
                             </div>
-                        ` : ''}
+                        ` : `
+                            <div class="bg-viper-cyan/10 border border-viper-cyan rounded p-3 mb-4">
+                                <div class="text-viper-cyan text-sm font-semibold mb-1">✓ ${carrierLabel ? carrierLabel + ' format' : 'Auto-detected'} — ${detectedCount} column${detectedCount === 1 ? '' : 's'} pre-mapped</div>
+                                <div class="text-gray-300 text-xs">Review the mapping below. Latitude/Longitude/Azimuth are optional — fill them to plot this return on the map.</div>
+                            </div>
+                        `}
                         
                         <form onsubmit="submitColumnMapping(event, '${fileName}', '${formatType}')">
                             <div class="grid grid-cols-2 gap-4 mb-6">
                                 ${renderColumnMappingField('Phone A (Caller)', 'phoneA', headers, true, autoMappings.phoneA)}
                                 ${renderColumnMappingField('Phone B (Callee)', 'phoneB', headers, true, autoMappings.phoneB)}
-                                ${renderColumnMappingField('Date', 'date', headers, true, autoMappings.date)}
-                                ${renderColumnMappingField('Time', 'time', headers, true, autoMappings.time)}
+                                ${renderColumnMappingField('Date/Time (combined, optional)', 'datetime', headers, false, autoMappings.datetime)}
+                                ${renderColumnMappingField('Date', 'date', headers, !autoMappings.datetime, autoMappings.date)}
+                                ${renderColumnMappingField('Time', 'time', headers, false, autoMappings.time)}
                                 ${renderColumnMappingField('Call Type', 'callType', headers, false, autoMappings.callType)}
                                 ${renderColumnMappingField('Duration', 'duration', headers, false, autoMappings.duration)}
                                 ${renderColumnMappingField('IMEI', 'imei', headers, false, autoMappings.imei)}
                                 ${renderColumnMappingField('IMSI', 'imsi', headers, false, autoMappings.imsi)}
                                 ${renderColumnMappingField('Tower/Cell ID', 'towerA', headers, false, autoMappings.towerA)}
-                                ${renderColumnMappingField('Tower B (optional)', 'towerB', headers, false)}
+                                ${renderColumnMappingField('Tower B (optional)', 'towerB', headers, false, autoMappings.towerB)}
+                            </div>
+
+                            <div class="text-xs font-semibold text-viper-cyan mb-2 mt-2">📍 Geolocation (optional — enables map plotting)</div>
+                            <div class="grid grid-cols-2 gap-4 mb-6">
+                                ${renderColumnMappingField('Tower Latitude', 'towerLat', headers, false, autoMappings.towerLat)}
+                                ${renderColumnMappingField('Tower Longitude', 'towerLon', headers, false, autoMappings.towerLon)}
+                                ${renderColumnMappingField('Azimuth (°)', 'azimuth', headers, false, autoMappings.azimuth)}
+                                ${renderColumnMappingField('Beamwidth (°)', 'beamwidth', headers, false, autoMappings.beamwidth)}
                             </div>
                             
                             <div class="flex justify-end gap-3">
@@ -33200,53 +33928,121 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         }
 
         async function processCDRData(fileName, mapping, rawData, formatType) {
+            // A duration column literally named in minutes is treated as minutes.
+            const durIsMinutes = formatType === 'ATT'
+                || /min/i.test(String(mapping.duration || ''));
+            const num = (v) => { const n = parseFloat(String(v).replace(/[^0-9.\-]/g, '')); return isFinite(n) ? n : null; };
+
             // Normalize and index the data
             const normalized = rawData.map((row, index) => {
-                // Parse duration - AT&T uses minutes (decimal), others use seconds
+                // Parse duration - some carriers report minutes (decimal), others seconds.
                 let durationSeconds = 0;
                 if (row[mapping.duration]) {
                     const durationValue = parseFloat(row[mapping.duration]);
-                    if (formatType === 'ATT') {
-                        durationSeconds = Math.round(durationValue * 60); // Convert minutes to seconds
-                    } else {
-                        durationSeconds = Math.round(durationValue);
+                    if (isFinite(durationValue)) {
+                        durationSeconds = Math.round(durIsMinutes ? durationValue * 60 : durationValue);
                     }
                 }
-                
+
                 // For AT&T: combine Source (Voice/SMS/Data) + Call Type (MO/MT)
                 const rawCallType = row[mapping.callType] || '';
                 const rawSource = mapping.source ? (row[mapping.source] || '') : '';
                 const callType = normalizeCallType(rawCallType, formatType, rawSource);
 
+                // Timestamp: prefer a combined date/time column when mapped.
+                let timestamp;
+                if (mapping.datetime && row[mapping.datetime]) {
+                    const parsed = new Date(row[mapping.datetime]);
+                    timestamp = isNaN(parsed) ? parseTimestamp(row[mapping.date], row[mapping.time]) : parsed.toISOString();
+                } else {
+                    timestamp = parseTimestamp(row[mapping.date], row[mapping.time]);
+                }
+
+                // Optional geo columns.
+                const towerLat = mapping.towerLat ? num(row[mapping.towerLat]) : null;
+                const towerLon = mapping.towerLon ? num(row[mapping.towerLon]) : null;
+                const azimuth = mapping.azimuth ? num(row[mapping.azimuth]) : null;
+                const beamwidth = mapping.beamwidth ? num(row[mapping.beamwidth]) : null;
+
                 return {
                     id: `cdr_${Date.now()}_${index}`,
                     phoneA: row[mapping.phoneA],
                     phoneB: row[mapping.phoneB],
-                    date: row[mapping.date],
-                    time: row[mapping.time],
-                    timestamp: parseTimestamp(row[mapping.date], row[mapping.time]),
+                    date: mapping.date ? row[mapping.date] : '',
+                    time: mapping.time ? row[mapping.time] : '',
+                    timestamp: timestamp,
                     callType: callType,
                     duration: durationSeconds,
                     imei: row[mapping.imei] || null,
                     imsi: row[mapping.imsi] || null,
                     towerA: row[mapping.towerA] || null,
                     towerB: row[mapping.towerB] || null,
+                    towerLat: towerLat,
+                    towerLon: towerLon,
+                    azimuth: azimuth,
+                    beamwidth: beamwidth,
                     raw: row
                 };
             });
-            
+
             // Calculate statistics
             const stats = calculateCDRStatistics(normalized);
-            
+
+            // Build geocoded points[] for the real map from any records that
+            // carry valid tower coordinates. One point per unique tower site
+            // (deduped by lat/lon+azimuth) so 100k rows don't create 100k markers.
+            const pointMap = new Map();
+            let tMin = null, tMax = null;
+            normalized.forEach(r => {
+                if (r.towerLat == null || r.towerLon == null) return;
+                const key = r.towerLat.toFixed(6) + ',' + r.towerLon.toFixed(6) + ',' + (r.azimuth == null ? '' : r.azimuth);
+                const tMs = Date.parse(r.timestamp);
+                if (isFinite(tMs)) { if (tMin == null || tMs < tMin) tMin = tMs; if (tMax == null || tMs > tMax) tMax = tMs; }
+                let p = pointMap.get(key);
+                if (!p) {
+                    p = {
+                        fid: pointMap.size + 1,
+                        datasetId: 0,
+                        lat: r.towerLat, lon: r.towerLon,
+                        tUtcMs: isFinite(tMs) ? tMs : null,
+                        label: r.towerA || '',
+                        callout: '',
+                        accuracyM: null,
+                        sectorAz: r.azimuth,
+                        sectorBw: r.beamwidth,
+                        sectorInner: null,
+                        sectorOuter: r.azimuth != null ? 1200 : null,
+                        tower: true,
+                        approx: false,
+                        _count: 0
+                    };
+                    pointMap.set(key, p);
+                }
+                p._count++;
+            });
+            const points = Array.from(pointMap.values()).map(p => {
+                p.callout = `Tower/Cell: ${p.label || 'n/a'}\nHits: ${p._count}\n${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}`
+                    + (p.sectorAz != null ? `\nAzimuth: ${p.sectorAz}°` + (p.sectorBw != null ? ` / Beamwidth: ${p.sectorBw}°` : '') : '');
+                delete p._count;
+                return p;
+            });
+            const hasGeo = points.length > 0;
+            const datasets = hasGeo ? [{ id: 0, name: fileName, color: '#00d9ff', visible: true, target: '', imei: '', imsi: '' }] : [];
+
             // Create dump object
             const dump = {
                 id: `dump_${Date.now()}`,
                 name: fileName,
                 uploadDate: new Date().toISOString(),
+                format: 'csv',
                 columnMapping: mapping,
+                carrier: window._cdrCarrierHint || '',
                 records: normalized,
                 stats: stats,
                 hasTowerData: normalized.some(r => r.towerA || r.towerB),
+                hasGeo: hasGeo,
+                points: points,
+                datasets: datasets,
                 refLat: window._cdrRefLat || null,
                 refLon: window._cdrRefLon || null
             };
@@ -33366,6 +34162,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
         function setAnalyticsMode(mode) {
             cdrAnalyticsMode = mode;
+            if (mode !== 'map') _ampStopPlayback();
             // Re-render only the center panel instead of the whole tab
             const center = document.getElementById('analytics-center-panel');
             if (center) {

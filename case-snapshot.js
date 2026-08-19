@@ -242,6 +242,34 @@
                         result.restoredCases += 1;
                     } else {
                         caseId = existing.id;
+
+                        // ── Heal a case record that lost modules ──────────
+                        // localStorage can lose (or be clobbered with) a stale
+                        // module list while the disk snapshot still has the
+                        // full set. Only trust the snapshot when it is NEWER
+                        // than the live record, so a deliberate module removal
+                        // is never resurrected.
+                        try {
+                            const diskAt = Date.parse(pkg._savedAt || meta.lastModified || '') || 0;
+                            const liveAt = Date.parse(existing.lastModified || existing.createdAt || '') || 0;
+                            if (diskAt > liveAt && Array.isArray(meta.modules)) {
+                                const live = Array.isArray(existing.modules) ? existing.modules : [];
+                                const missing = meta.modules.filter(m => m && !live.includes(m));
+                                if (missing.length) {
+                                    existing.modules = live.concat(missing);
+                                    const order = Array.isArray(existing.tabOrder)
+                                        ? existing.tabOrder.slice()
+                                        : ['overview', ...live];
+                                    for (const m of missing) if (!order.includes(m)) order.push(m);
+                                    existing.tabOrder = order;
+                                    existing.lastModified = pkg._savedAt || new Date().toISOString();
+                                    _origSetItem(CASES_KEY, JSON.stringify(cases));
+                                    result.restoredModules += missing.length;
+                                    console.warn('[snapshot] restored', missing.length,
+                                        'module(s) to case', meta.caseNumber, '->', missing.join(', '));
+                                }
+                            }
+                        } catch (e) { /* non-fatal */ }
                     }
 
                     // Pattern 2 — only fill keys that are missing/empty (never overwrite)

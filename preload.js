@@ -119,6 +119,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Identifier Lookups
   arinLookup: (ipAddress) => ipcRenderer.invoke('arin-lookup', ipAddress),
   verifyEmail: (email) => ipcRenderer.invoke('verify-email', email),
+  // Real ICMP ping (with TCP fallback for ICMP-filtered hosts).
+  // opts: string host, or { host, count }
+  pingHost: (opts) => ipcRenderer.invoke('ping-host', opts),
 
   // FMCSA Carrier Lookup
   fmcsaLookup: (params) => ipcRenderer.invoke('fmcsa-lookup', params),

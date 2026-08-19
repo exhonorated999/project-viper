@@ -1374,7 +1374,7 @@
                         }
                     }
                     const cases = _lsParse('viperCases', []);
-                    const ci = cases.findIndex(c => c.id === currentCase.id);
+                    const ci = cases.findIndex(c => String(c.id) === String(currentCase.id));
                     if (ci >= 0) {
                         cases[ci].modules = currentCase.modules;
                         if (currentCase.tabOrder) cases[ci].tabOrder = currentCase.tabOrder;
@@ -1604,14 +1604,7 @@
                         populated.push(`Involved Persons (${involvedRouted.length})`);
 
                         // Auto-add involvedPersons module if not already active
-                        const caseModules = currentCase.modules || [];
-                        if (!caseModules.includes('involvedPersons')) {
-                            caseModules.push('involvedPersons');
-                            currentCase.modules = caseModules;
-                            const cases = _lsParse('viperCases', []);
-                            const ci = cases.findIndex(c => c.id === currentCase.id);
-                            if (ci >= 0) { cases[ci].modules = caseModules; localStorage.setItem('viperCases', JSON.stringify(cases)); }
-                        }
+                        ensureCaseModule('involvedPersons');
                     }
                 }
 
@@ -1673,27 +1666,104 @@
             }
         }
 
-        function saveCase() {
+        // ── Module-loss protection ───────────────────────────────────────
+        // Historically saveCase() blind-overwrote the stored case record with
+        // the in-memory `currentCase`. Any code path holding a stale copy (a
+        // pop-out window, a module that cached the object before a tab was
+        // added, an async handler that resolved late) therefore silently wiped
+        // modules the user had just added. `_removedModules` records the
+        // modules the user deliberately removed IN THIS SESSION so the merge
+        // below can be purely additive for everything else.
+        const _removedModules = new Set();
+
+        function _mergeModuleList(stored, live) {
+            const out = [];
+            const seen = new Set();
+            const add = (m) => {
+                if (!m || typeof m !== 'string' || seen.has(m)) return;
+                seen.add(m); out.push(m);
+            };
+            (Array.isArray(live) ? live : []).forEach(add);
+            // Re-attach anything present on disk that the in-memory copy lost,
+            // unless the user explicitly removed it during this session.
+            (Array.isArray(stored) ? stored : []).forEach(m => {
+                if (_removedModules.has(m)) return;
+                add(m);
+            });
+            return out;
+        }
+
+        function _mergeTabOrder(storedOrder, liveOrder, modules) {
+            const out = [];
+            const seen = new Set();
+            const add = (t) => {
+                if (!t || typeof t !== 'string' || seen.has(t)) return;
+                if (t !== 'overview' && _removedModules.has(t)) return;
+                seen.add(t); out.push(t);
+            };
+            add('overview');
+            (Array.isArray(liveOrder) ? liveOrder : []).forEach(add);
+            (Array.isArray(storedOrder) ? storedOrder : []).forEach(add);
+            // Guarantee every active module has a tab slot.
+            (Array.isArray(modules) ? modules : []).forEach(add);
+            return out;
+        }
+
+        // Ensure a module is active on the case (used by importers that add a
+        // tab automatically). Persists through the merge-safe path.
+        function ensureCaseModule(moduleId) {
+            if (!moduleId || !currentCase) return false;
+            if (!Array.isArray(currentCase.modules)) currentCase.modules = [];
+            if (currentCase.modules.includes(moduleId)) return false;
+            _removedModules.delete(moduleId);
+            currentCase.modules.push(moduleId);
+            if (Array.isArray(currentCase.tabOrder) && !currentCase.tabOrder.includes(moduleId)) {
+                currentCase.tabOrder.push(moduleId);
+            }
+            saveCase({ silent: true });
+            return true;
+        }
+
+        // Persist the case record. `opts.silent` suppresses the green toast for
+        // background/automatic saves.
+        function saveCase(opts) {
+            const silent = !!(opts && opts.silent);
             try {
                 // Update last modified timestamp
                 currentCase.lastModified = new Date().toISOString();
 
-                // Save to currentCase in localStorage
-                localStorage.setItem('currentCase', JSON.stringify(currentCase));
-
-                // Save the case to viperCases array
+                // Re-read the authoritative store and MERGE rather than
+                // overwrite, so a stale in-memory copy can never delete a
+                // module that exists on disk.
                 const cases = _lsParse('viperCases', []);
-                const caseIndex = cases.findIndex(c => c.id === currentCase.id);
-                
+                let caseIndex = cases.findIndex(c => String(c.id) === String(currentCase.id));
+                if (caseIndex === -1 && currentCase.caseNumber) {
+                    caseIndex = cases.findIndex(c => c && c.caseNumber === currentCase.caseNumber);
+                }
+                const stored = caseIndex !== -1 ? cases[caseIndex] : null;
+
+                currentCase.modules = _mergeModuleList(stored && stored.modules, currentCase.modules);
+                currentCase.tabOrder = _mergeTabOrder(stored && stored.tabOrder, currentCase.tabOrder, currentCase.modules);
+
                 if (caseIndex !== -1) {
                     cases[caseIndex] = currentCase;
-                    localStorage.setItem('viperCases', JSON.stringify(cases));
-                    console.log('Case saved successfully:', currentCase.caseNumber);
                 } else {
                     console.warn('Case not found in viperCases array, adding it');
                     cases.push(currentCase);
-                    localStorage.setItem('viperCases', JSON.stringify(cases));
                 }
+                // viperCases is the authoritative store — write it FIRST so a
+                // failure on the secondary key can never cost us the case.
+                localStorage.setItem('viperCases', JSON.stringify(cases));
+                try { localStorage.setItem('currentCase', JSON.stringify(currentCase)); } catch (_) {}
+                console.log('Case saved:', currentCase.caseNumber, '| modules:', currentCase.modules.length);
+
+                // Push a disk snapshot immediately instead of waiting on the
+                // 800ms debounce — the user may navigate away before it fires.
+                try {
+                    if (window.viperSnapshot && window.viperSnapshot.snapshotCase) {
+                        window.viperSnapshot.snapshotCase(currentCase);
+                    }
+                } catch (_) { /* best-effort */ }
 
                 // Mark as saved
                 hasUnsavedChanges = false;
@@ -1703,12 +1773,35 @@
                 }
 
                 // Show save notification
-                showSaveNotification();
+                if (!silent) showSaveNotification();
+                return true;
             } catch (error) {
                 console.error('Failed to save case:', error);
-                showToast('Failed to save case: ' + error.message, 'error');
+                const quota = error && /quota|exceeded/i.test(error.name + ' ' + error.message);
+                showToast(quota
+                    ? 'STORAGE FULL — the case could not be saved. Free space (Settings → Storage) before continuing; recent changes are at risk.'
+                    : 'Failed to save case: ' + error.message, 'error');
+                return false;
             }
         }
+
+        // Another window (pop-out module, second case window) changed the case
+        // list. Fold any modules it added back into our in-memory copy so the
+        // next save here can't undo them, and refresh the tab strip.
+        window.addEventListener('storage', (e) => {
+            if (!e || e.key !== 'viperCases' || !currentCase) return;
+            try {
+                const cases = JSON.parse(e.newValue || '[]');
+                if (!Array.isArray(cases)) return;
+                const stored = cases.find(c => String(c.id) === String(currentCase.id))
+                            || cases.find(c => c && c.caseNumber === currentCase.caseNumber);
+                if (!stored) return;
+                const before = (currentCase.modules || []).length;
+                currentCase.modules = _mergeModuleList(stored.modules, currentCase.modules);
+                currentCase.tabOrder = _mergeTabOrder(stored.tabOrder, currentCase.tabOrder, currentCase.modules);
+                if (currentCase.modules.length !== before) renderTabs();
+            } catch (_) { /* ignore */ }
+        });
 
         function showSaveNotification() {
             // Create notification element
@@ -1738,18 +1831,22 @@
         }
 
         async function confirmLeavePage() {
+            const goHome = async () => {
+                // Make sure any debounced disk snapshot lands before the page
+                // is torn down — beforeunload can't await async IPC.
+                try {
+                    if (window.viperSnapshot && window.viperSnapshot.flushPending) {
+                        await window.viperSnapshot.flushPending();
+                    }
+                } catch (_) { /* best-effort */ }
+                window.location.href = 'index.html';
+            };
             if (hasUnsavedChanges) {
                 if (await viperConfirm('You have unsaved changes. Do you want to save before leaving?')) {
                     saveCase();
-                    setTimeout(() => {
-                        window.location.href = 'index.html';
-                    }, 500);
-                } else {
-                    window.location.href = 'index.html';
                 }
-            } else {
-                window.location.href = 'index.html';
             }
+            await goHome();
         }
 
         // Warn user if they try to close the page with unsaved changes
@@ -1872,9 +1969,10 @@
             };
             
             // Initialize tabOrder if it doesn't exist
+            if (!Array.isArray(currentCase.modules)) currentCase.modules = [];
             if (!currentCase.tabOrder) {
                 currentCase.tabOrder = ['overview', ...currentCase.modules];
-                saveCase();
+                saveCase({ silent: true });
             }
             
             // Sync: append any modules not yet in tabOrder
@@ -1885,7 +1983,7 @@
                     tabOrderChanged = true;
                 }
             }
-            if (tabOrderChanged) saveCase();
+            if (tabOrderChanged) saveCase({ silent: true });
             
             // Build tabs based on current order
             const tabs = currentCase.tabOrder
@@ -2119,13 +2217,17 @@
             const label = moduleConfig[moduleId] || moduleId;
             if (!await viperConfirm(`Remove "${label}" from this case?\n\nNote: Any data in this module will remain in storage and can be recovered by re-adding the module.`, {danger:true, okText:'Delete'})) return;
 
+            // Record the deliberate removal so the additive merge in
+            // saveCase() doesn't resurrect it from the stored copy.
+            _removedModules.add(moduleId);
+
             // Remove from modules array
-            currentCase.modules = currentCase.modules.filter(m => m !== moduleId);
+            currentCase.modules = (currentCase.modules || []).filter(m => m !== moduleId);
             // Remove from tabOrder
             if (currentCase.tabOrder) {
                 currentCase.tabOrder = currentCase.tabOrder.filter(t => t !== moduleId);
             }
-            saveCase();
+            saveCase({ silent: true });
 
             // If currently viewing the removed module, switch to overview
             if (currentTab === moduleId) {
@@ -4370,24 +4472,23 @@
             }
 
             // Add selected modules to the case
-            currentCase.modules = [...currentCase.modules, ...selectedModules];
-            
+            selectedModules.forEach(m => _removedModules.delete(m));
+            if (!Array.isArray(currentCase.modules)) currentCase.modules = [];
+            for (const m of selectedModules) {
+                if (!currentCase.modules.includes(m)) currentCase.modules.push(m);
+            }
+
             // Add to tab order (at the end)
-            if (!currentCase.tabOrder) {
+            if (!Array.isArray(currentCase.tabOrder)) {
                 currentCase.tabOrder = ['overview', ...currentCase.modules];
             } else {
-                currentCase.tabOrder = [...currentCase.tabOrder, ...selectedModules];
+                for (const m of selectedModules) {
+                    if (!currentCase.tabOrder.includes(m)) currentCase.tabOrder.push(m);
+                }
             }
-            
-            currentCase.lastModified = new Date().toISOString();
 
-            // Save to localStorage
-            const cases = _lsParse('viperCases', []);
-            const caseIndex = cases.findIndex(c => c.id === currentCase.id);
-            if (caseIndex !== -1) {
-                cases[caseIndex] = currentCase;
-                localStorage.setItem('viperCases', JSON.stringify(cases));
-            }
+            // Save through the merge-safe path (also snapshots to disk).
+            saveCase({ silent: true });
 
             // Close modal
             closeManageTabsModal();
@@ -6238,25 +6339,9 @@
                 console.log('[saveNote] saved. caseNotes count:', caseNotes.length);
 
                 // Defensive: ensure the 'notes' module stays in the case's
-                // module list so the tab survives a reload. saveCase() may have
-                // been called from a stale path that lost the modules array;
-                // re-asserting here is cheap and idempotent.
-                try {
-                    if (!Array.isArray(currentCase.modules)) currentCase.modules = [];
-                    if (!currentCase.modules.includes('notes')) {
-                        currentCase.modules.push('notes');
-                        if (Array.isArray(currentCase.tabOrder) && !currentCase.tabOrder.includes('notes')) {
-                            currentCase.tabOrder.push('notes');
-                        }
-                        const cases = _lsParse('viperCases', []);
-                        const ci = cases.findIndex(c => c.id === currentCase.id);
-                        if (ci >= 0) {
-                            cases[ci].modules = currentCase.modules;
-                            if (currentCase.tabOrder) cases[ci].tabOrder = currentCase.tabOrder;
-                            localStorage.setItem('viperCases', JSON.stringify(cases));
-                        }
-                    }
-                } catch (e) { console.warn('[saveNote] modules guard failed:', e); }
+                // module list so the tab survives a reload.
+                try { ensureCaseModule('notes'); }
+                catch (e) { console.warn('[saveNote] modules guard failed:', e); }
 
                 // Reset state and re-render
                 editingNoteId = null;
@@ -12524,17 +12609,7 @@
             else if (destTab === 'involvedPersons') { loadInvolvedPersons(); involvedPersons.push(destRecord); saveInvolvedPersons(); }
 
             // Auto-add module if not active
-            const caseModules = currentCase.modules || [];
-            if (!caseModules.includes(destTab)) {
-                caseModules.push(destTab);
-                currentCase.modules = caseModules;
-                if (!currentCase.tabOrder.includes(destTab)) {
-                    currentCase.tabOrder.push(destTab);
-                }
-                const cases = _lsParse('viperCases', []);
-                const ci = cases.findIndex(c => c.id === currentCase.id);
-                if (ci >= 0) { cases[ci].modules = caseModules; cases[ci].tabOrder = currentCase.tabOrder; localStorage.setItem('viperCases', JSON.stringify(cases)); }
-            }
+            ensureCaseModule(destTab);
 
             // Remove from source
             if (sourceTab === 'suspects') { suspects.splice(personIndex, 1); saveSuspects(); currentSuspectView = null; }
@@ -14744,14 +14819,34 @@
             }
         }
 
-        function pingSuspectIdent(suspectIdx, identIdx) {
+        async function pingSuspectIdent(suspectIdx, identIdx) {
             const ident = suspects[suspectIdx]?.identifiers?.[identIdx];
             if (!ident) return;
-            // Use fetch to ping via HTTP (simple reachability check)
-            showToast(`Pinging ${ident.value}...`, 'info');
-            fetch(`http://${ident.value}`, { mode: 'no-cors', signal: AbortSignal.timeout(5000) })
-                .then(() => showToast(`${ident.value} responded`, 'success'))
-                .catch(() => showToast(`${ident.value} — no response or unreachable`, 'error'));
+            const host = String(ident.value || '').trim();
+            if (!host) return;
+            if (!(window.electronAPI && window.electronAPI.pingHost)) {
+                showToast('Ping requires an app restart to load the updated engine.', 'error');
+                return;
+            }
+            showToast(`Pinging ${host}...`, 'info');
+            try {
+                const r = await window.electronAPI.pingHost({ host, count: 4 });
+                if (!r || r.success === false) {
+                    showToast(`${host} — ${(r && r.error) || 'ping failed'}`, 'error');
+                    return;
+                }
+                if (r.alive && r.method === 'icmp') {
+                    const lat = (r.avgMs != null) ? ` — ${r.avgMs}ms avg` : '';
+                    const loss = (r.lossPct != null) ? `, ${r.lossPct}% loss` : '';
+                    showToast(`✓ ${host} is ONLINE (ICMP ${r.received}/${r.sent} replies${lat}${loss})`, 'success');
+                } else if (r.alive && r.method === 'tcp') {
+                    showToast(`✓ ${host} is ONLINE — ICMP filtered, but TCP port ${r.openPorts.join(', ')} answered`, 'success');
+                } else {
+                    showToast(`${host} — no ICMP reply and no common TCP port answered. Host may be offline or firewalled (not proof the address is unassigned).`, 'error');
+                }
+            } catch (e) {
+                showToast('Ping error: ' + e.message, 'error');
+            }
         }
 
         function addSuspectIdentifierInline(suspectIdx) {
@@ -30338,18 +30433,26 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 return;
             }
 
-            // Add modules to current case
-            currentCase.modules.push(...selectedModules);
-            
+            // A module the user is re-adding is no longer "deliberately removed".
+            selectedModules.forEach(m => _removedModules.delete(m));
+
+            // Add modules to current case (guard against a missing/duplicated array)
+            if (!Array.isArray(currentCase.modules)) currentCase.modules = [];
+            for (const m of selectedModules) {
+                if (!currentCase.modules.includes(m)) currentCase.modules.push(m);
+            }
+
             // Add to tab order at the end
-            if (!currentCase.tabOrder) {
+            if (!Array.isArray(currentCase.tabOrder)) {
                 currentCase.tabOrder = ['overview', ...currentCase.modules];
             } else {
-                currentCase.tabOrder.push(...selectedModules);
+                for (const m of selectedModules) {
+                    if (!currentCase.tabOrder.includes(m)) currentCase.tabOrder.push(m);
+                }
             }
 
             // Save case
-            saveCase();
+            const ok = saveCase({ silent: true });
 
             // Close modal
             closeAddModuleModal();
@@ -30357,8 +30460,24 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             // Refresh tabs
             renderTabs();
 
-            // Show success message
-            viperToast(`Successfully added ${selectedModules.length} module(s, 'success') to this case!`);
+            if (!ok) return; // saveCase already surfaced the failure
+
+            // Read the record back so we never claim success on a write that
+            // didn't stick (quota, corrupted store, competing window).
+            let persisted = false;
+            try {
+                const check = _lsParse('viperCases', []);
+                const rec = check.find(c => String(c.id) === String(currentCase.id))
+                         || check.find(c => c && c.caseNumber === currentCase.caseNumber);
+                persisted = !!rec && selectedModules.every(m => (rec.modules || []).includes(m));
+            } catch (_) {}
+
+            if (!persisted) {
+                viperToast('Modules were added but could NOT be saved. Do not close the case — check Settings → Storage.', 'error', 8000);
+                return;
+            }
+
+            viperToast(`Added ${selectedModules.length} module${selectedModules.length > 1 ? 's' : ''} to this case.`, 'success');
         }
         
         function toggleOverviewEdit() {
@@ -35374,16 +35493,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             localStorage.setItem(`${tabKey}_${currentCase.id}`, JSON.stringify(existing));
 
             // Ensure module is active (Involved Persons is optional)
-            if (moduleId) {
-                const caseModules = currentCase.modules || [];
-                if (!caseModules.includes(moduleId)) {
-                    caseModules.push(moduleId);
-                    currentCase.modules = caseModules;
-                    const cases = _lsParse('viperCases', []);
-                    const ci = cases.findIndex(c => c.id === currentCase.id);
-                    if (ci >= 0) { cases[ci].modules = caseModules; localStorage.setItem('viperCases', JSON.stringify(cases)); }
-                }
-            }
+            if (moduleId) ensureCaseModule(moduleId);
 
             // Mark routed on the report (persist override)
             p.routedTo = label;
@@ -37502,14 +37612,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 populated.push(`Involved Persons (${involvedRouted.length})`);
 
                 // Auto-add involvedPersons module if not already active
-                const caseModules = currentCase.modules || [];
-                if (!caseModules.includes('involvedPersons')) {
-                    caseModules.push('involvedPersons');
-                    currentCase.modules = caseModules;
-                    const cases = _lsParse('viperCases', []);
-                    const ci = cases.findIndex(c => c.id === currentCase.id);
-                    if (ci >= 0) { cases[ci].modules = caseModules; localStorage.setItem('viperCases', JSON.stringify(cases)); }
-                }
+                ensureCaseModule('involvedPersons');
             }
 
             // Vehicles

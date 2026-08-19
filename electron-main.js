@@ -3544,6 +3544,135 @@ ipcMain.handle('arin-lookup', async (_event, ipAddress) => {
   }
 });
 
+// --- Host Reachability Probe (real ICMP ping + TCP fallback) ---
+// The old implementation lived in the renderer and used
+// `fetch('http://<ip>', {mode:'no-cors'})`, which only ever succeeds if the
+// host happens to run a web server on port 80. A live residential IP with no
+// web server always reported "unreachable". This runs the OS `ping` binary
+// (array-spawn, no shell) and falls back to a TCP connect probe for hosts that
+// filter ICMP.
+function _pingParse(out) {
+  const txt = String(out || '');
+  const res = { sent: 0, received: 0, lossPct: null, avgMs: null, minMs: null, maxMs: null };
+  // Windows: "Packets: Sent = 4, Received = 4, Lost = 0 (0% loss)"
+  let m = txt.match(/Sent\s*=\s*(\d+).*?Received\s*=\s*(\d+).*?Lost\s*=\s*(\d+)\s*\((\d+)%/i);
+  if (m) {
+    res.sent = +m[1]; res.received = +m[2]; res.lossPct = +m[4];
+  } else {
+    // Unix: "4 packets transmitted, 4 received, 0% packet loss"
+    m = txt.match(/(\d+)\s+packets transmitted,\s*(\d+)\s*(?:packets\s*)?received.*?([\d.]+)%\s*packet loss/is);
+    if (m) { res.sent = +m[1]; res.received = +m[2]; res.lossPct = parseFloat(m[3]); }
+  }
+  // Windows: "Minimum = 12ms, Maximum = 20ms, Average = 15ms"
+  m = txt.match(/Minimum\s*=\s*(\d+)ms.*?Maximum\s*=\s*(\d+)ms.*?Average\s*=\s*(\d+)ms/i);
+  if (m) { res.minMs = +m[1]; res.maxMs = +m[2]; res.avgMs = +m[3]; }
+  else {
+    // Unix: "rtt min/avg/max/mdev = 11.1/12.2/13.3/0.5 ms"
+    m = txt.match(/=\s*([\d.]+)\/([\d.]+)\/([\d.]+)\/[\d.]+\s*ms/i);
+    if (m) { res.minMs = parseFloat(m[1]); res.avgMs = parseFloat(m[2]); res.maxMs = parseFloat(m[3]); }
+  }
+  if (res.received === 0 && res.sent === 0) {
+    // Some locales don't match the summary lines; count reply lines instead.
+    const replies = (txt.match(/(?:Reply from|bytes from)\s/gi) || []).length;
+    if (replies > 0) { res.received = replies; res.sent = replies; res.lossPct = 0; }
+  }
+  return res;
+}
+
+function _tcpProbe(host, port, timeoutMs = 2500) {
+  return new Promise((resolve) => {
+    const netMod = require('net');
+    let done = false;
+    const started = Date.now();
+    const finish = (ok) => { if (done) return; done = true; try { sock.destroy(); } catch (_) {} resolve(ok ? { open: true, port, ms: Date.now() - started } : null); };
+    const sock = netMod.connect({ host, port });
+    sock.setTimeout(timeoutMs);
+    sock.on('connect', () => finish(true));
+    sock.on('timeout', () => finish(false));
+    sock.on('error', () => finish(false));
+  });
+}
+
+ipcMain.handle('ping-host', async (_event, opts = {}) => {
+  const raw = typeof opts === 'string' ? opts : (opts && opts.host);
+  let host = String(raw == null ? '' : raw).trim();
+  // Tolerate a pasted URL or a host:port form.
+  host = host.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/\/.*$/, '');
+  if (/^\[.*\]$/.test(host)) host = host.slice(1, -1);
+  else if (/^[^:]+:\d+$/.test(host)) host = host.split(':')[0];
+  // Strict allow-list: IPv4, IPv6, or hostname. Nothing else reaches spawn.
+  const isIPv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(host) && host.split('.').every(o => +o >= 0 && +o <= 255);
+  const isIPv6 = /^[0-9A-Fa-f:]+$/.test(host) && host.includes(':');
+  const isHostname = /^(?=.{1,253}$)([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/.test(host);
+  if (!host || !(isIPv4 || isIPv6 || isHostname)) {
+    return { success: false, alive: false, error: 'Not a valid IP address or hostname.' };
+  }
+
+  const count = Math.min(Math.max(parseInt(opts && opts.count, 10) || 4, 1), 10);
+  const isWin = process.platform === 'win32';
+  const isMac = process.platform === 'darwin';
+  let bin, args;
+  if (isWin) {
+    bin = 'ping';
+    args = ['-n', String(count), '-w', '2000'];
+    if (isIPv6) args.push('-6'); else if (isIPv4) args.push('-4');
+    args.push(host);
+  } else {
+    bin = isIPv6 ? 'ping6' : 'ping';
+    args = ['-c', String(count), isMac ? '-W' : '-W', isMac ? '2000' : '2', host];
+  }
+
+  const run = await new Promise((resolve) => {
+    let child;
+    try { child = spawn(bin, args, { windowsHide: true, shell: false }); }
+    catch (e) { resolve({ spawned: false, out: '', err: e.message }); return; }
+    let out = '';
+    const cap = (b) => { out = (out + b.toString()).slice(-8000); };
+    if (child.stdout) child.stdout.on('data', cap);
+    if (child.stderr) child.stderr.on('data', cap);
+    const killer = setTimeout(() => { try { child.kill(); } catch (_) {} }, (count * 2500) + 5000);
+    child.on('error', (e) => { clearTimeout(killer); resolve({ spawned: false, out, err: e.message }); });
+    child.on('close', (code) => { clearTimeout(killer); resolve({ spawned: true, code, out }); });
+  });
+
+  const stats = _pingParse(run.out);
+  if (run.spawned && stats.received > 0) {
+    return {
+      success: true, alive: true, method: 'icmp', host,
+      sent: stats.sent, received: stats.received,
+      lossPct: stats.lossPct == null ? 0 : stats.lossPct,
+      avgMs: stats.avgMs, minMs: stats.minMs, maxMs: stats.maxMs,
+      raw: run.out.slice(-2000),
+    };
+  }
+
+  // No ICMP reply. Very common — consumer routers, cloud hosts and most
+  // corporate firewalls drop echo requests. Probe a few common TCP ports so we
+  // can distinguish "filtered but alive" from "no response at all".
+  const ports = [443, 80, 22, 3389, 8080];
+  const probes = await Promise.all(ports.map(p => _tcpProbe(host, p, 2500)));
+  const open = probes.filter(Boolean);
+  if (open.length) {
+    return {
+      success: true, alive: true, method: 'tcp', host,
+      openPorts: open.map(o => o.port), avgMs: open[0].ms,
+      lossPct: stats.lossPct == null ? 100 : stats.lossPct,
+      sent: stats.sent, received: stats.received,
+      note: 'ICMP echo was filtered, but the host accepted a TCP connection.',
+      raw: run.out.slice(-2000),
+    };
+  }
+
+  return {
+    success: true, alive: false, method: 'none', host,
+    sent: stats.sent, received: stats.received,
+    lossPct: stats.lossPct == null ? 100 : stats.lossPct,
+    error: run.spawned ? '' : ('Could not run the system ping utility' + (run.err ? ': ' + run.err : '.')),
+    note: 'No ICMP reply and no common TCP port answered. The host may be offline, or ICMP and these ports may be blocked — this is not proof the address is unassigned.',
+    raw: run.out.slice(-2000),
+  };
+});
+
 // --- FMCSA Carrier Lookup (SAFER web scrape — no API key needed) ---
 ipcMain.handle('fmcsa-lookup', async (_event, params) => {
   const https = require('https');
@@ -5621,17 +5750,32 @@ function _parseMaigretReports(dir, username) {
     if (url && looksFound(o)) pushHit(site, url, o);
   };
   for (const f of jsonFiles) {
+    // Defensive: a single malformed/unexpected report must never abort the
+    // whole multi-query OSINT run.
+    try {
     let txt = '';
     try { txt = fs.readFileSync(path.join(dir, f), 'utf8'); } catch (_) { continue; }
     let parsedWhole = null;
     try { parsedWhole = JSON.parse(txt); } catch (_) { parsedWhole = null; }
     if (parsedWhole && typeof parsedWhole === 'object') {
       if (Array.isArray(parsedWhole)) parsedWhole.forEach(consider);
-      else {
+      else if (parsedWhole.url_user || parsedWhole.sitename ||
+               (parsedWhole.status && typeof parsedWhole.status === 'object')) {
+        // A single-record report. This also covers a one-line .ndjson file,
+        // which JSON.parse() happily swallows as a whole object.
+        consider(parsedWhole);
+      } else {
         // dict-of-sites: { "GitHub": {status, url_user, ...}, ... }
         for (const [k, v] of Object.entries(parsedWhole)) {
-          if (v && typeof v === 'object' && !v.sitename && !v.site && !v.name) v = Object.assign({ sitename: k }, v);
-          consider(v);
+          // NOTE: `v` is a const binding from the destructuring above — copy it
+          // into a mutable local before back-filling the site name. (Assigning
+          // to `v` threw "Assignment to constant variable" and aborted the
+          // whole OSINT run whenever a report was a whole-JSON dict.)
+          let entry = v;
+          if (entry && typeof entry === 'object' && !entry.sitename && !entry.site && !entry.name) {
+            entry = Object.assign({ sitename: k }, entry);
+          }
+          consider(entry);
         }
       }
     } else {
@@ -5641,6 +5785,9 @@ function _parseMaigretReports(dir, username) {
         if (!t) continue;
         try { consider(JSON.parse(t)); } catch (_) {}
       }
+    }
+    } catch (e) {
+      console.warn('[OSINT] failed to parse report', f, '-', (e && e.message) || e);
     }
   }
   return hits;
@@ -5729,6 +5876,7 @@ ipcMain.handle('osint-search', async (event, opts = {}) => {
     const results = [];
     for (let i = 0; i < clean.length; i++) {
       const q = clean[i];
+      try {
       send('osint-progress', { jobId, stage: 'searching', index: i, total: clean.length, query: q });
       // Per-query output directory so short usernames can't substring-collide
       // with longer ones when we match report files by name.
@@ -5757,6 +5905,12 @@ ipcMain.handle('osint-search', async (event, opts = {}) => {
       });
       const hits = _parseMaigretReports(qDir, q);
       results.push({ query: q, hits, engineOk: runRes.ok, note: runRes.error || '' });
+      } catch (qErr) {
+        // One bad identifier must not sink the whole search — record it and
+        // keep going so the investigator still gets the other results.
+        console.warn('[OSINT] query failed:', q, '-', (qErr && qErr.message) || qErr);
+        results.push({ query: q, hits: [], engineOk: false, note: (qErr && qErr.message) || 'search failed' });
+      }
     }
 
     // Nothing is auto-saved to Evidence. The renderer lets the user pick which

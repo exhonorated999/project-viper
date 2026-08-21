@@ -5288,7 +5288,10 @@ function _downloadTo(url, destPath, onProgress, redirects = 0, append = false) {
       }
       if (res.statusCode !== 200) {
         res.resume();
-        return reject(new Error('HTTP ' + res.statusCode));
+        return reject(new Error(res.statusCode === 404
+          ? 'HTTP 404 — the engine pack is not published at ' + url +
+            '. Use "Install from file…" with a pack .zip, or update VIPER.'
+          : 'HTTP ' + res.statusCode + ' fetching ' + url));
       }
       const total = parseInt(res.headers['content-length'] || '0', 10);
       let received = 0;
@@ -5333,7 +5336,13 @@ function _fetchText(url, redirects = 0) {
         let next; try { next = new URL(res.headers.location, url).toString(); } catch (e) { return reject(e); }
         return resolve(_fetchText(next, redirects + 1));
       }
-      if (res.statusCode !== 200) { res.resume(); return reject(new Error('HTTP ' + res.statusCode)); }
+      if (res.statusCode !== 200) {
+        res.resume();
+        return reject(new Error(res.statusCode === 404
+          ? 'HTTP 404 — the engine manifest is not published at ' + url +
+            '. Use "Install from file…" with a pack .zip, or update VIPER.'
+          : 'HTTP ' + res.statusCode + ' fetching ' + url));
+      }
       let data = '';
       res.setEncoding('utf8');
       res.on('data', (c) => { data += c; });
@@ -5494,7 +5503,7 @@ const MAIGRET_ENGINE_PACK_URL =
   'https://github.com/exhonorated999/project-viper/releases/download/osint-engines/viper-maigret-engine.manifest.json';
 // Pinned SHA-256 of the engine pack (.zip). Empty string = skip verification
 // (dev only). MUST be set to the real hash when the pack is published.
-const MAIGRET_PACK_SHA256 = 'fabf624a59eadd486100ff60a5c5701019bf469f1d7387b0e6db5d3bfa9a83ba';
+const MAIGRET_PACK_SHA256 = '41717a9b8e90aedbcc9b3848f5398f1e1aa371df1878c7a8cf2c43cab070bc30';
 
 const _osintJobs = new Map(); // jobId -> child process
 

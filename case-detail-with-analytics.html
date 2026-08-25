@@ -1407,7 +1407,27 @@
             // Add current tasks
             const updatedTasks = [...otherTasks, ...caseTasks];
             localStorage.setItem('viperTasks', JSON.stringify(updatedTasks));
-            markAsModified();
+            // NOTE: tasks live in their own global store ('viperTasks'), NOT in the
+            // case record. Writing them is already durable, so this must NOT call
+            // markAsModified() — doing so raised a phantom "unsaved changes" prompt
+            // on exit that nothing in the Tasks UI could ever clear.
+
+            // Keep the auto-generated Case Timeline in step with task due dates
+            // and completion stamps without making the user hit "Refresh".
+            try {
+                if (typeof generateAutoTimelineEvents === 'function' && currentCase && currentCase.id) {
+                    generateAutoTimelineEvents();
+                    if (typeof renderTimelineSection === 'function') {
+                        const host = document.getElementById('timelineSectionHost');
+                        if (host) {
+                            host.innerHTML = renderTimelineSection();
+                            if (typeof syncTimelineScroll === 'function') syncTimelineScroll();
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('[tasks] timeline sync failed:', (e && e.message) || e);
+            }
         }
 
         // --- Process Pending RMS Import (from "Import from RMS PDF" on case creation) ---
@@ -5202,7 +5222,6 @@
         }
 
         function renderOverviewTab() {
-            const incompleteTasks = caseTasks.filter(t => !t.completed);
             
             return `
                 <div class="space-y-6">
@@ -5405,7 +5424,7 @@
                     </div>
                     
                     <!-- Case Timeline -->
-                    ${renderTimelineSection()}
+                    <div id="timelineSectionHost">${renderTimelineSection()}</div>
 
                     <!-- Financial Summary (cargo + victim business) -->
                     ${(() => {
@@ -5603,34 +5622,8 @@
                             </button>
                         </div>
                         
-                        <div id="caseTasksList" class="space-y-3 flex-1 ${incompleteTasks.length === 0 ? 'flex flex-col items-center justify-center' : ''}">
-                            ${incompleteTasks.length === 0 ? `
-                                <div class="text-center py-8">
-                                    <svg class="w-16 h-16 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-                                    </svg>
-                                    <p class="text-gray-400 text-sm">No tasks for this case yet</p>
-                                </div>
-                            ` : incompleteTasks.map(task => {
-                                const priorityColors = {
-                                    high: 'red-500',
-                                    medium: 'orange-500',
-                                    low: 'green-500'
-                                };
-                                const color = priorityColors[task.priority];
-                                
-                                return `
-                                    <div class="bg-viper-card/50 rounded-lg p-4 border-l-4 border-${color}">
-                                        <div class="flex items-start justify-between">
-                                            <div class="flex-1">
-                                                <h4 class="font-medium">${task.title}</h4>
-                                                <p class="text-xs text-gray-400 mt-1">Due: ${formatDate(task.date)} ${task.time ? 'at ' + task.time + (task.timeUTC ? ' UTC' : '') : ''}</p>
-                                                ${task.notes ? `<p class="text-xs text-gray-400 mt-2 italic">${task.notes}</p>` : ''}
-                                            </div>
-                                        </div>
-                                    </div>
-                                `;
-                            }).join('')}
+                        <div id="caseTasksList" class="space-y-3 flex-1 ${caseTasks.length === 0 ? 'flex flex-col items-center justify-center' : ''}">
+                            ${renderCaseTasksListHtml()}
                         </div>
                     </div>
                     </div><!-- /grid: Related Cases + Case Tasks -->
@@ -30959,7 +30952,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
         const TIMELINE_CATEGORIES = {
             warrant: '📋', surveillance: '👁️', rms: '📄', interview: '🎙️',
-            lab: '🔬', digital: '💻', arrest: '🚔', note: '📝', custom: '📌'
+            lab: '🔬', digital: '💻', arrest: '🚔', note: '📝', task: '✅', custom: '📌'
         };
 
         function loadTimelineEvents() {
@@ -31196,6 +31189,47 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         description: [cs.consentingParty, cs.location].filter(Boolean).join(' · '),
                         lane: 'investigation', category: 'fieldwork', significance: granted ? 'important' : 'critical',
                         entityLink: cs.consentingParty || '', sourceType: 'auto:consentSearch', sourceId: cs.id, color: null, createdAt: now
+                    });
+                }
+            }
+
+            // --- Case Tasks (due + completion) ---
+            // Read straight from the global store so this works even if the
+            // Overview card has not been rendered yet in this window.
+            const tlTasks = _lsParse('viperTasks', []).filter(t => t && t.caseId === currentCase.caseNumber);
+            for (const t of tlTasks) {
+                const prio = String(t.priority || 'medium').toLowerCase();
+                const dueSig = prio === 'high' ? 'important' : 'supporting';
+
+                // Scheduled / due entry
+                let dueIso = null;
+                if (t.date) {
+                    const d = new Date(t.date + 'T' + (t.time && /^\d{2}:\d{2}/.test(t.time) ? t.time : '00:00') + ':00');
+                    if (!isNaN(d.getTime())) dueIso = d.toISOString();
+                }
+                if (!dueIso && t.createdAt && !isNaN(Date.parse(t.createdAt))) dueIso = new Date(t.createdAt).toISOString();
+                if (dueIso) {
+                    auto.push({
+                        id: 'tl_auto_task_' + t.id,
+                        timestamp: dueIso,
+                        endTimestamp: null,
+                        title: `Task ${t.completed ? '(closed)' : 'due'}: ${t.title || 'Untitled task'}`,
+                        description: [t.notes || t.description || '', `Priority: ${prio}`].filter(Boolean).join(' · '),
+                        lane: 'investigation', category: 'task', significance: dueSig,
+                        entityLink: '', sourceType: 'auto:task', sourceId: t.id, color: null, createdAt: now
+                    });
+                }
+
+                // Completion entry — the audit-relevant one
+                if (t.completed && t.completedAt && !isNaN(Date.parse(t.completedAt))) {
+                    auto.push({
+                        id: 'tl_auto_task_done_' + t.id,
+                        timestamp: new Date(t.completedAt).toISOString(),
+                        endTimestamp: null,
+                        title: `Task Completed: ${t.title || 'Untitled task'}`,
+                        description: [t.completedBy ? `Completed by ${t.completedBy}` : '', t.notes || t.description || ''].filter(Boolean).join(' · '),
+                        lane: 'investigation', category: 'task', significance: 'important',
+                        entityLink: t.completedBy || '', sourceType: 'auto:task', sourceId: t.id, color: null, createdAt: now
                     });
                 }
             }
@@ -32059,50 +32093,206 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
         }
 
-        function openCaseTaskModal() {
+        // ── Case Tasks ───────────────────────────────────────────────────
+        // Tasks are stored in the global 'viperTasks' store keyed by caseId
+        // (= caseNumber) so the Dashboard task list and the case Overview card
+        // are two views of the same records. Every mutation writes through
+        // saveCaseTasks() immediately; none of them touch the case record, so
+        // none of them may set the "unsaved changes" flag.
+
+        function _caseTaskColor(p) {
+            return ({ high: 'red-500', medium: 'orange-500', low: 'green-500' })[p] || 'gray-500';
+        }
+
+        function _caseTaskUser() {
+            try {
+                const u = _lsParse('viperCurrentUser', null) || _lsParse('viperUserInfo', {}) || {};
+                return u.username || u.name || '';
+            } catch (_) { return ''; }
+        }
+
+        // Attribute-safe JS literal for an inline handler (ids may be numeric or string).
+        function _caseTaskIdArg(id) { return _esc(JSON.stringify(id)); }
+
+        function _caseTaskStamp(iso) {            if (!iso) return '';
+            try {
+                const d = new Date(iso);
+                if (isNaN(d.getTime())) return String(iso);
+                return d.toLocaleString(undefined, {
+                    year: 'numeric', month: 'short', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit'
+                });
+            } catch (_) { return String(iso); }
+        }
+
+        function _renderCaseTaskCard(task) {
+            const color = _caseTaskColor(task.priority);
+            const done = !!task.completed;
+            const due = task.date ? `Due: ${formatDate(task.date)}${task.time ? ' at ' + task.time + (task.timeUTC ? ' UTC' : '') : ''}` : 'No due date';
+            const overdue = !done && task.date && new Date(task.date) < new Date(new Date().toDateString());
+            return `
+                <div class="bg-viper-card/50 rounded-lg p-4 border-l-4 border-${color} ${done ? 'opacity-60' : ''}">
+                    <div class="flex items-start gap-3">
+                        <input type="checkbox" ${done ? 'checked' : ''}
+                               onchange="toggleCaseTaskComplete(${_caseTaskIdArg(task.id)})"
+                               title="${done ? 'Mark as not complete' : 'Mark complete'}"
+                               class="mt-1 w-4 h-4 shrink-0 accent-viper-purple cursor-pointer">
+                        <div class="flex-1 min-w-0">
+                            <h4 class="font-medium ${done ? 'line-through text-gray-400' : ''}">${_esc(task.title)}</h4>
+                            <p class="text-xs mt-1 ${overdue ? 'text-red-400 font-medium' : 'text-gray-400'}">${_esc(due)}${overdue ? ' — OVERDUE' : ''}</p>
+                            ${task.notes ? `<p class="text-xs text-gray-400 mt-2 italic whitespace-pre-wrap">${_esc(task.notes)}</p>` : ''}
+                            ${done && task.completedAt ? `<p class="text-xs text-green-400 mt-2">✓ Completed ${_esc(_caseTaskStamp(task.completedAt))}${task.completedBy ? ' by ' + _esc(task.completedBy) : ''}</p>` : ''}
+                        </div>
+                        <div class="flex items-center gap-1 shrink-0">
+                            <button type="button" onclick="editCaseTask(${_caseTaskIdArg(task.id)})" title="Edit task"
+                                    class="p-1.5 rounded-md text-gray-400 hover:text-viper-cyan hover:bg-viper-cyan/10 transition">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                            </button>
+                            <button type="button" onclick="deleteCaseTask(${_caseTaskIdArg(task.id)})" title="Delete task"
+                                    class="p-1.5 rounded-md text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        function renderCaseTasksListHtml() {
+            const open = caseTasks.filter(t => !t.completed);
+            const done = caseTasks.filter(t => t.completed)
+                .sort((a, b) => (Date.parse(b.completedAt || 0) || 0) - (Date.parse(a.completedAt || 0) || 0));
+
+            if (!open.length && !done.length) {
+                return `
+                    <div class="text-center py-8">
+                        <svg class="w-16 h-16 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                        </svg>
+                        <p class="text-gray-400 text-sm">No tasks for this case yet</p>
+                    </div>`;
+            }
+
+            let html = open.map(_renderCaseTaskCard).join('');
+            if (!open.length) html += `<p class="text-gray-400 text-sm text-center py-4">All tasks complete.</p>`;
+            if (done.length) {
+                html += `
+                    <details class="mt-4" ${window._caseTasksShowDone ? 'open' : ''} ontoggle="window._caseTasksShowDone = this.open">
+                        <summary class="cursor-pointer text-xs text-gray-400 hover:text-white select-none">
+                            Completed (${done.length})
+                        </summary>
+                        <div class="space-y-3 mt-3">${done.map(_renderCaseTaskCard).join('')}</div>
+                    </details>`;
+            }
+            return html;
+        }
+
+        window._caseTasksShowDone = false;
+
+        function refreshCaseTasksList() {
+            const el = document.getElementById('caseTasksList');
+            if (!el) return;
+            el.classList.toggle('flex', caseTasks.length === 0);
+            el.classList.toggle('flex-col', caseTasks.length === 0);
+            el.classList.toggle('items-center', caseTasks.length === 0);
+            el.classList.toggle('justify-center', caseTasks.length === 0);
+            el.innerHTML = renderCaseTasksListHtml();
+        }
+
+        function toggleCaseTaskComplete(taskId) {
+            const task = caseTasks.find(t => String(t.id) === String(taskId));
+            if (!task) return;
+            task.completed = !task.completed;
+            task.completedAt = task.completed ? new Date().toISOString() : null;
+            task.completedBy = task.completed ? _caseTaskUser() : null;
+            saveCaseTasks();
+            refreshCaseTasksList();
+            if (typeof viperToast === 'function') {
+                viperToast(task.completed
+                    ? `Task completed ${_caseTaskStamp(task.completedAt)}`
+                    : 'Task reopened', 'success');
+            }
+        }
+
+        async function deleteCaseTask(taskId) {
+            const task = caseTasks.find(t => String(t.id) === String(taskId));
+            if (!task) return;
+            const ok = (typeof viperConfirm === 'function')
+                ? await viperConfirm(`Delete task "${task.title}"?`, { danger: true, okText: 'Delete' })
+                : confirm(`Delete task "${task.title}"?`);
+            if (!ok) return;
+            caseTasks = caseTasks.filter(t => String(t.id) !== String(taskId));
+            saveCaseTasks();
+            refreshCaseTasksList();
+        }
+
+        function editCaseTask(taskId) {
+            openCaseTaskModal(taskId);
+        }
+
+        function openCaseTaskModal(taskId) {
+            const editing = taskId != null
+                ? caseTasks.find(t => String(t.id) === String(taskId))
+                : null;
+            const t = editing || {};
             const modalHTML = `
                 <div id="caseTaskModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id === 'caseTaskModal') closeCaseTaskModal()">
                     <div class="glass-card rounded-xl p-6 max-w-lg w-full">
-                        <h3 class="text-2xl font-bold text-white mb-6">Add Case Task</h3>
+                        <h3 class="text-2xl font-bold text-white mb-6">${editing ? 'Edit Case Task' : 'Add Case Task'}</h3>
                         <form onsubmit="saveCaseTask(event)" class="space-y-4">
+                            <input type="hidden" id="task_id" value="${editing ? _esc(String(t.id)) : ''}">
                             <div>
                                 <label class="block text-sm text-gray-400 mb-2">Task Description *</label>
-                                <input type="text" id="task_description" required class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-purple focus:outline-none" placeholder="e.g., Interview witness, Review evidence">
+                                <input type="text" id="task_description" required value="${_esc(t.title || '')}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-purple focus:outline-none" placeholder="e.g., Interview witness, Review evidence">
                             </div>
-                            
-                            <div>
-                                <label class="block text-sm text-gray-400 mb-2">Due Date</label>
-                                <input type="date" id="task_dueDate" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-purple focus:outline-none">
+
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm text-gray-400 mb-2">Due Date</label>
+                                    <input type="date" id="task_dueDate" value="${_esc(t.date || '')}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-purple focus:outline-none">
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-400 mb-2">Time</label>
+                                    <input type="time" id="task_dueTime" value="${_esc(t.time || '')}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-purple focus:outline-none">
+                                </div>
                             </div>
-                            
+
                             <div>
                                 <label class="block text-sm text-gray-400 mb-2">Priority</label>
                                 <select id="task_priority" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-purple focus:outline-none">
-                                    <option value="low">Low</option>
-                                    <option value="medium" selected>Medium</option>
-                                    <option value="high">High</option>
+                                    <option value="low" ${t.priority === 'low' ? 'selected' : ''}>Low</option>
+                                    <option value="medium" ${!t.priority || t.priority === 'medium' ? 'selected' : ''}>Medium</option>
+                                    <option value="high" ${t.priority === 'high' ? 'selected' : ''}>High</option>
                                 </select>
                             </div>
-                            
+
                             <div>
                                 <label class="block text-sm text-gray-400 mb-2">Notes</label>
-                                <textarea id="task_notes" rows="3" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-purple focus:outline-none" placeholder="Additional details..."></textarea>
+                                <textarea id="task_notes" rows="3" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-purple focus:outline-none" placeholder="Additional details...">${_esc(t.notes || t.description || '')}</textarea>
                             </div>
-                            
+
+                            ${editing ? `
+                            <label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                                <input type="checkbox" id="task_completed" ${t.completed ? 'checked' : ''} class="w-4 h-4 accent-viper-purple">
+                                Mark as complete${t.completed && t.completedAt ? ` <span class="text-xs text-green-400">(completed ${_esc(_caseTaskStamp(t.completedAt))})</span>` : ''}
+                            </label>` : ''}
+
                             <div class="flex gap-3 justify-end mt-6">
                                 <button type="button" onclick="closeCaseTaskModal()" class="px-6 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white transition">
                                     Cancel
                                 </button>
                                 <button type="submit" class="px-6 py-2 bg-viper-purple hover:bg-viper-purple/80 rounded-lg text-white font-semibold transition">
-                                    Add Task
+                                    ${editing ? 'Save Changes' : 'Add Task'}
                                 </button>
                             </div>
                         </form>
                     </div>
                 </div>
             `;
-            
+
+            closeCaseTaskModal();
             document.body.insertAdjacentHTML('beforeend', modalHTML);
+            const first = document.getElementById('task_description');
+            if (first && first.focus) first.focus();
         }
 
         function closeCaseTaskModal() {
@@ -32112,26 +32302,53 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
         function saveCaseTask(event) {
             event.preventDefault();
-            
-            const dueDate = document.getElementById('task_dueDate').value;
-            
-            const newTask = {
-                id: Date.now(),
-                caseId: currentCase.caseNumber,
-                title: document.getElementById('task_description').value.trim(),
-                description: document.getElementById('task_notes').value.trim(),
-                date: dueDate || new Date().toISOString().split('T')[0],
-                time: '',
-                priority: document.getElementById('task_priority').value,
-                notes: document.getElementById('task_notes').value.trim(),
-                completed: false,
-                createdAt: new Date().toISOString()
-            };
 
-            caseTasks.push(newTask);
+            const idEl     = document.getElementById('task_id');
+            const rawId    = idEl ? idEl.value : '';
+            const existing = rawId ? caseTasks.find(t => String(t.id) === String(rawId)) : null;
+
+            const dueDate  = document.getElementById('task_dueDate').value;
+            const dueTime  = (document.getElementById('task_dueTime') || {}).value || '';
+            const notes    = document.getElementById('task_notes').value.trim();
+            const doneBox  = document.getElementById('task_completed');
+            const wantDone = doneBox ? !!doneBox.checked : false;
+
+            if (existing) {
+                existing.title       = document.getElementById('task_description').value.trim();
+                existing.description = notes;
+                existing.notes       = notes;
+                existing.date        = dueDate || existing.date || '';
+                existing.time        = dueTime;
+                existing.priority    = document.getElementById('task_priority').value;
+                existing.updatedAt   = new Date().toISOString();
+                if (wantDone && !existing.completed) {
+                    existing.completed   = true;
+                    existing.completedAt = new Date().toISOString();
+                    existing.completedBy = _caseTaskUser();
+                } else if (!wantDone && existing.completed) {
+                    existing.completed   = false;
+                    existing.completedAt = null;
+                    existing.completedBy = null;
+                }
+            } else {
+                caseTasks.push({
+                    id: Date.now(),
+                    caseId: currentCase.caseNumber,
+                    title: document.getElementById('task_description').value.trim(),
+                    description: notes,
+                    date: dueDate || new Date().toISOString().split('T')[0],
+                    time: dueTime,
+                    priority: document.getElementById('task_priority').value,
+                    notes: notes,
+                    completed: false,
+                    completedAt: null,
+                    createdAt: new Date().toISOString()
+                });
+            }
+
             saveCaseTasks();
             closeCaseTaskModal();
-            renderTabContent('overview'); // Refresh the overview tab
+            refreshCaseTasksList();
         }
         
         // Initialize on page load

@@ -1411,7 +1411,7 @@ footer {
                     <a href="#download" class="btn-primary">⬇ Download Free Demo</a>
                     <a href="#features" class="btn-secondary">Explore Features</a>
                 </div>
-                <p class="hero-meta">Version 5.0.6 · Windows 10/11 · 60-Day Free Trial</p>
+                <p class="hero-meta" data-viper-version-meta>Version 5.1.3 · Windows 10/11 · 60-Day Free Trial</p>
             </div>
             <div class="hero-image">
                 <img src="assets/hero-banner.png" alt="V.I.P.E.R. — Visual Intelligence Platform for Evidence and Reporting">
@@ -1963,10 +1963,10 @@ footer {
             <p class="reveal">60-day free trial. No credit card. No obligation. Full access to every feature.</p>
             <div class="cta-actions reveal">
                 <a href="#" class="btn-primary" id="downloadBtn" onclick="handleDownload(event)">
-                    ⬇ Download V.I.P.E.R. v5.0.6
+                    ⬇ Download V.I.P.E.R. <span data-viper-version-tag>v5.1.3</span>
                 </a>
             </div>
-            <p class="download-meta reveal">Version 5.0.6 · Windows 10/11 · ~130 MB</p>
+            <p class="download-meta reveal" data-viper-version-meta>Version 5.1.3 · Windows 10/11 · ~130 MB</p>
         </div>
     </section>
 
@@ -2283,13 +2283,53 @@ document.querySelectorAll('a[href^="#"]').forEach(link => {
 
 /* ──────────────────────────────────────────────
    DOWNLOAD HANDLER
+   ──────────────────────────────────────────────
+   VIPER_VERSION is the pinned fallback and must be bumped with each release.
+   On load we also ask the GitHub API for the newest release and, if it is
+   newer, retarget the button and the two "Version …" labels. That way a
+   missed manual bump degrades to "one release behind" instead of the four
+   releases the site drifted before 5.1.3. Every failure path (offline, rate
+   limit, unexpected payload) silently keeps the pinned value.
    ────────────────────────────────────────────── */
+const VIPER_VERSION = '5.1.3';
+let   VIPER_DOWNLOAD_URL =
+    'https://github.com/exhonorated999/project-viper/releases/download/v' +
+    VIPER_VERSION + '/V.I.P.E.R-' + VIPER_VERSION + '-Setup.exe';
+
 function handleDownload(e) {
-    const downloadUrl = 'https://github.com/exhonorated999/project-viper/releases/download/v5.0.6/V.I.P.E.R-5.0.6-Setup.exe';
+    if (e) e.preventDefault();
     // Track download click
     _iq('download_click');
-    window.location.href = downloadUrl;
+    window.location.href = VIPER_DOWNLOAD_URL;
 }
+
+(function syncViperVersion() {
+    const cmp = (a, b) => {
+        const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
+        for (let i = 0; i < 3; i++) {
+            const d = (pa[i] || 0) - (pb[i] || 0);
+            if (d) return d;
+        }
+        return 0;
+    };
+    fetch('https://api.github.com/repos/exhonorated999/project-viper/releases/latest',
+          { headers: { Accept: 'application/vnd.github+json' } })
+        .then(r => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
+        .then(rel => {
+            const tag = String(rel && rel.tag_name || '');
+            const m = tag.match(/^v?(\d+\.\d+\.\d+)$/);
+            if (!m || cmp(m[1], VIPER_VERSION) <= 0) return;
+            const ver = m[1];
+            const setup = (rel.assets || []).find(a => /-Setup\.exe$/i.test(a.name || ''));
+            if (!setup || !setup.browser_download_url) return;
+            VIPER_DOWNLOAD_URL = setup.browser_download_url;
+            document.querySelectorAll('[data-viper-version-tag]')
+                .forEach(el => { el.textContent = 'v' + ver; });
+            document.querySelectorAll('[data-viper-version-meta]')
+                .forEach(el => { el.textContent = el.textContent.replace(/\d+\.\d+\.\d+/, ver); });
+        })
+        .catch(() => { /* keep the pinned version */ });
+})();
 function handleSupervisorDownload(e) {
     if (e) e.preventDefault();
     const downloadUrl = 'https://github.com/exhonorated999/viper-supervisor-edition/releases/download/v0.1.0/VIPER-Supervisor-Edition-Setup-0.1.0.exe';

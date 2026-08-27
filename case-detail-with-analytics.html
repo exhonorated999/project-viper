@@ -27,6 +27,10 @@
     <script src="libs/leaflet.markercluster.js"></script>
     <link rel="stylesheet" href="modules/connection-board/connection-board.css" />
     <script src="modules/connection-board/connection-board.js" defer></script>
+    <link rel="stylesheet" href="modules/flock/flock-styles.css" />
+    <script src="modules/flock/flock-parser.js" defer></script>
+    <script src="modules/flock/flock-module.js" defer></script>
+    <script src="modules/flock/flock-ui.js" defer></script>
     <!-- Analytics CDR Libraries -->
     <script src="libs/papaparse.min.js"></script>
     <script src="libs/d3.v7.min.js"></script>
@@ -1985,6 +1989,7 @@
                 discordWarrant: { label: 'Discord Warrant', icon: 'M19.27 5.33C17.94 4.71 16.5 4.26 15 4a.09.09 0 00-.07.03c-.18.33-.39.76-.53 1.09a16.09 16.09 0 00-4.8 0c-.14-.34-.35-.76-.54-1.09-.01-.02-.04-.03-.07-.03-1.5.26-2.93.71-4.27 1.33-.01 0-.02.01-.03.02-2.72 4.07-3.47 8.03-3.1 11.95 0 .02.01.04.03.05 1.8 1.32 3.53 2.12 5.24 2.65.03.01.06 0 .07-.02.4-.55.76-1.13 1.07-1.74.02-.04 0-.08-.04-.09-.57-.22-1.11-.48-1.64-.78-.04-.02-.04-.08-.01-.11.11-.08.22-.17.33-.25.02-.02.05-.02.07-.01 3.44 1.57 7.15 1.57 10.55 0 .02-.01.05-.01.07.01.11.09.22.17.33.26.04.03.04.09-.01.11-.52.31-1.07.56-1.64.78-.04.01-.05.06-.04.09.32.61.68 1.19 1.07 1.74.03.01.06.02.09.01 1.72-.53 3.45-1.33 5.25-2.65.02-.01.03-.03.03-.05.44-4.53-.73-8.46-3.1-11.95-.01-.01-.02-.02-.04-.02zM8.52 14.91c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.84 2.12-1.89 2.12zm6.97 0c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.83 2.12-1.89 2.12z' },
                 datapilot: { label: 'Datapilot', icon: 'M9 17a4 4 0 01-2-7.5l1-3a4 4 0 017 0l1 3A4 4 0 0115 17H9zM12 12v9' },
                 cellebrite: { label: 'Cellebrite (Mobile Forensics)', icon: 'M11 2H9a2 2 0 00-2 2v16a2 2 0 002 2h6a2 2 0 002-2V4a2 2 0 00-2-2h-2M11 18h2' },
+                flock: { label: 'FLOCK (LPR)', icon: 'M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z M15 13a3 3 0 11-6 0 3 3 0 016 0z' },
                 forensics: { label: 'Device Exams', icon: 'M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25' }
             };
             
@@ -2133,6 +2138,7 @@
             allModules.discordWarrant = { label: 'Discord Warrant', icon: '💜' };
             allModules.datapilot = { label: 'Datapilot', icon: '📱' };
             allModules.cellebrite = { label: 'Cellebrite (Mobile Forensics)', icon: '📱' };
+            allModules.flock = { label: 'FLOCK (LPR)', icon: '📷' };
             allModules.forensics = { label: 'Device Exams', icon: '🔬' };
 
             // Warrant Author — only surface in Manage Tabs when feature toggle is enabled.
@@ -2231,6 +2237,7 @@
                 discordWarrant:'Discord Warrant',
                 datapilot:'Datapilot',
                 cellebrite:'Cellebrite (Mobile Forensics)',
+                flock:'FLOCK (LPR)',
                 forensics:'Device Exams',
                 warrantAuthor:'Warrant Author'
             };
@@ -2295,6 +2302,7 @@
                 discordWarrant: { label: 'Discord Warrant', icon: '💜', type: 'data' },
                 datapilot: { label: 'Datapilot', icon: '📱', type: 'data' },
                 cellebrite: { label: 'Cellebrite (Mobile Forensics)', icon: '📱', type: 'data' },
+                flock: { label: 'FLOCK (LPR)', icon: '📷', type: 'data' },
                 forensics: { label: 'Device Exams', icon: '🔬', type: 'mixed' },
                 consentSearch: { label: 'Consent Search', icon: '✅', type: 'data' },
                 warrantAuthor: { label: 'Warrant Author', icon: '✍️', type: 'mixed' }
@@ -2560,6 +2568,11 @@
                 case 'cellebrite': {
                     const cbData = _lsParse(`cellebriteImport_${currentCase.id}`, {"imports": []});
                     return (cbData.imports || []).length;
+                }
+                case 'flock': {
+                    // Count plate READS, not imports — the reads are the evidence.
+                    const flkData = _lsParse(`flock_${currentCase.id}`, {"imports": []});
+                    return (flkData.imports || []).reduce((n, i) => n + ((i.hits || []).length), 0);
                 }
                 case 'warrantAuthor': {
                     // Index lives in localStorage; full draft bodies live on disk under cases/{caseNumber}/Warrants/Drafts/.
@@ -4529,6 +4542,12 @@
             }
             currentTab = tabId;
 
+            // Leaving FLOCK must release the Leaflet instance and cancel the
+            // playback rAF loop — innerHTML alone leaves both running.
+            if (typeof teardownFlock === 'function' && tabId !== 'flock') {
+                try { teardownFlock(); } catch (_) {}
+            }
+
             // Telemetry: track module open (demo-only, gated internally)
             try { ViperTelemetry.moduleOpen(tabId); } catch (e) {}
 
@@ -4662,6 +4681,9 @@
             } else if (tabId === 'cellebrite') {
                 contentDiv.innerHTML = renderCellebriteTab();
                 initializeCellebrite();
+            } else if (tabId === 'flock') {
+                contentDiv.innerHTML = renderFlockTab();
+                initializeFlock();
             } else {
                 contentDiv.innerHTML = renderPlaceholderTab(tabId);
             }
@@ -30305,6 +30327,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 { id: 'discordWarrant', label: 'Discord Warrant Parser', icon: 'M19.27 5.33C17.94 4.71 16.5 4.26 15 4a.09.09 0 00-.07.03c-.18.33-.39.76-.53 1.09a16.09 16.09 0 00-4.8 0c-.14-.34-.35-.76-.54-1.09-.01-.02-.04-.03-.07-.03-1.5.26-2.93.71-4.27 1.33-.01 0-.02.01-.03.02-2.72 4.07-3.47 8.03-3.1 11.95 0 .02.01.04.03.05 1.8 1.32 3.53 2.12 5.24 2.65.03.01.06 0 .07-.02.4-.55.76-1.13 1.07-1.74.02-.04 0-.08-.04-.09-.57-.22-1.11-.48-1.64-.78-.04-.02-.04-.08-.01-.11.11-.08.22-.17.33-.25.02-.02.05-.02.07-.01 3.44 1.57 7.15 1.57 10.55 0 .02-.01.05-.01.07.01.11.09.22.17.33.26.04.03.04.09-.01.11-.52.31-1.07.56-1.64.78-.04.01-.05.06-.04.09.32.61.68 1.19 1.07 1.74.03.01.06.02.09.01 1.72-.53 3.45-1.33 5.25-2.65.02-.01.03-.03.03-.05.44-4.53-.73-8.46-3.1-11.95-.01-.01-.02-.02-.04-.02zM8.52 14.91c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.84 2.12-1.89 2.12zm6.97 0c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.83 2.12-1.89 2.12z', desc: 'Parse Discord Data Package warrant returns — messages, sessions, IPs, devices, billing' },
                 { id: 'datapilot', label: 'Datapilot (Mobile Forensics)', icon: 'M9 17a4 4 0 01-2-7.5l1-3a4 4 0 017 0l1 3A4 4 0 0115 17H9zM12 12v9', desc: 'Parse mobile forensic CSV exports — calls, messages, contacts, GPS, apps, files + AI insights' },
                 { id: 'cellebrite', label: 'Cellebrite (Mobile Forensics)', icon: 'M11 2H9a2 2 0 00-2 2v16a2 2 0 002 2h6a2 2 0 002-2V4a2 2 0 00-2-2h-2M11 18h2', desc: 'Parse raw UFED filesystem extractions (.ufdx) — device, apps, contacts, calls, SMS/MMS, accounts, Wi-Fi' },
+                { id: 'flock', label: 'FLOCK (License Plate Reader)', icon: 'M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z M15 13a3 3 0 11-6 0 3 3 0 016 0z', desc: 'Map Flock ALPR search results, replay vehicle movement & push hits to the Connection Board' },
             ];
 
             const allModules = [...caseManagement, ...investigativeTools];
@@ -30952,7 +30975,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
         const TIMELINE_CATEGORIES = {
             warrant: '📋', surveillance: '👁️', rms: '📄', interview: '🎙️',
-            lab: '🔬', digital: '💻', arrest: '🚔', note: '📝', task: '✅', custom: '📌'
+            lab: '🔬', digital: '💻', arrest: '🚔', note: '📝', task: '✅',
+            lpr: '📷', custom: '📌'
         };
 
         function loadTimelineEvents() {
@@ -31233,6 +31257,29 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     });
                 }
             }
+
+            // --- FLOCK LPR (one span per plate per import) ---
+            // A single return can carry hundreds of reads; emitting one event
+            // each would bury every other item on the timeline. Instead each
+            // plate gets one span from its first read to its last, and the
+            // detective drills into the FLOCK tab for the individual hits.
+            try {
+                if (window.FlockModule && typeof window.FlockModule.timelineEvents === 'function') {
+                    for (const fe of window.FlockModule.timelineEvents()) {
+                        auto.push({
+                            id: fe.id,
+                            timestamp: new Date(fe.startMs).toISOString(),
+                            endTimestamp: fe.endMs ? new Date(fe.endMs).toISOString() : null,
+                            title: fe.title,
+                            description: fe.description,
+                            lane: 'investigation', category: 'lpr',
+                            significance: fe.count >= 10 ? 'important' : 'supporting',
+                            entityLink: fe.plate || '', sourceType: 'auto:flock',
+                            sourceId: fe.importId + ':' + fe.plate, color: null, createdAt: now
+                        });
+                    }
+                }
+            } catch (e) { console.warn('[timeline] FLOCK events failed:', (e && e.message) || e); }
 
             // Deduplicate auto by id
             const seen = new Set();

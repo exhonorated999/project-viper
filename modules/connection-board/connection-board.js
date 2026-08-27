@@ -1676,7 +1676,11 @@
       try { if (typeof renderTabContent === 'function') { renderTabContent(pin.data.sourceTab); } if (typeof switchTab === 'function') switchTab(pin.data.sourceTab); } catch (_) {}
     };
     el.querySelectorAll('.cb-card-colors .cb-swatch').forEach(function (sw) {
-      sw.onclick = function () { pin.color = sw.getAttribute('data-color'); saveBoard(); renderCurrentView(); renderLocPanel(); renderDetailInner(el, pin, from); };
+      // _colorOverride marks the color as deliberately chosen, so a later
+      // re-sync from an external source (e.g. FLOCK re-pushing the same LPR
+      // hits) refreshes the data but leaves the detective's color alone —
+      // same contract as _labelOverride / _posManual.
+      sw.onclick = function () { pin.color = sw.getAttribute('data-color'); pin._colorOverride = true; saveBoard(); renderCurrentView(); renderLocPanel(); renderDetailInner(el, pin, from); };
     });
   }
 
@@ -2319,9 +2323,87 @@
     btn.style.display = disabled ? 'none' : '';
   }
 
+  // ============================================================
+  //  PUBLIC INGEST API — for feature modules (FLOCK LPR, etc.)
+  // ============================================================
+  /**
+   * Push externally-sourced pins onto this case's board.
+   *
+   * Works whether or not the drawer is open:
+   *   - open   -> mutate the live in-memory board and repaint immediately.
+   *   - closed -> load the stored board, merge, and save, so the pins are
+   *               waiting the next time the detective opens it.
+   *
+   * Pins are keyed by (sourceType, sourceId), so re-pushing the same items
+   * updates them in place instead of duplicating. User overrides — a
+   * hand-dragged position, a rename, a recolor — are always preserved.
+   *
+   * @param {Array<{type,label,sourceType,sourceId,lat,lng,color,address,data,photo}>} specs
+   * @returns {{added:number, updated:number}}
+   */
+  function addPins(specs) {
+    if (typeof currentCase === 'undefined' || !currentCase) {
+      toast('Open a case first', 'warning');
+      return { added: 0, updated: 0 };
+    }
+    specs = (specs || []).filter(Boolean);
+    if (!specs.length) return { added: 0, updated: 0 };
+
+    var drawerOpen = !!document.querySelector('#cbDrawer.cb-open');
+    // When the board is closed our in-memory copy may be stale or belong to a
+    // different case, so re-read from the store before merging.
+    if (!drawerOpen || caseId !== currentCase.id || !board) {
+      caseId = currentCase.id;
+      loadBoard();
+    }
+
+    var added = 0, updated = 0;
+    specs.forEach(function (spec) {
+      var pre = pinBySource(spec.sourceType, spec.sourceId);
+      var pin = upsertAutoPin(spec);
+      if (pre) updated++; else added++;
+
+      // upsertAutoPin only seeds lat/lng on CREATE. External sources supply
+      // surveyed coordinates (an ALPR camera position is exact), so refresh
+      // them on update too — unless the detective hand-placed the pin.
+      if (spec.lat != null && spec.lng != null && !pin._posManual) {
+        pin.lat = spec.lat; pin.lng = spec.lng; pin.approx = false;
+      }
+      if (spec.data) pin.data = spec.data;
+      if (spec.color && !pin._colorOverride) pin.color = spec.color;
+      // A pin previously "removed from board" should come back when the user
+      // deliberately pushes it again.
+      if (pin.hidden) pin.hidden = false;
+    });
+
+    saveBoard();
+    if (drawerOpen) { renderCurrentView(); renderLocPanel(); }
+    return { added: added, updated: updated };
+  }
+
+  /** Remove every pin that came from a given sourceType (e.g. 'flock'). */
+  function removePinsBySourceType(sourceType) {
+    if (typeof currentCase === 'undefined' || !currentCase) return 0;
+    var drawerOpen = !!document.querySelector('#cbDrawer.cb-open');
+    if (!drawerOpen || caseId !== currentCase.id || !board) {
+      caseId = currentCase.id;
+      loadBoard();
+    }
+    var doomed = {};
+    board.pins.forEach(function (p) { if (p.sourceType === sourceType) doomed[p.id] = true; });
+    var n = Object.keys(doomed).length;
+    if (!n) return 0;
+    board.pins = board.pins.filter(function (p) { return !doomed[p.id]; });
+    board.strings = board.strings.filter(function (s) { return !doomed[s.from] && !doomed[s.to]; });
+    saveBoard();
+    if (drawerOpen) { renderCurrentView(); renderLocPanel(); }
+    return n;
+  }
+
   // ---- exports ----
   window.ConnectionBoard = {
-    open: openBoard, close: closeBoard, addFromCaseData: addFromCaseData, applyFlag: applyFlag
+    open: openBoard, close: closeBoard, addFromCaseData: addFromCaseData, applyFlag: applyFlag,
+    addPins: addPins, removePinsBySourceType: removePinsBySourceType
   };
   window.openConnectionBoard = openBoard;
   window.closeConnectionBoard = closeBoard;

@@ -1,0 +1,193 @@
+/* ============================================================
+   FLOCK — LPR module styles (VIPER)
+   Card visuals intentionally echo the Connection Board detail card:
+   accent bar on the left, tight key/value rows, muted action strip.
+   Colors ride the --vp-* skin tokens where a skin defines them.
+   ============================================================ */
+
+/* ---- layout ---- */
+.flock-list {
+    max-height: 70vh;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+.flock-list::-webkit-scrollbar { width: 8px; }
+.flock-list::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.03); border-radius: 4px; }
+.flock-list::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.25); border-radius: 4px; }
+.flock-list::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.4); }
+
+.flock-map {
+    height: 70vh;
+    min-height: 420px;
+    border-radius: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    overflow: hidden;
+    background: #0b0e14;
+}
+
+/* ---- form controls ---- */
+.flock-input {
+    background: rgba(15, 18, 26, 0.9);
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 4px;
+    color: #e5e7eb;
+    font-size: 11px;
+    padding: 5px 8px;
+    outline: none;
+}
+.flock-input:focus {
+    border-color: rgb(var(--vp-cyan, 6 182 212));
+    box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.15);
+}
+.flock-input option { background: #0f121a; color: #e5e7eb; }
+
+/* ---- hit card ---- */
+.flock-card {
+    --flk-accent: #06b6d4;
+    background: rgba(21, 25, 35, 0.75);
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-left: 3px solid var(--flk-accent);
+    border-radius: 6px;
+    padding: 8px 10px;
+    transition: border-color .15s, background .15s, box-shadow .15s;
+}
+.flock-card:hover {
+    background: rgba(30, 36, 50, 0.85);
+    border-color: rgba(148, 163, 184, 0.32);
+    border-left-color: var(--flk-accent);
+}
+.flock-card-sel {
+    background: rgba(6, 182, 212, 0.08);
+    border-color: rgba(6, 182, 212, 0.45);
+    border-left-color: var(--flk-accent);
+}
+.flock-flash {
+    animation: flockFlash .9s ease-out;
+}
+@keyframes flockFlash {
+    0%   { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.7); }
+    100% { box-shadow: 0 0 0 14px rgba(6, 182, 212, 0); }
+}
+
+.flock-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+.flock-seq {
+    font-size: 10px;
+    color: #64748b;
+    font-variant-numeric: tabular-nums;
+    min-width: 30px;
+}
+.flock-plate {
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: .06em;
+    color: #fff;
+}
+.flock-state {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #94a3b8;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 3px;
+    padding: 1px 4px;
+}
+.flock-time {
+    margin-left: auto;
+    font-size: 11px;
+    font-family: ui-monospace, Consolas, monospace;
+    color: var(--flk-accent);
+    white-space: nowrap;
+}
+
+.flock-card-body { display: flex; flex-direction: column; gap: 2px; }
+.flock-row {
+    font-size: 11px;
+    color: #cbd5e1;
+    line-height: 1.5;
+    word-break: break-word;
+}
+.flock-k {
+    display: inline-block;
+    min-width: 74px;
+    color: #64748b;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+}
+.flock-dir {
+    display: inline-block;
+    margin-left: 4px;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: #0b0e14;
+    background: var(--flk-accent);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-weight: 600;
+}
+
+.flock-card-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+.flock-btn {
+    font-size: 10px;
+    color: #94a3b8;
+    background: rgba(148, 163, 184, 0.08);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 4px;
+    padding: 3px 8px;
+    cursor: pointer;
+    transition: all .15s;
+}
+.flock-btn:hover {
+    color: #fff;
+    border-color: var(--flk-accent);
+    background: rgba(6, 182, 212, 0.12);
+}
+
+/* ---- leg connector between consecutive reads ---- */
+.flock-leg {
+    font-size: 10px;
+    color: #64748b;
+    padding: 2px 0 2px 14px;
+    letter-spacing: .02em;
+}
+.flock-leg-warn {
+    color: #fbbf24;
+    font-weight: 600;
+}
+
+/* ---- dropzone (empty state) ---- */
+.flock-drop {
+    border: 2px dashed rgba(148, 163, 184, 0.3);
+    border-radius: 12px;
+    padding: 40px 20px;
+    text-align: center;
+    transition: all .18s;
+    background: rgba(21, 25, 35, 0.4);
+}
+.flock-drop-hot {
+    border-color: rgb(var(--vp-cyan, 6 182 212));
+    background: rgba(6, 182, 212, 0.08);
+}
+
+/* ---- leaflet popup skin (match the app's dark chrome) ---- */
+#flockMap .leaflet-popup-content-wrapper {
+    background: #151923;
+    color: #e5e7eb;
+    border: 1px solid rgba(6, 182, 212, 0.35);
+    border-radius: 6px;
+}
+#flockMap .leaflet-popup-tip { background: #151923; }
+#flockMap .leaflet-popup-content { margin: 8px 10px; }

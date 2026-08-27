@@ -38,7 +38,7 @@
         'money_', 'opsplan_', 'rmsImports_', 'oversightImport_',
         'canvasForms_', 'cyberTips_', 'timelineEvents_', 'consentSearches_',
         'googleWarrant_', 'metaWarrant_', 'kikWarrant_', 'caseMetrics_',
-        'connectionBoard_'
+        'connectionBoard_', 'flock_'
     ];
     const PATTERN1_SET = new Set(PATTERN1_KEYS);
     const TASK_KEY = 'viperTasks';

@@ -9068,6 +9068,82 @@ ipcMain.handle('tlo-reset', async () => {
   tloBrowserView.webContents.loadURL('https://tloxp.tlo.com/');
 });
 
+// ── FLOCK LPR module: image-pack (zip) reader ──────────────────────────
+// Flock ships plate-read photos as a SEPARATE zip from the search-results
+// spreadsheet. A pack is ~15 MB / ~200 JPEGs, so it must NOT go through
+// read-evidence-file: that handler marshals bytes as a plain number[], which
+// for 15 MB means a 15-million-element array over IPC. Instead the renderer
+// asks for one entry at a time and we return a small data URL.
+//
+// Reading here also means we inherit the shared zip-reader's ZIP64 support
+// and transparent VIPENC decryption when Field Security is unlocked.
+const _flockZipCache = new Map(); // zipPath -> { reader, timer }
+const FLOCK_ZIP_IDLE_MS = 60000;
+
+function _flockZipTouch(rec, zipPath) {
+  if (rec.timer) clearTimeout(rec.timer);
+  rec.timer = setTimeout(() => {
+    _flockZipCache.delete(zipPath);
+    try { rec.reader.close(); } catch (_) {}
+  }, FLOCK_ZIP_IDLE_MS);
+}
+
+async function _flockOpenZip(zipPath) {
+  const hit = _flockZipCache.get(zipPath);
+  if (hit) { _flockZipTouch(hit, zipPath); return hit.reader; }
+  const { openZip } = require('./modules/_shared/zip-reader');
+  const reader = await openZip(zipPath, { security });
+  const rec = { reader, timer: null };
+  _flockZipCache.set(zipPath, rec);
+  _flockZipTouch(rec, zipPath);
+  return reader;
+}
+
+function _flockValidateZip(zipPath) {
+  if (typeof zipPath !== 'string' || !zipPath) return 'No file path supplied.';
+  if (!/\.zip$/i.test(zipPath)) return 'Not a .zip file.';
+  if (!fs.existsSync(zipPath)) return 'That file is no longer on disk — re-add it under Evidence.';
+  return null;
+}
+
+ipcMain.handle('flock-zip-list', async (_event, zipPath) => {
+  const bad = _flockValidateZip(zipPath);
+  if (bad) return { ok: false, error: bad };
+  try {
+    const reader = await _flockOpenZip(zipPath);
+    const entries = reader.getEntries()
+      .filter(e => !e.isDirectory)
+      .map(e => e.entryName);
+    return { ok: true, entries };
+  } catch (e) {
+    console.error('[FLOCK] zip list failed:', e);
+    return { ok: false, error: (e && e.message) || String(e) };
+  }
+});
+
+const _FLOCK_MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
+
+ipcMain.handle('flock-zip-read-image', async (_event, zipPath, entryName) => {
+  const bad = _flockValidateZip(zipPath);
+  if (bad) return { ok: false, error: bad };
+  if (typeof entryName !== 'string' || !entryName) return { ok: false, error: 'No entry supplied.' };
+  const ext = (entryName.match(/\.([a-z0-9]+)$/i) || [])[1];
+  const mime = _FLOCK_MIME[String(ext).toLowerCase()];
+  if (!mime) return { ok: false, error: 'Unsupported image type.' };
+  try {
+    const reader = await _flockOpenZip(zipPath);
+    const entry = reader.getEntries().find(e => e.entryName === entryName);
+    if (!entry) return { ok: false, error: 'Image not found in the pack.' };
+    // Guard against a hostile / malformed archive claiming a huge entry.
+    if (entry.size > 25 * 1024 * 1024) return { ok: false, error: 'Image too large.' };
+    const buf = entry.getData();
+    return { ok: true, dataUrl: 'data:' + mime + ';base64,' + buf.toString('base64'), bytes: buf.length };
+  } catch (e) {
+    console.error('[FLOCK] zip read failed:', entryName, e);
+    return { ok: false, error: (e && e.message) || String(e) };
+  }
+});
+
 // ── LexisNexis Accurint IPC ────────────────────────────────
 ipcMain.on('accurint-set-bounds', (_event, bounds) => {
   if (!accurintBrowserView || !mainWindow || mainWindow.isDestroyed()) return;

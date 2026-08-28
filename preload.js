@@ -485,6 +485,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   flockSetVisible: (visible) => ipcRenderer.send('flock-set-visible', visible),
   flockSearchPlate: (params) => ipcRenderer.invoke('flock-search-plate', params),
   flockReset: () => ipcRenderer.invoke('flock-reset'),
+  // FLOCK LPR module — image packs. Separate from the Flock Safety
+  // BrowserView above: these read the plate-read photo zip that Flock
+  // delivers alongside the search-results spreadsheet.
+  flockZipList: (zipPath) => ipcRenderer.invoke('flock-zip-list', zipPath),
+  flockZipReadImage: (zipPath, entryName) => ipcRenderer.invoke('flock-zip-read-image', zipPath, entryName),
 
   // TLO / TransUnion (persistent BrowserView)
   tloSetBounds: (bounds) => ipcRenderer.send('tlo-set-bounds', bounds),

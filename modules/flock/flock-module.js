@@ -34,16 +34,65 @@
     var MAX_HITS_PER_IMPORT = 25000; // sanity ceiling; a real return is 100s–1000s
 
     // ---- host-page helpers (all defined in case-detail-with-analytics.html) ----
+    //
+    // IMPORTANT: the case-detail page declares `currentCase` and `caseEvidence`
+    // with `let` at the top level of a classic <script>. Top-level let/const go
+    // into the global LEXICAL environment, NOT onto the global object — so
+    // `window.currentCase` is permanently `undefined` here even though the bare
+    // identifier `currentCase` resolves fine across classic scripts.
+    //
+    // Reading them through `window.` is what made the module report
+    // "No case is open." on every direct load and find nothing in Evidence.
+    // connection-board.js already uses the bare form (`typeof currentCase ===
+    // 'undefined'`); this now matches it. Function declarations such as
+    // _lsParse / ensureCaseModule DO land on window, so those stay as-is.
+    function theCase() {
+        try { if (typeof currentCase !== 'undefined' && currentCase) return currentCase; } catch (_) {}
+        try { if (window.currentCase) return window.currentCase; } catch (_) {}
+        return null;
+    }
+
+    function evidenceItems() {
+        // Prefer the live in-memory array the Evidence tab maintains.
+        try { if (typeof caseEvidence !== 'undefined' && Array.isArray(caseEvidence)) return caseEvidence; } catch (_) {}
+        try { if (Array.isArray(window.caseEvidence)) return window.caseEvidence; } catch (_) {}
+        // Fall back to the shared store, which is keyed by caseNumber.
+        var c = theCase();
+        if (!c) return [];
+        var all = lsParse('viperCaseEvidence', {}) || {};
+        var list = all[c.caseNumber];
+        return Array.isArray(list) ? list : [];
+    }
+
     function lsParse(key, fallback) {
-        if (typeof window._lsParse === 'function') return window._lsParse(key, fallback);
+        try { if (typeof _lsParse === 'function') return _lsParse(key, fallback); } catch (_) {}
+        try { if (typeof window._lsParse === 'function') return window._lsParse(key, fallback); } catch (_) {}
         try { var v = JSON.parse(localStorage.getItem(key)); return v == null ? fallback : v; }
         catch (_) { return fallback; }
     }
     function toast(msg, kind) {
         try { (window.viperToast || window.showToast || function () {})(msg, kind || 'info'); } catch (_) {}
     }
-    function theCase() {
-        return (typeof window.currentCase !== 'undefined' && window.currentCase) ? window.currentCase : null;
+
+    // Host helpers are reached bare-first, then via window. A bare identifier
+    // walks the scope chain and therefore finds BOTH a top-level `function`
+    // (which lands on the global object) and a top-level `let`/`const` (which
+    // lands only in the global lexical environment). Going through `window.`
+    // alone silently misses the latter — that is what broke this module.
+    function callHost(name, args) {
+        var fn = null;
+        try { if (typeof window[name] === 'function') fn = window[name]; } catch (_) {}
+        if (!fn) return false;
+        try { fn.apply(null, args || []); return true; } catch (e) {
+            console.warn('[FLOCK] host call failed:', name, (e && e.message) || e);
+            return false;
+        }
+    }
+
+    function activateModuleTab() {
+        // Never hand-roll currentCase.modules — see the 5.1.1 data-loss bug.
+        try { if (typeof ensureCaseModule === 'function') { ensureCaseModule('flock'); return true; } } catch (_) {}
+        return callHost('ensureCaseModule', ['flock']);
     }
 
     function storeKey() {
@@ -58,11 +107,12 @@
     // ---- persistence ----------------------------------------------------
     function load() {
         var k = storeKey();
-        if (!k) return { version: STORE_VERSION, imports: [], selected: {} };
+        if (!k) return { version: STORE_VERSION, imports: [], selected: {}, imagePacks: [] };
         var d = lsParse(k, null);
         if (!d || typeof d !== 'object') d = {};
         if (!Array.isArray(d.imports)) d.imports = [];
         if (!d.selected || typeof d.selected !== 'object') d.selected = {};
+        if (!Array.isArray(d.imagePacks)) d.imagePacks = [];
         d.version = STORE_VERSION;
         return d;
     }
@@ -183,7 +233,7 @@
 
         // Light the tab up on the case the moment real data lands, using the
         // shared helper (never hand-roll currentCase.modules — see 5.1.1).
-        try { if (typeof window.ensureCaseModule === 'function') window.ensureCaseModule('flock'); } catch (_) {}
+        activateModuleTab();
         try { refreshTimeline(); } catch (_) {}
 
         return { ok: true, record: record, duplicate: !!dup };
@@ -305,19 +355,189 @@
     function isSupportedName(name) {
         return isCsvName(name) || isWorkbookName(name);
     }
+    function isImagePackName(name) {
+        return /\.zip$/i.test(name || '');
+    }
+
+    // ── Image packs ──────────────────────────────────────────────────────
+    // Flock delivers plate-read photos as a SEPARATE zip download from the
+    // search-results spreadsheet. The two use different filename conventions
+    // and must be cross-referenced:
+    //
+    //   spreadsheet : #100_-_N_Haven_Ave_@_HWY-10_-_SB_(Lanes_3&4)_2026-08-19T05:44:26.773Z.jpg
+    //   image zip   : 14-_EB_Lake_Park_@_Ramona_Expy_2026-08-25T13-10-27.000+00-00.jpg
+    //
+    // A zip entry cannot contain ':', so Flock rewrites the time separators as
+    // '-' and the zone as '+00-00'. Some reads also ship 2-3 photos (context
+    // shot + plate crop), suffixed _1, _2 AFTER the timestamp.
+    //
+    // Matching on the raw filename therefore fails. The reliable key is
+    // (normalized camera name + UTC second), which on the reference data
+    // matched 142/162 reads with zero ambiguity — the other 20 fall outside
+    // the image pack's date range, i.e. the officer pulled a narrower image
+    // search than spreadsheet search. Never silently "best-guess" those.
+    var NAME_TS = /(\d{4}-\d{2}-\d{2})[T_](\d{2})[:\-](\d{2})[:\-](\d{2})(?:[.,](\d{1,3}))?\s*(Z|[+-]\d{2}[:\-]?\d{2})?/;
+
+    /** Split a Flock image filename into { ms, camera, dup }. */
+    function parseImageName(name) {
+        var base = String(name || '').replace(/\.[a-z0-9]+$/i, '');
+        var m = base.match(NAME_TS);
+        if (!m) return null;
+        var ms = Date.UTC(
+            +m[1].slice(0, 4), +m[1].slice(5, 7) - 1, +m[1].slice(8, 10),
+            +m[2], +m[3], +m[4]
+        );
+        var off = m[6];
+        if (off && off !== 'Z') {
+            var sign = off[0] === '-' ? -1 : 1;
+            var digits = off.slice(1).replace(/[:\-]/g, '');
+            ms -= sign * ((+digits.slice(0, 2)) * 60 + (+digits.slice(2, 4))) * 60000;
+        }
+        var tail = base.slice(m.index + m[0].length);
+        return {
+            ms: ms,
+            // Trim the separator that sits between the camera name and the
+            // timestamp so the value is presentable as-is. Only '_' and
+            // whitespace are stripped — a trailing '-' can be part of a real
+            // camera label (e.g. "14-").
+            camera: base.slice(0, m.index).replace(/[\s_]+$/, ''),
+            dup: (tail.match(/_(\d+)$/) || [])[1] || '0'
+        };
+    }
+
+    function camSlug(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+    /** Grouping key shared by both sides: UTC second + camera slug. */
+    function imageKey(ms, camera) {
+        return Math.floor(ms / 1000) + '|' + camSlug(camera);
+    }
+
+    /** Key for a parsed hit (uses its own image filename, else camera+time). */
+    function hitImageKey(hit) {
+        if (!hit) return null;
+        var p = hit.image ? parseImageName(hit.image) : null;
+        if (p) return imageKey(p.ms, p.camera);
+        if (hit.tUtcMs != null) return imageKey(hit.tUtcMs, hit.camera);
+        return null;
+    }
+
+    /** Build { key -> [entryName, ...] } from a pack's entry list. */
+    function buildPackIndex(entries) {
+        var idx = {};
+        (entries || []).forEach(function (name) {
+            var p = parseImageName(name);
+            if (!p) return;
+            var k = imageKey(p.ms, p.camera);
+            (idx[k] = idx[k] || []).push(name);
+        });
+        // Keep the numbered variants in a stable order (base shot first).
+        Object.keys(idx).forEach(function (k) {
+            idx[k].sort(function (a, b) {
+                var pa = parseImageName(a), pb = parseImageName(b);
+                return (+(pa && pa.dup || 0)) - (+(pb && pb.dup || 0)) || String(a).localeCompare(String(b));
+            });
+        });
+        return idx;
+    }
+
+    function getImagePacks() { return load().imagePacks || []; }
+
+    /** Every image entry available for a hit, across all attached packs. */
+    function imagesForHit(hit) {
+        var key = hitImageKey(hit);
+        if (!key) return [];
+        var out = [];
+        getImagePacks().forEach(function (pack) {
+            var names = (pack.index || {})[key];
+            if (!names) return;
+            names.forEach(function (n) { out.push({ packId: pack.id, path: pack.path, entry: n }); });
+        });
+        return out;
+    }
+
+    /**
+     * Attach an image zip that is already filed in Evidence.
+     * Listing happens in the MAIN process: the pack is ~15 MB and
+     * readEvidenceFile() marshals bytes as a plain number[], which would mean
+     * a 15-million-element array over IPC. Main also owns the shared
+     * zip-reader (ZIP64 + Field-Security decryption).
+     */
+    function attachImagePack(candidate) {
+        if (!(window.electronAPI && window.electronAPI.flockZipList)) {
+            return Promise.resolve({ ok: false, error: 'Image-pack bridge unavailable — restart VIPER to pick up the update.' });
+        }
+        return window.electronAPI.flockZipList(candidate.filePath).then(function (r) {
+            if (!r || !r.ok) return { ok: false, error: (r && r.error) || 'Could not read that zip.' };
+            var images = (r.entries || []).filter(function (n) { return /\.(jpe?g|png|webp)$/i.test(n); });
+            if (!images.length) return { ok: false, error: 'That zip holds no images.' };
+
+            var index = buildPackIndex(images);
+            var d = load();
+            d.imagePacks = d.imagePacks || [];
+            // Re-attaching the same file refreshes it rather than duplicating.
+            d.imagePacks = d.imagePacks.filter(function (p) { return p.path !== candidate.filePath; });
+            var pack = {
+                id: uid('pack'),
+                name: candidate.fileName,
+                path: candidate.filePath,
+                evidenceTag: candidate.tag || '',
+                count: images.length,
+                attachedAt: new Date().toISOString(),
+                index: index
+            };
+            d.imagePacks.push(pack);
+            if (!save(d)) return { ok: false, error: 'Storage write failed.' };
+
+            // Report coverage honestly — a partial pack is normal and the user
+            // must not assume a missing photo means the read did not happen.
+            var hits = allHits();
+            var withImg = hits.filter(function (h) { return imagesForHit(h).length; }).length;
+            return { ok: true, pack: pack, images: images.length, matched: withImg, totalHits: hits.length };
+        }, function (err) {
+            return { ok: false, error: (err && err.message) || String(err) };
+        });
+    }
+
+    function detachImagePack(packId) {
+        var d = load();
+        var before = (d.imagePacks || []).length;
+        d.imagePacks = (d.imagePacks || []).filter(function (p) { return p.id !== packId; });
+        if (d.imagePacks.length === before) return false;
+        save(d);
+        return true;
+    }
+
+    /** Fetch one image as a data URL (main process reads a single entry). */
+    var _imgCache = new Map();
+    var IMG_CACHE_MAX = 80;
+    function readImage(ref) {
+        if (!ref) return Promise.resolve(null);
+        var ck = ref.path + '::' + ref.entry;
+        if (_imgCache.has(ck)) return Promise.resolve(_imgCache.get(ck));
+        if (!(window.electronAPI && window.electronAPI.flockZipReadImage)) return Promise.resolve(null);
+        return window.electronAPI.flockZipReadImage(ref.path, ref.entry).then(function (r) {
+            if (!r || !r.ok || !r.dataUrl) return null;
+            if (_imgCache.size >= IMG_CACHE_MAX) {
+                // Cheap FIFO eviction — plenty for a scrolling card list.
+                _imgCache.delete(_imgCache.keys().next().value);
+            }
+            _imgCache.set(ck, r.dataUrl);
+            return r.dataUrl;
+        }, function () { return null; });
+    }
 
     /**
      * Scan the case's evidence items for candidate spreadsheet files.
      * @returns [{ evidenceId, tag, description, fileName, filePath, size, likely, kind }]
      */
     function findCandidatesInEvidence() {
-        var ev = (typeof window.caseEvidence !== 'undefined' && Array.isArray(window.caseEvidence))
-            ? window.caseEvidence
-            : lsParse('viperCaseEvidence', {})[(theCase() || {}).caseNumber] || [];
         var out = [];
-        (ev || []).forEach(function (item) {
+        evidenceItems().forEach(function (item) {
             (item.files || []).forEach(function (f) {
-                if (!f || !isSupportedName(f.name)) return;
+                if (!f) return;
+                var isSheet = isSupportedName(f.name);
+                var isPack = isImagePackName(f.name);
+                if (!isSheet && !isPack) return;
                 out.push({
                     evidenceId: item.id,
                     tag: item.tag || '',
@@ -326,13 +546,14 @@
                     filePath: f.path,
                     size: f.size || 0,
                     likely: looksLikeFlockName(f.name),
-                    kind: isWorkbookName(f.name) ? 'xlsx' : 'csv'
+                    kind: isPack ? 'images' : (isWorkbookName(f.name) ? 'xlsx' : 'csv')
                 });
             });
         });
-        // Most-likely first, then newest-looking name.
+        // Most-likely first, spreadsheets before image packs, then by name.
         out.sort(function (a, b) {
             if (a.likely !== b.likely) return a.likely ? -1 : 1;
+            if ((a.kind === 'images') !== (b.kind === 'images')) return a.kind === 'images' ? 1 : -1;
             return String(b.fileName).localeCompare(String(a.fileName));
         });
         return out;
@@ -481,6 +702,10 @@
             label: h.plate + ' · ' + shortHitTime(h),
             lat: h.lat, lng: h.lng,
             color: '#06b6d4',
+            // A downscaled plate-read photo when the image pack supplied one.
+            // The UI layer attaches this as _photo; full-size shots stay in
+            // the zip so the board store cannot blow the localStorage quota.
+            photo: h._photo || '',
             sourceType: 'flock',
             sourceId: h.id,
             address: h.camera || '',
@@ -538,17 +763,24 @@
     // 162 reads would bury every other event, so the timeline gets ONE span
     // per plate per import (first read -> last read) rather than one per hit.
     function refreshTimeline() {
-        if (typeof window.generateAutoTimelineEvents !== 'function') return;
-        try { window.generateAutoTimelineEvents(); } catch (_) { return; }
+        var gen = null;
+        try { if (typeof generateAutoTimelineEvents === 'function') gen = generateAutoTimelineEvents; } catch (_) {}
+        if (!gen) { try { if (typeof window.generateAutoTimelineEvents === 'function') gen = window.generateAutoTimelineEvents; } catch (_) {} }
+        if (!gen) return;
+        try { gen(); } catch (_) { return; }
         try {
-            if (typeof window.renderTimelineSection === 'function') {
-                var host = document.getElementById('timelineSectionHost');
-                if (host) {
-                    host.innerHTML = window.renderTimelineSection();
-                    if (typeof window.syncTimelineScroll === 'function') window.syncTimelineScroll();
-                }
-            }
-        } catch (_) {}
+            var render = null;
+            try { if (typeof renderTimelineSection === 'function') render = renderTimelineSection; } catch (_) {}
+            if (!render) { try { if (typeof window.renderTimelineSection === 'function') render = window.renderTimelineSection; } catch (_) {} }
+            if (!render) return;
+            var host = document.getElementById('timelineSectionHost');
+            if (!host) return;
+            host.innerHTML = render();
+            try { if (typeof syncTimelineScroll === 'function') { syncTimelineScroll(); return; } } catch (_) {}
+            try { if (typeof window.syncTimelineScroll === 'function') window.syncTimelineScroll(); } catch (_) {}
+        } catch (e) {
+            console.warn('[FLOCK] timeline refresh failed:', (e && e.message) || e);
+        }
     }
 
     /**
@@ -604,6 +836,12 @@
         readEvidenceCsv: readEvidenceCsv,
         readEvidenceBytes: readEvidenceBytes,
         isCsvName: isCsvName, isWorkbookName: isWorkbookName, isSupportedName: isSupportedName,
+        isImagePackName: isImagePackName,
+        // image packs
+        getImagePacks: getImagePacks, attachImagePack: attachImagePack,
+        detachImagePack: detachImagePack, imagesForHit: imagesForHit, readImage: readImage,
+        parseImageName: parseImageName, buildPackIndex: buildPackIndex,
+        imageKey: imageKey, hitImageKey: hitImageKey,
         // selection
         getSelected: getSelected, isSelected: isSelected, toggleSelect: toggleSelect,
         setSelection: setSelection, clearSelection: clearSelection,

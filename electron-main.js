@@ -8853,11 +8853,11 @@ ipcMain.on('media-resize-end', () => {
 // failure we just recorded (confirmed experimentally). The flag is
 // therefore cleared only when we deliberately start a retry; if that retry
 // also fails, did-fail-load re-arms it.
-const _bvLoadState = new WeakMap(); // BrowserView -> { failed, wired }
+const _bvLoadState = new WeakMap(); // BrowserView -> { failed, navigating, wired }
 
 function _bvState(view) {
   let st = _bvLoadState.get(view);
-  if (!st) { st = { failed: false, wired: false }; _bvLoadState.set(view, st); }
+  if (!st) { st = { failed: false, navigating: false, wired: false, navTimer: null }; _bvLoadState.set(view, st); }
   return st;
 }
 
@@ -8875,6 +8875,10 @@ function showResourceBV(view, bounds, url) {
       console.warn('[ResourceHub-BV] load failed', code, desc, failedUrl);
       st.failed = true;
     });
+    // did-stop-loading fires for success AND failure, so it is the right
+    // place to release the in-flight guard.
+    wc.on('did-stop-loading', () => { _bvClearNav(st); });
+    wc.on('did-navigate', () => { _bvClearNav(st); });
   }
 
   // Attach and size the view BEFORE navigating. Chromium suspends network
@@ -8885,6 +8889,13 @@ function showResourceBV(view, bounds, url) {
   try { mainWindow.addBrowserView(view); } catch (_) {}
   try { view.setBounds(bounds); } catch (_) {}
 
+  // The renderer calls positionBV from six places (open, tab switch, the
+  // 350ms drawer-animation settle, resize, zoom). Until the first load
+  // COMMITS, getURL() is still empty, so without this guard every one of
+  // those calls would kick off another loadURL — each aborting the last,
+  // which the user sees as the site flickering and restarting forever.
+  if (st.navigating) return;
+
   let current = '';
   try { current = wc.getURL(); } catch (_) {}
   let crashed = false;
@@ -8893,20 +8904,47 @@ function showResourceBV(view, bounds, url) {
 
   if (!blank && !crashed && !st.failed) return; // already showing a good page
 
+  // Retry cooldown. A failing load finishes fast, which would let the same
+  // burst of positionBV calls fire a fresh attempt each time and flash the
+  // error page repeatedly. Only throttle repeats of the SAME url; a
+  // deliberate close/reopen (hideResourceBV) clears this so the user's
+  // "try again" gesture is always honoured immediately.
+  if (st.failed && st.lastUrl === url && (Date.now() - (st.lastNavAt || 0)) < BV_RETRY_COOLDOWN_MS) return;
+
   st.failed = false; // cleared by the retry itself
-  const goCrashed = crashed && !blank;
-  setImmediate(() => {
-    try {
-      if (goCrashed) wc.reload();
-      else wc.loadURL(url);
-    } catch (_) {
-      try { wc.loadURL(url); } catch (__) {}
-    }
-  });
+  st.lastUrl = url;
+  st.lastNavAt = Date.now();
+  _bvBeginNav(st);
+  try {
+    if (crashed && !blank) wc.reload();
+    else wc.loadURL(url);
+  } catch (_) {
+    try { wc.loadURL(url); } catch (__) { _bvClearNav(st); }
+  }
+}
+
+const BV_RETRY_COOLDOWN_MS = 2500;
+
+function _bvBeginNav(st) {
+  st.navigating = true;
+  if (st.navTimer) clearTimeout(st.navTimer);
+  // Safety valve: if no load event ever arrives we must not stay latched,
+  // or the view could never retry — that is the wedge this whole helper
+  // exists to prevent.
+  st.navTimer = setTimeout(() => { st.navigating = false; st.navTimer = null; }, 20000);
+}
+
+function _bvClearNav(st) {
+  st.navigating = false;
+  if (st.navTimer) { clearTimeout(st.navTimer); st.navTimer = null; }
 }
 
 function hideResourceBV(view) {
   if (!view || !mainWindow || mainWindow.isDestroyed()) return;
+  // Closing the panel is the user's implicit "try again" for next time, so
+  // drop the retry cooldown.
+  const st = _bvState(view);
+  st.lastNavAt = 0;
   try { view.setBounds({ x: 0, y: 0, width: 0, height: 0 }); } catch (_) {}
   try { mainWindow.removeBrowserView(view); } catch (_) {}
 }

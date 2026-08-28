@@ -166,15 +166,20 @@
     }
 
     function renderToolbar(imports) {
+        var packs = mod().getImagePacks();
+        var packNote = packs.length
+            ? '<span class="text-[10px] text-viper-cyan">\uD83D\uDDBC ' + packs.reduce(function (n, p) { return n + (p.count || 0); }, 0) + ' photos attached</span>'
+            : '<span class="text-[10px] text-gray-600">no photo pack</span>';
         return '' +
         '<div class="flex items-center justify-between gap-3 flex-wrap">' +
             '<div>' +
                 '<h2 class="text-lg font-bold text-white flex items-center gap-2"><span>\uD83D\uDCF7</span> FLOCK \u2014 License Plate Reader</h2>' +
-                '<p class="text-xs text-gray-500">' + imports.length + ' import' + (imports.length === 1 ? '' : 's') + ' loaded</p>' +
+                '<p class="text-xs text-gray-500">' + imports.length + ' import' + (imports.length === 1 ? '' : 's') + ' loaded \u00B7 ' + packNote + '</p>' +
             '</div>' +
             '<div class="flex items-center gap-2">' +
                 '<button data-flk="pick-file" class="px-3 py-1.5 bg-viper-purple hover:bg-viper-purple/80 rounded text-white text-xs font-medium">+ Load file</button>' +
                 '<button data-flk="from-evidence" class="px-3 py-1.5 bg-viper-card border border-viper-cyan/40 hover:border-viper-cyan rounded text-viper-cyan text-xs font-medium">\uD83D\uDCE6 Find in Evidence</button>' +
+                '<button data-flk="attach-images" class="px-3 py-1.5 bg-viper-card border border-gray-600 hover:border-viper-cyan rounded text-gray-300 text-xs">\uD83D\uDDBC Photos\u2026</button>' +
                 '<button data-flk="manage" class="px-3 py-1.5 bg-viper-card border border-gray-600 hover:border-gray-400 rounded text-gray-300 text-xs">Manage imports</button>' +
             '</div>' +
             '<input type="file" id="flockFileInput" accept=".csv,.xlsx,.xlsm,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">' +
@@ -280,6 +285,7 @@
                 'Show ' + Math.min(300, hits.length - shown.length) + ' more (' + (hits.length - shown.length).toLocaleString() + ' hidden)</button>';
         }
         host.innerHTML = html;
+        observeThumbs();
     }
 
     function card(h, seq, prev, selected, color) {
@@ -287,6 +293,7 @@
         var leg = (P && prev) ? P.legStats(prev, h) : null;
         var dirLabel = h.dir ? ((P && P.DIR_LABEL[h.dir]) || h.dir) : '';
         var vehicle = [h.color, h.make, h.body].filter(Boolean).join(' ');
+        var shots = m.imagesForHit(h);
 
         var legHtml = '';
         if (leg && (leg.miles != null || leg.seconds != null)) {
@@ -300,6 +307,16 @@
             '</div>';
         }
 
+        // Thumbnail is lazy: the pack is ~200 photos and eagerly turning them
+        // all into data URLs would be tens of MB of strings. An
+        // IntersectionObserver fills these in as the list scrolls.
+        var thumbHtml = shots.length
+            ? '<div class="flock-thumb" data-flk="thumb" data-hit-img="' + esc(h.id) + '" title="Click to enlarge">' +
+                  '<div class="flock-thumb-spin"></div>' +
+                  (shots.length > 1 ? '<span class="flock-thumb-count">' + shots.length + '</span>' : '') +
+              '</div>'
+            : '';
+
         return '' +
         legHtml +
         '<div class="flock-card' + (selected ? ' flock-card-sel' : '') + '" data-hit="' + esc(h.id) + '" style="--flk-accent:' + color + '">' +
@@ -310,19 +327,23 @@
                 (h.state ? '<span class="flock-state">' + esc(h.state) + '</span>' : '') +
                 '<span class="flock-time">' + esc(m.shortHitTime(h)) + '</span>' +
             '</div>' +
-            '<div class="flock-card-body">' +
-                row('When', esc(h.localDate || '') + ' ' + esc(h.localTime || '') +
-                    (h.approxTime ? ' <span class="text-amber-400" title="No timezone in the export; shown in this machine\'s local time">(approx)</span>' : '')) +
-                row('Camera', esc(h.camera || '\u2014') + (dirLabel ? ' <span class="flock-dir">' + esc(dirLabel) + '</span>' : '')) +
-                row('Network', esc(h.network || '\u2014')) +
-                (vehicle ? row('Vehicle', esc(vehicle) + ' <span class="text-gray-600 text-[10px]">(classifier)</span>') : '') +
-                (h.identifiers ? row('Identifiers', esc(h.identifiers)) : '') +
-                (h.lat != null
-                    ? row('Coords', esc(h.lat.toFixed(6) + ', ' + h.lng.toFixed(6)))
-                    : '<div class="flock-row text-amber-400/80"><span class="flock-k">Coords</span> not provided \u2014 not mapped</div>') +
+            '<div class="flock-card-main">' +
+                thumbHtml +
+                '<div class="flock-card-body">' +
+                    row('When', esc(h.localDate || '') + ' ' + esc(h.localTime || '') +
+                        (h.approxTime ? ' <span class="text-amber-400" title="No timezone in the export; shown in this machine\'s local time">(approx)</span>' : '')) +
+                    row('Camera', esc(h.camera || '\u2014') + (dirLabel ? ' <span class="flock-dir">' + esc(dirLabel) + '</span>' : '')) +
+                    row('Network', esc(h.network || '\u2014')) +
+                    (vehicle ? row('Vehicle', esc(vehicle) + ' <span class="text-gray-600 text-[10px]">(classifier)</span>') : '') +
+                    (h.identifiers ? row('Identifiers', esc(h.identifiers)) : '') +
+                    (h.lat != null
+                        ? row('Coords', esc(h.lat.toFixed(6) + ', ' + h.lng.toFixed(6)))
+                        : '<div class="flock-row text-amber-400/80"><span class="flock-k">Coords</span> not provided \u2014 not mapped</div>') +
+                '</div>' +
             '</div>' +
             '<div class="flock-card-actions">' +
                 (h.lat != null ? '<button data-flk="focus" class="flock-btn">\uD83D\uDCCD Show on map</button>' : '') +
+                (shots.length ? '<button data-flk="photos" class="flock-btn">\uD83D\uDDBC ' + shots.length + ' photo' + (shots.length === 1 ? '' : 's') + '</button>' : '') +
                 '<button data-flk="push-one" class="flock-btn">\uD83E\uDDF5 Add to board</button>' +
             '</div>' +
         '</div>';
@@ -338,6 +359,82 @@
         if (sec < 5400) return Math.round(sec / 60) + ' min';
         if (sec < 172800) return (sec / 3600).toFixed(1) + ' hrs';
         return (sec / 86400).toFixed(1) + ' days';
+    }
+
+    // ── lazy thumbnails ──────────────────────────────────────────────
+    // A pack holds ~200 JPEGs at ~79 KB each. Turning them all into data
+    // URLs up front would be ~17 MB of strings and a stutter on every
+    // filter change, so each thumb is fetched only when it scrolls into
+    // view and the result is cached in the module layer.
+    var _thumbObserver = null;
+
+    function observeThumbs() {
+        if (_thumbObserver) { _thumbObserver.disconnect(); _thumbObserver = null; }
+        var host = document.getElementById('flockList');
+        if (!host || typeof IntersectionObserver === 'undefined') return;
+
+        _thumbObserver = new IntersectionObserver(function (entries) {
+            entries.forEach(function (en) {
+                if (!en.isIntersecting) return;
+                var el = en.target;
+                _thumbObserver.unobserve(el);
+                fillThumb(el);
+            });
+        }, { root: host, rootMargin: '200px' });
+
+        host.querySelectorAll('[data-hit-img]').forEach(function (el) { _thumbObserver.observe(el); });
+    }
+
+    function fillThumb(el) {
+        var hitId = el.getAttribute('data-hit-img');
+        var h = FL.rendered.find(function (x) { return x.id === hitId; });
+        if (!h) return;
+        var shots = mod().imagesForHit(h);
+        if (!shots.length) return;
+        // The "N photos" badge must survive a failed read — losing it would
+        // hide the fact that more shots exist for this plate read.
+        var badge = shots.length > 1
+            ? '<span class="flock-thumb-count">' + shots.length + '</span>'
+            : '';
+        mod().readImage(shots[0]).then(function (dataUrl) {
+            if (!el.isConnected) return;
+            el.innerHTML = dataUrl
+                ? '<img src="' + dataUrl + '" alt="Plate read">' + badge
+                : '<span class="flock-thumb-fail" title="Image could not be read from the pack">\u26A0</span>' + badge;
+        });
+    }
+
+    // ── photo lightbox ───────────────────────────────────────────────
+    function openPhotos(hitId) {
+        var m = mod();
+        var h = FL.rendered.find(function (x) { return x.id === hitId; });
+        if (!h) return;
+        var shots = m.imagesForHit(h);
+        if (!shots.length) { toast('No photo in the attached pack for this read', 'warning'); return; }
+
+        var head = h.plate + ' \u00B7 ' + m.formatHitTime(h);
+        var body =
+            '<div class="text-xs text-gray-400 mb-2">' + esc(h.camera || '') +
+                (h.network ? ' \u00B7 ' + esc(h.network) : '') + '</div>' +
+            '<div id="flockShots" class="flock-shots">' +
+                shots.map(function (s, i) {
+                    return '<div class="flock-shot" data-shot="' + i + '"><div class="flock-thumb-spin"></div></div>';
+                }).join('') +
+            '</div>' +
+            '<p class="text-[10px] text-gray-600 mt-3">Photos come from the Flock image pack and are matched to this read by camera and capture second. ' +
+            'A read with no photo simply was not included in the image download \u2014 it does not mean the read is invalid.</p>';
+
+        showModal('Plate read \u2014 ' + head, body, 'max-w-3xl');
+
+        shots.forEach(function (s, i) {
+            m.readImage(s).then(function (dataUrl) {
+                var slot = document.querySelector('#flockShots [data-shot="' + i + '"]');
+                if (!slot) return;
+                slot.innerHTML = dataUrl
+                    ? '<img src="' + dataUrl + '" alt="Plate read ' + (i + 1) + '">'
+                    : '<span class="flock-thumb-fail">\u26A0 unreadable</span>';
+            });
+        });
     }
 
     // ── map ──────────────────────────────────────────────────────────
@@ -382,6 +479,7 @@
             });
             mk.bindPopup(popupHtml(h, i + 1));
             mk.on('click', function () { highlightCard(h.id); });
+            mk.on('popupopen', function () { fillPopupImage(h); });
             FL.markers[h.id] = mk;
             layer.addLayer(mk);
         });
@@ -422,14 +520,32 @@
         var m = mod(), P = parser();
         var dirLabel = h.dir ? ((P && P.DIR_LABEL[h.dir]) || h.dir) : '';
         var vehicle = [h.color, h.make, h.body].filter(Boolean).join(' ');
-        return '<div style="min-width:190px">' +
+        var shots = m.imagesForHit(h);
+        return '<div style="min-width:190px" data-popup-hit="' + esc(h.id) + '">' +
             '<div style="font-weight:700;font-size:13px">#' + seq + ' \u00B7 ' + esc(h.plate) + '</div>' +
             '<div style="font-size:11px;color:#94a3b8;margin-bottom:4px">' + esc(m.formatHitTime(h)) + '</div>' +
+            (shots.length ? '<div class="flock-pop-img" data-pop-img="' + esc(h.id) + '">loading photo\u2026</div>' : '') +
             '<div style="font-size:11px">' + esc(h.camera || '') + '</div>' +
             (dirLabel ? '<div style="font-size:11px;color:#06b6d4">' + esc(dirLabel) + '</div>' : '') +
             (vehicle ? '<div style="font-size:11px;color:#94a3b8">' + esc(vehicle) + '</div>' : '') +
             '<div style="font-size:10px;color:#64748b;margin-top:4px">' + esc(h.network || '') + '</div>' +
         '</div>';
+    }
+
+    /** Fill a marker popup's photo slot once Leaflet has rendered it. */
+    function fillPopupImage(h) {
+        var m = mod();
+        var shots = m.imagesForHit(h);
+        if (!shots.length) return;
+        var slot = document.querySelector('[data-pop-img="' + h.id + '"]');
+        if (!slot) return;
+        m.readImage(shots[0]).then(function (dataUrl) {
+            var el = document.querySelector('[data-pop-img="' + h.id + '"]');
+            if (!el) return;
+            el.innerHTML = dataUrl
+                ? '<img src="' + dataUrl + '" alt="Plate read">'
+                : '<span style="color:#fbbf24">photo unreadable</span>';
+        });
     }
 
     function highlightCard(hitId) {
@@ -605,18 +721,61 @@
         if (el) el.textContent = String(mod().selectedCount());
     }
 
+    /**
+     * Downscale a plate-read photo before it goes onto the Connection Board.
+     * Board pins persist to localStorage, and a full 79 KB JPEG per pin would
+     * blow the quota on a busy case. ~140px at q0.6 is ~6-8 KB and is plenty
+     * for a pin thumbnail; the full-resolution shot stays in the pack.
+     */
+    function thumbnailFor(hit) {
+        var shots = mod().imagesForHit(hit);
+        if (!shots.length) return Promise.resolve('');
+        return mod().readImage(shots[0]).then(function (dataUrl) {
+            if (!dataUrl) return '';
+            return new Promise(function (resolve) {
+                var img = new Image();
+                img.onload = function () {
+                    try {
+                        var MAX = 140;
+                        var scale = Math.min(1, MAX / Math.max(img.width, img.height));
+                        var c = document.createElement('canvas');
+                        c.width = Math.max(1, Math.round(img.width * scale));
+                        c.height = Math.max(1, Math.round(img.height * scale));
+                        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+                        resolve(c.toDataURL('image/jpeg', 0.6));
+                    } catch (_) { resolve(''); }
+                };
+                img.onerror = function () { resolve(''); };
+                img.src = dataUrl;
+            });
+        }, function () { return ''; });
+    }
+
+    function attachThumbnails(hits) {
+        return Promise.all(hits.map(function (h) {
+            return thumbnailFor(h).then(function (t) {
+                return t ? Object.assign({}, h, { _photo: t }) : h;
+            });
+        }));
+    }
+
     function pushSelected() {
         var m = mod();
         var hits = m.selectedHits();
         if (!hits.length) { toast('Tick the hits you want on the board first', 'warning'); return; }
         var withGeo = hits.filter(function (h) { return h.lat != null; });
         if (!withGeo.length) { toast('None of the queued hits have coordinates — nothing to plot', 'error'); return; }
-        var r = m.pushToConnectionBoard(withGeo);
-        if (!r.ok) { toast(r.error || 'Push failed', 'error'); return; }
         var skipped = hits.length - withGeo.length;
-        toast('Connection Board: ' + r.added + ' pin(s) added' +
-              (r.updated ? ', ' + r.updated + ' updated' : '') +
-              (skipped ? ' \u2014 ' + skipped + ' skipped (no coordinates)' : ''), 'success');
+        toast('Preparing ' + withGeo.length + ' pin(s)\u2026', 'info');
+        attachThumbnails(withGeo).then(function (prepared) {
+            var r = m.pushToConnectionBoard(prepared);
+            if (!r.ok) { toast(r.error || 'Push failed', 'error'); return; }
+            var photos = prepared.filter(function (h) { return h._photo; }).length;
+            toast('Connection Board: ' + r.added + ' pin(s) added' +
+                  (r.updated ? ', ' + r.updated + ' updated' : '') +
+                  (photos ? ' \u00B7 ' + photos + ' with photo' : '') +
+                  (skipped ? ' \u2014 ' + skipped + ' skipped (no coordinates)' : ''), 'success');
+        });
     }
 
     function pushOne(hitId) {
@@ -624,15 +783,20 @@
         var h = FL.rendered.find(function (x) { return x.id === hitId; });
         if (!h) return;
         if (h.lat == null) { toast('That read has no coordinates — cannot plot it', 'error'); return; }
-        var r = m.pushToConnectionBoard([h]);
-        if (!r.ok) { toast(r.error || 'Push failed', 'error'); return; }
-        toast(r.added ? 'Added ' + h.plate + ' to the Connection Board' : 'Already on the board — refreshed', 'success');
+        attachThumbnails([h]).then(function (prepared) {
+            var r = m.pushToConnectionBoard(prepared);
+            if (!r.ok) { toast(r.error || 'Push failed', 'error'); return; }
+            toast(r.added ? 'Added ' + h.plate + ' to the Connection Board' : 'Already on the board — refreshed', 'success');
+        });
     }
 
     // ── ingest dialogs ───────────────────────────────────────────────
     function openEvidencePicker() {
         var m = mod();
-        var list = m.findCandidatesInEvidence();
+        // Image zips are attached separately (Photos… button), so the
+        // spreadsheet picker only offers spreadsheets.
+        var list = m.findCandidatesInEvidence().filter(function (c) { return c.kind !== 'images'; });
+        var zipCount = m.findCandidatesInEvidence().length - list.length;
         var body;
         if (!list.length) {
             body = '<div class="text-center py-8 text-gray-400 text-sm">' +
@@ -653,8 +817,51 @@
                 '</button>';
             }).join('') + '</div>';
         }
-        showModal('Find Flock export in Evidence', body);
+        if (zipCount) {
+            body += '<p class="text-[10px] text-gray-500 mt-3">' + zipCount + ' .zip file(s) in Evidence are not listed here \u2014 ' +
+                    'use <span class="text-viper-cyan">\uD83D\uDDBC Photos\u2026</span> to attach a Flock image pack.</p>';
+        }
         FL._evCandidates = list;
+        showModal('Find Flock export in Evidence', body);
+    }
+
+    function openImagePackModal() {
+        var m = mod();
+        var all = m.findCandidatesInEvidence();
+        var zips = all.filter(function (c) { return c.kind === 'images'; });
+        var packs = m.getImagePacks();
+
+        var attached = packs.length
+            ? '<div class="mb-4"><div class="text-[10px] uppercase tracking-wider text-gray-500 mb-2">Attached</div>' +
+                packs.map(function (p) {
+                    return '<div class="p-2 bg-viper-card/60 border border-viper-cyan/30 rounded flex items-center justify-between gap-2 mb-2">' +
+                        '<div class="min-w-0"><div class="text-white text-xs truncate">' + esc(p.name) + '</div>' +
+                        '<div class="text-[10px] text-gray-500">' + (p.count || 0) + ' photos' +
+                        (p.evidenceTag ? ' \u00B7 ' + esc(p.evidenceTag) : '') + '</div></div>' +
+                        '<button data-flk="detach-pack" data-id="' + esc(p.id) + '" class="shrink-0 px-2 py-1 text-[10px] border border-red-500/40 text-red-400 rounded hover:bg-red-500/10">Detach</button>' +
+                    '</div>';
+                }).join('') + '</div>'
+            : '';
+
+        var list = zips.length
+            ? '<div class="text-[10px] uppercase tracking-wider text-gray-500 mb-2">Zips in Evidence</div>' +
+              '<div class="space-y-2 max-h-64 overflow-y-auto">' + zips.map(function (c, i) {
+                  return '<button data-flk="pack-pick" data-idx="' + i + '" class="w-full text-left p-3 bg-viper-card/60 border ' +
+                      (c.likely ? 'border-viper-cyan/50' : 'border-gray-700') +
+                      ' rounded hover:border-viper-cyan transition">' +
+                      '<div class="flex items-center gap-2">' +
+                          (c.likely ? '<span class="text-[9px] uppercase tracking-wider bg-viper-cyan/20 text-viper-cyan px-1.5 py-0.5 rounded">Likely Flock</span>' : '') +
+                          '<span class="text-white text-sm font-medium truncate">' + esc(c.fileName) + '</span>' +
+                      '</div>' +
+                      '<div class="text-xs text-gray-500 mt-1">Tag ' + esc(c.tag || '\u2014') +
+                      (c.size ? ' \u00B7 ' + Math.max(1, Math.round(c.size / 1048576)) + ' MB' : '') + '</div>' +
+                  '</button>';
+              }).join('') + '</div>'
+            : '<div class="text-center py-6 text-gray-400 text-sm">No .zip files in this case\u2019s Evidence.<br>' +
+              '<span class="text-gray-600 text-xs">Flock delivers plate photos as a separate zip download. Add it under the Evidence tab, then attach it here.</span></div>';
+
+        FL._packCandidates = zips;
+        showModal('Flock photo pack', attached + list);
     }
 
     function openManageModal() {
@@ -683,14 +890,14 @@
         showModal('Manage FLOCK imports', body);
     }
 
-    function showModal(title, bodyHtml) {
+    function showModal(title, bodyHtml, widthClass) {
         closeModal();
         var wrap = document.createElement('div');
         wrap.id = 'flockModal';
         wrap.className = 'fixed inset-0 bg-black/70 flex items-center justify-center z-[9999] p-4';
         wrap.innerHTML =
-            '<div class="bg-viper-dark border border-viper-cyan/30 rounded-lg w-full max-w-lg shadow-2xl">' +
-                '<div class="flex items-center justify-between px-4 py-3 border-b border-gray-700">' +
+            '<div class="bg-viper-dark border border-viper-cyan/30 rounded-lg w-full ' + (widthClass || 'max-w-lg') + ' shadow-2xl max-h-[90vh] overflow-y-auto">' +
+                '<div class="flex items-center justify-between px-4 py-3 border-b border-gray-700 sticky top-0 bg-viper-dark">' +
                     '<h3 class="text-white font-semibold text-sm">' + esc(title) + '</h3>' +
                     '<button data-flk="modal-close" class="text-gray-400 hover:text-white text-lg leading-none">\u2715</button>' +
                 '</div>' +
@@ -778,8 +985,40 @@
                 break;
             }
             case 'from-evidence': openEvidencePicker(); break;
+            case 'attach-images': openImagePackModal(); break;
             case 'manage': openManageModal(); break;
             case 'modal-close': closeModal(); break;
+            case 'photos': if (hitId) openPhotos(hitId); break;
+            case 'thumb': {
+                var tid = t.getAttribute('data-hit-img');
+                if (tid) openPhotos(tid);
+                break;
+            }
+
+            case 'pack-pick': {
+                var pidx = parseInt(t.getAttribute('data-idx'), 10);
+                var pc = (FL._packCandidates || [])[pidx];
+                if (!pc) return;
+                t.disabled = true;
+                t.innerHTML = '<div class="text-viper-cyan text-sm py-1">Reading pack\u2026</div>';
+                mod().attachImagePack(pc).then(function (r) {
+                    if (!r.ok) { toast(r.error || 'Could not attach that pack', 'error'); closeModal(); return; }
+                    closeModal();
+                    var miss = r.totalHits - r.matched;
+                    toast('Attached ' + r.images + ' photos \u2014 matched ' + r.matched + ' of ' + r.totalHits + ' reads' +
+                          (miss > 0 ? ' (' + miss + ' read(s) have no photo in this pack)' : ''),
+                          miss > 0 ? 'warning' : 'success');
+                    if (typeof window.renderTabContent === 'function') window.renderTabContent('flock');
+                });
+                break;
+            }
+            case 'detach-pack': {
+                var packId = t.getAttribute('data-id');
+                mod().detachImagePack(packId);
+                closeModal();
+                if (typeof window.renderTabContent === 'function') window.renderTabContent('flock');
+                break;
+            }
 
             case 'ev-pick': {
                 var idx = parseInt(t.getAttribute('data-idx'), 10);

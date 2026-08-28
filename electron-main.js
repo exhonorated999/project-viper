@@ -134,6 +134,10 @@ let lastMediaBounds = null;
 let flockBrowserView = null;
 let flockViewVisible = false;
 let lastFlockBounds = null;
+// Single source of truth for the Flock landing page — it was previously
+// hardcoded at four call sites, so a URL change could silently fix one
+// recovery path and miss another.
+const FLOCK_HOME_URL = 'https://search-2.flocksafety.com/';
 let tloBrowserView = null;
 let tloViewVisible = false;
 let lastTloBounds = null;
@@ -927,7 +931,7 @@ app.whenReady().then(async () => {
         try {
           flockBrowserView.webContents.reload();
         } catch (_) {
-          try { flockBrowserView.webContents.loadURL('https://search-2.flocksafety.com/'); } catch (__) {}
+          try { flockBrowserView.webContents.loadURL(FLOCK_HOME_URL); } catch (__) {}
         }
         setTimeout(() => { _flockReloading = false; }, 4000);
       }, 300);
@@ -8823,6 +8827,90 @@ ipcMain.on('media-resize-end', () => {
 });
 
 // --- Flock Safety LPR: BrowserView positioning ---
+// ── Resource-hub BrowserView show/hide ──────────────────────────────────
+// Shared by the embedded investigative resources (Flock, TLO, Accurint, …).
+//
+// The bug this fixes presented as "the panel just says Loading… forever,
+// and only a restart brings it back".
+//
+// The old show handler decided whether to (re)navigate like this:
+//
+//     if (!currentUrl || currentUrl === 'about:blank')  loadURL(...)
+//     else if (webContents.isCrashed())                 reload()
+//
+// After a FAILED main-frame navigation neither branch is true: getURL()
+// returns the URL that failed (so it is non-empty) and isCrashed() is
+// false, because a network error is not a crash — Chromium just swaps in
+// its internal error page. So once the first load failed for any reason
+// (asleep//VPN not up yet, DNS hiccup, captive portal, SSO blip) the view
+// could never re-navigate for the rest of the session.
+//
+// Verified in a real Electron runtime: after a failed load,
+// getURL()="http://…" and isCrashed()=false -> old predicate = false.
+//
+// NOTE: did-finish-load must NOT be used to clear the failed flag — it
+// also fires for Chromium's error page, which would immediately mask the
+// failure we just recorded (confirmed experimentally). The flag is
+// therefore cleared only when we deliberately start a retry; if that retry
+// also fails, did-fail-load re-arms it.
+const _bvLoadState = new WeakMap(); // BrowserView -> { failed, wired }
+
+function _bvState(view) {
+  let st = _bvLoadState.get(view);
+  if (!st) { st = { failed: false, wired: false }; _bvLoadState.set(view, st); }
+  return st;
+}
+
+function showResourceBV(view, bounds, url) {
+  if (!view || !mainWindow || mainWindow.isDestroyed() || !bounds) return;
+  const st = _bvState(view);
+  const wc = view.webContents;
+
+  if (!st.wired) {
+    st.wired = true;
+    wc.on('did-fail-load', (_e, code, desc, failedUrl, isMainFrame) => {
+      // ERR_ABORTED (-3) is normal for redirects and for loads we replace
+      // ourselves; it is not a failure the user would ever see.
+      if (!isMainFrame || code === -3) return;
+      console.warn('[ResourceHub-BV] load failed', code, desc, failedUrl);
+      st.failed = true;
+    });
+  }
+
+  // Attach and size the view BEFORE navigating. Chromium suspends network
+  // I/O for detached zero-size views (ERR_NETWORK_IO_SUSPENDED), which is
+  // the failure mode commit 4efe637 was chasing when it moved the load out
+  // of view creation — but the load was still being issued while the view
+  // was detached and 0x0.
+  try { mainWindow.addBrowserView(view); } catch (_) {}
+  try { view.setBounds(bounds); } catch (_) {}
+
+  let current = '';
+  try { current = wc.getURL(); } catch (_) {}
+  let crashed = false;
+  try { crashed = wc.isCrashed(); } catch (_) {}
+  const blank = !current || current === 'about:blank';
+
+  if (!blank && !crashed && !st.failed) return; // already showing a good page
+
+  st.failed = false; // cleared by the retry itself
+  const goCrashed = crashed && !blank;
+  setImmediate(() => {
+    try {
+      if (goCrashed) wc.reload();
+      else wc.loadURL(url);
+    } catch (_) {
+      try { wc.loadURL(url); } catch (__) {}
+    }
+  });
+}
+
+function hideResourceBV(view) {
+  if (!view || !mainWindow || mainWindow.isDestroyed()) return;
+  try { view.setBounds({ x: 0, y: 0, width: 0, height: 0 }); } catch (_) {}
+  try { mainWindow.removeBrowserView(view); } catch (_) {}
+}
+
 ipcMain.on('flock-set-bounds', (_event, bounds) => {
   if (!flockBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
   const b = {
@@ -8841,21 +8929,9 @@ ipcMain.on('flock-set-visible', (_event, visible) => {
   if (!flockBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
   flockViewVisible = visible;
   if (visible && lastFlockBounds) {
-    // Lazy-load Flock on first show (avoids ERR_NETWORK_IO_SUSPENDED)
-    const currentUrl = flockBrowserView.webContents.getURL();
-    if (!currentUrl || currentUrl === '' || currentUrl === 'about:blank') {
-      flockBrowserView.webContents.loadURL('https://search-2.flocksafety.com/');
-    } else if (flockBrowserView.webContents.isCrashed()) {
-      // View died while hidden — recover on reopen so it isn't a black panel.
-      console.warn('[FLOCK] webContents crashed; reloading on show');
-      try { flockBrowserView.webContents.reload(); }
-      catch (_) { try { flockBrowserView.webContents.loadURL('https://search-2.flocksafety.com/'); } catch (__) {} }
-    }
-    try { mainWindow.addBrowserView(flockBrowserView); } catch (_) {}
-    flockBrowserView.setBounds(lastFlockBounds);
+    showResourceBV(flockBrowserView, lastFlockBounds, FLOCK_HOME_URL);
   } else if (!visible) {
-    flockBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
-    try { mainWindow.removeBrowserView(flockBrowserView); } catch (_) {}
+    hideResourceBV(flockBrowserView);
   }
 });
 
@@ -8866,7 +8942,7 @@ ipcMain.handle('flock-search-plate', async (_event, { plate, state }) => {
     const currentUrl = flockBrowserView.webContents.getURL();
     // If not on search page, navigate there first
     if (!currentUrl.includes('search-2.flocksafety.com')) {
-      flockBrowserView.webContents.loadURL('https://search-2.flocksafety.com/');
+      flockBrowserView.webContents.loadURL(FLOCK_HOME_URL);
       // Wait for page to load
       await new Promise(resolve => {
         flockBrowserView.webContents.once('did-finish-load', resolve);
@@ -8908,7 +8984,7 @@ ipcMain.handle('flock-reset', async () => {
   if (!flockBrowserView) return;
   const ses = flockBrowserView.webContents.session;
   await ses.clearStorageData();
-  flockBrowserView.webContents.loadURL('https://search-2.flocksafety.com/');
+  flockBrowserView.webContents.loadURL(FLOCK_HOME_URL);
 });
 
 /* ── TLO (TransUnion) IPC handlers ─────────────────────────── */

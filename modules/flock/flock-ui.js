@@ -141,14 +141,14 @@
             '</div>' +
             '<div id="flockDrop" class="flock-drop">' +
                 '<div class="text-3xl mb-2">\u2B07</div>' +
-                '<div class="text-white font-medium mb-1">Drop the Flock CSV here</div>' +
-                '<div class="text-gray-500 text-xs mb-4">Flock_Safety_Search_Results_\u2026.csv</div>' +
+                '<div class="text-white font-medium mb-1">Drop the Flock export here</div>' +
+                '<div class="text-gray-500 text-xs mb-4">Flock_Safety_Search_Results_\u2026 \u00B7 .csv or .xlsx</div>' +
                 '<div class="flex items-center justify-center gap-3">' +
-                    '<button data-flk="pick-file" class="px-4 py-2 bg-viper-purple hover:bg-viper-purple/80 rounded text-white text-sm font-medium">Choose CSV\u2026</button>' +
+                    '<button data-flk="pick-file" class="px-4 py-2 bg-viper-purple hover:bg-viper-purple/80 rounded text-white text-sm font-medium">Choose file\u2026</button>' +
                     '<button data-flk="from-evidence" class="px-4 py-2 bg-viper-card border border-viper-cyan/40 hover:border-viper-cyan rounded text-viper-cyan text-sm font-medium">\uD83D\uDCE6 Find in Evidence</button>' +
                 '</div>' +
             '</div>' +
-            '<input type="file" id="flockFileInput" accept=".csv,text/csv" class="hidden">' +
+            '<input type="file" id="flockFileInput" accept=".csv,.xlsx,.xlsm,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">' +
             '<div class="mt-8 grid grid-cols-3 gap-3 text-center">' +
                 tile('\uD83D\uDDFA', 'Map every read', 'Camera-accurate coordinates, clustered and colour-coded per plate.') +
                 tile('\u25B6', 'Replay the route', 'Scrub or play the vehicle\u2019s track in chronological order.') +
@@ -173,11 +173,11 @@
                 '<p class="text-xs text-gray-500">' + imports.length + ' import' + (imports.length === 1 ? '' : 's') + ' loaded</p>' +
             '</div>' +
             '<div class="flex items-center gap-2">' +
-                '<button data-flk="pick-file" class="px-3 py-1.5 bg-viper-purple hover:bg-viper-purple/80 rounded text-white text-xs font-medium">+ Load CSV</button>' +
+                '<button data-flk="pick-file" class="px-3 py-1.5 bg-viper-purple hover:bg-viper-purple/80 rounded text-white text-xs font-medium">+ Load file</button>' +
                 '<button data-flk="from-evidence" class="px-3 py-1.5 bg-viper-card border border-viper-cyan/40 hover:border-viper-cyan rounded text-viper-cyan text-xs font-medium">\uD83D\uDCE6 Find in Evidence</button>' +
                 '<button data-flk="manage" class="px-3 py-1.5 bg-viper-card border border-gray-600 hover:border-gray-400 rounded text-gray-300 text-xs">Manage imports</button>' +
             '</div>' +
-            '<input type="file" id="flockFileInput" accept=".csv,text/csv" class="hidden">' +
+            '<input type="file" id="flockFileInput" accept=".csv,.xlsx,.xlsm,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">' +
         '</div>';
     }
 
@@ -636,8 +636,8 @@
         var body;
         if (!list.length) {
             body = '<div class="text-center py-8 text-gray-400 text-sm">' +
-                'No CSV files found in this case\u2019s Evidence.<br>' +
-                '<span class="text-gray-600 text-xs">Add the Flock export under the Evidence tab first, or use \u201CLoad CSV\u201D to read it straight off disk.</span></div>';
+                'No spreadsheet files found in this case\u2019s Evidence.<br>' +
+                '<span class="text-gray-600 text-xs">Add the Flock export (.csv or .xlsx) under the Evidence tab first, or use \u201CLoad file\u201D to read it straight off disk.</span></div>';
         } else {
             body = '<div class="space-y-2 max-h-80 overflow-y-auto">' + list.map(function (c, i) {
                 return '<button data-flk="ev-pick" data-idx="' + i + '" class="w-full text-left p-3 bg-viper-card/60 border ' +
@@ -645,6 +645,7 @@
                     ' rounded hover:border-viper-cyan transition">' +
                     '<div class="flex items-center gap-2">' +
                         (c.likely ? '<span class="text-[9px] uppercase tracking-wider bg-viper-cyan/20 text-viper-cyan px-1.5 py-0.5 rounded">Likely Flock</span>' : '') +
+                        '<span class="text-[9px] uppercase tracking-wider bg-gray-700/60 text-gray-300 px-1.5 py-0.5 rounded">' + esc(c.kind === 'xlsx' ? 'XLSX' : 'CSV') + '</span>' +
                         '<span class="text-white text-sm font-medium truncate">' + esc(c.fileName) + '</span>' +
                     '</div>' +
                     '<div class="text-xs text-gray-500 mt-1">Tag ' + esc(c.tag || '\u2014') + ' \u00B7 ' + esc(c.description || '') +
@@ -669,6 +670,8 @@
                     '<div class="text-xs text-gray-500 mt-1">' + (i.hits || []).length + ' reads \u00B7 ' +
                         (i.plates || []).length + ' plate(s) \u00B7 ' + esc(span) + '</div>' +
                     '<div class="text-[10px] text-gray-600 mt-0.5">' +
+                        esc((i.format === 'xlsx' ? 'XLSX' : 'CSV') +
+                            (i.sheetName ? ' \u00B7 sheet "' + i.sheetName + '"' : '') + ' \u00B7 ') +
                         esc(i.source === 'evidence' ? 'From Evidence' + (i.evidenceTag ? ' (' + i.evidenceTag + ')' : '') : 'Loaded from disk') +
                         ' \u00B7 ' + esc(new Date(i.importedAt).toLocaleString()) + '</div>' +
                     ((i.warnings || []).length

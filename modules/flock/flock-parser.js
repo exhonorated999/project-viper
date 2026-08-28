@@ -158,6 +158,9 @@
     function utcFromDateTime(dateStr, timeStr) {
         var d = String(dateStr || '').trim();
         if (!d) return null;
+        // An Excel datetime cell arrives as "2026-08-18 22:44:26"; keep only
+        // the date half here — the time half is split out upstream.
+        d = d.replace(/[ T]\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\s*$/, '').trim();
         var dm = d.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/) ||
                  d.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
         if (!dm) return null;
@@ -247,9 +250,60 @@
     }
 
     /**
-     * Parse a full Flock CSV export.
+     * Reconcile the date and time cells.
      *
-     * @param {string} text  raw CSV
+     * Excel is the reason this exists. When a detective opens a Flock CSV
+     * and re-saves it as a workbook, Excel may coerce "Capture Date" into a
+     * real datetime serial, which we render back as "2026-08-18 22:44:26".
+     * It may also blank or reformat "Capture Time". Split the pieces apart
+     * so the downstream logic sees the same shape either way.
+     *
+     * Note: Excel CANNOT coerce "22:44:26 PDT" into a time (the zone token
+     * defeats it), so in practice that column survives as text and keeps
+     * its abbreviation. This handles the cases where it does not.
+     */
+    function splitDateTime(dateStr, timeStr) {
+        var d = tidy(dateStr);
+        var t = tidy(timeStr);
+        var embedded = d.match(/^(.*?)[ T](\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?)\s*$/);
+        if (embedded) {
+            d = embedded[1].trim();
+            // Only adopt the embedded time if the time column has nothing
+            // real in it — an explicit "22:44:26 PDT" is strictly better
+            // because it carries the zone.
+            if (!/\d/.test(t)) t = embedded[2];
+        }
+        return { date: d, time: t };
+    }
+
+    /**
+     * Parse a full Flock CSV export.
+     * Thin wrapper: reads the CSV into rows, then hands off to the shared
+     * row pipeline that the .xlsx path also uses.
+     */
+    function parseFlockCsv(text, opts) {
+        var rows;
+        try {
+            rows = parseCsv(text);
+        } catch (e) {
+            return failed('Could not read the CSV: ' + ((e && e.message) || e));
+        }
+        return parseFlockRows(rows, opts);
+    }
+
+    function failed(msg, extra) {
+        return Object.assign({
+            ok: false, error: msg, hits: [], warnings: [], columns: {}, headers: [],
+            rowCount: 0, plates: [], span: null, geoCount: 0
+        }, extra || {});
+    }
+
+    /**
+     * Shared pipeline: an array of string rows (row 0 = header) -> hits.
+     * Both the CSV reader and the XLSX reader feed this, so the two formats
+     * can never drift apart in their interpretation of the data.
+     *
+     * @param {string[][]} rows
      * @param {object} opts  { idPrefix }
      * @returns {{
      *   ok: boolean, error?: string,
@@ -258,29 +312,40 @@
      *   plates: string[], span: {startMs, endMs}|null, geoCount: number
      * }}
      */
-    function parseFlockCsv(text, opts) {
+    function parseFlockRows(rows, opts) {
         opts = opts || {};
         var prefix = opts.idPrefix || 'flk';
-        var rows = parseCsv(text);
         var warnings = [];
 
-        if (!rows.length) {
-            return { ok: false, error: 'File is empty.', hits: [], warnings: warnings, columns: {}, headers: [], rowCount: 0, plates: [], span: null, geoCount: 0 };
+        rows = (rows || []).filter(function (r) {
+            return Array.isArray(r) && r.some(function (v) { return String(v == null ? '' : v).trim() !== ''; });
+        });
+
+        if (!rows.length) return failed('File is empty.');
+
+        // Some agencies paste a title or an export banner above the real
+        // header. Scan the first few rows for the one that maps a Plate
+        // column rather than blindly trusting row 0.
+        var headerAt = -1, cols = null;
+        for (var probe = 0; probe < Math.min(rows.length, 10); probe++) {
+            var candidate = mapColumns(rows[probe].map(tidy));
+            if (candidate.plate != null) { headerAt = probe; cols = candidate; break; }
         }
 
-        var headers = rows[0].map(tidy);
-        var cols = mapColumns(headers);
-
-        // A Flock export is only meaningful if we can identify the plate.
-        // Everything else can degrade gracefully.
-        if (cols.plate == null) {
-            return {
-                ok: false,
-                error: 'This does not look like a Flock export — no "Plate" column found. Columns seen: ' + headers.join(', '),
-                hits: [], warnings: warnings, columns: cols, headers: headers,
-                rowCount: rows.length - 1, plates: [], span: null, geoCount: 0
-            };
+        if (headerAt === -1) {
+            var seen = rows[0].map(tidy).filter(Boolean).join(', ');
+            return failed(
+                'This does not look like a Flock export — no "Plate" column found. Columns seen: ' + seen,
+                { headers: rows[0].map(tidy), rowCount: Math.max(0, rows.length - 1) }
+            );
         }
+        if (headerAt > 0) {
+            warnings.push('Skipped ' + headerAt + ' row(s) above the column headers.');
+        }
+
+        var headers = rows[headerAt].map(tidy);
+        var body = rows.slice(headerAt + 1);
+
         if (cols.lat == null || cols.lng == null) {
             warnings.push('No latitude/longitude columns — map and playback will be unavailable.');
         }
@@ -298,14 +363,15 @@
             return cols[key] == null ? '' : tidy(r[cols[key]]);
         }
 
-        for (var i = 1; i < rows.length; i++) {
-            var r = rows[i];
+        for (var i = 0; i < body.length; i++) {
+            var r = body[i];
             var plate = tidyPlate(cell(r, 'plate'));
             if (!plate) continue; // skip spacer / total rows
 
             var image = cell(r, 'image');
-            var dateStr = cell(r, 'date');
-            var timeStr = cell(r, 'time');
+            var dt = splitDateTime(cell(r, 'date'), cell(r, 'time'));
+            var dateStr = dt.date;
+            var timeStr = dt.time;
 
             // Authoritative UTC from the image filename; fall back to the
             // local date/time + zone abbreviation.
@@ -343,8 +409,8 @@
             var camera = cell(r, 'camera');
 
             var hit = {
-                id: prefix + '_' + i,
-                row: i,
+                id: prefix + '_' + (i + 1),
+                row: i + 1,
                 plate: plate,
                 state: titleCaseState(cell(r, 'state')),
                 tUtcMs: tUtcMs,
@@ -374,12 +440,10 @@
         }
 
         if (!hits.length) {
-            return {
-                ok: false,
-                error: 'No plate reads found in this file (' + (rows.length - 1) + ' data rows scanned).',
-                hits: [], warnings: warnings, columns: cols, headers: headers,
-                rowCount: rows.length - 1, plates: [], span: null, geoCount: 0
-            };
+            return failed(
+                'No plate reads found in this file (' + body.length + ' data rows scanned).',
+                { columns: cols, headers: headers, rowCount: body.length, warnings: warnings }
+            );
         }
 
         // Chronological order is the module's contract — the card list, the
@@ -401,7 +465,7 @@
             ok: true,
             columns: cols,
             headers: headers,
-            rowCount: rows.length - 1,
+            rowCount: body.length,
             hits: hits,
             warnings: warnings,
             plates: plates,
@@ -458,7 +522,9 @@
         utcFromDateTime: utcFromDateTime,
         directionOf: directionOf,
         DIR_LABEL: DIR_LABEL,
+        splitDateTime: splitDateTime,
         parseFlockCsv: parseFlockCsv,
+        parseFlockRows: parseFlockRows,
         haversineMi: haversineMi,
         legStats: legStats
     };

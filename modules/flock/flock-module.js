@@ -115,6 +115,22 @@
      * @returns {{ok:boolean, error?:string, record?:object, duplicate?:boolean}}
      */
     function addImport(text, meta) {
+        if (!window.FlockParser) return { ok: false, error: 'FLOCK parser not loaded.' };
+        var rows;
+        try {
+            rows = window.FlockParser.parseCsv(text);
+        } catch (e) {
+            return { ok: false, error: 'Could not read the CSV: ' + ((e && e.message) || e) };
+        }
+        return addImportRows(rows, meta);
+    }
+
+    /**
+     * Append an import from already-tabulated rows (row 0 = header).
+     * Both the CSV and the .xlsx paths land here, so the two formats
+     * share one set of validation, dedupe and storage rules.
+     */
+    function addImportRows(rows, meta) {
         meta = meta || {};
         if (!window.FlockParser) return { ok: false, error: 'FLOCK parser not loaded.' };
         if (!theCase()) return { ok: false, error: 'No case is open.' };
@@ -122,7 +138,7 @@
         var importId = uid('flk');
         var res;
         try {
-            res = window.FlockParser.parseFlockCsv(text, { idPrefix: importId });
+            res = window.FlockParser.parseFlockRows(rows, { idPrefix: importId });
         } catch (e) {
             return { ok: false, error: 'Parse failed: ' + ((e && e.message) || e) };
         }
@@ -149,6 +165,8 @@
             name: meta.name || 'Flock export',
             importedAt: new Date().toISOString(),
             source: meta.source || 'file',
+            format: meta.format || 'csv',
+            sheetName: meta.sheetName || '',
             sourcePath: meta.sourcePath || '',
             evidenceTag: meta.evidenceTag || '',
             rowCount: res.rowCount,
@@ -156,7 +174,7 @@
             plates: res.plates,
             plateCounts: res.plateCounts || {},
             span: res.span,
-            warnings: res.warnings || [],
+            warnings: (res.warnings || []).concat(meta.extraWarnings || []),
             hits: res.hits
         };
 
@@ -169,6 +187,50 @@
         try { refreshTimeline(); } catch (_) {}
 
         return { ok: true, record: record, duplicate: !!dup };
+    }
+
+    /**
+     * Read an .xlsx/.xlsm ArrayBuffer and import the first sheet that
+     * actually contains a Flock table.
+     *
+     * A workbook can hold several tabs (detectives often keep notes or a
+     * pivot alongside the data), so we probe each in workbook order rather
+     * than assuming sheet 1, and report every sheet name if none match.
+     */
+    function addImportWorkbook(arrayBuffer, meta) {
+        meta = meta || {};
+        if (!window.FlockXlsx) return Promise.resolve({ ok: false, error: 'FLOCK .xlsx reader not loaded.' });
+        if (!window.FlockParser) return Promise.resolve({ ok: false, error: 'FLOCK parser not loaded.' });
+
+        return window.FlockXlsx.readWorkbook(arrayBuffer).then(function (wb) {
+            var sheets = (wb && wb.sheets) || [];
+            if (!sheets.length) return { ok: false, error: 'That workbook has no sheets.' };
+
+            var probeErr = null;
+            for (var i = 0; i < sheets.length; i++) {
+                var s = sheets[i];
+                if (!s.rows || !s.rows.length) continue;
+                var probe = window.FlockParser.parseFlockRows(s.rows, { idPrefix: 'probe' });
+                if (probe.ok) {
+                    var extra = [];
+                    if (sheets.length > 1) extra.push('Workbook had ' + sheets.length + ' sheets; read "' + s.name + '".');
+                    return addImportRows(s.rows, Object.assign({}, meta, {
+                        format: 'xlsx',
+                        sheetName: s.name,
+                        extraWarnings: extra
+                    }));
+                }
+                if (!probeErr) probeErr = probe.error;
+            }
+            return {
+                ok: false,
+                error: 'No sheet in that workbook looks like a Flock export. Sheets checked: ' +
+                       sheets.map(function (s) { return '"' + s.name + '"'; }).join(', ') +
+                       (probeErr ? ('. ' + probeErr) : '')
+            };
+        }, function (err) {
+            return { ok: false, error: (err && err.message) || String(err) };
+        });
     }
 
     function deleteImport(importId) {
@@ -226,17 +288,27 @@
 
     // Heuristic file matcher. Flock's own filename is
     // "Flock_Safety_Search_Results_<date>_<time>.csv", but agencies rename
-    // exports constantly, so any CSV is offered — Flock-named ones first.
+    // exports constantly and frequently re-save them through Excel, so both
+    // CSV and modern workbook formats are offered — Flock-named ones first.
     function looksLikeFlockName(name) {
         return /flock/i.test(name || '');
     }
     function isCsvName(name) {
         return /\.csv$/i.test(name || '');
     }
+    function isWorkbookName(name) {
+        return /\.xls[xm]$/i.test(name || '');
+    }
+    function isLegacyXlsName(name) {
+        return /\.xls$/i.test(name || '');
+    }
+    function isSupportedName(name) {
+        return isCsvName(name) || isWorkbookName(name);
+    }
 
     /**
-     * Scan the case's evidence items for candidate CSV files.
-     * @returns [{ evidenceId, tag, description, fileName, filePath, size, likely }]
+     * Scan the case's evidence items for candidate spreadsheet files.
+     * @returns [{ evidenceId, tag, description, fileName, filePath, size, likely, kind }]
      */
     function findCandidatesInEvidence() {
         var ev = (typeof window.caseEvidence !== 'undefined' && Array.isArray(window.caseEvidence))
@@ -245,7 +317,7 @@
         var out = [];
         (ev || []).forEach(function (item) {
             (item.files || []).forEach(function (f) {
-                if (!f || !isCsvName(f.name)) return;
+                if (!f || !isSupportedName(f.name)) return;
                 out.push({
                     evidenceId: item.id,
                     tag: item.tag || '',
@@ -253,7 +325,8 @@
                     fileName: f.name,
                     filePath: f.path,
                     size: f.size || 0,
-                    likely: looksLikeFlockName(f.name)
+                    likely: looksLikeFlockName(f.name),
+                    kind: isWorkbookName(f.name) ? 'xlsx' : 'csv'
                 });
             });
         });
@@ -265,15 +338,21 @@
         return out;
     }
 
-    /** Read a file already stored in the case Evidence folder. */
-    function readEvidenceCsv(filePath) {
+    /** Read raw bytes for a file stored in the case Evidence folder. */
+    function readEvidenceBytes(filePath) {
         if (!(window.electronAPI && window.electronAPI.readEvidenceFile)) {
             return Promise.reject(new Error('Evidence bridge unavailable.'));
         }
         return window.electronAPI.readEvidenceFile(filePath).then(function (bytes) {
             // IPC hands back a plain byte array (already decrypted when Field
-            // Security is on). Decode as UTF-8; the BOM is stripped downstream.
-            var u8 = (bytes instanceof Uint8Array) ? bytes : new Uint8Array(bytes || []);
+            // Security is on).
+            return (bytes instanceof Uint8Array) ? bytes : new Uint8Array(bytes || []);
+        });
+    }
+
+    /** Read a file already stored in the case Evidence folder, as text. */
+    function readEvidenceCsv(filePath) {
+        return readEvidenceBytes(filePath).then(function (u8) {
             try { return new TextDecoder('utf-8').decode(u8); }
             catch (_) {
                 var s = '';
@@ -284,28 +363,50 @@
     }
 
     function importFromEvidence(candidate) {
-        return readEvidenceCsv(candidate.filePath).then(function (text) {
-            return addImport(text, {
-                name: candidate.fileName,
-                source: 'evidence',
-                sourcePath: candidate.filePath,
-                evidenceTag: candidate.tag
+        var meta = {
+            name: candidate.fileName,
+            source: 'evidence',
+            sourcePath: candidate.filePath,
+            evidenceTag: candidate.tag
+        };
+        if (isWorkbookName(candidate.fileName)) {
+            return readEvidenceBytes(candidate.filePath).then(function (u8) {
+                // Hand the reader a standalone ArrayBuffer — the IPC array may
+                // be a view into a larger pooled buffer.
+                var ab = u8.buffer.byteLength === u8.byteLength
+                    ? u8.buffer
+                    : u8.slice().buffer;
+                return addImportWorkbook(ab, meta);
             });
+        }
+        return readEvidenceCsv(candidate.filePath).then(function (text) {
+            return addImport(text, meta);
         });
     }
 
     /** Read a File/Blob chosen through an <input type="file"> or drag-drop. */
     function importFromFile(file) {
+        if (!file) return Promise.resolve({ ok: false, error: 'No file supplied.' });
+
+        if (isWorkbookName(file.name)) {
+            return file.arrayBuffer().then(function (ab) {
+                return addImportWorkbook(ab, { name: file.name, source: 'file' });
+            }, function () {
+                return { ok: false, error: 'Could not read that workbook.' };
+            });
+        }
+
+        if (isLegacyXlsName(file.name)) {
+            return Promise.resolve({ ok: false, error:
+                'That is a legacy .xls workbook, which VIPER cannot read. Open it in Excel and use File \u2192 Save As to produce a .xlsx or .csv.' });
+        }
+
+        if (!isCsvName(file.name)) {
+            return Promise.resolve({ ok: false, error: 'Choose the .csv or .xlsx Flock produced. ' +
+                (/\.zip$/i.test(file.name) ? 'This looks like a ZIP — extract it first.' : '') });
+        }
+
         return new Promise(function (resolve) {
-            if (!file) { resolve({ ok: false, error: 'No file supplied.' }); return; }
-            if (!isCsvName(file.name)) {
-                resolve({ ok: false, error: 'Choose the .csv Flock produced. ' +
-                    (/\.(zip|xlsx?)$/i.test(file.name)
-                        ? 'This looks like a ' + (/\.zip$/i.test(file.name) ? 'ZIP' : 'Excel') +
-                          ' file — extract / save-as CSV first.'
-                        : '') });
-                return;
-            }
             var fr = new FileReader();
             fr.onerror = function () { resolve({ ok: false, error: 'Could not read that file.' }); };
             fr.onload = function () {
@@ -494,12 +595,15 @@
         load: load, save: save, storeKey: storeKey,
         // imports
         getImports: getImports, getImport: getImport, allHits: allHits,
-        addImport: addImport, deleteImport: deleteImport,
+        addImport: addImport, addImportRows: addImportRows, addImportWorkbook: addImportWorkbook,
+        deleteImport: deleteImport,
         // ingest
         findCandidatesInEvidence: findCandidatesInEvidence,
         importFromEvidence: importFromEvidence,
         importFromFile: importFromFile,
         readEvidenceCsv: readEvidenceCsv,
+        readEvidenceBytes: readEvidenceBytes,
+        isCsvName: isCsvName, isWorkbookName: isWorkbookName, isSupportedName: isSupportedName,
         // selection
         getSelected: getSelected, isSelected: isSelected, toggleSelect: toggleSelect,
         setSelection: setSelection, clearSelection: clearSelection,

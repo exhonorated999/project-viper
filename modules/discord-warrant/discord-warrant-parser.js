@@ -42,6 +42,7 @@ const AdmZip = require('adm-zip'); // retained for back-compat with buffer-based
 const fs = require('fs');
 const path = require('path');
 const { openZip } = require('../_shared/zip-reader');
+const { DiscordReturnParser } = require('./discord-return-parser');
 
 // IP-bearing event types we surface in IP Activity table.
 const IP_EVENT_TYPES = new Set([
@@ -90,6 +91,8 @@ class DiscordWarrantParser {
                     if (n.startsWith('Activity/')) return true;
                 }
             }
+            // Law-enforcement return format (lowercase, CSV-based)
+            if (DiscordReturnParser.detect(Array.from(names)).match) return true;
             return false;
         } catch (e) {
             return false;
@@ -116,6 +119,8 @@ class DiscordWarrantParser {
                     if (n.startsWith('Activity/')) return true;
                 }
             }
+            // Law-enforcement return format (lowercase, CSV-based)
+            if (DiscordReturnParser.detect(Array.from(names)).match) return true;
             return false;
         } catch (e) {
             return false;
@@ -138,6 +143,8 @@ class DiscordWarrantParser {
             if (fs.existsSync(userJson) && fs.existsSync(messagesIndex)) return true;
             // Fallback: user.json + Activity dir
             if (fs.existsSync(userJson) && fs.existsSync(path.join(folderPath, 'Activity'))) return true;
+            // Law-enforcement return format (lowercase, CSV-based)
+            if (DiscordReturnParser.isReturnFolder(folderPath)) return true;
             return false;
         } catch (e) {
             return false;
@@ -159,18 +166,24 @@ class DiscordWarrantParser {
             const entryMap = new Map();
             for (const e of entries) entryMap.set(e.entryName.replace(/\\/g, '/'), e);
 
-            return await this._parseSources({
-                entryNames: Array.from(entryMap.keys()),
-                readText: (name) => {
-                    const e = entryMap.get(name);
-                    return e ? zip.readAsText(e) : null;
-                },
-                readBinary: (name) => {
-                    const e = entryMap.get(name);
-                    return e ? e.getData() : null;
-                },
-                options
-            });
+            const entryNames = Array.from(entryMap.keys());
+            const readText = (name) => {
+                const e = entryMap.get(name);
+                return e ? zip.readAsText(e) : null;
+            };
+            const readBinary = (name) => {
+                const e = entryMap.get(name);
+                return e ? e.getData() : null;
+            };
+
+            // Two mutually exclusive Discord formats reach this parser.  Route
+            // law-enforcement returns to the CSV parser; everything else is
+            // treated as a Discord Data Package.
+            if (DiscordReturnParser.detect(entryNames).match) {
+                return await new DiscordReturnParser().parse({ entryNames, readText, readBinary, options });
+            }
+
+            return await this._parseSources({ entryNames, readText, readBinary, options });
         } finally {
             zip.close();
         }
@@ -194,20 +207,22 @@ class DiscordWarrantParser {
         };
         walk(folderPath, '');
 
-        return this._parseSources({
-            entryNames: allFiles,
-            readText: (name) => {
-                const fp = path.join(folderPath, name);
-                if (!fs.existsSync(fp)) return null;
-                return fs.readFileSync(fp, 'utf8');
-            },
-            readBinary: (name) => {
-                const fp = path.join(folderPath, name);
-                if (!fs.existsSync(fp)) return null;
-                return fs.readFileSync(fp);
-            },
-            options
-        });
+        const readText = (name) => {
+            const fp = path.join(folderPath, name);
+            if (!fs.existsSync(fp)) return null;
+            return fs.readFileSync(fp, 'utf8');
+        };
+        const readBinary = (name) => {
+            const fp = path.join(folderPath, name);
+            if (!fs.existsSync(fp)) return null;
+            return fs.readFileSync(fp);
+        };
+
+        if (DiscordReturnParser.detect(allFiles).match) {
+            return new DiscordReturnParser().parse({ entryNames: allFiles, readText, readBinary, options });
+        }
+
+        return this._parseSources({ entryNames: allFiles, readText, readBinary, options });
     }
 
     // ─── Core parsing ───────────────────────────────────────────────────
@@ -349,7 +364,20 @@ class DiscordWarrantParser {
             mediaCount: Object.keys(contentFiles).length
         };
 
+        // Diagnostics — the Data Package path used to fail completely silently:
+        // every section reader returns [] or null on a miss, so a package whose
+        // layout has drifted imports "successfully" with nothing in it.
+        const ddpWarnings = [];
+        if (!subscriber) ddpWarnings.push('Account/user.json was missing or unreadable — no subscriber info recovered.');
+        if (!channels.length) ddpWarnings.push('No message channels found under Messages/.');
+        if (!activity.totalEventCount) ddpWarnings.push('No Activity/ events parsed — IP and device tables will be empty.');
+        if (!stats.messageCount && !servers.length && !subscriber) {
+            ddpWarnings.push('Nothing was recovered from this package. If this is a law-enforcement return rather than a Discord Data Package, the layout differs — report this package to the developer.');
+        }
+
         return {
+            format: 'data-package',
+            formatLabel: 'Discord Data Package',
             subscriber,
             avatarFile,
             recentAvatarFiles,
@@ -364,7 +392,13 @@ class DiscordWarrantParser {
             ipActivity,
             devices,
             contentFiles,
-            stats
+            stats,
+            diagnostics: {
+                filesSeen: entryNames.length,
+                warnings: ddpWarnings,
+                unmatchedFiles: [],
+                unmatchedCount: 0
+            }
         };
     }
 

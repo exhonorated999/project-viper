@@ -330,6 +330,7 @@ class DiscordWarrantUI {
         return `
             <div class="dwp-section">
                 <h2 class="dwp-section-title">👤 Account Overview</h2>
+                ${this._renderDiagnostics(d)}
 
                 <div class="dwp-overview-grid">
                     <div class="dwp-card">
@@ -946,6 +947,55 @@ class DiscordWarrantUI {
             <div class="dwp-stat">
                 <div class="dwp-stat-value">${(value || 0).toLocaleString()}</div>
                 <div class="dwp-stat-label">${this._esc(label)}</div>
+            </div>
+        `;
+    }
+
+    /**
+     * Import diagnostics banner.
+     *
+     * Both Discord parsers are built to degrade rather than throw — a missing
+     * or renamed section yields [] instead of an error.  That is the right
+     * behaviour for a forensic tool, but without this banner it means a package
+     * we only half-understood imports "successfully" and quietly shows nothing.
+     * Always tell the analyst which format we matched and what we skipped.
+     */
+    _renderDiagnostics(d) {
+        const diag = d.diagnostics || {};
+        const warnings = Array.isArray(diag.warnings) ? diag.warnings : [];
+        const label = d.formatLabel || 'Discord Data Package';
+        const root = d.detectedRoot && d.detectedRoot !== '(archive root)'
+            ? ` · nested under <code>${this._esc(d.detectedRoot)}</code>` : '';
+
+        const unmatched = diag.unmatchedCount || 0;
+        const unmatchedHtml = unmatched
+            ? `<details class="dwp-diag-details">
+                   <summary>${unmatched.toLocaleString()} file${unmatched === 1 ? '' : 's'} in this package were not recognized</summary>
+                   <ul class="dwp-diag-list">
+                       ${(diag.unmatchedFiles || []).map(f => `<li><code>${this._esc(f)}</code></li>`).join('')}
+                   </ul>
+                   ${unmatched > (diag.unmatchedFiles || []).length
+                       ? `<div class="dwp-diag-more">…and ${(unmatched - (diag.unmatchedFiles || []).length).toLocaleString()} more.</div>` : ''}
+               </details>`
+            : '';
+
+        const warnHtml = warnings.length
+            ? `<ul class="dwp-diag-list dwp-diag-warn">
+                   ${warnings.map(w => `<li>${this._esc(w)}</li>`).join('')}
+               </ul>`
+            : '';
+
+        const tone = warnings.length ? 'dwp-diag-alert' : 'dwp-diag-ok';
+        return `
+            <div class="dwp-diag ${tone}">
+                <div class="dwp-diag-head">
+                    <span class="dwp-diag-badge">${this._esc(label)}</span>
+                    <span class="dwp-diag-meta">
+                        ${diag.filesSeen ? `${diag.filesSeen.toLocaleString()} files read` : ''}${root}
+                    </span>
+                </div>
+                ${warnHtml}
+                ${unmatchedHtml}
             </div>
         `;
     }

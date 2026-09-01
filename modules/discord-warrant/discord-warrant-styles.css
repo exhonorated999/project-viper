@@ -785,3 +785,38 @@ body.light-mode .dwp-push-btn:hover { background: rgba(8,145,178,0.18) !importan
 body.light-mode .dwp-message.flagged { box-shadow: 0 0 0 2px rgba(245,158,11,0.40) !important; border-left-color: #f59e0b !important; }
 body.light-mode tr.dwp-row-flagged > td { background: rgba(245,158,11,0.06) !important; }
 body.light-mode .dwp-flag-toolbar { background: var(--lm-inset, #f0f3f6) !important; border-color: var(--lm-card-border, #dde3ea) !important; }
+
+/* ── Import diagnostics banner ─────────────────────────────────────────
+   Tells the analyst which Discord format was matched and what was skipped,
+   so a partially-understood package can never look like a clean import. */
+.dwp-diag {
+    margin: 0 0 16px 0; padding: 10px 14px;
+    border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.03);
+    font-size: 12px;
+}
+.dwp-diag-ok    { border-left: 3px solid #3ba55d; }
+.dwp-diag-alert { border-left: 3px solid #faa61a; }
+.dwp-diag-head {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.dwp-diag-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    background: rgba(88,101,242,0.18); color: #c7d2fe;
+    font-weight: 600; letter-spacing: 0.2px;
+}
+.dwp-diag-meta { color: #9ca3af; }
+.dwp-diag-meta code {
+    background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px;
+}
+.dwp-diag-list { margin: 8px 0 0 0; padding-left: 18px; color: #d1d5db; }
+.dwp-diag-list li { margin: 2px 0; word-break: break-all; }
+.dwp-diag-warn li { color: #fcd34d; }
+.dwp-diag-details { margin-top: 8px; }
+.dwp-diag-details > summary {
+    cursor: pointer; color: #9ca3af; user-select: none;
+}
+.dwp-diag-details > summary:hover { color: #e5e7eb; }
+.dwp-diag-details .dwp-diag-list { max-height: 220px; overflow-y: auto; }
+.dwp-diag-more { margin-top: 6px; color: #9ca3af; font-style: italic; }
+

@@ -64,6 +64,9 @@ class DiscordWarrantModule {
      * localStorage gets a stripped index so the tab badge, import list and
      * flag counts still work before the async disk read resolves — and so the
      * module degrades gracefully if the IPC is unavailable.
+     *
+     * Must never throw: it is called from flag toggles and from import, and a
+     * storage failure has to degrade rather than take the tab down.
      */
     saveData() {
         if (window.electronAPI?.discordWarrantSaveStore) {
@@ -74,15 +77,24 @@ class DiscordWarrantModule {
         }
 
         const key = `discordWarrant_${this.caseId}`;
-        const full = JSON.stringify({ imports: this.imports });
-        // ~4 MB of UTF-16 is the practical localStorage ceiling in Chromium.
-        if (full.length < 3_500_000) {
-            try { localStorage.setItem(key, full); return; } catch (_) { /* fall through */ }
+        // Stringify can itself be the expensive step on a big return, so only
+        // attempt the full write when the record is plausibly small.
+        const looksSmall = this.imports.every(i =>
+            !i.data || !i.data._lazy) &&
+            this.imports.reduce((n, i) => n + ((i.stats && i.stats.messageCount) || 0), 0) < 20000;
+
+        if (looksSmall) {
+            try {
+                const full = JSON.stringify({ imports: this.imports });
+                if (full.length < 3_500_000) { localStorage.setItem(key, full); return; }
+            } catch (_) { /* fall through to the stripped write */ }
         }
         try {
             localStorage.setItem(key, JSON.stringify({ imports: this.imports.map(i => this._stripImport(i)) }));
         } catch (e) {
+            // Out of quota even stripped — disk is authoritative, so carry on.
             console.error('Discord warrant localStorage save failed even when stripped:', e);
+            try { localStorage.removeItem(key); } catch (_) {}
         }
     }
 
@@ -129,6 +141,10 @@ class DiscordWarrantModule {
 
     /**
      * Import a Discord warrant by file or folder path.
+     *
+     * Nothing here may throw on the happy-ish path.  A six-figure return that
+     * parses fine but fails to persist must still be usable in the open tab,
+     * so persistence problems are reported, not raised.
      */
     async importWarrant(filePath, fileName, isFolder = false) {
         if (!window.electronAPI?.discordWarrantImport) {
@@ -165,9 +181,53 @@ class DiscordWarrantModule {
         if (existingIdx >= 0) this.imports[existingIdx] = importRecord;
         else this.imports.push(importRecord);
 
-        this.saveData();
-        await this.scanForWarrants();
+        this._chanCache = null;
+        try {
+            this.saveData();
+        } catch (e) {
+            console.error('Discord warrant save after import failed:', e);
+            this._saveError = e.message || String(e);
+        }
+        try {
+            await this.scanForWarrants();
+        } catch (e) {
+            console.warn('Discord warrant rescan after import failed:', e);
+        }
         return importRecord;
+    }
+
+    /**
+     * Messages for one channel.  Large returns are sharded to disk at import
+     * time (see DW_LAZY_MESSAGE_THRESHOLD in electron-main.js) and the channel
+     * arrives with `_sharded: true` and an empty `messages`.  Exactly ONE
+     * channel is cached at a time — the reference return's biggest channel is
+     * 205,547 messages, and holding several would put us right back where the
+     * crash came from.
+     */
+    async loadChannelMessages(channelId) {
+        const imp = this.getActiveImport();
+        if (!imp || !imp.data) return [];
+        const ch = (imp.data.channels || []).find(c => c.channelId === channelId);
+        if (!ch) return [];
+
+        if (Array.isArray(ch.messages) && ch.messages.length) return ch.messages;
+        const storeKey = imp.data._storeKey;
+        if (!ch._sharded || !storeKey || !window.electronAPI?.discordWarrantReadChannel) {
+            return Array.isArray(ch.messages) ? ch.messages : [];
+        }
+
+        const cacheKey = `${storeKey}|${channelId}`;
+        if (this._chanCache && this._chanCache.key === cacheKey) return this._chanCache.messages;
+
+        const res = await window.electronAPI.discordWarrantReadChannel({
+            caseNumber: this.caseNumber, storeKey, channelId
+        });
+        if (!res || !res.success) {
+            throw new Error((res && res.error) || 'Could not read this conversation from the case store');
+        }
+        const messages = Array.isArray(res.messages) ? res.messages : [];
+        this._chanCache = { key: cacheKey, messages };
+        return messages;
     }
 
     async importFromPicker() {
@@ -181,7 +241,16 @@ class DiscordWarrantModule {
     }
 
     deleteImport(importId) {
+        const gone = this.imports.find(i => i.id === importId);
         this.imports = this.imports.filter(i => i.id !== importId);
+        this._chanCache = null;
+        // Drop the on-disk shards too, or a deleted 384 MB return keeps its
+        // message store forever.
+        const storeKey = gone && gone.data && gone.data._storeKey;
+        if (storeKey && window.electronAPI?.discordWarrantDeleteStore) {
+            window.electronAPI.discordWarrantDeleteStore({ caseNumber: this.caseNumber, storeKey })
+                .catch(err => console.warn('Discord warrant store cleanup failed:', err));
+        }
         this.saveData();
     }
 
@@ -219,8 +288,21 @@ class DiscordWarrantModule {
         return this.imports[0] || null;
     }
 
-    toggleFlag(section, key) {
-        return WarrantFlags.toggle(this.getActiveImport(), section, key, () => this.saveData());
+    toggleFlag(section, key, snapshot) {
+        const imp = this.getActiveImport();
+        const nowOn = WarrantFlags.toggle(imp, section, key, () => {});
+        // Remember enough about the flagged item to build the evidence bundle
+        // WITHOUT re-scanning the messages.  On a sharded return the bodies
+        // are not in memory, and even when they are, walking 541,831 records
+        // per push is pointless when the row was on screen at flag time.
+        if (imp && snapshot && typeof snapshot === 'object') {
+            if (!imp.flagSnapshots || typeof imp.flagSnapshots !== 'object') imp.flagSnapshots = {};
+            if (!imp.flagSnapshots[section]) imp.flagSnapshots[section] = {};
+            if (nowOn) imp.flagSnapshots[section][String(key)] = snapshot;
+            else delete imp.flagSnapshots[section][String(key)];
+        }
+        this.saveData();
+        return nowOn;
     }
     isFlagged(section, key) {
         return WarrantFlags.isFlagged(this.getActiveImport(), section, key);
@@ -254,18 +336,41 @@ class DiscordWarrantModule {
         // Messages — flag key = msg.id (Discord snowflake, globally unique)
         const flaggedMsgIds = new Set((f.messages || []).map(String));
         if (flaggedMsgIds.size > 0) {
-            for (const ch of (d.channels || [])) {
-                const channelLabel = ch.guildName ? `${ch.guildName} · ${ch.channelName || ch.channelId}` : (ch.channelName || ch.channelId);
-                for (const m of (ch.messages || [])) {
-                    if (!flaggedMsgIds.has(String(m.id))) continue;
-                    out.messages.push({
-                        id: m.id,
-                        timestamp: m.timestamp,
-                        channel: channelLabel,
-                        channelId: ch.channelId,
-                        contents: m.contents || '',
-                        attachments: m.attachments || ''
-                    });
+            // Prefer the snapshot captured when the examiner clicked the flag.
+            // A sharded return has no message bodies in memory at all, and
+            // re-walking half a million records would be wasteful even if it
+            // did.  Fall back to scanning for records flagged before 5.1.7.
+            const snaps = (imp.flagSnapshots && imp.flagSnapshots.messages) || {};
+            const resolved = new Set();
+            for (const id of flaggedMsgIds) {
+                const s = snaps[id];
+                if (!s) continue;
+                out.messages.push({
+                    id: s.id != null ? s.id : id,
+                    timestamp: s.timestamp || null,
+                    channel: s.channel || '',
+                    channelId: s.channelId || null,
+                    contents: s.contents || '',
+                    attachments: s.attachments || ''
+                });
+                resolved.add(String(id));
+            }
+            if (resolved.size < flaggedMsgIds.size) {
+                for (const ch of (d.channels || [])) {
+                    const channelLabel = ch.guildName ? `${ch.guildName} · ${ch.channelName || ch.channelId}` : (ch.channelName || ch.channelId);
+                    for (const m of (ch.messages || [])) {
+                        const mid = String(m.id);
+                        if (!flaggedMsgIds.has(mid) || resolved.has(mid)) continue;
+                        out.messages.push({
+                            id: m.id,
+                            timestamp: m.timestamp,
+                            channel: channelLabel,
+                            channelId: ch.channelId,
+                            contents: m.contents || '',
+                            attachments: m.attachments || ''
+                        });
+                        resolved.add(mid);
+                    }
                 }
             }
             out.messages.sort((a, b) => (Date.parse(a.timestamp || '') || 0) - (Date.parse(b.timestamp || '') || 0));

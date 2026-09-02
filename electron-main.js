@@ -10583,6 +10583,21 @@ ipcMain.handle('discord-warrant-import', async (event, { filePath, caseNumber, i
       data = await dwParser.parseZip(filePath, { extractDir, security });
     }
 
+    // Keep six-figure returns off the IPC boundary entirely (see
+    // discord-warrant-store.js).  If sharding fails we still return the full
+    // payload — a slow import beats no import — but we say so.
+    const msgCount = (data && data.stats && data.stats.messageCount) || 0;
+    if (caseNumber && msgCount > dwStore.LAZY_MESSAGE_THRESHOLD) {
+      try {
+        const res = dwStore.shardChannels(data, dwBaseDir(caseNumber), dwStore.storeKeyFor(filePath));
+        console.log(`[discord-warrant] sharded ${res.written} channel(s), ${res.failed.length} failed -> ${res.dir}`);
+      } catch (err) {
+        console.error('[discord-warrant] sharding failed, returning inline payload:', err);
+        data._lazy = false;
+        data._shardError = err.message;
+      }
+    }
+
     return { success: true, data };
   } catch (error) {
     console.error('Discord warrant import error:', error);
@@ -10591,30 +10606,24 @@ ipcMain.handle('discord-warrant-import', async (event, { filePath, caseNumber, i
 });
 
 // ── Bulk store for parsed Discord returns ──────────────────────────────
-// A real law-enforcement return runs to hundreds of thousands of messages
-// (541,831 in the first one we saw).  Serialised that is ~100 MB — an order
-// of magnitude past the 5 MB localStorage quota, so the renderer's saveData()
-// throws QuotaExceededError and the import silently evaporates on reload.
-// Heavy payloads therefore live on disk beside the case; localStorage keeps
-// only the light index.
-function dwStorePath(caseNumber) {
+// See modules/discord-warrant/discord-warrant-store.js for the measurements
+// behind this: a real return is ~500 MB of heap and 134 MB of JSON, so past
+// LAZY_MESSAGE_THRESHOLD the message bodies never cross the IPC boundary.
+const dwStore = require('./modules/discord-warrant/discord-warrant-store');
+
+function dwBaseDir(caseNumber) {
   if (!caseNumber) return null;
   const dir = path.join(casesDir, String(caseNumber), 'Evidence', 'DiscordWarrant');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  return path.join(dir, 'imports.json');
+  return dir;
 }
 
 ipcMain.handle('discord-warrant-save-store', async (event, { caseNumber, payload }) => {
   try {
-    const file = dwStorePath(caseNumber);
-    if (!file) return { success: false, error: 'No case number' };
-    const json = JSON.stringify(payload || { imports: [] });
-    // Write to a sibling temp file first: a truncated imports.json would cost
-    // the examiner the whole return.
-    const tmp = file + '.tmp';
-    fs.writeFileSync(tmp, json, 'utf8');
-    fs.renameSync(tmp, file);
-    return { success: true, bytes: Buffer.byteLength(json) };
+    const dir = dwBaseDir(caseNumber);
+    if (!dir) return { success: false, error: 'No case number' };
+    const res = dwStore.saveIndex(dir, payload);
+    return { success: true, bytes: res.bytes };
   } catch (error) {
     console.error('discord-warrant-save-store error:', error);
     return { success: false, error: error.message };
@@ -10623,13 +10632,36 @@ ipcMain.handle('discord-warrant-save-store', async (event, { caseNumber, payload
 
 ipcMain.handle('discord-warrant-load-store', async (event, { caseNumber }) => {
   try {
-    const file = dwStorePath(caseNumber);
-    if (!file || !fs.existsSync(file)) return { success: true, payload: null };
-    const raw = fs.readFileSync(file, 'utf8');
-    return { success: true, payload: JSON.parse(raw) };
+    const dir = dwBaseDir(caseNumber);
+    return { success: true, payload: dir ? dwStore.loadIndex(dir) : null };
   } catch (error) {
     console.error('discord-warrant-load-store error:', error);
     return { success: false, error: error.message, payload: null };
+  }
+});
+
+// One channel's messages, for a return whose bodies were sharded at import.
+ipcMain.handle('discord-warrant-read-channel', async (event, { caseNumber, storeKey, channelId }) => {
+  try {
+    const dir = dwBaseDir(caseNumber);
+    if (!dir) return { success: false, error: 'No case number', messages: [] };
+    const messages = dwStore.readChannel(dir, storeKey, channelId);
+    if (messages === null) return { success: false, error: 'Channel not in case store', messages: [] };
+    return { success: true, messages };
+  } catch (error) {
+    console.error('discord-warrant-read-channel error:', error);
+    return { success: false, error: error.message, messages: [] };
+  }
+});
+
+ipcMain.handle('discord-warrant-delete-store', async (event, { caseNumber, storeKey }) => {
+  try {
+    const dir = dwBaseDir(caseNumber);
+    if (dir) dwStore.deleteStore(dir, storeKey);
+    return { success: true };
+  } catch (error) {
+    console.error('discord-warrant-delete-store error:', error);
+    return { success: false, error: error.message };
   }
 });
 

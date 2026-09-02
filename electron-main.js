@@ -10590,6 +10590,49 @@ ipcMain.handle('discord-warrant-import', async (event, { filePath, caseNumber, i
   }
 });
 
+// ── Bulk store for parsed Discord returns ──────────────────────────────
+// A real law-enforcement return runs to hundreds of thousands of messages
+// (541,831 in the first one we saw).  Serialised that is ~100 MB — an order
+// of magnitude past the 5 MB localStorage quota, so the renderer's saveData()
+// throws QuotaExceededError and the import silently evaporates on reload.
+// Heavy payloads therefore live on disk beside the case; localStorage keeps
+// only the light index.
+function dwStorePath(caseNumber) {
+  if (!caseNumber) return null;
+  const dir = path.join(casesDir, String(caseNumber), 'Evidence', 'DiscordWarrant');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, 'imports.json');
+}
+
+ipcMain.handle('discord-warrant-save-store', async (event, { caseNumber, payload }) => {
+  try {
+    const file = dwStorePath(caseNumber);
+    if (!file) return { success: false, error: 'No case number' };
+    const json = JSON.stringify(payload || { imports: [] });
+    // Write to a sibling temp file first: a truncated imports.json would cost
+    // the examiner the whole return.
+    const tmp = file + '.tmp';
+    fs.writeFileSync(tmp, json, 'utf8');
+    fs.renameSync(tmp, file);
+    return { success: true, bytes: Buffer.byteLength(json) };
+  } catch (error) {
+    console.error('discord-warrant-save-store error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('discord-warrant-load-store', async (event, { caseNumber }) => {
+  try {
+    const file = dwStorePath(caseNumber);
+    if (!file || !fs.existsSync(file)) return { success: true, payload: null };
+    const raw = fs.readFileSync(file, 'utf8');
+    return { success: true, payload: JSON.parse(raw) };
+  } catch (error) {
+    console.error('discord-warrant-load-store error:', error);
+    return { success: false, error: error.message, payload: null };
+  }
+});
+
 ipcMain.handle('discord-warrant-pick-file', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Select Discord Warrant Return (ZIP or Folder)',

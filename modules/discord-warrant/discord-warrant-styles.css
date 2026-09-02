@@ -820,3 +820,207 @@ body.light-mode .dwp-flag-toolbar { background: var(--lm-inset, #f0f3f6) !import
 .dwp-diag-details .dwp-diag-list { max-height: 220px; overflow-y: auto; }
 .dwp-diag-more { margin-top: 6px; color: #9ca3af; font-style: italic; }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   Conversation thread — chat-bubble transcript view
+   Warrant returns are read as conversations, not as tables.  Incoming
+   traffic sits left, the account holder's own messages sit right, and
+   consecutive messages from one author inside 5 minutes collapse into a
+   single block with one header.  --dwp-av is a per-author hue set inline
+   so the same correspondent keeps the same colour throughout the case.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.dwp-input {
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.10);
+    background: rgba(255,255,255,0.04);
+    color: #e5e7eb;
+    font-size: 0.86em;
+    outline: none;
+}
+.dwp-input:focus { border-color: rgba(88,101,242,0.55); background: rgba(88,101,242,0.06); }
+.dwp-input::placeholder { color: #6b7280; }
+
+.dwp-chan-search { margin: 4px 0 12px; }
+.dwp-chip {
+    display: inline-block;
+    padding: 1px 7px; margin-right: 5px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.07);
+    color: #9ca3af;
+    font-size: 0.9em; font-weight: 600;
+}
+.dwp-chip.mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.dwp-chip.warn { background: rgba(245,158,11,0.16); color: #fbbf24; }
+.dwp-chan-range { color: #6b7280; font-size: 0.9em; }
+
+/* ── Thread header ───────────────────────────────────────────────────── */
+.dwp-thread-section { display: flex; flex-direction: column; min-height: 0; }
+.dwp-thread-head {
+    padding: 10px 0 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.dwp-thread-title {
+    display: flex; align-items: center; gap: 9px;
+    font-size: 1.22em; font-weight: 700; color: #f3f4f6;
+}
+.dwp-thread-icon { font-size: 1.05em; }
+.dwp-thread-meta {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin-top: 7px; color: #9ca3af; font-size: 0.82em;
+}
+.dwp-thread-people {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin-top: 9px;
+}
+.dwp-person {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 2px 9px 2px 7px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.05);
+    color: #d1d5db; font-size: 0.78em;
+}
+.dwp-person-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--dwp-av, #5865F2);
+}
+.dwp-person-n { color: #6b7280; font-variant-numeric: tabular-nums; }
+
+.dwp-thread-toolbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 0;
+}
+.dwp-thread-toolbar .dwp-input { max-width: 420px; }
+.dwp-thread-hits { color: #9ca3af; font-size: 0.8em; }
+.dwp-tz-btn { margin-left: auto; white-space: nowrap; }
+
+/* ── The transcript ──────────────────────────────────────────────────── */
+.dwp-chat {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 8px 4px 16px;
+    background:
+        radial-gradient(1200px 400px at 50% -10%, rgba(88,101,242,0.06), transparent 70%);
+    border-radius: 12px;
+}
+
+.dwp-chat-day {
+    display: flex; align-items: center; gap: 12px;
+    margin: 18px 0 10px;
+    color: #6b7280; font-size: 0.74em;
+    font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.dwp-chat-day::before, .dwp-chat-day::after {
+    content: ''; flex: 1; height: 1px;
+    background: rgba(255,255,255,0.07);
+}
+
+.dwp-bubble-row {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 1px 2px;
+    max-width: 100%;
+}
+.dwp-bubble-row.grouped { margin-top: -2px; }
+.dwp-bubble-row.out { flex-direction: row-reverse; }
+.dwp-bubble-row.flagged .dwp-bubble {
+    outline: 1px solid #fbbf24;
+    box-shadow: 0 0 0 3px rgba(245,158,11,0.14);
+}
+
+.dwp-bubble-avatar {
+    flex: 0 0 34px; width: 34px; height: 34px;
+    margin-top: 20px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--dwp-av, #5865F2);
+    color: #0b0d12;
+    font-size: 0.72em; font-weight: 800; letter-spacing: 0.02em;
+    user-select: none;
+}
+.dwp-bubble-row.grouped .dwp-bubble-avatar { background: transparent; margin-top: 0; }
+
+.dwp-bubble-col {
+    display: flex; flex-direction: column;
+    min-width: 0; max-width: min(680px, 78%);
+}
+.dwp-bubble-row.out .dwp-bubble-col { align-items: flex-end; }
+
+.dwp-bubble-who {
+    display: flex; align-items: baseline; gap: 8px;
+    margin: 8px 4px 3px;
+    font-size: 0.8em;
+}
+.dwp-bubble-author { font-weight: 700; color: var(--dwp-av, #b9bffd); }
+.dwp-bubble-self {
+    padding: 0 6px; border-radius: 8px;
+    background: rgba(88,101,242,0.20); color: #b9bffd;
+    font-size: 0.85em; font-weight: 600;
+}
+.dwp-bubble-time { color: #6b7280; font-size: 0.85em; }
+
+.dwp-bubble {
+    position: relative;
+    padding: 8px 12px 6px;
+    border-radius: 14px;
+    background: rgba(255,255,255,0.055);
+    border: 1px solid rgba(255,255,255,0.05);
+    color: #e5e7eb;
+    font-size: 0.88em; line-height: 1.5;
+    word-break: break-word; overflow-wrap: anywhere;
+}
+.dwp-bubble-row.in  .dwp-bubble { border-top-left-radius: 5px; }
+.dwp-bubble-row.out .dwp-bubble {
+    background: linear-gradient(135deg, rgba(88,101,242,0.30), rgba(71,82,196,0.24));
+    border-color: rgba(88,101,242,0.35);
+    border-top-right-radius: 5px;
+}
+.dwp-bubble-row.grouped.in  .dwp-bubble { border-top-left-radius: 14px; }
+.dwp-bubble-row.grouped.out .dwp-bubble { border-top-right-radius: 14px; }
+
+.dwp-bubble-text { white-space: normal; }
+.dwp-hl { background: #fbbf24; color: #111827; border-radius: 3px; padding: 0 2px; }
+
+.dwp-bubble-media { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 7px; }
+.dwp-bubble-attach { margin-top: 7px; }
+.dwp-att-file {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 6px 10px; border-radius: 8px;
+    background: rgba(0,0,0,0.25);
+    border: 1px solid rgba(255,255,255,0.07);
+    font-size: 0.92em;
+}
+.dwp-att-name { color: #e5e7eb; }
+.dwp-att-local {
+    padding: 1px 6px; border-radius: 8px;
+    background: rgba(34,197,94,0.16); color: #4ade80;
+    font-size: 0.82em; font-weight: 600;
+}
+
+/* Metadata line: deliberately quiet, but always present — a transcript is
+   evidence, so the message ID and exact stamp must never be hidden. */
+.dwp-bubble-foot {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 4px;
+    opacity: 0.35; transition: opacity 0.15s;
+    font-size: 0.78em; color: #9ca3af;
+}
+.dwp-bubble-row:hover .dwp-bubble-foot { opacity: 1; }
+.dwp-bubble-row.flagged .dwp-bubble-foot { opacity: 1; }
+.dwp-bubble-row.out .dwp-bubble-foot { justify-content: flex-end; }
+.dwp-bubble-stamp { font-variant-numeric: tabular-nums; }
+.dwp-bubble-id {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.92em; color: #6b7280;
+}
+.dwp-bubble-flag { margin-left: auto; }
+.dwp-bubble-row.out .dwp-bubble-flag { margin-left: 0; margin-right: auto; }
+
+.dwp-page-input {
+    width: 74px; padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.04);
+    color: #d1d5db; font-size: 0.8em;
+    text-align: center;
+}
+

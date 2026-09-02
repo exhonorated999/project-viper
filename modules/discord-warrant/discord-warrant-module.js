@@ -18,6 +18,11 @@ class DiscordWarrantModule {
         this.ui = new DiscordWarrantUI(containerId, this);
         window.discordWarrantUI = this.ui;
         this.ui.render();
+        // Disk store wins over localStorage: a real return is far too large
+        // for the 5 MB quota, so localStorage only ever holds the light index.
+        this.loadFromDisk().then(loaded => {
+            if (loaded && this.ui) this.ui.render();
+        }).catch(err => console.warn('Discord warrant disk load error:', err));
         this.scanForWarrants().catch(err => console.warn('Discord warrant scan error:', err));
         return this;
     }
@@ -35,10 +40,65 @@ class DiscordWarrantModule {
         }
     }
 
+    /**
+     * Pull the full parsed payload from cases/<num>/Evidence/DiscordWarrant/
+     * imports.json.  Anything found there supersedes the localStorage copy —
+     * that copy is stripped of message bodies whenever the payload is large.
+     */
+    async loadFromDisk() {
+        if (!window.electronAPI?.discordWarrantLoadStore) return false;
+        try {
+            const res = await window.electronAPI.discordWarrantLoadStore({ caseNumber: this.caseNumber });
+            if (res && res.success && res.payload && Array.isArray(res.payload.imports) && res.payload.imports.length) {
+                this.imports = res.payload.imports;
+                return true;
+            }
+        } catch (e) {
+            console.warn('Discord warrant disk load failed:', e);
+        }
+        return false;
+    }
+
+    /**
+     * Persist to BOTH stores.  Disk is authoritative and holds everything;
+     * localStorage gets a stripped index so the tab badge, import list and
+     * flag counts still work before the async disk read resolves — and so the
+     * module degrades gracefully if the IPC is unavailable.
+     */
     saveData() {
-        localStorage.setItem(`discordWarrant_${this.caseId}`, JSON.stringify({
-            imports: this.imports
-        }));
+        if (window.electronAPI?.discordWarrantSaveStore) {
+            window.electronAPI.discordWarrantSaveStore({
+                caseNumber: this.caseNumber,
+                payload: { imports: this.imports }
+            }).catch(err => console.error('Discord warrant disk save failed:', err));
+        }
+
+        const key = `discordWarrant_${this.caseId}`;
+        const full = JSON.stringify({ imports: this.imports });
+        // ~4 MB of UTF-16 is the practical localStorage ceiling in Chromium.
+        if (full.length < 3_500_000) {
+            try { localStorage.setItem(key, full); return; } catch (_) { /* fall through */ }
+        }
+        try {
+            localStorage.setItem(key, JSON.stringify({ imports: this.imports.map(i => this._stripImport(i)) }));
+        } catch (e) {
+            console.error('Discord warrant localStorage save failed even when stripped:', e);
+        }
+    }
+
+    /** Import record minus the bulk message bodies — index only. */
+    _stripImport(imp) {
+        const d = imp.data || {};
+        return {
+            ...imp,
+            _truncated: true,
+            data: {
+                ...d,
+                channels: (d.channels || []).map(c => ({ ...c, messages: [] })),
+                contentFiles: {},
+                servers: (d.servers || []).map(s => ({ ...s, auditLog: [] }))
+            }
+        };
     }
 
     /**

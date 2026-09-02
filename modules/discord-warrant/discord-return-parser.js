@@ -276,12 +276,96 @@ class DiscordReturnParser {
             consumed.add(orig);
             try { return readText(orig); } catch (_) { return null; }
         };
+        // A file we opened but understood nothing in is NOT consumed — it has
+        // to reach the diagnostics banner, or a return we half-read looks like
+        // a clean import.
+        const unconsume = (rel) => {
+            const orig = relMap.get(rel);
+            if (orig) consumed.delete(orig);
+        };
 
-        // ── 1) Messages ────────────────────────────────────────────────
+        // ── 0) Subscriber / account info ───────────────────────────────
+        // Parsed FIRST: the account's own username is what lets us tell "me"
+        // from "them" when naming a DM and when aligning chat bubbles.
+        const subscriber = this._findSubscriber(rels, textOf, warnings) ||
+            { id: null, username: null, email: null, phone: null, ip: null, sessions: [], connections: [], flags: [] };
+
+        // session/*.txt is where a return actually states the account's
+        // username — and we need that BEFORE reading messages so every row can
+        // be classified as the subscriber's own or a correspondent's.
+        const ipActivity = this._parseSessionAndReports(rels, textOf, subscriber, warnings, unconsume);
+
+        const selfKeys = new Set();
+        for (const v of [subscriber.id, subscriber.username, subscriber.globalName]) {
+            if (v) selfKeys.add(String(v).toLowerCase());
+        }
+        // "name#0" and "name" should both match the subscriber.
+        if (subscriber.username) selfKeys.add(String(subscriber.username).split('#')[0].toLowerCase());
+
+        // ── 1) Servers (parsed before messages: they NAME the channels) ─
+        // servers/<guildid>.json carries { id, name, owner_id,
+        // channels: { "<channelid>": "<name>" }, threads: { ... } }.  That map
+        // is the ONLY place a return states a channel's human-readable name —
+        // without it every server channel renders as a bare snowflake.
+        const servers = [];
+        const channelIndex = new Map(); // channelId -> {name, guildId, guildName, isThread}
+        for (const rel of rels.filter(r => /^servers\/[^/]+\.json$/.test(r)).sort()) {
+            const txt = textOf(rel);
+            if (txt == null) continue;
+            let obj = null;
+            try { obj = JSON.parse(txt); } catch (_) {
+                warnings.push(`${rel}: not valid JSON`); continue;
+            }
+            const list = Array.isArray(obj) ? obj : [obj];
+            for (const g of list) {
+                if (!g || typeof g !== 'object') continue;
+                const gid = String(g.id || g.ID || path.basename(rel, '.json'));
+                const gname = g.name || g.Name || `Server ${path.basename(rel, '.json')}`;
+
+                // Returns use an id→name object; the data package and older
+                // vintages use an array of channel objects.  Accept both.
+                const harvest = (blob, isThread) => {
+                    const out = [];
+                    if (Array.isArray(blob)) {
+                        for (const c of blob) {
+                            if (!c || typeof c !== 'object') continue;
+                            out.push({ id: String(c.id ?? c.ID ?? ''), name: String(c.name ?? c.Name ?? '') });
+                        }
+                    } else if (blob && typeof blob === 'object') {
+                        for (const k of Object.keys(blob)) out.push({ id: String(k), name: String(blob[k] ?? '') });
+                    }
+                    for (const c of out) {
+                        if (!c.id) continue;
+                        channelIndex.set(c.id, { name: c.name || null, guildId: gid, guildName: gname, isThread: !!isThread });
+                    }
+                    return out;
+                };
+                const guildChannels = harvest(g.channels, false);
+                const guildThreads = harvest(g.threads, true);
+
+                servers.push({
+                    id: gid,
+                    name: gname,
+                    description: g.description || g.Description || null,
+                    ownerId: g.owner_id || g.ownerId || g['Owner ID'] || null,
+                    icon: g.icon || null,
+                    region: g.region || null,
+                    preferredLocale: g.preferred_locale || null,
+                    channels: guildChannels,
+                    threads: guildThreads,
+                    channelCount: guildChannels.length,
+                    threadCount: guildThreads.length,
+                    auditLog: Array.isArray(g.audit_log) ? g.audit_log : []
+                });
+            }
+        }
+
+        // ── 2) Messages ────────────────────────────────────────────────
         // messages/<bucket>/<channelid>.csv   bucket ∈ dms|servers|unknown|archived|…
         const channels = [];
         const msgFiles = rels.filter(r => /^messages\/[^/]+\/[^/]+\.csv$/.test(r) &&
                                           !path.basename(r).startsWith('._'));
+        let headerlessCount = 0;
         for (const rel of msgFiles.sort()) {
             const txt = textOf(rel);
             if (txt == null) { warnings.push(`Could not read ${rel}`); continue; }
@@ -321,66 +405,115 @@ class DiscordReturnParser {
                 const rawTs = at(r, 'timestamp');
                 const ts = DiscordReturnParser.normalizeTs(rawTs) ||
                            (id ? DiscordReturnParser.snowflakeToIso(id) : null);
+                const authorId = String(at(r, 'authorId') || '').trim() || null;
+                const username = String(at(r, 'username') || '').trim() || null;
+                const isSelf =
+                    (authorId && selfKeys.has(authorId.toLowerCase())) ||
+                    (username && (selfKeys.has(username.toLowerCase()) ||
+                                  selfKeys.has(username.split('#')[0].toLowerCase())));
                 messages.push({
                     id: id || null,
                     timestamp: ts,
                     rawTimestamp: String(rawTs || '') || null,
                     contents: String(at(r, 'contents') || ''),
                     attachments: String(at(r, 'attachments') || ''),
-                    authorId: String(at(r, 'authorId') || '') || null,
-                    username: String(at(r, 'username') || '') || null
+                    authorId,
+                    username,
+                    // Drives bubble alignment in the thread view.  Only a
+                    // return carries an author per row; a data package does
+                    // not, so this field is return-only by design.
+                    direction: isSelf ? 'outgoing' : 'incoming'
                 });
             }
 
+            // Participants, most-talkative first.  For a DM this is the only
+            // way to put a name on the thread — the return never states one.
+            const seen = new Map();
+            for (const m of messages) {
+                const key = (m.authorId || m.username || '').toLowerCase();
+                if (!key) continue;
+                const cur = seen.get(key) || {
+                    id: m.authorId || null, username: m.username || null,
+                    count: 0, isSubscriber: m.direction === 'outgoing'
+                };
+                if (!cur.username && m.username) cur.username = m.username;
+                if (!cur.id && m.authorId) cur.id = m.authorId;
+                cur.count++;
+                seen.set(key, cur);
+            }
+            const participants = Array.from(seen.values()).sort((a, b) => b.count - a.count);
+            const others = participants.filter(p => !p.isSubscriber);
+
             const channelId = String(at(body[0] || [], 'channelId') || '').trim() || fileChannelId;
+            const idx = channelIndex.get(channelId) || channelIndex.get(fileChannelId) || null;
+
+            // Name resolution, best source first:
+            //   1. servers/<guild>.json channels/threads map  → "#general"
+            //   2. the other DM participants                  → "alice, bob"
+            //   3. the channel snowflake                      → last resort
+            let channelName = null;
+            let channelType = null;
+            if (idx && idx.name) {
+                channelName = (idx.isThread ? '🧵 ' : '#') + idx.name;
+                channelType = idx.isThread ? 'GUILD_THREAD' : 'GUILD_TEXT';
+            } else if (bucket === 'dms' || bucket === 'archived' || others.length) {
+                const named = (others.length ? others : participants)
+                    .slice(0, 4).map(p => p.username || p.id).filter(Boolean);
+                if (named.length) {
+                    channelName = named.join(', ') + (others.length > 4 ? ` +${others.length - 4}` : '');
+                }
+                channelType = others.length > 1 ? 'GROUP DM' : 'DM';
+            }
+            if (!channelName) channelName = `${bucket}/${fileChannelId}`;
+            if (!channelType) channelType = bucket === 'servers' ? 'GUILD_TEXT' : bucket.toUpperCase();
+
+            const withTs = messages.filter(m => m.timestamp);
+            const firstMessage = withTs.length ? withTs.reduce((a, b) => (a.timestamp <= b.timestamp ? a : b)).timestamp : null;
+            const lastMessage = withTs.length ? withTs.reduce((a, b) => (a.timestamp >= b.timestamp ? a : b)).timestamp : null;
+
             channels.push({
-                id: channelId,
-                name: `${bucket}/${fileChannelId}`,
-                type: bucket === 'dms' ? 'DM' : bucket === 'servers' ? 'Server' : bucket,
-                guildId: null,
-                guildName: null,
+                // The UI reads channelId/channelName/channelType — this is the
+                // contract the data-package parser emits.  Do NOT rename these:
+                // 5.1.6 shipped id/name/type and every thread rendered blank
+                // and un-clickable because `_openChannel` got an empty string.
+                channelId,
+                channelName,
+                channelType,
+                guildId: idx ? idx.guildId : null,
+                guildName: idx ? idx.guildName : null,
                 indexLabel: null,
-                recipients: null,
+                recipients: others.length ? others.map(p => ({ id: p.id, username: p.username })) : null,
+                participants,
+                bucket,
+                firstMessage,
+                lastMessage,
                 messageCount: messages.length,
                 messages,
                 _sourceFile: rel,
                 _columnSource: source
             });
-            if (source !== 'header') {
-                warnings.push(`${rel}: header row not recognized — used ${source} column layout`);
-            }
+            if (source !== 'header') headerlessCount++;
         }
-
-        // ── 2) Servers ─────────────────────────────────────────────────
-        const servers = [];
-        for (const rel of rels.filter(r => /^servers\/[^/]+\.json$/.test(r)).sort()) {
-            const txt = textOf(rel);
-            if (txt == null) continue;
-            let obj = null;
-            try { obj = JSON.parse(txt); } catch (_) {
-                warnings.push(`${rel}: not valid JSON`); continue;
-            }
-            const list = Array.isArray(obj) ? obj : [obj];
-            for (const g of list) {
-                if (!g || typeof g !== 'object') continue;
-                servers.push({
-                    id: String(g.id || g.ID || path.basename(rel, '.json')),
-                    name: g.name || g.Name || `Server ${path.basename(rel, '.json')}`,
-                    description: g.description || g.Description || null,
-                    ownerId: g.owner_id || g.ownerId || g['Owner ID'] || null,
-                    channels: Array.isArray(g.channels) ? g.channels : [],
-                    auditLog: Array.isArray(g.audit_log) ? g.audit_log : []
-                });
-            }
+        if (headerlessCount) {
+            // Real returns ship headerless message CSVs.  Report it once,
+            // not 101 times — one line per channel drowns the banner.
+            warnings.push(`${headerlessCount} of ${msgFiles.length} message file(s) had no recognizable header row — the documented positional column layout was used.`);
         }
 
         // ── 3) Relationships (friends / blocks) ────────────────────────
+        // Real returns ship this headerless too: <userid>,<username>,FRIEND.
         const relationships = [];
         for (const rel of rels.filter(r => /^relationships[^/]*\.csv$/.test(r)).sort()) {
             const txt = textOf(rel);
             if (txt == null) continue;
             const rows = parseCsv(txt);
-            for (const r of rows.slice(1)) {
+            if (!rows.length) continue;
+            const h0 = rows[0] || [];
+            const headerLooksNamed =
+                /^(user\s*id|id)$/i.test(String(h0[0] || '').trim()) ||
+                /^(user\s*name|username|name)$/i.test(String(h0[1] || '').trim());
+            const body = headerLooksNamed ? rows.slice(1) : rows;
+            for (const r of body) {
                 if (!r || r.every(c => String(c).trim() === '')) continue;
                 relationships.push({
                     userId: String(r[0] || '').trim() || null,
@@ -389,15 +522,13 @@ class DiscordReturnParser {
                 });
             }
         }
-
-        // ── 4) Subscriber / account info ───────────────────────────────
-        const subscriber = this._findSubscriber(rels, textOf, warnings) ||
-            { id: null, username: null, email: null, phone: null, ip: null, sessions: [], connections: [], flags: [] };
         subscriber.relationships = relationships;
 
         // ── 5) Attachments ─────────────────────────────────────────────
-        // Layout: attachments/<attachmentid>/<filename>  (id also appears as
-        // the second-to-last segment of the CDN URL in the Attachments column).
+        // Seen in the wild as BOTH attachments/<attachmentid>/<file> and
+        // attachments/<channelid>/<attachmentid>/<file>.  The attachment ID is
+        // always the LAST directory segment, which is also the second-to-last
+        // segment of the CDN URL in the Attachments column — that is the join.
         const contentFiles = {};
         const attachRels = rels.filter(r => /^attachments\//.test(r));
         if (extractDir && attachRels.length) {
@@ -423,7 +554,12 @@ class DiscordReturnParser {
                         size: buf.length,
                         mimeType: this._mime(path.extname(rel).toLowerCase()),
                         kind: 'attachment',
-                        attachmentId: segs.length >= 3 ? segs[1] : null,
+                        // The attachment ID is the LAST directory segment, not
+                        // segs[1]: real returns nest as
+                        // attachments/<channelid>/<attachmentid>/<file>.
+                        attachmentId: segs.length >= 3 ? segs[segs.length - 2] : null,
+                        channelId: segs.length >= 4 ? segs[1] : null,
+                        fileName: segs[segs.length - 1],
                         original: rel
                     };
                 } catch (_) { warnings.push(`Could not write ${rel} to disk`); }
@@ -432,13 +568,16 @@ class DiscordReturnParser {
             warnings.push(`${attachRels.length} attachment file(s) present but no extract directory was provided`);
         }
 
-        // Link extracted media back onto each message via the attachment ID
+        // Link extracted media back onto each message via the attachment ID.
+        // `rels` are lower-cased for case-insensitive lookup while the CDN URL
+        // in the CSV keeps its original case, so BOTH sides must be folded.
         const byAttachmentId = new Map();
         for (const k of Object.keys(contentFiles)) {
             const id = contentFiles[k].attachmentId;
             if (!id) continue;
-            if (!byAttachmentId.has(id)) byAttachmentId.set(id, []);
-            byAttachmentId.get(id).push(contentFiles[k]);
+            const key = String(id).toLowerCase();
+            if (!byAttachmentId.has(key)) byAttachmentId.set(key, []);
+            byAttachmentId.get(key).push(contentFiles[k]);
         }
         let linked = 0;
         for (const ch of channels) {
@@ -448,8 +587,8 @@ class DiscordReturnParser {
                 for (const part of String(m.attachments).split(/[\r\n]+/)) {
                     const p = part.trim();
                     if (!p) continue;
-                    const segs = p.split('/');
-                    const id = segs.length >= 2 ? segs[segs.length - 2] : p;
+                    const segs = p.split('?')[0].split('/');
+                    const id = (segs.length >= 2 ? segs[segs.length - 2] : p).toLowerCase();
                     for (const rec of (byAttachmentId.get(id) || [])) media.push(rec);
                 }
                 if (media.length) { m.media = media; linked += media.length; }
@@ -481,7 +620,7 @@ class DiscordReturnParser {
             store: { wishlist: [] },
             virtualCurrency: { accounts: [], transactions: [] },
             activity: { sessionStarts: [], sessionEnds: [], appOpens: [], logins: [], registers: [], otherImportant: [], eventCounts: {}, totalEventCount: 0 },
-            ipActivity: [],
+            ipActivity,
             devices: [],
             contentFiles,
 
@@ -491,7 +630,7 @@ class DiscordReturnParser {
                 serverCount: servers.length,
                 relationshipCount: relationships.length,
                 sessionCount: (subscriber.sessions || []).length,
-                ipCount: 0,
+                ipCount: ipActivity.length,
                 deviceCount: 0,
                 eventCount: 0,
                 mediaCount: Object.keys(contentFiles).length,
@@ -506,6 +645,164 @@ class DiscordReturnParser {
                 warnings
             }
         };
+    }
+
+    /**
+     * Returns ship two extra artifact families the message/server readers
+     * ignore, and both are pure gold for an investigator:
+     *
+     *   session/<something>.txt   — a plain-text subscriber sheet
+     *                               ("User ID: …", "Username: …", "Email: …")
+     *                               followed by a Date/IP access table.
+     *   reports/<something>.csv   — message-report and login/session history.
+     *                               Header names vary; one file in the
+     *                               reference return is fully headerless.
+     *
+     * Rather than hard-code column names that change between vintages, sniff
+     * each CSV for an IP-shaped column and a timestamp-shaped column and roll
+     * everything up into the ipActivity table the UI already renders.
+     * Anything not understood is left to the diagnostics banner.
+     *
+     * Mutates `subscriber` in place with any field it can fill that is still
+     * blank; never overwrites a value the primary reader already found.
+     */
+    _parseSessionAndReports(rels, textOf, subscriber, warnings, unconsume = () => {}) {
+        const IPV4 = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+        const IPV6 = /^[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7}$/i;
+        const isIp = (v) => {
+            const s = String(v || '').trim();
+            if (IPV4.test(s)) return s.split('.').every(o => Number(o) <= 255);
+            return IPV6.test(s) && s.includes('::') === s.includes('::');
+        };
+
+        const agg = new Map(); // ip -> record
+        const note = (ip, ts, source, extra = {}) => {
+            if (!ip) return;
+            let rec = agg.get(ip);
+            if (!rec) {
+                rec = { ip, count: 0, locations: [], isps: [], oses: [], browsers: [],
+                        firstSeen: null, lastSeen: null, sources: [] };
+                agg.set(ip, rec);
+            }
+            rec.count++;
+            if (ts) {
+                if (!rec.firstSeen || ts < rec.firstSeen) rec.firstSeen = ts;
+                if (!rec.lastSeen || ts > rec.lastSeen) rec.lastSeen = ts;
+            }
+            if (source && !rec.sources.includes(source)) rec.sources.push(source);
+            for (const [k, bucket] of [['os', rec.oses], ['browser', rec.browsers],
+                                       ['location', rec.locations], ['isp', rec.isps]]) {
+                const v = String(extra[k] || '').trim();
+                if (v && !bucket.includes(v)) bucket.push(v);
+            }
+        };
+
+        // ── session/*.txt — subscriber sheet + access log ───────────────
+        const setIfBlank = (key, val) => {
+            const v = String(val == null ? '' : val).trim();
+            if (!v || /^not found$/i.test(v)) return false;
+            if (subscriber[key] == null || subscriber[key] === '') { subscriber[key] = v; return true; }
+            return false;
+        };
+        for (const rel of rels.filter(r => /\.txt$/.test(r) && !/^attachments\//.test(r)).sort()) {
+            const txt = textOf(rel);
+            if (txt == null) continue;
+            const label = rel;
+            let gained = 0;
+            for (const rawLine of String(txt).split(/\r?\n/)) {
+                const line = rawLine.trim();
+                if (!line) continue;
+
+                const kv = line.match(/^([A-Za-z][A-Za-z0-9 ()/._-]{1,48}?)\s*:\s*(.+)$/);
+                if (kv) {
+                    const k = slug(kv[1]);
+                    const v = kv[2].trim();
+                    if (k === 'userid') gained += setIfBlank('id', v) ? 1 : 0;
+                    else if (k === 'username') gained += setIfBlank('username', v) ? 1 : 0;
+                    else if (k === 'email' || k === 'emailaddress') gained += setIfBlank('email', v) ? 1 : 0;
+                    else if (k === 'emailverified') gained += setIfBlank('verified', v) ? 1 : 0;
+                    else if (k === 'phonenumber' || k === 'phone') gained += setIfBlank('phone', v) ? 1 : 0;
+                    else if (k === 'registrationip') {
+                        gained += setIfBlank('ip', v) ? 1 : 0;
+                        if (isIp(v)) { note(v, null, label, {}); gained++; }
+                    } else if (k === 'lastip') {
+                        if (isIp(v)) { note(v, null, label, {}); gained++; }
+                    } else if (/^registrationdate/.test(k)) {
+                        const iso = DiscordReturnParser.normalizeTs(v);
+                        if (iso && !subscriber.registrationDate) { subscriber.registrationDate = iso; gained++; }
+                    }
+                    continue;
+                }
+
+                // Access table rows: "<date> <time> <ip>" (optionally more).
+                const row = line.match(/^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?)\s+(\S+)(?:\s+(.*))?$/);
+                if (row && isIp(row[2])) {
+                    note(row[2], DiscordReturnParser.normalizeTs(row[1]), label,
+                         { browser: (row[3] || '').trim() });
+                    gained++;
+                }
+            }
+            if (!gained) unconsume(rel);
+        }
+
+        // ── reports/*.csv + any other loose CSV — sniff IP + timestamp ──
+        // Skip the file the subscriber reader already claimed: unconsuming it
+        // here would wrongly report it as unrecognized.
+        const subFile = String(subscriber._sourceFile || '').toLowerCase();
+        const csvRels = rels.filter(r =>
+            /\.csv$/.test(r) &&
+            r !== subFile &&
+            !/^messages\//.test(r) &&
+            !/^relationships/.test(r) &&
+            !/^attachments\//.test(r)
+        );
+        for (const rel of csvRels.sort()) {
+            const txt = textOf(rel);
+            if (txt == null) continue;
+            const rows = parseCsv(txt).filter(r => r && r.some(c => String(c).trim() !== ''));
+            if (rows.length < 2) continue;
+
+            // Header only counts if row 0 has no IP and no parseable timestamp.
+            const h = rows[0];
+            const headerish = !h.some(c => isIp(c)) &&
+                              !h.some(c => DiscordReturnParser.normalizeTs(c) && /[-:]/.test(String(c)));
+            const header = headerish ? h.map(c => slug(c)) : [];
+            const body = headerish ? rows.slice(1) : rows;
+            if (!body.length) continue;
+
+            const width = Math.max(...body.slice(0, 50).map(r => r.length));
+            const colIsIp = [], colIsTs = [];
+            for (let i = 0; i < width; i++) {
+                const sample = body.slice(0, 50).map(r => r[i]).filter(v => String(v || '').trim() !== '');
+                if (!sample.length) continue;
+                if (sample.every(isIp)) colIsIp.push(i);
+                else if (sample.every(v => !!DiscordReturnParser.normalizeTs(v) && /[-:]/.test(String(v)))) colIsTs.push(i);
+            }
+            if (!colIsIp.length) {
+                warnings.push(`${rel}: read but held no IP column — ${body.length} row(s) not surfaced.`);
+                unconsume(rel);
+                continue;
+            }
+            const ipCol = colIsIp[0];
+            const tsCol = colIsTs.length ? colIsTs[0] : -1;
+            const findCol = (...names) => {
+                for (const n of names) { const i = header.indexOf(n); if (i >= 0) return i; }
+                return -1;
+            };
+            const osCol = findCol('os', 'operatingsystem');
+            const brCol = findCol('browser', 'client', 'useragent');
+            const locCol = findCol('location', 'city', 'country');
+
+            for (const r of body) {
+                note(String(r[ipCol] || '').trim(),
+                     tsCol >= 0 ? DiscordReturnParser.normalizeTs(r[tsCol]) : null,
+                     rel,
+                     { os: osCol >= 0 ? r[osCol] : '', browser: brCol >= 0 ? r[brCol] : '',
+                       location: locCol >= 0 ? r[locCol] : '' });
+            }
+        }
+
+        return Array.from(agg.values()).sort((a, b) => b.count - a.count);
     }
 
     /**

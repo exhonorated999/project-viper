@@ -14,6 +14,12 @@ class DiscordWarrantUI {
         this._activeChannelId = null;
         this._msgPage = 0;
         this._msgPageSize = 100;
+        this._msgQuery = '';
+        this._channelQuery = '';
+        this._threadCache = null;
+        this._threadCacheKey = null;
+        // Returns are UTC.  Default to showing them that way.
+        this._tz = 'utc';
         this._eventTypeFilter = 'all';
         this._activityPage = 0;
         this._activityPageSize = 100;
@@ -438,47 +444,86 @@ class DiscordWarrantUI {
     // ─── Messages ───────────────────────────────────────────────────────
 
     _renderMessages(d) {
-        const channels = (d.channels || []).slice().sort((a, b) => b.messageCount - a.messageCount);
+        const all = (d.channels || []).slice();
 
         if (this._activeChannelId) {
-            const ch = channels.find(c => c.channelId === this._activeChannelId);
-            if (ch) return this._renderChannelDetail(ch);
+            const ch = all.find(c => c.channelId === this._activeChannelId);
+            if (ch) return this._renderChannelDetail(ch, d);
         }
+
+        const q = (this._channelQuery || '').trim().toLowerCase();
+        const channels = (q
+            ? all.filter(c =>
+                String(c.channelName || '').toLowerCase().includes(q) ||
+                String(c.guildName || '').toLowerCase().includes(q) ||
+                String(c.channelId || '').includes(q) ||
+                (c.participants || []).some(p => String(p.username || '').toLowerCase().includes(q)))
+            : all
+        ).sort((a, b) => b.messageCount - a.messageCount);
 
         return `
             <div class="dwp-section">
                 <h2 class="dwp-section-title">💬 Messages</h2>
-                <p class="dwp-section-sub">${channels.length} channel${channels.length === 1 ? '' : 's'} · ${(d.stats?.messageCount || 0).toLocaleString()} message${d.stats?.messageCount === 1 ? '' : 's'}</p>
+                <p class="dwp-section-sub">${all.length} channel${all.length === 1 ? '' : 's'} · ${(d.stats?.messageCount || 0).toLocaleString()} message${d.stats?.messageCount === 1 ? '' : 's'}${q ? ` · showing ${channels.length} match${channels.length === 1 ? '' : 'es'}` : ''}</p>
+
+                <div class="dwp-chan-search">
+                    <input type="search" id="dwp-chan-q" class="dwp-input" placeholder="Filter channels by name, server, participant or ID…"
+                           value="${this._esc(this._channelQuery || '')}"
+                           oninput="window.discordWarrantUI._onChannelQuery(this.value)">
+                </div>
 
                 <div class="dwp-channel-list">
-                    ${channels.map(ch => `
+                    ${channels.length === 0 ? '<div class="dwp-empty-section">No channels match that filter.</div>' : channels.map(ch => {
+                        const label = ch.channelName || ch.indexLabel || ch.channelId;
+                        const people = (ch.participants || []).filter(p => !p.isSubscriber)
+                            .slice(0, 3).map(p => p.username || p.id).filter(Boolean);
+                        const range = (ch.firstMessage || ch.lastMessage)
+                            ? `${this._fmtDay(ch.firstMessage)} – ${this._fmtDay(ch.lastMessage)}` : '';
+                        return `
                         <button class="dwp-channel-row" onclick="window.discordWarrantUI._openChannel('${this._escJs(ch.channelId)}')">
                             <div class="dwp-channel-icon">${this._channelIcon(ch.channelType)}</div>
                             <div class="dwp-channel-info">
-                                <div class="dwp-channel-name">${this._esc(ch.channelName || ch.indexLabel || ch.channelId)}</div>
-                                ${ch.guildName ? `<div class="dwp-channel-guild">in ${this._esc(ch.guildName)}</div>` : ''}
-                                <div class="dwp-channel-id"><code>${this._esc(ch.channelId)}</code> · ${this._esc(ch.channelType || '')}</div>
+                                <div class="dwp-channel-name">${this._esc(label)}</div>
+                                ${ch.guildName ? `<div class="dwp-channel-guild">in ${this._esc(ch.guildName)}</div>`
+                                              : (people.length && people.join(', ') !== label
+                                                    ? `<div class="dwp-channel-guild">${this._esc(people.join(', '))}</div>` : '')}
+                                <div class="dwp-channel-id">
+                                    <code>${this._esc(ch.channelId)}</code>
+                                    ${ch.channelType ? `<span class="dwp-chip">${this._esc(ch.channelType)}</span>` : ''}
+                                    ${ch.bucket && ch.bucket !== 'dms' && ch.bucket !== 'servers' ? `<span class="dwp-chip warn">${this._esc(ch.bucket)}</span>` : ''}
+                                    ${range ? `<span class="dwp-chan-range">${this._esc(range)}</span>` : ''}
+                                </div>
                             </div>
                             <div class="dwp-channel-count">${ch.messageCount.toLocaleString()}</div>
                         </button>
-                    `).join('')}
+                    `;}).join('')}
                 </div>
             </div>
         `;
+    }
+
+    _onChannelQuery(v) {
+        this._channelQuery = v;
+        const content = document.getElementById('dwp-content-area');
+        if (!content) return;
+        content.innerHTML = this._renderSection();
+        const box = document.getElementById('dwp-chan-q');
+        if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
     }
 
     _openChannel(channelId) {
         this._activeChannelId = channelId;
-        this._msgPage = 0;
-        const content = document.getElementById('dwp-content-area');
-        if (content) {
-            content.innerHTML = this._renderSection();
-            if (typeof this._loadLazyImages === 'function') this._loadLazyImages(content);
-        }
+        this._msgQuery = '';
+        this._threadCacheKey = null;
+        // A thread reads like a conversation, so open at the END — the most
+        // recent traffic — the way any chat client does.
+        this._msgPage = Number.MAX_SAFE_INTEGER;
+        this._repaintThread('bottom');
     }
 
     _backToChannels() {
         this._activeChannelId = null;
+        this._threadCacheKey = null;
         const content = document.getElementById('dwp-content-area');
         if (content) {
             content.innerHTML = this._renderSection();
@@ -486,50 +531,284 @@ class DiscordWarrantUI {
         }
     }
 
-    _renderChannelDetail(ch) {
-        const total = ch.messages.length;
-        const start = this._msgPage * this._msgPageSize;
+    // ─── Conversation thread ────────────────────────────────────────────
+
+    /**
+     * Chronologically-ordered (and optionally filtered) message list for a
+     * channel.  Returns arrive in file order, which is NOT guaranteed to be
+     * chronological, and one channel in the reference return holds 205k rows —
+     * so the sorted/filtered list is memoised per (channel, query).
+     */
+    _threadMessages(ch) {
+        const key = `${ch.channelId}|${this._msgQuery || ''}`;
+        if (this._threadCacheKey === key && this._threadCache) return this._threadCache;
+
+        let list = (ch.messages || []).slice();
+        list.sort((a, b) => {
+            const at = a.timestamp || '', bt = b.timestamp || '';
+            if (at !== bt) return at < bt ? -1 : 1;
+            const ai = String(a.id || ''), bi = String(b.id || '');
+            return ai === bi ? 0 : (ai.length !== bi.length ? ai.length - bi.length : (ai < bi ? -1 : 1));
+        });
+
+        const q = (this._msgQuery || '').trim().toLowerCase();
+        if (q) {
+            list = list.filter(m =>
+                String(m.contents || '').toLowerCase().includes(q) ||
+                String(m.username || '').toLowerCase().includes(q) ||
+                String(m.id || '').includes(q) ||
+                String(m.authorId || '').includes(q));
+        }
+
+        this._threadCacheKey = key;
+        this._threadCache = list;
+        return list;
+    }
+
+    _onMsgQuery(v) {
+        this._msgQuery = v;
+        this._threadCacheKey = null;
+        this._msgPage = 0;
+        this._repaintThread(null);
+        const box = document.getElementById('dwp-msg-q');
+        if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+    }
+
+    _gotoPage(n) {
+        this._msgPage = n;
+        this._repaintThread('top');
+    }
+
+    /**
+     * Repaint the thread and place the viewport sensibly.  `.dwp-chat` is not
+     * itself a scroll container — the section scrolls — so scrolling has to be
+     * driven from `#dwp-content-area`.
+     */
+    _repaintThread(where) {
+        const content = document.getElementById('dwp-content-area');
+        if (!content) return;
+        content.innerHTML = this._renderSection();
+        if (typeof this._loadLazyImages === 'function') this._loadLazyImages(content);
+        if (where === 'bottom') content.scrollTop = content.scrollHeight;
+        else if (where === 'top') content.scrollTop = 0;
+    }
+
+    _renderChannelDetail(ch, d) {
+        const msgs = this._threadMessages(ch);
+        const total = msgs.length;
+        const pageCount = Math.max(1, Math.ceil(total / this._msgPageSize));
+        const page = Math.min(Math.max(0, this._msgPage), pageCount - 1);
+        this._msgPage = page;
+
+        const start = page * this._msgPageSize;
         const end = Math.min(start + this._msgPageSize, total);
-        const slice = ch.messages.slice(start, end);
-        const hasMore = end < total;
-        const hasPrev = this._msgPage > 0;
+        const slice = msgs.slice(start, end);
+
+        const sub = (d && d.subscriber) || {};
+        const selfLabel = sub.username || sub.global_name || 'Account holder';
+        const people = (ch.participants || []).filter(p => !p.isSubscriber);
 
         return `
-            <div class="dwp-section">
+            <div class="dwp-section dwp-thread-section">
                 <button class="dwp-back-btn" onclick="window.discordWarrantUI._backToChannels()">← Back to channels</button>
-                <h2 class="dwp-section-title">
-                    ${this._channelIcon(ch.channelType)} ${this._esc(ch.channelName || ch.channelId)}
-                </h2>
-                <p class="dwp-section-sub">
-                    ${ch.guildName ? `Server: <strong>${this._esc(ch.guildName)}</strong> · ` : ''}
-                    Channel ID <code>${this._esc(ch.channelId)}</code> · ${total.toLocaleString()} messages
-                </p>
 
-                <div class="dwp-messages">
-                    ${slice.length === 0 ? '<div class="dwp-empty-section">No messages.</div>' : slice.map(m => {
-                        const flagged = this.module.isFlagged('messages', m.id);
-                        return `
-                        <div class="dwp-message ${flagged ? 'flagged' : ''}">
-                            <div class="dwp-message-header">
-                                <span class="dwp-message-time">${this._fmtDate(m.timestamp)}</span>
-                                <span class="dwp-message-id">ID: <code>${this._esc(String(m.id || ''))}</code></span>
-                                <span style="margin-left:auto">${this._flagBtn('messages', m.id)}</span>
-                            </div>
-                            <div class="dwp-message-body">${this._esc(m.contents || '').replace(/\n/g, '<br>') || '<em class="dwp-muted">(no text)</em>'}</div>
-                            ${m.attachments ? `<div class="dwp-message-attach">${this._renderAttachments(m.attachments)}</div>` : ''}
-                        </div>
-                    `;}).join('')}
+                <div class="dwp-thread-head">
+                    <div class="dwp-thread-title">
+                        <span class="dwp-thread-icon">${this._channelIcon(ch.channelType)}</span>
+                        <span>${this._esc(ch.channelName || ch.channelId)}</span>
+                    </div>
+                    <div class="dwp-thread-meta">
+                        ${ch.guildName ? `<span class="dwp-chip">${this._esc(ch.guildName)}</span>` : ''}
+                        ${ch.channelType ? `<span class="dwp-chip">${this._esc(ch.channelType)}</span>` : ''}
+                        <span class="dwp-chip mono">${this._esc(ch.channelId)}</span>
+                        <span>${(ch.messageCount || 0).toLocaleString()} messages</span>
+                        ${ch.firstMessage ? `<span>${this._esc(this._fmtDay(ch.firstMessage))} – ${this._esc(this._fmtDay(ch.lastMessage))}</span>` : ''}
+                    </div>
+                    ${people.length ? `<div class="dwp-thread-people">
+                        ${people.slice(0, 12).map(p => `<span class="dwp-person" style="--dwp-av:${this._authorHue(p.username || p.id)}">
+                            <span class="dwp-person-dot"></span>${this._esc(p.username || p.id)}<span class="dwp-person-n">${(p.count || 0).toLocaleString()}</span>
+                        </span>`).join('')}
+                        ${people.length > 12 ? `<span class="dwp-person">+${people.length - 12} more</span>` : ''}
+                    </div>` : ''}
                 </div>
 
-                ${total > this._msgPageSize ? `
+                <div class="dwp-thread-toolbar">
+                    <input type="search" id="dwp-msg-q" class="dwp-input" placeholder="Search this conversation…"
+                           value="${this._esc(this._msgQuery || '')}"
+                           oninput="window.discordWarrantUI._onMsgQuery(this.value)">
+                    ${this._msgQuery ? `<span class="dwp-thread-hits">${total.toLocaleString()} match${total === 1 ? '' : 'es'}</span>` : ''}
+                    <button class="dwp-btn-sm dwp-tz-btn" onclick="window.discordWarrantUI._toggleTz()"
+                            title="Discord states return timestamps in UTC. Switch the transcript between UTC and this machine's local time.">
+                        🕓 ${this._tz === 'local' ? 'Local time' : 'UTC'}
+                    </button>
+                </div>
+
+                <div class="dwp-chat" id="dwp-chat-scroll">
+                    ${slice.length === 0
+                        ? `<div class="dwp-empty-section">${this._msgQuery ? 'No messages match that search.' : 'No messages in this channel.'}</div>`
+                        : this._renderBubbles(slice, selfLabel)}
+                </div>
+
+                ${pageCount > 1 ? `
                     <div class="dwp-pager">
-                        <button class="dwp-btn-sm" onclick="window.discordWarrantUI._msgPage--; document.getElementById('dwp-content-area').innerHTML = window.discordWarrantUI._renderSection();" ${hasPrev ? '' : 'disabled'}>← Prev</button>
+                        <button class="dwp-btn-sm" onclick="window.discordWarrantUI._gotoPage(0)" ${page === 0 ? 'disabled' : ''} title="Oldest">⏮</button>
+                        <button class="dwp-btn-sm" onclick="window.discordWarrantUI._gotoPage(${page - 1})" ${page === 0 ? 'disabled' : ''}>← Older</button>
                         <span>${(start + 1).toLocaleString()}–${end.toLocaleString()} of ${total.toLocaleString()}</span>
-                        <button class="dwp-btn-sm" onclick="window.discordWarrantUI._msgPage++; document.getElementById('dwp-content-area').innerHTML = window.discordWarrantUI._renderSection();" ${hasMore ? '' : 'disabled'}>Next →</button>
+                        <input class="dwp-page-input" type="number" min="1" max="${pageCount}" value="${page + 1}"
+                               onchange="window.discordWarrantUI._gotoPage(Math.max(0, Math.min(${pageCount - 1}, (parseInt(this.value,10)||1) - 1)))">
+                        <span class="dwp-muted">/ ${pageCount.toLocaleString()}</span>
+                        <button class="dwp-btn-sm" onclick="window.discordWarrantUI._gotoPage(${page + 1})" ${page >= pageCount - 1 ? 'disabled' : ''}>Newer →</button>
+                        <button class="dwp-btn-sm" onclick="window.discordWarrantUI._gotoPage(${pageCount - 1})" ${page >= pageCount - 1 ? 'disabled' : ''} title="Newest">⏭</button>
                     </div>
                 ` : ''}
             </div>
         `;
+    }
+
+    /**
+     * Render a page of messages as a chat transcript.
+     *
+     * Grouping rules mirror a real chat client: consecutive messages from the
+     * same author inside 5 minutes collapse into one block, and a date divider
+     * is emitted whenever the calendar day changes.  `direction` is set by the
+     * LE-return parser (which knows the author of every row); a Discord data
+     * package has no per-row author — every message in it belongs to the
+     * account holder — so an absent direction is treated as outgoing.
+     */
+    _renderBubbles(slice, selfLabel) {
+        const GROUP_MS = 5 * 60 * 1000;
+        let out = '';
+        let prevDay = null;
+        let prevKey = null;
+        let prevTime = 0;
+
+        for (const m of slice) {
+            const outgoing = (m.direction || 'outgoing') === 'outgoing';
+            const author = m.username || (outgoing ? selfLabel : (m.authorId || 'Unknown'));
+            const t = m.timestamp ? Date.parse(m.timestamp) : NaN;
+            const day = m.timestamp ? this._fmtDay(m.timestamp) : 'Undated';
+
+            if (day !== prevDay) {
+                out += `<div class="dwp-chat-day"><span>${this._esc(day)}</span></div>`;
+                prevDay = day;
+                prevKey = null;
+            }
+
+            const key = `${outgoing ? 'S' : 'R'}|${author}`;
+            const grouped = key === prevKey && !isNaN(t) && !isNaN(prevTime) && (t - prevTime) < GROUP_MS;
+            prevKey = key;
+            prevTime = isNaN(t) ? prevTime : t;
+
+            const flagged = this.module.isFlagged('messages', m.id);
+            const hasText = String(m.contents || '').trim() !== '';
+            const media = Array.isArray(m.media) ? m.media : [];
+
+            out += `
+                <div class="dwp-bubble-row ${outgoing ? 'out' : 'in'}${grouped ? ' grouped' : ''}${flagged ? ' flagged' : ''}"
+                     style="--dwp-av:${this._authorHue(author)}">
+                    <div class="dwp-bubble-avatar" title="${this._esc(author)}">${grouped ? '' : this._esc(this._initials(author))}</div>
+                    <div class="dwp-bubble-col">
+                        ${grouped ? '' : `
+                            <div class="dwp-bubble-who">
+                                <span class="dwp-bubble-author">${this._esc(author)}</span>
+                                ${outgoing ? '<span class="dwp-bubble-self">account holder</span>' : ''}
+                                <span class="dwp-bubble-time">${this._esc(this._fmtTime(m.timestamp))}</span>
+                            </div>`}
+                        <div class="dwp-bubble">
+                            ${hasText
+                                ? `<div class="dwp-bubble-text">${this._highlight(m.contents)}</div>`
+                                : (media.length || m.attachments ? '' : '<div class="dwp-bubble-text dwp-muted"><em>(no text)</em></div>')}
+                            ${media.length ? `<div class="dwp-bubble-media">${this._renderLocalMedia(media)}</div>` : ''}
+                            ${m.attachments ? `<div class="dwp-bubble-attach">${this._renderAttachments(m.attachments)}</div>` : ''}
+                            <div class="dwp-bubble-foot">
+                                <span class="dwp-bubble-stamp" title="${this._esc(m.timestamp || m.rawTimestamp || '')}">${this._esc(this._fmtTime(m.timestamp))}</span>
+                                ${m.id ? `<code class="dwp-bubble-id">${this._esc(String(m.id))}</code>` : ''}
+                                <span class="dwp-bubble-flag">${this._flagBtn('messages', m.id)}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+        }
+        return out;
+    }
+
+    /** Attachments extracted to disk from the return, rendered from the case folder. */
+    _renderLocalMedia(media) {
+        return media.map(rec => {
+            const name = rec.fileName || (rec.original || '').split('/').pop() || 'attachment';
+            const mime = String(rec.mimeType || '');
+            const kb = rec.size ? `${(rec.size / 1024).toFixed(0)} KB` : '';
+            if (mime.startsWith('image/')) {
+                return `<div class="dwp-att dwp-att-img">
+                    <img class="dwp-lazy-img" data-disk-path="${this._esc(rec.diskPath)}" alt="${this._esc(name)}">
+                    <div class="dwp-att-caption">🖼️ ${this._esc(name)} <span class="dwp-muted">${this._esc(kb)}</span></div>
+                </div>`;
+            }
+            const icon = mime.startsWith('video/') ? '🎬' : mime.startsWith('audio/') ? '🔊' : '📎';
+            return `<div class="dwp-att dwp-att-file">
+                ${icon} <span class="dwp-att-name">${this._esc(name)}</span>
+                <span class="dwp-muted">${this._esc(kb)}</span>
+                <span class="dwp-att-local" title="Extracted from the return to the case Evidence folder">on disk</span>
+            </div>`;
+        }).join('');
+    }
+
+    /** Escape, linkify, preserve newlines, and mark the active search term. */
+    _highlight(text) {
+        const s = String(text || '');
+        let html = this._esc(s).replace(/\n/g, '<br>');
+        const q = (this._msgQuery || '').trim();
+        if (q) {
+            const rx = new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+            html = html.replace(rx, '<mark class="dwp-hl">$1</mark>');
+        }
+        return html;
+    }
+
+    _initials(name) {
+        const s = String(name || '?').replace(/#\d+$/, '').trim();
+        if (!s) return '?';
+        return s.slice(0, 2).toUpperCase();
+    }
+
+    /** Stable per-author hue so the same person keeps the same colour. */
+    _authorHue(name) {
+        const s = String(name || '');
+        let h = 0;
+        for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+        return `hsl(${h % 360} 62% 58%)`;
+    }
+
+    _fmtDay(ts) {
+        if (!ts) return '';
+        try {
+            const d = new Date(ts);
+            if (isNaN(d.getTime())) return String(ts);
+            const opts = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' };
+            if (this._tz !== 'local') opts.timeZone = 'UTC';
+            return d.toLocaleDateString(undefined, opts);
+        } catch (_) { return String(ts); }
+    }
+
+    _fmtTime(ts) {
+        if (!ts) return '';
+        try {
+            const d = new Date(ts);
+            if (isNaN(d.getTime())) return String(ts);
+            const opts = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
+            if (this._tz !== 'local') opts.timeZone = 'UTC';
+            return d.toLocaleTimeString(undefined, opts) + (this._tz !== 'local' ? 'Z' : '');
+        } catch (_) { return String(ts); }
+    }
+
+    /**
+     * Discord states every timestamp in a return as UTC.  Rendering them in
+     * the examiner's local zone without saying so has burned people in court,
+     * so UTC is the default and the toggle is explicit.
+     */
+    _toggleTz() {
+        this._tz = this._tz === 'local' ? 'utc' : 'local';
+        this._repaintThread(null);
     }
 
     _channelIcon(type) {

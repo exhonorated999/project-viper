@@ -87,7 +87,7 @@ const files = {
         // still discard row 1, because row 1 is clearly not data.
         'Col A,Col B,Col C,Col D,Col E,Col F,Col G\n' +
         '444,900000000000000005,7004,1704472331,newguy,hi there,\n',
-    'req-1/servers/999.json': JSON.stringify({ id: '999', name: 'Bad Server', description: 'd', owner_id: '7001', channels: [{ id: '222' }] }),
+    'req-1/servers/999.json': JSON.stringify({ id: '999', name: 'Bad Server', description: 'd', owner_id: '7001', channels: { '222': 'general' }, threads: { '223': 'side chat' } }),
     'req-1/relationships_7001.csv': 'User ID,Username,Relationship\n7002,victim,friend\n7003,ghost,blocked\n',
     'req-1/subscriber_info.csv': 'Username,Email,Phone,Registration Date,ID\nbadguy,bad@example.com,+15550001111,1600000000,7001\n',
     'req-1/attachments/abc123/pic.jpg': Buffer.from('JPEGDATA'),
@@ -111,8 +111,12 @@ const extractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'drtest-'));
     eq('relationship count', r.stats.relationshipCount, 2);
 
     const dm = r.channels.find(c => c._sourceFile === 'messages/dms/111.csv');
-    eq('dm channel id', dm.id, '111');
-    eq('dm type', dm.type, 'DM');
+    // The UI reads channelId/channelName/channelType — this mirrors what the
+    // data-package parser emits.  5.1.6 shipped id/name/type and every thread
+    // rendered blank and un-clickable.
+    eq('dm channel id', dm.channelId, '111');
+    eq('dm type', dm.channelType, 'DM');
+    eq('dm named from participants', dm.channelName, 'victim');
     eq('quoted comma preserved', dm.messages[0].contents, 'hello, there');
     eq('unix ts normalized', dm.messages[0].timestamp, '2024-01-05T13:32:11.000Z');
     eq('multiline preserved', dm.messages[1].contents, 'multi\nline text');
@@ -128,6 +132,17 @@ const extractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'drtest-'));
     eq('server name', r.servers[0].name, 'Bad Server');
     eq('server owner', r.servers[0].ownerId, '7001');
 
+    // servers/<guild>.json is the only place a return states a channel's name.
+    const svrChan = r.channels.find(c => c._sourceFile === 'messages/servers/222.csv');
+    eq('server channel named from guild map', svrChan.channelName, '#general');
+    eq('server channel guild resolved', svrChan.guildName, 'Bad Server');
+    eq('server channel type', svrChan.channelType, 'GUILD_TEXT');
+    eq('threads harvested', r.servers[0].threadCount, 1);
+
+    // direction drives bubble alignment: badguy IS the subscriber here.
+    eq('subscriber msg outgoing', dm.messages[0].direction, 'outgoing');
+    eq('correspondent msg incoming', dm.messages[1].direction, 'incoming');
+
     eq('subscriber username', r.subscriber.username, 'badguy');
     eq('subscriber email', r.subscriber.email, 'bad@example.com');
     eq('subscriber phone', r.subscriber.phone, '+15550001111');
@@ -142,8 +157,8 @@ const extractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'drtest-'));
     eq('mime detected', dm.messages[1].media[0].mimeType, 'image/jpeg');
 
     eq('unmatched surfaced', r.diagnostics.unmatchedFiles, ['req-1/notes_from_discord.txt']);
-    ok('warns about headerless file',
-        r.diagnostics.warnings.some(w => /333\.csv/.test(w) && /positional/.test(w)));
+    ok('warns about headerless files (aggregated)',
+        r.diagnostics.warnings.some(w => /message file\(s\) had no recognizable header row/.test(w)));
 
     const bogusHdr = r.channels.find(c => c._sourceFile === 'messages/dms/444.csv');
     eq('unrecognized header discarded', bogusHdr.messageCount, 1);

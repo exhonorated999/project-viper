@@ -20,6 +20,10 @@ class DiscordWarrantUI {
         this._threadCacheKey = null;
         // Returns are UTC.  Default to showing them that way.
         this._tz = 'utc';
+        this._activeMessages = null;
+        this._threadError = null;
+        this._flagPayloads = {};
+        this._importing = false;
         this._eventTypeFilter = 'all';
         this._activityPage = 0;
         this._activityPageSize = 100;
@@ -125,7 +129,8 @@ class DiscordWarrantUI {
     }
 
     _onFlagClick(section, key) {
-        this.module.toggleFlag(section, key);
+        const payload = this._flagPayloads ? this._flagPayloads[section + '|' + key] : null;
+        this.module.toggleFlag(section, key, payload);
         this._refreshFlagToolbar();
         // Re-render the current section to update flag-button state on the visible row
         const content = document.getElementById('dwp-content-area');
@@ -172,31 +177,51 @@ class DiscordWarrantUI {
     }
 
     async handleEvidenceClick(filePath, fileName, isFolder) {
+        // A 384 MB return takes seconds to parse.  Without a guard an
+        // impatient second click starts a concurrent import and doubles the
+        // peak memory — which is exactly how this module fell over.
+        if (this._importing) { this._toast('An import is already running.', 'info'); return; }
+        this._importing = true;
         try {
-            this._showLoading('Importing Discord Data Package… (large packages may take a minute)');
+            this._showLoading('Importing Discord return… large returns can take a minute. Do not close this tab.');
             const record = await this.module.importWarrant(filePath, fileName, isFolder);
             this.activeImportIdx = this.module.imports.findIndex(i => i.id === record.id);
             this.activeSection = 'overview';
             this.render();
-            this._toast(`Imported: ${record.accountUsername || fileName}`, 'success');
+            this._afterImportToast(record, fileName);
         } catch (err) {
             this._toast('Import failed: ' + err.message, 'error');
             this.render();
+        } finally {
+            this._importing = false;
         }
     }
 
     async handleFilePicker() {
+        if (this._importing) { this._toast('An import is already running.', 'info'); return; }
+        this._importing = true;
         try {
-            this._showLoading('Importing Discord Data Package…');
+            this._showLoading('Importing Discord return… large returns can take a minute. Do not close this tab.');
             const record = await this.module.importFromPicker();
             if (!record) { this.render(); return; }
             this.activeImportIdx = this.module.imports.findIndex(i => i.id === record.id);
             this.activeSection = 'overview';
             this.render();
-            this._toast(`Imported: ${record.accountUsername || record.fileName}`, 'success');
+            this._afterImportToast(record, record.fileName);
         } catch (err) {
             this._toast('Import failed: ' + err.message, 'error');
             this.render();
+        } finally {
+            this._importing = false;
+        }
+    }
+
+    _afterImportToast(record, fileName) {
+        const n = (record.stats && record.stats.messageCount) || 0;
+        this._toast(`Imported ${record.accountUsername || fileName}${n ? ` — ${n.toLocaleString()} messages` : ''}`, 'success');
+        if (this.module._saveError) {
+            this._toast('Imported, but saving to the case store failed: ' + this.module._saveError, 'error');
+            this.module._saveError = null;
         }
     }
 
@@ -205,6 +230,11 @@ class DiscordWarrantUI {
         this._activeChannelId = null;
         this._msgPage = 0;
         this._activityPage = 0;
+        this._activeMessages = null;
+        this._threadCache = null;
+        this._threadCacheKey = null;
+        this._threadError = null;
+        this._msgQuery = '';
         const content = document.getElementById('dwp-content-area');
         if (content) {
             content.innerHTML = this._renderSection();
@@ -511,19 +541,36 @@ class DiscordWarrantUI {
         if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
     }
 
-    _openChannel(channelId) {
+    async _openChannel(channelId) {
         this._activeChannelId = channelId;
         this._msgQuery = '';
         this._threadCacheKey = null;
+        this._activeMessages = null;
+        this._threadError = null;
         // A thread reads like a conversation, so open at the END — the most
         // recent traffic — the way any chat client does.
         this._msgPage = Number.MAX_SAFE_INTEGER;
+
+        const content = document.getElementById('dwp-content-area');
+        // Large returns are sharded to disk at import, so this is a real read.
+        if (content) {
+            content.innerHTML = `<div class="dwp-loading"><div class="dwp-spinner"></div><p>Loading conversation…</p></div>`;
+        }
+        try {
+            this._activeMessages = await this.module.loadChannelMessages(channelId);
+        } catch (err) {
+            this._activeMessages = [];
+            this._threadError = err && err.message ? err.message : String(err);
+        }
         this._repaintThread('bottom');
     }
 
     _backToChannels() {
         this._activeChannelId = null;
         this._threadCacheKey = null;
+        this._threadCache = null;
+        this._activeMessages = null;
+        this._threadError = null;
         const content = document.getElementById('dwp-content-area');
         if (content) {
             content.innerHTML = this._renderSection();
@@ -543,7 +590,13 @@ class DiscordWarrantUI {
         const key = `${ch.channelId}|${this._msgQuery || ''}`;
         if (this._threadCacheKey === key && this._threadCache) return this._threadCache;
 
-        let list = (ch.messages || []).slice();
+        // `_activeMessages` is the shard fetched by _openChannel; `ch.messages`
+        // is the inline array a small import (or a data package) still carries.
+        const source = Array.isArray(this._activeMessages) && this._activeMessages.length
+            ? this._activeMessages
+            : (ch.messages || []);
+
+        let list = source.slice();
         list.sort((a, b) => {
             const at = a.timestamp || '', bt = b.timestamp || '';
             if (at !== bt) return at < bt ? -1 : 1;
@@ -644,9 +697,17 @@ class DiscordWarrantUI {
                 </div>
 
                 <div class="dwp-chat" id="dwp-chat-scroll">
-                    ${slice.length === 0
-                        ? `<div class="dwp-empty-section">${this._msgQuery ? 'No messages match that search.' : 'No messages in this channel.'}</div>`
-                        : this._renderBubbles(slice, selfLabel)}
+                    ${this._threadError
+                        ? `<div class="dwp-diag dwp-diag-alert">
+                               <strong>This conversation could not be read from the case store.</strong>
+                               <div class="dwp-diag-warn">${this._esc(this._threadError)}</div>
+                               <div class="dwp-diag-more">The return is still imported — re-importing it will rebuild the message store.</div>
+                           </div>`
+                        : slice.length === 0
+                            ? `<div class="dwp-empty-section">${this._msgQuery
+                                    ? 'No messages match that search.'
+                                    : (ch.messageCount ? 'Messages for this channel are not in the case store. Re-import the return to rebuild it.' : 'No messages in this channel.')}</div>`
+                            : this._renderBubbles(slice, selfLabel, ch)}
                 </div>
 
                 ${pageCount > 1 ? `
@@ -675,8 +736,14 @@ class DiscordWarrantUI {
      * package has no per-row author — every message in it belongs to the
      * account holder — so an absent direction is treated as outgoing.
      */
-    _renderBubbles(slice, selfLabel) {
+    _renderBubbles(slice, selfLabel, ch) {
         const GROUP_MS = 5 * 60 * 1000;
+        const channelLabel = ch
+            ? (ch.guildName ? `${ch.guildName} · ${ch.channelName || ch.channelId}` : (ch.channelName || ch.channelId))
+            : '';
+        // Flagging has to work without the bulk message array in memory, so
+        // remember what is on screen.  You can only flag what you can see.
+        if (!this._flagPayloads) this._flagPayloads = {};
         let out = '';
         let prevDay = null;
         let prevKey = null;
@@ -687,6 +754,17 @@ class DiscordWarrantUI {
             const author = m.username || (outgoing ? selfLabel : (m.authorId || 'Unknown'));
             const t = m.timestamp ? Date.parse(m.timestamp) : NaN;
             const day = m.timestamp ? this._fmtDay(m.timestamp) : 'Undated';
+
+            if (m.id != null) {
+                this._flagPayloads['messages|' + m.id] = {
+                    id: m.id,
+                    timestamp: m.timestamp || null,
+                    channel: channelLabel,
+                    channelId: ch ? ch.channelId : null,
+                    contents: m.contents || '',
+                    attachments: m.attachments || ''
+                };
+            }
 
             if (day !== prevDay) {
                 out += `<div class="dwp-chat-day"><span>${this._esc(day)}</span></div>`;

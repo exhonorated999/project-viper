@@ -168,6 +168,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   discordWarrantReadMedia: (data) => ipcRenderer.invoke('discord-warrant-read-media', data),
   discordWarrantSaveStore: (data) => ipcRenderer.invoke('discord-warrant-save-store', data),
   discordWarrantLoadStore: (data) => ipcRenderer.invoke('discord-warrant-load-store', data),
+  discordWarrantReadChannel: (data) => ipcRenderer.invoke('discord-warrant-read-channel', data),
+  discordWarrantDeleteStore: (data) => ipcRenderer.invoke('discord-warrant-delete-store', data),
 
   // Datapilot mobile-forensic CSV export parser
   datapilotScan: (data) => ipcRenderer.invoke('datapilot-scan', data),

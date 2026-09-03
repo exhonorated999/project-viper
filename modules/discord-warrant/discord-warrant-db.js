@@ -87,6 +87,9 @@ function _openReadonly(dbFile) {
     _closeCache();
     if (!fs.existsSync(dbFile)) return null;
     const db = new Database(dbFile, { readonly: true, fileMustExist: true });
+    // Readers serve 100-row pages.  Cap the page cache so a long-lived
+    // reader on a 400 MB store does not quietly hold tens of MB.
+    try { db.pragma('cache_size = -8192'); } catch (_) {}
     _cachedDb = db;
     _cachedDbPath = dbFile;
     return db;
@@ -129,11 +132,18 @@ class MessageWriter {
         // Speed pragmas for bulk import.  An aborted import is discarded
         // wholesale (the completion flag guards readers), so durability
         // during the write phase is unnecessary.
+        //
+        // cache_size is deliberately modest.  Inserts are append-only and
+        // strictly sequential, so a large page cache buys nothing — but it
+        // DOES get charged to RSS, and this import runs inside the same
+        // process as the rest of the app.  A 1 GB cache measured 477 MB of
+        // peak RSS on a 2.4M-row channel; 64 MB measures far less for the
+        // same throughput.
         this.db.exec(`
             PRAGMA journal_mode = WAL;
             PRAGMA synchronous = OFF;
             PRAGMA temp_store = MEMORY;
-            PRAGMA cache_size = -1048576;
+            PRAGMA cache_size = -65536;
         `);
 
         this._inChannel = false;

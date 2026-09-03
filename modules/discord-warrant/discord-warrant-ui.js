@@ -22,6 +22,13 @@ class DiscordWarrantUI {
         this._tz = 'utc';
         this._activeMessages = null;
         this._threadError = null;
+        // Paged mode: the channel is too large to hold, so `_activeMessages`
+        // holds ONE page and search runs in the main process.
+        this._paged = false;
+        this._pagedTotal = 0;
+        this._pagedMatches = null;
+        this._pagedTruncated = false;
+        this._searchTimer = null;
         this._flagPayloads = {};
         this._importing = false;
         this._eventTypeFilter = 'all';
@@ -235,6 +242,11 @@ class DiscordWarrantUI {
         this._threadCacheKey = null;
         this._threadError = null;
         this._msgQuery = '';
+        this._paged = false;
+        this._pagedTotal = 0;
+        this._pagedMatches = null;
+        this._pagedTruncated = false;
+        clearTimeout(this._searchTimer);
         const content = document.getElementById('dwp-content-area');
         if (content) {
             content.innerHTML = this._renderSection();
@@ -547,6 +559,10 @@ class DiscordWarrantUI {
         this._threadCacheKey = null;
         this._activeMessages = null;
         this._threadError = null;
+        this._paged = false;
+        this._pagedTotal = 0;
+        this._pagedMatches = null;
+        this._pagedTruncated = false;
         // A thread reads like a conversation, so open at the END — the most
         // recent traffic — the way any chat client does.
         this._msgPage = Number.MAX_SAFE_INTEGER;
@@ -556,6 +572,22 @@ class DiscordWarrantUI {
         if (content) {
             content.innerHTML = `<div class="dwp-loading"><div class="dwp-spinner"></div><p>Loading conversation…</p></div>`;
         }
+
+        const d = (this.currentImport && this.currentImport.data) || null;
+        const ch = ((d && d.channels) || []).find(c => c.channelId === channelId);
+
+        // Channels past the paging threshold are NEVER loaded whole — the
+        // biggest channel in the 2.36 GB return is ~2.4M messages.
+        if (this.module.isChannelPaged && this.module.isChannelPaged(ch)) {
+            this._paged = true;
+            this._pagedTotal = ch.messageCount || 0;
+            const pageCount = Math.max(1, Math.ceil(this._pagedTotal / this._msgPageSize));
+            this._msgPage = pageCount - 1;
+            await this._fetchPage(this._msgPage);
+            this._repaintThread('bottom');
+            return;
+        }
+
         try {
             this._activeMessages = await this.module.loadChannelMessages(channelId);
         } catch (err) {
@@ -565,12 +597,29 @@ class DiscordWarrantUI {
         this._repaintThread('bottom');
     }
 
+    /** Pull one window of a paged channel into `_activeMessages`. */
+    async _fetchPage(page) {
+        try {
+            const res = await this.module.loadChannelPage(
+                this._activeChannelId, page * this._msgPageSize, this._msgPageSize);
+            this._activeMessages = res.messages;
+            if (res.total) this._pagedTotal = res.total;
+            this._threadError = null;
+        } catch (err) {
+            this._activeMessages = [];
+            this._threadError = err && err.message ? err.message : String(err);
+        }
+    }
+
     _backToChannels() {
         this._activeChannelId = null;
         this._threadCacheKey = null;
         this._threadCache = null;
         this._activeMessages = null;
         this._threadError = null;
+        this._paged = false;
+        this._pagedTotal = 0;
+        this._pagedMatches = null;
         const content = document.getElementById('dwp-content-area');
         if (content) {
             content.innerHTML = this._renderSection();
@@ -622,13 +671,67 @@ class DiscordWarrantUI {
         this._msgQuery = v;
         this._threadCacheKey = null;
         this._msgPage = 0;
+        if (this._paged) { this._runPagedSearch(v); return; }
         this._repaintThread(null);
         const box = document.getElementById('dwp-msg-q');
         if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
     }
 
+    /**
+     * Search a paged channel in the main process.  Debounced, because every
+     * keystroke would otherwise scan millions of rows.
+     */
+    _runPagedSearch(v) {
+        clearTimeout(this._searchTimer);
+        this._searchTimer = setTimeout(async () => {
+            const q = String(v || '').trim();
+            if (!q) {
+                this._pagedMatches = null;
+                this._pagedTruncated = false;
+                const pageCount = Math.max(1, Math.ceil(this._pagedTotal / this._msgPageSize));
+                this._msgPage = pageCount - 1;
+                await this._fetchPage(this._msgPage);
+                this._repaintThread('bottom');
+                this._focusMsgQ();
+                return;
+            }
+            try {
+                const res = await this.module.searchChannelMessages(this._activeChannelId, q, 500);
+                this._pagedMatches = res.matches;
+                this._pagedTruncated = res.truncated;
+                this._threadError = null;
+            } catch (err) {
+                this._pagedMatches = [];
+                this._pagedTruncated = false;
+                this._threadError = err && err.message ? err.message : String(err);
+            }
+            this._msgPage = 0;
+            this._repaintThread('top');
+            this._focusMsgQ();
+        }, 250);
+    }
+
+    _focusMsgQ() {
+        const box = document.getElementById('dwp-msg-q');
+        if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+    }
+
+    /** Jump a paged channel to the page holding a search hit. */
+    async _gotoOrd(ord) {
+        this._msgQuery = '';
+        this._pagedMatches = null;
+        this._pagedTruncated = false;
+        this._msgPage = Math.floor(ord / this._msgPageSize);
+        await this._fetchPage(this._msgPage);
+        this._repaintThread('top');
+    }
+
     _gotoPage(n) {
         this._msgPage = n;
+        if (this._paged && !this._pagedMatches) {
+            this._fetchPage(n).then(() => this._repaintThread('top'));
+            return;
+        }
         this._repaintThread('top');
     }
 
@@ -647,15 +750,39 @@ class DiscordWarrantUI {
     }
 
     _renderChannelDetail(ch, d) {
-        const msgs = this._threadMessages(ch);
-        const total = msgs.length;
-        const pageCount = Math.max(1, Math.ceil(total / this._msgPageSize));
-        const page = Math.min(Math.max(0, this._msgPage), pageCount - 1);
-        this._msgPage = page;
+        let total, pageCount, page, start, end, slice;
+        let searchMode = false;
 
-        const start = page * this._msgPageSize;
-        const end = Math.min(start + this._msgPageSize, total);
-        const slice = msgs.slice(start, end);
+        if (this._paged) {
+            // Server-paged: `_activeMessages` IS the window — never the channel.
+            if (this._pagedMatches) {
+                searchMode = true;
+                total = this._pagedMatches.length;
+                pageCount = Math.max(1, Math.ceil(total / this._msgPageSize));
+                page = Math.min(Math.max(0, this._msgPage), pageCount - 1);
+                this._msgPage = page;
+                start = page * this._msgPageSize;
+                end = Math.min(start + this._msgPageSize, total);
+                slice = this._pagedMatches.slice(start, end);
+            } else {
+                total = this._pagedTotal;
+                pageCount = Math.max(1, Math.ceil(total / this._msgPageSize));
+                page = Math.min(Math.max(0, this._msgPage), pageCount - 1);
+                this._msgPage = page;
+                start = page * this._msgPageSize;
+                end = Math.min(start + this._msgPageSize, total);
+                slice = Array.isArray(this._activeMessages) ? this._activeMessages : [];
+            }
+        } else {
+            const msgs = this._threadMessages(ch);
+            total = msgs.length;
+            pageCount = Math.max(1, Math.ceil(total / this._msgPageSize));
+            page = Math.min(Math.max(0, this._msgPage), pageCount - 1);
+            this._msgPage = page;
+            start = page * this._msgPageSize;
+            end = Math.min(start + this._msgPageSize, total);
+            slice = msgs.slice(start, end);
+        }
 
         const sub = (d && d.subscriber) || {};
         const selfLabel = sub.username || sub.global_name || 'Account holder';
@@ -689,12 +816,21 @@ class DiscordWarrantUI {
                     <input type="search" id="dwp-msg-q" class="dwp-input" placeholder="Search this conversation…"
                            value="${this._esc(this._msgQuery || '')}"
                            oninput="window.discordWarrantUI._onMsgQuery(this.value)">
-                    ${this._msgQuery ? `<span class="dwp-thread-hits">${total.toLocaleString()} match${total === 1 ? '' : 'es'}</span>` : ''}
+                    ${this._msgQuery ? `<span class="dwp-thread-hits">${total.toLocaleString()} match${total === 1 ? '' : 'es'}${searchMode && this._pagedTruncated ? ' (capped)' : ''}</span>` : ''}
+                    ${this._paged ? `<span class="dwp-chip" title="This conversation is too large to hold in memory. Pages are read from the case message store on demand and searches run against the store, not the page you are looking at.">streamed</span>` : ''}
                     <button class="dwp-btn-sm dwp-tz-btn" onclick="window.discordWarrantUI._toggleTz()"
                             title="Discord states return timestamps in UTC. Switch the transcript between UTC and this machine's local time.">
                         🕓 ${this._tz === 'local' ? 'Local time' : 'UTC'}
                     </button>
                 </div>
+
+                ${searchMode ? `<div class="dwp-diag">
+                        <strong>${total.toLocaleString()} match${total === 1 ? '' : 'es'}</strong>
+                        ${this._pagedTruncated ? `<div class="dwp-diag-warn">Only the first 500 matches are shown. Narrow the search to see the rest.</div>` : ''}
+                        ${total ? `<div class="dwp-diag-more">
+                            <button class="dwp-btn-sm" onclick="window.discordWarrantUI._gotoOrd(${this._pagedMatches[0].ord | 0})">Jump to the first match in the transcript</button>
+                        </div>` : ''}
+                    </div>` : ''}
 
                 <div class="dwp-chat" id="dwp-chat-scroll">
                     ${this._threadError

@@ -230,6 +230,71 @@ class DiscordWarrantModule {
         return messages;
     }
 
+    /**
+     * Past this many messages a channel is never loaded whole — the UI reads
+     * one page at a time from the message store.  The 2.36 GB return has a
+     * single channel of ~2.4M messages; materialising that in the renderer is
+     * exactly the crash we are fixing.
+     */
+    static get PAGED_THRESHOLD() { return 25000; }
+
+    /** True when this channel must be read page-by-page rather than whole. */
+    isChannelPaged(ch) {
+        if (!ch) return false;
+        const imp = this.getActiveImport();
+        const storeKey = imp && imp.data && imp.data._storeKey;
+        if (!storeKey || !ch._sharded) return false;
+        if (!window.electronAPI?.discordWarrantReadPage) return false;
+        return (ch.messageCount || 0) > DiscordWarrantModule.PAGED_THRESHOLD;
+    }
+
+    /**
+     * One window of a channel, straight from the message store.  Nothing is
+     * cached: the point is that only `limit` rows exist in the renderer at
+     * any moment.
+     */
+    async loadChannelPage(channelId, offset, limit) {
+        const imp = this.getActiveImport();
+        const storeKey = imp && imp.data && imp.data._storeKey;
+        if (!storeKey || !window.electronAPI?.discordWarrantReadPage) {
+            return { messages: [], total: 0, offset: 0, limit };
+        }
+        const res = await window.electronAPI.discordWarrantReadPage({
+            caseNumber: this.caseNumber, storeKey, channelId,
+            offset: Math.max(0, offset | 0), limit: Math.max(1, limit | 0)
+        });
+        if (!res || !res.success) {
+            throw new Error((res && res.error) || 'Could not read this conversation from the case store');
+        }
+        return {
+            messages: Array.isArray(res.messages) ? res.messages : [],
+            total: res.total || 0, offset: res.offset || 0, limit: res.limit || limit
+        };
+    }
+
+    /**
+     * Search inside one channel.  Runs in the main process against the store
+     * so a multi-million-row channel never crosses the IPC boundary; results
+     * are capped and each match carries its `ord` for a jump-to-page.
+     */
+    async searchChannelMessages(channelId, query, cap) {
+        const imp = this.getActiveImport();
+        const storeKey = imp && imp.data && imp.data._storeKey;
+        if (!storeKey || !window.electronAPI?.discordWarrantSearchChannel) {
+            return { matches: [], truncated: false, scanned: 0 };
+        }
+        const res = await window.electronAPI.discordWarrantSearchChannel({
+            caseNumber: this.caseNumber, storeKey, channelId, query, cap: cap || 500
+        });
+        if (!res || !res.success) {
+            throw new Error((res && res.error) || 'Search failed');
+        }
+        return {
+            matches: Array.isArray(res.matches) ? res.matches : [],
+            truncated: !!res.truncated, scanned: res.scanned || 0
+        };
+    }
+
     async importFromPicker() {
         if (!window.electronAPI?.discordWarrantPickFile) {
             throw new Error('File picker not available');

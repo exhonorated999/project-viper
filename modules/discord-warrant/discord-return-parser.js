@@ -33,6 +33,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { streamCsvRows } = require('./dw-csv-stream');
 
 // Discord epoch — snowflake IDs encode their own creation time.
 const DISCORD_EPOCH = 1420070400000;
@@ -360,148 +361,10 @@ class DiscordReturnParser {
             }
         }
 
-        // ── 2) Messages ────────────────────────────────────────────────
-        // messages/<bucket>/<channelid>.csv   bucket ∈ dms|servers|unknown|archived|…
-        const channels = [];
-        const msgFiles = rels.filter(r => /^messages\/[^/]+\/[^/]+\.csv$/.test(r) &&
-                                          !path.basename(r).startsWith('._'));
-        let headerlessCount = 0;
-        for (const rel of msgFiles.sort()) {
-            const txt = textOf(rel);
-            if (txt == null) { warnings.push(`Could not read ${rel}`); continue; }
-            const rows = parseCsv(txt);
-            if (!rows.length) { warnings.push(`${rel} is empty`); continue; }
-
-            const seg = rel.split('/');
-            const bucket = seg[1];
-            const fileChannelId = path.basename(rel, '.csv');
-
-            const { map, source } = DiscordReturnParser.mapMessageColumns(rows[0]);
-            const at = (r, k) => (map[k] === undefined ? '' : (r[map[k]] ?? ''));
-
-            // Only discard row 0 when it really is a header.  Some returns ship
-            // headerless CSVs; blindly slicing would silently drop the first
-            // message of every such channel.  When the column layout came from
-            // the positional fallback, decide by inspecting row 0 itself: a
-            // parseable timestamp or a snowflake-shaped ID means it is data.
-            let body;
-            if (source === 'header') {
-                body = rows.slice(1);
-            } else {
-                const first = rows[0] || [];
-                const looksLikeData =
-                    !!DiscordReturnParser.normalizeTs(at(first, 'timestamp')) ||
-                    /^\d{15,}$/.test(String(at(first, 'id') || '').trim());
-                body = looksLikeData ? rows : rows.slice(1);
-                if (!looksLikeData) {
-                    warnings.push(`${rel}: row 1 discarded as an unrecognized header`);
-                }
-            }
-
-            const messages = [];
-            for (const r of body) {
-                if (!r || r.every(c => String(c).trim() === '')) continue;
-                const id = String(at(r, 'id') || '').trim();
-                const rawTs = at(r, 'timestamp');
-                const ts = DiscordReturnParser.normalizeTs(rawTs) ||
-                           (id ? DiscordReturnParser.snowflakeToIso(id) : null);
-                const authorId = String(at(r, 'authorId') || '').trim() || null;
-                const username = String(at(r, 'username') || '').trim() || null;
-                const isSelf =
-                    (authorId && selfKeys.has(authorId.toLowerCase())) ||
-                    (username && (selfKeys.has(username.toLowerCase()) ||
-                                  selfKeys.has(username.split('#')[0].toLowerCase())));
-                messages.push({
-                    id: id || null,
-                    timestamp: ts,
-                    rawTimestamp: String(rawTs || '') || null,
-                    contents: String(at(r, 'contents') || ''),
-                    attachments: String(at(r, 'attachments') || ''),
-                    authorId,
-                    username,
-                    // Drives bubble alignment in the thread view.  Only a
-                    // return carries an author per row; a data package does
-                    // not, so this field is return-only by design.
-                    direction: isSelf ? 'outgoing' : 'incoming'
-                });
-            }
-
-            // Participants, most-talkative first.  For a DM this is the only
-            // way to put a name on the thread — the return never states one.
-            const seen = new Map();
-            for (const m of messages) {
-                const key = (m.authorId || m.username || '').toLowerCase();
-                if (!key) continue;
-                const cur = seen.get(key) || {
-                    id: m.authorId || null, username: m.username || null,
-                    count: 0, isSubscriber: m.direction === 'outgoing'
-                };
-                if (!cur.username && m.username) cur.username = m.username;
-                if (!cur.id && m.authorId) cur.id = m.authorId;
-                cur.count++;
-                seen.set(key, cur);
-            }
-            const participants = Array.from(seen.values()).sort((a, b) => b.count - a.count);
-            const others = participants.filter(p => !p.isSubscriber);
-
-            const channelId = String(at(body[0] || [], 'channelId') || '').trim() || fileChannelId;
-            const idx = channelIndex.get(channelId) || channelIndex.get(fileChannelId) || null;
-
-            // Name resolution, best source first:
-            //   1. servers/<guild>.json channels/threads map  → "#general"
-            //   2. the other DM participants                  → "alice, bob"
-            //   3. the channel snowflake                      → last resort
-            let channelName = null;
-            let channelType = null;
-            if (idx && idx.name) {
-                channelName = (idx.isThread ? '🧵 ' : '#') + idx.name;
-                channelType = idx.isThread ? 'GUILD_THREAD' : 'GUILD_TEXT';
-            } else if (bucket === 'dms' || bucket === 'archived' || others.length) {
-                const named = (others.length ? others : participants)
-                    .slice(0, 4).map(p => p.username || p.id).filter(Boolean);
-                if (named.length) {
-                    channelName = named.join(', ') + (others.length > 4 ? ` +${others.length - 4}` : '');
-                }
-                channelType = others.length > 1 ? 'GROUP DM' : 'DM';
-            }
-            if (!channelName) channelName = `${bucket}/${fileChannelId}`;
-            if (!channelType) channelType = bucket === 'servers' ? 'GUILD_TEXT' : bucket.toUpperCase();
-
-            const withTs = messages.filter(m => m.timestamp);
-            const firstMessage = withTs.length ? withTs.reduce((a, b) => (a.timestamp <= b.timestamp ? a : b)).timestamp : null;
-            const lastMessage = withTs.length ? withTs.reduce((a, b) => (a.timestamp >= b.timestamp ? a : b)).timestamp : null;
-
-            channels.push({
-                // The UI reads channelId/channelName/channelType — this is the
-                // contract the data-package parser emits.  Do NOT rename these:
-                // 5.1.6 shipped id/name/type and every thread rendered blank
-                // and un-clickable because `_openChannel` got an empty string.
-                channelId,
-                channelName,
-                channelType,
-                guildId: idx ? idx.guildId : null,
-                guildName: idx ? idx.guildName : null,
-                indexLabel: null,
-                recipients: others.length ? others.map(p => ({ id: p.id, username: p.username })) : null,
-                participants,
-                bucket,
-                firstMessage,
-                lastMessage,
-                messageCount: messages.length,
-                messages,
-                _sourceFile: rel,
-                _columnSource: source
-            });
-            if (source !== 'header') headerlessCount++;
-        }
-        if (headerlessCount) {
-            // Real returns ship headerless message CSVs.  Report it once,
-            // not 101 times — one line per channel drowns the banner.
-            warnings.push(`${headerlessCount} of ${msgFiles.length} message file(s) had no recognizable header row — the documented positional column layout was used.`);
-        }
-
-        // ── 3) Relationships (friends / blocks) ────────────────────────
+        // ── 2) Relationships (friends / blocks) ────────────────────────
         // Real returns ship this headerless too: <userid>,<username>,FRIEND.
+        // Parsed before messages only so that message streaming can be the
+        // last thing that happens — see the note on section 4.
         const relationships = [];
         for (const rel of rels.filter(r => /^relationships[^/]*\.csv$/.test(r)).sort()) {
             const txt = textOf(rel);
@@ -524,11 +387,15 @@ class DiscordReturnParser {
         }
         subscriber.relationships = relationships;
 
-        // ── 5) Attachments ─────────────────────────────────────────────
+        // ── 3) Attachments ─────────────────────────────────────────────
         // Seen in the wild as BOTH attachments/<attachmentid>/<file> and
         // attachments/<channelid>/<attachmentid>/<file>.  The attachment ID is
         // always the LAST directory segment, which is also the second-to-last
         // segment of the CDN URL in the Attachments column — that is the join.
+        //
+        // Extracted BEFORE messages: media used to be stitched onto each row
+        // in a second pass over channels[].messages, which is impossible once
+        // messages are streamed straight to disk and never held in memory.
         const contentFiles = {};
         const attachRels = rels.filter(r => /^attachments\//.test(r));
         if (extractDir && attachRels.length) {
@@ -568,7 +435,6 @@ class DiscordReturnParser {
             warnings.push(`${attachRels.length} attachment file(s) present but no extract directory was provided`);
         }
 
-        // Link extracted media back onto each message via the attachment ID.
         // `rels` are lower-cased for case-insensitive lookup while the CDN URL
         // in the CSV keeps its original case, so BOTH sides must be folded.
         const byAttachmentId = new Map();
@@ -580,22 +446,241 @@ class DiscordReturnParser {
             byAttachmentId.get(key).push(contentFiles[k]);
         }
         let linked = 0;
-        for (const ch of channels) {
-            for (const m of ch.messages) {
-                if (!m.attachments) continue;
-                const media = [];
-                for (const part of String(m.attachments).split(/[\r\n]+/)) {
-                    const p = part.trim();
-                    if (!p) continue;
-                    const segs = p.split('?')[0].split('/');
-                    const id = (segs.length >= 2 ? segs[segs.length - 2] : p).toLowerCase();
-                    for (const rec of (byAttachmentId.get(id) || [])) media.push(rec);
-                }
-                if (media.length) { m.media = media; linked += media.length; }
+        const mediaFor = (attachmentsCell) => {
+            if (!attachmentsCell || !byAttachmentId.size) return null;
+            const media = [];
+            for (const part of String(attachmentsCell).split(/[\r\n]+/)) {
+                const p = part.trim();
+                if (!p) continue;
+                const segs = p.split('?')[0].split('/');
+                const id = (segs.length >= 2 ? segs[segs.length - 2] : p).toLowerCase();
+                for (const rec of (byAttachmentId.get(id) || [])) media.push(rec);
             }
+            if (!media.length) return null;
+            linked += media.length;
+            return media;
+        };
+
+        // ── 4) Messages ────────────────────────────────────────────────
+        // messages/<bucket>/<channelid>.csv   bucket ∈ dms|servers|unknown|archived|…
+        //
+        // STREAMED, one row at a time.  A second agency's return is 2.36 GB
+        // with a single message CSV of 355 MB / ~2.4 M rows; buffering that
+        // file (string + array-of-arrays + array of objects) is several GB of
+        // live heap and killed the main process outright.  When the caller
+        // supplies options.openStream + options.messageSink each row goes
+        // straight into SQLite and is forgotten.
+        //
+        // Rows are kept in memory ONLY while the running total is under
+        // INLINE_BUDGET, so a small return still travels inline over IPC on
+        // exactly the code path it always did.  The moment the budget is
+        // exceeded every buffered array is dropped and the import is lazy.
+        const openStream = options.openStream || null;
+        const sink = options.messageSink || null;
+        // Without a sink there is nowhere for a dropped row to go, so the
+        // budget only applies when the caller gave us somewhere to stream to.
+        const INLINE_BUDGET = !sink ? Infinity
+            : (Number.isFinite(options.inlineBudget) ? options.inlineBudget : 25000);
+        let lazy = false;
+        let inlineTotal = 0;
+
+        const channels = [];
+        const msgFiles = rels.filter(r => /^messages\/[^/]+\/[^/]+\.csv$/.test(r) &&
+                                          !path.basename(r).startsWith('._'));
+        let headerlessCount = 0;
+        for (const rel of msgFiles.sort()) {
+            const seg = rel.split('/');
+            const bucket = seg[1];
+            const fileChannelId = path.basename(rel, '.csv');
+
+            // Per-channel accumulators.  Everything here is O(distinct
+            // authors), never O(messages).
+            let map = null;
+            let source = null;
+            let headerDecided = false;
+            let count = 0;
+            let firstMessage = null;
+            let lastMessage = null;
+            let channelIdSeen = null;
+            let sinkOpen = false;
+            const messages = [];
+            const seen = new Map();
+            const at = (r, k) => (map[k] === undefined ? '' : (r[map[k]] ?? ''));
+
+            const onRow = (r) => {
+                if (!headerDecided) {
+                    headerDecided = true;
+                    const m = DiscordReturnParser.mapMessageColumns(r);
+                    map = m.map; source = m.source;
+                    if (source !== 'header') headerlessCount++;
+
+                    // Only discard row 0 when it really is a header.  Some
+                    // returns ship headerless CSVs; blindly skipping would
+                    // silently drop the first message of every such channel.
+                    if (source === 'header') return;
+                    const looksLikeData =
+                        !!DiscordReturnParser.normalizeTs(at(r, 'timestamp')) ||
+                        /^\d{15,}$/.test(String(at(r, 'id') || '').trim());
+                    if (!looksLikeData) {
+                        warnings.push(`${rel}: row 1 discarded as an unrecognized header`);
+                        return;
+                    }
+                    // else fall through — row 0 is data
+                }
+                if (!r || r.every(c => String(c).trim() === '')) return;
+
+                const id = String(at(r, 'id') || '').trim();
+                const rawTs = at(r, 'timestamp');
+                const ts = DiscordReturnParser.normalizeTs(rawTs) ||
+                           (id ? DiscordReturnParser.snowflakeToIso(id) : null);
+                const authorId = String(at(r, 'authorId') || '').trim() || null;
+                const username = String(at(r, 'username') || '').trim() || null;
+                const isSelf =
+                    (authorId && selfKeys.has(authorId.toLowerCase())) ||
+                    (username && (selfKeys.has(username.toLowerCase()) ||
+                                  selfKeys.has(username.split('#')[0].toLowerCase())));
+                const msg = {
+                    id: id || null,
+                    timestamp: ts,
+                    rawTimestamp: String(rawTs || '') || null,
+                    contents: String(at(r, 'contents') || ''),
+                    attachments: String(at(r, 'attachments') || ''),
+                    authorId,
+                    username,
+                    // Drives bubble alignment in the thread view.  Only a
+                    // return carries an author per row; a data package does
+                    // not, so this field is return-only by design.
+                    direction: isSelf ? 'outgoing' : 'incoming'
+                };
+                const media = mediaFor(msg.attachments);
+                if (media) msg.media = media;
+
+                if (channelIdSeen === null) {
+                    channelIdSeen = String(at(r, 'channelId') || '').trim() || null;
+                }
+                if (ts) {
+                    if (!firstMessage || ts < firstMessage) firstMessage = ts;
+                    if (!lastMessage || ts > lastMessage) lastMessage = ts;
+                }
+
+                // Participants, most-talkative first.  For a DM this is the
+                // only way to put a name on the thread — the return never
+                // states one.  Capped so a busy server channel cannot turn
+                // the "bounded memory" promise into a lie.
+                const key = (authorId || username || '').toLowerCase();
+                if (key) {
+                    let cur = seen.get(key);
+                    if (!cur && seen.size < 5000) {
+                        cur = { id: authorId, username, count: 0, isSubscriber: msg.direction === 'outgoing' };
+                        seen.set(key, cur);
+                    }
+                    if (cur) {
+                        if (!cur.username && username) cur.username = username;
+                        if (!cur.id && authorId) cur.id = authorId;
+                        cur.count++;
+                    }
+                }
+
+                if (sink) {
+                    if (!sinkOpen) { sink.beginChannel(channelIdSeen || fileChannelId); sinkOpen = true; }
+                    sink.write(msg);
+                }
+                count++;
+
+                if (!lazy) {
+                    messages.push(msg);
+                    if (++inlineTotal > INLINE_BUDGET) {
+                        lazy = true;
+                        messages.length = 0;
+                        for (const prev of channels) prev.messages = [];
+                    }
+                }
+            };
+
+            let read = false;
+            if (openStream) {
+                const orig = relMap.get(rel);
+                let stream = null;
+                try { stream = orig ? await openStream(orig) : null; } catch (_) { stream = null; }
+                if (stream) {
+                    consumed.add(orig);
+                    try {
+                        await streamCsvRows(stream, onRow);
+                        read = true;
+                    } catch (err) {
+                        warnings.push(`${rel}: read failed after ${count} row(s) — ${err.message}`);
+                        read = true; // partial: keep what we got, report it
+                    }
+                }
+            }
+            if (!read) {
+                const txt = textOf(rel);
+                if (txt == null) { warnings.push(`Could not read ${rel}`); continue; }
+                for (const r of parseCsv(txt)) onRow(r);
+            }
+
+            if (sinkOpen) { try { sink.endChannel(); } catch (_) {} }
+            if (!count && !headerDecided) { warnings.push(`${rel} is empty`); continue; }
+
+            const participants = Array.from(seen.values()).sort((a, b) => b.count - a.count);
+            const others = participants.filter(p => !p.isSubscriber);
+
+            const channelId = channelIdSeen || fileChannelId;
+            const idx = channelIndex.get(channelId) || channelIndex.get(fileChannelId) || null;
+
+            // Name resolution, best source first:
+            //   1. servers/<guild>.json channels/threads map  → "#general"
+            //   2. the other DM participants                  → "alice, bob"
+            //   3. the channel snowflake                      → last resort
+            let channelName = null;
+            let channelType = null;
+            if (idx && idx.name) {
+                channelName = (idx.isThread ? '🧵 ' : '#') + idx.name;
+                channelType = idx.isThread ? 'GUILD_THREAD' : 'GUILD_TEXT';
+            } else if (bucket === 'dms' || bucket === 'archived' || others.length) {
+                const named = (others.length ? others : participants)
+                    .slice(0, 4).map(p => p.username || p.id).filter(Boolean);
+                if (named.length) {
+                    channelName = named.join(', ') + (others.length > 4 ? ` +${others.length - 4}` : '');
+                }
+                channelType = others.length > 1 ? 'GROUP DM' : 'DM';
+            }
+            if (!channelName) channelName = `${bucket}/${fileChannelId}`;
+            if (!channelType) channelType = bucket === 'servers' ? 'GUILD_TEXT' : bucket.toUpperCase();
+
+            channels.push({
+                // The UI reads channelId/channelName/channelType — this is the
+                // contract the data-package parser emits.  Do NOT rename these:
+                // 5.1.6 shipped id/name/type and every thread rendered blank
+                // and un-clickable because `_openChannel` got an empty string.
+                channelId,
+                channelName,
+                channelType,
+                guildId: idx ? idx.guildId : null,
+                guildName: idx ? idx.guildName : null,
+                indexLabel: null,
+                recipients: others.length ? others.map(p => ({ id: p.id, username: p.username })) : null,
+                participants,
+                bucket,
+                firstMessage,
+                lastMessage,
+                messageCount: count,
+                messages: lazy ? [] : messages,
+                _sourceFile: rel,
+                _columnSource: source
+            });
+        }
+        if (lazy) {
+            // The budget was blown partway through; nothing may keep rows.
+            for (const ch of channels) { ch.messages = []; ch._sharded = true; }
+        }
+        if (headerlessCount) {
+            // Real returns ship headerless message CSVs.  Report it once,
+            // not 101 times — one line per channel drowns the banner.
+            warnings.push(`${headerlessCount} of ${msgFiles.length} message file(s) had no recognizable header row — the documented positional column layout was used.`);
         }
 
-        // ── 6) Diagnostics ─────────────────────────────────────────────
+        // ── 5) Diagnostics ─────────────────────────────────────────────
         const unmatched = originals.filter(o => !consumed.has(o) && !/\/$/.test(o));
         const messageCount = channels.reduce((s, c) => s + c.messageCount, 0);
         if (!messageCount && !servers.length && !relationships.length) {
@@ -608,6 +693,9 @@ class DiscordReturnParser {
             detectedRoot: root || '(archive root)',
             detectReasons: det.reasons,
 
+            // True when the message bodies were streamed to the case store
+            // instead of being carried inline.  The caller stamps _storeKey.
+            _lazy: lazy,
             subscriber,
             avatarFile: null,
             recentAvatarFiles: [],

@@ -10233,12 +10233,54 @@ ipcMain.handle('snapchat-warrant-import', async (event, { filePath, caseNumber, 
   }
 });
 
+/**
+ * Pick a warrant production that may arrive either as a .zip or as an
+ * already-extracted folder.
+ *
+ * DO NOT go back to properties: ['openFile', 'openDirectory'].  Electron
+ * documents that on Windows and Linux an open dialog cannot be both a file
+ * selector and a directory selector — it silently shows a DIRECTORY-ONLY
+ * picker.  Shipping that meant no Windows user could ever select a ZIP for
+ * Discord, Snapchat or X; the bug reached two agencies as "the module will
+ * not let me import the file zipped, only unzipped works".
+ *
+ * macOS handles the combined dialog properly, so keep the one-step flow there.
+ */
+async function pickProductionFileOrFolder({ title, filterName }) {
+  if (process.platform === 'darwin') {
+    return dialog.showOpenDialog(mainWindow, {
+      title,
+      properties: ['openFile', 'openDirectory'],
+      filters: [{ name: filterName, extensions: ['zip'] }]
+    });
+  }
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    buttons: ['ZIP archive\u2026', 'Extracted folder\u2026', 'Cancel'],
+    defaultId: 0,
+    cancelId: 2,
+    title,
+    message: title,
+    detail: 'Windows cannot show files and folders in a single dialog. Choose which one you are importing.'
+  });
+  if (response === 2) return { canceled: true, filePaths: [] };
+  if (response === 0) {
+    return dialog.showOpenDialog(mainWindow, {
+      title,
+      properties: ['openFile'],
+      filters: [
+        { name: filterName, extensions: ['zip'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    });
+  }
+  return dialog.showOpenDialog(mainWindow, { title, properties: ['openDirectory'] });
+}
+
 ipcMain.handle('snapchat-warrant-pick-file', async () => {
-  // Allow user to pick either a ZIP file OR a folder
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const result = await pickProductionFileOrFolder({
     title: 'Select Snapchat Warrant Production (ZIP or Folder)',
-    properties: ['openFile', 'openDirectory'],
-    filters: [{ name: 'Snapchat Warrant Production', extensions: ['zip'] }]
+    filterName: 'Snapchat Warrant Production'
   });
   restoreFocus();
   if (result.canceled || !result.filePaths.length) return null;
@@ -10404,10 +10446,9 @@ ipcMain.handle('x-warrant-import', async (event, { filePath, caseNumber, isFolde
 });
 
 ipcMain.handle('x-warrant-pick-file', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const result = await pickProductionFileOrFolder({
     title: 'Select X / Twitter Production (ZIP or Folder)',
-    properties: ['openFile', 'openDirectory'],
-    filters: [{ name: 'X Warrant Production', extensions: ['zip'] }]
+    filterName: 'X Warrant Production'
   });
   restoreFocus();
   if (result.canceled || !result.filePaths.length) return null;
@@ -10567,29 +10608,73 @@ ipcMain.handle('discord-warrant-scan', async (event, { caseNumber }) => {
   }
 });
 
+// One import at a time.  A concurrent second import doubles peak memory and
+// two MessageWriters would fight over the same .db file.
+let dwImportInFlight = false;
+
 ipcMain.handle('discord-warrant-import', async (event, { filePath, caseNumber, isFolder }) => {
+  if (dwImportInFlight) {
+    return { success: false, error: 'A Discord import is already running. Wait for it to finish.' };
+  }
+  dwImportInFlight = true;
+  let writer = null;
   try {
     const extractDir = caseNumber
       ? path.join(casesDir, caseNumber, 'Evidence', 'DiscordWarrant')
       : null;
     if (extractDir && !fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
 
-    let data;
-    if (isFolder) {
-      data = await dwParser.parseFolder(filePath, { extractDir, security });
-    } else {
-      // Pass file path directly — streaming reader handles VIPENC decryption
-      // transparently and supports ZIP64 (no 2 GB cap).
-      data = await dwParser.parseZip(filePath, { extractDir, security });
+    // The 2.36 GB / ~5.8M-message return cannot be parsed into memory at all:
+    // rows stream straight from the CSV into SQLite and never accumulate.
+    // Under LAZY_MESSAGE_THRESHOLD the parser keeps everything inline and the
+    // writer ends up holding a store nobody reads — cheap, and it means one
+    // code path.  See modules/discord-warrant/discord-warrant-db.js.
+    const storeKey = dwStore.storeKeyFor(filePath);
+    const baseDir = caseNumber ? dwBaseDir(caseNumber) : null;
+    if (baseDir) {
+      try {
+        writer = new dwDb.MessageWriter(baseDir, storeKey);
+      } catch (err) {
+        console.error('[discord-warrant] could not open message store, importing inline:', err);
+        writer = null;
+      }
     }
 
-    // Keep six-figure returns off the IPC boundary entirely (see
-    // discord-warrant-store.js).  If sharding fails we still return the full
-    // payload — a slow import beats no import — but we say so.
-    const msgCount = (data && data.stats && data.stats.messageCount) || 0;
-    if (caseNumber && msgCount > dwStore.LAZY_MESSAGE_THRESHOLD) {
+    const parseOpts = { extractDir, security, messageSink: writer };
+    const data = isFolder
+      ? await dwParser.parseFolder(filePath, parseOpts)
+      // Pass file path directly — streaming reader handles VIPENC decryption
+      // transparently and supports ZIP64 (no 2 GB cap).
+      : await dwParser.parseZip(filePath, parseOpts);
+
+    if (writer) {
       try {
-        const res = dwStore.shardChannels(data, dwBaseDir(caseNumber), dwStore.storeKeyFor(filePath));
+        const res = writer.finish({ source: filePath, caseNumber: String(caseNumber || '') });
+        console.log(`[discord-warrant] store ${storeKey}: ${res.messageCount} row(s), ${res.channelCount} channel(s), ${res.dbBytes} bytes`);
+        if (data && data._lazy) {
+          data._storeKey = storeKey;
+          data._store = 'sqlite';
+        }
+      } catch (err) {
+        console.error('[discord-warrant] store finish failed:', err);
+        try { writer.abort(); } catch (_) {}
+        if (data && data._lazy) {
+          // Bodies were dropped on the floor to keep memory flat and now have
+          // nowhere to live.  Say so loudly rather than showing empty threads.
+          data._storeError = err.message;
+        }
+      }
+      writer = null;
+    }
+
+    // Pre-5.1.8 fallback: no DB (no case number) but a six-figure payload —
+    // shard to JSON as 5.1.7 did rather than push 500 MB across IPC.
+    const msgCount = (data && data.stats && data.stats.messageCount) || 0;
+    if (!data._storeKey && caseNumber && msgCount > dwStore.LAZY_MESSAGE_THRESHOLD) {
+      try {
+        const res = dwStore.shardChannels(data, dwBaseDir(caseNumber), storeKey);
+        data._storeKey = storeKey;
+        data._store = 'shards';
         console.log(`[discord-warrant] sharded ${res.written} channel(s), ${res.failed.length} failed -> ${res.dir}`);
       } catch (err) {
         console.error('[discord-warrant] sharding failed, returning inline payload:', err);
@@ -10600,8 +10685,11 @@ ipcMain.handle('discord-warrant-import', async (event, { filePath, caseNumber, i
 
     return { success: true, data };
   } catch (error) {
+    if (writer) { try { writer.abort(); } catch (_) {} }
     console.error('Discord warrant import error:', error);
     return { success: false, error: error.message };
+  } finally {
+    dwImportInFlight = false;
   }
 });
 
@@ -10610,6 +10698,7 @@ ipcMain.handle('discord-warrant-import', async (event, { filePath, caseNumber, i
 // behind this: a real return is ~500 MB of heap and 134 MB of JSON, so past
 // LAZY_MESSAGE_THRESHOLD the message bodies never cross the IPC boundary.
 const dwStore = require('./modules/discord-warrant/discord-warrant-store');
+const dwDb = require('./modules/discord-warrant/discord-warrant-db');
 
 function dwBaseDir(caseNumber) {
   if (!caseNumber) return null;
@@ -10641,23 +10730,96 @@ ipcMain.handle('discord-warrant-load-store', async (event, { caseNumber }) => {
 });
 
 // One channel's messages, for a return whose bodies were sharded at import.
+// 5.1.8 writes SQLite; 5.1.7 wrote one JSON file per channel.  Old cases must
+// keep opening, so the DB is tried first and the shards are the fallback.
 ipcMain.handle('discord-warrant-read-channel', async (event, { caseNumber, storeKey, channelId }) => {
   try {
     const dir = dwBaseDir(caseNumber);
     if (!dir) return { success: false, error: 'No case number', messages: [] };
+    try {
+      const info = dwDb.channelInfo(dir, storeKey, channelId);
+      if (info) {
+        // A 2.4M-message channel will not fit in a renderer array — the UI is
+        // expected to page instead.  readAll throws past its cap.
+        const messages = dwDb.readAll(dir, storeKey, channelId);
+        return { success: true, messages, total: info.count, source: 'sqlite' };
+      }
+    } catch (err) {
+      return { success: false, error: err.message, messages: [], tooLarge: true };
+    }
     const messages = dwStore.readChannel(dir, storeKey, channelId);
     if (messages === null) return { success: false, error: 'Channel not in case store', messages: [] };
-    return { success: true, messages };
+    return { success: true, messages, total: messages.length, source: 'shards' };
   } catch (error) {
     console.error('discord-warrant-read-channel error:', error);
     return { success: false, error: error.message, messages: [] };
   }
 });
 
+// Windowed read.  Channels past the paging threshold never load whole.
+ipcMain.handle('discord-warrant-read-page', async (event, { caseNumber, storeKey, channelId, offset, limit }) => {
+  try {
+    const dir = dwBaseDir(caseNumber);
+    if (!dir) return { success: false, error: 'No case number', messages: [] };
+    const info = dwDb.channelInfo(dir, storeKey, channelId);
+    if (info) {
+      const page = dwDb.readPage(dir, storeKey, channelId, offset | 0, Math.max(1, limit | 0));
+      return { success: true, source: 'sqlite', ...page };
+    }
+    // 5.1.7 shards: slice in main so the renderer still never sees the whole
+    // channel, even though main had to read it.
+    const all = dwStore.readChannel(dir, storeKey, channelId);
+    if (all === null) return { success: false, error: 'Channel not in case store', messages: [] };
+    const off = Math.max(0, Math.min(offset | 0, all.length));
+    const lim = Math.max(1, limit | 0);
+    return {
+      success: true, source: 'shards', total: all.length,
+      offset: off, limit: lim, messages: all.slice(off, off + lim)
+    };
+  } catch (error) {
+    console.error('discord-warrant-read-page error:', error);
+    return { success: false, error: error.message, messages: [] };
+  }
+});
+
+// Search runs in main so a multi-million-row channel never crosses IPC.
+ipcMain.handle('discord-warrant-search-channel', async (event, { caseNumber, storeKey, channelId, query, cap }) => {
+  try {
+    const dir = dwBaseDir(caseNumber);
+    if (!dir) return { success: false, error: 'No case number', matches: [] };
+    const info = dwDb.channelInfo(dir, storeKey, channelId);
+    if (info) {
+      const res = dwDb.searchChannel(dir, storeKey, channelId, query, cap || 500);
+      return { success: true, source: 'sqlite', ...res };
+    }
+    const all = dwStore.readChannel(dir, storeKey, channelId);
+    if (all === null) return { success: false, error: 'Channel not in case store', matches: [] };
+    const needle = String(query || '').toLowerCase();
+    const max = cap || 500;
+    const matches = [];
+    let truncated = false;
+    for (let i = 0; i < all.length; i++) {
+      const m = all[i];
+      const hay = `${m.contents || ''} ${m.username || ''}`.toLowerCase();
+      if (needle && hay.includes(needle)) {
+        if (matches.length >= max) { truncated = true; break; }
+        matches.push(Object.assign({ ord: i }, m));
+      }
+    }
+    return { success: true, source: 'shards', matches, truncated, scanned: all.length };
+  } catch (error) {
+    console.error('discord-warrant-search-channel error:', error);
+    return { success: false, error: error.message, matches: [] };
+  }
+});
+
 ipcMain.handle('discord-warrant-delete-store', async (event, { caseNumber, storeKey }) => {
   try {
     const dir = dwBaseDir(caseNumber);
-    if (dir) dwStore.deleteStore(dir, storeKey);
+    if (dir) {
+      try { dwDb.deleteStore(dir, storeKey); } catch (err) { console.error('dwDb.deleteStore:', err); }
+      dwStore.deleteStore(dir, storeKey);
+    }
     return { success: true };
   } catch (error) {
     console.error('discord-warrant-delete-store error:', error);
@@ -10666,10 +10828,9 @@ ipcMain.handle('discord-warrant-delete-store', async (event, { caseNumber, store
 });
 
 ipcMain.handle('discord-warrant-pick-file', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const result = await pickProductionFileOrFolder({
     title: 'Select Discord Warrant Return (ZIP or Folder)',
-    properties: ['openFile', 'openDirectory'],
-    filters: [{ name: 'Discord Data Package', extensions: ['zip'] }]
+    filterName: 'Discord Warrant Return'
   });
   restoreFocus();
   if (result.canceled || !result.filePaths.length) return null;

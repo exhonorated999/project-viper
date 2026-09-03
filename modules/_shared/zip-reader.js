@@ -150,6 +150,26 @@ class ZipReader {
     }
 
     /**
+     * Open one entry as a Readable WITHOUT buffering it.  Required for the
+     * 355 MB message CSVs in large warrant returns — readAsText() on those
+     * costs a Buffer plus a same-sized JS string before parsing even starts.
+     */
+    openStream(entryOrName) {
+        const name = (typeof entryOrName === 'string')
+            ? entryOrName
+            : (entryOrName && (entryOrName._name || entryOrName.entryName));
+        if (!name) return Promise.resolve(null);
+        if (this._mode === 'buffer') {
+            const ent = this._adm.getEntry(name);
+            if (!ent) return Promise.resolve(null);
+            return Promise.resolve(require('stream').Readable.from([ent.getData()]));
+        }
+        return new Promise((resolve, reject) => {
+            this._zip.stream(name, (err, stm) => err ? reject(err) : resolve(stm));
+        });
+    }
+
+    /**
      * Extract one entry to a target path on disk WITHOUT buffering the whole
      * entry in memory. Use this when an inner-zip or media file might itself
      * be multi-GB.

@@ -180,7 +180,14 @@ class DiscordWarrantParser {
             // law-enforcement returns to the CSV parser; everything else is
             // treated as a Discord Data Package.
             if (DiscordReturnParser.detect(entryNames).match) {
-                return await new DiscordReturnParser().parse({ entryNames, readText, readBinary, options });
+                // Message CSVs are streamed rather than buffered — see
+                // dw-csv-stream.js for why (a single 355 MB CSV).
+                const streamOpts = Object.assign({}, options, {
+                    openStream: (name) => zip.openStream(name)
+                });
+                return await new DiscordReturnParser().parse({
+                    entryNames, readText, readBinary, options: streamOpts
+                });
             }
 
             return await this._parseSources({ entryNames, readText, readBinary, options });
@@ -219,7 +226,16 @@ class DiscordWarrantParser {
         };
 
         if (DiscordReturnParser.detect(allFiles).match) {
-            return new DiscordReturnParser().parse({ entryNames: allFiles, readText, readBinary, options });
+            const streamOpts = Object.assign({}, options, {
+                openStream: async (name) => {
+                    const fp = path.join(folderPath, name);
+                    if (!fs.existsSync(fp)) return null;
+                    return fs.createReadStream(fp, { highWaterMark: 1 << 18 });
+                }
+            });
+            return new DiscordReturnParser().parse({
+                entryNames: allFiles, readText, readBinary, options: streamOpts
+            });
         }
 
         return this._parseSources({ entryNames: allFiles, readText, readBinary, options });

@@ -1,0 +1,257 @@
+/* ============================================================
+   P2P Activity Check — TorrentAnalytics
+   ------------------------------------------------------------
+   Colour comes from the active skin's --vp-* RGB triples so this
+   module follows Classic / Supervisor / Obsidian / Ember without
+   a per-skin block. Do NOT hardcode hex here (the mistake
+   discord-warrant-styles.css made).
+   ============================================================ */
+
+/* ── Acknowledgement gate ─────────────────────────────────── */
+
+.p2p-gate {
+    position: fixed;
+    inset: 0;
+    z-index: 10050;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: rgba(2, 6, 18, .72);
+    backdrop-filter: blur(6px);
+}
+
+.p2p-gate-card {
+    width: 100%;
+    max-width: 34rem;
+    border-radius: .75rem;
+    border: 1px solid rgb(var(--vp-purple) / .55);
+    background: linear-gradient(160deg, rgb(var(--vp-card)) 0%, rgb(var(--vp-dark)) 100%);
+    box-shadow: 0 24px 64px rgb(var(--vp-purple) / .22);
+    display: flex;
+    flex-direction: column;
+}
+
+.p2p-gate-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.1rem 1.25rem;
+    border-bottom: 1px solid rgb(var(--vp-purple) / .3);
+}
+
+.p2p-gate-head-l {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+}
+
+.p2p-gate-icon {
+    color: rgb(var(--vp-orange));
+    font-size: 1.15rem;
+    line-height: 1;
+}
+
+.p2p-gate-head h2 {
+    color: #fff;
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+.p2p-gate-x {
+    background: none;
+    border: 0;
+    color: #6b7280;
+    font-size: 1.6rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: color .15s;
+}
+
+.p2p-gate-x:hover { color: #fff; }
+
+.p2p-gate-body { padding: 1.25rem; }
+
+.p2p-gate-target {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+
+.p2p-gate-muted { color: #9ca3af; font-size: .875rem; }
+
+.p2p-gate-ip {
+    color: #fff;
+    font-size: .875rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    padding: .25rem .5rem;
+    border-radius: .25rem;
+    background: rgb(var(--vp-dark));
+    border: 1px solid rgb(var(--vp-purple) / .4);
+}
+
+.p2p-gate-chip {
+    font-size: .625rem;
+    padding: .125rem .375rem;
+    border-radius: .25rem;
+    background: rgb(var(--vp-purple) / .12);
+    color: rgb(var(--vp-purple));
+    border: 1px solid rgb(var(--vp-purple) / .35);
+}
+
+/* The caveat is the whole reason this gate exists — give it the
+   warning treatment, not body-copy treatment. */
+.p2p-gate-caveat {
+    border-radius: .5rem;
+    border: 1px solid rgb(var(--vp-orange) / .45);
+    background: rgb(var(--vp-orange) / .06);
+    padding: 1rem;
+    color: #d1d5db;
+    font-size: .875rem;
+    line-height: 1.6;
+}
+
+.p2p-gate-foot {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: .75rem;
+    padding: 1rem 1.25rem;
+    border-top: 1px solid rgb(var(--vp-purple) / .3);
+}
+
+.p2p-btn-ghost {
+    padding: .5rem 1rem;
+    border-radius: .5rem;
+    background: rgb(var(--vp-dark));
+    border: 1px solid rgb(var(--vp-purple) / .4);
+    color: #9ca3af;
+    font-size: .875rem;
+    cursor: pointer;
+    transition: color .15s, border-color .15s;
+}
+
+.p2p-btn-ghost:hover { color: #fff; border-color: rgb(var(--vp-purple)); }
+
+.p2p-btn-go {
+    padding: .5rem 1.25rem;
+    border-radius: .5rem;
+    border: 0;
+    color: #fff;
+    font-size: .875rem;
+    font-weight: 500;
+    cursor: pointer;
+    background: linear-gradient(90deg, rgb(var(--vp-purple)) 0%, rgb(var(--vp-orange)) 100%);
+    transition: filter .15s;
+}
+
+.p2p-btn-go:hover { filter: brightness(1.12); }
+.p2p-btn-go:disabled { opacity: .6; cursor: not-allowed; filter: none; }
+
+.p2p-btn-sm { padding: .25rem .75rem; font-size: .75rem; border-radius: .375rem; }
+
+/* ── Scan window ──────────────────────────────────────────── */
+
+/* The overlay is DOM; the results are a native BrowserView that
+   main positions over .p2p-bv. Nothing must ever be drawn inside
+   .p2p-bv expecting to be visible — the BV covers it. */
+.p2p-overlay {
+    position: fixed;
+    inset: 3.5rem 1rem 1rem 1rem;
+    z-index: 10040;
+    display: flex;
+    flex-direction: column;
+    border-radius: .5rem;
+    overflow: hidden;
+    border: 1px solid rgb(var(--vp-purple) / .9);
+    background: rgb(var(--vp-card));
+    box-shadow: 0 24px 64px rgba(0, 0, 0, .6);
+}
+
+.p2p-overlay.hidden { display: none; }
+
+.p2p-hairline {
+    height: 1px;
+    width: 100%;
+    flex-shrink: 0;
+    background: linear-gradient(90deg, rgb(var(--vp-purple)) 0%, rgb(var(--vp-cyan)) 50%, rgb(var(--vp-orange)) 100%);
+}
+
+.p2p-chrome {
+    height: 46px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: .625rem;
+    padding: 0 .875rem;
+    border-bottom: 1px solid rgb(var(--vp-purple) / .5);
+    user-select: none;
+}
+
+.p2p-brand-dot { color: rgb(var(--vp-purple)); font-size: .9rem; }
+.p2p-brand { color: #fff; font-size: .75rem; font-weight: 600; letter-spacing: .02em; }
+
+.p2p-ip {
+    color: #9ca3af;
+    font-size: .75rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    padding-left: .25rem;
+}
+
+.p2p-spacer { flex: 1; }
+
+.p2p-info { color: #6b7280; cursor: help; font-size: .9rem; }
+.p2p-info:hover, .p2p-info:focus { color: #fff; outline: none; }
+
+.p2p-chrome-btn {
+    background: none;
+    border: 0;
+    color: #6b7280;
+    font-size: .95rem;
+    padding: .25rem .4rem;
+    border-radius: .25rem;
+    cursor: pointer;
+    transition: color .15s, background .15s;
+}
+
+.p2p-chrome-btn:hover { color: #fff; background: rgba(255, 255, 255, .06); }
+
+.p2p-chrome-x {
+    background: none;
+    border: 0;
+    color: #6b7280;
+    font-size: 1.35rem;
+    line-height: 1;
+    padding: 0 .25rem;
+    cursor: pointer;
+    transition: color .15s;
+}
+
+.p2p-chrome-x:hover { color: #fff; }
+
+/* The caveat rides with the results on screen, not just on the
+   gate. An examiner who left the window open for ten minutes has
+   stopped remembering what they clicked through. */
+.p2p-caveat-strip {
+    flex-shrink: 0;
+    padding: .375rem .875rem;
+    font-size: .6875rem;
+    line-height: 1.45;
+    color: rgb(var(--vp-orange));
+    background: rgb(var(--vp-orange) / .07);
+    border-bottom: 1px solid rgb(var(--vp-orange) / .28);
+}
+
+.p2p-bv {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgb(var(--vp-dark));
+}
+
+.p2p-bv-placeholder { color: #4b5563; font-size: .75rem; }

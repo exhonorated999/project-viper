@@ -1665,6 +1665,34 @@
                             </div>
                         </div>
 
+                        <!-- P2P Activity Check (TorrentAnalytics) -->
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-start gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-fuchsia-500/10 flex items-center justify-center flex-shrink-0">
+                                    <svg class="w-5 h-5 text-fuchsia-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                                    </svg>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <h4 class="text-white font-semibold text-sm">P2P Activity Check — TorrentAnalytics</h4>
+                                        <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                                            <input type="checkbox" id="p2pScanEnabledToggle" class="sr-only peer" onchange="setP2pScanEnabled(this.checked)">
+                                            <div class="w-11 h-6 bg-gray-600 rounded-full peer peer-checked:bg-viper-cyan transition-colors"></div>
+                                            <div class="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+                                        </label>
+                                    </div>
+                                    <p class="text-xs text-gray-400 mt-1 leading-relaxed">Check whether an IP address appears in public <span class="text-gray-300">BitTorrent</span> DHT and tracker activity. When enabled, a <span class="text-gray-300">🧲 P2P</span> button appears next to IP addresses on the Identifiers card of Suspects, Victims, Witnesses &amp; Other Parties. Results open in a window inside VIPER and can be saved to Evidence as a PDF.</p>
+
+                                    <div class="rounded-lg bg-amber-900/20 border border-amber-700/40 px-3 py-2 mt-3">
+                                        <p class="text-xs text-amber-300 leading-relaxed">⚠ <strong>Investigative lead only — not evidence.</strong> This feature makes a <strong>live request over the internet</strong> from this machine to a third-party site (torrentanalytics.net). DHT announcements can be <strong>spoofed by third parties</strong>, and residential IP assignments change over time. The source sees <strong>public BitTorrent only</strong> — not Tor, Usenet, direct downloads, or streaming — and updates in daily batches rather than in real time. Corroborate before acting.</p>
+                                    </div>
+
+                                    <p class="text-xs text-gray-500 leading-relaxed mt-3">Private, loopback, carrier-NAT (100.64/10) and documentation ranges are not scannable and the button stays disabled for them. IPv6 is not supported by the source.</p>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- TLO / TransUnion -->
                         <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
                             <div class="flex items-start gap-3">
@@ -2445,6 +2473,100 @@
                                 <div>
                                     <h4 class="text-white font-semibold text-sm">Project Oversight Import — Sex Offender Compliance Data</h4>
                                     <p class="text-xs text-gray-400 mt-1 leading-relaxed">Import compliance check records exported from Project Oversight (Intellect&rsquo;s sex-offender registry compliance platform) into a VIPER case. Brings in registrant information, address verifications, employment/vehicle disclosures, and field-contact history. Imported data is read-only and preserved as reference material alongside your VIPER case.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ── My Tools (Bring Your Own) ── -->
+                        <div class="flex items-center gap-2 pt-2">
+                            <svg class="w-4 h-4 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                            </svg>
+                            <h4 class="text-xs font-bold uppercase tracking-wider text-viper-purple">My Tools — Bring Your Own</h4>
+                            <div class="flex-1 h-px bg-gradient-to-r from-gray-700/50 to-transparent"></div>
+                        </div>
+
+                        <div class="bg-viper-dark/50 rounded-lg p-4 border border-gray-700/50">
+                            <div class="flex items-start gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-viper-purple/10 flex items-center justify-center flex-shrink-0">
+                                    <svg class="w-5 h-5 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                    </svg>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center justify-between gap-3">
+                                        <h4 class="text-white font-semibold text-sm">Your Own Investigative Tools</h4>
+                                        <button id="ctAddBtn" onclick="ctShowForm()" class="px-3 py-1.5 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded-lg text-viper-purple text-xs font-medium transition flex-shrink-0">
+                                            + Add a Tool
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-gray-400 mt-1 leading-relaxed">Add any website you rely on — a county e-warrant portal, your records management system, a regional intelligence share — and it appears as its own tab in the Investigative Resources tray, grouped under <strong class="text-white">My Tools</strong>. Optional credentials are auto-filled on the site&rsquo;s login page, exactly like the built-in resources above. Downloads and page captures route into case Evidence the same way.</p>
+
+                                    <!-- Add / edit form -->
+                                    <div id="ctForm" class="hidden mt-4 space-y-3 p-3 rounded-lg bg-viper-purple/5 border border-viper-purple/10">
+                                        <div class="flex items-center justify-between">
+                                            <span id="ctFormTitle" class="text-xs font-bold uppercase tracking-wider text-viper-purple">Add a Tool</span>
+                                            <span id="ctFormCount" class="text-[10px] text-gray-500"></span>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs text-gray-400 mb-1">Tool Name <span class="text-viper-purple">*</span></label>
+                                            <input type="text" id="ctName" maxlength="40" placeholder="e.g. County E-Warrant Portal" autocomplete="off"
+                                                class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-purple focus:outline-none">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs text-gray-400 mb-1">Website Address <span class="text-viper-purple">*</span></label>
+                                            <input type="text" id="ctUrl" placeholder="portal.example.gov/warrants" autocomplete="off" spellcheck="false"
+                                                class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-purple focus:outline-none">
+                                            <p class="text-[10px] text-gray-500 mt-1">If you leave off <code class="text-gray-400">https://</code> it will be added for you.</p>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs text-gray-400 mb-1">Description <span class="text-gray-600">(optional)</span></label>
+                                            <textarea id="ctDesc" rows="2" maxlength="400" placeholder="What you use this tool for. Shown as a tooltip on the tray tab."
+                                                class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-purple focus:outline-none resize-y"></textarea>
+                                        </div>
+
+                                        <div class="pt-1 border-t border-gray-700/50">
+                                            <span class="text-[10px] font-bold uppercase tracking-wider text-gray-500">Login Credentials (auto-fill) &mdash; optional</span>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs text-gray-400 mb-1">Username</label>
+                                            <input type="text" id="ctUsername" placeholder="Username for this site" autocomplete="off"
+                                                class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-purple focus:outline-none">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs text-gray-400 mb-1">Password</label>
+                                            <div class="relative">
+                                                <input type="password" id="ctPassword" placeholder="••••••••" autocomplete="new-password"
+                                                    class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-purple focus:outline-none pr-10">
+                                                <button type="button" onclick="ctTogglePasswordVisibility()" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:opacity-80 transition">
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                                </button>
+                                            </div>
+                                            <p id="ctPasswordHint" class="text-[10px] text-gray-500 mt-1"></p>
+                                        </div>
+
+                                        <div id="ctFormErrors" class="hidden text-xs text-red-400 leading-relaxed space-y-1"></div>
+                                        <div id="ctFormWarn" class="hidden text-xs text-amber-400 leading-relaxed"></div>
+
+                                        <div class="flex gap-2 pt-1">
+                                            <button type="button" id="ctSaveBtn" onclick="ctSaveForm()" class="px-3 py-1.5 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded-lg text-viper-purple text-xs font-medium transition">
+                                                Save Tool
+                                            </button>
+                                            <button type="button" onclick="ctHideForm()" class="px-3 py-1.5 bg-gray-600/20 hover:bg-gray-600/30 border border-gray-600 rounded-lg text-gray-400 text-xs font-medium transition">
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Tool list -->
+                                    <div id="customToolsList" class="mt-4 space-y-3"></div>
+
+                                    <div id="ctEmpty" class="hidden mt-4 p-4 rounded-lg border border-dashed border-gray-700 text-center">
+                                        <p class="text-xs text-gray-500">No custom tools yet. Add one and it will show up in the Investigative Resources tray under <strong class="text-gray-400">My Tools</strong>.</p>
+                                    </div>
+
+                                    <p id="ctVaultNote" class="text-xs text-gray-500 leading-relaxed mt-3">Usernames and passwords for your own tools are encrypted with Windows account protection and stored outside the browser &mdash; VIPER cannot read a saved password back out, it only injects it into the site&rsquo;s login form. Nothing is ever sent to Intellect LE.</p>
                                 </div>
                             </div>
                         </div>
@@ -3466,6 +3588,7 @@
             loadTelemetryState();
             initWhisperEngineCard();
             initOsintEngineCard();
+            initP2pScanCard();
 
             // Telemetry init + lifecycle
             try {
@@ -3796,6 +3919,25 @@
             var t = document.getElementById('osintTorProxyInput');
             if (p) localStorage.setItem('osintProxy', p.value.trim());
             if (t) localStorage.setItem('osintTorProxy', t.value.trim());
+        }
+
+        // ---- P2P Activity Check (TorrentAnalytics) -------------------------
+        // Off by default, exactly like the other investigative resources: this
+        // reaches out to a third-party site over the internet, so it is never
+        // on until an examiner turns it on. The key is read by
+        // modules/p2p-scan/p2p-scan.js isEnabled(), which is what actually
+        // decides whether the 🧲 P2P button renders on identifier rows.
+        function isP2pScanEnabled() {
+            return localStorage.getItem('p2pScanEnabled') === 'true';
+        }
+
+        function setP2pScanEnabled(on) {
+            localStorage.setItem('p2pScanEnabled', on ? 'true' : 'false');
+        }
+
+        function initP2pScanCard() {
+            var toggle = document.getElementById('p2pScanEnabledToggle');
+            if (toggle) toggle.checked = isP2pScanEnabled();
         }
 
         function initOsintEngineCard() {
@@ -6120,6 +6262,7 @@
     <!-- GenLogs API Service -->
     <script src="modules/genlogs-api.js"></script>
     <script src="modules/trace-search-api.js"></script>
+    <script src="modules/custom-tools.js"></script>
     <script src="modules/resource-hub.js"></script>
     <script src="modules/uc-chat/uc-chat-ops.js"></script>
     <script>
@@ -10036,6 +10179,399 @@
             btn.textContent = 'Submit Report'; btn.disabled = false;
         }
     }
+    </script>
+
+    <!-- ══════════ Custom "Bring Your Own Tool" management ══════════ -->
+    <script>
+    /**
+     * UI for CustomTools (modules/custom-tools.js). Metadata round-trips
+     * through localStorage; credentials go straight to the main-process
+     * vault and can never be read back — see the three rules on
+     * ctFillForm / ctSaveForm / ctSaveCreds.
+     */
+    (function () {
+        'use strict';
+
+        const CT = () => window.CustomTools;
+
+        /** Every value below is interpolated into innerHTML. A tool named
+         *  `<img src=x onerror=...>` must not execute. */
+        function esc(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        /** The tray lives in this same window, and `storage` events do not
+         *  fire in the window that made the change, so poke it directly. */
+        function ctChanged() {
+            window.dispatchEvent(new CustomEvent('viper:custom-tools-changed'));
+        }
+
+        let ctEditingId = null;        // null = adding
+        let ctEditHasPassword = false; // drives the "leave blank to keep" rule
+        let ctPendingDelete = null;
+        let ctDeleteTimer = null;
+
+        /* ── Form ─────────────────────────────────────────────── */
+
+        function ctShowForm(id) {
+            const ct = CT();
+            if (!ct) return;
+            const form = document.getElementById('ctForm');
+            if (!form) return;
+
+            ctEditingId = id || null;
+            ctEditHasPassword = false;
+            ctSetErrors([]);
+            ctSetWarn('');
+
+            const tools = ct.list();
+            document.getElementById('ctFormTitle').textContent = ctEditingId ? 'Edit Tool' : 'Add a Tool';
+            document.getElementById('ctSaveBtn').textContent = ctEditingId ? 'Save Changes' : 'Save Tool';
+            document.getElementById('ctFormCount').textContent = tools.length + ' of ' + ct.MAX_TOOLS + ' used';
+
+            const tool = ctEditingId ? ct.get(ctEditingId) : null;
+            document.getElementById('ctName').value = tool ? tool.label : '';
+            document.getElementById('ctUrl').value = tool ? tool.url : '';
+            document.getElementById('ctDesc').value = tool ? tool.description : '';
+            document.getElementById('ctUsername').value = '';
+
+            const pw = document.getElementById('ctPassword');
+            pw.value = '';
+            pw.type = 'password';
+            document.getElementById('ctPasswordHint').textContent =
+                'Optional. Used only to fill this site\u2019s own login form.';
+
+            form.classList.remove('hidden');
+            document.getElementById('ctAddBtn').classList.toggle('hidden', !!ctEditingId);
+            document.getElementById('ctName').focus();
+
+            // RULE 1: a stored password is never echoed into the field. We
+            // can only learn *that* one exists, so say so in the
+            // placeholder and treat "blank" as "keep it".
+            if (tool) {
+                ct.credentialStatus(tool.id).then(st => {
+                    if (ctEditingId !== tool.id) return; // user moved on
+                    document.getElementById('ctUsername').value = st.username || '';
+                    ctEditHasPassword = !!st.hasPassword;
+                    const hint = document.getElementById('ctPasswordHint');
+                    if (st.unreadable) {
+                        pw.placeholder = 'Re-enter password';
+                        hint.textContent = 'A saved password exists but could not be unlocked on this Windows account. Re-enter it to fix auto-fill.';
+                        hint.className = 'text-[10px] text-amber-400 mt-1';
+                    } else if (st.hasPassword) {
+                        pw.placeholder = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 (stored)';
+                        hint.textContent = 'A password is saved. Leave this blank to keep it, or type a new one to replace it.';
+                        hint.className = 'text-[10px] text-gray-500 mt-1';
+                    }
+                    if (!st.encrypted) ctSetWarn('This workstation does not support encrypted storage, so credentials would be saved unencrypted on disk. Consider leaving the password blank and signing in manually.');
+                });
+            }
+        }
+
+        function ctHideForm() {
+            const form = document.getElementById('ctForm');
+            if (form) form.classList.add('hidden');
+            document.getElementById('ctAddBtn').classList.remove('hidden');
+            ctEditingId = null;
+            ctEditHasPassword = false;
+            ctSetErrors([]);
+            ctSetWarn('');
+        }
+
+        function ctSetErrors(list) {
+            const box = document.getElementById('ctFormErrors');
+            if (!box) return;
+            if (!list || !list.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+            box.innerHTML = list.map(e => '<div>\u2022 ' + esc(e) + '</div>').join('');
+            box.classList.remove('hidden');
+        }
+
+        function ctSetWarn(msg) {
+            const box = document.getElementById('ctFormWarn');
+            if (!box) return;
+            if (!msg) { box.classList.add('hidden'); box.textContent = ''; return; }
+            box.textContent = msg;
+            box.classList.remove('hidden');
+        }
+
+        async function ctSaveForm() {
+            const ct = CT();
+            if (!ct) return;
+            const input = {
+                label: document.getElementById('ctName').value,
+                url: document.getElementById('ctUrl').value,
+                description: document.getElementById('ctDesc').value,
+            };
+
+            let res;
+            try {
+                res = ctEditingId ? ct.update(ctEditingId, input) : ct.add(input);
+            } catch (err) {
+                // _write deliberately does not swallow QuotaExceededError:
+                // the examiner must not be shown a tool that vanishes on
+                // reload.
+                ctSetErrors(['Could not save: ' + (err.message || err)]);
+                return;
+            }
+            if (!res.ok) { ctSetErrors(res.errors); return; }
+
+            const id = res.tool.id;
+            const username = document.getElementById('ctUsername').value;
+            const password = document.getElementById('ctPassword').value;
+
+            // RULE 2: blank + a password already on file means "keep it",
+            // which the vault expresses as an explicit null.
+            const hadCreds = ctEditingId && ctEditHasPassword;
+            if (username || password || hadCreds) {
+                const cres = await ct.saveCredentials(id, username,
+                    (!password && hadCreds) ? null : password);
+                if (!cres.ok) {
+                    ctSetErrors(['Tool saved, but credentials failed: ' + cres.error]);
+                    ctRender(); ctChanged();
+                    return;
+                }
+            }
+
+            ctHideForm();
+            ctRender();
+            ctChanged();
+            if (res.insecure) {
+                ctBanner(id, 'Saved. This address is plain http:// \u2014 traffic to it is not encrypted.', 'warn');
+            }
+        }
+
+        function ctTogglePasswordVisibility() {
+            const el = document.getElementById('ctPassword');
+            el.type = el.type === 'password' ? 'text' : 'password';
+        }
+
+        /* ── List ─────────────────────────────────────────────── */
+
+        function ctRender() {
+            const ct = CT();
+            const host = document.getElementById('customToolsList');
+            if (!ct || !host) return;
+
+            let tools = [];
+            try { tools = ct.list(); } catch (_) { tools = []; }
+
+            const empty = document.getElementById('ctEmpty');
+            if (empty) empty.classList.toggle('hidden', tools.length > 0);
+
+            host.innerHTML = tools.map(t => {
+                const on = t.enabled !== false;
+                return '' +
+                // A disabled tool is NOT in the resources tray, so dim it —
+                // otherwise the list gives no glanceable signal of which
+                // tools an examiner can actually reach.
+                '<div class="rounded-lg p-3 border border-gray-700/50 bg-viper-dark/70' + (on ? '' : ' opacity-60') + '" data-ct-card="' + esc(t.id) + '">' +
+                  '<div class="flex items-start gap-3">' +
+                    '<div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 text-[11px] font-bold" ' +
+                         'style="background:' + esc(t.color) + '22;color:' + esc(t.color) + '">' + esc(ct.initialsOf(t.label)) + '</div>' +
+                    '<div class="flex-1 min-w-0">' +
+                      '<div class="flex items-center justify-between gap-3">' +
+                        '<h5 class="text-white font-semibold text-sm truncate">' + esc(t.label) +
+                          (on ? '' : ' <span class="text-[10px] font-normal text-gray-500 uppercase tracking-wider">hidden from tray</span>') + '</h5>' +
+                        '<button onclick="ctToggleEnabled(\'' + esc(t.id) + '\')" title="' + (on ? 'Hide from the resources tray' : 'Show in the resources tray') + '" ' +
+                                'class="relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ' + (on ? 'bg-viper-purple' : 'bg-gray-600') + '">' +
+                          '<div class="absolute w-4 h-4 bg-white rounded-full top-1 transition-transform ' + (on ? 'translate-x-6' : 'translate-x-1') + '"></div>' +
+                        '</button>' +
+                      '</div>' +
+                      '<p class="text-[11px] text-gray-500 mt-0.5 truncate" title="' + esc(t.url) + '">' + esc(ct.hostOf(t.url)) +
+                        (/^http:/i.test(t.url) ? ' <span class="text-amber-400">\u00b7 not encrypted</span>' : '') + '</p>' +
+                      (t.description ? '<p class="text-xs text-gray-400 mt-1 leading-relaxed">' + esc(t.description) + '</p>' : '') +
+                      '<div class="mt-2 flex items-center gap-3 flex-wrap">' +
+                        '<a href="' + esc(t.url) + '" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 text-xs text-viper-purple hover:underline">' +
+                          '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>' +
+                          'Open Site</a>' +
+                        '<button onclick="ctShowForm(\'' + esc(t.id) + '\')" class="text-xs text-gray-400 hover:text-white transition">Edit</button>' +
+                        '<button onclick="ctDelete(\'' + esc(t.id) + '\')" data-ct-del="' + esc(t.id) + '" class="text-xs text-gray-500 hover:text-red-400 transition">Remove</button>' +
+                      '</div>' +
+
+                      '<details class="mt-3" onclick="ctLazyCredStatus(\'' + esc(t.id) + '\')">' +
+                        '<summary class="cursor-pointer text-xs text-viper-purple hover:opacity-80 select-none flex items-center gap-1.5 font-medium">' +
+                          '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>' +
+                          'Login Credentials (auto-fill)</summary>' +
+                        '<div class="mt-3 space-y-3 p-3 rounded-lg bg-viper-purple/5 border border-viper-purple/10">' +
+                          '<div>' +
+                            '<label class="block text-xs text-gray-400 mb-1">Username</label>' +
+                            '<input type="text" id="ctu_' + esc(t.id) + '" autocomplete="off" placeholder="Username for this site" ' +
+                                   'class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-purple focus:outline-none">' +
+                          '</div>' +
+                          '<div>' +
+                            '<label class="block text-xs text-gray-400 mb-1">Password</label>' +
+                            '<input type="password" id="ctp_' + esc(t.id) + '" autocomplete="new-password" placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" ' +
+                                   'class="w-full bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-purple focus:outline-none">' +
+                          '</div>' +
+                          '<div class="flex gap-2">' +
+                            '<button onclick="ctSaveCreds(\'' + esc(t.id) + '\')" class="px-3 py-1.5 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded-lg text-viper-purple text-xs font-medium transition">Save Credentials</button>' +
+                            '<button onclick="ctClearCreds(\'' + esc(t.id) + '\')" class="px-3 py-1.5 bg-gray-600/20 hover:bg-gray-600/30 border border-gray-600 rounded-lg text-gray-400 text-xs font-medium transition">Clear</button>' +
+                          '</div>' +
+                          '<p id="cts_' + esc(t.id) + '" class="text-xs text-gray-500 leading-relaxed">Checking\u2026</p>' +
+                        '</div>' +
+                      '</details>' +
+
+                      '<div id="ctb_' + esc(t.id) + '" class="hidden text-xs mt-2 leading-relaxed"></div>' +
+                    '</div>' +
+                  '</div>' +
+                '</div>';
+            }).join('');
+        }
+
+        /** Per-card feedback, so a message about one tool never appears
+         *  next to another. */
+        function ctBanner(id, msg, kind) {
+            const el = document.getElementById('ctb_' + id);
+            if (!el) return;
+            el.textContent = msg;
+            el.className = 'text-xs mt-2 leading-relaxed ' +
+                (kind === 'error' ? 'text-red-400' : kind === 'warn' ? 'text-amber-400' : 'text-viper-green');
+            el.classList.remove('hidden');
+            setTimeout(() => { el.classList.add('hidden'); }, 6000);
+        }
+
+        function ctToggleEnabled(id) {
+            const ct = CT();
+            if (!ct) return;
+            const tool = ct.get(id);
+            if (!tool) { ctRender(); return; }
+            let res;
+            try { res = ct.setEnabled(id, tool.enabled === false); }
+            catch (err) { ctBanner(id, 'Could not save: ' + (err.message || err), 'error'); return; }
+            if (!res.ok) { ctBanner(id, res.errors.join(' '), 'error'); return; }
+            ctRender();
+            ctChanged();
+        }
+
+        /** Two-step confirm rather than a blocking modal. */
+        function ctDelete(id) {
+            const btn = document.querySelector('[data-ct-del="' + id + '"]');
+            if (ctPendingDelete !== id) {
+                ctPendingDelete = id;
+                if (btn) { btn.textContent = 'Remove \u2014 click to confirm'; btn.className = 'text-xs text-red-400 font-semibold'; }
+                clearTimeout(ctDeleteTimer);
+                ctDeleteTimer = setTimeout(() => { ctPendingDelete = null; ctRender(); }, 5000);
+                return;
+            }
+            clearTimeout(ctDeleteTimer);
+            ctPendingDelete = null;
+            const ct = CT();
+            // Async: also drops the credentials, the BrowserView and the
+            // tool's whole session partition, so no authenticated court
+            // portal is left signed in on a shared workstation.
+            Promise.resolve(ct.remove(id)).catch(() => {}).then(() => {
+                if (ctEditingId === id) ctHideForm();
+                ctRender();
+                ctChanged();
+            });
+        }
+
+        /* ── Per-card credentials ──────────────────────────────── */
+
+        const ctStatusLoaded = new Set();
+
+        function ctLazyCredStatus(id) {
+            // `onclick` on <details> fires before the open state flips, so
+            // just load once on first interaction.
+            if (ctStatusLoaded.has(id)) return;
+            ctStatusLoaded.add(id);
+            ctRefreshCredStatus(id);
+        }
+
+        async function ctRefreshCredStatus(id) {
+            const ct = CT();
+            if (!ct) return;
+            const st = await ct.credentialStatus(id);
+            const userEl = document.getElementById('ctu_' + id);
+            const passEl = document.getElementById('ctp_' + id);
+            const target = document.getElementById('cts_' + id);
+
+            if (userEl && !userEl.value) userEl.value = st.username || '';
+            if (passEl) {
+                // RULE 1 again: never populate the password field.
+                passEl.value = '';
+                passEl.placeholder = st.hasPassword
+                    ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 (stored)'
+                    : '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
+            }
+            if (!target) return;
+
+            let msg, cls = 'text-xs text-gray-500 leading-relaxed';
+            if (st.unreadable) {
+                msg = 'A saved password could not be unlocked on this Windows account. Re-enter it to restore auto-fill.';
+                cls = 'text-xs text-amber-400 leading-relaxed';
+            } else if (st.hasPassword) {
+                msg = 'Password saved' + (st.encrypted
+                        ? ' and encrypted with your Windows account.'
+                        : ' \u2014 UNENCRYPTED, this workstation does not support secure storage.') +
+                      ' Leave the field blank to keep it.';
+                if (!st.encrypted) cls = 'text-xs text-amber-400 leading-relaxed';
+            } else if (!st.encrypted) {
+                msg = 'This workstation does not support encrypted storage. A password saved here would sit unencrypted on disk.';
+                cls = 'text-xs text-amber-400 leading-relaxed';
+            } else {
+                msg = 'No credentials saved. VIPER cannot read a saved password back \u2014 it is only injected into this site\u2019s login form.';
+            }
+            target.textContent = msg;
+            target.className = cls;
+        }
+
+        async function ctSaveCreds(id) {
+            const ct = CT();
+            const user = document.getElementById('ctu_' + id);
+            const pass = document.getElementById('ctp_' + id);
+            if (!ct || !user || !pass) return;
+            const st = await ct.credentialStatus(id);
+            // RULE 2 in the per-card panel too.
+            const pw = (!pass.value && st.hasPassword) ? null : pass.value;
+            const res = await ct.saveCredentials(id, user.value, pw);
+            if (!res.ok) { ctBanner(id, res.error, 'error'); return; }
+            pass.value = '';
+            ctBanner(id, res.encrypted ? 'Credentials saved (encrypted).' : 'Credentials saved WITHOUT encryption \u2014 secure storage is unavailable here.', res.encrypted ? 'ok' : 'warn');
+            ctRefreshCredStatus(id);
+            // The view may already be open with the old credentials.
+            if (window.electronAPI && window.electronAPI.customToolReload) {
+                window.electronAPI.customToolReload({ id: id, home: false }).catch(() => {});
+            }
+        }
+
+        async function ctClearCreds(id) {
+            const ct = CT();
+            const res = await ct.clearCredentials(id);
+            const user = document.getElementById('ctu_' + id);
+            const pass = document.getElementById('ctp_' + id);
+            if (user) user.value = '';
+            if (pass) { pass.value = ''; pass.placeholder = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022'; }
+            ctBanner(id, res.ok ? 'Credentials cleared.' : ('Could not clear: ' + res.error), res.ok ? 'ok' : 'error');
+            ctRefreshCredStatus(id);
+        }
+
+        /* ── Wiring ───────────────────────────────────────────── */
+
+        window.ctShowForm = ctShowForm;
+        window.ctHideForm = ctHideForm;
+        window.ctSaveForm = ctSaveForm;
+        window.ctTogglePasswordVisibility = ctTogglePasswordVisibility;
+        window.ctToggleEnabled = ctToggleEnabled;
+        window.ctDelete = ctDelete;
+        window.ctSaveCreds = ctSaveCreds;
+        window.ctClearCreds = ctClearCreds;
+        window.ctLazyCredStatus = ctLazyCredStatus;
+        window.ctRender = ctRender;
+
+        // Another window (a case window's tray) may have changed things.
+        window.addEventListener('storage', (e) => {
+            if (CT() && e.key === CT().STORE_KEY) ctRender();
+        });
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', ctRender);
+        } else {
+            ctRender();
+        }
+    })();
     </script>
 
 </body>

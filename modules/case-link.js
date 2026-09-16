@@ -527,6 +527,21 @@
                     confidence,
                     via: via ? IDENT_LABEL[via.type] : undefined,
                     viaValue: via ? identDisplay(via) : undefined,
+                    // Where the record actually lives, so the UI can offer to
+                    // import it into the current case. A DESCRIPTOR rather than
+                    // the raw object: the click may come minutes after the
+                    // render and the source case could have changed, so the
+                    // record is re-resolved at import time.
+                    sourceCaseId: o.caseId,
+                    sourceCaseNumber: o.caseNumber,
+                    sourceRole: o.role,
+                    ref: {
+                        caseId: o.caseId,
+                        role: o.role,
+                        canonical: canonicalKey(o.person) || '',
+                        nameKey: nameKey(o.person) || '',
+                        ident: via ? (via.type + ':' + via.value) : '',
+                    },
                 });
             });
         });
@@ -563,6 +578,23 @@
                     note: ml.note || '',
                     addedAt: ml.addedAt || '',
                     manual: true,
+                    // A manual link stores only the name/DOB the user typed, so
+                    // the descriptor has no canonical key. getPersonRecord()
+                    // falls back to a name lookup across every role in the
+                    // linked case; if nothing is found the importer builds a
+                    // minimal record from the name and DOB instead of failing.
+                    sourceCaseId: ml.otherCaseId,
+                    sourceCaseNumber: ml.otherCaseNumber || other.caseNumber || ml.otherCaseId,
+                    sourceRole: sp.role || '',
+                    ref: {
+                        caseId: ml.otherCaseId,
+                        role: sp.role || '',
+                        canonical: '',
+                        nameKey: '',
+                        ident: '',
+                        name: sp.name || '',
+                        dob: sp.dob || '',
+                    },
                 });
             });
         } catch (_) {}
@@ -592,6 +624,69 @@
 
     function titleCase(s) {
         return String(s || '').toLowerCase().replace(/\b([a-z])/g, (_, c) => c.toUpperCase());
+    }
+
+    /**
+     * Re-resolve the ORIGINAL stored person object behind a sharedPerson.ref.
+     *
+     * getRelatedCases() hands the UI a descriptor, not the record, because the
+     * "Import into this case" click can land long after the card was painted
+     * and the source case may have been edited in the meantime. Resolving here
+     * means the import always copies what is on disk right now.
+     *
+     * Resolution order, most specific first:
+     *   1. canonical key (name + DOB) within the recorded role
+     *   2. shared identifier (email / username / IP / phone / SSN)
+     *   3. name key within the role
+     *   4. name key across ANY role in that case (manual links carry no role)
+     *
+     * @param {object} ref  sharedPerson.ref from getRelatedCases()
+     * @returns {object|null} the raw stored person object, or null
+     */
+    function getPersonRecord(ref) {
+        if (!ref || !ref.caseId) return null;
+        const idx = buildIndex();
+        const inCase = idx.entries.filter(e => e.caseId === ref.caseId);
+        if (!inCase.length) return null;
+
+        const sameRole = ref.role ? inCase.filter(e => e.role === ref.role) : inCase;
+
+        if (ref.canonical) {
+            const hit = sameRole.find(e => canonicalKey(e.person) === ref.canonical);
+            if (hit) return hit.person.raw || null;
+        }
+
+        if (ref.ident) {
+            const sep = String(ref.ident).indexOf(':');
+            if (sep > 0) {
+                const t = ref.ident.slice(0, sep);
+                const v = ref.ident.slice(sep + 1);
+                const hit = sameRole.find(e =>
+                    identTokens(e.person).some(tok => tok.type === t && tok.value === v));
+                if (hit) return hit.person.raw || null;
+            }
+        }
+
+        if (ref.nameKey) {
+            const hit = sameRole.find(e => nameKey(e.person) === ref.nameKey);
+            if (hit) return hit.person.raw || null;
+        }
+
+        // Manual-link fallback: match on the typed name across every role.
+        if (ref.name) {
+            const parts = parseNameString(ref.name);
+            const nk = nameKey({ firstName: norm(parts.first), lastName: norm(parts.last) });
+            if (nk) {
+                const wantDob = normDob(ref.dob || '');
+                const pool = inCase.filter(e => nameKey(e.person) === nk);
+                // Prefer an exact DOB match when the manual link recorded one.
+                const exact = wantDob && pool.find(e => e.person.dob === wantDob);
+                const hit = exact || pool[0];
+                if (hit) return hit.person.raw || null;
+            }
+        }
+
+        return null;
     }
 
     function escHtml(s) {
@@ -986,6 +1081,9 @@
         countMatches,
         // Related cases (Tier B)
         getRelatedCases,
+        // Re-resolve the stored record behind a sharedPerson.ref so the UI can
+        // import a related person into the current case.
+        getPersonRecord,
         // Manual links
         getManualLinks,
         addManualLink,

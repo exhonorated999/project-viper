@@ -12,7 +12,7 @@
   'use strict';
 
   /* ── Resource definitions ─────────────────────────────────── */
-  const RESOURCES = [
+  const BUILTIN_RESOURCES = [
     { id: 'flock',    label: 'Flock Safety',        enabledKey: 'flockEnabled',        isBV: true },
     { id: 'tlo',      label: 'TLO / TransUnion',    enabledKey: 'tloEnabled',          isBV: true },
     { id: 'accurint', label: 'LexisNexis Accurint', enabledKey: 'accurintEnabled',     isBV: true },
@@ -31,12 +31,94 @@
     { id: 'fmcsa',    label: 'FMCSA Carrier',       enabledKey: 'fmcsaEnabled',        isBV: false },
   ];
 
+  // RESOURCES is rebuilt (not replaced in place) by syncResources() so
+  // that user-defined tools appear alongside the built-ins without every
+  // existing `RESOURCES.find/forEach/filter` call site needing to know
+  // custom tools exist.
+  let RESOURCES = BUILTIN_RESOURCES.slice();
+
+  /** Custom tools, shaped to look like a built-in resource descriptor. */
+  function customResourceDefs() {
+    const CT = window.CustomTools;
+    if (!CT) return [];
+    let tools = [];
+    try { tools = CT.list(); } catch (_) { return []; }
+    return tools.map(t => ({
+      id: t.id,
+      label: t.label,
+      isBV: true,
+      custom: true,
+      url: t.url,
+      color: t.color,
+      description: t.description,
+      enabledKey: null,
+      enabled: t.enabled !== false,
+    }));
+  }
+
+  function syncResources() {
+    RESOURCES = BUILTIN_RESOURCES.concat(customResourceDefs());
+    ensureCustomPanels();
+    return RESOURCES;
+  }
+
   let rhOpen = false;
   let rhExpanded = false;
   let rhActiveTab = null;
 
   function enabled() {
-    return RESOURCES.filter(r => localStorage.getItem(r.enabledKey) === 'true');
+    syncResources();
+    return RESOURCES.filter(r => r.custom
+      ? r.enabled !== false
+      : localStorage.getItem(r.enabledKey) === 'true');
+  }
+
+  /**
+   * Custom tools have no hand-written panel in the injected DOM, so build
+   * one per tool on demand and tear down panels for tools that have been
+   * deleted. Also injects the per-tool tab underline color, which cannot
+   * be done inline because it lives on a ::after pseudo-element.
+   */
+  function ensureCustomPanels() {
+    const content = document.getElementById('rhContent');
+    if (!content) return;
+    // Only tools that are actually in the tray get a panel. A disabled
+    // tool has no tab, so a panel for it is unreachable — and leaving one
+    // behind means disabling a tool never cleans up its DOM.
+    const defs = RESOURCES.filter(r => r.custom && r.enabled !== false);
+    const live = new Set(defs.map(d => d.id));
+
+    // Remove panels for deleted tools.
+    Array.from(content.querySelectorAll('[data-ct-panel]')).forEach(el => {
+      if (!live.has(el.getAttribute('data-ct-panel'))) el.remove();
+    });
+
+    let css = '';
+    defs.forEach(d => {
+      css += `.rh-tab[data-res="${d.id}"].rh-active::after{width:100%;background:${d.color || '#38bdf8'}}`;
+      if (document.getElementById('rhPanel_' + d.id)) return;
+      const panel = document.createElement('div');
+      panel.id = 'rhPanel_' + d.id;
+      panel.setAttribute('data-ct-panel', d.id);
+      panel.className = 'absolute inset-0 hidden';
+      const inner = document.createElement('div');
+      inner.id = 'rhBV_' + d.id;
+      inner.className = 'rh-bv-placeholder w-full h-full flex items-center justify-center';
+      const p = document.createElement('p');
+      p.className = 'text-gray-600 text-xs';
+      p.textContent = 'Loading ' + d.label + '…';
+      inner.appendChild(p);
+      panel.appendChild(inner);
+      content.appendChild(panel);
+    });
+
+    let styleEl = document.getElementById('rh-custom-styles');
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = 'rh-custom-styles';
+      document.head.appendChild(styleEl);
+    }
+    if (styleEl.textContent !== css) styleEl.textContent = css;
   }
 
   /* ── Inject CSS ───────────────────────────────────────────── */
@@ -261,11 +343,31 @@
     const bar = document.getElementById('rhTabBar');
     if (!bar) return;
     const active = enabled();
-    bar.innerHTML = active.map(r =>
-      `<button class="rh-tab px-4 py-2.5 text-xs font-semibold text-gray-500 hover:text-gray-300 whitespace-nowrap transition" data-res="${r.id}" onclick="window._rhSwitchTab('${r.id}')">${r.label}</button>`
-    ).join('');
+    const tabFor = (r) =>
+      `<button class="rh-tab px-4 py-2.5 text-xs font-semibold text-gray-500 hover:text-gray-300 whitespace-nowrap transition" data-res="${esc(r.id)}" onclick="window._rhSwitchTab('${esc(r.id)}')"${r.custom ? ` title="${esc(r.description || r.url)}"` : ''}>${esc(r.label)}</button>`;
+
+    const builtins = active.filter(r => !r.custom);
+    const customs = active.filter(r => r.custom);
+
+    // Custom tools get their own labelled group at the end of the bar so
+    // an examiner can tell at a glance which resources are agency-issued
+    // and which they added themselves.
+    let html = builtins.map(tabFor).join('');
+    if (customs.length) {
+      html += `<div class="flex items-center gap-2 pl-3 pr-1 flex-shrink-0" title="Tools you added yourself">
+          <div class="w-px h-5 bg-white/10"></div>
+          <span class="text-[9px] font-bold uppercase tracking-widest text-cyan-500/70 whitespace-nowrap">My Tools</span>
+        </div>` + customs.map(tabFor).join('');
+    }
+    bar.innerHTML = html;
     if (!active.find(r => r.id === rhActiveTab) && active.length) rhActiveTab = active[0].id;
     highlightTab();
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   function highlightTab() {
@@ -315,6 +417,17 @@
       height: Math.round(r.height * z)
     };
     if (b.width < 10 || b.height < 10) return;
+    const res = RESOURCES.find(r => r.id === resId);
+    if (res && res.custom) {
+      // One generic bridge for every user-added tool. The url + label ride
+      // along because main creates the view lazily on first show and has
+      // no other source for them (the metadata lives in localStorage).
+      window.electronAPI.customToolSetBounds({ id: resId, bounds: b });
+      window.electronAPI.customToolSetVisible({
+        id: resId, visible: true, url: res.url, label: res.label, bounds: b,
+      });
+      return;
+    }
     if (resId === 'flock') { window.electronAPI.flockSetBounds(b); window.electronAPI.flockSetVisible(true); }
     if (resId === 'tlo')   { window.electronAPI.tloSetBounds(b);   window.electronAPI.tloSetVisible(true); }
     if (resId === 'accurint') { window.electronAPI.accurintSetBounds(b); window.electronAPI.accurintSetVisible(true); }
@@ -338,6 +451,12 @@
 
   function hideBV(resId) {
     if (!window.electronAPI) return;
+    if (window.CustomTools && window.CustomTools.isCustomId(resId)) {
+      if (window.electronAPI.customToolSetVisible) {
+        window.electronAPI.customToolSetVisible({ id: resId, visible: false });
+      }
+      return;
+    }
     if (resId === 'flock') window.electronAPI.flockSetVisible(false);
     if (resId === 'tlo')   window.electronAPI.tloSetVisible(false);
     if (resId === 'accurint') window.electronAPI.accurintSetVisible(false);
@@ -355,6 +474,32 @@
   }
 
   function hideAllBVs() { RESOURCES.filter(r => r.isBV).forEach(r => hideBV(r.id)); }
+
+  /**
+   * A resource can be turned off (or a custom tool deleted) while its
+   * BrowserView is on screen. A BrowserView is an OS-level overlay, not a
+   * DOM node, so simply rebuilding the tab bar leaves it floating over the
+   * app with no tab to close it — the drawer looks wedged. Always hide the
+   * departing view and move to a tab that still exists.
+   */
+  function refreshAfterResourceChange() {
+    const previous = rhActiveTab;
+    const active = enabled();               // also runs syncResources()
+    updateFab();
+
+    const stillThere = active.some(r => r.id === previous);
+    if (!stillThere && previous) hideBV(previous);
+
+    if (!rhOpen) return;
+
+    if (!active.length) { close(); return; }
+    if (stillThere) { buildTabBar(); return; }
+
+    // buildTabBar re-points rhActiveTab at the first surviving resource;
+    // switchTab then does the show/position dance.
+    buildTabBar();
+    switchTab(rhActiveTab || active[0].id);
+  }
 
   /* ── Open / Close / Toggle ────────────────────────────────── */
   function toggle() { rhOpen ? close() : open(); }
@@ -990,11 +1135,17 @@
 
     // Settings changes → update FAB + tabs
     window.addEventListener('storage', (e) => {
-      if (RESOURCES.some(r => r.enabledKey === e.key)) {
-        updateFab();
-        if (rhOpen) buildTabBar();
+      // `viperCustomTools` covers add/edit/delete/enable of user tools,
+      // which arrive from the settings page in another renderer.
+      if (e.key === (window.CustomTools && window.CustomTools.STORE_KEY) ||
+          RESOURCES.some(r => r.enabledKey === e.key)) {
+        refreshAfterResourceChange();
       }
     });
+
+    // Same-page notification (settings.html hosts the tray too, and
+    // `storage` does not fire in the window that made the change).
+    window.addEventListener('viper:custom-tools-changed', refreshAfterResourceChange);
 
     // Listen for downloads intercepted from Resource Hub BrowserViews
     // (Flock, ICACCOPS, ICAC Data System, Gridcop, TLO, Accurint,

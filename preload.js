@@ -20,6 +20,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Storage paths
   getStoragePaths: () => ipcRenderer.invoke('get-storage-paths'),
 
+  // Storage health / install marker (phantom-reset protection).
+  // Lets the renderer tell a genuinely new install apart from a userData
+  // folder that simply has not synced/mounted yet.
+  getStorageHealth: () => ipcRenderer.invoke('get-storage-health'),
+  getInstallMarkerRegistration: () => ipcRenderer.invoke('get-install-marker-registration'),
+  updateInstallMarker: (payload) => ipcRenderer.invoke('update-install-marker', payload || {}),
+
   // Storage location overrides (Settings → Storage Locations)
   getStorageOverrides: () => ipcRenderer.invoke('get-storage-overrides'),
   chooseDirectory: (opts) => ipcRenderer.invoke('choose-directory', opts || {}),
@@ -172,6 +179,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   discordWarrantReadPage: (data) => ipcRenderer.invoke('discord-warrant-read-page', data),
   discordWarrantSearchChannel: (data) => ipcRenderer.invoke('discord-warrant-search-channel', data),
   discordWarrantDeleteStore: (data) => ipcRenderer.invoke('discord-warrant-delete-store', data),
+
+  // ── Custom "bring your own tool" investigative resources ──────────
+  // Bounds/visible mirror the built-in resource bridges but are keyed by
+  // tool id instead of having one pair per resource.
+  // NOTE: there is deliberately no "read credentials" bridge. Passwords
+  // are written into the main-process vault and injected from there; they
+  // never come back across this boundary.
+  customToolSetBounds: (data) => ipcRenderer.send('custom-tool-set-bounds', data),
+  customToolSetVisible: (data) => ipcRenderer.send('custom-tool-set-visible', data),
+  customToolSaveCreds: (data) => ipcRenderer.invoke('custom-tool-save-creds', data),
+  customToolCredStatus: (id) => ipcRenderer.invoke('custom-tool-cred-status', id),
+  customToolClearCreds: (id) => ipcRenderer.invoke('custom-tool-clear-creds', id),
+  customToolForget: (id) => ipcRenderer.invoke('custom-tool-forget', id),
+  customToolReload: (data) => ipcRenderer.invoke('custom-tool-reload', data),
 
   // Datapilot mobile-forensic CSV export parser
   datapilotScan: (data) => ipcRenderer.invoke('datapilot-scan', data),
@@ -333,6 +354,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   resourceHubRouteDownload: (payload) => ipcRenderer.invoke('rh-download-route', payload),
   resourceHubCapturePdf: (payload) => ipcRenderer.invoke('rh-capture-pdf', payload),
   resourceHubCaptureHtml: (payload) => ipcRenderer.invoke('rh-capture-html', payload),
+
+  // P2P Activity Check (TorrentAnalytics). The results view is a
+  // BrowserView because the site forbids framing (X-Frame-Options: DENY
+  // + frame-ancestors 'none') — see modules/p2p-scan/p2p-scan.js.
+  // Capture reuses the rh-download-ready destination picker above, so
+  // there is no separate "save to evidence" channel.
+  p2pScanOpen: (payload) => ipcRenderer.invoke('p2p-scan-open', payload),
+  p2pScanSetBounds: (bounds) => ipcRenderer.send('p2p-scan-set-bounds', bounds),
+  p2pScanClose: () => ipcRenderer.send('p2p-scan-close'),
+  p2pScanReload: () => ipcRenderer.invoke('p2p-scan-reload'),
+  p2pScanCapturePdf: () => ipcRenderer.invoke('p2p-scan-capture-pdf'),
 
   // Warrant file storage
   saveWarrantFile: (data) => ipcRenderer.invoke('save-warrant-file', data),

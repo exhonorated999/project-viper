@@ -142,6 +142,13 @@ async function activateLicense(licenseKey) {
   _set("license_key", licenseKey);
   _set("license_type", json.license_type || "standard");
   if (json.expires_at) _set("expires_at", json.expires_at);
+  // Mirror the upgraded license to the on-disk install marker so a later
+  // storage hiccup can never cost the user their paid activation.
+  try {
+    if (typeof window !== 'undefined' && window.ViperStorageGuard) {
+      window.ViperStorageGuard.markHealthy();
+    }
+  } catch (_) {}
   // Audit: license activation. Fire-and-forget; failures here must
   // never break activation. window.electronAPI may not exist in a
   // test/jsdom environment.

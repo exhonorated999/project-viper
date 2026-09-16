@@ -1,5 +1,5 @@
 const electron = require('electron');
-const { app, BrowserView, ipcMain, shell, dialog, globalShortcut, session, protocol, net, Menu } = electron;
+const { app, BrowserView, ipcMain, shell, dialog, globalShortcut, session, protocol, net, Menu, safeStorage } = electron;
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -141,6 +141,13 @@ const FLOCK_HOME_URL = 'https://search-2.flocksafety.com/';
 let tloBrowserView = null;
 let tloViewVisible = false;
 let lastTloBounds = null;
+// P2P Activity Check (TorrentAnalytics). Created lazily on first scan —
+// most cases never run one, and an always-on BrowserView for a site that
+// is only reachable from an IP identifier row is pure startup cost.
+let p2pScanBrowserView = null;
+let p2pScanViewVisible = false;
+let lastP2pScanBounds = null;
+let p2pScanCurrentIp = '';
 let accurintBrowserView = null;
 let accurintViewVisible = false;
 let lastAccurintBounds = null;
@@ -197,6 +204,33 @@ const iconPath = app.isPackaged
 const STORAGE_CONFIG_DIR = path.join(app.getPath('appData'), 'viper-electron-config');
 const STORAGE_CONFIG_FILE = path.join(STORAGE_CONFIG_DIR, 'storage.json');
 
+// ── Install marker (anti-"phantom reset") ────────────────────────────
+// Lives beside storage.json, i.e. ALWAYS on local disk in the real
+// %APPDATA% — never inside userData, never inside a redirected/cloud
+// folder. It records that this machine has a registered VIPER install.
+//
+// WHY: registration + case records live in Chromium localStorage inside
+// userData. If userData is unreadable at launch (cloud-sync placeholder
+// not yet hydrated, file lock, redirected folder not yet mounted) Chromium
+// hands the renderer an EMPTY localStorage instead of failing. The app
+// then concludes "brand new user", shows the registration modal and hides
+// every case — while the real data is sitting on disk, intact. That is
+// the Josh Berzanji incident: it healed itself on the third launch once
+// OneDrive finished syncing.
+//
+// This marker lets the renderer tell those two states apart:
+//   marker absent + localStorage empty  -> genuinely a new install
+//   marker present + localStorage empty -> STORAGE FAULT, do not prompt
+const INSTALL_MARKER_FILE = path.join(STORAGE_CONFIG_DIR, 'install.json');
+
+// Atomic write / cloud-path detection / localStorage probe live in a
+// shared module so they can be unit-tested in plain Node without booting
+// Electron. See modules/_shared/safe-storage-io.js and
+// modules/_shared/__tests__/safe-storage-io.test.js
+const _safeIO = require('./modules/_shared/safe-storage-io');
+const _atomicWriteFileSync = _safeIO.atomicWriteFileSync;
+const _looksCloudSynced = (p) => _safeIO.looksCloudSynced(p, process.env);
+
 function _normalizeStorageTargetBootstrap(rawPath, kind) {
   if (!rawPath || typeof rawPath !== 'string') return rawPath;
   const trimmed = rawPath.trim();
@@ -223,7 +257,7 @@ function _readStorageOverrides() {
     // Persist any normalization so the next read is already clean
     if ((out.casesPath && out.casesPath !== parsed.casesPath) ||
         (out.userDataPath && out.userDataPath !== parsed.userDataPath)) {
-      try { fs.writeFileSync(STORAGE_CONFIG_FILE, JSON.stringify(out, null, 2), 'utf8'); } catch (_) {}
+      try { _atomicWriteFileSync(STORAGE_CONFIG_FILE, JSON.stringify(out, null, 2)); } catch (_) {}
     }
     return out;
   } catch (e) {
@@ -235,7 +269,7 @@ function _readStorageOverrides() {
 function _writeStorageOverrides(next) {
   try {
     if (!fs.existsSync(STORAGE_CONFIG_DIR)) fs.mkdirSync(STORAGE_CONFIG_DIR, { recursive: true });
-    fs.writeFileSync(STORAGE_CONFIG_FILE, JSON.stringify(next, null, 2), 'utf8');
+    _atomicWriteFileSync(STORAGE_CONFIG_FILE, JSON.stringify(next, null, 2));
     return true;
   } catch (e) {
     console.error('storage overrides write failed:', e.message);
@@ -267,6 +301,33 @@ let casesDir;            // writable directory for case data (reassignable)
 let userDataOverridden = false;
 let casesOverridden = false;
 
+// Boot-time storage forensics. Captured BEFORE we create any directory, so
+// we can tell "the user's folder is there" from "we just invented an empty
+// one". The renderer uses this to decide whether an empty localStorage is a
+// new install or a storage fault. See INSTALL_MARKER_FILE above.
+const storageHealth = {
+  portable: isPortable,
+  userDataPath: null,
+  userDataExistedAtBoot: null,
+  localStorageExistedAtBoot: null,
+  localStorageFileCount: 0,
+  userDataCloudProvider: null,
+  casesPath: null,
+  casesExistedAtBoot: null,
+  casesCloudProvider: null,
+  overrideRequested: null,
+  overrideApplied: false,
+  overrideError: null,
+  warnings: [],
+};
+
+// A Chromium localStorage LevelDB is "real" if it has a CURRENT manifest.
+// An empty/absent directory means there is nothing to load — which is the
+// difference between a new user and a user whose files have not arrived.
+function _probeLocalStorage(userDataPath) {
+  return _safeIO.probeLocalStorage(userDataPath, fs);
+}
+
 if (isPortable) {
   // Portable mode wins over user overrides — the USB stick must stay self-contained
   const portableData = path.join(exeDir, 'userdata');
@@ -277,20 +338,50 @@ if (isPortable) {
 } else {
   // Desktop install: honor user overrides if present
   if (storageOverrides.userDataPath) {
+    storageHealth.overrideRequested = storageOverrides.userDataPath;
+    storageHealth.userDataCloudProvider = _looksCloudSynced(storageOverrides.userDataPath);
     try {
-      if (!fs.existsSync(storageOverrides.userDataPath)) {
+      // Probe BEFORE mkdir — once we create the folder we can no longer tell
+      // whether the user's data was simply not there yet.
+      const existed = fs.existsSync(storageOverrides.userDataPath);
+      storageHealth.userDataExistedAtBoot = existed;
+      if (existed) {
+        const probe = _probeLocalStorage(storageOverrides.userDataPath);
+        storageHealth.localStorageExistedAtBoot = probe.present;
+        storageHealth.localStorageFileCount = probe.files;
+      } else {
+        storageHealth.localStorageExistedAtBoot = false;
+        storageHealth.warnings.push(
+          'The redirected app-data folder did not exist at launch and was created empty. ' +
+          'If it lives on a cloud-synced or removable drive, your data may simply not have ' +
+          'synced/mounted yet.'
+        );
+      }
+      if (!existed) {
         fs.mkdirSync(storageOverrides.userDataPath, { recursive: true });
       }
       app.setPath('userData', storageOverrides.userDataPath);
       userDataOverridden = true;
+      storageHealth.overrideApplied = true;
       console.log('USER OVERRIDE — userData redirected to:', storageOverrides.userDataPath);
+      if (storageHealth.userDataCloudProvider) {
+        console.warn('WARNING: userData is inside', storageHealth.userDataCloudProvider,
+          '— Chromium localStorage (LevelDB) on cloud-synced storage can appear empty ' +
+          'until sync completes.');
+        storageHealth.warnings.push(
+          'App data is stored inside ' + storageHealth.userDataCloudProvider +
+          '. Cloud sync can make VIPER look reset until syncing finishes.'
+        );
+      }
     } catch (e) {
+      storageHealth.overrideError = e.message;
       console.error('userData override failed, using default:', e.message);
     }
   }
   if (storageOverrides.casesPath) {
     try {
-      if (!fs.existsSync(storageOverrides.casesPath)) {
+      storageHealth.casesExistedAtBoot = fs.existsSync(storageOverrides.casesPath);
+      if (!storageHealth.casesExistedAtBoot) {
         fs.mkdirSync(storageOverrides.casesPath, { recursive: true });
       }
       casesDir = storageOverrides.casesPath;
@@ -307,6 +398,38 @@ if (isPortable) {
   }
 }
 if (!fs.existsSync(casesDir)) fs.mkdirSync(casesDir, { recursive: true });
+
+// Finalize the boot-time storage picture for the non-override paths too.
+(function _finalizeStorageHealth() {
+  try {
+    const resolved = app.getPath('userData');
+    storageHealth.userDataPath = resolved;
+    if (storageHealth.userDataExistedAtBoot === null) {
+      storageHealth.userDataExistedAtBoot = fs.existsSync(resolved);
+      const probe = _probeLocalStorage(resolved);
+      storageHealth.localStorageExistedAtBoot = probe.present;
+      storageHealth.localStorageFileCount = probe.files;
+    }
+    if (!storageHealth.userDataCloudProvider) {
+      storageHealth.userDataCloudProvider = _looksCloudSynced(resolved);
+    }
+    storageHealth.casesPath = casesDir;
+    storageHealth.casesCloudProvider = _looksCloudSynced(casesDir);
+    if (storageHealth.casesExistedAtBoot === null) {
+      try { storageHealth.casesExistedAtBoot = fs.readdirSync(casesDir).length > 0; }
+      catch (_) { storageHealth.casesExistedAtBoot = false; }
+    }
+    if (storageHealth.casesCloudProvider) {
+      storageHealth.warnings.push(
+        'Case files are stored inside ' + storageHealth.casesCloudProvider +
+        '. If sync is incomplete, cases can appear missing until it finishes.'
+      );
+    }
+    console.log('[storage-health]', JSON.stringify(storageHealth));
+  } catch (e) {
+    console.error('storage health probe failed:', e.message);
+  }
+})();
 
 // MIME types mapping
 const mimeTypes = {
@@ -1664,6 +1787,7 @@ app.whenReady().then(async () => {
       { partition: 'persist:claimSearch',    label: 'ISO ClaimSearch',  defaultTag: 'ClaimSearch-Reports' },
       { partition: 'persist:osintIndustries',label: 'OSINT Industries', defaultTag: 'OSINT-Reports'    },
       { partition: 'persist:idiCore',        label: 'idiCORE',          defaultTag: 'idiCORE-Reports'  },
+      { partition: 'persist:p2pscan',        label: 'TorrentAnalytics', defaultTag: 'P2P-Scans'        },
     ];
 
     const _sanitizeDlName = (n) => String(n || 'download').replace(/[\\/:*?"<>|\r\n]+/g, '_').slice(0, 180) || 'download';
@@ -1719,12 +1843,17 @@ app.whenReady().then(async () => {
       }
     }
     RESOURCE_PARTITIONS.forEach(_attachResourceDownloadInterceptor);
+    // Custom "bring your own tool" resources are created on demand, long
+    // after createWindow() has returned, so publish the interceptor to
+    // module scope rather than duplicating it for user partitions.
+    _rhAttachDownloadInterceptor = _attachResourceDownloadInterceptor;
 
     // On page navigation, detach resource-hub BrowserViews so they can't steal clicks
     // on the next page. Media player is handled by its own show/hide via reportBounds().
     mainWindow.webContents.on('did-start-navigation', (_event, _url, isInPlace) => {
       if (isInPlace) return; // ignore hash/pushState navigations
-      const pageViews = [flockBrowserView, tloBrowserView, accurintBrowserView, whoosterBrowserView, vigilantBrowserView, icacDataSystemBrowserView, icacCopsBrowserView, gridcopBrowserView, callyoBrowserView, outlookBrowserView, leadsOnlineBrowserView, claimSearchBrowserView, osintIndustriesBrowserView, idiCoreBrowserView];
+      const pageViews = [flockBrowserView, tloBrowserView, accurintBrowserView, whoosterBrowserView, vigilantBrowserView, icacDataSystemBrowserView, icacCopsBrowserView, gridcopBrowserView, callyoBrowserView, outlookBrowserView, leadsOnlineBrowserView, claimSearchBrowserView, osintIndustriesBrowserView, idiCoreBrowserView, p2pScanBrowserView]
+        .concat(customToolViews());
       for (const bv of pageViews) {
         if (!bv) continue;
         try { mainWindow.removeBrowserView(bv); } catch (_) {}
@@ -1744,6 +1873,7 @@ app.whenReady().then(async () => {
       claimSearchViewVisible = false;
       osintIndustriesViewVisible = false;
       idiCoreViewVisible = false;
+      p2pScanViewVisible = false;
     });
 
     // When the renderer page finishes loading, ask it to report media bounds
@@ -1862,6 +1992,118 @@ ipcMain.handle('migrate-userdata', async (event, { toPath, mode } = {}) => {
 });
 
 // --- Storage paths for Settings page ---
+// ─────────────────────────────────────────────────────────────────────
+// Install marker — distinguishes "new install" from "storage not ready"
+// ─────────────────────────────────────────────────────────────────────
+// The registration blob is encrypted with the OS keystore (DPAPI on
+// Windows) via safeStorage when available, so this file is no more
+// readable than the user's own profile. Falls back to plaintext only if
+// the OS keystore is unavailable, which matches the existing localStorage
+// exposure anyway.
+function _readInstallMarker() {
+  try {
+    if (!fs.existsSync(INSTALL_MARKER_FILE)) return null;
+    const parsed = JSON.parse(fs.readFileSync(INSTALL_MARKER_FILE, 'utf8'));
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (parsed.enc && typeof parsed.registration === 'string') {
+      try {
+        const { safeStorage } = electron;
+        if (safeStorage && safeStorage.isEncryptionAvailable()) {
+          parsed.registration = JSON.parse(
+            safeStorage.decryptString(Buffer.from(parsed.registration, 'base64'))
+          );
+        } else {
+          parsed.registration = null;
+          parsed.registrationLocked = true;
+        }
+      } catch (_) {
+        parsed.registration = null;
+        parsed.registrationLocked = true;
+      }
+    }
+    return parsed;
+  } catch (e) {
+    console.warn('install marker unreadable:', e.message);
+    return null;
+  }
+}
+
+function _writeInstallMarker(next) {
+  try {
+    if (!fs.existsSync(STORAGE_CONFIG_DIR)) fs.mkdirSync(STORAGE_CONFIG_DIR, { recursive: true });
+    const out = { ...next, _v: 1, updatedAt: new Date().toISOString() };
+    if (out.registration && typeof out.registration === 'object') {
+      try {
+        const { safeStorage } = electron;
+        if (safeStorage && safeStorage.isEncryptionAvailable()) {
+          out.registration = safeStorage
+            .encryptString(JSON.stringify(out.registration))
+            .toString('base64');
+          out.enc = true;
+        } else {
+          out.enc = false;
+        }
+      } catch (_) { out.enc = false; }
+    }
+    _atomicWriteFileSync(INSTALL_MARKER_FILE, JSON.stringify(out, null, 2));
+    return true;
+  } catch (e) {
+    console.error('install marker write failed:', e.message);
+    return false;
+  }
+}
+
+// Returns everything the renderer needs to decide whether an empty
+// localStorage is trustworthy.
+ipcMain.handle('get-storage-health', async () => {
+  const marker = _readInstallMarker();
+  return {
+    ...storageHealth,
+    hasInstallMarker: !!marker,
+    marker: marker
+      ? {
+          firstSeenAt: marker.firstSeenAt || null,
+          lastHealthyAt: marker.lastHealthyAt || null,
+          lastKnownCaseCount: marker.lastKnownCaseCount || 0,
+          registrationLocked: !!marker.registrationLocked,
+          hasRegistration: !!(marker.registration && marker.registration.registered_at),
+        }
+      : null,
+  };
+});
+
+// Renderer asks for the stored registration to self-heal localStorage.
+ipcMain.handle('get-install-marker-registration', async () => {
+  const marker = _readInstallMarker();
+  if (!marker || !marker.registration) return null;
+  return marker.registration;
+});
+
+// Called by the renderer whenever storage is confirmed healthy.
+ipcMain.handle('update-install-marker', async (_e, payload) => {
+  try {
+    const prev = _readInstallMarker() || {};
+    const next = {
+      ...prev,
+      firstSeenAt: prev.firstSeenAt || new Date().toISOString(),
+      lastHealthyAt: new Date().toISOString(),
+    };
+    if (payload && payload.registration && typeof payload.registration === 'object') {
+      next.registration = payload.registration;
+      delete next.registrationLocked;
+    } else if (prev.registration && !prev.registrationLocked) {
+      next.registration = prev.registration;
+    }
+    if (payload && typeof payload.caseCount === 'number') {
+      next.lastKnownCaseCount = payload.caseCount;
+    }
+    next.userDataPath = app.getPath('userData');
+    return { success: _writeInstallMarker(next) };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('get-storage-paths', async () => {
   return {
     appDir: __dirname,
@@ -4773,22 +5015,35 @@ function _sanitizeNameSafe(n) {
 // rendered page (including content below the fold). The resulting file
 // is written to the same temp dir as downloads, then `rh-download-ready`
 // is emitted so the existing destination-picker modal handles routing.
-const _rhResourceMap = () => ({
-  flock:          { bv: flockBrowserView,          label: 'Flock Safety',     defaultTag: 'Flock-Reports'    },
-  tlo:            { bv: tloBrowserView,            label: 'TLO',              defaultTag: 'TLO-Reports'      },
-  accurint:       { bv: accurintBrowserView,       label: 'Accurint',         defaultTag: 'Accurint-Reports' },
-  whooster:       { bv: whoosterBrowserView,       label: 'Whooster',         defaultTag: 'Whooster-Reports' },
-  vigilant:       { bv: vigilantBrowserView,       label: 'Vigilant LPR',     defaultTag: 'Vigilant-Reports' },
-  icacDataSystem: { bv: icacDataSystemBrowserView, label: 'ICAC Data System', defaultTag: 'CyberTip-Reports' },
-  icacCops:       { bv: icacCopsBrowserView,       label: 'ICACCOPS',         defaultTag: 'ICACCOPS-Reports' },
-  gridcop:        { bv: gridcopBrowserView,        label: 'Gridcop',          defaultTag: 'Gridcop-Reports'  },
-  callyo:         { bv: callyoBrowserView,         label: 'Callyo',           defaultTag: 'Callyo-Reports'   },
-  outlook:        { bv: outlookBrowserView,        label: 'Outlook Email',    defaultTag: 'Outlook-Reports'  },
-  leadsOnline:    { bv: leadsOnlineBrowserView,    label: 'LeadsOnline',      defaultTag: 'LeadsOnline-Reports' },
-  claimSearch:    { bv: claimSearchBrowserView,    label: 'ISO ClaimSearch',  defaultTag: 'ClaimSearch-Reports' },
-  osintIndustries:{ bv: osintIndustriesBrowserView,label: 'OSINT Industries', defaultTag: 'OSINT-Reports'    },
-  idiCore:        { bv: idiCoreBrowserView,        label: 'idiCORE',          defaultTag: 'idiCORE-Reports'  },
-});
+const _rhResourceMap = () => {
+  const map = {
+    flock:          { bv: flockBrowserView,          label: 'Flock Safety',     defaultTag: 'Flock-Reports'    },
+    tlo:            { bv: tloBrowserView,            label: 'TLO',              defaultTag: 'TLO-Reports'      },
+    accurint:       { bv: accurintBrowserView,       label: 'Accurint',         defaultTag: 'Accurint-Reports' },
+    whooster:       { bv: whoosterBrowserView,       label: 'Whooster',         defaultTag: 'Whooster-Reports' },
+    vigilant:       { bv: vigilantBrowserView,       label: 'Vigilant LPR',     defaultTag: 'Vigilant-Reports' },
+    icacDataSystem: { bv: icacDataSystemBrowserView, label: 'ICAC Data System', defaultTag: 'CyberTip-Reports' },
+    icacCops:       { bv: icacCopsBrowserView,       label: 'ICACCOPS',         defaultTag: 'ICACCOPS-Reports' },
+    gridcop:        { bv: gridcopBrowserView,        label: 'Gridcop',          defaultTag: 'Gridcop-Reports'  },
+    callyo:         { bv: callyoBrowserView,         label: 'Callyo',           defaultTag: 'Callyo-Reports'   },
+    outlook:        { bv: outlookBrowserView,        label: 'Outlook Email',    defaultTag: 'Outlook-Reports'  },
+    leadsOnline:    { bv: leadsOnlineBrowserView,    label: 'LeadsOnline',      defaultTag: 'LeadsOnline-Reports' },
+    claimSearch:    { bv: claimSearchBrowserView,    label: 'ISO ClaimSearch',  defaultTag: 'ClaimSearch-Reports' },
+    osintIndustries:{ bv: osintIndustriesBrowserView,label: 'OSINT Industries', defaultTag: 'OSINT-Reports'    },
+    idiCore:        { bv: idiCoreBrowserView,        label: 'idiCORE',          defaultTag: 'idiCORE-Reports'  },
+  };
+  // User-added tools participate in capture-to-Evidence on the same
+  // terms as the built-ins. Only tools with a live view are listed.
+  for (const entry of customTools.values()) {
+    if (!entry.view || !entry.view.webContents || entry.view.webContents.isDestroyed()) continue;
+    map[entry.id] = {
+      bv: entry.view,
+      label: entry.label,
+      defaultTag: _ctSanitizeTag(entry.label) + '-Reports',
+    };
+  }
+  return map;
+};
 
 ipcMain.handle('rh-capture-pdf', async (_e, payload) => {
   const resourceId = payload && payload.resourceId;
@@ -8949,6 +9204,585 @@ function hideResourceBV(view) {
   try { mainWindow.removeBrowserView(view); } catch (_) {}
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// CUSTOM TOOLS — "bring your own" investigative resources
+// ═══════════════════════════════════════════════════════════════════
+// The 14 built-in resources each get a hand-written module-scope
+// BrowserView variable plus a copy-pasted bounds/visible IPC pair. That
+// does not scale to user-defined tools, which appear and disappear at
+// runtime, so custom tools share ONE generic IPC surface keyed by tool id
+// and a lazily-populated registry.
+//
+// Deliberate differences from the built-ins:
+//   - Views are created on first show, not at startup, so an examiner
+//     with 20 registered portals does not pay 20 BrowserViews on launch.
+//   - They route through showResourceBV/hideResourceBV, i.e. they get the
+//     5.1.5 non-wedging navigation logic that most built-ins still lack.
+//   - Credentials come from the encrypted vault in main, never from
+//     renderer localStorage.
+//   - The URL is re-validated here. The renderer already validates, but
+//     main must never hand an unvalidated string to loadURL.
+
+const { CredentialVault } = require('./modules/custom-tools-vault');
+
+let _ctVault = null;
+function ctVault() {
+  if (!_ctVault) _ctVault = new CredentialVault(app.getPath('userData'), safeStorage);
+  return _ctVault;
+}
+
+/** Set by createWindow() so custom partitions get download routing too. */
+let _rhAttachDownloadInterceptor = null;
+
+/** toolId -> { view, visible, lastBounds, url, label, partition } */
+const customTools = new Map();
+
+function customToolViews() {
+  return Array.from(customTools.values()).map(e => e.view).filter(Boolean);
+}
+
+/** Ids are minted by modules/custom-tools.js as `ct_<base36>_<rand>`. */
+function isCustomToolId(id) {
+  return typeof id === 'string' && /^ct_[a-z0-9_]+$/i.test(id) && id.length <= 64;
+}
+
+/**
+ * The main-process half of the URL allow-list. modules/custom-tools.js
+ * validates on the way in, but a compromised or buggy renderer must not be
+ * able to point a BrowserView at `file:///` and read the disk.
+ */
+function safeCustomToolUrl(raw) {
+  try {
+    const u = new URL(String(raw || ''));
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+    return u.toString();
+  } catch (_) {
+    return null;
+  }
+}
+
+function _ctSanitizeTag(label) {
+  const s = String(label || 'Custom').replace(/[^A-Za-z0-9 _-]+/g, '').trim().replace(/\s+/g, '-');
+  return (s || 'Custom').slice(0, 40);
+}
+
+/**
+ * Builds the auto-fill script for a tool. Unlike the built-in resources,
+ * which guess "is this a login page?" from the URL, this keys off the
+ * actual presence of a password field — a far better signal, and it means
+ * we never inject anything into a page that has nowhere to put it.
+ *
+ * Nothing is ever submitted; the examiner reviews and signs in.
+ */
+function _ctAutofillScript(username, password) {
+  return `
+    (function () {
+      var USER = ${JSON.stringify(username || '')};
+      var PASS = ${JSON.stringify(password || '')};
+      if (!USER && !PASS) return;
+      function setVal(el, val) {
+        if (!el || !val) return false;
+        try {
+          var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+          setter.call(el, val);
+        } catch (_) { el.value = val; }
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      }
+      function pickPass() {
+        var p = Array.prototype.slice.call(document.querySelectorAll('input[type="password"]'));
+        return p.filter(function (i) { return i.offsetParent !== null; })[0] || p[0] || null;
+      }
+      function pickUser(pw) {
+        var direct = document.querySelector('input[autocomplete="username"]')
+                  || document.querySelector('input[name="username"]')
+                  || document.querySelector('input#username')
+                  || document.querySelector('input[name="user"]')
+                  || document.querySelector('input[name="email"]')
+                  || document.querySelector('input[type="email"]');
+        if (direct) return direct;
+        // Fall back to the text input immediately preceding the password
+        // field in DOM order — reliable on portals with unlabelled inputs.
+        var all = Array.prototype.slice.call(document.querySelectorAll('input[type="text"], input[type="email"], input:not([type])'));
+        if (pw) {
+          var before = all.filter(function (i) {
+            return i.compareDocumentPosition(pw) & Node.DOCUMENT_POSITION_FOLLOWING;
+          });
+          if (before.length) return before[before.length - 1];
+        }
+        return all.find(function (i) {
+          return /user|email|login|logon|account/i.test((i.name || '') + ' ' + (i.id || '') + ' ' + (i.placeholder || ''));
+        }) || all[0] || null;
+      }
+      var done = false;
+      function fill() {
+        if (done) return;
+        var pw = pickPass();
+        if (!pw) return;                      // not a login page — do nothing
+        var ok = setVal(pw, PASS);
+        setVal(pickUser(pw), USER);
+        if (ok) done = true;
+      }
+      fill();
+      // SPA logins render the form after first paint, so retry briefly.
+      var tries = 0;
+      var iv = setInterval(function () {
+        tries++;
+        fill();
+        if (done || tries > 12) clearInterval(iv);
+      }, 400);
+    })();
+  `;
+}
+
+function _ctWireView(entry) {
+  const wc = entry.view.webContents;
+
+  wc.on('did-finish-load', () => {
+    try {
+      wc.insertCSS(`
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0d1117; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+      `).catch(() => {});
+    } catch (_) {}
+
+    // Read the secret only at the moment of use, and only in main.
+    let creds = null;
+    try { creds = ctVault().reveal(entry.id); } catch (_) { creds = null; }
+    if (!creds || (!creds.username && !creds.password)) return;
+    try {
+      wc.executeJavaScript(_ctAutofillScript(creds.username, creds.password), true).catch(() => {});
+    } catch (_) {}
+  });
+
+  // Keep the view on http(s). A portal that redirects to a custom scheme
+  // (some SSO clients do) must not be able to launch a protocol handler
+  // from inside an embedded view.
+  wc.on('will-navigate', (e, navUrl) => {
+    if (!safeCustomToolUrl(navUrl)) {
+      e.preventDefault();
+      console.warn('[custom-tool] blocked non-http navigation:', navUrl);
+    }
+  });
+
+  // Popups: allow real http(s) windows so Azure AD / Okta style SSO
+  // flows (which depend on window.opener) still work, but never let a
+  // popup inherit node integration, and deny anything non-web.
+  wc.setWindowOpenHandler(({ url: popupUrl }) => {
+    if (safeCustomToolUrl(popupUrl)) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          width: 900,
+          height: 720,
+          autoHideMenuBar: true,
+          webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, partition: entry.partition },
+        },
+      };
+    }
+    if (/^mailto:|^tel:/i.test(String(popupUrl || ''))) {
+      try { shell.openExternal(popupUrl); } catch (_) {}
+    }
+    return { action: 'deny' };
+  });
+
+  wc.on('did-fail-load', (_e, code, desc, u, isMain) => {
+    if (isMain && code !== -3) console.error('[custom-tool]', entry.id, 'did-fail-load', code, desc, u);
+  });
+  wc.on('render-process-gone', (_e, details) => {
+    console.error('[custom-tool]', entry.id, 'render-process-gone', details);
+  });
+}
+
+/**
+ * Lazily creates the BrowserView for a tool. Each tool gets its own
+ * persistent session partition, so signing into one portal never leaks
+ * cookies into another — and deleting the tool can wipe it wholesale.
+ */
+function ensureCustomToolView(id, url, label) {
+  if (!isCustomToolId(id)) return null;
+  const safeUrl = safeCustomToolUrl(url);
+  if (!safeUrl) return null;
+
+  let entry = customTools.get(id);
+  if (entry && entry.view && entry.view.webContents && !entry.view.webContents.isDestroyed()) {
+    entry.url = safeUrl;
+    if (label) entry.label = String(label).slice(0, 60);
+    return entry;
+  }
+
+  const partition = 'persist:custom_' + id;
+  const view = new BrowserView({
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      partition,
+    },
+  });
+  entry = {
+    id,
+    view,
+    partition,
+    url: safeUrl,
+    label: String(label || 'Custom Tool').slice(0, 60),
+    visible: false,
+    lastBounds: null,
+  };
+  customTools.set(id, entry);
+
+  try { view.setBounds({ x: 0, y: 0, width: 0, height: 0 }); } catch (_) {}
+  try { view.setAutoResize({ width: false, height: false }); } catch (_) {}
+  _ctWireView(entry);
+
+  // Route downloads from this portal into the Evidence picker, exactly
+  // like the built-in resources.
+  if (_rhAttachDownloadInterceptor && !entry.dlAttached) {
+    try {
+      _rhAttachDownloadInterceptor({
+        partition,
+        label: entry.label,
+        defaultTag: _ctSanitizeTag(entry.label) + '-Reports',
+      });
+      entry.dlAttached = true;
+    } catch (err) {
+      console.error('[custom-tool] download interceptor failed for', id, err);
+    }
+  }
+
+  console.log('[custom-tool] view created:', id, entry.label, partition);
+  return entry;
+}
+
+/** Full teardown — view, session data and stored credentials. */
+async function destroyCustomTool(id) {
+  const entry = customTools.get(id);
+  if (entry) {
+    try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.removeBrowserView(entry.view); } catch (_) {}
+    try { entry.view.webContents.close(); } catch (_) {}
+    customTools.delete(id);
+    // Clearing the partition matters: otherwise "delete this tool" would
+    // leave a live authenticated session for a court portal behind on a
+    // shared workstation.
+    try {
+      const ses = session.fromPartition(entry.partition);
+      await ses.clearStorageData();
+      await ses.clearCache();
+    } catch (err) {
+      console.warn('[custom-tool] partition clear failed for', id, err.message);
+    }
+  }
+  try { ctVault().clear(id); } catch (_) {}
+  return { success: true };
+}
+
+// ── Custom tool IPC ────────────────────────────────────────────────
+ipcMain.on('custom-tool-set-bounds', (_event, payload) => {
+  const { id, bounds } = payload || {};
+  const entry = customTools.get(id);
+  if (!entry || !mainWindow || mainWindow.isDestroyed() || !bounds) return;
+  const b = {
+    x: Math.round(bounds.x), y: Math.round(bounds.y),
+    width: Math.round(bounds.width), height: Math.round(bounds.height),
+  };
+  if (b.width < 10 || b.height < 10) return;
+  entry.lastBounds = b;
+  if (entry.visible) { try { entry.view.setBounds(b); } catch (_) {} }
+});
+
+ipcMain.on('custom-tool-set-visible', (_event, payload) => {
+  const { id, visible, url, label, bounds } = payload || {};
+  if (!isCustomToolId(id)) return;
+  if (!visible) {
+    const existing = customTools.get(id);
+    if (existing) {
+      existing.visible = false;
+      hideResourceBV(existing.view);
+    }
+    return;
+  }
+  const entry = ensureCustomToolView(id, url, label);
+  if (!entry) {
+    console.warn('[custom-tool] refused to show', id, '— invalid url:', url);
+    return;
+  }
+  if (bounds) {
+    const b = {
+      x: Math.round(bounds.x), y: Math.round(bounds.y),
+      width: Math.round(bounds.width), height: Math.round(bounds.height),
+    };
+    if (b.width >= 10 && b.height >= 10) entry.lastBounds = b;
+  }
+  entry.visible = true;
+  if (entry.lastBounds) showResourceBV(entry.view, entry.lastBounds, entry.url);
+});
+
+ipcMain.handle('custom-tool-save-creds', async (_event, payload) => {
+  const { id, username, password } = payload || {};
+  if (!isCustomToolId(id)) return { success: false, error: 'Unknown tool' };
+  return ctVault().save(id, username, password);
+});
+
+ipcMain.handle('custom-tool-cred-status', async (_event, id) => {
+  if (!isCustomToolId(id)) return { hasPassword: false, username: '', encrypted: false };
+  return ctVault().status(id);
+});
+
+ipcMain.handle('custom-tool-clear-creds', async (_event, id) => {
+  if (!isCustomToolId(id)) return { success: false, error: 'Unknown tool' };
+  return ctVault().clear(id);
+});
+
+ipcMain.handle('custom-tool-forget', async (_event, id) => {
+  if (!isCustomToolId(id)) return { success: false, error: 'Unknown tool' };
+  return destroyCustomTool(id);
+});
+
+// Reload / home, for the tray's per-tool controls.
+ipcMain.handle('custom-tool-reload', async (_event, payload) => {
+  const { id, home } = payload || {};
+  const entry = customTools.get(id);
+  if (!entry) return { success: false, error: 'Not open' };
+  try {
+    if (home) entry.view.webContents.loadURL(entry.url);
+    else entry.view.webContents.reload();
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// P2P ACTIVITY CHECK — TorrentAnalytics IP lookup
+// ═══════════════════════════════════════════════════════════════════
+// Ported from Project Oversight. See modules/p2p-scan/p2p-scan.js for
+// what this source can and cannot see, and why the caveat is mandatory.
+//
+// Why a BrowserView and not an iframe: torrentanalytics.net serves
+// `X-Frame-Options: DENY` plus `frame-ancestors 'none'`. Framing is
+// refused by Chromium itself — there is no client-side workaround. A
+// BrowserView is a top-level navigation and is unaffected.
+//
+// The renderer already validates the IP, but main must never hand an
+// unvalidated string to loadURL, so the check is repeated here. This is
+// the same defence-in-depth rule the custom-tools URL allow-list follows.
+
+const P2P_PARTITION = 'persist:p2pscan';
+
+/** Duplicate of p2p-scan.js isRoutableIpv4 — main cannot load the UMD
+ *  renderer module, and a require() of it here would be the only reason
+ *  that file needs to stay CommonJS-clean. Keep the two in sync; the
+ *  test suite asserts they agree. */
+function p2pIsRoutableIpv4(value) {
+  const parts = String(value == null ? '' : value).trim().split('.');
+  if (parts.length !== 4) return false;
+  const n = [];
+  for (const p of parts) {
+    if (!/^\d{1,3}$/.test(p)) return false;
+    if (p.length > 1 && p[0] === '0') return false;
+    const v = Number(p);
+    if (v < 0 || v > 255) return false;
+    n.push(v);
+  }
+  const [a, b] = n;
+  if (a === 0 || a === 10 || a === 127) return false;
+  if (a === 169 && b === 254) return false;
+  if (a === 172 && b >= 16 && b <= 31) return false;
+  if (a === 192 && b === 168) return false;
+  if (a === 100 && b >= 64 && b <= 127) return false;
+  if (a === 192 && b === 0) return false;
+  if (a === 198 && (b === 18 || b === 19 || b === 51)) return false;
+  if (a === 203 && b === 0) return false;
+  if (a >= 224) return false;
+  return true;
+}
+
+function p2pScanUrl(ip) {
+  return 'https://torrentanalytics.net/search_ip?ip=' + encodeURIComponent(String(ip).trim());
+}
+
+function ensureP2pScanView() {
+  if (p2pScanBrowserView && p2pScanBrowserView.webContents && !p2pScanBrowserView.webContents.isDestroyed()) {
+    return p2pScanBrowserView;
+  }
+  const view = new BrowserView({
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      partition: P2P_PARTITION,
+    },
+  });
+  const wc = view.webContents;
+
+  // Keep the view on http(s) and on this one host. A redirect to a custom
+  // scheme must not be able to launch a protocol handler from inside an
+  // embedded view, and there is no legitimate reason for this view to
+  // wander off TorrentAnalytics.
+  wc.on('will-navigate', (e, navUrl) => {
+    let ok = false;
+    try {
+      const u = new URL(String(navUrl || ''));
+      ok = (u.protocol === 'https:' || u.protocol === 'http:');
+    } catch (_) { ok = false; }
+    if (!ok) {
+      e.preventDefault();
+      console.warn('[p2p-scan] blocked non-http navigation:', navUrl);
+    }
+  });
+
+  // Their site has external links (FAQ, contact). Send those to the real
+  // browser rather than opening a second chromeless view the examiner
+  // has no way to close.
+  wc.setWindowOpenHandler(({ url: popupUrl }) => {
+    try {
+      const u = new URL(String(popupUrl || ''));
+      if (u.protocol === 'https:' || u.protocol === 'http:') shell.openExternal(popupUrl);
+    } catch (_) {}
+    return { action: 'deny' };
+  });
+
+  wc.on('did-finish-load', () => {
+    try {
+      wc.insertCSS(`
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0d1117; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+      `).catch(() => {});
+    } catch (_) {}
+  });
+
+  wc.on('did-fail-load', (_e, code, desc, u, isMain) => {
+    if (isMain && code !== -3) console.error('[p2p-scan] did-fail-load', code, desc, u);
+  });
+
+  try { view.setBounds({ x: 0, y: 0, width: 0, height: 0 }); } catch (_) {}
+  try { view.setAutoResize({ width: false, height: false }); } catch (_) {}
+
+  p2pScanBrowserView = view;
+  console.log('[p2p-scan] view created');
+  return view;
+}
+
+ipcMain.on('p2p-scan-set-bounds', (_event, bounds) => {
+  if (!p2pScanBrowserView || !mainWindow || mainWindow.isDestroyed() || !bounds) return;
+  const b = {
+    x: Math.round(bounds.x), y: Math.round(bounds.y),
+    width: Math.round(bounds.width), height: Math.round(bounds.height),
+  };
+  if (b.width < 10 || b.height < 10) return;
+  lastP2pScanBounds = b;
+  if (p2pScanViewVisible) { try { p2pScanBrowserView.setBounds(b); } catch (_) {} }
+});
+
+ipcMain.handle('p2p-scan-open', async (_event, payload) => {
+  const ip = String((payload && payload.ip) || '').trim();
+  const bounds = payload && payload.bounds;
+  if (!p2pIsRoutableIpv4(ip)) {
+    return { success: false, error: 'Not a publicly routable IPv4 address' };
+  }
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return { success: false, error: 'No window' };
+  }
+  const view = ensureP2pScanView();
+  if (bounds) {
+    const b = {
+      x: Math.round(bounds.x), y: Math.round(bounds.y),
+      width: Math.round(bounds.width), height: Math.round(bounds.height),
+    };
+    if (b.width >= 10 && b.height >= 10) lastP2pScanBounds = b;
+  }
+  if (!lastP2pScanBounds) return { success: false, error: 'No bounds reported' };
+
+  p2pScanViewVisible = true;
+  const url = p2pScanUrl(ip);
+
+  if (ip !== p2pScanCurrentIp) {
+    // A different IP is a different query, so showResourceBV's "already
+    // showing a good page" short-circuit must not apply. Attach and size
+    // first (Chromium suspends network I/O for detached 0x0 views), then
+    // navigate explicitly.
+    p2pScanCurrentIp = ip;
+    try { mainWindow.addBrowserView(view); } catch (_) {}
+    try { view.setBounds(lastP2pScanBounds); } catch (_) {}
+    try { view.webContents.loadURL(url); } catch (err) {
+      return { success: false, error: err.message || String(err) };
+    }
+  } else {
+    // Same IP reopened — reuse the loaded page and let the 5.1.5
+    // non-wedging logic handle a previous failure.
+    showResourceBV(view, lastP2pScanBounds, url);
+  }
+  return { success: true, url, ip };
+});
+
+ipcMain.on('p2p-scan-close', () => {
+  p2pScanViewVisible = false;
+  if (p2pScanBrowserView) hideResourceBV(p2pScanBrowserView);
+});
+
+ipcMain.handle('p2p-scan-reload', async () => {
+  if (!p2pScanBrowserView || p2pScanBrowserView.webContents.isDestroyed()) {
+    return { success: false, error: 'Not open' };
+  }
+  try {
+    if (p2pScanCurrentIp) p2pScanBrowserView.webContents.loadURL(p2pScanUrl(p2pScanCurrentIp));
+    else p2pScanBrowserView.webContents.reload();
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
+// Capture the scan as a PDF and hand it to the SAME destination-picker
+// modal the resource-hub downloads use (`rh-download-ready`). Reusing that
+// path means the file lands in the case's Evidence folder on disk with a
+// tag, gets discoverability, and shows up in exports — none of which we
+// have to reimplement here.
+ipcMain.handle('p2p-scan-capture-pdf', async () => {
+  if (!p2pScanBrowserView || p2pScanBrowserView.webContents.isDestroyed()) {
+    return { success: false, error: 'Scan window is not open' };
+  }
+  try {
+    const wc = p2pScanBrowserView.webContents;
+    const url = wc.getURL() || '';
+    const ipPart = _sanitizeNameSafe(p2pScanCurrentIp || 'ip');
+    const d = new Date();
+    const p = n => String(n).padStart(2, '0');
+    const stamp = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+    const fileName = `torrentanalytics_${ipPart}_${stamp}.pdf`;
+
+    const tempName = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}-${fileName}`;
+    const tempPath = path.join(rhDownloadTmpDir, tempName);
+
+    const pdfBuf = await wc.printToPDF({
+      printBackground: true,
+      pageSize: 'Letter',
+      margins: { marginType: 'custom', top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 },
+    });
+    fs.writeFileSync(tempPath, pdfBuf);
+    const stat = fs.statSync(tempPath);
+
+    mainWindow.webContents.send('rh-download-ready', {
+      success: true,
+      tempPath,
+      fileName,
+      size: stat.size,
+      mime: 'application/pdf',
+      sourceUrl: url,
+      resource: 'TorrentAnalytics',
+      defaultTag: 'P2P-Scans',
+      capture: true,
+    });
+    return { success: true, fileName };
+  } catch (err) {
+    console.error('[p2p-scan-capture-pdf]', err);
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
 ipcMain.on('flock-set-bounds', (_event, bounds) => {
   if (!flockBrowserView || !mainWindow || mainWindow.isDestroyed()) return;
   const b = {
@@ -9621,6 +10455,10 @@ ipcMain.on('rh-set-zoom', (_event, payload) => {
     else if (resId === 'claimSearch') bv = claimSearchBrowserView;
     else if (resId === 'osintIndustries') bv = osintIndustriesBrowserView;
     else if (resId === 'idiCore') bv = idiCoreBrowserView;
+    else if (isCustomToolId(resId)) {
+      const entry = customTools.get(resId);
+      bv = entry ? entry.view : null;
+    }
     if (bv && bv.webContents && !bv.webContents.isDestroyed()) {
       bv.webContents.setZoomFactor(f);
     }

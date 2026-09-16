@@ -13,6 +13,7 @@
     <script src="modules/telemetry-consent.js"></script>
     <script src="modules/genlogs-api.js"></script>
     <script src="modules/trace-search-api.js"></script>
+    <script src="modules/custom-tools.js"></script>
     <script src="modules/resource-hub.js"></script>
     <script src="modules/uc-chat/uc-chat-ops.js"></script>
     <script src="modules/case-link.js"></script>
@@ -37,6 +38,19 @@
     <script src="libs/d3.v7.min.js"></script>
     <link rel="stylesheet" href="modules/viper-skins.css">
     <script src="modules/viper-skins.js"></script>
+    <!-- Issuing-jurisdiction list for DL / plate "State" fields. Loaded
+         WITHOUT defer: the person and vehicle renderers call it synchronously. -->
+    <script src="modules/us-jurisdictions.js"></script>
+    <!-- Single source of truth for "is this warrant still outstanding?".
+         Shared with index.html so the alert badges and the warrant cards
+         can never disagree. Loaded WITHOUT defer (used during render). -->
+    <script src="modules/warrant-status.js"></script>
+    <!-- P2P Activity Check (TorrentAnalytics). Loaded WITHOUT defer:
+         _p2pScanBtn() is called synchronously while identifier rows
+         render. p2p-scan.js (pure core) must precede the UI half. -->
+    <link rel="stylesheet" href="modules/p2p-scan/p2p-scan.css">
+    <script src="modules/p2p-scan/p2p-scan.js"></script>
+    <script src="modules/p2p-scan/p2p-scan-ui.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -3141,7 +3155,7 @@
                             { label: 'Full Name',  value: fullName },
                             { label: 'Date of Birth', value: s.dob ? formatDate(s.dob) : '' },
                             { label: 'Age',        value: s.age },
-                            { label: "Driver's License", value: s.dlNumber || s.driverLicense || s.driversLicense },
+                            { label: "Driver's License", value: _dlDisplay(s, '') },
                             { label: 'Sex',        value: s.sex },
                             { label: 'Race',       value: s.race },
                             { label: 'Ethnicity',  value: s.ethnicity },
@@ -3324,7 +3338,7 @@
                             { label: 'Weight', value: p.weight },
                             { label: 'Hair', value: p.hairColor },
                             { label: 'Eyes', value: p.eyeColor },
-                            { label: 'DL #', value: p.dlNumber },
+                            { label: 'DL #', value: _dlDisplay(p, '') },
                             { label: 'Scars/Marks/Tattoos', value: p.scarsMarksTattoos }
                         ]);
                         gap(2);
@@ -3820,7 +3834,19 @@
                         fieldBold('   Date Served', w.dateServed ? formatDate(w.dateServed) : 'Not served');
                         fieldBold('   Due Date', w.dueDate ? formatDate(w.dueDate) : 'None');
                         if (w.judge) fieldBold('   Judge/Magistrate', w.judge);
-                        fieldBold('   Return Received', w.returnReceived ? 'Yes' : 'No');
+                        // Report the real disposition. A closed-out preservation
+                        // request must NOT read as "Return Received: Yes" —
+                        // nothing was received.
+                        if (w.returnReceived) {
+                            fieldBold('   Return Received', w.returnReceivedDate ? `Yes — ${formatDate(w.returnReceivedDate)}` : 'Yes');
+                        } else if (w.closedOut) {
+                            fieldBold('   Return Received', WarrantStatus.hasNothingToReceive(w)
+                                ? 'N/A — preservation request, no production expected'
+                                : 'No — closed out, no return expected');
+                            if (w.closedOutDate) fieldBold('   Closed Out', formatDate(w.closedOutDate));
+                        } else {
+                            fieldBold('   Return Received', 'No');
+                        }
                         if (w.courtReturnDate) fieldBold('   Court Return Filed', formatDate(w.courtReturnDate));
                         if (w.hasWarrantFile) fieldBold('   Signed Warrant File', w.warrantFileName);
                         if (w.hasProduction) fieldBold('   Production Files', `${w.productionFileCount} file(s)`);
@@ -4047,7 +4073,7 @@
                                 yPos += 5;
                             }
                             if (suspect.dlNumber) {
-                                doc.text(`DL#: ${suspect.dlNumber}`, margin + 5, yPos);
+                                doc.text(`DL#: ${_dlDisplay(suspect, '')}`, margin + 5, yPos);
                                 yPos += 5;
                             }
                             if (suspect.address) {
@@ -4189,7 +4215,7 @@
                                 yPos += 5;
                             }
                             if (vehicle.plateNumber) {
-                                doc.text(`Plate: ${vehicle.plateNumber}`, margin + 5, yPos);
+                                doc.text(`Plate: ${vehicle.plateNumber}${vehicle.plateState ? ' (' + vehicle.plateState + ')' : ''}`, margin + 5, yPos);
                                 yPos += 5;
                             }
                             if (vehicle.vin) {
@@ -4738,6 +4764,10 @@
                 return;
             }
 
+            // Register descriptors so each row can emit an Import button that
+            // references its person by key.
+            _registerCaseLinkImportRefs(related);
+
             // Group shared persons by confidence band for clarity
             const byConf = { MANUAL: [], HIGH: [], MEDIUM: [], LOW: [] };
             r.sharedPersons.forEach(sp => {
@@ -4750,6 +4780,9 @@
                 const myLabel = ROLE_LABELS[sp.myRole] || sp.myRole;
                 const theirLabel = ROLE_LABELS[sp.theirRole] || sp.theirRole;
                 const ico = roleIcon[sp.theirRole] || '👤';
+                // indexOf works because renderRow gets the same object
+                // references that _registerCaseLinkImportRefs keyed.
+                const importKey = `${r.caseId}|${r.sharedPersons.indexOf(sp)}`;
                 return `
                     <div class="flex items-start gap-3 p-3 rounded-lg bg-viper-card/40 border border-gray-700/40 hover:border-gray-600 transition">
                         <div class="text-2xl flex-shrink-0">${ico}</div>
@@ -4766,6 +4799,12 @@
                             </div>
                             ${sp.via ? `<div class="text-[11px] text-viper-cyan/80 mt-1">🔗 Matched on ${escHtml(sp.via)}${sp.viaValue ? `: <span class="font-mono text-gray-300">${escHtml(sp.viaValue)}</span>` : ''}</div>` : ''}
                         </div>
+                        <button type="button" onclick="importRelatedPerson('${escHtml(importKey)}')"
+                            title="Copy this person's record into ${escHtml(currentCase.caseNumber)}"
+                            class="flex-shrink-0 px-2.5 py-1.5 text-[11px] font-medium rounded-lg bg-viper-green/15 hover:bg-viper-green/25 border border-viper-green/40 text-viper-green transition inline-flex items-center gap-1.5 whitespace-nowrap">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                            Import
+                        </button>
                     </div>`;
             };
 
@@ -4860,6 +4899,251 @@
         }
         // Expose for inline onclick handlers
         if (typeof window !== 'undefined') window.showCaseLinkDetails = showCaseLinkDetails;
+
+        // ─── A-3c: Import a related person into THIS case ────────────────────
+        // Previously a detective who spotted a shared suspect in the Related
+        // Cases card had to retype the whole record by hand. These three
+        // functions copy it instead.
+        //
+        // Descriptors are stashed in _clImportRefs at render time and
+        // referenced by a short "<caseId>|<index>" key, because serialising a
+        // person object into an inline onclick attribute is both unreadable
+        // and an HTML-injection hazard.
+        let _clImportRefs = {};
+
+        /* viperToast lives in modules/viper-ui.js, which every other call site
+         * here guards with a typeof check. Do the same once, in one place. */
+        function _clToast(msg, kind) {
+            try {
+                const fn = (typeof viperToast === 'function') ? viperToast
+                         : (typeof showToast === 'function') ? showToast : null;
+                if (fn) fn(msg, kind || 'info');
+                else console.log('[CaseLink]', kind || 'info', msg);
+            } catch (_) {}
+        }
+
+        /** Register this render's shared-person descriptors. Called by the
+         *  overview card and the details modal before they emit buttons. */
+        function _registerCaseLinkImportRefs(related) {
+            _clImportRefs = {};
+            (related || []).forEach(r => {
+                (r.sharedPersons || []).forEach((sp, i) => {
+                    _clImportRefs[`${r.caseId}|${i}`] = { sp: sp, caseNumber: r.caseNumber, caseId: r.caseId };
+                });
+            });
+        }
+
+        // Only these roles are offered. Missing Person is included because it
+        // is a first-class party role in VIPER, not a sub-type of victim.
+        const _CL_IMPORT_TABS = [
+            { tab: 'suspects',       label: 'Suspect',         icon: '🚨', accent: 'viper-cyan' },
+            { tab: 'victims',        label: 'Victim',          icon: '🆘', accent: 'viper-purple' },
+            { tab: 'witnesses',      label: 'Witness',         icon: '👁️', accent: 'viper-green' },
+            { tab: 'missingpersons', label: 'Missing Person',  icon: '🚸', accent: 'viper-orange' },
+            { tab: 'involvedPersons',label: 'Involved Person', icon: '👤', accent: 'gray-400' },
+        ];
+        const _CL_ROLE_TO_TAB = {
+            suspect: 'suspects', victim: 'victims', witness: 'witnesses',
+            missingPerson: 'missingpersons',
+        };
+
+        /*
+         * Step 1: resolve the record and ask which role it should come in as.
+         *
+         * The role is ALWAYS asked, never assumed from the other case. A
+         * person can be a witness in one case and a suspect in another, and
+         * silently importing them as a suspect would be a serious mislabel.
+         */
+        function importRelatedPerson(key) {
+            const entry = _clImportRefs[key];
+            if (!entry) {
+                _clToast('That link is stale — rescan Related Cases and try again', 'error');
+                return;
+            }
+            const sp = entry.sp;
+
+            let record = null;
+            try {
+                if (window.CaseLink && typeof window.CaseLink.getPersonRecord === 'function') {
+                    record = window.CaseLink.getPersonRecord(sp.ref);
+                }
+            } catch (e) { console.warn('[CaseLink] getPersonRecord failed', e); }
+
+            if (!record) {
+                // Manual links store only what the user typed, so there may be
+                // no underlying record. Import the name/DOB rather than
+                // refusing outright — it still saves retyping.
+                if (sp.name && sp.name !== '(unnamed)' && sp.name !== '(manually linked)') {
+                    record = { name: sp.name, dob: sp.dob || '' };
+                } else {
+                    _clToast('Could not find that person in the source case', 'error');
+                    return;
+                }
+            }
+
+            const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+                ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+            const suggested = _CL_ROLE_TO_TAB[sp.theirRole] || '';
+            const fieldCount = Object.keys(record).filter(k => {
+                const v = record[k];
+                return v !== '' && v != null && !(Array.isArray(v) && !v.length);
+            }).length;
+
+            const modal = document.createElement('div');
+            modal.id = 'clImportModal';
+            modal.className = 'fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[70] p-4';
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+            modal.innerHTML = `
+                <div class="glass-card rounded-xl p-6 max-w-md w-full" onclick="event.stopPropagation()">
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <h3 class="text-lg font-bold text-white">Import into ${esc(currentCase.caseNumber)}</h3>
+                            <p class="text-sm text-gray-400 mt-0.5">
+                                <span class="text-white font-medium">${esc(record.name || sp.name)}</span>
+                                ${record.dob ? `<span class="font-mono text-xs"> · DOB ${esc(record.dob)}</span>` : ''}
+                            </p>
+                            <p class="text-xs text-gray-500 mt-1">from <span class="font-mono text-viper-cyan">${esc(entry.caseNumber)}</span> · ${fieldCount} field${fieldCount !== 1 ? 's' : ''} on record</p>
+                        </div>
+                        <button onclick="this.closest('#clImportModal').remove()" class="text-gray-400 hover:text-white p-1 -mr-1 -mt-1">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+                    <p class="text-xs text-gray-400 mb-3">Add them to this case as:</p>
+                    <div class="space-y-2">
+                        ${_CL_IMPORT_TABS.map(d => `
+                            <button type="button" onclick="executeImportRelatedPerson('${esc(key)}', '${d.tab}')"
+                                class="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg bg-viper-card/50 border ${d.tab === suggested ? 'border-viper-cyan' : 'border-gray-600'} hover:border-viper-cyan transition text-left">
+                                <span class="text-lg flex-shrink-0">${d.icon}</span>
+                                <span class="text-sm text-white font-medium flex-1">${d.label}</span>
+                                ${d.tab === suggested ? `<span class="text-[10px] text-viper-cyan whitespace-nowrap">same role in ${esc(entry.caseNumber)}</span>` : ''}
+                            </button>
+                        `).join('')}
+                    </div>
+                    <p class="text-[11px] text-gray-500 italic mt-4">
+                        Identity and description fields are copied. Case-specific facts
+                        (injuries, property, statements, last-seen clothing) are NOT —
+                        those must be documented from this investigation.
+                    </p>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        /*
+         * Step 2: write the copy into this case.
+         *
+         * Re-resolves the record rather than trusting anything captured in the
+         * previous step, and re-loads the destination array from storage first
+         * so a stale in-memory array can't clobber a concurrent edit.
+         */
+        function executeImportRelatedPerson(key, destTab) {
+            const entry = _clImportRefs[key];
+            if (!entry) { _clToast('That link is stale — rescan and try again', 'error'); return; }
+            const sp = entry.sp;
+
+            let source = null;
+            try {
+                if (window.CaseLink && typeof window.CaseLink.getPersonRecord === 'function') {
+                    source = window.CaseLink.getPersonRecord(sp.ref);
+                }
+            } catch (_) {}
+            if (!source && sp.name) source = { name: sp.name, dob: sp.dob || '' };
+            if (!source) { _clToast('Could not find that person in the source case', 'error'); return; }
+
+            const destRecord = _buildPersonRecordForTab(source, destTab);
+            if (!destRecord) { _clToast('Unsupported destination', 'error'); return; }
+
+            // Provenance. A record that appeared in a case file from nowhere is
+            // a discovery problem; this says where it came from and when.
+            destRecord.importedFrom = {
+                caseNumber: entry.caseNumber || '',
+                caseId: entry.caseId || '',
+                role: sp.theirRole || '',
+                confidence: sp.confidence || '',
+                at: new Date().toISOString(),
+            };
+
+            // Load fresh, then check for an existing match so a double-click
+            // or a re-import doesn't silently duplicate the person.
+            const loaders = {
+                suspects: () => { loadSuspects(); return suspects; },
+                victims: () => { loadVictims(); return victims; },
+                witnesses: () => { loadWitnesses(); return witnesses; },
+                missingpersons: () => { loadMissingPersons(); return missingPersons; },
+                involvedPersons: () => { loadInvolvedPersons(); return involvedPersons; },
+            };
+            const savers = {
+                suspects: saveSuspects, victims: saveVictims, witnesses: saveWitnesses,
+                missingpersons: saveMissingPersons, involvedPersons: saveInvolvedPersons,
+            };
+            const labels = {
+                suspects: 'Suspects', victims: 'Victims', witnesses: 'Witnesses',
+                missingpersons: 'Missing Persons', involvedPersons: 'Involved Persons',
+            };
+            const loader = loaders[destTab];
+            const saver = savers[destTab];
+            if (!loader || typeof saver !== 'function') { _clToast('Unsupported destination', 'error'); return; }
+
+            const list = loader();
+            const nameNorm = (s) => String(s || '').trim().toUpperCase().replace(/\s+/g, ' ');
+            const dup = (list || []).some(p =>
+                nameNorm(p && p.name) === nameNorm(destRecord.name) &&
+                String((p && p.dob) || '') === String(destRecord.dob || ''));
+            if (dup) {
+                if (!confirm(`${destRecord.name || 'That person'} already appears under ${labels[destTab]} in this case.\n\nAdd a second entry anyway?`)) {
+                    document.getElementById('clImportModal')?.remove();
+                    return;
+                }
+            }
+
+            list.push(destRecord);
+            try {
+                saver();
+            } catch (e) {
+                // Almost always QuotaExceededError from a copied photo.
+                console.warn('[CaseLink] import save failed, retrying without photos', e);
+                list.pop();
+                const slim = { ...destRecord, photo: '', residencePhoto: '' };
+                if (slim.vehicle && slim.vehicle.photo) slim.vehicle = { ...slim.vehicle, photo: null };
+                list.push(slim);
+                try {
+                    saver();
+                    _clToast('Imported without photos — storage is full', 'warning');
+                } catch (e2) {
+                    list.pop();
+                    console.error('[CaseLink] import failed', e2);
+                    _clToast('Import failed — storage is full', 'error');
+                    return;
+                }
+            }
+
+            ensureCaseModule(destTab);
+            try {
+                audit('related_person_imported', {
+                    case_number: currentCase ? currentCase.caseNumber : null,
+                    case_id: currentCase ? currentCase.id : null,
+                    source_case_number: entry.caseNumber || null,
+                    source_role: sp.theirRole || null,
+                    dest_tab: destTab,
+                    name: destRecord.name || '',
+                    match_confidence: sp.confidence || '',
+                });
+            } catch (_) {}
+
+            // The new person changes the link graph, so the index must go.
+            try { window.CaseLink && window.CaseLink.invalidateIndex && window.CaseLink.invalidateIndex(); } catch (_) {}
+
+            document.getElementById('clImportModal')?.remove();
+            document.getElementById('caseLinkDetailsModal')?.remove();
+            _clToast(`${destRecord.name || 'Person'} imported to ${labels[destTab]}`, 'success');
+            renderTabs();
+            renderTabContent(destTab);
+        }
+
+        if (typeof window !== 'undefined') {
+            window.importRelatedPerson = importRelatedPerson;
+            window.executeImportRelatedPerson = executeImportRelatedPerson;
+        }
 
         // ─── A-3b: Unlink (suppress / remove manual) ─────────────────────────
         // Called from the Details modal footer. Handles three shapes:
@@ -5509,6 +5793,11 @@
                         try { related = window.CaseLink.getRelatedCases(currentCase.id) || []; }
                         catch (e) { console.warn('[CaseLink] getRelatedCases failed', e); }
 
+                        // Register descriptors for the per-person Import buttons
+                        // below. Re-registered on every paint so the keys always
+                        // match what is on screen.
+                        try { _registerCaseLinkImportRefs(related); } catch (_) {}
+
                         const totalShared = related.reduce((s, r) => s + r.sharedPersons.length, 0);
                         const cap = 8;
                         const shown = related.slice(0, cap);
@@ -5557,7 +5846,7 @@
                                             </div>
                                         </div>
                                         <div class="flex flex-wrap gap-1.5">
-                                            ${r.sharedPersons.slice(0, 6).map(sp => {
+                                            ${r.sharedPersons.slice(0, 6).map((sp, spIdx) => {
                                                 const cc = confClass[sp.confidence] || confClass.LOW;
                                                 const isManual = sp.confidence === 'MANUAL';
                                                 const sameRole = sp.myRole === sp.theirRole;
@@ -5569,9 +5858,16 @@
                                                 const ico = isManual ? '🔗' : (roleIcon[sp.theirRole] || '');
                                                 const viaStr = sp.via ? ' · ' + sp.via : '';
                                                 const viaTip = sp.via ? ' · matched on ' + sp.via + (sp.viaValue ? ': ' + sp.viaValue : '') : '';
+                                                const importKey = `${r.caseId}|${spIdx}`;
                                                 return `<span class="inline-flex items-center gap-1.5 px-2 py-1 text-xs rounded ${cc.bg} ${cc.text} border ${cc.border}" title="${escHtml(sp.confidence)} — ${escHtml(roleStr)}${escHtml(viaTip)}${sp.note ? ' · ' + escHtml(sp.note) : ''}">
                                                     ${ico} <span class="font-medium">${escHtml(sp.name)}</span>
                                                     <span class="text-[10px] opacity-70">(${escHtml(roleStr)}${escHtml(viaStr)})</span>
+                                                    <button type="button" data-cl-action="import"
+                                                        onclick="event.stopPropagation(); importRelatedPerson('${escHtml(importKey)}')"
+                                                        title="Import ${escHtml(sp.name)} into this case"
+                                                        class="ml-0.5 -mr-0.5 w-4 h-4 rounded flex items-center justify-center bg-white/10 hover:bg-viper-green/40 hover:text-white transition">
+                                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M12 4v16m8-8H4"/></svg>
+                                                    </button>
                                                 </span>`;
                                             }).join('')}
                                             ${r.sharedPersons.length > 6 ? `<span class="text-xs text-gray-500 self-center">+${r.sharedPersons.length - 6} more</span>` : ''}
@@ -10808,9 +11104,8 @@
                     }
                     case 'status': {
                         // Overdue first, then pending (unserved), then complete
-                        const today = new Date(); today.setHours(0,0,0,0);
-                        const scoreA = a.returnReceived ? 2 : (a.dueDate && new Date(a.dueDate + 'T00:00:00') < today ? 0 : 1);
-                        const scoreB = b.returnReceived ? 2 : (b.dueDate && new Date(b.dueDate + 'T00:00:00') < today ? 0 : 1);
+                        const scoreA = WarrantStatus.isResolved(a) ? 2 : (WarrantStatus.isOverdue(a) ? 0 : 1);
+                        const scoreB = WarrantStatus.isResolved(b) ? 2 : (WarrantStatus.isOverdue(b) ? 0 : 1);
                         return scoreA - scoreB;
                     }
                     case 'dateSigned':
@@ -10824,7 +11119,9 @@
             return sorted.map(warrant => {
                 const dueDateLocal = warrant.dueDate ? new Date(warrant.dueDate + 'T00:00:00') : null;
                 const todayLocal = new Date(); todayLocal.setHours(0,0,0,0);
-                const isOverdue = dueDateLocal && !warrant.returnReceived && dueDateLocal < todayLocal;
+                const isOverdue = WarrantStatus.isOverdue(warrant);
+                const isResolved = WarrantStatus.isResolved(warrant);
+                const noReturnExpected = WarrantStatus.hasNothingToReceive(warrant);
                 const daysUntilDue = dueDateLocal ? Math.ceil((dueDateLocal - todayLocal) / (1000 * 60 * 60 * 24)) : null;
                 
                 return `
@@ -10878,7 +11175,7 @@
                                         <div class="bg-viper-card/50 rounded p-2 ${isOverdue ? 'border-2 border-red-500' : ''}">
                                             <p class="text-gray-400 text-xs">Due Date</p>
                                             <p class="${isOverdue ? 'text-red-400 font-bold' : 'text-white'}">${formatDate(warrant.dueDate)}</p>
-                                            ${daysUntilDue !== null && !warrant.returnReceived ? `
+                                            ${daysUntilDue !== null && !isResolved ? `
                                                 <p class="text-xs ${isOverdue ? 'text-red-400' : daysUntilDue <= 7 ? 'text-viper-orange' : 'text-gray-400'}">
                                                     ${isOverdue ? `${Math.abs(daysUntilDue)} days overdue` : `${daysUntilDue} days remaining`}
                                                 </p>
@@ -10895,15 +11192,52 @@
                                 
                                 <!-- Return Status -->
                                 <div class="border-t border-gray-700 pt-4">
-                                    <label class="flex items-center space-x-3 cursor-pointer">
-                                        <input type="checkbox" ${warrant.returnReceived ? 'checked' : ''} onchange="toggleWarrantReturn(${warrant.id})" class="w-5 h-5 rounded border-gray-600 text-viper-green focus:ring-viper-green focus:ring-offset-0">
+                                    <label class="flex items-center space-x-3 ${warrant.closedOut ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}">
+                                        <input type="checkbox" ${warrant.returnReceived ? 'checked' : ''} ${warrant.closedOut ? 'disabled' : ''} onchange="toggleWarrantReturn(${warrant.id})" class="w-5 h-5 rounded border-gray-600 text-viper-green focus:ring-viper-green focus:ring-offset-0">
                                         <span class="text-sm font-medium ${warrant.returnReceived ? 'text-viper-green' : 'text-gray-400'}">
                                             ${warrant.returnReceived ? '✓ Warrant Return Received' : 'Mark Return as Received'}
                                         </span>
                                     </label>
-                                    ${warrant.returnReceivedAt ? `
-                                        <p class="text-xs text-gray-400 mt-1 ml-8">Received: ${new Date(warrant.returnReceivedAt).toLocaleString()}</p>
+                                    ${warrant.returnReceived ? `
+                                        <!-- Received date is EDITABLE: a production that lands
+                                             over a weekend or on the detective's day off gets
+                                             checked off later than it actually arrived. The
+                                             click timestamp below is kept as the audit trail
+                                             and is never overwritten. -->
+                                        <div class="mt-2 ml-8 flex flex-wrap items-center gap-2">
+                                            <label class="text-xs text-gray-400">Date received:</label>
+                                            <input type="date" value="${_warrantReceivedDate(warrant)}" max="${_todayLocalDate()}"
+                                                   onchange="setWarrantReturnDate(${warrant.id}, this.value)"
+                                                   class="bg-viper-card/50 border border-gray-600 rounded px-2 py-1 text-xs text-white focus:border-viper-green focus:outline-none">
+                                            ${warrant.returnReceivedAt ? `<span class="text-xs text-gray-500">recorded ${new Date(warrant.returnReceivedAt).toLocaleString()}</span>` : ''}
+                                        </div>
                                     ` : ''}
+                                    ${warrant.closedOut ? `
+                                        <div class="mt-3 flex flex-wrap items-center gap-2">
+                                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-viper-green/15 border border-viper-green/40 text-viper-green text-xs font-medium">
+                                                ✓ ${noReturnExpected ? 'Preservation Closed Out' : 'Closed Out'} — no return expected
+                                            </span>
+                                            ${warrant.closedOutAt ? `<span class="text-xs text-gray-500">${new Date(warrant.closedOutAt).toLocaleString()}</span>` : ''}
+                                            <button onclick="reopenWarrant(${warrant.id})" class="text-xs text-gray-400 hover:text-viper-orange underline">Reopen</button>
+                                        </div>
+                                    ` : (!warrant.returnReceived ? `
+                                        <!-- Preservation requests produce nothing to receive: the
+                                             provider just holds the data. Recording "return
+                                             received" for one would be false in a case file, so
+                                             they get their own close-out that silences alerts. -->
+                                        <div class="mt-3">
+                                            <button onclick="closeOutWarrant(${warrant.id})"
+                                                    class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition ${noReturnExpected
+                                                        ? 'bg-viper-green/15 border border-viper-green/40 text-viper-green hover:bg-viper-green/25'
+                                                        : 'bg-viper-card/40 border border-gray-600 text-gray-400 hover:text-white hover:border-gray-500'}">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                                </svg>
+                                                ${noReturnExpected ? 'Close Out Preservation (No Return Expected)' : 'Close Out — No Return Expected'}
+                                            </button>
+                                            ${noReturnExpected ? `<p class="text-xs text-gray-500 mt-1.5">Preservation requests have no production to receive. Closing out stops the due-date alerts.</p>` : ''}
+                                        </div>
+                                    ` : '')}
                                 </div>
                                 
                                 <!-- Attachments -->
@@ -11169,6 +11503,10 @@
                     warrantFilePath: savedFilePath,
                     returnReceived: false,
                     returnReceivedAt: null,
+                    returnReceivedDate: null,
+                    closedOut: false,
+                    closedOutAt: null,
+                    closedOutDate: null,
                     hasProduction: false,
                     productionFileCount: 0,
                     productionFiles: [],
@@ -11193,13 +11531,158 @@
             renderTabContent('warrants');
         }
         
+        /* Local 'YYYY-MM-DD' for today. Built from local parts, NOT
+         * toISOString(), which is UTC and would hand back tomorrow's date to
+         * anyone east of Greenwich after 4pm. */
+        function _todayLocalDate() {
+            const d = new Date();
+            const p = n => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+        }
+
+        /*
+         * The effective date of receipt for the date picker.
+         *
+         * `returnReceivedDate` is the examiner-editable effective date.
+         * `returnReceivedAt` is the immutable timestamp of the click and is
+         * the fallback for warrants checked off before this field existed.
+         */
+        function _warrantReceivedDate(w) {
+            if (!w) return '';
+            if (w.returnReceivedDate) return w.returnReceivedDate;
+            if (w.returnReceivedAt) {
+                const d = new Date(w.returnReceivedAt);
+                if (!isNaN(d.getTime())) {
+                    const p = n => String(n).padStart(2, '0');
+                    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+                }
+            }
+            return '';
+        }
+
         function toggleWarrantReturn(warrantId) {
             const warrant = caseWarrants.find(w => w.id === warrantId);
             if (!warrant) return;
-            
+
             warrant.returnReceived = !warrant.returnReceived;
-            warrant.returnReceivedAt = warrant.returnReceived ? new Date().toISOString() : null;
-            
+            if (warrant.returnReceived) {
+                // Two fields on purpose: `returnReceivedAt` records WHEN the
+                // examiner clicked (audit trail, never edited) and
+                // `returnReceivedDate` is the effective date of receipt, which
+                // defaults to today but the examiner can correct.
+                warrant.returnReceivedAt = new Date().toISOString();
+                warrant.returnReceivedDate = _todayLocalDate();
+                // Receiving a return resolves it; the close-out flag would be
+                // contradictory.
+                warrant.closedOut = false;
+                warrant.closedOutAt = null;
+            } else {
+                warrant.returnReceivedAt = null;
+                warrant.returnReceivedDate = null;
+            }
+
+            audit(warrant.returnReceived ? 'warrant_return_received' : 'warrant_return_unmarked', {
+                case_number: currentCase ? currentCase.caseNumber : null,
+                case_id: currentCase ? currentCase.id : null,
+                warrant_id: warrant.id,
+                type: warrant.type,
+                issued_to: warrant.issuedTo,
+                received_date: warrant.returnReceivedDate || null,
+            });
+
+            saveWarrantsToStorage();
+            renderTabContent('warrants');
+        }
+
+        /*
+         * Correct the effective date of receipt (return arrived over a weekend
+         * or on a day off and was only checked off later).  Rejects a future
+         * date rather than silently storing it — a return cannot be received
+         * tomorrow.
+         */
+        function setWarrantReturnDate(warrantId, value) {
+            const warrant = caseWarrants.find(w => w.id === warrantId);
+            if (!warrant) return;
+            const v = String(value || '').trim();
+            if (!v) { renderTabContent('warrants'); return; }
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) { renderTabContent('warrants'); return; }
+            if (v > _todayLocalDate()) {
+                showToast('Received date cannot be in the future.', 'error');
+                renderTabContent('warrants');
+                return;
+            }
+            const previous = warrant.returnReceivedDate || null;
+            warrant.returnReceivedDate = v;
+            warrant.lastModified = new Date().toISOString();
+
+            audit('warrant_return_date_changed', {
+                case_number: currentCase ? currentCase.caseNumber : null,
+                case_id: currentCase ? currentCase.id : null,
+                warrant_id: warrant.id,
+                from: previous,
+                to: v,
+            });
+
+            saveWarrantsToStorage();
+            renderTabContent('warrants');
+        }
+
+        /*
+         * Close out a warrant that has nothing to receive.  Preservation
+         * requests are the motivating case: the provider holds the data and
+         * sends nothing back, so there is no production to mark received, yet
+         * the due-date alerts fired forever.
+         *
+         * Stored as its OWN flag, not as returnReceived, because claiming a
+         * return was received when none exists would be a false entry in the
+         * case file — and the DA report reads these fields.
+         */
+        function closeOutWarrant(warrantId) {
+            const warrant = caseWarrants.find(w => w.id === warrantId);
+            if (!warrant) return;
+
+            const noReturn = WarrantStatus.hasNothingToReceive(warrant);
+            const label = warrant.issuedTo ? ` to ${warrant.issuedTo}` : '';
+            const msg = noReturn
+                ? `Close out this preservation request${label}?\n\nNo production will be recorded as received, and due-date alerts for it will stop.`
+                : `Close out this ${String(warrant.type || 'item').replace('-', ' ')}${label} with no return expected?\n\nDue-date alerts for it will stop.`;
+            if (!confirm(msg)) return;
+
+            warrant.closedOut = true;
+            warrant.closedOutAt = new Date().toISOString();
+            warrant.closedOutDate = _todayLocalDate();
+            warrant.lastModified = new Date().toISOString();
+
+            audit('warrant_closed_out', {
+                case_number: currentCase ? currentCase.caseNumber : null,
+                case_id: currentCase ? currentCase.id : null,
+                warrant_id: warrant.id,
+                type: warrant.type,
+                issued_to: warrant.issuedTo,
+                no_return_expected: noReturn,
+            });
+
+            saveWarrantsToStorage();
+            renderTabContent('warrants');
+            showToast(noReturn ? 'Preservation request closed out.' : 'Closed out — alerts stopped.', 'success');
+        }
+
+        /** Undo a close-out; the warrant starts raising alerts again. */
+        function reopenWarrant(warrantId) {
+            const warrant = caseWarrants.find(w => w.id === warrantId);
+            if (!warrant) return;
+            warrant.closedOut = false;
+            warrant.closedOutAt = null;
+            warrant.closedOutDate = null;
+            warrant.lastModified = new Date().toISOString();
+
+            audit('warrant_reopened', {
+                case_number: currentCase ? currentCase.caseNumber : null,
+                case_id: currentCase ? currentCase.id : null,
+                warrant_id: warrant.id,
+                type: warrant.type,
+            });
+
             saveWarrantsToStorage();
             renderTabContent('warrants');
         }
@@ -12527,20 +13010,24 @@
             document.body.appendChild(modal);
         }
 
-        function executeMovePerson(sourceTab, personIndex, destTab) {
-            // Get source person
-            let person;
-            if (sourceTab === 'suspects') person = suspects[personIndex];
-            else if (sourceTab === 'victims') person = victims[personIndex];
-            else if (sourceTab === 'witnesses') person = witnesses[personIndex];
-            else if (sourceTab === 'involvedPersons') person = involvedPersons[personIndex];
-            if (!person) return;
-
-            // Build the destination record with common fields
+        /*
+         * Shape a person record for a destination tab.
+         *
+         * Extracted from executeMovePerson so the cross-case import
+         * (importRelatedPerson) uses the SAME field map. Two copies of this
+         * would drift, and a field silently dropped on import is worse than
+         * one dropped on a move — the source case may be someone else's.
+         *
+         * `dlState` travels with `dlNumber`: a licence number is only
+         * meaningful alongside its issuing jurisdiction.
+         */
+        function _buildPersonRecordForTab(person, destTab) {
+            if (!person) return null;
             const common = {
                 name: person.name || '',
                 dob: person.dob || '',
                 dlNumber: person.dlNumber || '',
+                dlState: person.dlState || '',
                 sex: person.sex || '',
                 height: person.height || '',
                 weight: person.weight || '',
@@ -12552,9 +13039,8 @@
                 residencePhoto: person.residencePhoto || ''
             };
 
-            let destRecord;
             if (destTab === 'suspects') {
-                destRecord = {
+                return {
                     ...common,
                     scarsMarksTattoos: person.scarsMarksTattoos || '',
                     employerName: person.employerName || '',
@@ -12570,8 +13056,9 @@
                     rmsSource: person.rmsSource || '',
                     rmsRole: person.rmsRole || ''
                 };
-            } else if (destTab === 'victims') {
-                destRecord = {
+            }
+            if (destTab === 'victims') {
+                return {
                     ...common,
                     phone: person.phone || '',
                     phone2: person.phone2 || '',
@@ -12581,6 +13068,8 @@
                     occupation: person.occupation || '',
                     employerAddress: person.employerAddress || '',
                     employerPhone: person.employerPhone || '',
+                    // Injury and property are FACTS ABOUT THIS CASE. Never
+                    // carried across — that would fabricate evidence.
                     injuryDescription: '',
                     injuryPhotos: [],
                     propertyDescription: '',
@@ -12588,8 +13077,9 @@
                     vehicles: person.vehicles || [],
                     rmsSource: person.rmsSource || ''
                 };
-            } else if (destTab === 'witnesses') {
-                destRecord = {
+            }
+            if (destTab === 'witnesses') {
+                return {
                     ...common,
                     phone: person.phone || '',
                     phone2: person.phone2 || '',
@@ -12602,8 +13092,9 @@
                     statement: person.notes || person.statement || '',
                     rmsSource: person.rmsSource || ''
                 };
-            } else if (destTab === 'involvedPersons') {
-                destRecord = {
+            }
+            if (destTab === 'involvedPersons') {
+                return {
                     ...common,
                     scarsMarksTattoos: person.scarsMarksTattoos || '',
                     phone: person.phone || '',
@@ -12617,6 +13108,48 @@
                     rmsRole: person.rmsRole || ''
                 };
             }
+            if (destTab === 'missingpersons') {
+                return {
+                    id: Date.now(),
+                    name: common.name,
+                    dob: common.dob,
+                    height: common.height,
+                    weight: common.weight,
+                    hairColor: common.hairColor,
+                    eyeColor: common.eyeColor,
+                    tattoos: person.tattoos || person.scarsMarksTattoos || '',
+                    // What they were last seen wearing belongs to THIS
+                    // investigation. Never copied from another case.
+                    clothingDescription: '',
+                    photo: common.photo,
+                    cellPhone: person.cellPhone || person.phone || '',
+                    homePhone: person.homePhone || person.phone2 || '',
+                    acquaintancePhone: person.acquaintancePhone || '',
+                    homeAddress: person.homeAddress ||
+                        [common.address, common.addressCityStateZip].filter(Boolean).join(', '),
+                    knownAcquaintances: Array.isArray(person.knownAcquaintances) ? person.knownAcquaintances : [],
+                    previousLocations: [],
+                    vehicle: person.vehicle || null,
+                    located: false,
+                    dateLocated: null,
+                    locatedNotes: null,
+                    createdAt: new Date().toISOString()
+                };
+            }
+            return null;
+        }
+
+        function executeMovePerson(sourceTab, personIndex, destTab) {
+            // Get source person
+            let person;
+            if (sourceTab === 'suspects') person = suspects[personIndex];
+            else if (sourceTab === 'victims') person = victims[personIndex];
+            else if (sourceTab === 'witnesses') person = witnesses[personIndex];
+            else if (sourceTab === 'involvedPersons') person = involvedPersons[personIndex];
+            if (!person) return;
+
+            const destRecord = _buildPersonRecordForTab(person, destTab);
+            if (!destRecord) return;
 
             // Add to destination
             if (destTab === 'suspects') { loadSuspects(); suspects.push(destRecord); saveSuspects(); }
@@ -12712,7 +13245,7 @@
         }
         
         function renderSuspectCard(suspect, index) {
-            const photoUrl = suspect.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"%3E%3Crect fill="%231a2332" width="200" height="200"/%3E%3Cpath fill="%2300d9ff" d="M100 50a30 30 0 110 60 30 30 0 010-60zm0 80c-25 0-50 12.5-50 25v20h100v-20c0-12.5-25-25-50-25z" opacity="0.3"/%3E%3C/svg%3E';
+            const photoUrl = suspect.photo || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22 viewBox=%220 0 200 200%22%3E%3Crect fill=%22%231a2332%22 width=%22200%22 height=%22200%22/%3E%3Cpath fill=%22%2300d9ff%22 d=%22M100 50a30 30 0 110 60 30 30 0 010-60zm0 80c-25 0-50 12.5-50 25v20h100v-20c0-12.5-25-25-50-25z%22 opacity=%220.3%22/%3E%3C/svg%3E';
             
             return `
                 <div class="glass-card rounded-xl p-6 hover:border-viper-cyan transition cursor-pointer mx-auto" style="max-width: 400px; width: 100%;" onclick="viewSuspectDetail(${index})">
@@ -12808,7 +13341,7 @@
                                 <div class="flex gap-5">
                                     <div class="shrink-0">
                                         <div class="w-48 h-48 rounded-lg overflow-hidden bg-viper-dark">
-                                            <img id="suspect-photo-${index}" ${_S}="${suspect.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"%3E%3Crect fill="%231a2332" width="400" height="400"/%3E%3Cpath fill="%2300d9ff" d="M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z" opacity="0.3"/%3E%3C/svg%3E'}" alt="${suspect.name || 'Suspect'}" class="w-full h-full object-cover">
+                                            <img id="suspect-photo-${index}" ${_S}="${suspect.photo || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22400%22 viewBox=%220 0 400 400%22%3E%3Crect fill=%22%231a2332%22 width=%22400%22 height=%22400%22/%3E%3Cpath fill=%22%2300d9ff%22 d=%22M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z%22 opacity=%220.3%22/%3E%3C/svg%3E'}" alt="${suspect.name || 'Suspect'}" class="w-full h-full object-cover">
                                         </div>
                                         ${isEditingInline ? `<input type="file" accept="image/*" onchange="handleInlineImageUpload(event, 'suspect-photo-${index}')" class="text-xs text-gray-400 mt-2 w-48">` : ''}
                                     </div>
@@ -12816,6 +13349,7 @@
                                         ${renderEditableField('Name', 'name', suspect.name, index)}
                                         ${renderEditableField('Date of Birth', 'dob', suspect.dob, index, 'date')}
                                         ${renderEditableField('Driver\'s License', 'dlNumber', suspect.dlNumber, index)}
+                                        ${renderEditableField('DL State', 'dlState', suspect.dlState, index, 'state')}
                                         ${renderEditableField('Height', 'height', suspect.height, index)}
                                         ${renderEditableField('Weight', 'weight', suspect.weight, index)}
                                         ${renderEditableField('Hair Color', 'hairColor', suspect.hairColor, index)}
@@ -12889,6 +13423,7 @@
                                                         📡 Ping
                                                     </button>
                                                 ` : ''}
+                                                ${ident.type === 'ip' ? _p2pScanBtn(ident.value) : ''}
                                                 ${ident.type === 'email' ? `
                                                     <button onclick="verifyEmailSuspectIdent(${index}, ${iIdx})" class="px-3 py-1.5 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan text-xs font-semibold transition" title="Verify Email">
                                                         ✉️ Verify
@@ -13051,8 +13586,8 @@
                                                     <div>
                                                         <p class="text-xs text-gray-500">Plate Number</p>
                                                         <div class="flex items-center gap-2">
-                                                            <p class="text-white text-sm">${vehicle.plateNumber || 'N/A'}</p>
-                                                            ${renderFlockButton(vehicle.plateNumber, '', true)}
+                                                            <p class="text-white text-sm">${_plateDisplay(vehicle)}</p>
+                                                            ${renderFlockButton(_plateNum(vehicle), vehicle.plateState, true)}
                                                         </div>
                                                     </div>
                                                 </div>
@@ -13205,6 +13740,9 @@
                     // CA DL numbers are 1 letter + 7 digits (e.g. D6074798, Y7432022)
                     if (/^[A-Z]\d{6,8}$/.test(dlCandidate)) {
                         result.dlNumber = dlCandidate;
+                        // CAL-PHOTO is, by definition, a California DMV
+                        // product — the printout never states the state.
+                        result.dlState = 'CA';
                     }
                 }
             }
@@ -13276,7 +13814,11 @@
             if (dlMatch) {
                 const num = dlMatch[1].trim();
                 const state = dlMatch[2] || '';
-                result.dlNumber = state ? `${num} (${state})` : num;
+                // Keep the number and its issuing jurisdiction in SEPARATE
+                // fields. Baking "(CA)" into dlNumber made the number
+                // unusable for any downstream lookup that expects a bare OLN.
+                result.dlNumber = num;
+                if (state) result.dlState = state.toUpperCase();
             }
 
             // DOB — Dob, DOB, Date of Birth, Birth Date, DB
@@ -13389,7 +13931,7 @@
                 const fields = [];
                 if (parsed.name) fields.push(`<b>Name:</b> ${parsed.name}`);
                 if (parsed.dob) fields.push(`<b>DOB:</b> ${formatDate(parsed.dob)}`);
-                if (parsed.dlNumber) fields.push(`<b>DL#:</b> ${parsed.dlNumber}`);
+                if (parsed.dlNumber) fields.push(`<b>DL#:</b> ${parsed.dlNumber}${parsed.dlState ? ' (' + parsed.dlState + ')' : ''}`);
                 if (parsed.sex) fields.push(`<b>Sex:</b> ${parsed.sex}`);
                 if (parsed.height) fields.push(`<b>Height:</b> ${parsed.height}"`);
                 if (parsed.weight) fields.push(`<b>Weight:</b> ${parsed.weight} lbs`);
@@ -13423,6 +13965,7 @@
                     if (parsed.name && !suspect.name) suspect.name = parsed.name;
                     if (parsed.dob && !suspect.dob) suspect.dob = parsed.dob;
                     if (parsed.dlNumber && !suspect.dlNumber) suspect.dlNumber = parsed.dlNumber;
+                    if (parsed.dlState && !suspect.dlState) suspect.dlState = parsed.dlState;
                     if (parsed.height && !suspect.height) suspect.height = parsed.height;
                     if (parsed.weight && !suspect.weight) suspect.weight = parsed.weight;
                     if (parsed.eyeColor && !suspect.eyeColor) suspect.eyeColor = parsed.eyeColor;
@@ -13460,7 +14003,7 @@
                     const newSuspect = {
                         name: parsed.name || '',
                         dob: parsed.dob || '',
-                        dlNumber: parsed.dlNumber || '',
+                        dlNumber: parsed.dlNumber || '', dlState: parsed.dlState || '',
                         sex: parsed.sex || '',
                         height: parsed.height || '',
                         weight: parsed.weight || '',
@@ -13529,7 +14072,7 @@
                 const fields = [];
                 if (parsed.name) fields.push(`<b>Name:</b> ${parsed.name}`);
                 if (parsed.dob) fields.push(`<b>DOB:</b> ${formatDate(parsed.dob)}`);
-                if (parsed.dlNumber) fields.push(`<b>DL#:</b> ${parsed.dlNumber}`);
+                if (parsed.dlNumber) fields.push(`<b>DL#:</b> ${parsed.dlNumber}${parsed.dlState ? ' (' + parsed.dlState + ')' : ''}`);
                 if (parsed.sex) fields.push(`<b>Sex:</b> ${parsed.sex}`);
                 if (parsed.height) fields.push(`<b>Height:</b> ${parsed.height}"`);
                 if (parsed.weight) fields.push(`<b>Weight:</b> ${parsed.weight} lbs`);
@@ -13560,6 +14103,7 @@
                     if (parsed.name && !victim.name) victim.name = parsed.name;
                     if (parsed.dob && !victim.dob) victim.dob = parsed.dob;
                     if (parsed.dlNumber && !victim.dlNumber) victim.dlNumber = parsed.dlNumber;
+                    if (parsed.dlState && !victim.dlState) victim.dlState = parsed.dlState;
                     if (parsed.height && !victim.height) victim.height = parsed.height;
                     if (parsed.weight && !victim.weight) victim.weight = parsed.weight;
                     if (parsed.eyeColor && !victim.eyeColor) victim.eyeColor = parsed.eyeColor;
@@ -13574,7 +14118,7 @@
                 } else {
                     victims.push({
                         photo: '', name: parsed.name || '', dob: parsed.dob || '',
-                        dlNumber: parsed.dlNumber || '', phone: '', phone2: '', email: '', email2: '',
+                        dlNumber: parsed.dlNumber || '', dlState: parsed.dlState || '', phone: '', phone2: '', email: '', email2: '',
                         height: parsed.height || '', weight: parsed.weight || '',
                         hairColor: parsed.hairColor || '', eyeColor: parsed.eyeColor || '',
                         address: parsed.address || '', addressCityStateZip: parsed.addressCityStateZip || '',
@@ -13618,7 +14162,7 @@
                 const fields = [];
                 if (parsed.name) fields.push(`<b>Name:</b> ${parsed.name}`);
                 if (parsed.dob) fields.push(`<b>DOB:</b> ${formatDate(parsed.dob)}`);
-                if (parsed.dlNumber) fields.push(`<b>DL#:</b> ${parsed.dlNumber}`);
+                if (parsed.dlNumber) fields.push(`<b>DL#:</b> ${parsed.dlNumber}${parsed.dlState ? ' (' + parsed.dlState + ')' : ''}`);
                 if (parsed.sex) fields.push(`<b>Sex:</b> ${parsed.sex}`);
                 if (parsed.height) fields.push(`<b>Height:</b> ${parsed.height}"`);
                 if (parsed.weight) fields.push(`<b>Weight:</b> ${parsed.weight} lbs`);
@@ -13649,6 +14193,7 @@
                     if (parsed.name && !witness.name) witness.name = parsed.name;
                     if (parsed.dob && !witness.dob) witness.dob = parsed.dob;
                     if (parsed.dlNumber && !witness.dlNumber) witness.dlNumber = parsed.dlNumber;
+                    if (parsed.dlState && !witness.dlState) witness.dlState = parsed.dlState;
                     if (parsed.height && !witness.height) witness.height = parsed.height;
                     if (parsed.weight && !witness.weight) witness.weight = parsed.weight;
                     if (parsed.eyeColor && !witness.eyeColor) witness.eyeColor = parsed.eyeColor;
@@ -13663,7 +14208,7 @@
                 } else {
                     witnesses.push({
                         photo: '', name: parsed.name || '', dob: parsed.dob || '',
-                        dlNumber: parsed.dlNumber || '', phone: '', phone2: '', email: '', email2: '',
+                        dlNumber: parsed.dlNumber || '', dlState: parsed.dlState || '', phone: '', phone2: '', email: '', email2: '',
                         height: parsed.height || '', weight: parsed.weight || '',
                         hairColor: parsed.hairColor || '', eyeColor: parsed.eyeColor || '',
                         address: parsed.address || '', addressCityStateZip: parsed.addressCityStateZip || '',
@@ -13705,7 +14250,7 @@
                 const fields = [];
                 if (parsed.name) fields.push(`<b>Name:</b> ${parsed.name}`);
                 if (parsed.dob) fields.push(`<b>DOB:</b> ${formatDate(parsed.dob)}`);
-                if (parsed.dlNumber) fields.push(`<b>DL#:</b> ${parsed.dlNumber}`);
+                if (parsed.dlNumber) fields.push(`<b>DL#:</b> ${parsed.dlNumber}${parsed.dlState ? ' (' + parsed.dlState + ')' : ''}`);
                 if (parsed.sex) fields.push(`<b>Sex:</b> ${parsed.sex}`);
                 if (parsed.height) fields.push(`<b>Height:</b> ${parsed.height}"`);
                 if (parsed.weight) fields.push(`<b>Weight:</b> ${parsed.weight} lbs`);
@@ -13736,6 +14281,7 @@
                     if (parsed.name && !person.name) person.name = parsed.name;
                     if (parsed.dob && !person.dob) person.dob = parsed.dob;
                     if (parsed.dlNumber && !person.dlNumber) person.dlNumber = parsed.dlNumber;
+                    if (parsed.dlState && !person.dlState) person.dlState = parsed.dlState;
                     if (parsed.sex && !person.sex) person.sex = parsed.sex;
                     if (parsed.height && !person.height) person.height = parsed.height;
                     if (parsed.weight && !person.weight) person.weight = parsed.weight;
@@ -13751,7 +14297,7 @@
                 } else {
                     involvedPersons.push({
                         photo: '', name: parsed.name || '', dob: parsed.dob || '',
-                        dlNumber: parsed.dlNumber || '', sex: parsed.sex || '',
+                        dlNumber: parsed.dlNumber || '', dlState: parsed.dlState || '', sex: parsed.sex || '',
                         phone: '', phone2: '', email: '', email2: '',
                         height: parsed.height || '', weight: parsed.weight || '',
                         hairColor: parsed.hairColor || '', eyeColor: parsed.eyeColor || '',
@@ -13821,6 +14367,7 @@
             suspect.name = document.getElementById(`field-name-${index}`)?.value || '';
             suspect.dob = document.getElementById(`field-dob-${index}`)?.value || '';
             suspect.dlNumber = document.getElementById(`field-dlNumber-${index}`)?.value || '';
+            suspect.dlState = document.getElementById(`field-dlState-${index}`)?.value || '';
             suspect.height = document.getElementById(`field-height-${index}`)?.value || '';
             suspect.weight = document.getElementById(`field-weight-${index}`)?.value || '';
             suspect.hairColor = document.getElementById(`field-hairColor-${index}`)?.value || '';
@@ -13870,7 +14417,116 @@
             }
         }
         
+        /*
+         * Shared renderer for a DL/plate issuing-jurisdiction field.
+         *
+         * Read mode shows the full jurisdiction name ("California") because a
+         * bare code is ambiguous in a report; edit mode shows a grouped
+         * <select> so the examiner can't invent a non-existent state.
+         * `elId` is the exact element id the caller's inline-save routine
+         * reads back, which is why it is passed in fully-formed rather than
+         * reconstructed here (suspect/victim/witness use different prefixes).
+         */
+        function _renderJurisdictionField(label, elId, value) {
+            const J = window.ViperJurisdictions;
+            if (isEditingInline) {
+                const cls = 'w-full bg-viper-dark border border-viper-cyan/50 rounded-lg px-3 py-2 text-white focus:border-viper-cyan focus:outline-none';
+                const select = J
+                    ? J.selectHtml({ id: elId, value: value, cls: cls })
+                    // Jurisdiction list failed to load — degrade to a free-text
+                    // box rather than losing the field entirely.
+                    : `<input type="text" id="${elId}" value="${value || ''}" maxlength="3" class="${cls}">`;
+                return `
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">${label}</label>
+                        ${select}
+                    </div>
+                `;
+            }
+            const shown = value ? (J ? `${value} \u2014 ${J.label(value)}` : value) : 'N/A';
+            return `
+                <div>
+                    <p class="text-sm text-gray-400 mb-1">${label}</p>
+                    <p class="text-base text-white font-medium">${shown}</p>
+                </div>
+            `;
+        }
+
+        /*
+         * Read-only display for a DL number + its issuing jurisdiction.
+         * Returns e.g. "D1234567 (CA)".  A DL number with no state is shown
+         * bare rather than with an empty paren, and a state with no number
+         * still renders so the examiner can see the field was partially
+         * filled instead of the data silently vanishing.
+         */
+        function _dlDisplay(p, fallback) {
+            if (!p) return fallback === undefined ? 'N/A' : fallback;
+            const num = p.dlNumber || p.driverLicense || p.driversLicense || '';
+            const st = p.dlState || '';
+            if (num && st) return `${num} (${st})`;
+            if (num) return num;
+            if (st) return `(${st})`;
+            return fallback === undefined ? 'N/A' : fallback;
+        }
+
+        /*
+         * Jurisdiction <select> sized for the add/edit MODAL forms (which use
+         * FormData, hence `name` rather than `id`).  Accent colour differs per
+         * role tab (cyan = suspect, purple = victim, green = witness).
+         */
+        function _jurisdictionFormSelect(name, value, accent, placeholder, cls) {
+            const a = accent || 'viper-cyan';
+            const ph = placeholder || '\u2014 DL State \u2014';
+            const klass = cls || `bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-${a} focus:outline-none`;
+            if (window.ViperJurisdictions) {
+                return window.ViperJurisdictions.selectHtml({
+                    name: name, value: value, cls: klass, placeholder: ph
+                });
+            }
+            return `<input type="text" name="${name}" placeholder="${ph}" value="${value || ''}" maxlength="3" class="${klass}">`;
+        }
+
+        /*
+         * Same picker, but for the older modals that read their values back
+         * with getElementById instead of FormData (missing persons, recovered
+         * vehicles).  Kept separate so neither form style has to grow an
+         * options bag.
+         */
+        function _jurisdictionIdSelect(elId, value, placeholder) {
+            const ph = placeholder || '\u2014 Select \u2014';
+            const cls = 'w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-orange focus:outline-none';
+            if (window.ViperJurisdictions) {
+                return window.ViperJurisdictions.selectHtml({
+                    id: elId, value: value, cls: cls, placeholder: ph
+                });
+            }
+            return `<input type="text" id="${elId}" placeholder="${ph}" value="${value || ''}" maxlength="3" class="${cls}">`;
+        }
+
+        /*
+         * Read-only display for a plate + its issuing jurisdiction.
+         * Vehicle records are inconsistent across modules: the suspect/victim
+         * tabs use `plateNumber`, the recovered-vehicle and missing-person
+         * modules use `licensePlate`.  Accept both so one helper covers all.
+         */
+        function _plateDisplay(v, fallback) {
+            if (!v) return fallback === undefined ? 'N/A' : fallback;
+            const num = v.plateNumber || v.plate || v.licensePlate || '';
+            const st = v.plateState || '';
+            if (num && st) return `${num} (${st})`;
+            if (num) return num;
+            return fallback === undefined ? 'N/A' : fallback;
+        }
+        /** The plate string a lookup should actually be run against. */
+        function _plateNum(v) {
+            return (v && (v.plateNumber || v.plate || v.licensePlate)) || '';
+        }
+
         function renderEditableField(label, fieldName, value, index, type = 'text') {
+            // Issuing-jurisdiction picker (DL state, plate state). Handled
+            // before the date sniffing below so a label like "DL State" can
+            // never be mistaken for something else.
+            if (type === 'state') return _renderJurisdictionField(label, `field-${fieldName}-${index}`, value);
             // Auto-detect if this is a date field
             if (label && (label.toLowerCase().includes('date') || label.toLowerCase().includes('dob') || label.toLowerCase().includes('birth'))) {
                 type = 'date';
@@ -13950,6 +14606,7 @@
                                 <input type="text" name="name" placeholder="Full Name" value="${suspect.name || ''}" required class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                                 <input type="date" name="dob" placeholder="Date of Birth" value="${suspect.dob || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                                 <input type="text" name="dlNumber" placeholder="Driver's License Number" value="${suspect.dlNumber || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
+                                ${_jurisdictionFormSelect('dlState', suspect.dlState, 'viper-cyan')}
                                 <input type="text" name="height" placeholder="Height (inches)" value="${suspect.height || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                                 <input type="text" name="weight" placeholder="Weight (lbs)" value="${suspect.weight || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                                 <input type="text" name="hairColor" placeholder="Hair Color" value="${suspect.hairColor || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
@@ -14048,6 +14705,7 @@
                     name: formData.get('name'),
                     dob: formData.get('dob'),
                     dlNumber: formData.get('dlNumber'),
+                    dlState: formData.get('dlState'),
                     height: formData.get('height'),
                     weight: formData.get('weight'),
                     hairColor: formData.get('hairColor'),
@@ -14113,6 +14771,7 @@
                 const providerBadge = ident.provider ? `<span class="px-1.5 py-0.5 rounded text-[10px] bg-green-500/20 text-green-400 border border-green-500/40">ISP: ${escHtmlSafe(ident.provider)}</span>` : '';
                 const osintBadge = _osintIdentBadgeHtml(kind, index, iIdx, ident);
                 const arinBtn = ident.type === 'ip' ? `<button onclick="arinLookupPersonIdent('${kind}', ${index}, ${iIdx})" class="px-2 py-1 bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500 rounded text-yellow-400 text-xs transition" title="ARIN WHOIS Lookup">🌐 ARIN</button>` : '';
+                const p2pBtn = ident.type === 'ip' ? _p2pScanBtn(ident.value) : '';
                 return `
                 <div class="bg-gradient-to-r from-${color}/10 to-transparent border border-${color}/20 rounded-lg p-3 flex items-center justify-between gap-3">
                     <div class="flex items-center gap-3 flex-1 min-w-0 flex-wrap">
@@ -14126,6 +14785,7 @@
                     </div>
                     <div class="flex items-center gap-2 flex-shrink-0">
                         ${arinBtn}
+                        ${p2pBtn}
                         <button onclick="removePersonIdentifier('${kind}', ${index}, ${iIdx})" class="text-red-500 hover:text-red-400 p-1" title="Remove">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                         </button>
@@ -14140,6 +14800,23 @@
                 </div>
                 <div class="space-y-2">${rowsHtml}</div>
             </div>`;
+        }
+
+        // ============================================================
+        // P2P Activity Check button (TorrentAnalytics).
+        // Thin wrapper so both the suspect detail view and the shared
+        // people-identifier section render the identical affordance, and
+        // so a page loaded without the module (or with the Settings
+        // toggle off) silently renders nothing rather than throwing
+        // inside a template literal.
+        // ============================================================
+        function _p2pScanBtn(ipValue) {
+            try {
+                if (window.P2PScan && typeof window.P2PScan.buttonHtml === 'function') {
+                    return window.P2PScan.buttonHtml(ipValue);
+                }
+            } catch (_) { /* never break identifier rendering over this */ }
+            return '';
         }
 
         function _ppGetList(kind) {
@@ -15187,6 +15864,7 @@
                         <input type="text" name="makeModel" placeholder="Make/Model" required class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                         <input type="text" name="color" placeholder="Color" required class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                         <input type="text" name="plateNumber" placeholder="Plate Number" required class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
+                        ${_jurisdictionFormSelect('plateState', '', 'viper-cyan', '\u2014 Plate State \u2014', 'w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none')}
                         <div>
                             <label class="block text-sm text-gray-400 mb-1">Vehicle Photo (URL or Data URL)</label>
                             <input type="text" name="photo" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
@@ -15221,6 +15899,7 @@
                     makeModel: formData.get('makeModel'),
                     color: formData.get('color'),
                     plateNumber: formData.get('plateNumber'),
+                    plateState: formData.get('plateState') || '',
                     photo: formData.get('photo')
                 });
                 saveSuspects();
@@ -15502,7 +16181,7 @@
                                         </div>
                                         <div class="field">
                                             <label>Driver's License:</label>
-                                            <div>${suspect.dlNumber || 'N/A'}</div>
+                                            <div>${_dlDisplay(suspect)}</div>
                                         </div>
                                         <div class="field">
                                             <label>Height:</label>
@@ -15629,7 +16308,7 @@
                                                 </div>
                                                 <div class="field">
                                                     <label>Plate Number:</label>
-                                                    <div>${v.plateNumber || 'N/A'}</div>
+                                                    <div>${_plateDisplay(v)}</div>
                                                 </div>
                                             </div>
                                             ${v.photo ? `<img ${_S}="${v.photo}" class="photo" alt="Vehicle Photo" style="margin-top: 10px;">` : ''}
@@ -15719,7 +16398,7 @@
         }
         
         function renderVictimCard(victim, index) {
-            const photoUrl = victim.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"%3E%3Crect fill="%231a2332" width="200" height="200"/%3E%3Cpath fill="%239d4edd" d="M100 50a30 30 0 110 60 30 30 0 010-60zm0 80c-25 0-50 12.5-50 25v20h100v-20c0-12.5-25-25-50-25z" opacity="0.3"/%3E%3C/svg%3E';
+            const photoUrl = victim.photo || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22 viewBox=%220 0 200 200%22%3E%3Crect fill=%22%231a2332%22 width=%22200%22 height=%22200%22/%3E%3Cpath fill=%22%239d4edd%22 d=%22M100 50a30 30 0 110 60 30 30 0 010-60zm0 80c-25 0-50 12.5-50 25v20h100v-20c0-12.5-25-25-50-25z%22 opacity=%220.3%22/%3E%3C/svg%3E';
             
             return `
                 <div class="glass-card rounded-xl p-6 hover:border-viper-purple transition cursor-pointer mx-auto" style="max-width: 400px; width: 100%;" onclick="viewVictimDetail(${index})">
@@ -15808,7 +16487,7 @@
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div class="col-span-1">
                                     <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark border-2 border-viper-purple/30">
-                                        <img id="victim-photo-${index}" ${_S}="${victim.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"%3E%3Crect fill="%231a2332" width="400" height="400"/%3E%3Cpath fill="%239d4edd" d="M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z" opacity="0.3"/%3E%3C/svg%3E'}" alt="${victim.name || 'Victim'}" class="w-full h-full object-cover">
+                                        <img id="victim-photo-${index}" ${_S}="${victim.photo || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22400%22 viewBox=%220 0 400 400%22%3E%3Crect fill=%22%231a2332%22 width=%22400%22 height=%22400%22/%3E%3Cpath fill=%22%239d4edd%22 d=%22M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z%22 opacity=%220.3%22/%3E%3C/svg%3E'}" alt="${victim.name || 'Victim'}" class="w-full h-full object-cover">
                                     </div>
                                     ${isEditingInline ? `
                                         <div class="mt-2">
@@ -15820,6 +16499,7 @@
                                     ${renderEditableFieldVictim('Name', 'name', victim.name, index)}
                                     ${renderEditableFieldVictim('Date of Birth', 'dob', victim.dob, index, 'date')}
                                     ${renderEditableFieldVictim('Driver\'s License', 'dlNumber', victim.dlNumber, index)}
+                                    ${renderEditableFieldVictim('DL State', 'dlState', victim.dlState, index, 'state')}
                                     ${renderEditableFieldVictim('Height (inches)', 'height', victim.height, index)}
                                     ${renderEditableFieldVictim('Weight (lbs)', 'weight', victim.weight, index)}
                                     ${renderEditableFieldVictim('Hair Color', 'hairColor', victim.hairColor, index)}
@@ -15950,8 +16630,8 @@
                                                     <div>
                                                         <p class="text-xs text-gray-500">Plate Number</p>
                                                         <div class="flex items-center gap-2">
-                                                            <p class="text-white">${vehicle.plateNumber || 'N/A'}</p>
-                                                            ${renderFlockButton(vehicle.plateNumber, '', true)}
+                                                            <p class="text-white">${_plateDisplay(vehicle)}</p>
+                                                            ${renderFlockButton(_plateNum(vehicle), vehicle.plateState, true)}
                                                         </div>
                                                     </div>
                                                 </div>
@@ -16006,6 +16686,7 @@
             victim.name = document.getElementById(`field-victim-name-${index}`)?.value || '';
             victim.dob = document.getElementById(`field-victim-dob-${index}`)?.value || '';
             victim.dlNumber = document.getElementById(`field-victim-dlNumber-${index}`)?.value || '';
+            victim.dlState = document.getElementById(`field-victim-dlState-${index}`)?.value || '';
             victim.height = document.getElementById(`field-victim-height-${index}`)?.value || '';
             victim.weight = document.getElementById(`field-victim-weight-${index}`)?.value || '';
             victim.hairColor = document.getElementById(`field-victim-hairColor-${index}`)?.value || '';
@@ -16038,6 +16719,7 @@
         }
         
         function renderEditableFieldVictim(label, fieldName, value, index, type = 'text') {
+            if (type === 'state') return _renderJurisdictionField(label, `field-victim-${fieldName}-${index}`, value);
             // Auto-detect if this is a date field
             if (label && (label.toLowerCase().includes('date') || label.toLowerCase().includes('dob') || label.toLowerCase().includes('birth'))) {
                 type = 'date';
@@ -16117,6 +16799,7 @@
                                 <input type="text" name="name" placeholder="Full Name" value="${victim.name || ''}" required class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-purple focus:outline-none">
                                 <input type="date" name="dob" placeholder="Date of Birth" value="${victim.dob || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-purple focus:outline-none">
                                 <input type="text" name="dlNumber" placeholder="Driver's License Number" value="${victim.dlNumber || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-purple focus:outline-none">
+                                ${_jurisdictionFormSelect('dlState', victim.dlState, 'viper-purple')}
                                 <input type="text" name="height" placeholder="Height (inches)" value="${victim.height || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-purple focus:outline-none">
                                 <input type="text" name="weight" placeholder="Weight (lbs)" value="${victim.weight || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-purple focus:outline-none">
                                 <input type="text" name="hairColor" placeholder="Hair Color" value="${victim.hairColor || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-purple focus:outline-none">
@@ -16190,6 +16873,7 @@
                     name: formData.get('name'),
                     dob: formData.get('dob'),
                     dlNumber: formData.get('dlNumber'),
+                    dlState: formData.get('dlState'),
                     phone: formData.get('phone'),
                     phone2: formData.get('phone2'),
                     email: formData.get('email'),
@@ -16379,6 +17063,7 @@
                         <input type="text" name="makeModel" placeholder="Make/Model" required class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                         <input type="text" name="color" placeholder="Color" required class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                         <input type="text" name="plateNumber" placeholder="Plate Number" required class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
+                        ${_jurisdictionFormSelect('plateState', '', 'viper-cyan', '\u2014 Plate State \u2014', 'w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none')}
                         <div>
                             <label class="block text-sm text-gray-400 mb-1">Vehicle Photo (URL or Data URL)</label>
                             <input type="text" name="photo" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
@@ -16402,6 +17087,7 @@
                     makeModel: formData.get('makeModel'),
                     color: formData.get('color'),
                     plateNumber: formData.get('plateNumber'),
+                    plateState: formData.get('plateState') || '',
                     photo: formData.get('photo')
                 });
                 saveVictims();
@@ -16680,7 +17366,7 @@
                                         </div>
                                         <div class="field">
                                             <label>Driver's License:</label>
-                                            <div>${victim.dlNumber || 'N/A'}</div>
+                                            <div>${_dlDisplay(victim)}</div>
                                         </div>
                                         <div class="field">
                                             <label>Height:</label>
@@ -16785,7 +17471,7 @@
                                                 </div>
                                                 <div class="field">
                                                     <label>Plate Number:</label>
-                                                    <div>${v.plateNumber || 'N/A'}</div>
+                                                    <div>${_plateDisplay(v)}</div>
                                                 </div>
                                             </div>
                                             ${v.photo ? `<img ${_S}="${v.photo}" class="photo" alt="Vehicle Photo" style="margin-top: 10px;">` : ''}
@@ -18068,7 +18754,7 @@
         }
         
         function renderWitnessCard(witness, index) {
-            const photoUrl = witness.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"%3E%3Crect fill="%231a2332" width="200" height="200"/%3E%3Cpath fill="%2300ff88" d="M100 50a30 30 0 110 60 30 30 0 010-60zm0 80c-25 0-50 12.5-50 25v20h100v-20c0-12.5-25-25-50-25z" opacity="0.3"/%3E%3C/svg%3E';
+            const photoUrl = witness.photo || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22 viewBox=%220 0 200 200%22%3E%3Crect fill=%22%231a2332%22 width=%22200%22 height=%22200%22/%3E%3Cpath fill=%22%2300ff88%22 d=%22M100 50a30 30 0 110 60 30 30 0 010-60zm0 80c-25 0-50 12.5-50 25v20h100v-20c0-12.5-25-25-50-25z%22 opacity=%220.3%22/%3E%3C/svg%3E';
             
             return `
                 <div class="glass-card rounded-xl p-6 hover:border-viper-green transition cursor-pointer mx-auto" style="max-width: 400px; width: 100%;" onclick="viewWitnessDetail(${index})">
@@ -18156,7 +18842,7 @@
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div class="col-span-1">
                                     <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark border-2 border-viper-green/30">
-                                        <img id="witness-photo-${index}" ${_S}="${witness.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"%3E%3Crect fill="%231a2332" width="400" height="400"/%3E%3Cpath fill="%2300ff88" d="M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z" opacity="0.3"/%3E%3C/svg%3E'}" alt="${witness.name || 'Witness'}" class="w-full h-full object-cover">
+                                        <img id="witness-photo-${index}" ${_S}="${witness.photo || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22400%22 viewBox=%220 0 400 400%22%3E%3Crect fill=%22%231a2332%22 width=%22400%22 height=%22400%22/%3E%3Cpath fill=%22%2300ff88%22 d=%22M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z%22 opacity=%220.3%22/%3E%3C/svg%3E'}" alt="${witness.name || 'Witness'}" class="w-full h-full object-cover">
                                     </div>
                                     ${isEditingInline ? `
                                         <div class="mt-2">
@@ -18168,6 +18854,7 @@
                                     ${renderEditableFieldWitness('Name', 'name', witness.name, index)}
                                     ${renderEditableFieldWitness('Date of Birth', 'dob', witness.dob, index, 'date')}
                                     ${renderEditableFieldWitness('Driver\'s License', 'dlNumber', witness.dlNumber, index)}
+                                    ${renderEditableFieldWitness('DL State', 'dlState', witness.dlState, index, 'state')}
                                     ${renderEditableFieldWitness('Height (inches)', 'height', witness.height, index)}
                                     ${renderEditableFieldWitness('Weight (lbs)', 'weight', witness.weight, index)}
                                     ${renderEditableFieldWitness('Hair Color', 'hairColor', witness.hairColor, index)}
@@ -18269,6 +18956,7 @@
             witness.name = document.getElementById(`field-witness-name-${index}`)?.value || '';
             witness.dob = document.getElementById(`field-witness-dob-${index}`)?.value || '';
             witness.dlNumber = document.getElementById(`field-witness-dlNumber-${index}`)?.value || '';
+            witness.dlState = document.getElementById(`field-witness-dlState-${index}`)?.value || '';
             witness.height = document.getElementById(`field-witness-height-${index}`)?.value || '';
             witness.weight = document.getElementById(`field-witness-weight-${index}`)?.value || '';
             witness.hairColor = document.getElementById(`field-witness-hairColor-${index}`)?.value || '';
@@ -18302,6 +18990,7 @@
         }
         
         function renderEditableFieldWitness(label, fieldName, value, index, type = 'text') {
+            if (type === 'state') return _renderJurisdictionField(label, `field-witness-${fieldName}-${index}`, value);
             // Auto-detect if this is a date field
             if (label && (label.toLowerCase().includes('date') || label.toLowerCase().includes('dob') || label.toLowerCase().includes('birth'))) {
                 type = 'date';
@@ -18381,6 +19070,7 @@
                                 <input type="text" name="name" placeholder="Full Name" value="${witness.name || ''}" required class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-green focus:outline-none">
                                 <input type="date" name="dob" placeholder="Date of Birth" value="${witness.dob || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-green focus:outline-none">
                                 <input type="text" name="dlNumber" placeholder="Driver's License Number" value="${witness.dlNumber || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-green focus:outline-none">
+                                ${_jurisdictionFormSelect('dlState', witness.dlState, 'viper-green')}
                                 <input type="text" name="height" placeholder="Height (inches)" value="${witness.height || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-green focus:outline-none">
                                 <input type="text" name="weight" placeholder="Weight (lbs)" value="${witness.weight || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-green focus:outline-none">
                                 <input type="text" name="hairColor" placeholder="Hair Color" value="${witness.hairColor || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-green focus:outline-none">
@@ -18460,6 +19150,7 @@
                     name: formData.get('name'),
                     dob: formData.get('dob'),
                     dlNumber: formData.get('dlNumber'),
+                    dlState: formData.get('dlState'),
                     phone: formData.get('phone'),
                     phone2: formData.get('phone2'),
                     email: formData.get('email'),
@@ -18741,7 +19432,7 @@
                                         </div>
                                         <div class="field">
                                             <label>Driver's License:</label>
-                                            <div>${witness.dlNumber || 'N/A'}</div>
+                                            <div>${_dlDisplay(witness)}</div>
                                         </div>
                                         <div class="field">
                                             <label>Phone:</label>
@@ -18897,7 +19588,7 @@
         }
 
         function renderInvolvedPersonCard(person, index) {
-            const photoUrl = person.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"%3E%3Crect fill="%231a2332" width="200" height="200"/%3E%3Cpath fill="%2300ff88" d="M100 50a30 30 0 110 60 30 30 0 010-60zm0 80c-25 0-50 12.5-50 25v20h100v-20c0-12.5-25-25-50-25z" opacity="0.3"/%3E%3C/svg%3E';
+            const photoUrl = person.photo || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22 viewBox=%220 0 200 200%22%3E%3Crect fill=%22%231a2332%22 width=%22200%22 height=%22200%22/%3E%3Cpath fill=%22%2300ff88%22 d=%22M100 50a30 30 0 110 60 30 30 0 010-60zm0 80c-25 0-50 12.5-50 25v20h100v-20c0-12.5-25-25-50-25z%22 opacity=%220.3%22/%3E%3C/svg%3E';
 
             return `
                 <div class="glass-card rounded-xl p-6 hover:border-viper-green transition cursor-pointer mx-auto" style="max-width: 400px; width: 100%;" onclick="viewInvolvedPersonDetail(${index})">
@@ -18997,7 +19688,7 @@
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div class="col-span-1">
                                     <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark border-2 border-viper-green/30">
-                                        <img id="ip-photo-${index}" ${_S}="${person.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"%3E%3Crect fill="%231a2332" width="400" height="400"/%3E%3Cpath fill="%2300ff88" d="M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z" opacity="0.3"/%3E%3C/svg%3E'}" alt="${person.name || 'Person'}" class="w-full h-full object-cover">
+                                        <img id="ip-photo-${index}" ${_S}="${person.photo || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22400%22 viewBox=%220 0 400 400%22%3E%3Crect fill=%22%231a2332%22 width=%22400%22 height=%22400%22/%3E%3Cpath fill=%22%2300ff88%22 d=%22M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z%22 opacity=%220.3%22/%3E%3C/svg%3E'}" alt="${person.name || 'Person'}" class="w-full h-full object-cover">
                                     </div>
                                     ${isEditingInline ? `
                                         <div class="mt-2">
@@ -19458,7 +20149,7 @@
                             <div class="person-grid">
                                 ${p.photo ? `<div style="grid-column: span 2;"><img src="${p.photo}" class="photo" alt="Photo"></div>` : ''}
                                 ${p.dob ? `<div class="field"><span class="label">DOB:</span> <span class="value">${formatDate(p.dob)}</span></div>` : ''}
-                                ${p.dlNumber ? `<div class="field"><span class="label">DL#:</span> <span class="value">${p.dlNumber}</span></div>` : ''}
+                                ${p.dlNumber ? `<div class="field"><span class="label">DL#:</span> <span class="value">${_dlDisplay(p, '')}</span></div>` : ''}
                                 ${p.sex ? `<div class="field"><span class="label">Sex:</span> <span class="value">${p.sex}</span></div>` : ''}
                                 ${p.height ? `<div class="field"><span class="label">Height:</span> <span class="value">${p.height}"</span></div>` : ''}
                                 ${p.weight ? `<div class="field"><span class="label">Weight:</span> <span class="value">${p.weight} lbs</span></div>` : ''}
@@ -19546,7 +20237,7 @@
         }
         
         function renderRecoveredVehicleCard(vehicle, index) {
-            const photoUrl = vehicle.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"%3E%3Crect fill="%231a2332" width="200" height="200"/%3E%3Cpath fill="%23ffa726" d="M40 80h120v40H40z M50 120h20v20H50z M130 120h20v20h-20z M40 80l20-20h100l20 20" opacity="0.3"/%3E%3C/svg%3E';
+            const photoUrl = vehicle.photo || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22 viewBox=%220 0 200 200%22%3E%3Crect fill=%22%231a2332%22 width=%22200%22 height=%22200%22/%3E%3Cpath fill=%22%23ffa726%22 d=%22M40 80h120v40H40z M50 120h20v20H50z M130 120h20v20h-20z M40 80l20-20h100l20 20%22 opacity=%220.3%22/%3E%3C/svg%3E';
             
             return `
                 <div class="glass-card rounded-xl p-6 hover:border-viper-orange transition cursor-pointer" onclick="viewRecoveredVehicleDetail(${index})">
@@ -19618,6 +20309,7 @@
                             <div class="grid grid-cols-2 gap-4">
                                 ${renderField('Make/Model', vehicle.makeModel)}
                                 ${renderField('License Plate', vehicle.licensePlate)}
+                                ${renderField('Plate State', vehicle.plateState)}
                                 ${renderField('VIN Number', vehicle.vin)}
                                 ${renderField('Color', vehicle.color)}
                                 ${renderField('Year', vehicle.year)}
@@ -19708,6 +20400,7 @@
                             <div class="grid grid-cols-2 gap-4">
                                 <input type="text" name="makeModel" placeholder="Make/Model (e.g., Toyota Camry)" value="${vehicle.makeModel || ''}" required class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-orange focus:outline-none">
                                 <input type="text" name="licensePlate" placeholder="License Plate" value="${vehicle.licensePlate || ''}" required class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-orange focus:outline-none">
+                                ${_jurisdictionFormSelect('plateState', vehicle.plateState, 'viper-orange', '\u2014 Plate State \u2014')}
                                 <input type="text" name="vin" placeholder="VIN Number" value="${vehicle.vin || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-orange focus:outline-none">
                                 <input type="text" name="color" placeholder="Color" value="${vehicle.color || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-orange focus:outline-none">
                                 <input type="text" name="year" placeholder="Year" value="${vehicle.year || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-orange focus:outline-none">
@@ -19770,6 +20463,7 @@
                 const vehicleData = {
                     makeModel: formData.get('makeModel'),
                     licensePlate: formData.get('licensePlate'),
+                    plateState: formData.get('plateState') || '',
                     vin: formData.get('vin'),
                     color: formData.get('color'),
                     year: formData.get('year'),
@@ -20043,7 +20737,7 @@
                                     </div>
                                     <div class="field">
                                         <label>License Plate:</label>
-                                        <div>${vehicle.licensePlate || 'N/A'}</div>
+                                        <div>${_plateDisplay(vehicle)}</div>
                                     </div>
                                     <div class="field">
                                         <label>VIN Number:</label>
@@ -20145,7 +20839,7 @@
         }
 
         function renderMissingPersonCard(person, index) {
-            const photoUrl = person.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"%3E%3Crect fill="%231a2332" width="200" height="200"/%3E%3Cpath fill="%23ffa726" d="M100 50a30 30 0 110 60 30 30 0 010-60zm0 80c-25 0-50 12.5-50 25v20h100v-20c0-12.5-25-25-50-25z" opacity="0.3"/%3E%3C/svg%3E';
+            const photoUrl = person.photo || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22 viewBox=%220 0 200 200%22%3E%3Crect fill=%22%231a2332%22 width=%22200%22 height=%22200%22/%3E%3Cpath fill=%22%23ffa726%22 d=%22M100 50a30 30 0 110 60 30 30 0 010-60zm0 80c-25 0-50 12.5-50 25v20h100v-20c0-12.5-25-25-50-25z%22 opacity=%220.3%22/%3E%3C/svg%3E';
             
             return `
                 <div class="glass-card rounded-xl p-6 hover:border-viper-orange transition cursor-pointer mx-auto ${person.located ? 'opacity-60' : ''}" style="max-width: 400px; width: 100%;" onclick="viewMissingPersonDetail(${index})">
@@ -20314,7 +21008,7 @@
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div class="md:col-span-1">
                                     <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark mb-4">
-                                        <img id="missing-photo-${index}" ${_S}="${person.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"%3E%3Crect fill="%231a2332" width="200" height="200"/%3E%3Cpath fill="%23ffa726" d="M100 50a30 30 0 110 60 30 30 0 010-60zm0 80c-25 0-50 12.5-50 25v20h100v-20c0-12.5-25-25-50-25z" opacity="0.3"/%3E%3C/svg%3E'}" alt="${person.name}" class="w-full h-full object-cover">
+                                        <img id="missing-photo-${index}" ${_S}="${person.photo || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22 viewBox=%220 0 200 200%22%3E%3Crect fill=%22%231a2332%22 width=%22200%22 height=%22200%22/%3E%3Cpath fill=%22%23ffa726%22 d=%22M100 50a30 30 0 110 60 30 30 0 010-60zm0 80c-25 0-50 12.5-50 25v20h100v-20c0-12.5-25-25-50-25z%22 opacity=%220.3%22/%3E%3C/svg%3E'}" alt="${person.name}" class="w-full h-full object-cover">
                                     </div>
                                     ${isEditingInline ? `
                                         <div class="text-center">
@@ -21237,6 +21931,10 @@
                                         <label class="block text-sm text-gray-400 mb-2">License Plate</label>
                                         <input type="text" id="mp_vehicle_licensePlate" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-orange focus:outline-none">
                                     </div>
+                                    <div>
+                                        <label class="block text-sm text-gray-400 mb-2">Plate State</label>
+                                        ${_jurisdictionIdSelect('mp_vehicle_plateState', '', '\u2014 Plate State \u2014')}
+                                    </div>
                                     <div class="md:col-span-2">
                                         <label class="block text-sm text-gray-400 mb-2">Vehicle Description/Notes</label>
                                         <textarea id="mp_vehicle_description" rows="2" placeholder="e.g., Tinted windows, bumper stickers, dents, etc." class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-orange focus:outline-none"></textarea>
@@ -21377,6 +22075,7 @@
                         model: vehicleModel,
                         vin: document.getElementById('mp_vehicle_vin').value.trim(),
                         licensePlate: document.getElementById('mp_vehicle_licensePlate').value.trim(),
+                        plateState: document.getElementById('mp_vehicle_plateState')?.value || '',
                         description: document.getElementById('mp_vehicle_description').value.trim(),
                         photo: vehiclePhoto
                     };
@@ -21637,6 +22336,10 @@
                                         <label class="block text-sm text-gray-400 mb-2">License Plate</label>
                                         <input type="text" id="mp_vehicle_licensePlate" value="${person.vehicle?.licensePlate || ''}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-orange focus:outline-none">
                                     </div>
+                                    <div>
+                                        <label class="block text-sm text-gray-400 mb-2">Plate State</label>
+                                        ${_jurisdictionIdSelect('mp_vehicle_plateState', person.vehicle?.plateState || '', '\u2014 Plate State \u2014')}
+                                    </div>
                                     <div class="md:col-span-2">
                                         <label class="block text-sm text-gray-400 mb-2">Vehicle Description/Notes</label>
                                         <textarea id="mp_vehicle_description" rows="2" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-orange focus:outline-none">${person.vehicle?.description || ''}</textarea>
@@ -21711,6 +22414,7 @@
                         model: vehicleModel,
                         vin: document.getElementById('mp_vehicle_vin').value.trim(),
                         licensePlate: document.getElementById('mp_vehicle_licensePlate').value.trim(),
+                        plateState: document.getElementById('mp_vehicle_plateState')?.value || '',
                         description: document.getElementById('mp_vehicle_description').value.trim(),
                         photo: vehiclePhoto || missingPersons[index].vehicle?.photo || null
                     };
@@ -25589,7 +26293,7 @@
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div class="md:col-span-1">
                                     <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark mb-4">
-                                        <img ${_S}="${narcotic.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"%3E%3Crect fill="%231a2332" width="200" height="200"/%3E%3Cpath fill="%23ffa726" d="M100 60l-15 20h10v40h10V80h10z" opacity="0.3"/%3E%3C/svg%3E'}" alt="${narcotic.type}" class="w-full h-full object-cover">
+                                        <img ${_S}="${narcotic.photo || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22 viewBox=%220 0 200 200%22%3E%3Crect fill=%22%231a2332%22 width=%22200%22 height=%22200%22/%3E%3Cpath fill=%22%23ffa726%22 d=%22M100 60l-15 20h10v40h10V80h10z%22 opacity=%220.3%22/%3E%3C/svg%3E'}" alt="${narcotic.type}" class="w-full h-full object-cover">
                                     </div>
                                     <div class="text-center">
                                         <label class="cursor-pointer px-4 py-2 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded-lg text-viper-purple text-sm transition inline-block">
@@ -27388,7 +28092,7 @@
                 let line = parts.join(' | ');
                 // Vehicles
                 if (s.vehicles && s.vehicles.length > 0) {
-                    const veh = s.vehicles.map(v => [v.color, v.makeModel, v.plateNumber ? `(${v.plateNumber})` : ''].filter(Boolean).join(' ')).join('; ');
+                    const veh = s.vehicles.map(v => [v.color, v.makeModel, _plateNum(v) ? `(${_plateDisplay(v, '')})` : ''].filter(Boolean).join(' ')).join('; ');
                     line += `\n   Vehicles: ${veh}`;
                 }
                 // Firearms
@@ -28913,7 +29617,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             <div class="field"><label>Date of Birth</label><span>${s.dob || '—'}</span></div>
                         </div>
                         <div class="field-row">
-                            <div class="field"><label>Driver's License</label><span>${s.dlNumber || '—'}</span></div>
+                            <div class="field"><label>Driver's License</label><span>${_dlDisplay(s, '—')}</span></div>
                             <div class="field"><label>Height / Weight</label><span>${[s.height, s.weight ? s.weight + ' lbs' : ''].filter(Boolean).join(' / ') || '—'}</span></div>
                         </div>
                         <div class="field-row">
@@ -28943,7 +29647,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         ${s.vehicles.map(v => `
                             <div class="item-card" style="display:flex;gap:12px;align-items:start">
                                 ${v.photo ? '<img ' + _S + '="' + v.photo + '" style="width:120px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #ddd;flex-shrink:0">' : ''}
-                                <div><strong>${[v.color, v.makeModel].filter(Boolean).join(' ')}</strong>${v.plateNumber ? ' — Plate: ' + v.plateNumber : ''}</div>
+                                <div><strong>${[v.color, v.makeModel].filter(Boolean).join(' ')}</strong>${_plateNum(v) ? ' — Plate: ' + _plateDisplay(v, '') : ''}</div>
                             </div>
                         `).join('')}
                     </div>

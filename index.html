@@ -9,6 +9,7 @@
     <script src="modules/viper-prefs.js"></script>
     <script src="modules/datetime-format.js"></script>
     <script src="modules/licensing.js"></script>
+    <script src="modules/storage-guard.js"></script>
     <script src="modules/telemetry.js"></script>
     <script src="modules/telemetry-consent.js"></script>
     <script src="modules/genlogs-api.js"></script>
@@ -19,6 +20,9 @@
     <script src="libs/tailwindcss.js"></script>
     <link rel="stylesheet" href="modules/viper-skins.css">
     <script src="modules/viper-skins.js"></script>
+    <!-- Shared warrant-outstanding predicate. Must match the warrant cards in
+         case-detail-with-analytics.html, which loads the same module. -->
+    <script src="modules/warrant-status.js"></script>
     <script src="libs/chart.min.js"></script>
     <script src="libs/jspdf.umd.min.js"></script>
     <script src="libs/jspdf.plugin.autotable.min.js"></script>
@@ -3593,7 +3597,10 @@
                 Object.entries(allWarrants).forEach(([caseNumber, warrants]) => {
                     if (Array.isArray(warrants)) {
                         warrants.forEach(warrant => {
-                            if (!warrant.returnReceived) {
+                            // Resolved = production received OR explicitly closed
+                            // out (preservation requests). Both are out of the
+                            // alert section.
+                            if (WarrantStatus.isOpen(warrant)) {
                                 // Calculate days since issued
                                 const issuedDate = new Date(warrant.issuedDate || warrant.dateIssued);
                                 const dueDate = new Date(warrant.dueDate + 'T00:00:00');
@@ -4524,7 +4531,7 @@
             
             Object.values(allWarrants).forEach(caseWarrants => {
                 caseWarrants.forEach(warrant => {
-                    if (warrant.dueDate && !warrant.returnReceived && new Date(warrant.dueDate + 'T00:00:00') < new Date()) {
+                    if (WarrantStatus.isOverdue(warrant)) {
                         overdueCount++;
                     }
                 });
@@ -5384,13 +5391,13 @@
             
             Object.entries(allWarrants).forEach(([caseNumber, warrants]) => {
                 warrants.forEach(warrant => {
-                    if (warrant.dueDate && !warrant.returnReceived && new Date(warrant.dueDate + 'T00:00:00') < new Date()) {
+                    if (WarrantStatus.isOverdue(warrant)) {
                         const caseInfo = allCases.find(c => c.caseNumber === caseNumber);
                         overdueWarrants.push({
                             caseNumber: caseNumber,
                             warrant: warrant,
                             caseId: caseInfo ? caseInfo.id : null,
-                            daysOverdue: Math.ceil((new Date() - new Date(warrant.dueDate + 'T00:00:00')) / (1000 * 60 * 60 * 24))
+                            daysOverdue: WarrantStatus.daysOverdue(warrant)
                         });
                     }
                 });
@@ -6163,7 +6170,7 @@
             const overdue = [];
             Object.entries(allWarrants).forEach(([caseNumber, warrants]) => {
                 (warrants || []).forEach(warrant => {
-                    if (warrant.dueDate && !warrant.returnReceived && new Date(warrant.dueDate + 'T00:00:00') < new Date()) {
+                    if (WarrantStatus.isOverdue(warrant)) {
                         const caseInfo = allCases.find(c => c.caseNumber === caseNumber);
                         overdue.push({ caseNumber, warrant, caseId: caseInfo ? caseInfo.id : null });
                     }
@@ -8316,16 +8323,56 @@
 
     <script>
     // --- Licensing bootstrap ---
-    (function() {
+    // NOTE: this deliberately does NOT trust an empty localStorage.
+    // Chromium hands the renderer an empty store when the localStorage
+    // LevelDB cannot be opened (cloud-sync placeholder not yet hydrated,
+    // file lock, redirected folder not mounted). The old code read
+    // `!status.registered` and immediately showed the registration modal,
+    // which is how an officer was asked to re-register with every case
+    // apparently gone - while all of it sat intact on disk and came back
+    // by itself two launches later. ViperStorageGuard tells those two
+    // states apart before we prompt for anything. See modules/storage-guard.js.
+    (async function() {
         const lic = window.ViperLicensing;
         if (!lic) return;
 
+        let verdict = 'ok';
+        try {
+            if (window.ViperStorageGuard) {
+                const r = await window.ViperStorageGuard.run();
+                verdict = r.verdict;
+            }
+        } catch (e) {
+            console.error('[licensing bootstrap] storage guard failed:', e);
+        }
+
+        // Storage is untrustworthy - the guard has already taken over the
+        // screen. Never show a registration prompt on top of that.
+        if (verdict === 'storage-fault') return;
+
         const status = lic.getLicenseStatus();
 
-        // Show registration modal if not registered
         if (!status.registered) {
             const modal = document.getElementById('registrationModal');
-            modal.style.display = 'flex';
+            if (modal) modal.style.display = 'flex';
+        } else {
+            // Storage is healthy. Back-fill any case data that is present on
+            // disk but missing from localStorage. This is strictly additive
+            // and was previously only reachable from a button in Settings,
+            // so a partial loss stayed invisible until the user went looking.
+            try {
+                if (window.viperSnapshot && window.viperSnapshot.recover) {
+                    const rec = await window.viperSnapshot.recover({ silent: true });
+                    if (rec && (rec.restoredCases || rec.restoredModules)) {
+                        console.warn('[startup recovery] restored',
+                            rec.restoredCases, 'case(s) and',
+                            rec.restoredModules, 'module set(s) from disk.');
+                        if (typeof renderCases === 'function') { try { renderCases(); } catch (_) {} }
+                    }
+                }
+            } catch (e) {
+                console.warn('[startup recovery] failed:', e);
+            }
         }
 
         // Show expired banner
@@ -8356,6 +8403,12 @@
 
         try {
             await window.ViperLicensing.registerDemo({ name, agency, email, address });
+            // Record this install on local disk immediately. This is what
+            // lets a later launch tell "storage didn't load" apart from
+            // "new user" - without it the very first session is unprotected.
+            try {
+                if (window.ViperStorageGuard) await window.ViperStorageGuard.markHealthy();
+            } catch (_) { /* non-fatal */ }
             document.getElementById('regForm').style.display = 'none';
             document.getElementById('regSuccess').style.display = 'block';
         } catch (e) {
@@ -8375,7 +8428,15 @@
         ['registered_at','api_key','license_key','license_type','expires_at','customer_name','contact_email','agency'].forEach(k =>
             localStorage.removeItem('viper_' + k)
         );
-        location.reload();
+        // Forget the on-disk install marker too. Otherwise the next launch
+        // sees "marker present + empty registration" and correctly reports a
+        // storage fault for what was actually a deliberate reset.
+        const done = () => location.reload();
+        if (window.ViperStorageGuard && window.ViperStorageGuard.forget) {
+            window.ViperStorageGuard.forget().then(done, done);
+        } else {
+            done();
+        }
     }
     </script>
     <script src="/modules/security-ui.js"></script>
@@ -8424,6 +8485,7 @@
     </div>
 
     <!-- Resource Hub (unified investigative resources drawer) -->
+    <script src="modules/custom-tools.js"></script>
     <script src="modules/resource-hub.js"></script>
     <!-- UC Chat Operations (undercover chat workspace) -->
     <script src="modules/uc-chat/uc-chat-ops.js"></script>

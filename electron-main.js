@@ -3401,6 +3401,58 @@ ipcMain.handle('extract-pdf-text', async (event, filePath) => {
   }
 });
 
+// --- Sparse-text OCR for specific PDF pages (ADDITIVE — used only by the
+// Arkansas NIBRS incident-report importer).
+//
+// `extract-pdf-text` above is UNCHANGED and still the only path used by every
+// other RMS format. It OCRs with Tesseract's default page segmentation, which
+// preserves row/column layout — necessary for label->value association, but it
+// reliably DROPS the typed NAME value inside the dense "Others Involved" blocks
+// on the Arkansas continuation page even though the value is clearly legible in
+// the render. Sparse-text mode (PSM 11) recovers those names but destroys the
+// layout, so it is run only over the handful of pages that actually lost a
+// name, and only the name is taken from it.
+ipcMain.handle('ocr-pdf-pages-sparse', async (event, filePath, pages) => {
+  const out = {};
+  try {
+    const wanted = Array.from(new Set((pages || [])
+      .map(n => parseInt(n, 10))
+      .filter(n => Number.isInteger(n) && n > 0)))
+      .slice(0, 12);                       // hard cap: this is an OCR pass per page
+    if (!wanted.length) return { ok: true, pages: out };
+
+    const dataBuffer = fs.readFileSync(filePath);
+    const mupdf = await import('mupdf');
+    const Tesseract = (await import('tesseract.js')).default;
+    const doc = mupdf.Document.openDocument(dataBuffer, 'application/pdf');
+    const numPages = doc.countPages();
+
+    const worker = await Tesseract.createWorker('eng');
+    try {
+      await worker.setParameters({ tessedit_pageseg_mode: '11' });  // PSM_SPARSE_TEXT
+      for (const pageNo of wanted) {
+        if (pageNo > numPages) continue;
+        const page = doc.loadPage(pageNo - 1);
+        const matrix = mupdf.Matrix.scale(300 / 72, 300 / 72);
+        const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false, true);
+        const result = await worker.recognize(Buffer.from(pixmap.asPNG()));
+        out[String(pageNo)] = String((result && result.data && result.data.text) || '')
+          .replace(/©/g, '0')
+          .replace(/\(([A-Z])0\)/g, '($1O)')
+          .replace(/['']/g, "'");
+      }
+    } finally {
+      try { await worker.terminate(); } catch (_) { /* ignore */ }
+    }
+    return { ok: true, pages: out };
+  } catch (error) {
+    // Never fail the import because the supplementary pass failed — the caller
+    // simply keeps whatever the primary extraction read.
+    console.error('ocr-pdf-pages-sparse error:', error);
+    return { ok: false, pages: out, error: String((error && error.message) || error) };
+  }
+});
+
 // --- Case Export / Import ---
 ipcMain.handle('save-case-export', async (event, { fileName, data }) => {
   const result = await dialog.showSaveDialog(mainWindow, {

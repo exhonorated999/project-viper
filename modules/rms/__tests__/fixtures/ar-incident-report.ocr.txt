@@ -1,0 +1,259 @@
+# REDACTED fixture — Arkansas State NIBRS Incident Report, Tesseract OCR output.
+# Structure, OCR artifacts and column collapse are byte-for-byte as produced by
+# electron-main.js `extract-pdf-text` (MuPDF 300 DPI render -> Tesseract, default
+# page segmentation). All names, DOBs, phones, addresses, incident/ORI/officer
+# codes have been replaced with same-shaped synthetic values. No real PII here.
+ORI NUMBER INTERNAL INCIDENT EXCEPTIONAL
+a —— ARKANSAS STATUS: CLEARANCE STATUS:
+f= INCIDENT NUMBER Il (A) Active [J (A) Death of the Offender
+Z, INCIDENT REPORT [1 (CA) Closed by Arrest [J (B) Prosecution Declined
+= 26-0417295 UNAPPROVED ! " .
+= DATE(S) OF INCIDENT TET [J (CE) Closed by Exception | [7] (C) Extradition Denied
+&) 08/13/2026 Boone County Sheriff's Office 0 co) Closed ha Vietm RAGA Ey
+4 TIME(S) OF INCIDENT DAY(S) OF INCIDENT a nace = (EY ine, No Gland
+=| 15:33 - 16:13 Thursday [J (U) Unfounded I (N) Not Applicable
+DISPATCHER TIME RECEIVED TIME ARRIVED | REPORTING AREA EXCEPT. CLEAR. DATE
+bmoreau - Moreau, Bianca 15:40 BCSO-Delta
+OFFENSE # UCRCODE | OFFENSE STATUS: OFFENDER USED: IE (N) Not Applicable Burglary (220) Location 14819: FORCED ENTRY?
+1 11A [1 (A) Attempted [if (C) Completed |[T] (A) Alcohol [7 (C) Cptr. Equip. [] (D) Drugs | # PREMISES ENTERED? [J Yes [J No
+5-14-103a(1) Rape 912 THISTLEDOWN LN, Bellefonte, AR 72611
+LOCATION CODE (Enter 1) [J (17) Liquor Store [J (46) Farm Facility WEAPON FORCE:  (Max.3)
+[7 (01) Air/Bus/Train Terminal [J (18) Parking LotiDrop Lot/Garage  [] (47) Gambling FacilityCasino/Race | {FOr 11-15 place "A" in space next fo box
+[1 (02) Bank/Savings & Loan [1 (19) Rental/Storage Facility Track if weapon was an Automatic)
+[1 (03) Bar/Night Club Il (20) Residence/Home [1 (48) Industrial Site ___[O (11) Firearm (Type not stated) [7] (90) Other
+[3 (04) Church/Synagogue/Temple/Mosque [7] (21) Restaurant [1 (49) Military Installation 12) Hand 95) Unk
+[J (05) Commercial/Office Building [J (23) Service/Gas Station [J (50) ParkiPlayground — [1 (12) Handgun a
+= [J (06) Construction Site [J (24) Specialty Store [1 (51) Rest Area — [OO #3) Rifle [1 (99) None
+whl [O (07) Convenience Store [1 (25) Other/Unknown [J (52) School - College/University [Od (14) Shotgun
+pd [J (08) Department/Discount Store [J (37) Abandoned/Condemned [J (53) School - Elementary/Secondary [J (15) Other Firearm
+=| [J (09) Drug Store/Doctor's Office/Hospital Structure [1 (54) Shelter - Mission/Homeless —
+=| [J (10) FieldWoods [] (38) Amusement Park [J (55) Shopping Mall [7 (20) Knife/Cutting Instru. (Ax, etc.)
+= = i SpE Building [J (39) ArenalStadium/Fairgrounds/ ~~ [] (56) Tribal Lands [J (30) Blunt Object (Club, etc.)
+rocery/Supermarket Coliseum [O (57) Community Center ;
+[J (13) Highway/Road/Alley/Street/Sidewalk [7] (40) ATM Separate From Bank hid apa
+[J (14) HoteliMotel Etc. [J (41) Auto Dealership New/Used I (40) Personal Weapons (Hands, etc.)
+1 (19) i [1 (42) Camp/Campground [3 (50) Poison
+acility [J (44) Daycare Facility i"
+[J (16) Lake/Waterway/Beach [J (45) Dock/WharfiFreight/Modal Terminal Le juni
+TINT] = [1 (65) Firellncendiary Device
+: (Max.3) TYPEGANGACTVITY: ~~ (Max.3) | [ (70) Narcotics/Drugs!
+[1 (B) Buying [J (0) Operating/Promoting/Assisting [J (6) Other Gang Sleeping Pills
+[J (C) Cultivate/Manufacture/Publish [J (P) Possessing/Concealing [J W) Juvenile Gan [J (85) Asphyxiation
+[1 (D) Distributing/Selling [J (7) Transport/Transmit/import [7 (N) Nonelunk o BIAS MOTIVATED CRIME:
+E) Exploiting Children i ji oneiUnknown FE
+[1 (E) Exploiting [J (U) Using/Consuming None (No Bias)
+VICTIM # NAME: Last, First, Middle SOC. SEC. NO. DRIVER'S LICENSE DR. LI. STATE | DATE OF BIRTH
+1 HOLLOWAY (JV2), MARISOL 04/22/2011
+RESIDENT ADDRESS: Street City State ZIP RELATIONSHIP OF THIS VICTIM TO OFFENDERS
+912 THISTLEDOWN LN, Bellefonte, AR 72611 (check relationship under appropriate offender number):
+OCCUPATION RESIDENT PH #MOH2 #3 #4 #5 #6 #7 #8 #9 #10 VICTIM WAS:
+=. goooon
+479) 302-6614 Qoooo (G8 Spouse
+BFETET O = = SEE EEE BER emerson
+SEX (PA) Parent
+m——— O (mM) Male Hl (F) Female [J (U) Unknown Oooo onn (SB) Sibling
+or = OOoOOoOoOgogoQg  CHchid
+ETHNIC: oo : COCOCOCOCOCLOC EC (GP) Grandparent
+[1 (Hy Hispanic ~~ [ (N) Nonhispanic [7 (U) Unknown ExactAge _14 a H L ogg = CI LIC (GC) Grandchild
+RACE: Range __| QUOUDOUOLTLL ea
+Bl (W)White [7] () American Indian [J (U) Unknown [J (NN) Under 24 Hrs. Old H = = H H H H H H H eg
+[J (B)Black  [] (A) Asian/Pacific Islander [J (NB) 1-6 Days Old El eBeleBelclolclala iE I.
+= [J (BB) 7-364 Days Old OOOO0O0O000L0O (8S) Stepsibling
+| RES. STATUS: H (5) over so 1. 01d OOO CODCOD CO (OF Other Family Member
+[=| Ml (R) Resident [J (N) Nonresident [] (U) Unknown [7 (00) Unknown H H d H H H DOO (A) Acuaintance
+{| VICTIM TYPE: B () Individual [7] (B) Business [] (F) Financial Institution [J (U) Unknown Ee 4 ori
+= [J (6G) Government [] (R) Religious [J (S) Society/Public [J (O) Other OgooOooOooooogongog (BE) Babysittee (baby)
+VICTIM INJURY: (Max. 5) (M) Apparent Minor Inju THIS VICTIM RELATED BEHLN HEHE HM REE 0 Eomandciineg
+BB () None O on TO WHICH OFFENSES? OO0OO0OO0OO0O00 000 (CFChild of Boyfriend/Girlfriend
+LJ (B) Apparent Broken Bones [J (O) Other Major Injury Ey Ou Ow Oo OOOOOODODODODO (HR) Homosexual Relationship
+C1 () Possible Internal Injury [1 (T) Loss of Teath #2 CI#5 C148 others: | OJ 01 01 00 01 01 01 01 LJ C1 (XS)Ex-Spouse
+C1 (1) Severe Laceration [1 (U) Unconsciousness # [J# O# OOO0OOO0OO0OQO0dQgQgn (EE) Employee
+AGGRAVATED ASSAULTIHOMICIDE CIRCUMSTANCES Ee EmEmEaa mE = bot bt Ld Ll 1 C1 (ER) Employes
+Aggravated Assault/Murder: (max. 2) Negligent Manslaughter: (enter 1 googoogogo ow Otherwise Known
+0 (0) Argument [1 (30) Chid Paying Wh Weapon Rd elo oR) Sesonship Unknown
+[7 (02) Assault On Law Enf. Officer [1 (31) Gun-Cleaning Accident Oooo on 0) strange
+[m| o Drug Dealing [1 (32) Hunting Accident O00O000000O (VO) Victim was Offender
+angland i i imi i
+B (05 overt Gang a ADDITIONAL EF] (3) Crimina Attacked Fellow Pte ocr
+6) Domestic Viol i illi imi vil
+= a) Hh rh ence [J (34) Other Negligent Killings Lil [J (€) Criminal Attacked Civilian
+[7 (08) Other Felony Involved Justifiable Homicide: (enter 1) CRC: | 8 ir ic i
+[m| i) Ota Cheumgtuncey [J (20) Criminal Killed by Private Citizen pel H & bi Rasiuied Fusdiag HER
+(10) nown Circumstances [J (21) Criminal Killed by Police Officer LC] (G) Unable to Determine/Not Enough Information
+-l -
+= REPORT DATE DAY TIME (Military) REPORTING OFFICER CODE# | APPROVING SUPERVISOR CODE# | DATE APPROVED
+=| 08/13/2026 Thu 15:33 DERRICK LANE D0312
+
+INCIDENT REPORT
+
+a DATE INCIDENT NUMBER ORM ("B") | REPORTING OFFICER CODE# | VICTIM NAME
+< 08/13/2026 | 26-0417295 AR0450000 | DERRICK LANE D0312 | HOLLOWAY (JV2), MARISOL
+
+ARRESTEE# | NAME Last, First, Middle,
+= ABERNATHY (JV1), GRAYSON
+= OFFENDER# | RESIDENT ADDRESS Street City State EE DATE OF BIRTH
+
+1
+
+z RESIDENT PHONE EMPLOYMENT/SCHOOL PHONE DRIVER'S LICENSE DR. LI STATE po
+~ ARREST LOCATION OCCUPATION PLACE OF EMPLOYMENT ARREST TYPE: [J (0) On View Arrest
+< [J (5) Summons/Cited [7] (T) Taken Into Cust.
+~| sEx: (M) Male (F) Female (U) Unk. AGE: MULT. ARREST INDIC.: (M) Multiple ] :
+> : | | : : O : [| EXACT AGE 14 [J (C) Count Arrestee a N) NIA (Max. 2) (Place "A" in blank if automatic)
+= ETHNIC: [7] (H) Hispanic [ll (N) Nonhisp. Od (U) Unk. AGE RANGE: io rrp [1 (01) Unarmed [] [19 Raw
+
+RACE Whit B) Black 1) American Indi re ee] Diab Voll UN Ui JOYE Es [J (11) Firearm utting
+a [| i ite =) ) Black [] (I) American Indian [1 (99) Over 98 Yrs. Old [J (H) Handled within Department. [J (12) Handgun Instr.
+Zz [1 (A) Asian/Pacific Islander ~~ [] (U) Unknown [3 (00) Unknown [1 (R) Referred outside Department 0 (13) Rifle OJ (17) Club /
+= RES. STATUS: [ll (R)Resident | UCRARR.CODE | OFFENSE NAME ARREST DATE | ARREST TRANSACT. J (14) Shotgun Blackjack /
+=| C1 (N)Nonres. [J (U) Unknown # [1] (15) Other Firearm Brass Kn.
+O[ HEIGHT | WEIGHT | BUILD HAIR COLOR HAIR STYLE HAIR LENGTH EYE COLOR
+=
+= OFFENDER# | RESIDENT ADDRESS Street City State DATE OF BIRTH
+z RESIDENT PHONE EMPLOYMENT/SCHOOL PHONE DRIVER'S LICENSE rue fs
+&
+£Y| ARREST LOCATION OCCUPATION PLACE OF EMPLOYMENT ARREST TYPE: [J (0) On View Arrest
+< [J (5) SummonsiCited [7] (T) Taken Into Cust.
+~| SEX: CJ (M) Male [J (F) Female [J (U) Unk. AGE: MULT. ARREST INDIC.: J (M) Muitiple i ]
+PAIETNG:  [] (9) isperic [JN Norhisp. [J U1 Unk | [J (H) Hispanic [J (N) Nonhi UjUnk | [PUCTAGE 0 E)CumtAmestas LJ (NYA hime 1 a) Mga
+= - cl SH JE SY AGE RANGE: _to _ I"iSpPOSITION OF JUVENILE BE a Hl 4 . “3
+
+RACE W) White B) Black 1) American Indian rere Dior Voit IVI OF SOVENLE: [J (11) Firearm utting
+= Li A EH c oo EJ chino. Dd [1 (H) Handled within Department. [J (12) Handgun Instr.
+Zz. [J (A) Asian/Pacific Islander ~~ [] (U) Unknown [J (00) Unknown 1 (R) Referred outside Department [J] (13) Rifle [J] (7) Club
+= RES.STATUS: [] (R)Resident | UCRARR.CODE | OFFENSE NAME ARREST DATE | ARREST TRANSACT. [J (14) Shotgun Blackjack /
+Go| [I (N)Nonres. [7] (U) Unknown # [J (15) Other Firearm Brass Kn.
+a a i i Gel
+fq
+&~
+se]
+b=
+se
+=~
+@)
+wn
+ed
+s
+B=
+[®)
+=
+lr)
+=
+=
+75)
+
+INCIDENT REPORT
+(8 PAGE# | DATE INCIDENT # REPORTING OFFICER CODE# | VICTIM NAME
+« 3 08/13/2026 | 26-0417295 DERRICK LANE D0312 | HOLLOWAY (JV2), MARISOL
+= YEAR MAKE MODEL STYLE VIN LICENSE NUMBER STATE
+ju]
+[=| TOP/SOLID COLOR SECOND COLOR DISPOSITION OF RECOVERY:
+> [J () Impounded [7 (R) Released To Owner
+=| YEAR MODEL STYLE VIN LICENSE NUMBER STATE
+=
+= A a
+[=| TOP/SOLID COLOR SECOND COLOR DISPOSITION OF RECOVERY:
+> [J () Impounded [7] (R) Released To Owner
+OF.CODE | P.LOSS BE DESCRIPTION (include serial number, make, model, primary color) a ITEM VALUE RECOV. DATE
+[=9
+ec rrr rr I |
+&
+o IN I I I
+TOTAL NUMBER VEHICLES STOLEN: TOTAL NUMBER VEHICLES RECOVERED: TOTAL VALUE STOLEN: TOTAL VALUE RECOVERED:
+wn PROPERTY LOSS: (1) None (2) Burned (3) Counterfeited/Forged (4) Damaged/Destroyed/Vandalized (5) Recovered (6) Seized (7) Stolen, etc. (8) Unk.
+= PROPERTY DESCRIPTION: (14) Gambling Equipment (27) Recordings-Audio/Visual (42) Artistic Supplies/Accessories (68) Lawn/Yard/Garden Equipment
+(01) Aircraft (15) Heavy Construction/industrial (28) Recreational Vehicles (43) Building Materials (69) Logging Equipment
+®) (02) Alcohol Equipment (29) Structures-Single Occupancy (44) Camping/Hunting/Fishing (70) Medical/Medical Lab Equipment
+|) (03) Automobiles (16) Household Goods (30) Structures-Other Dwellings Equipment/Supplies (71) Metals, Non-Precious
+(04) Bicycles (17) Jewelry/Precious Metals/Gems (31) Structures-Commercial/Business (45) Chemicals (72) Musical Instruments
+pb (05) Buses (18) Livestock (32) Structures-IndustrialiManufacturing (46) CollectionsiCollectibles (73) Pets
+fi (06) Cloths/Furs (19) Merchandise (33) Structures-Public/Community (47) Crops (74) Photographic/Optical Equipment
+[4 (07) Computer Hardware/Software (20) Money (34) Structures-Storage (48) Documents/Personal or Business (75) Portable Electronic Communications
+= (08) Consumable Goods (21) Negotiable Instruments (35) Structures-Other (49) Explosives (76) Recreational/Sports Equipment
+ay (09) Credit/Debit Cards (22) Nonnegotiable Instruments (36) Tools (59) Firearm Accessories (77) Other
+(10) Drugs/Narcotics (23) Office-Type Equipment (37) Trucks (64) Fuel (78) Trailers
+a (11) Drug/Narcotic Equipment (24) Other Motor Vehicles (38) Vehicle Parts/Accessories (65) Identity Documents (79) Watercraft Equipment/Parts/Accessories
+[a4 (12) Farm Equipment (25) PursesiHandbags/Wallets (39) Watercraft (66) Identity - Intangible (80) Weapons - Other
+fy (13)Firearms (26) RadiosITVs/VCRs/DVD Players (41) Aircraft Parts/Accessories (67) Law Enforcement Equipment (88) Pending Inventory (of Property)
+DRUG TYPE WHOLE DRUG QUANTITY FRACTIONAL DRUG QUANTITY DRUG MEASUREMENT TYPE DRUG MEASUREMENT:
+WEIGHT
+(GM) Gram
+o (KG) Kilogram
+0] (OZ) Ounce
+= (LB) Pound
+= CAPACITY
+4) (ML) Milliliter
+: (LT) Liter
+2 DRUG TYPE: (FO) Fluid Ounce
+=) (A) "Crack" Cocaine (F) Morphine (K) Other Hallucinogens (0) Other Depressants (GL) Gallon
+f (B) Cocaine (G) Opium L) phen, (P) Other Drugs
+(C) Hashish (H) Other Narcotics We amphetamines (U) Unknown Type Drug UNITS Lo
+(D) Heroin ()LSD (M) Other Stimulants (X) Over 3 Drug Types (DU) Dosage Unit (Pills, etc.)
+(E) Marijuana (J) PSP (N) Barbiturates (NP) Number of Plants
+(=| NAME: Last, First, Middle SEX: .
+4 OJ () Male AGE: RAGE:
+| [J (F) Female [1 (00) Unknown [1 (W) White
+By RESIDENT ADDRESS: Street City Stat 0] (U) Unk LE} tec
+H e . e
+> RESIDENT PHONE | EMPLOYT. PHONE | LJ () American Indian
+[@) [1 (A) Asian/Pacific Islander
+|@) O (U) Unknown
+
+INCIDENT REPORT
+PAGE# | DATE INCIDENT NUMBER REPORTING OFFICER CODE # VICTIM NAME
+4 08/13/2026 | 26-0417295 DERRICK LANE DO312 HOLLOWAY (JV2), MARISOL
+NAME: Last, First, Middle SEX: [J (U)Unk [AGE: ___ [RACE [J (U) Unk.
+1 (M) Male [0 W)White [7] (B) Black
+VANDERLINDE (JV3), EMMETT £5 (F) Female OJ 0) Unknown | = 1 american Indian
+WwW RESIDENT ADDRESS: Street City State Zip RESIDENT PHONE EMPL. PHONE [1 (A) Asian/Pacific
+1 Islander
+tL DATE OF BIRTH > OCCUPATION PLACE OF EMPLOYMENT
+& NAME: Last, First, Middle SEX: [J U)Unk. | AGE: RACE: 0 (U) Unk.
+OO (M) Male 00¥ Ui [1 W) White [7 (B) Black
+S [1 (F) Female LJ (0) Unkmown | =) American Indian
+E RESIDENT ADDRESS: Street City State Zip RESIDENT PHONE EMPL. PHONE [1 (A) Asian/Pacific
+S Islander
+a ici itis A
+NARRATIVE:
+On Thursday, August 13, 2026 at approximately 1545 hours, I was dispatched to a call for service
+with ASP Crimes Against Children advocate.
+IT called and made contact with the caller, Ms. Delphine Quillen (Others Involved), who stated today
+JV1 and JV3 got into an argument, JV1 said he had made a mistake and was living with the
+consequences. JV1 would not divulge what the mistake was to Jv3, but JV1 stated he was suffering
+JV3 said the JV1’s mistake was raping his ex-girlfriend. JV1 did not admit this to JV3, however
+from the information gathered, JV1 did tell his older brother about the situation and the brother
+(unknown information) told Rowena Marchetti (Others involved), who is JV2’s mother.
+Ms. Quillen advised this incident occurred at the end of the 2025/2026 school year, but did not
+have an exact date/time.
+Ms. Quillen, did provided Ms. Marchetti’s phone number and I contacted her for some additional
+context and information. Ms. Marchetti advised she was made aware of the situation and the parents
+of Jv2 and JV1 decided the two would break up and not see each other, however she stated JV1 did
+not rape JV2, it was consensual sex, however JV1 did pressure JV2 into having sex. Ms. Marchetti
+went on to say the JVl is a good kid, they just could condone this type of activity at this age.
+ASP Case number is 318-4407 and I provided Ms. Quillen with the BCSO report number.
+There is a lot of blanks throughout this report, however I updated the information that was
+
+CONTINUATION PAGE
+DATE INCIDENT # REPORTING OFFICER CODE# | VICTIM NAME
+08/13/2026 | 26-0417295 DERRICK LANE D0312 | HOLLOWAY (JV2), MARISOL
+Others Involved
+CASE WORKER
+NAME: Last, First, Middle SEX: -
+1 () Male AGE: RACE:
+[ (F) Female 00) Unk Od (W) White
+RESIDENT pt ES as City Stat 0] ) unk 0 Bow LJ (8) Black
+3 ate z N
+RESIDENT PHONE | EMPLOY. PHONE | LJ (I) American Indian
+[1 (A) Asian/Pacific Islander
+0 [ (U) Unknown
+PARENT
+NAME: Last, First, Middle SEX:
+J (M) Male AGE: 34 RACE:
+0 H (F) Female Bl (W) White
+RESIDENT ODES Ss meee Ci sate | Zi 0] 0) Ook comin | Oe
+’ Hy ate ? RESIDENT PHONE | EMPLOY'T. PHONE (1) American Indian
+J (A) Asian/Pacific Islander
+912 THISTLEDOWN LN, Boone County, Bellefonte, AR 72611 (479) 318-2270 [1 (U) Unknown
+DATE OF BIRTH OCCUPATION PLACE OF EMPLOYMENT
+06/05/1991
+

@@ -1463,7 +1463,7 @@
             if (!raw) return;
 
             try {
-                const { text, fileName, arSparsePages } = JSON.parse(raw);
+                const { text, fileName, arSparsePages, arAltPages } = JSON.parse(raw);
                 localStorage.removeItem(key); // consume immediately
 
                 // Parse using the full RMS parser
@@ -1473,15 +1473,20 @@
                     return;
                 }
 
-                // Arkansas format only: fill names the layout OCR pass dropped,
-                // using the sparse-text pass index.html ran while it still had the
+                // Arkansas format only: fill names the layout OCR pass dropped
+                // and re-merge narrative rows it discarded, using the
+                // supplementary passes index.html ran while it still had the
                 // file path. Synchronous, so this function stays synchronous.
-                if (arSparsePages && window.ArIncidentParser &&
-                    report.arFormat === 'ar-incident-report') {
+                if (window.ArIncidentParser && report.arFormat === 'ar-incident-report') {
                     try {
-                        window.ArIncidentParser.recoverNames(report, arSparsePages);
+                        if (arSparsePages) window.ArIncidentParser.recoverNames(report, arSparsePages);
                     } catch (arErr) {
                         console.warn('[RMS Import] Arkansas name recovery failed:', arErr);
+                    }
+                    try {
+                        if (arAltPages) window.ArIncidentParser.recoverNarrative(report, arAltPages);
+                    } catch (arErr2) {
+                        console.warn('[RMS Import] Arkansas narrative recovery failed:', arErr2);
                     }
                 }
 
@@ -38650,30 +38655,42 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         }
 
         /*
-         * Arkansas NIBRS incident reports only: Tesseract's layout-preserving
-         * pass drops the typed NAME inside the dense continuation-page blocks.
-         * Run a sparse-text OCR pass over just the affected pages and let the
-         * parser fill the blanks. Additive and best-effort — a failure here
-         * never fails the import, it just leaves those blocks unnamed (and they
-         * are then reported in report.diagnostics.warnings rather than being
-         * routed into the case tabs with a blank name).
+         * Arkansas NIBRS incident reports only: the primary OCR pass loses two
+         * specific things, each needing a different Tesseract segmentation mode
+         * over a couple of pages:
+         *   * the typed NAME inside the dense continuation-page blocks (PSM 11)
+         *   * short trailing narrative rows (PSM 3)
+         * Both merges are additive and best-effort — a failure here never fails
+         * the import. Unnamed blocks are reported in report.diagnostics.warnings
+         * rather than routed into the case tabs with a blank name.
          */
-        async function _arRecoverRmsNames(report, filePath) {
+        async function _arRecoverRmsOcr(report, filePath) {
+            let names = 0, narrativeLines = 0;
             try {
                 const AR = window.ArIncidentParser;
-                if (!AR || !filePath) return 0;
-                if (report.arFormat !== 'ar-incident-report') return 0;
-                if (!AR.needsNameRecovery(report)) return 0;
-                if (!window.electronAPI || !window.electronAPI.ocrPdfPagesSparse) return 0;
-                const pages = AR.nameRecoveryPages(report);
-                if (!pages.length) return 0;
-                const res = await window.electronAPI.ocrPdfPagesSparse(filePath, pages);
-                if (!res || !res.pages) return 0;
-                return AR.recoverNames(report, res.pages);
+                if (!AR || !filePath) return { names, narrativeLines };
+                if (report.arFormat !== 'ar-incident-report') return { names, narrativeLines };
+                if (!window.electronAPI || !window.electronAPI.ocrPdfPagesSparse) {
+                    return { names, narrativeLines };
+                }
+
+                if (AR.needsNameRecovery(report)) {
+                    const pages = AR.nameRecoveryPages(report);
+                    if (pages.length) {
+                        const res = await window.electronAPI.ocrPdfPagesSparse(filePath, pages, '11');
+                        if (res && res.pages) names = AR.recoverNames(report, res.pages);
+                    }
+                }
+
+                const nPages = AR.narrativeRecoveryPages(report);
+                if (nPages.length) {
+                    const res2 = await window.electronAPI.ocrPdfPagesSparse(filePath, nPages, '3');
+                    if (res2 && res2.pages) narrativeLines = AR.recoverNarrative(report, res2.pages);
+                }
             } catch (err) {
-                console.warn('[RMS Parser] sparse name recovery failed:', err);
-                return 0;
+                console.warn('[RMS Parser] supplementary OCR recovery failed:', err);
             }
+            return { names, narrativeLines };
         }
 
         async function handleRmsImport() {
@@ -38690,7 +38707,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         const result = await window.electronAPI.extractPdfText(filePath);
                         const report = parseRmsReport(result.text, result.fileName);
                         report.pageCount = result.numPages;
-                        await _arRecoverRmsNames(report, filePath);
+                        await _arRecoverRmsOcr(report, filePath);
                         if (report.provisionalPersons) unnamedBlocks += report.provisionalPersons.length;
 
                         // Check for duplicate

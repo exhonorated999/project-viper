@@ -2972,6 +2972,7 @@
                 // that the ladders above recognise, so without this block the case
                 // number, synopsis and module checkboxes would all come back empty.
                 let arSparsePages = null;
+                let arAltPages = null;
                 if (window.ArIncidentParser && window.ArIncidentParser.detect(text)) {
                     try {
                         const arScan = window.ArIncidentParser.quickScan(text, result.fileName);
@@ -2982,17 +2983,23 @@
                                 if (arScan.detected[k]) detected[k] = true;
                             });
                         }
-                        // Pre-run the supplementary sparse-text OCR here, while we
-                        // still hold the file path, and hand the result across with
-                        // the text — processPendingRmsImport is synchronous and only
+                        // Pre-run the supplementary OCR passes here, while we still
+                        // hold the file path, and hand the results across with the
+                        // text — processPendingRmsImport is synchronous and only
                         // ever receives text.
                         const arReport = window.ArIncidentParser.parse(text, result.fileName);
-                        if (window.ArIncidentParser.needsNameRecovery(arReport) &&
-                            window.electronAPI.ocrPdfPagesSparse) {
-                            const pages = window.ArIncidentParser.nameRecoveryPages(arReport);
-                            if (pages.length) {
-                                const sparse = await window.electronAPI.ocrPdfPagesSparse(chosenPath, pages);
-                                if (sparse && sparse.pages) arSparsePages = sparse.pages;
+                        if (window.electronAPI.ocrPdfPagesSparse) {
+                            if (window.ArIncidentParser.needsNameRecovery(arReport)) {
+                                const pages = window.ArIncidentParser.nameRecoveryPages(arReport);
+                                if (pages.length) {
+                                    const sparse = await window.electronAPI.ocrPdfPagesSparse(chosenPath, pages, '11');
+                                    if (sparse && sparse.pages) arSparsePages = sparse.pages;
+                                }
+                            }
+                            const nPages = window.ArIncidentParser.narrativeRecoveryPages(arReport);
+                            if (nPages.length) {
+                                const alt = await window.electronAPI.ocrPdfPagesSparse(chosenPath, nPages, '3');
+                                if (alt && alt.pages) arAltPages = alt.pages;
                             }
                         }
                     } catch (arErr) {
@@ -3001,7 +3008,7 @@
                 }
 
                 // Store for case creation
-                pendingRmsData = { text: result.text, fileName: result.fileName, detected, caseNum, synopsis, arSparsePages };
+                pendingRmsData = { text: result.text, fileName: result.fileName, detected, caseNum, synopsis, arSparsePages, arAltPages };
 
                 // Auto-fill form fields
                 if (caseNum) {
@@ -3419,10 +3426,12 @@
                     localStorage.setItem('pendingRmsImport_' + newCase.id, JSON.stringify({
                         text: pendingRmsData.text,
                         fileName: pendingRmsData.fileName,
-                        // Arkansas format only: sparse-text OCR of the pages whose
-                        // typed names the layout OCR pass dropped. Carried across
-                        // because processPendingRmsImport has no file path.
-                        arSparsePages: pendingRmsData.arSparsePages || null
+                        // Arkansas format only: supplementary OCR of the pages whose
+                        // typed names the layout OCR pass dropped (PSM 11) and of the
+                        // narrative page (PSM 3). Carried across because
+                        // processPendingRmsImport has no file path.
+                        arSparsePages: pendingRmsData.arSparsePages || null,
+                        arAltPages: pendingRmsData.arAltPages || null
                     }));
                     pendingRmsData = null;
                 }

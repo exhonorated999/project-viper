@@ -1,0 +1,87 @@
+# REDACTED FIXTURE — Arkansas state NIBRS Incident Report, page 4 only,
+# re-OCR'd with Tesseract PSM 3 (full auto page segmentation).
+#
+# This is the real OCR output of the reference report's narrative page, with
+# every name, incident number, phone number, address and officer code replaced
+# with a same-shaped synthetic value. No real person's data is present. All OCR
+# damage (dropped labels, scrambled column order, misreads) is preserved
+# verbatim, because that damage is exactly what the parser has to survive.
+#
+# Why this pass exists: tesseract.js defaults to PSM 6, which silently DROPS
+# the short trailing rows of two narrative paragraphs ("with it." and
+# "provided or I could obtain."). PSM 3 reads them, but scrambles the
+# surrounding column order — note the PAGE # / NAME: / INCIDENT NUMBER block
+# interleaved into the middle of the narrative below. recoverNarrative()
+# therefore merges ADDITIVELY and only from an anchored position.
+#
+# Lines beginning with '#' are banner and are stripped by the test loader.
+INCIDENT REPORT
+DATE REPORTING OFFICER CODE # VICTIM NAME
+08/13/2026 DERRICK LANE D0312 HOLLOWAY (JV2), MARISOL
+Last, Middle SEX. [J (U)Unk AGE: | RACE: J (U) Unk.
+C1 (W) Male [J (00) Unknown
+VANDERLINDE (JV3), EMMETT [1 (F) Female
+
+[0 W)White [7] (B) Black
+[1 (1) American Indian
+RESIDENT ADDRESS: Street City State Zip RESIDENT PHONE EMPL. PHONE [1 (A) Asian/Pacific
+Islander
+DATE OF BIRTH > OCCUPATION PLACE OF EMPLOYMENT
+
+NAME: Last, First, Middle SEX: [J U) Unk. RACE: J (U) Unk.
+CJ () Male 00} Unk [1 W) White [7 (B) Black
+[] (F) Female J 00) Unknown} = American Indian
+RESIDENT ADDRESS: ~~ Street City State Zip RESIDENT PHONE EMPL. PHONE [1 (A) Asian/Pacific
+Islander
+
+NARRATIVE:
+On Thursday, August 13, 2026 at approximately 1545 hours, I was dispatched to a call for service
+
+PAGE #
+4
+
+NAME:
+
+INCIDENT NUMBER
+26-0417295
+
+First,
+
+DEEZ ==
+
+with ASP Crimes Against Children advocate.
+
+IT called and made contact with the caller, Ms. Delphine Quillen (Others Involved), who stated today
+JV1 and JV3 got into an argument, JV1 said he had made a mistake and was living with the
+
+consequences. JV1 would not divulge what the mistake was to Jv3, but JV1 stated he was suffering
+
+with it.
+
+JV3 said the JV1’s mistake was raping his ex-girlfriend. JV1 did not admit this to JV3, however
+
+from the information gathered, JV1 did tell his older brother about the situation and the brother
+
+(unknown information) told Rowena Marchetti (Others involved), who is JV2’s mother.
+
+Ms. Quillen advised this incident occurred at the end of the 2025/2026 school year, but did not
+
+have an exact date/time.
+
+Ms. Quillen, did provided Ms. Marchetti’s phone number and I contacted her for some additional
+
+context and information. Ms. Marchetti advised she was made aware of the situation and the parents
+
+of Jv2 and JV1 decided the two would break up and not see each other, however she stated JV1 did
+Marchetti
+
+not rape JV2, it was consensual sex, however JV1 did pressure JV2 into having sex. Ms.
+
+went on to say the JVl is a good kid, they just could condone this type of activity at this age.
+
+ASP Case number is 318-4407 and I provided Ms. Quillen with the BCSO report number.
+
+There is a lot of blanks throughout this report, however I updated the information that was
+
+provided or I could obtain.
+

@@ -8,8 +8,8 @@
  * every identifying value swapped for a same-shaped synthetic one. All OCR
  * damage is preserved verbatim: shredded vertical band labels, checkbox glyphs
  * (Il / IE / Bl / [J / LJ / O), the lost opening paren on the victim phone, the
- * F0107 -> FO107 drift on page 4 and the NAME values the layout pass drops on
- * the continuation page.
+ * digit/letter drift in the officer code on page 4 and the NAME values the
+ * layout pass drops on the continuation page.
  */
 const fs = require('fs');
 const path = require('path');
@@ -214,6 +214,123 @@ ok('narrative excludes page header rows', !/26-0417295/.test(nar.text));
 ok('narrative excludes the form label itself', !/^NARRATIVE:/m.test(nar.text));
 ok('narrative is not truncated', nar.text.length > 1200, nar.text.length);
 ok('OCR damage is preserved, not "corrected"', /IT called and made contact/.test(nar.text));
+
+/* Paragraph reconstruction. The printed form separates paragraphs with a blank
+ * ruled row that the OCR does not emit, so without this the narrative imported
+ * as one undifferentiated wall of text. Printed line breaks are kept verbatim;
+ * the ONLY thing added is a blank line at a sentence boundary. */
+console.log('\n[narrative paragraphs]');
+const paras = nar.text.split('\n\n');
+eq('the layout pass yields 6 paragraphs (one closing line was dropped by OCR)', paras.length, 6);
+ok('paragraph 1 break lands after "...advocate."',
+    /advocate\.$/.test(paras[0]), paras[0].slice(-30));
+ok('paragraph break after "have an exact date/time."',
+    paras.some(p => /have an exact date\/time\.$/.test(p)));
+ok('the ASP case number is its own paragraph',
+    paras.some(p => /^ASP Case number is 318-4407 .* report number\.$/.test(p)));
+ok('no paragraph is empty', paras.every(p => p.trim().length > 0));
+ok('no run of three or more newlines', !/\n{3}/.test(nar.text));
+ok('printed line breaks inside a paragraph are preserved',
+    /call for service\nwith ASP Crimes/.test(nar.text));
+ok('no line was joined across a paragraph boundary',
+    !/advocate\. IT called/.test(nar.text));
+
+const P = AR._internal.paragraphize;
+eq('paragraphize keeps a single line untouched', P(['Only one line.']), 'Only one line.');
+eq('paragraphize does not break a wrapped line that ends mid-sentence',
+    P(['first part of a', 'sentence.']), 'first part of a\nsentence.');
+eq('paragraphize breaks at a sentence boundary',
+    P(['Done here.', 'New thought.']), 'Done here.\n\nNew thought.');
+eq('paragraphize does NOT break after a title abbreviation',
+    P(['I spoke with Ms.', 'Marchetti about it.']), 'I spoke with Ms.\nMarchetti about it.');
+eq('paragraphize does NOT break after a single initial',
+    P(['The reporting officer was J.', 'Smith of the agency.']),
+    'The reporting officer was J.\nSmith of the agency.');
+eq('paragraphize does NOT break when the next line is lower case',
+    P(['ends with a period.', 'continues in lower case']),
+    'ends with a period.\ncontinues in lower case');
+eq('paragraphize handles an empty list', P([]), '');
+
+/* ────────────────────────────────────────────────────────────────
+ * 8b. NARRATIVE LINE RECOVERY.
+ *     tesseract.js defaults to PSM 6, which silently drops the short trailing
+ *     row of a paragraph. PSM 3 reads those rows but scrambles the surrounding
+ *     column order, so the merge must be additive and anchored.
+ * ──────────────────────────────────────────────────────────────── */
+console.log('\n[narrative recovery]');
+const PSM3_P4 = loadFixture('ar-incident-report.page4-psm3.txt');
+
+eq('narrativeRecoveryPages points at the narrative page', AR.narrativeRecoveryPages(r), [4]);
+eq('narrativeRecoveryPages on a foreign object is empty', AR.narrativeRecoveryPages({}), []);
+eq('narrativeRecoveryPages on null is empty', AR.narrativeRecoveryPages(null), []);
+
+ok('the primary pass really is missing the dropped lines',
+    !/with it\./.test(nar.text) && !/could obtain/.test(nar.text));
+
+const rN = AR.parse(TEXT, 'x.pdf');
+eq('recoverNarrative with no alt text is a no-op', AR.recoverNarrative(rN, null), 0);
+eq('recoverNarrative with an empty page map is a no-op', AR.recoverNarrative(rN, {}), 0);
+eq('recoverNarrative recovers exactly the two dropped lines',
+    AR.recoverNarrative(rN, { '4': PSM3_P4 }), 2);
+const nt = rN.narratives[0].text;
+ok('"with it." is restored', /with it\./.test(nt));
+ok('"provided or I could obtain." is restored', /provided or I could obtain\./.test(nt));
+ok('"with it." is restored in the RIGHT place',
+    /he was suffering\nwith it\.\n\nJV3 said/.test(nt), nt);
+ok('the closing line is restored at the end',
+    /information that was\nprovided or I could obtain\.$/.test(nt.trim()));
+eq('the recovered narrative has all 7 printed paragraphs', nt.split('\n\n').length, 7);
+eq('diagnostics count the recovered lines', rN.diagnostics.narrativeLinesRecovered, 2);
+eq('diagnostics.narrativeChars is refreshed', rN.diagnostics.narrativeChars, nt.length);
+ok('the recovery is disclosed in diagnostics.warnings',
+    rN.diagnostics.warnings.some(w => /^Narrative: 2 lines missed by the primary OCR pass/.test(w)),
+    rN.diagnostics.warnings);
+eq('recovery is idempotent', AR.recoverNarrative(rN, { '4': PSM3_P4 }), 0);
+
+// The PSM 3 pass interleaves form furniture into the middle of the narrative.
+// None of it may survive the merge.
+ok('form furniture is not merged in', !/PAGE #|INCIDENT NUMBER|DEEZ/.test(nt), nt);
+ok('the bare "NAME:" label is not merged in', !/^NAME:/m.test(nt));
+ok('the page header incident number is not merged in', !/26-0417295/.test(nt));
+ok('a stray single word from a scrambled wrap is not merged in',
+    !/^Marchetti$/m.test(nt) && !/^First,$/m.test(nt));
+ok('no line is duplicated', (function () {
+    const seen = {};
+    return nt.split('\n').filter(Boolean).every(l => {
+        const k = l.trim();
+        if (seen[k]) return false;
+        seen[k] = true;
+        return true;
+    });
+})());
+
+// An unanchored fragment (nothing before it matches the primary narrative)
+// must be discarded rather than prepended.
+const rU = AR.parse(TEXT, 'x.pdf');
+eq('an unanchored fragment is discarded',
+    AR.recoverNarrative(rU, { '4': 'Some entirely unrelated prose line that ends here.' }), 0);
+
+// A report with no narrative at all must not throw.
+eq('recoverNarrative on a narrative-less report is a no-op',
+    AR.recoverNarrative({ narratives: [] }, { '4': PSM3_P4 }), 0);
+eq('recoverNarrative on null is a no-op', AR.recoverNarrative(null, { '4': PSM3_P4 }), 0);
+
+const F = AR._internal.isNarrativeFragment;
+console.log('\n[_isNarrativeFragment]');
+ok('accepts a short two-word closing line', F('with it.') === true);
+ok('accepts a five-word closing line', F('provided or I could obtain.') === true);
+ok('accepts a full prose row',
+    F('JV3 said the mistake was raping his ex-girlfriend, however') === true);
+ok('rejects a single word', F('Marchetti') === false);
+ok('rejects a one-word fragment with a comma', F('First,') === false);
+ok('rejects an all-caps form label', F('INCIDENT NUMBER') === false);
+ok('rejects the PAGE # label', F('PAGE #') === false);
+ok('rejects OCR garbage', F('DEEZ ==') === false);
+ok('rejects a checkbox row', F('[J (U) Unk. [1 (W) White [7 (B) Black') === false);
+ok('rejects a bare number', F('26-0417295') === false);
+ok('rejects empty', F('') === false);
+ok('rejects null', F(null) === false);
+ok('rejects a two-word fragment with no sentence end', F('older brother') === false);
 
 /* ────────────────────────────────────────────────────────────────
  * 9. THE ROUTING CONTRACT.

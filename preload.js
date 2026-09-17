@@ -99,7 +99,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Supplementary sparse-text OCR of specific pages. Used only by the Arkansas
   // NIBRS incident-report importer to recover typed names that Tesseract's
   // layout-preserving pass drops. extractPdfText is unchanged.
-  ocrPdfPagesSparse: (filePath, pages) => ipcRenderer.invoke('ocr-pdf-pages-sparse', filePath, pages),
+  ocrPdfPagesSparse: (filePath, pages, psm) => ipcRenderer.invoke('ocr-pdf-pages-sparse', filePath, pages, psm),
   readFileAsDataUrl: (filePath) => ipcRenderer.invoke('read-file-as-data-url', filePath),
   resolveWarrantPath: (data) => ipcRenderer.invoke('resolve-warrant-path', data),
   viewWarrantExternal: (filePath) => ipcRenderer.invoke('view-warrant-external', filePath),

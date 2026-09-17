@@ -3401,18 +3401,22 @@ ipcMain.handle('extract-pdf-text', async (event, filePath) => {
   }
 });
 
-// --- Sparse-text OCR for specific PDF pages (ADDITIVE — used only by the
-// Arkansas NIBRS incident-report importer).
+// --- Alternate-segmentation OCR for specific PDF pages (ADDITIVE — used only
+// by the Arkansas NIBRS incident-report importer).
 //
 // `extract-pdf-text` above is UNCHANGED and still the only path used by every
-// other RMS format. It OCRs with Tesseract's default page segmentation, which
-// preserves row/column layout — necessary for label->value association, but it
-// reliably DROPS the typed NAME value inside the dense "Others Involved" blocks
-// on the Arkansas continuation page even though the value is clearly legible in
-// the render. Sparse-text mode (PSM 11) recovers those names but destroys the
-// layout, so it is run only over the handful of pages that actually lost a
-// name, and only the name is taken from it.
-ipcMain.handle('ocr-pdf-pages-sparse', async (event, filePath, pages) => {
+// other RMS format. It OCRs through tesseract.js's default page segmentation
+// (PSM 6, single uniform block), which preserves row/column layout — necessary
+// for label->value association — but it drops text in two known ways on the
+// Arkansas form:
+//   * PSM 11 (sparse text) is needed to read the typed NAME inside the dense
+//     "Others Involved" blocks on the continuation page. Only the name is
+//     taken from it; sparse mode destroys column alignment.
+//   * PSM 3 (full auto segmentation) is needed to read short trailing
+//     narrative rows that PSM 6 silently discards. Only lines the primary
+//     pass is missing are merged in; PSM 3 scrambles the surrounding columns.
+// Either way this runs over a handful of pages only, never the whole document.
+ipcMain.handle('ocr-pdf-pages-sparse', async (event, filePath, pages, psm) => {
   const out = {};
   try {
     const wanted = Array.from(new Set((pages || [])
@@ -3420,6 +3424,9 @@ ipcMain.handle('ocr-pdf-pages-sparse', async (event, filePath, pages) => {
       .filter(n => Number.isInteger(n) && n > 0)))
       .slice(0, 12);                       // hard cap: this is an OCR pass per page
     if (!wanted.length) return { ok: true, pages: out };
+
+    // Allow-listed segmentation modes only — anything else falls back to sparse.
+    const mode = ['3', '4', '6', '11', '12'].includes(String(psm)) ? String(psm) : '11';
 
     const dataBuffer = fs.readFileSync(filePath);
     const mupdf = await import('mupdf');
@@ -3429,7 +3436,9 @@ ipcMain.handle('ocr-pdf-pages-sparse', async (event, filePath, pages) => {
 
     const worker = await Tesseract.createWorker('eng');
     try {
-      await worker.setParameters({ tessedit_pageseg_mode: '11' });  // PSM_SPARSE_TEXT
+      // NOTE: in tesseract.js v7 passing tessedit_pageseg_mode as the 4th
+      // argument of recognize() is silently ignored. It must be set here.
+      await worker.setParameters({ tessedit_pageseg_mode: mode });
       for (const pageNo of wanted) {
         if (pageNo > numPages) continue;
         const page = doc.loadPage(pageNo - 1);
@@ -3444,7 +3453,7 @@ ipcMain.handle('ocr-pdf-pages-sparse', async (event, filePath, pages) => {
     } finally {
       try { await worker.terminate(); } catch (_) { /* ignore */ }
     }
-    return { ok: true, pages: out };
+    return { ok: true, pages: out, psm: mode };
   } catch (error) {
     // Never fail the import because the supplementary pass failed — the caller
     // simply keeps whatever the primary extraction read.

@@ -15,7 +15,7 @@
  *      location code, relationship and every other tick box stay BLANK.
  *      Only typed / handwritten text is imported.
  *   2. NAMES ARE VERBATIM. Juvenile alias tokens printed in the name field
- *      ("PUTNEY (JV2), ISABELLA") are preserved exactly as printed. The alias
+ *      ("HOLLOWAY (JV2), MARISOL") are preserved exactly as printed. The alias
  *      is additionally copied to `alias` as metadata; the name itself is not
  *      rewritten.
  *   3. Nothing is inferred. Offense severity has no field on this form, so it
@@ -113,7 +113,7 @@
     }
 
     /* Strip the OCR gutter noise that bleeds in from the vertical band labels
-     * ("= STORKE (JV1), WALKER", "&) 08/13/2026 ..."). Only non-alphanumeric
+     * ("= ABERNATHY (JV1), GRAYSON", "&) 08/13/2026 ..."). Only non-alphanumeric
      * leading characters are removed, so no real value can be lost. */
     function _strip(line) {
         return String(line == null ? '' : line)
@@ -166,8 +166,8 @@
      * Pull a "Last[ (ALIAS)], First [Middle...]" name out of an OCR line that
      * also carries checkbox junk. Walks outward from each candidate comma and
      * stops at the first token that is not a name token, so
-     *   "KITTLER (JV3), JAXON £5 (F) Female OJ 0) Unknown"  ->  "KITTLER (JV3), JAXON"
-     *   "PUTNEY (JV2), ISABELLA 08/31/2011"                 ->  "PUTNEY (JV2), ISABELLA"
+     *   "VANDERLINDE (JV3), EMMETT £5 (F) Female OJ 0) Unknown"  ->  "VANDERLINDE (JV3), EMMETT"
+     *   "HOLLOWAY (JV2), MARISOL 08/31/2011"                 ->  "HOLLOWAY (JV2), MARISOL"
      *   "148 RODEN MILL RD, Conway, AR 72032"               ->  null
      */
     function _extractName(line) {
@@ -714,8 +714,41 @@
         return out;
     }
 
+    /* ----------------------------------------------------------------
+     * Paragraph reconstruction.
+     * ----------------------------------------------------------------
+     * The printed form separates paragraphs with a blank ruled row, but the
+     * OCR emits every text row back-to-back with no blank line, so the
+     * imported narrative arrived as one undifferentiated wall of text.
+     *
+     * The printed LINE BREAKS are preserved verbatim (they are part of the
+     * source document); a blank line is inserted between two lines only when
+     * the first one ends a sentence and the second starts a new one. Nothing
+     * is added, removed or re-worded — the only change is white space.
+     * ---------------------------------------------------------------- */
+    var RE_SENTENCE_END = /[.!?][)"'\u2019\u201d]?$/;
+    /* Titles/abbreviations that end in a period mid-sentence. A wrapped line
+     * ending "... Ms." must NOT become a paragraph break. */
+    var RE_ABBREV_END = /(?:^|\s)(?:mr|mrs|ms|dr|prof|det|sgt|lt|cpl|ofc|jr|sr|st|ave|rd|blvd|ln|apt|ste|dept|approx|est|no|vs|etc|inc|co|corp|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|[a-z])\.$/i;
+    var RE_SENTENCE_START = /^["'(\u201c\u2018]?[A-Z0-9]/;
+
+    function _paragraphize(body) {
+        var out = [];
+        for (var i = 0; i < body.length; i++) {
+            out.push(body[i]);
+            if (i === body.length - 1) break;
+            var cur = body[i], nxt = body[i + 1];
+            if (!RE_SENTENCE_END.test(cur)) continue;
+            if (RE_ABBREV_END.test(cur)) continue;
+            if (!RE_SENTENCE_START.test(nxt)) continue;
+            out.push('');
+        }
+        return out.join('\n');
+    }
+
     function _readNarrative(pages, warn) {
         var chunks = [];
+        var srcPages = [];
         var started = false;
         for (var p = 0; p < pages.length; p++) {
             var page = pages[p];
@@ -732,7 +765,10 @@
                     if (RE_PAGE_HEADER.test(s)) continue;
                     body.push(s);
                 }
-                if (body.length) chunks.push(body.join('\n'));
+                if (body.length) {
+                    chunks.push(_paragraphize(body));
+                    if (srcPages.indexOf(page.index) === -1) srcPages.push(page.index);
+                }
                 continue;
             }
 
@@ -744,18 +780,128 @@
                 if (RE_PAGE_HEADER.test(lines[j])) continue;
                 if (_isProse(lines[j])) prose.push(_clean(lines[j]));
             }
-            if (prose.length >= 2) chunks.push(prose.join('\n'));
+            if (prose.length >= 2) {
+                chunks.push(_paragraphize(prose));
+                if (srcPages.indexOf(page.index) === -1) srcPages.push(page.index);
+            }
         }
 
         if (!chunks.length) {
             warn('No NARRATIVE section found.');
-            return [];
+            return { items: [], pages: [] };
         }
-        return [{
-            officer: '',            // filled by parse() from the ADM footer
-            badge: '',
-            text: chunks.join('\n\n')
-        }];
+        return {
+            pages: srcPages,
+            items: [{
+                officer: '',            // filled by parse() from the ADM footer
+                badge: '',
+                text: chunks.join('\n\n')
+            }]
+        };
+    }
+
+    /* ================================================================
+     * Narrative line recovery.
+     * ----------------------------------------------------------------
+     * tesseract.js defaults to PSM 6 (single uniform block), and that pass
+     * silently DROPS short trailing narrative rows — on the reference report
+     * it lost "with it." and "provided or I could obtain.", i.e. the closing
+     * line of two paragraphs. A second pass over the same page image with
+     * PSM 3 (full auto page segmentation) reads them, but scrambles the
+     * surrounding column order, so PSM 3 cannot simply replace the narrative.
+     *
+     * So the merge is ADDITIVE and anchored: a PSM 3 line is inserted only if
+     * (a) the primary pass does not already have it, and (b) it directly
+     * follows a line the primary pass DID read. Everything else is discarded.
+     * No line is ever rewritten or removed.
+     * ================================================================ */
+    function _normLine(s) {
+        return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, '');
+    }
+
+    /* Looser than _isProse: has to admit a two-word closing line such as
+     * "with it." while still rejecting label grids, stray single words left
+     * over from a scrambled wrap ("Marchetti", "First,") and form furniture
+     * ("PAGE #", "INCIDENT NUMBER", "DEEZ =="). */
+    function _isNarrativeFragment(line) {
+        var s = _clean(line);
+        if (s.length < 5 || s.length > 300) return false;
+        if (/\[\s*[A-Za-z0-9|]{0,3}\]|\[[JjOo0-9IilMm|]/.test(s)) return false;
+        var words = s.split(/\s+/).filter(function (w) { return /[A-Za-z]{2,}/.test(w); });
+        if (words.length < 2) return false;
+        if (words.length < 4 && !RE_SENTENCE_END.test(s)) return false;
+        var lower = (s.match(/[a-z]/g) || []).length;
+        var alpha = (s.match(/[A-Za-z]/g) || []).length;
+        return alpha > 0 && lower / alpha > 0.5;
+    }
+
+    function _findNorm(list, norm) {
+        var i;
+        for (i = 0; i < list.length; i++) {
+            if (list[i] && _normLine(list[i]) === norm) return i;
+        }
+        if (norm.length >= 30) {
+            var head = norm.slice(0, 30);
+            for (i = 0; i < list.length; i++) {
+                if (!list[i]) continue;
+                var n = _normLine(list[i]);
+                if (n.length >= 30 && n.slice(0, 30) === head) return i;
+            }
+        }
+        return -1;
+    }
+
+    function narrativeRecoveryPages(report) {
+        return (report && report.narrativeRecovery && report.narrativeRecovery.pages) || [];
+    }
+
+    function recoverNarrative(report, altByPage) {
+        if (!report || !report.narratives || !report.narratives.length) return 0;
+        if (!altByPage) return 0;
+        var narr = report.narratives[0];
+        var merged = _lines(narr.text);
+        var added = 0;
+
+        var keys = Object.keys(altByPage);
+        for (var ki = 0; ki < keys.length; ki++) {
+            var alt = altByPage[keys[ki]];
+            if (!alt) continue;
+            var altLines = _lines(alt);
+            var anchor = -1;
+            for (var a = 0; a < altLines.length; a++) {
+                var cand = _clean(altLines[a]);
+                if (!_isNarrativeFragment(cand)) continue;
+                var norm = _normLine(cand);
+                if (!norm) continue;
+                var at = _findNorm(merged, norm);
+                if (at >= 0) { anchor = at; continue; }
+                // Never insert ahead of the first matched line: an unanchored
+                // fragment could have come from anywhere on the page.
+                if (anchor < 0) continue;
+                if (added >= 25) break;
+                merged.splice(anchor + 1, 0, cand);
+                anchor += 1;
+                added++;
+            }
+        }
+
+        if (added) {
+            var body = [];
+            for (var m = 0; m < merged.length; m++) {
+                if (_clean(merged[m])) body.push(_clean(merged[m]));
+            }
+            narr.text = _paragraphize(body);
+            report.diagnostics.narrativeChars = narr.text.length;
+            report.diagnostics.narrativeLinesRecovered =
+                (report.diagnostics.narrativeLinesRecovered || 0) + added;
+            var msg = 'Narrative: ' + added + ' line' + (added === 1 ? '' : 's') +
+                ' missed by the primary OCR pass were recovered by a second pass — ' +
+                'verify the narrative against the source document.';
+            if (report.diagnostics.warnings.indexOf(msg) === -1) {
+                report.diagnostics.warnings.push(msg);
+            }
+        }
+        return added;
     }
 
     /* ================================================================
@@ -776,7 +922,8 @@
         var arrestees = _readArrestees(pages, warn);
         var generic = _readGenericPersonBlocks(pages, warn);
         var others = _readOthersInvolved(pages, warn);
-        var narratives = _readNarrative(pages, warn);
+        var narrRead = _readNarrative(pages, warn);
+        var narratives = narrRead.items;
 
         var officerLabel = _clean(header.reportingOfficer);
         for (var n = 0; n < narratives.length; n++) {
@@ -864,10 +1011,15 @@
                 provisional: provisional.length,
                 namesRecovered: 0,
                 narrativeChars: narratives.length ? narratives[0].text.length : 0,
+                narrativeLinesRecovered: 0,
                 checkboxFieldsSkipped: true,
                 warnings: warnings
             }
         };
+
+        // Pages a second (PSM 3) OCR pass should cover to recover narrative
+        // rows the primary pass dropped. See recoverNarrative().
+        report.narrativeRecovery = { pages: narrRead.pages || [] };
 
         _describeProvisional(report, warn);
         return report;
@@ -1032,7 +1184,7 @@
         var arrestees = _readArrestees(pages, noop);
         var generic = _readGenericPersonBlocks(pages, noop);
         var others = _readOthersInvolved(pages, noop);
-        var narratives = _readNarrative(pages, noop);
+        var narratives = _readNarrative(pages, noop).items;
 
         result.caseNum = header.incidentNumber || '';
 
@@ -1086,12 +1238,16 @@
         needsNameRecovery: needsNameRecovery,
         nameRecoveryPages: nameRecoveryPages,
         recoverNames: recoverNames,
+        narrativeRecoveryPages: narrativeRecoveryPages,
+        recoverNarrative: recoverNarrative,
         // exposed for tests
         _internal: {
             extractName: _extractName,
             splitPages: _splitPages,
             strip: _strip,
             isProse: _isProse,
+            isNarrativeFragment: _isNarrativeFragment,
+            paragraphize: _paragraphize,
             fmtPhone: _fmtPhone,
             scanAddress: _scanAddress
         }

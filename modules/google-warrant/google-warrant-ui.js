@@ -706,7 +706,11 @@ class GoogleWarrantUI {
         }
 
         const map = L.map('gwp-location-map', { preferCanvas: true }).setView([0, 0], 2);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        // CARTO watermarks keyless tiles with "API KEY REQUIRED"; the key lives
+        // in modules/_shared/basemap.js. Keyless fallback = degraded, not broken.
+        const tileUrl = (window.VIPER_BASEMAP && window.VIPER_BASEMAP.dark) ||
+            'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+        L.tileLayer(tileUrl, {
             attribution: '© OpenStreetMap, © CARTO',
             maxZoom: 19
         }).addTo(map);

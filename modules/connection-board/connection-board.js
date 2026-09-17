@@ -939,10 +939,22 @@
   //  MAP VIEW (Leaflet)
   // ============================================================
   var _restoringView = false; // true while WE set the view programmatically
+
+  /**
+   * CARTO dark basemap URL. The API key lives in modules/_shared/basemap.js —
+   * without it CARTO stamps a large "API KEY REQUIRED" watermark across every
+   * tile. Resolved lazily so script load order cannot matter, and falls back
+   * to the keyless URL if that file is missing (watermarked beats broken).
+   */
+  function _darkTileUrl() {
+    return (window.VIPER_BASEMAP && window.VIPER_BASEMAP.dark) ||
+      'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+  }
+
   function initMap() {
     if (map) return;
     map = L.map('cbMapStage', { zoomControl: true, attributionControl: true });
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    L.tileLayer(_darkTileUrl(), {
       maxZoom: 19, attribution: '&copy; OpenStreetMap &copy; CARTO'
     }).addTo(map);
     map.on('click', onMapClick);
@@ -2224,7 +2236,7 @@
     'function hasAddr(a){return /[a-z0-9]/i.test(a||"");}' +
     'function hav(a,b){if(!a||!b||a.lat==null||b.lat==null)return null;var R=3958.8,dLa=(b.lat-a.lat)*Math.PI/180,dLo=(b.lng-a.lng)*Math.PI/180,l1=a.lat*Math.PI/180,l2=b.lat*Math.PI/180;var h=Math.sin(dLa/2)*Math.sin(dLa/2)+Math.sin(dLo/2)*Math.sin(dLo/2)*Math.cos(l1)*Math.cos(l2);return R*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));}' +
     'var map=null,mapLayers=[],strLayers=[];' +
-    'function initMap(){if(map)return;map=L.map("map",{zoomControl:true});L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{maxZoom:19,attribution:"&copy; OpenStreetMap &copy; CARTO"}).addTo(map);map.on("zoomend moveend",function(){drawMapStrings();});}' +
+    'function initMap(){if(map)return;map=L.map("map",{zoomControl:true});L.tileLayer("__VIPER_TILE_URL__",{maxZoom:19,attribution:"&copy; OpenStreetMap &copy; CARTO"}).addTo(map);map.on("zoomend moveend",function(){drawMapStrings();});}' +
     'function micon(p){var inner=p.photo?"<img src=\\""+esc(p.photo)+"\\">":"<span class=\\"mg\\">"+glyph(p)+"</span>";return L.divIcon({className:"",iconSize:[44,44],iconAnchor:[22,22],html:"<div class=\\"mk\\" style=\\"border-color:"+pcolor(p)+"\\">"+inner+"</div>"});}' +
     'function curveLL(a,b,pk){if(!map||!map._loaded||!pk||Math.abs(pk)<.01)return[[a.lat,a.lng],[b.lat,b.lng]];try{var pa=map.latLngToContainerPoint([a.lat,a.lng]),pb=map.latLngToContainerPoint([b.lat,b.lng]),dx=pb.x-pa.x,dy=pb.y-pa.y,ln=Math.sqrt(dx*dx+dy*dy)||1,px=-dy/ln,py=dx/ln,mx=(pa.x+pb.x)/2,my=(pa.y+pb.y)/2,cx=mx+px*pk*2,cy=my+py*pk*2,pts=[];for(var t=0;t<=1.0001;t+=1/16){var it=1-t,x=it*it*pa.x+2*it*t*cx+t*t*pb.x,y=it*it*pa.y+2*it*t*cy+t*t*pb.y,l=map.containerPointToLatLng([x,y]);pts.push([l.lat,l.lng]);}return pts;}catch(e){return[[a.lat,a.lng],[b.lat,b.lng]];}}' +
     'function drawMapStrings(){if(!map)return;strLayers.forEach(function(l){try{map.removeLayer(l);}catch(e){}});strLayers=[];' +
@@ -2296,6 +2308,12 @@
   function buildExportHtml(data) {
     var dataJson = JSON.stringify(data).replace(/<\//g, '<\\/').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
     var title = 'VIPER Connection Board \u2014 Case ' + (data.caseInfo.number || '');
+    // The exported board is a standalone file the examiner may hand to a DA or
+    // attach to a case packet, so the basemap key is baked in — otherwise the
+    // recipient opens it to a map covered in "API KEY REQUIRED". This is a
+    // client-side CARTO basemap key (already visible in every tile request the
+    // app makes), not a credential.
+    var exportJs = EXPORT_JS.replace('__VIPER_TILE_URL__', _darkTileUrl());
     return '<!DOCTYPE html>\n' +
       '<html lang="en"><head><meta charset="utf-8">' +
       '<meta name="viewport" content="width=device-width, initial-scale=1">' +
@@ -2309,7 +2327,7 @@
       '</header>' +
       '<div id="stage"><div id="map"></div><div id="web" class="hidden"><div id="webCanvas"><svg id="webLines"></svg><div id="webLabels"></div></div></div></div>' +
       '<div id="detail" class="hidden"></div>' +
-      '<script>window.__BOARD__=' + dataJson + ';\n' + EXPORT_JS + '<\/script>' +
+      '<script>window.__BOARD__=' + dataJson + ';\n' + exportJs + '<\/script>' +
       '</body></html>';
   }
 

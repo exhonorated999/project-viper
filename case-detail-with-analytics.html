@@ -17,6 +17,10 @@
     <script src="modules/resource-hub.js"></script>
     <script src="modules/uc-chat/uc-chat-ops.js"></script>
     <script src="modules/case-link.js"></script>
+    <!-- Offense Reference schema. Needed here so the Case Overview offense
+         editor and the warrant author can filter case law out of their
+         chargeable-offense pickers. -->
+    <script src="modules/offense-reference.js"></script>
     <script src="modules/supervisor-link/supervisor-link-ui.js"></script>
     <script src="case-snapshot.js"></script>
 
@@ -26037,7 +26041,7 @@
         }
 
         function _offenseInLibrary(value) {
-            const offenses = _lsParse('viperOffenseReference', []);
+            const offenses = _chargeableOffenseLib();
             return offenses.some(o => `${o.code} - ${o.description}` === value);
         }
 
@@ -31222,13 +31226,29 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         // ─── Unified Offenses Editor ───────────────────────────────────────────
         const _OFFENSE_TYPES = ['Felony', 'Misdemeanor', 'Wobbler', 'Infraction', 'Non-Criminal'];
 
+        // Chargeable entries from the offense reference library. The library
+        // also holds case law, which is reference material only — it must
+        // never reach a charge picker. Falls back to the raw array if the
+        // schema module failed to load, so the editor degrades rather than
+        // showing an empty library.
+        function _chargeableOffenseLib() {
+            try {
+                if (window.OffenseReference) {
+                    return window.OffenseReference.chargeable(window.OffenseReference.loadAll(localStorage));
+                }
+            } catch (_e) { /* fall through */ }
+            return _lsParse('viperOffenseReference', []);
+        }
+
         function _offenseLibraryOptionsHtml(currentValue) {
-            const offenses = _lsParse('viperOffenseReference', []);
+            const offenses = _chargeableOffenseLib();
             let html = '<option value="">— Select from Offense Library —</option>';
             if (offenses.length > 0) {
                 const grouped = {};
                 offenses.forEach(o => {
-                    const t = o.type || 'Other';
+                    // Federal entries get their own optgroup so an examiner can
+                    // see they are selecting a federal charge, not a state one.
+                    const t = (o.kind === 'federal' ? 'Federal — ' : '') + (o.type || 'Other');
                     if (!grouped[t]) grouped[t] = [];
                     grouped[t].push(o);
                 });
@@ -31260,7 +31280,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         function _offenseRowHtml(idx, value, type) {
             const isPrimary = idx === 0;
             const label = isPrimary ? 'Primary Offense' : `Offense ${idx + 1}`;
-            const offenses = _lsParse('viperOffenseReference', []);
+            const offenses = _chargeableOffenseLib();
             const inLibrary = offenses.some(o => `${o.code} - ${o.description}` === value);
             const showInput = !!(value && !inLibrary);
             const escVal = (value || '').replace(/"/g, '&quot;');

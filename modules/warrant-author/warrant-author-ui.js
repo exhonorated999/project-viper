@@ -3616,12 +3616,23 @@ function renderCasePc(caseId) {
   // Pull the user's offense reference library so they can pick from it
   // instead of typing the description by hand. Stored by the offense
   // reference page (index.html) under localStorage['viperOffenseReference'].
+  //
+  // Chargeable entries only: the library also holds case law, and a warrant's
+  // offense description is what the suspect is alleged to have done, not the
+  // authority the affiant is relying on. Riley v. California in this dropdown
+  // would be a drafting error waiting to be signed by a judge.
   let offenseRefs = [];
   try {
-    const rawRefs = localStorage.getItem('viperOffenseReference');
-    if (rawRefs) {
-      const parsed = JSON.parse(rawRefs);
-      if (Array.isArray(parsed)) offenseRefs = parsed;
+    if (window.OffenseReference) {
+      offenseRefs = window.OffenseReference.chargeable(window.OffenseReference.loadAll(localStorage));
+    } else {
+      const rawRefs = localStorage.getItem('viperOffenseReference');
+      if (rawRefs) {
+        const parsed = JSON.parse(rawRefs);
+        if (Array.isArray(parsed)) {
+          offenseRefs = parsed.filter(o => o && o.kind !== 'caselaw');
+        }
+      }
     }
   } catch (_e) { /* non-fatal */ }
   // Build the "pick from reference" options. Use the description as the

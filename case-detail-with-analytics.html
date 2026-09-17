@@ -35,6 +35,9 @@
     <link rel="stylesheet" href="modules/flock/flock-styles.css" />
     <script src="modules/flock/flock-xlsx.js" defer></script>
     <script src="modules/flock/flock-parser.js" defer></script>
+    <!-- RMS: Arkansas state NIBRS Incident Report format (additive; the other
+         RMS formats stay in the inline parseRmsReport dispatcher) -->
+    <script src="modules/rms/ar-incident-parser.js"></script>
     <script src="modules/flock/flock-module.js" defer></script>
     <script src="modules/flock/flock-ui.js" defer></script>
     <!-- Analytics CDR Libraries -->
@@ -1460,7 +1463,7 @@
             if (!raw) return;
 
             try {
-                const { text, fileName } = JSON.parse(raw);
+                const { text, fileName, arSparsePages } = JSON.parse(raw);
                 localStorage.removeItem(key); // consume immediately
 
                 // Parse using the full RMS parser
@@ -1468,6 +1471,18 @@
                 if (!report) {
                     viperToast('Failed to parse RMS report', 'error');
                     return;
+                }
+
+                // Arkansas format only: fill names the layout OCR pass dropped,
+                // using the sparse-text pass index.html ran while it still had the
+                // file path. Synchronous, so this function stays synchronous.
+                if (arSparsePages && window.ArIncidentParser &&
+                    report.arFormat === 'ar-incident-report') {
+                    try {
+                        window.ArIncidentParser.recoverNames(report, arSparsePages);
+                    } catch (arErr) {
+                        console.warn('[RMS Import] Arkansas name recovery failed:', arErr);
+                    }
                 }
 
                 console.log('[RMS Import] Parsed report:', fileName,
@@ -37971,6 +37986,12 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 console.log('[RMS Parser] → parseCrimeReport');
                 return parseCrimeReport(text, fileName);
             }
+            // Arkansas state NIBRS Incident Report (modules/rms/ar-incident-parser.js).
+            // Placed LAST so it can never pre-empt a format already supported above.
+            if (window.ArIncidentParser && window.ArIncidentParser.detect(text)) {
+                console.log('[RMS Parser] → ArIncidentParser (Arkansas NIBRS Incident Report)');
+                return window.ArIncidentParser.parse(text, fileName);
+            }
             console.log('[RMS Parser] → original INFORM parser (fallback)');
 
             // --- Original INFORM RMS parser continues below ---
@@ -38628,6 +38649,33 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             return populated;
         }
 
+        /*
+         * Arkansas NIBRS incident reports only: Tesseract's layout-preserving
+         * pass drops the typed NAME inside the dense continuation-page blocks.
+         * Run a sparse-text OCR pass over just the affected pages and let the
+         * parser fill the blanks. Additive and best-effort — a failure here
+         * never fails the import, it just leaves those blocks unnamed (and they
+         * are then reported in report.diagnostics.warnings rather than being
+         * routed into the case tabs with a blank name).
+         */
+        async function _arRecoverRmsNames(report, filePath) {
+            try {
+                const AR = window.ArIncidentParser;
+                if (!AR || !filePath) return 0;
+                if (report.arFormat !== 'ar-incident-report') return 0;
+                if (!AR.needsNameRecovery(report)) return 0;
+                if (!window.electronAPI || !window.electronAPI.ocrPdfPagesSparse) return 0;
+                const pages = AR.nameRecoveryPages(report);
+                if (!pages.length) return 0;
+                const res = await window.electronAPI.ocrPdfPagesSparse(filePath, pages);
+                if (!res || !res.pages) return 0;
+                return AR.recoverNames(report, res.pages);
+            } catch (err) {
+                console.warn('[RMS Parser] sparse name recovery failed:', err);
+                return 0;
+            }
+        }
+
         async function handleRmsImport() {
             try {
                 const filePaths = await window.electronAPI.selectRmsFiles();
@@ -38635,12 +38683,15 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
                 showLoadingIndicator('Parsing RMS reports...');
                 let imported = 0;
+                let unnamedBlocks = 0;
 
                 for (const filePath of filePaths) {
                     try {
                         const result = await window.electronAPI.extractPdfText(filePath);
                         const report = parseRmsReport(result.text, result.fileName);
                         report.pageCount = result.numPages;
+                        await _arRecoverRmsNames(report, filePath);
+                        if (report.provisionalPersons) unnamedBlocks += report.provisionalPersons.length;
 
                         // Check for duplicate
                         const existingIdx = rmsImports.findIndex(r =>
@@ -38670,6 +38721,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     loadInvolvedPersons();
                     loadRecoveredVehicles();
                     showToast(`Imported ${imported} RMS report${imported !== 1 ? 's' : ''} — persons routed to case tabs`, 'success');
+                    if (unnamedBlocks > 0) {
+                        showToast(`${unnamedBlocks} person block${unnamedBlocks !== 1 ? 's' : ''} had no readable name and ${unnamedBlocks !== 1 ? 'were' : 'was'} not imported — verify against the source PDF`, 'warning');
+                    }
                     renderTabContent('rmsImport');
                 } else {
                     showToast('No reports could be parsed', 'error');

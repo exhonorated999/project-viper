@@ -19,6 +19,9 @@
          Order matters — the UI module reads window.OffenseReference at load. -->
     <script src="modules/offense-reference.js"></script>
     <script src="modules/offense-reference-ui.js"></script>
+    <!-- RMS: Arkansas state NIBRS Incident Report format (additive; used by
+         importRmsForNewCase to derive the case number, synopsis and modules) -->
+    <script src="modules/rms/ar-incident-parser.js"></script>
     <script src="modules/supervisor-link/supervisor-link-ui.js"></script>
     <script src="case-snapshot.js"></script>
     <script src="libs/tailwindcss.js"></script>
@@ -2963,8 +2966,42 @@
                     }
                 }
 
+                // --- Arkansas state NIBRS Incident Report (additive; runs LAST so it
+                //     cannot pre-empt any of the ladders above) ---
+                // The Arkansas form carries no "Case Number:" / "Incident No." label
+                // that the ladders above recognise, so without this block the case
+                // number, synopsis and module checkboxes would all come back empty.
+                let arSparsePages = null;
+                if (window.ArIncidentParser && window.ArIncidentParser.detect(text)) {
+                    try {
+                        const arScan = window.ArIncidentParser.quickScan(text, result.fileName);
+                        if (arScan.matched) {
+                            if (!caseNum && arScan.caseNum) caseNum = arScan.caseNum;
+                            if (!synopsis && arScan.synopsis) synopsis = arScan.synopsis;
+                            Object.keys(arScan.detected).forEach(k => {
+                                if (arScan.detected[k]) detected[k] = true;
+                            });
+                        }
+                        // Pre-run the supplementary sparse-text OCR here, while we
+                        // still hold the file path, and hand the result across with
+                        // the text — processPendingRmsImport is synchronous and only
+                        // ever receives text.
+                        const arReport = window.ArIncidentParser.parse(text, result.fileName);
+                        if (window.ArIncidentParser.needsNameRecovery(arReport) &&
+                            window.electronAPI.ocrPdfPagesSparse) {
+                            const pages = window.ArIncidentParser.nameRecoveryPages(arReport);
+                            if (pages.length) {
+                                const sparse = await window.electronAPI.ocrPdfPagesSparse(chosenPath, pages);
+                                if (sparse && sparse.pages) arSparsePages = sparse.pages;
+                            }
+                        }
+                    } catch (arErr) {
+                        console.warn('[RMS Import] Arkansas quick scan failed:', arErr);
+                    }
+                }
+
                 // Store for case creation
-                pendingRmsData = { text: result.text, fileName: result.fileName, detected, caseNum, synopsis };
+                pendingRmsData = { text: result.text, fileName: result.fileName, detected, caseNum, synopsis, arSparsePages };
 
                 // Auto-fill form fields
                 if (caseNum) {
@@ -3381,7 +3418,11 @@
                 if (pendingRmsData) {
                     localStorage.setItem('pendingRmsImport_' + newCase.id, JSON.stringify({
                         text: pendingRmsData.text,
-                        fileName: pendingRmsData.fileName
+                        fileName: pendingRmsData.fileName,
+                        // Arkansas format only: sparse-text OCR of the pages whose
+                        // typed names the layout OCR pass dropped. Carried across
+                        // because processPendingRmsImport has no file path.
+                        arSparsePages: pendingRmsData.arSparsePages || null
                     }));
                     pendingRmsData = null;
                 }

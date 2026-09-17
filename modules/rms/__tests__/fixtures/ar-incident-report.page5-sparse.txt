@@ -1,0 +1,136 @@
+# REDACTED fixture — Arkansas continuation page 5 ONLY, sparse-text OCR (PSM 11).
+# Structure, OCR artifacts and column collapse are byte-for-byte as produced by
+# electron-main.js `extract-pdf-text` (MuPDF 300 DPI render -> Tesseract, sparse-text
+# page segmentation (PSM 11)). All names, DOBs, phones, addresses, incident/ORI/officer
+# codes have been replaced with same-shaped synthetic values. No real PII here.
+CONTINUATION PAGE
+
+REPORTING OFFICER
+
+CODE #
+
+VICTIM NAME
+
+DERRICK LANE
+
+D0312
+
+HOLLOWAY (JV2), MARISOL
+
+I
+
+Others Involved
+
+CASE WORKER
+
+NAME:
+
+Last,
+
+First,
+
+Middle
+
+La
+
+SEX:
+
+RACE:
+
+O (M) Male
+
+AGE:
+
+QUILLEN, DELPHINE ASP CAC
+
+[ (F) Female
+
+[1 (00) Unknown
+
+[J (W) White
+
+CJ (U) Unk
+
+OJ (B) Black
+
+RESIDENT ADDRESS:
+
+Street
+
+City
+
+State
+
+[J (1) American Indian
+
+[1 (A) Asian/Pacific Islander
+
+[ (U) Unknown
+
+DATE OF BIRTH
+
+SSN
+
+PLACE OF EMPLOYMENT
+
+PARENT
+
+NAME:
+
+Last,
+
+First,
+
+Middle
+
+SEX:
+
+[J (M) Male
+
+AGE: 34
+
+RACE:
+
+Marchetti, Rowena Claire
+
+IH (F) Female
+
+[J (00) Unknown
+
+BW) White
+
+RESIDENT ADDRESS:
+
+Street
+
+State
+
+O (©) Unk
+
+[J (8) Black
+
+City
+
+Zip
+
+RESIDENT PHONE
+
+[3d (©) American Indian
+
+J (A) Asian/Pacific Islander
+
+912 THISTLEDOWN LN, Boone County, Bellefonte, AR
+
+72611
+
+(479) 318-2270
+
+Od (U) Unknown
+
+DATE OF BIRTH
+
+PLACE OF EMPLOYMENT
+
+06/05/1991
+
+nl ia

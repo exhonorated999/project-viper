@@ -30,6 +30,9 @@
     <link rel="stylesheet" href="libs/MarkerCluster.css" />
     <link rel="stylesheet" href="libs/MarkerCluster.Default.css" />
     <script src="libs/leaflet.markercluster.js"></script>
+    <!-- Shared CARTO basemap config (API key). Must load BEFORE any module that
+         builds a Leaflet tile layer — loaded synchronously, no defer. -->
+    <script src="modules/_shared/basemap.js"></script>
     <link rel="stylesheet" href="modules/connection-board/connection-board.css" />
     <script src="modules/connection-board/connection-board.js" defer></script>
     <link rel="stylesheet" href="modules/flock/flock-styles.css" />
@@ -33762,6 +33765,21 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             return pts;
         }
 
+        /**
+         * Resolve the CARTO dark basemap tile URL.
+         *
+         * CARTO watermarks keyless raster tiles with a large "API KEY REQUIRED"
+         * diagonal, which defaced every map in VIPER. The key lives in
+         * modules/_shared/basemap.js so a rotation is a one-line change.
+         *
+         * Falls back to the keyless URL if that file failed to load: a
+         * watermarked map is degraded, a map that throws is broken.
+         */
+        function viperDarkTileUrl() {
+            return (window.VIPER_BASEMAP && window.VIPER_BASEMAP.dark) ||
+                'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+        }
+
         function renderCDRMap() {
             const container = document.getElementById('cdr-map');
             console.log('renderCDRMap: container=', container, 'dims=', container?.clientWidth, container?.clientHeight);
@@ -33786,7 +33804,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             let refLon = currentCDRDump.refLon || -97.728162;
 
             cdrMap = L.map(container, { zoomControl: true }).setView([refLat, refLon], 12);
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            L.tileLayer(viperDarkTileUrl(), {
                 attribution: '&copy; OpenStreetMap &copy; CARTO',
                 maxZoom: 19
             }).addTo(cdrMap);
@@ -33872,7 +33890,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const center = n ? [sumLat / n, sumLon / n] : [32.72, -96.63];
 
             cdrMap = L.map(container, { zoomControl: true, preferCanvas: true }).setView(center, 11);
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            L.tileLayer(viperDarkTileUrl(), {
                 attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19
             }).addTo(cdrMap);
 
@@ -42550,7 +42568,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         const mapEl = document.getElementById('glSightingMap');
         if (!mapEl || !window.L) return;
         const map = L.map(mapEl, { zoomControl: false, attributionControl: false }).setView([39.8, -98.5], 4);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 18 }).addTo(map);
+        L.tileLayer(viperDarkTileUrl(), { maxZoom: 18 }).addTo(map);
         const bounds = [];
         sightings.forEach(s => {
             // Sightings have state_seen and location_zip but no lat/lon — we approximate from state

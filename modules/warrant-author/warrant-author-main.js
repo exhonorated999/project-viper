@@ -25,15 +25,55 @@ const { app, dialog, shell } = require('electron');
 // ─── State ────────────────────────────────────────────────────────────
 let _security   = null;
 let _mainWindow = null;
+let _getCasesDir = null;
 
 function setSecurityManager(sm) { _security = sm; }
 function setMainWindow(win)     { _mainWindow = win; }
+function setCasesDirGetter(fn)  { _getCasesDir = fn; }
 function _isSecActive()         { return !!(_security && _security.isEnabled() && _security.isUnlocked()); }
 
 // ─── Paths ────────────────────────────────────────────────────────────
 function _userdataDir() { return path.join(app.getPath('userData'), 'warrant-author'); }
+
+/**
+ * Resolve the renderer-supplied `casePath` (always the RELATIVE string
+ * "cases/<caseNumber>") to an ABSOLUTE directory.
+ *
+ * Why this exists: every path here used to be handed to fs/shell verbatim.
+ * fs silently resolves a relative path against process.cwd(), which happens
+ * to be the repo root in dev — so it looked correct. Two things were wrong:
+ *   1. shell.openPath() does NOT resolve against cwd, so "Open DOCX" /
+ *      "Open Folder" failed with "Windows cannot find 'cases\...'".
+ *   2. In a packaged build cwd is the install directory, so warrant drafts
+ *      were written next to the .exe instead of into the real cases root
+ *      (app.getPath('userData')/cases, or the USB dir in portable mode) —
+ *      invisible to case export, backup and the storage-override setting.
+ *
+ * Legacy safety: if a cwd-relative folder already exists and the canonical
+ * one does not, the legacy location wins. Drafts written by older builds
+ * are never orphaned; they are simply read from where they actually are.
+ */
+function _resolveCasePath(casePath) {
+    const raw = String(casePath || '');
+    if (!raw) return '';
+    if (path.isAbsolute(raw)) return path.normalize(raw);
+    const legacy = path.resolve(raw);              // pre-5.2.1 behaviour (cwd)
+    let root = '';
+    try { root = _getCasesDir ? String(_getCasesDir() || '') : ''; } catch (_e) { root = ''; }
+    if (!root) return legacy;
+    const rel = raw.replace(/\\/g, '/')
+                   .replace(/^\.\/+/, '')
+                   .replace(/^cases\/?/i, '');
+    const canonical = rel ? path.join(root, rel) : root;
+    if (path.normalize(canonical) === path.normalize(legacy)) return canonical;
+    try {
+        if (!fs.existsSync(canonical) && fs.existsSync(legacy)) return legacy;
+    } catch (_e) { /* fall through to canonical */ }
+    return canonical;
+}
+
 function _draftsDirFor(casePath, warrantId) {
-    return path.join(casePath, 'Warrants', 'Drafts', warrantId);
+    return path.join(_resolveCasePath(casePath), 'Warrants', 'Drafts', warrantId);
 }
 function _manifestPath(casePath, warrantId) {
     return path.join(_draftsDirFor(casePath, warrantId), 'manifest.json');
@@ -206,7 +246,7 @@ function registerIpc(ipcMain) {
     // ── list-drafts: enumerate manifest.json files under case Warrants/Drafts/ ─
     ipcMain.handle('warrant-author-list-drafts', async (_event, { casePath } = {}) => {
         if (!casePath) return { success: false, error: 'casePath required' };
-        const draftsRoot = path.join(casePath, 'Warrants', 'Drafts');
+        const draftsRoot = path.join(_resolveCasePath(casePath), 'Warrants', 'Drafts');
         if (!fs.existsSync(draftsRoot)) return { success: true, drafts: [] };
         try {
             const entries = fs.readdirSync(draftsRoot, { withFileTypes: true })
@@ -474,10 +514,21 @@ function registerIpc(ipcMain) {
         // If Field Security is active, the file on disk is VIPENC-encrypted;
         // opening it in a desktop viewer would fail. Open the folder instead.
         if (_isSecActive()) {
-            try { await shell.openPath(_draftsDirFor(casePath, warrantId)); return { success: true, openedDir: true }; }
+            try {
+                const err = await shell.openPath(_draftsDirFor(casePath, warrantId));
+                if (err) return { success: false, error: err };
+                return { success: true, openedDir: true };
+            }
             catch (e) { return { success: false, error: e.message }; }
         }
-        try { await shell.openPath(fpath); return { success: true }; }
+        // shell.openPath RESOLVES with a non-empty error string on failure —
+        // it does not reject. Ignoring it let a bad path surface as a raw
+        // Windows shell dialog with no VIPER-side diagnostics.
+        try {
+            const err = await shell.openPath(fpath);
+            if (err) return { success: false, error: `${err} (${fpath})` };
+            return { success: true };
+        }
         catch (e) { return { success: false, error: e.message }; }
     });
 
@@ -569,7 +620,8 @@ function registerIpc(ipcMain) {
         const dir = _draftsDirFor(casePath, warrantId);
         if (!fs.existsSync(dir)) return { success: false, error: 'folder not found' };
         try {
-            await shell.openPath(dir);
+            const err = await shell.openPath(dir);
+            if (err) return { success: false, error: `${err} (${dir})` };
             return { success: true };
         } catch (e) { return { success: false, error: e.message }; }
     });
@@ -579,5 +631,6 @@ module.exports = {
     registerIpc,
     setSecurityManager,
     setMainWindow,
-    _internals: { genWarrantId, _secureReadJson, _secureWriteJson, _draftsDirFor, _manifestPath, _mergeVaPdfs, _mergePaPdfs },
+    setCasesDirGetter,
+    _internals: { genWarrantId, _secureReadJson, _secureWriteJson, _draftsDirFor, _manifestPath, _resolveCasePath, _mergeVaPdfs, _mergePaPdfs },
 };

@@ -5644,6 +5644,10 @@
                                     <label class="text-sm text-gray-400">Date Closed</label>
                                     <p class="text-white mt-1">${currentCase.dateClosed ? new Date(String(currentCase.dateClosed).slice(0, 10) + 'T00:00').toLocaleDateString() : '<span class="text-gray-500 italic">—</span>'}</p>
                                 </div>
+                                <div>
+                                    <label class="text-sm text-gray-400">Date of Offense</label>
+                                    <p class="text-white mt-1">${currentCase.offenseDate ? new Date(String(currentCase.offenseDate).slice(0, 10) + 'T00:00').toLocaleDateString() : '<span class="text-gray-500 italic">Not set</span>'}</p>
+                                </div>
                                 <div class="col-span-2">
                                     <label class="text-sm text-gray-400">Offenses</label>
                                     <div class="text-white mt-2 leading-relaxed">
@@ -5718,6 +5722,10 @@
                                 <div>
                                     <label class="text-sm text-gray-400 block mb-1">Date Assigned</label>
                                     <input type="date" id="editDateAssigned" value="${currentCase.dateAssigned ? currentCase.dateAssigned.split('T')[0] : ''}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
+                                </div>
+                                <div>
+                                    <label class="text-sm text-gray-400 block mb-1">Date of Offense <span class="text-gray-600">(auto-fills warrant templates)</span></label>
+                                    <input type="date" id="editCaseOffenseDate" value="${currentCase.offenseDate ? String(currentCase.offenseDate).split('T')[0] : ''}" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:outline-none">
                                 </div>
                                 <div class="col-span-2">
                                     <div class="flex items-center justify-between mb-2">
@@ -31476,6 +31484,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const newCybertip = (document.getElementById('editCaseCybertip')?.value || '').trim();
             const newLocationOfOccurrence = (document.getElementById('editCaseLocationOfOccurrence')?.value || '').trim();
             const newDateAssigned = document.getElementById('editDateAssigned')?.value || '';
+            const newOffenseDate = document.getElementById('editCaseOffenseDate')?.value || '';
             const offenses = _readOffensesFromEditor();
             const newPrimaryOffense = offenses.primary;
             const newAdditionalOffenses = offenses.additional;
@@ -31498,6 +31507,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             currentCase.cybertipNumber = newCybertip;
             currentCase.locationOfOccurrence = newLocationOfOccurrence;
             currentCase.dateAssigned = newDateAssigned || null;
+            // Date of Offense — read by the Warrant Author (case.offenseDate slot).
+            // Stored as YYYY-MM-DD, same shape as dateAssigned/dateClosed.
+            currentCase.offenseDate = newOffenseDate || null;
             currentCase.primaryOffense = newPrimaryOffense || null;
             currentCase.additionalOffenses = newAdditionalOffenses;
             // Clear legacy charges field — superseded by additionalOffenses

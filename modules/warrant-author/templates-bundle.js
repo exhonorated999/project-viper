@@ -12,6 +12,213 @@
   }
   var TEMPLATES = [
   {
+    "id": "ar-multi-business-esp",
+    "name": "Arkansas Circuit Court ESP (Affidavit + Search Warrant)",
+    "jurisdiction": "AR",
+    "version": 1,
+    "description": "Arkansas combined Affidavit for Search Warrant to Provide Records + Search Warrant to Provide Records, for Electronic Service Providers. Modelled verbatim on a Faulkner County Circuit Court exemplar. The single output document is two page sets — the Affidavit, a hard page break, then the Search Warrant and order. Repeated once per provider addendum. The exemplar carries no statutory citations and none are added. The judge is identified by court stamp, so the judge block prints a blank signature line plus the county Circuit Court and Division. Court caption county comes from the agency profile (county) and the Division from the agency profile (arCircuitDivision).",
+    "compatibleProviderTypes": [
+      "ESP",
+      "Phone",
+      "Internet",
+      "Financial",
+      "Other"
+    ],
+    "supportsMultipleProviders": true,
+    "blocks": [
+      {
+        "key": "01-affidavit-caption",
+        "kind": "ar-caption",
+        "documentTitle": "AFFIDAVIT FOR SEARCH WARRANT\nTO PROVIDE RECORDS"
+      },
+      {
+        "key": "02-intro-header",
+        "kind": "constant",
+        "text": "INTRODUCTION AND AGENT BACKGROUND"
+      },
+      {
+        "key": "03-oath-line",
+        "kind": "verbatim-paragraph",
+        "text": "I, {{agency.affiantRank}} {{agency.affiantName}}, after being first duly sworn upon oath, depose and say:"
+      },
+      {
+        "key": "04-agent-background",
+        "kind": "verbatim-paragraph",
+        "text": "{{agency.trainingExperienceBoilerplate}}"
+      },
+      {
+        "key": "05-assignment",
+        "kind": "verbatim-paragraph",
+        "text": "I am currently assigned to the {{agency.unit}} of the {{agency.agencyName}} and have been assigned to investigate {{case.offenseDescription}} reported on {{case.offenseDate}} ({{agency.agencyName}} report# {{case.number}})."
+      },
+      {
+        "key": "06-records-belief",
+        "kind": "constant",
+        "text": "I have reason to believe that particular internet service subscriber records may contain evidence identifying and linking, victim(s), suspect(s), and possible witness(es) to the referenced investigation."
+      },
+      {
+        "key": "07-request-paragraph",
+        "kind": "provider-slot-paragraph",
+        "text": "I am requesting a search warrant allowing for the release of subscriber records from {{provider.name}}, an electronic service provider with a physical address that includes {{provider.address}}, and to disclose the contents of any record pertaining to a customer or subscriber within such provider's possession, custody, or control."
+      },
+      {
+        "key": "08-records-header",
+        "kind": "constant",
+        "text": "RECORDS TO BE PROVIDED"
+      },
+      {
+        "key": "09-records-lead-in",
+        "kind": "verbatim-paragraph",
+        "text": "This applicant seeks permission for release of records relating to the referenced investigation that are associated with records currently under the control of {{provider.name}}."
+      },
+      {
+        "key": "10-target-lead-in",
+        "kind": "constant",
+        "text": "The specific records are associated with the individual using the following identifier(s):"
+      },
+      {
+        "key": "11-target-account",
+        "kind": "target-account"
+      },
+      {
+        "key": "12-date-range-line",
+        "kind": "date-range"
+      },
+      {
+        "key": "13-items-lead-in",
+        "kind": "constant",
+        "text": "And are to include, by way of example but not limitation, the following records:"
+      },
+      {
+        "key": "14-items-to-seize",
+        "kind": "items-to-seize",
+        "style": "prose"
+      },
+      {
+        "key": "15-facts-header",
+        "kind": "constant",
+        "text": "FACTS OF INVESTIGATION"
+      },
+      {
+        "key": "16-probable-cause",
+        "kind": "verbatim-paragraph",
+        "text": "{{addendum.probableCause}}"
+      },
+      {
+        "key": "17-conclusion-header",
+        "kind": "constant",
+        "text": "CONCLUSION"
+      },
+      {
+        "key": "18-conclusion",
+        "kind": "constant",
+        "text": "Based on the foregoing information, I believe evidence relating to this investigation are currently within the records described above. I therefore respectfully request that a Search Warrant be issued authorizing the release and examination of the records set forth herein."
+      },
+      {
+        "key": "19-affiant-signature",
+        "kind": "ar-affiant-signature"
+      },
+      {
+        "key": "20-oath-jurat",
+        "kind": "constant",
+        "text": "Subscribed and sworn to before me this ______ day of ____________________, 20____."
+      },
+      {
+        "key": "21-judge-block",
+        "kind": "ar-judge-block"
+      },
+      {
+        "key": "22-page-break",
+        "kind": "page-break"
+      },
+      {
+        "key": "23-warrant-caption",
+        "kind": "ar-caption",
+        "documentTitle": "SEARCH WARRANT\nTO PROVIDE RECORDS"
+      },
+      {
+        "key": "24-warrant-header",
+        "kind": "constant",
+        "text": "SEARCH WARRANT TO PROVIDE RECORDS"
+      },
+      {
+        "key": "25-ordered-party",
+        "kind": "ar-provider-order-block"
+      },
+      {
+        "key": "26-to-supply-lead",
+        "kind": "constant",
+        "text": "To supply: Any and all records regarding the identification of the individual using the following identifier(s):"
+      },
+      {
+        "key": "27-target-account-warrant",
+        "kind": "target-account"
+      },
+      {
+        "key": "28-items-lead-in-warrant",
+        "kind": "constant",
+        "text": "And are to include, by way of example but not limitation, the following records:"
+      },
+      {
+        "key": "29-items-to-seize-warrant",
+        "kind": "items-to-seize",
+        "style": "prose"
+      },
+      {
+        "key": "30-investigation-ref",
+        "kind": "verbatim-paragraph",
+        "text": "Search Warrant is in reference to an ongoing investigation, {{agency.agencyName}} Incident #{{case.number}}."
+      },
+      {
+        "key": "31-comply-header",
+        "kind": "constant",
+        "text": "This search warrant may be complied with by providing said records to:"
+      },
+      {
+        "key": "32-affiant-contact",
+        "kind": "affiant-contact",
+        "fields": [
+          "affiantName",
+          "agencyName",
+          "agencyAddress",
+          "affiantEmail",
+          "affiantPhone"
+        ],
+        "labels": {
+          "affiantName": "",
+          "agencyName": "",
+          "agencyAddress": "",
+          "affiantEmail": "Email",
+          "affiantPhone": "Phone"
+        },
+        "requiredFields": [
+          "affiantName",
+          "agencyName",
+          "affiantEmail"
+        ]
+      },
+      {
+        "key": "33-execution-window",
+        "kind": "constant",
+        "text": "You are further directed to execute the search warrant within five (5) days of issuance between the hours of 7 am and 10 pm, and make return of this search warrant to me within five (5) days after execution, except as otherwise provided herein:"
+      },
+      {
+        "key": "34-dated-line",
+        "kind": "constant",
+        "text": "Dated this ______ day of ____________________, 20____."
+      },
+      {
+        "key": "35-order-line",
+        "kind": "constant",
+        "text": "IT IS HEREBY ORDERED BY THIS COURT THAT THE ABOVE-MENTIONED INFORMATION BE PROVIDED"
+      },
+      {
+        "key": "36-judge-block-warrant",
+        "kind": "ar-judge-block"
+      }
+    ]
+  },
+  {
     "id": "ca-multi-business-esp",
     "name": "California Multi-Business ESP (CalECPA)",
     "jurisdiction": "CA",

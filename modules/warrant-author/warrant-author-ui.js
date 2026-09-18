@@ -157,6 +157,45 @@ function _resolveCaseCtxForDraft(draft) {
   };
 }
 
+// ─── AR-specific compose-ctx helper ─────────────────────────────────────
+// The Arkansas exemplar prints "<County> County Circuit Court" / "<N>
+// Division" beneath the judge signature line, and "FOR THE COUNTY OF
+// <County>" in the caption. County comes from the agency profile (shared
+// with CA/CO); the division ordinal is the one AR-only field. A per-draft
+// override is honoured first so an agency that occasionally files in a
+// different division does not have to edit Settings.
+function _resolveArCourtForDraft(draft) {
+  try {
+    const ap = _agency();
+    const profile = ap ? ap.normalize(_loadAgencyProfile()) : (_loadAgencyProfile() || {});
+    const snapshot = (draft && draft.affiantSnapshot) || {};
+    const county =
+      String((draft && draft.arCounty) || '').trim() ||
+      String(snapshot.county || '').trim() ||
+      String(profile.county || '').trim();
+    const division =
+      String((draft && draft.arCircuitDivision) || '').trim() ||
+      String(snapshot.arCircuitDivision || '').trim() ||
+      String(profile.arCircuitDivision || '').trim();
+    if (!county && !division) return null;
+    const out = {};
+    if (county) out.county = county;
+    if (division) out.division = division;
+    return out;
+  } catch (_) { return null; }
+}
+
+// Single court-context builder used at BOTH compose sites (preview +
+// generate). Merges the CO court descriptor with the AR county/division
+// pair. Only non-empty AR keys are layered on so a CO draft's resolved
+// court object is never clobbered by a blank AR field.
+function _resolveCourtCtxForDraft(draft) {
+  const base = _resolveCoCourtForDraft(draft);
+  const ar   = _resolveArCourtForDraft(draft);
+  if (!base && !ar) return null;
+  return Object.assign({}, base || {}, ar || {});
+}
+
 // ─── ephemeral renderer state (not persisted) ───────────────────────────
 
 const _state = {
@@ -648,7 +687,7 @@ function harvestIdentifiers(caseId) {
 function _readWarrantAuthorState() {
   // Settings dropdown wins over agency.state; falls back to agency.state, then 'CA'.
   // Must mirror _WARRANT_AUTHOR_SUPPORTED_STATES in settings.html.
-  const SUPPORTED = ['CA', 'VA', 'CO', 'PA'];
+  const SUPPORTED = ['CA', 'VA', 'CO', 'PA', 'AR'];
   try {
     const s = (localStorage.getItem('viperWarrantAuthorState') || '').toUpperCase();
     if (SUPPORTED.includes(s)) return s;
@@ -669,6 +708,7 @@ function _espTemplateForState(state) {
     case 'VA': return { id: 'va-multi-business-esp',     label: 'VA — Multi-Business ESP (DC-338/DC-339, §19.2-53) · Beta' };
     case 'CO': return { id: 'co-multi-business-esp',     label: 'CO — Affidavit + Search Warrant (§16-3-301) · Beta' };
     case 'PA': return { id: 'pa-multi-business-esp',     label: 'PA — Search Warrant + Affidavit (AOPC 410A) · Beta' };
+    case 'AR': return { id: 'ar-multi-business-esp',     label: 'AR — Circuit Court ESP (Affidavit + Search Warrant) · Beta' };
     default:   return { id: 'generic-us-multi-business-esp', label: 'US Generic — Multi-Business ESP (SCA §2703)' };
   }
 }
@@ -1457,6 +1497,7 @@ function _renderDraftHeader(caseId, draft) {
     { v: 'va-multi-business-esp', label: 'VA — DC-338/DC-339 (§19.2-53)' },
     { v: 'co-multi-business-esp', label: 'CO — Affidavit + Search Warrant (§16-3-301)' },
     { v: 'pa-multi-business-esp', label: 'PA — Search Warrant + Affidavit (AOPC 410A)' },
+    { v: 'ar-multi-business-esp', label: 'AR — Circuit Court ESP (Affidavit + Search Warrant)' },
     { v: 'generic-us-multi-business-esp', label: 'US Generic — SCA §2703' },
   ];
   // Colorado: the agency profile carries a user-maintained list of courts
@@ -1476,6 +1517,41 @@ function _renderDraftHeader(caseId, draft) {
     } catch (_) { /* non-fatal */ }
   }
   const isCoTemplate = String(draft.template || '') === 'co-multi-business-esp';
+  // Arkansas: the caption reads "FOR THE COUNTY OF <county>" and the judge
+  // block reads "<county> County Circuit Court / <N> Division". Both default
+  // from the agency profile (County + Arkansas-Specific → Circuit Court
+  // Division); these two inputs are per-draft OVERRIDES for the occasional
+  // filing in another county or division. Left blank, the profile wins.
+  const isArTemplate = String(draft.template || '') === 'ar-multi-business-esp'
+    || String(draft.jurisdiction || '').toUpperCase() === 'AR';
+  let arProfileCounty = '';
+  let arProfileDivision = '';
+  if (isArTemplate && typeof window !== 'undefined' && window.WarrantAuthorAgencyProfile) {
+    try {
+      const raw = localStorage.getItem('viperAgencyProfile');
+      const profile = window.WarrantAuthorAgencyProfile.normalize(raw ? JSON.parse(raw) : {});
+      arProfileCounty = String(profile.county || '');
+      arProfileDivision = String(profile.arCircuitDivision || '');
+    } catch (_) { /* non-fatal */ }
+  }
+  const arFieldsHtml = isArTemplate ? `
+      <label class="text-xs">
+        <span class="text-slate-400 uppercase tracking-wider">County <span class="text-slate-600 normal-case tracking-normal">(override)</span></span>
+        <input type="text" value="${attr(draft.arCounty || '')}"
+               placeholder="${attr(arProfileCounty || 'e.g. Faulkner')}"
+               onchange="WarrantAuthorUI.bus.onDraftFieldChange('${attr(caseId)}','${attr(draft.id)}','arCounty',this.value)"
+               class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
+        <span class="block mt-0.5 text-[11px] text-slate-500">Blank uses the agency profile${arProfileCounty ? ` (<span class="text-slate-400">${esc(arProfileCounty)}</span>)` : ''}.</span>
+      </label>
+      <label class="text-xs">
+        <span class="text-slate-400 uppercase tracking-wider">Circuit Division <span class="text-slate-600 normal-case tracking-normal">(override)</span></span>
+        <input type="text" value="${attr(draft.arCircuitDivision || '')}"
+               placeholder="${attr(arProfileDivision || 'e.g. 2nd')}"
+               onchange="WarrantAuthorUI.bus.onDraftFieldChange('${attr(caseId)}','${attr(draft.id)}','arCircuitDivision',this.value)"
+               class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
+        <span class="block mt-0.5 text-[11px] text-slate-500">Prints as "<span class="text-slate-400">${esc(draft.arCircuitDivision || arProfileDivision || '____')} Division</span>" under the judge signature.</span>
+      </label>
+    ` : '';
   // When CO template is active AND the agency has a Colorado Courts list,
   // the court picker (coCourtId) is the authoritative source for the
   // caption — the legacy free-text "Court Name" field is ignored by the
@@ -1544,6 +1620,7 @@ function _renderDraftHeader(caseId, draft) {
         </select>
       </label>
       ${courtPickerHtml}
+      ${arFieldsHtml}
 
       <div class="col-span-2 text-[11px] text-slate-500 flex items-center justify-between border-t border-slate-700 pt-2 mt-1">
         <span>
@@ -2948,8 +3025,9 @@ function _renderLivePreview(caseId, draft, activeId) {
     draft,
     // Colorado template needs court (selected per-draft from agency.coCourts)
     // + case info (case number, offense). The block-builder reads these
-    // from the resolved blocks emitted by the CO resolvers.
-    court: _resolveCoCourtForDraft(draft),
+    // from the resolved blocks emitted by the CO resolvers. Arkansas reuses
+    // the same ctx.court key for {county, division}.
+    court: _resolveCourtCtxForDraft(draft),
     case: _resolveCaseCtxForDraft(draft),
   };
 
@@ -2973,7 +3051,14 @@ function _renderLivePreview(caseId, draft, activeId) {
     const heading = b.heading ? `<div class="wa-pv-heading">${esc(b.heading)}</div>` : '';
     let body = '';
     if (b.kind === 'items-to-seize' && Array.isArray(b.items)) {
-      if (b.style === 'semicolons') {
+      if (b.style === 'prose') {
+        // AR flowing-prose list — one semicolon-joined sentence, verbatim
+        // to the Arkansas exemplar. Mirrors block-builder's 'prose' arm.
+        const bodies = b.items
+          .map(it => (it.description || it.label || it.key || '').trim().replace(/[.;]?\s*$/, ''))
+          .filter(Boolean);
+        body = `<div class="wa-pv-text">${esc(bodies.length ? bodies.join('; ') + '.' : '(no items selected)')}</div>`;
+      } else if (b.style === 'semicolons') {
         // CO semicolon-terminated list — render as semicolon paragraphs
         // so the preview matches the exported DOCX faithfully.
         body = `<div class="wa-pv-text">${b.items.map((it, idx) => {
@@ -2999,6 +3084,38 @@ function _renderLivePreview(caseId, draft, activeId) {
       body = `<div class="wa-pv-text">Date<br>In the ${esc(b.judicialDistrict || '_______')} Judicial District, Colorado<br><br>______________________________<br><span class="text-slate-400">Signature of Judge</span><br><br>______________________________<br><span class="text-slate-400">Printed Name of Judge</span></div>`;
     } else if (b.kind === 'co-da-approval') {
       body = `<div class="wa-pv-text">APPROVED AS TO FORM:<br>${esc(b.daName || '[District Attorney Name]')}<br>${esc(b.daTitle || 'District Attorney')}<br>By /s<br>${esc(b.daDeputyLine || '[Chief][Senior] Deputy District Attorney')}</div>`;
+    } else if (b.kind === 'ar-caption') {
+      // Three-column ")" caption. wa-pv-text is monospace, so pad column 1
+      // out to the widest literal exactly as block-builder does — otherwise
+      // the continuation row's ")" sits flush left and the preview no
+      // longer shows what the PDF will contain.
+      const county = String(b.county || '[County]').toUpperCase();
+      const lead = 'STATE OF ARKANSAS';
+      const countyLead = `COUNTY OF ${county}`;
+      const col1 = Math.max(lead.length, countyLead.length) + 3;
+      const padTo = s => s + ' '.repeat(Math.max(1, col1 - s.length));
+      const nb = s => esc(s).replace(/ /g, '&nbsp;');
+      const titleLines = String(b.documentTitle || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      const rows = [`${nb(padTo(lead))})&nbsp;&nbsp;<span class="font-bold">${esc(titleLines[0] || '')}</span>`];
+      for (let li = 1; li < titleLines.length; li++) {
+        rows.push(`${nb(padTo(''))})&nbsp;&nbsp;<span class="font-bold">${esc(titleLines[li])}</span>`);
+      }
+      rows.push(`${nb(padTo(countyLead))})&nbsp;&nbsp;<span class="font-bold">${esc(b.providerLine || '[Provider]')}</span>`);
+      body = `<div class="wa-pv-text text-center font-semibold">IN THE CIRCUIT COURT OF THE STATE OF ARKANSAS<br>FOR THE COUNTY OF ${esc(county)}</div>
+              <div class="wa-pv-text mt-1">${rows.join('<br>')}</div>`;
+    } else if (b.kind === 'ar-provider-order-block') {
+      body = `<div class="wa-pv-text">The following party is ordered: Online Service: ${esc(b.providerName || '[Provider]')}<br>
+              Address: ${esc(b.street || '')}<br>
+              City: ${esc(b.city || '')}<br>
+              State: ${esc(b.state || '')}<br>
+              Zip Code: ${esc(b.zip || '')}<br>
+              Phone Number: ${esc(b.phone || '')}<br>
+              Email: ${esc(b.email || '')}</div>`;
+    } else if (b.kind === 'ar-affiant-signature') {
+      body = `<div class="wa-pv-text">______________________________<br><span class="text-slate-400">Signature of Affiant</span><br>${esc([b.affiantRank, b.affiantName].filter(Boolean).join(' ') || '[Affiant]')}<br>${esc(b.agencyName || '[Agency]')}</div>`;
+    } else if (b.kind === 'ar-judge-block') {
+      // Deliberately no judge name — the AR bench applies a stamp.
+      body = `<div class="wa-pv-text">______________________________<br><span class="text-slate-400">Honorable Judge</span><br>${esc(b.county || '[County]')} County Circuit Court<br>${esc(b.division || '____')} Division</div>`;
     } else if (b.kind === 'page-break') {
       body = `<div class="wa-pv-text text-center text-amber-400 italic border-t border-b border-dashed border-amber-500/40 py-1 my-1">— Page Break —</div>`;
     } else if (b.text) {
@@ -3021,6 +3138,7 @@ function _renderLivePreview(caseId, draft, activeId) {
         draft.template === 'ca-multi-business-esp' ? 'CA template'
         : draft.template === 'va-multi-business-esp' ? 'VA template'
         : draft.template === 'co-multi-business-esp' ? 'CO template'
+        : draft.template === 'ar-multi-business-esp' ? 'AR template'
         : 'US template'
       )} · Page ${esc(ad.pageLabel)}</div>
       ${issuesBar}
@@ -3368,6 +3486,7 @@ function _showGenerateResultModal(caseId, draft, blockStream, issues, pdfResult,
               draft.template === 'va-multi-business-esp'  ? 'VA · DC-338/DC-339' :
               draft.template === 'co-multi-business-esp'  ? 'CO · §16-3-301' :
               draft.template === 'pa-multi-business-esp'  ? 'PA · AOPC 410A' :
+              draft.template === 'ar-multi-business-esp'  ? 'AR · Circuit Court' :
               (String(draft.jurisdiction || '').toUpperCase() === 'PA') ? 'PA · AOPC 410A' :
               draft.template === 'ca-residential-sw'      ? 'CA · Residential SW' :
               draft.template === 'ca-residential'         ? 'CA · Residential SW' :
@@ -3870,6 +3989,7 @@ const bus = {
                   : tpl.startsWith('va-') ? 'VA'
                   : tpl.startsWith('co-') ? 'CO'
                   : tpl.startsWith('pa-') ? 'PA'
+                  : tpl.startsWith('ar-') ? 'AR'
                   : 'US',
       agencyProfile: agency,
       crimeType: type === 'residential' ? crimeId : ''
@@ -3924,6 +4044,7 @@ const bus = {
       else if (v.startsWith('va-')) d.jurisdiction = 'VA';
       else if (v.startsWith('co-')) d.jurisdiction = 'CO';
       else if (v.startsWith('pa-')) d.jurisdiction = 'PA';
+      else if (v.startsWith('ar-')) d.jurisdiction = 'AR';
       else                          d.jurisdiction = 'US';
     }
     ds.saveDraft(caseId, d, { silent: true });
@@ -5051,8 +5172,9 @@ const bus = {
         agency:  _coAgency,
         draft,
         // CO template needs court + case ctx; harmless on other templates
-        // because non-CO resolvers ignore them.
-        court: _resolveCoCourtForDraft(draft),
+        // because non-CO resolvers ignore them. AR reads {county, division}
+        // off the same ctx.court key.
+        court: _resolveCourtCtxForDraft(draft),
         case: _resolveCaseCtxForDraft(draft),
       };
       let composed;

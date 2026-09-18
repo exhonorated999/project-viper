@@ -2789,6 +2789,7 @@
                                         <option value="VA">Virginia (VA) — DC-338/DC-339 ESP · Beta</option>
                                         <option value="CO">Colorado (CO) — Multi-Business ESP · Beta</option>
                                         <option value="PA">Pennsylvania (PA) — AOPC 410A Search Warrant · Beta</option>
+                                        <option value="AR">Arkansas (AR) — Circuit Court ESP · Beta</option>
                                     </select>
                                 </div>
                             </div>
@@ -7867,7 +7868,7 @@
     // ─── State / jurisdiction selector ──────────────────────────────
     // Persisted as 'viperWarrantAuthorState'. Default 'CA'. Drives which
     // jurisdiction-specific boilerplate the block-builder applies.
-    const _WARRANT_AUTHOR_SUPPORTED_STATES = ['CA', 'VA', 'CO', 'PA'];
+    const _WARRANT_AUTHOR_SUPPORTED_STATES = ['CA', 'VA', 'CO', 'PA', 'AR'];
     function getWarrantAuthorState() {
         const v = (localStorage.getItem('viperWarrantAuthorState') || 'CA').toUpperCase();
         return _WARRANT_AUTHOR_SUPPORTED_STATES.includes(v) ? v : 'CA';

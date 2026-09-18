@@ -38,6 +38,16 @@
 
   function _safe(s) { return (s == null) ? '' : String(s); }
 
+  // Column layout for the Arkansas three-column ")" caption. The
+  // composers render with a proportional font, so this is a visual
+  // approximation of the exemplar's tab stops — intentionally plain
+  // spaces so both jsPDF (Times) and docx behave identically.
+  // AR_CAPTION_LEAD is the literal that anchors column 1; continuation
+  // and county rows are padded out to the widest column-1 literal so the
+  // ")" column cannot walk when the county name is long or short.
+  const AR_CAPTION_LEAD = 'STATE OF ARKANSAS';
+  const AR_CAPTION_GAP = '   ';
+
   function _todayStr() {
     const d = new Date();
     return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -88,6 +98,15 @@
         const items = Array.isArray(rb.items) ? rb.items : [];
         if (items.length === 0) {
           out.push({ kind: 'paragraph', text: '[NO ITEMS SELECTED — review Items to Produce]' });
+        } else if (rb.style === 'prose') {
+          // AR running-prose form — the Arkansas exemplar prints the
+          // records request as one flowing sentence, not a list. Join
+          // the item bodies with '; ' and terminate with '.'.
+          const bodies = items
+            .map(it => _safe(it.description || it.label || it.name || it.key).trim())
+            .filter(Boolean)
+            .map(b => b.replace(/[.;]?\s*$/, ''));
+          if (bodies.length) out.push({ kind: 'paragraph', text: bodies.join('; ') + '.' });
         } else if (rb.style === 'semicolons') {
           // CO semicolon-terminated paragraph list — one paragraph per
           // item, each ending in ';' except the last which ends in '.'.
@@ -211,6 +230,70 @@
         out.push({ kind: 'paragraph', text: daTitle });
         out.push({ kind: 'paragraph', text: 'By /s' });
         out.push({ kind: 'paragraph', text: daDeputy });
+        break;
+      }
+
+      // ─── AR-specific kinds ─────────────────────────────────────────────
+      // Arkansas Circuit Court ESP. No judge name anywhere (the judge
+      // stamps/signs by hand) and no statutory citations — both are
+      // deliberate, matching the customer's exemplar.
+
+      case 'ar-caption': {
+        const county = _safe(rb.county).trim();
+        const countyUpper = (county || '[COUNTY]').toUpperCase();
+        const provLine = _safe(rb.providerLine).trim() || '[PROVIDER]';
+        out.push({ kind: 'cover-subheading', text: 'IN THE CIRCUIT COURT OF THE STATE OF ARKANSAS' });
+        out.push({ kind: 'cover-subheading', text: `FOR THE COUNTY OF ${countyUpper}` });
+        out.push({ kind: 'spacer', size: 'sm' });
+        // Three-column ")" caption. Title may be multi-line; line 1 sits
+        // beside "STATE OF ARKANSAS", any further lines hang beneath it,
+        // and the provider name sits beside "COUNTY OF <county>".
+        const titleLines = _safe(rb.documentTitle).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+        // Column 1 is variable-width ("COUNTY OF <county>" can be longer
+        // or shorter than "STATE OF ARKANSAS"), so pad every row out to
+        // the widest literal + the gap. Otherwise the ")" column walks.
+        const countyLead = `COUNTY OF ${countyUpper}`;
+        const col1 = Math.max(AR_CAPTION_LEAD.length, countyLead.length) + AR_CAPTION_GAP.length;
+        const padTo = s => s + ' '.repeat(Math.max(1, col1 - s.length));
+        out.push({ kind: 'paragraph', text: `${padTo(AR_CAPTION_LEAD)})  ${titleLines[0] || ''}` });
+        for (let li = 1; li < titleLines.length; li++) {
+          out.push({ kind: 'paragraph', text: `${padTo('')})  ${titleLines[li]}` });
+        }
+        out.push({ kind: 'paragraph', text: `${padTo(countyLead)})  ${provLine}` });
+        out.push({ kind: 'spacer', size: 'sm' });
+        break;
+      }
+
+      case 'ar-provider-order-block': {
+        const name = _safe(rb.providerName).trim() || '[provider]';
+        out.push({ kind: 'paragraph', text: `The following party is ordered: Online Service: ${name}` });
+        out.push({ kind: 'paragraph', text: `Address: ${_safe(rb.street).trim()}` });
+        out.push({ kind: 'paragraph', text: `City: ${_safe(rb.city).trim()}` });
+        out.push({ kind: 'paragraph', text: `State: ${_safe(rb.state).trim()}` });
+        out.push({ kind: 'paragraph', text: `Zip Code: ${_safe(rb.zip).trim()}` });
+        out.push({ kind: 'paragraph', text: `Phone Number: ${_safe(rb.phone).trim()}` });
+        out.push({ kind: 'paragraph', text: `Email: ${_safe(rb.email).trim()}` });
+        out.push({ kind: 'spacer', size: 'sm' });
+        break;
+      }
+
+      case 'ar-affiant-signature': {
+        const rank = _safe(rb.affiantRank).trim();
+        const name = _safe(rb.affiantName).trim();
+        out.push({ kind: 'spacer', size: 'md' });
+        out.push({ kind: 'signature', label: 'Signature of Affiant' });
+        out.push({ kind: 'paragraph', text: [rank, name].filter(Boolean).join(' ') || '[Affiant]' });
+        out.push({ kind: 'paragraph', text: _safe(rb.agencyName).trim() || '[Agency]' });
+        break;
+      }
+
+      case 'ar-judge-block': {
+        const county = _safe(rb.county).trim() || '[County]';
+        const division = _safe(rb.division).trim();
+        out.push({ kind: 'spacer', size: 'md' });
+        out.push({ kind: 'signature', label: 'Honorable Judge' });
+        out.push({ kind: 'paragraph', text: `${county} County Circuit Court` });
+        out.push({ kind: 'paragraph', text: `${division || '____'} Division` });
         break;
       }
 
@@ -1272,6 +1355,32 @@
   }
 
 
+  // ─── AR Circuit Court ESP (combined Affidavit + Search Warrant) ──────
+  // Mirrors _buildCoEsp: the 35-block AR template already encodes the
+  // whole document, so this is just a loop with a hard page break
+  // between provider page sets (the "addendum" behaviour the examiner
+  // asked for). pcNarrative is unused here — the template pulls PC via
+  // {{addendum.probableCause}}, injected by the UI's compose ctx.
+  function _buildArEsp(draft, agency, caseInfo, addendumComposes, pcNarrative) {
+    const blocks = [];
+    if (!Array.isArray(addendumComposes) || !addendumComposes.length) {
+      blocks.push({
+        kind: 'paragraph',
+        text: '[ No provider attached — add a provider addendum to render the AR Affidavit / Search Warrant. ]',
+      });
+      return blocks;
+    }
+    addendumComposes.forEach((ac, i) => {
+      if (i > 0) blocks.push({ kind: 'page-break' });
+      const composed = ac.compose || {};
+      const resolvedBlocks = Array.isArray(composed.blocks) ? composed.blocks : [];
+      for (const rb of resolvedBlocks) {
+        for (const m of _mapResolvedBlock(rb)) blocks.push(m);
+      }
+    });
+    return blocks;
+  }
+
   /**
    * Top-level: build complete document block stream.
    */
@@ -1308,6 +1417,44 @@
       _safe(draft.type) === 'residential' ||
       _safe(draft.template) === 'ca-residential'
     );
+    // Detect Arkansas jurisdiction — combined Affidavit + Search Warrant,
+    // one page set per provider. Checked FIRST because isVa also fires on
+    // agency.state, which must never shadow an explicit AR template.
+    const isAr = (
+      _safe(draft.template) === 'ar-multi-business-esp' ||
+      _safe(draft.jurisdiction).toUpperCase() === 'AR'
+    );
+
+    // 0-AR) Arkansas ESP flow — combined Affidavit + Search Warrant to
+    //       Provide Records. Returns early; the 35-block AR template
+    //       encodes the full document, so there is no cover page, no
+    //       separate PC section and no addendum loop here.
+    if (isAr && !isResidential) {
+      for (const b of _buildArEsp(draft, agency, caseInfo, addendumComposes, pcNarrative)) blocks.push(b);
+      const drNumberAr = _safe(draft.caseRef) || _safe(caseInfo.caseNumber) || '';
+      const allDanglingAr = [];
+      for (const ac of addendumComposes) {
+        const cs = (ac.compose && Array.isArray(ac.compose.danglingSlots)) ? ac.compose.danglingSlots : [];
+        for (const d of cs) allDanglingAr.push(`${ac.addendumId || ac.providerKey || '?'}/${d}`);
+      }
+      return {
+        blocks,
+        meta: {
+          jurisdiction: 'AR',
+          // The AR exemplar prints no running header/footer — the caption
+          // repeats in the body of each page set instead.
+          runningHeader: { enabled: false, lines: [] },
+          runningFooter: { enabled: false, drNumber: drNumberAr, revision: '' },
+        },
+        stats: {
+          addendums: addendumComposes.length,
+          totalBlocks: blocks.length,
+          danglingSlots: allDanglingAr,
+          pcAuthored: !!(pcNarrative && String(pcNarrative).trim().length > 0),
+          arkansas: true,
+        },
+      };
+    }
 
     // 0-CO) Colorado ESP flow — combined Affidavit + Search Warrant and
     //       Court Order in a single document. Returns early; no cover
@@ -1532,7 +1679,7 @@
 
   const api = Object.freeze({
     build,
-    _internals: { _mapResolvedBlock, _abc, _buildCover, _buildCaFacePage, _buildProbableCause, _buildAddendum, _buildSignature, _buildCaStatementOfProbableCause, _buildVaEsp, _buildCoEsp },
+    _internals: { _mapResolvedBlock, _abc, _buildCover, _buildCaFacePage, _buildProbableCause, _buildAddendum, _buildSignature, _buildCaStatementOfProbableCause, _buildVaEsp, _buildCoEsp, _buildArEsp },
   });
 
   if (typeof module !== 'undefined' && module.exports) {

@@ -90,6 +90,13 @@ const DEFAULTS = Object.freeze({
   daTitle: 'District Attorney',// rarely changes
   daDeputyLine: '[Chief][Senior] Deputy District Attorney', // bracketed pick-list
 
+  // ── Arkansas-specific: Circuit Court division ──────────────────────────
+  // The AR exemplar prints "<County> County Circuit Court" / "<N> Division"
+  // beneath the judge signature line. County already lives above; only the
+  // division ordinal is AR-specific. Deliberately NOT a multi-court list —
+  // an AR sheriff's office files in one circuit.
+  arCircuitDivision: '',       // e.g. "2nd"
+
   // NOTE: Hobbs sealing + night-search are per-warrant selections, NOT
   // agency defaults. They live on the warrant authoring form (P3+) as
   // checkboxes the affiant ticks per case. Do not re-add them here.
@@ -145,6 +152,9 @@ const FIELDS = Object.freeze([
   { key: 'daTitle',            label: 'DA Title',                       group: 'colorado', type: 'text', placeholder: 'District Attorney',                    helper: 'Almost always "District Attorney".' },
   { key: 'daDeputyLine',       label: 'Deputy DA Line',                 group: 'colorado', type: 'text', placeholder: '[Chief][Senior] Deputy District Attorney', helper: 'Bracketed pick-list shown beneath the DA signature.' },
 
+  // Arkansas-specific block (Circuit Court division under the judge stamp line)
+  { key: 'arCircuitDivision',  label: 'Circuit Court Division',         group: 'arkansas', type: 'text', placeholder: '2nd',                                  helper: 'Prints as "<N> Division" under the judge signature on AR warrants. County is taken from Agency Identity.' },
+
   // Training & experience block (textarea, full-width)
   { key: 'trainingExperienceBoilerplate', label: 'Training & Experience Boilerplate', group: 'training', type: 'textarea', rows: 10,
     placeholder: 'Describe your law-enforcement career, specialized training, certifications, prior warrants authored and reviewed, and case experience relevant to ESP / electronic-evidence investigations.',
@@ -156,6 +166,7 @@ const FIELD_GROUPS = Object.freeze([
   { id: 'affiant',  label: 'Affiant Identity',  helper: 'Identifies you (the affiant) on the affidavit + signature block.' },
   { id: 'defaults', label: 'Administrative Defaults', helper: 'Pre-fill these on every new draft. You can override per-warrant.' },
   { id: 'colorado', label: 'Colorado-Specific',  helper: 'Used only by the CO Multi-Business ESP template. Add your courts and DA below.' },
+  { id: 'arkansas', label: 'Arkansas-Specific',  helper: 'Used only by the AR Circuit Court ESP template.' },
   { id: 'training', label: 'Training & Experience', helper: 'Re-usable boilerplate paragraph. Verbatim prose — review with your DA.' },
 ]);
 

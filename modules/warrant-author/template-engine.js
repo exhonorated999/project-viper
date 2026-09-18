@@ -297,19 +297,36 @@ function _resolveItemsToSeize(block, ctx) {
     kind: block.kind,
     heading: block.heading || '',
     style: block.style || '',
-    text: items.length
-      ? (block.style === 'semicolons'
-          ? items.map((it, i) => {
-              const body = (it.description || it.label || '').trim();
-              if (!body) return '';
-              const sep = (i === items.length - 1) ? '.' : ';';
-              return body.replace(/[.;]?\s*$/, '') + sep;
-            }).filter(Boolean).join('\n')
-          : items.map((it, i) => `  ${String.fromCharCode(97 + i)}. ${it.description}`).join('\n\n'))
-      : '{{items.empty}}',
+    text: items.length ? _formatItemsText(items, block.style) : '{{items.empty}}',
     items,
     danglingSlots: dangling,
   };
+}
+
+/**
+ * Renders the resolved item list as text for the three supported styles:
+ *   'semicolons'  one item per line, `;`-terminated, last one `.` (CO)
+ *   'prose'       ONE flowing line, `; `-joined, `.`-terminated (AR) — the
+ *                 Arkansas exemplar prints the records request as running
+ *                 prose rather than an enumerated list.
+ *   (default)     lettered list `a. …` separated by a blank line (CA/VA/US)
+ * Pure — no side effects, safe to call from either process.
+ */
+function _formatItemsText(items, style) {
+  const bodies = items
+    .map(it => String(it.description || it.label || '').trim())
+    .filter(Boolean)
+    .map(b => b.replace(/[.;]?\s*$/, ''));
+  if (!bodies.length) return '{{items.empty}}';
+  if (style === 'prose') {
+    return bodies.join('; ') + '.';
+  }
+  if (style === 'semicolons') {
+    return bodies.map((b, i) => b + (i === bodies.length - 1 ? '.' : ';')).join('\n');
+  }
+  return items
+    .map((it, i) => `  ${String.fromCharCode(97 + i)}. ${it.description}`)
+    .join('\n\n');
 }
 
 function _resolveProviderSlotParagraph(block, ctx) {
@@ -539,6 +556,151 @@ function _resolveCoDaApproval(block, ctx) {
   };
 }
 
+// ─── AR-SPECIFIC RESOLVERS ─────────────────────────────────────────────────
+// The AR Circuit Court ESP template emits a single combined document
+// (Affidavit for Search Warrant to Provide Records + Search Warrant to
+// Provide Records), modelled verbatim on a Faulkner County exemplar.
+// Layout-only kinds; the block-builder's AR branch renders them.
+//
+// Deliberate omissions, per the examiner:
+//   • No judge name anywhere. The issuing judge signs/stamps by hand, so
+//     the judge block prints a blank signature line + court + division.
+//   • No statutory citations. The exemplar carries none.
+
+// Splits a single-line provider mailing address into the discrete
+// Address / City / State / Zip lines the AR warrant page prints.
+// Conservative: only splits when the tail actually looks like
+// "<city>, <ST> <zip>". Otherwise the whole string stays on Address:
+// (a wrong split on a warrant is worse than an unsplit one).
+const AR_ADDRESS_TAIL_RE = /^(.*),\s*([^,]+),\s*([A-Za-z]{2})\.?\s+(\d{5}(?:-\d{4})?)\s*$/;
+
+function _splitUsAddress(raw) {
+  const flat = String(raw || '').replace(/\r?\n/g, ', ').replace(/\s+/g, ' ').trim();
+  if (!flat) return { street: '', city: '', state: '', zip: '' };
+  const m = AR_ADDRESS_TAIL_RE.exec(flat);
+  if (!m) return { street: flat, city: '', state: '', zip: '' };
+  return {
+    street: m[1].trim(),
+    city: m[2].trim(),
+    state: m[3].toUpperCase(),
+    zip: m[4].trim(),
+  };
+}
+
+// Resolves the county used by the AR caption + judge block. The AR
+// template has no multi-court list (an Arkansas sheriff's office sits in
+// one county); ctx.court is populated by the UI from the agency profile,
+// with the raw profile as a fallback so a bare ctx still resolves.
+function _arCounty(ctx) {
+  const court = ctx.court || {};
+  const agency = ctx.agency || {};
+  return String(court.county || agency.county || '').trim();
+}
+
+function _arDivision(ctx) {
+  const court = ctx.court || {};
+  const agency = ctx.agency || {};
+  return String(court.division || agency.arCircuitDivision || '').trim();
+}
+
+function _resolveArCaption(block, ctx) {
+  // IN THE CIRCUIT COURT OF THE STATE OF ARKANSAS
+  // FOR THE COUNTY OF <COUNTY>
+  // STATE OF ARKANSAS   )  <documentTitle line 1>
+  //                     )  <documentTitle line 2>
+  // COUNTY OF <COUNTY>  )  <PROVIDER>
+  const provider = ctx.provider || {};
+  const dangling = [];
+  const county = _arCounty(ctx);
+  if (!county) dangling.push('court.county');
+  const titleRes = substituteSlots(block.documentTitle || '', ctx);
+  const providerLine = String(provider.legalEntity || provider.name || '').trim();
+  if (!providerLine) dangling.push('provider.name');
+  return {
+    key: block.key,
+    kind: block.kind,
+    heading: '',
+    text: '',
+    county,
+    documentTitle: titleRes.text,
+    providerLine,
+    danglingSlots: dangling.concat(titleRes.danglingSlots || []),
+  };
+}
+
+function _resolveArProviderOrderBlock(block, ctx) {
+  // The following party is ordered: Online Service: <name>
+  // Address:      <street>
+  // City:         <city>
+  // State:        <ST>
+  // Zip Code:     <zip>
+  // Phone Number: <phone>
+  // Email:        <email>
+  const provider = ctx.provider || {};
+  const dangling = [];
+  const name = String(provider.legalEntity || provider.name || '').trim();
+  if (!name) dangling.push('provider.name');
+  const rawAddress = String(provider.address || '').trim();
+  if (!rawAddress) dangling.push('provider.address');
+  const parts = _splitUsAddress(rawAddress);
+  return {
+    key: block.key,
+    kind: block.kind,
+    heading: '',
+    text: '',
+    providerName: name,
+    street: parts.street,
+    city: parts.city,
+    state: parts.state,
+    zip: parts.zip,
+    phone: String(provider.phone || '').trim(),
+    email: String(provider.email || '').trim(),
+    danglingSlots: dangling,
+  };
+}
+
+function _resolveArAffiantSignature(block, ctx) {
+  // Blank signature line, then the affiant's rank/name and agency.
+  const agency = ctx.agency || {};
+  const dangling = [];
+  const rank = String(agency.affiantRank || '').trim();
+  const name = String(agency.affiantName || '').trim();
+  if (!name) dangling.push('agency.affiantName');
+  const agencyName = String(agency.agencyName || '').trim();
+  if (!agencyName) dangling.push('agency.agencyName');
+  return {
+    key: block.key,
+    kind: block.kind,
+    heading: '',
+    text: '',
+    affiantRank: rank,
+    affiantName: name,
+    agencyName,
+    danglingSlots: dangling,
+  };
+}
+
+function _resolveArJudgeBlock(block, ctx) {
+  // Blank signature line (the judge stamps/signs), then:
+  //   <County> County Circuit Court
+  //   <N> Division
+  // NO judge name — deliberate.
+  const county = _arCounty(ctx);
+  const division = _arDivision(ctx);
+  const dangling = [];
+  if (!county) dangling.push('court.county');
+  if (!division) dangling.push('court.division');
+  return {
+    key: block.key,
+    kind: block.kind,
+    heading: '',
+    text: '',
+    county,
+    division,
+    danglingSlots: dangling,
+  };
+}
+
 function _resolvePageBreak(block) {
   return {
     key: block.key,
@@ -568,6 +730,11 @@ const RESOLVERS = Object.freeze({
   'co-judge-oath-affidavit': _resolveCoJudgeOathAffidavit,
   'co-judge-signature':      _resolveCoJudgeSignature,
   'co-da-approval':          _resolveCoDaApproval,
+  // AR-specific
+  'ar-caption':              _resolveArCaption,
+  'ar-provider-order-block': _resolveArProviderOrderBlock,
+  'ar-affiant-signature':    _resolveArAffiantSignature,
+  'ar-judge-block':          _resolveArJudgeBlock,
   'page-break':              _resolvePageBreak,
 });
 
@@ -694,6 +861,8 @@ const api = Object.freeze({
   listTemplates,
   // exposed for tests + downstream composers
   RESOLVERS,
+  _splitUsAddress,
+  _formatItemsText,
 });
 
 if (typeof module !== 'undefined' && module.exports) {

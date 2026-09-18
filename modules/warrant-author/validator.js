@@ -236,16 +236,20 @@ function validateDraft(input) {
     const _tpl = String(draft.template || '');
     let _isCaJurisdiction;
     let _isCoJurisdiction;
+    let _isArJurisdiction;
     if (_jx) {
         _isCaJurisdiction = (_jx === 'CA');
         _isCoJurisdiction = (_jx === 'CO');
+        _isArJurisdiction = (_jx === 'AR');
     } else if (_tpl) {
         _isCaJurisdiction = _tpl.startsWith('ca-');
         _isCoJurisdiction = _tpl.startsWith('co-');
+        _isArJurisdiction = _tpl.startsWith('ar-');
     } else {
         // Fully empty draft → legacy default = CA.
         _isCaJurisdiction = true;
         _isCoJurisdiction = false;
+        _isArJurisdiction = false;
     }
     if (_isCaJurisdiction) {
         const grounds = (draft.pc1524Grounds && typeof draft.pc1524Grounds === 'object') ? draft.pc1524Grounds : {};
@@ -319,6 +323,58 @@ function validateDraft(input) {
                 'draft.offenseDate.empty',
                 'CO_OFFENSE_DATE_EMPTY',
                 'No offense date on the case — the CO warrant will print "[offense date]" as a placeholder. Set it in the Case Probable Cause panel.',
+                { scope: 'case', fieldPath: 'case.offenseDate' }
+            ));
+        }
+    }
+
+    // ── AR-specific checks (county + circuit division + offense) ─────────
+    // All WARNINGS, never hard errors. The AR template degrades to a
+    // bracketed placeholder for each of these, which is legible to the
+    // examiner and correctable by hand before filing. Blocking generation
+    // on a missing division ordinal would be worse than printing "____".
+    if (_isArJurisdiction) {
+        // 1) County — drives both the caption ("FOR THE COUNTY OF X") and
+        //    the judge block ("X County Circuit Court"). Sourced from the
+        //    agency profile (shared field), overridable per draft.
+        const arCounty = String(draft.arCounty || agency.county || '').trim();
+        if (!arCounty) {
+            warnings.push(_warn(
+                'agency.county.empty.ar',
+                'AR_COUNTY_EMPTY',
+                'No county on file — the AR caption and judge block will print "[County]". Set it under Settings → Agency Profile → Agency Identity.',
+                { scope: 'agency', fieldPath: 'agency.county' }
+            ));
+        }
+        // 2) Circuit division ordinal — prints as "<N> Division" beneath
+        //    the judge signature line.
+        const arDivision = String(draft.arCircuitDivision || agency.arCircuitDivision || '').trim();
+        if (!arDivision) {
+            warnings.push(_warn(
+                'agency.arCircuitDivision.empty',
+                'AR_CIRCUIT_DIVISION_EMPTY',
+                'No Circuit Court division on file — the AR judge block will print "____ Division". Set it under Settings → Agency Profile → Arkansas-Specific.',
+                { scope: 'agency', fieldPath: 'agency.arCircuitDivision' }
+            ));
+        }
+        // 3) Offense description + date — the AR affidavit's assignment
+        //    paragraph names the offense and the report date. Same
+        //    case-level source as CO.
+        const arOffenseDesc = String(caseCtx.offenseDescription || draft.offenseDescription || '').trim();
+        const arOffenseDate = String(caseCtx.offenseDate        || draft.offenseDate        || '').trim();
+        if (!arOffenseDesc) {
+            warnings.push(_warn(
+                'draft.offenseDescription.empty.ar',
+                'AR_OFFENSE_DESCRIPTION_EMPTY',
+                'No offense description on the case — the AR affidavit will print "{{case.offenseDescription}}". Set it in the Case Probable Cause panel.',
+                { scope: 'case', fieldPath: 'case.offenseDescription' }
+            ));
+        }
+        if (!arOffenseDate) {
+            warnings.push(_warn(
+                'draft.offenseDate.empty.ar',
+                'AR_OFFENSE_DATE_EMPTY',
+                'No offense date on the case — the AR affidavit will print "{{case.offenseDate}}". Set it in the Case Probable Cause panel.',
                 { scope: 'case', fieldPath: 'case.offenseDate' }
             ));
         }

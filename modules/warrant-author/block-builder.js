@@ -48,6 +48,18 @@
   const AR_CAPTION_LEAD = 'STATE OF ARKANSAS';
   const AR_CAPTION_GAP = '   ';
 
+  // Default lead for the AR warrant-page order block. Overridden per-block
+  // via `lead` on the template (the Addendum page does exactly that).
+  const AR_ORDER_LEAD_DEFAULT = 'The following party is ordered: Online Service:';
+
+  // Block keys prefixed with this form the per-provider ADDENDUM section of
+  // the AR template. _buildArEsp partitions on it so every provider's
+  // Affidavit + Warrant page set prints first and all addendums are grouped
+  // at the very end (Addendum A, B, C ... in provider order) to be detached
+  // and served individually. MUST match the 'ad-' keys in
+  // templates/ar-multi-business-esp.json.
+  const AR_ADDENDUM_KEY_PREFIX = 'ad-';
+
   function _todayStr() {
     const d = new Date();
     return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -266,7 +278,10 @@
 
       case 'ar-provider-order-block': {
         const name = _safe(rb.providerName).trim() || '[provider]';
-        out.push({ kind: 'paragraph', text: `The following party is ordered: Online Service: ${name}` });
+        // Addendum pages pass lead:"Online Service:" so the block reads as
+        // an identification header rather than a second order sentence.
+        const lead = _safe(rb.lead).trim() || AR_ORDER_LEAD_DEFAULT;
+        out.push({ kind: 'paragraph', text: `${lead} ${name}`.trim() });
         out.push({ kind: 'paragraph', text: `Address: ${_safe(rb.street).trim()}` });
         out.push({ kind: 'paragraph', text: `City: ${_safe(rb.city).trim()}` });
         out.push({ kind: 'paragraph', text: `State: ${_safe(rb.state).trim()}` });
@@ -1356,11 +1371,21 @@
 
 
   // ─── AR Circuit Court ESP (combined Affidavit + Search Warrant) ──────
-  // Mirrors _buildCoEsp: the 35-block AR template already encodes the
-  // whole document, so this is just a loop with a hard page break
-  // between provider page sets (the "addendum" behaviour the examiner
-  // asked for). pcNarrative is unused here — the template pulls PC via
-  // {{addendum.probableCause}}, injected by the UI's compose ctx.
+  // The AR template encodes the WHOLE document, so this is a loop rather
+  // than a hand-built page set. pcNarrative is unused here — the template
+  // pulls PC via {{addendum.probableCause}}, injected by the UI compose ctx.
+  //
+  // TWO-PASS LAYOUT (examiner's call, 5.2.1): each composed provider is
+  // partitioned on the 'ad-' block-key prefix into
+  //   • document part  — Affidavit + hard page-break + Search Warrant
+  //   • addendum part  — ADDENDUM <letter>: provider block, target
+  //                      identifier(s), date range, records list
+  // Pass 1 emits every provider's document part (page-break between
+  // providers). Pass 2 emits every provider's addendum part, so ALL
+  // addendums land at the very end of the deliverable after the last judge
+  // signature — the officer tears them off and serves one per provider.
+  // The in-body cross-reference ("...set forth in Addendum A...") comes
+  // from {{addendum.pageLabel}}, resolved by the template engine.
   function _buildArEsp(draft, agency, caseInfo, addendumComposes, pcNarrative) {
     const blocks = [];
     if (!Array.isArray(addendumComposes) || !addendumComposes.length) {
@@ -1370,14 +1395,32 @@
       });
       return blocks;
     }
+    const isAddendumBlock = rb =>
+      String((rb && rb.key) || '').startsWith(AR_ADDENDUM_KEY_PREFIX);
+
+    // Pass 1 — Affidavit + Search Warrant, one page set per provider.
     addendumComposes.forEach((ac, i) => {
       if (i > 0) blocks.push({ kind: 'page-break' });
       const composed = ac.compose || {};
       const resolvedBlocks = Array.isArray(composed.blocks) ? composed.blocks : [];
       for (const rb of resolvedBlocks) {
+        if (isAddendumBlock(rb)) continue;
         for (const m of _mapResolvedBlock(rb)) blocks.push(m);
       }
     });
+
+    // Pass 2 — all ADDENDUM pages, grouped, in provider order. Each
+    // addendum section opens with its own page-break block (ad-01), so no
+    // extra break is inserted here.
+    addendumComposes.forEach((ac) => {
+      const composed = ac.compose || {};
+      const resolvedBlocks = Array.isArray(composed.blocks) ? composed.blocks : [];
+      for (const rb of resolvedBlocks) {
+        if (!isAddendumBlock(rb)) continue;
+        for (const m of _mapResolvedBlock(rb)) blocks.push(m);
+      }
+    });
+
     return blocks;
   }
 
@@ -1426,9 +1469,10 @@
     );
 
     // 0-AR) Arkansas ESP flow — combined Affidavit + Search Warrant to
-    //       Provide Records. Returns early; the 35-block AR template
-    //       encodes the full document, so there is no cover page, no
-    //       separate PC section and no addendum loop here.
+    //       Provide Records, then ALL provider addendums grouped at the
+    //       end. Returns early; the AR template encodes the full document,
+    //       so there is no cover page, no separate PC section and no
+    //       generic addendum loop here.
     if (isAr && !isResidential) {
       for (const b of _buildArEsp(draft, agency, caseInfo, addendumComposes, pcNarrative)) blocks.push(b);
       const drNumberAr = _safe(draft.caseRef) || _safe(caseInfo.caseNumber) || '';

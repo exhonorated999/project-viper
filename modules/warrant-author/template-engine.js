@@ -636,6 +636,12 @@ function _resolveArProviderOrderBlock(block, ctx) {
   // Zip Code:     <zip>
   // Phone Number: <phone>
   // Email:        <email>
+  //
+  // `block.lead` overrides the sentence that precedes the provider name.
+  // The warrant page uses the default ordering language; the Addendum page
+  // reuses the same discrete Address/City/State/Zip layout but must NOT
+  // repeat "The following party is ordered", so it sets lead:"Online
+  // Service:". Empty/absent => default.
   const provider = ctx.provider || {};
   const dangling = [];
   const name = String(provider.legalEntity || provider.name || '').trim();
@@ -648,6 +654,7 @@ function _resolveArProviderOrderBlock(block, ctx) {
     kind: block.kind,
     heading: '',
     text: '',
+    lead: String(block.lead || '').trim(),
     providerName: name,
     street: parts.street,
     city: parts.city,

@@ -13057,6 +13057,13 @@ try {
 try {
   const WarrantAuthor = require('./modules/warrant-author/warrant-author-main');
   WarrantAuthor.registerIpc(ipcMain);
+  if (typeof WarrantAuthor.setCasesDirGetter === 'function') {
+    // The renderer always sends the RELATIVE "cases/<caseNumber>". Without
+    // this getter the module resolves it against process.cwd() — right by
+    // accident in dev, wrong (install dir) in a packaged build, and fatal
+    // for shell.openPath(), which does not honour cwd at all.
+    WarrantAuthor.setCasesDirGetter(() => casesDir);
+  }
   if (typeof WarrantAuthor.setSecurityManager === 'function') {
     WarrantAuthor.setSecurityManager(security);
   }

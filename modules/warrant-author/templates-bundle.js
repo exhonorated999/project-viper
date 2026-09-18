@@ -15,8 +15,8 @@
     "id": "ar-multi-business-esp",
     "name": "Arkansas Circuit Court ESP (Affidavit + Search Warrant)",
     "jurisdiction": "AR",
-    "version": 1,
-    "description": "Arkansas combined Affidavit for Search Warrant to Provide Records + Search Warrant to Provide Records, for Electronic Service Providers. Modelled verbatim on a Faulkner County Circuit Court exemplar. The single output document is two page sets — the Affidavit, a hard page break, then the Search Warrant and order. Repeated once per provider addendum. The exemplar carries no statutory citations and none are added. The judge is identified by court stamp, so the judge block prints a blank signature line plus the county Circuit Court and Division. Court caption county comes from the agency profile (county) and the Division from the agency profile (arCircuitDivision).",
+    "version": 2,
+    "description": "Arkansas combined Affidavit for Search Warrant to Provide Records + Search Warrant to Provide Records, for Electronic Service Providers. Modelled verbatim on a Faulkner County Circuit Court exemplar. The exemplar carries no statutory citations and none are added. The judge is identified by court stamp, so the judge block prints a blank signature line plus the county Circuit Court and Division. Court caption county comes from the agency profile (county) and the Division from the agency profile (arCircuitDivision).\n\nBLOCK KEY CONVENTION — LOAD BEARING: keys prefixed 'ad-' form the per-provider ADDENDUM section. block-builder._buildArEsp() partitions each composed provider on that prefix so every provider's Affidavit + Warrant page set prints first and ALL addendums are grouped at the very end of the document (Addendum A, B, C ... in provider order), ready to be detached and served on the individual providers. Renaming an 'ad-' key breaks that grouping.",
     "compatibleProviderTypes": [
       "ESP",
       "Phone",
@@ -68,114 +68,82 @@
       },
       {
         "key": "09-records-lead-in",
-        "kind": "verbatim-paragraph",
+        "kind": "provider-slot-paragraph",
         "text": "This applicant seeks permission for release of records relating to the referenced investigation that are associated with records currently under the control of {{provider.name}}."
       },
       {
-        "key": "10-target-lead-in",
-        "kind": "constant",
-        "text": "The specific records are associated with the individual using the following identifier(s):"
+        "key": "10-addendum-reference",
+        "kind": "verbatim-paragraph",
+        "text": "The records to be provided are set forth in Addendum {{addendum.pageLabel}}, attached hereto and incorporated herein by reference."
       },
       {
-        "key": "11-target-account",
-        "kind": "target-account"
-      },
-      {
-        "key": "12-date-range-line",
-        "kind": "date-range"
-      },
-      {
-        "key": "13-items-lead-in",
-        "kind": "constant",
-        "text": "And are to include, by way of example but not limitation, the following records:"
-      },
-      {
-        "key": "14-items-to-seize",
-        "kind": "items-to-seize",
-        "style": "prose"
-      },
-      {
-        "key": "15-facts-header",
+        "key": "11-facts-header",
         "kind": "constant",
         "text": "FACTS OF INVESTIGATION"
       },
       {
-        "key": "16-probable-cause",
+        "key": "12-probable-cause",
         "kind": "verbatim-paragraph",
         "text": "{{addendum.probableCause}}"
       },
       {
-        "key": "17-conclusion-header",
+        "key": "13-conclusion-header",
         "kind": "constant",
         "text": "CONCLUSION"
       },
       {
-        "key": "18-conclusion",
+        "key": "14-conclusion",
         "kind": "constant",
         "text": "Based on the foregoing information, I believe evidence relating to this investigation are currently within the records described above. I therefore respectfully request that a Search Warrant be issued authorizing the release and examination of the records set forth herein."
       },
       {
-        "key": "19-affiant-signature",
+        "key": "15-affiant-signature",
         "kind": "ar-affiant-signature"
       },
       {
-        "key": "20-oath-jurat",
+        "key": "16-oath-jurat",
         "kind": "constant",
         "text": "Subscribed and sworn to before me this ______ day of ____________________, 20____."
       },
       {
-        "key": "21-judge-block",
+        "key": "17-judge-block",
         "kind": "ar-judge-block"
       },
       {
-        "key": "22-page-break",
+        "key": "18-page-break",
         "kind": "page-break"
       },
       {
-        "key": "23-warrant-caption",
+        "key": "19-warrant-caption",
         "kind": "ar-caption",
         "documentTitle": "SEARCH WARRANT\nTO PROVIDE RECORDS"
       },
       {
-        "key": "24-warrant-header",
+        "key": "20-warrant-header",
         "kind": "constant",
         "text": "SEARCH WARRANT TO PROVIDE RECORDS"
       },
       {
-        "key": "25-ordered-party",
+        "key": "21-ordered-party",
         "kind": "ar-provider-order-block"
       },
       {
-        "key": "26-to-supply-lead",
-        "kind": "constant",
-        "text": "To supply: Any and all records regarding the identification of the individual using the following identifier(s):"
+        "key": "22-addendum-reference-warrant",
+        "kind": "verbatim-paragraph",
+        "text": "The records to be provided are set forth in Addendum {{addendum.pageLabel}}, attached hereto and incorporated herein by reference."
       },
       {
-        "key": "27-target-account-warrant",
-        "kind": "target-account"
-      },
-      {
-        "key": "28-items-lead-in-warrant",
-        "kind": "constant",
-        "text": "And are to include, by way of example but not limitation, the following records:"
-      },
-      {
-        "key": "29-items-to-seize-warrant",
-        "kind": "items-to-seize",
-        "style": "prose"
-      },
-      {
-        "key": "30-investigation-ref",
+        "key": "23-investigation-ref",
         "kind": "verbatim-paragraph",
         "text": "Search Warrant is in reference to an ongoing investigation, {{agency.agencyName}} Incident #{{case.number}}."
       },
       {
-        "key": "31-comply-header",
+        "key": "24-comply-header",
         "kind": "constant",
         "text": "This search warrant may be complied with by providing said records to:"
       },
       {
-        "key": "32-affiant-contact",
+        "key": "25-affiant-contact",
         "kind": "affiant-contact",
         "fields": [
           "affiantName",
@@ -198,23 +166,61 @@
         ]
       },
       {
-        "key": "33-execution-window",
+        "key": "26-execution-window",
         "kind": "constant",
         "text": "You are further directed to execute the search warrant within five (5) days of issuance between the hours of 7 am and 10 pm, and make return of this search warrant to me within five (5) days after execution, except as otherwise provided herein:"
       },
       {
-        "key": "34-dated-line",
+        "key": "27-dated-line",
         "kind": "constant",
         "text": "Dated this ______ day of ____________________, 20____."
       },
       {
-        "key": "35-order-line",
+        "key": "28-order-line",
         "kind": "constant",
         "text": "IT IS HEREBY ORDERED BY THIS COURT THAT THE ABOVE-MENTIONED INFORMATION BE PROVIDED"
       },
       {
-        "key": "36-judge-block-warrant",
+        "key": "29-judge-block-warrant",
         "kind": "ar-judge-block"
+      },
+      {
+        "key": "ad-01-page-break",
+        "kind": "page-break"
+      },
+      {
+        "key": "ad-02-heading",
+        "kind": "verbatim-paragraph",
+        "heading": "ADDENDUM {{addendum.pageLabel}} — {{provider.name}}",
+        "text": "This Addendum is attached to and incorporated into the Affidavit for Search Warrant to Provide Records and the Search Warrant to Provide Records issued in this matter."
+      },
+      {
+        "key": "ad-03-provider-block",
+        "kind": "ar-provider-order-block",
+        "lead": "Online Service:"
+      },
+      {
+        "key": "ad-04-target-lead",
+        "kind": "constant",
+        "text": "The specific records are associated with the individual using the following identifier(s):"
+      },
+      {
+        "key": "ad-05-target-account",
+        "kind": "target-account"
+      },
+      {
+        "key": "ad-06-date-range",
+        "kind": "date-range"
+      },
+      {
+        "key": "ad-07-items-lead-in",
+        "kind": "constant",
+        "text": "And are to include, by way of example but not limitation, the following records:"
+      },
+      {
+        "key": "ad-08-items-to-seize",
+        "kind": "items-to-seize",
+        "style": "prose"
       }
     ]
   },

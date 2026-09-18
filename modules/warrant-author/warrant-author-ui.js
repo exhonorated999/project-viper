@@ -135,25 +135,77 @@ function _resolveCoCourtForDraft(draft) {
     };
   } catch (_) { return null; }
 }
+// ─── Case record lookup ─────────────────────────────────────────────────
+// case-detail-with-analytics.html declares `currentCase` with a top-level
+// `let` in a classic <script>, so it does NOT land on window — but
+// renderWarrantAuthorTab() explicitly mirrors it (`window.currentCase =
+// currentCase`) precisely so submodules can read it. Prefer that live
+// object; fall back to scanning the persisted roster by id so this still
+// works if the module is driven outside the case-detail host (tests,
+// future embeds).
+function _resolveCaseRecord() {
+  try {
+    const live = (typeof window !== 'undefined') ? window.currentCase : null;
+    if (live && typeof live === 'object') return live;
+  } catch (_e) { /* non-fatal */ }
+  try {
+    const id = _state.caseId;
+    if (!id) return null;
+    const rows = JSON.parse(localStorage.getItem('viperCases') || '[]');
+    if (!Array.isArray(rows)) return null;
+    return rows.find(c => c && String(c.id) === String(id)) || null;
+  } catch (_e) { return null; }
+}
+
+// A bare YYYY-MM-DD reads badly inside warrant prose ("reported on
+// 2026-03-14"). Render it as MM/DD/YYYY. Anything that is NOT a bare ISO
+// date — a free-typed string like "March 2026" or "on or about 3/14/26" —
+// is passed through VERBATIM. The warrant never rewrites what the
+// examiner typed.
+function _formatOffenseDateForWarrant(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return s;
+  return `${m[2]}/${m[3]}/${m[1]}`;
+}
+
 function _resolveCaseCtxForDraft(draft) {
   if (!draft) return {};
-  // Case-level overrides (offense description + date live on the Case
-  // Probable Cause panel — case-pc-store). Fall back to draft fields so
-  // legacy drafts authored before the case-level store existed still work.
-  let caseOffenseDesc = '';
-  let caseOffenseDate = '';
+  // PRECEDENCE (highest first):
+  //   1. Case Probable Cause panel (case-pc-store) — the explicit,
+  //      warrant-specific override the examiner typed here.
+  //   2. The case Overview tab — primaryOffense (the Offense Reference
+  //      entry) and the Date of Offense field. This is where the offense
+  //      is normally recorded, so inheriting it is what stops
+  //      {{case.offenseDescription}} / {{case.offenseDate}} from dangling
+  //      on the AR and CO templates without the examiner re-typing it.
+  //   3. Legacy per-draft fields, for drafts authored before the
+  //      case-level store existed.
+  let pcDesc = '';
+  let pcDate = '';
   try {
     const pcStore = (typeof window !== 'undefined') ? window.WarrantAuthorCasePcStore : null;
     const caseId  = (window.currentCase && (window.currentCase.id || window.currentCase.caseId)) || _state.caseId;
     if (pcStore && caseId) {
-      caseOffenseDesc = pcStore.getOffenseDescription(caseId) || '';
-      caseOffenseDate = pcStore.getOffenseDate(caseId) || '';
+      pcDesc = pcStore.getOffenseDescription(caseId) || '';
+      pcDate = pcStore.getOffenseDate(caseId) || '';
     }
   } catch (_e) { /* non-fatal */ }
+  let caseDesc = '';
+  let caseDate = '';
+  let caseNum  = '';
+  const rec = _resolveCaseRecord();
+  if (rec) {
+    // primaryOffense is stored verbatim as the examiner picked it from the
+    // Offense Reference (statute citation included). Never reword it.
+    caseDesc = String(rec.primaryOffense || '').trim();
+    caseDate = String(rec.offenseDate || '').trim();
+    caseNum  = String(rec.caseNumber || '').trim();
+  }
   return {
-    number: draft.caseRef || draft.caseNumber || '',
-    offenseDescription: caseOffenseDesc || draft.offenseDescription || '',
-    offenseDate:        caseOffenseDate || draft.offenseDate || '',
+    number: draft.caseRef || draft.caseNumber || caseNum || '',
+    offenseDescription: pcDesc || caseDesc || draft.offenseDescription || '',
+    offenseDate: _formatOffenseDateForWarrant(pcDate || caseDate || draft.offenseDate || ''),
   };
 }
 
@@ -2585,13 +2637,11 @@ function _runValidator(caseId, draft) {
   const pcNarrative = (pcStore && pcStore.getBody)
     ? pcStore.getBody(caseId)
     : (draft.probableCauseNarrative || '');
-  // Case-level offense (offense description + date live on the Case
-  // Probable Cause panel). Pass through so the CO validator branch can
-  // fall back to these without having to read the store itself.
-  const caseCtx = {
-    offenseDescription: (pcStore && pcStore.getOffenseDescription) ? pcStore.getOffenseDescription(caseId) : '',
-    offenseDate:        (pcStore && pcStore.getOffenseDate)        ? pcStore.getOffenseDate(caseId)        : '',
-  };
+  // Case-level offense (offense description + date). Resolved through the
+  // SAME helper the compose sites use, so the validator can never warn
+  // about a slot that composing would have filled (pc-store override →
+  // Overview tab → legacy draft field).
+  const caseCtx = _resolveCaseCtxForDraft(draft);
   try {
     return V.validateDraft({
       draft,
@@ -3104,7 +3154,11 @@ function _renderLivePreview(caseId, draft, activeId) {
       body = `<div class="wa-pv-text text-center font-semibold">IN THE CIRCUIT COURT OF THE STATE OF ARKANSAS<br>FOR THE COUNTY OF ${esc(county)}</div>
               <div class="wa-pv-text mt-1">${rows.join('<br>')}</div>`;
     } else if (b.kind === 'ar-provider-order-block') {
-      body = `<div class="wa-pv-text">The following party is ordered: Online Service: ${esc(b.providerName || '[Provider]')}<br>
+      // `lead` is set by the Addendum page block so it reads as an
+      // identification header instead of a second order sentence. Must
+      // mirror block-builder's AR_ORDER_LEAD_DEFAULT.
+      const arLead = String(b.lead || '').trim() || 'The following party is ordered: Online Service:';
+      body = `<div class="wa-pv-text">${esc(arLead)} ${esc(b.providerName || '[Provider]')}<br>
               Address: ${esc(b.street || '')}<br>
               City: ${esc(b.city || '')}<br>
               State: ${esc(b.state || '')}<br>
@@ -3732,6 +3786,18 @@ function renderCasePc(caseId) {
   const updated = stats.updatedAt ? _shortDate(stats.updatedAt) : '—';
   const offenseDesc = pcStore.getOffenseDescription(caseId);
   const offenseDate = pcStore.getOffenseDate(caseId);
+  // What the Overview tab already knows. These are the values a warrant
+  // inherits when the fields below are left blank, so show them rather
+  // than leaving the officer to guess whether the slot will fill.
+  let inheritedDesc = '';
+  let inheritedDate = '';
+  try {
+    const rec = _resolveCaseRecord();
+    if (rec) {
+      inheritedDesc = String(rec.primaryOffense || '').trim();
+      inheritedDate = _formatOffenseDateForWarrant(rec.offenseDate || '');
+    }
+  } catch (_e) { /* non-fatal */ }
   // Pull the user's offense reference library so they can pick from it
   // instead of typing the description by hand. Stored by the offense
   // reference page (index.html) under localStorage['viperOffenseReference'].
@@ -3787,10 +3853,11 @@ function renderCasePc(caseId) {
           (initial ESP/IP warrants → search-history → residence). Validator (P7) will flag empty PC as a hard error at submission.
         </div>
         <!-- Case-level offense fields (offense description + date).
-             Used by CO templates' "*These records will be searched for
-             evidence pertaining the {{case.offenseDescription}} that
-             occurred on {{case.offenseDate}}" line. Stored at the case
-             level so a single edit propagates to every draft in the case. -->
+             Feed {{case.offenseDescription}} / {{case.offenseDate}} on the
+             CO and AR templates. Both are OPTIONAL overrides: when blank
+             the warrant inherits the case Overview tab's primary offense
+             and Date of Offense (see _resolveCaseCtxForDraft). Stored at
+             the case level so a single edit propagates to every draft. -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
           <label class="block text-xs">
             <span class="text-slate-400 uppercase tracking-wider">Offense Description</span>
@@ -3798,7 +3865,7 @@ function renderCasePc(caseId) {
               <input type="text"
                      id="waCaseOffenseDesc"
                      value="${attr(offenseDesc)}"
-                     placeholder="e.g. Aggravated Robbery, Sexual Assault on a Child…"
+                     placeholder="${inheritedDesc ? attr(inheritedDesc) : 'e.g. Aggravated Robbery, Sexual Assault on a Child…'}"
                      oninput="WarrantAuthorUI.bus.onCaseOffenseDescChange('${attr(caseId)}', this.value)"
                      onblur="WarrantAuthorUI.bus.onCaseOffenseDescBlur('${attr(caseId)}')"
                      class="flex-1 px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
@@ -3814,7 +3881,9 @@ function renderCasePc(caseId) {
               `}
             </div>
             <span class="block text-[10px] text-slate-500 mt-1">
-              Manual entry or pick from your Offense Reference library. Used by CO templates; harmless on others.
+              ${inheritedDesc && !offenseDesc
+                ? `Inheriting the case\u2019s primary offense: <span class="text-viper-cyan">${esc(inheritedDesc)}</span>. Type here only to override it.`
+                : 'Manual entry or pick from your Offense Reference library. Blank inherits the primary offense from the case Overview tab.'}
             </span>
           </label>
           <label class="block text-xs">
@@ -3825,7 +3894,9 @@ function renderCasePc(caseId) {
                    onchange="WarrantAuthorUI.bus.onCaseOffenseDateChange('${attr(caseId)}', this.value)"
                    class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
             <span class="block text-[10px] text-slate-500 mt-1">
-              The date the offense occurred. Auto-populates every CO warrant in this case.
+              ${inheritedDate && !offenseDate
+                ? `Inheriting the case\u2019s Date of Offense: <span class="text-viper-cyan">${esc(inheritedDate)}</span>. Set a date here only to override it.`
+                : 'The date the offense occurred. Blank inherits the Date of Offense from the case Overview tab.'}
             </span>
           </label>
         </div>
@@ -5109,10 +5180,7 @@ const bus = {
       const pcNarrative0 = (pcStore0 && pcStore0.getBody)
         ? pcStore0.getBody(caseId)
         : (draft.probableCauseNarrative || '');
-      const caseCtx0 = {
-        offenseDescription: (pcStore0 && pcStore0.getOffenseDescription) ? pcStore0.getOffenseDescription(caseId) : '',
-        offenseDate:        (pcStore0 && pcStore0.getOffenseDate)        ? pcStore0.getOffenseDate(caseId)        : '',
-      };
+      const caseCtx0 = _resolveCaseCtxForDraft(draft);
       const vres = V.validateDraft({
         draft,
         agency: agencyProfile,

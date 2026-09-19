@@ -76,6 +76,8 @@
   const AR_CAPTION_INDENT = 72;  // 1" inset of the whole ")" caption block
   const AR_CAPTION_COL = 234;    // x of the ")" column, from the left margin
   const AR_FIELD_COL = 216;      // x of the warrant-page field column
+  const AR_BODY_LH = 18;         // body leading, points (== pdf FONT_BODY.lh)
+  const AR_HEAD_LH = 20;         // heading leading, points (== pdf FONT_H2.lh)
 
   /**
    * Map a single template-engine resolved block to one or more output blocks.
@@ -100,8 +102,13 @@
     // original left-aligned bold heading-2. `orphanGuard` asks the
     // composer to keep N following body lines on the same page, so a
     // section header can never be the last thing before a page break.
+    // `lh` is the line height IN POINTS. The PDF composer already uses
+    // these values (FONT_BODY.lh 18 / FONT_H2.lh 20); stating them on the
+    // block lets the DOCX composer use the same leading instead of its
+    // own 16pt default, which is what made Word output look tighter than
+    // the PDF. Absent `lh`, every other jurisdiction keeps its defaults.
     const h2 = t => (ar
-      ? { kind: 'heading-2', text: t, align: 'center', underline: true, orphanGuard: 3 }
+      ? { kind: 'heading-2', text: t, align: 'center', underline: true, orphanGuard: 3, lh: AR_HEAD_LH }
       : { kind: 'heading-2', text: t });
 
     // Body paragraph. Under AR, a block tagged `format:"prose"` in the
@@ -110,11 +117,11 @@
     // `format:"center"` gets a single centered line.
     const para = t => {
       if (!ar) return { kind: 'paragraph', text: t };
-      if (format === 'center') return { kind: 'paragraph', text: t, align: 'center' };
+      if (format === 'center') return { kind: 'paragraph', text: t, align: 'center', lh: AR_BODY_LH };
       if (format === 'prose') {
-        return { kind: 'paragraph', text: t, firstIndent: AR_FIRST_INDENT, justify: true, tight: true };
+        return { kind: 'paragraph', text: t, firstIndent: AR_FIRST_INDENT, justify: true, tight: true, lh: AR_BODY_LH };
       }
-      return { kind: 'paragraph', text: t };
+      return { kind: 'paragraph', text: t, lh: AR_BODY_LH };
     };
 
     switch (kind) {
@@ -200,7 +207,7 @@
             const t = ln.trim();
             if (!t) continue;
             out.push(ar
-              ? { kind: 'paragraph', text: t, align: 'center', bold: true, tight: true }
+              ? { kind: 'paragraph', text: t, align: 'center', bold: true, tight: true, lh: AR_BODY_LH }
               : { kind: 'paragraph', text: t });
           }
           if (ar) out.push({ kind: 'spacer', size: 'md' });
@@ -325,6 +332,7 @@
           sep: ')',
           indent: AR_CAPTION_INDENT,
           sepCol: AR_CAPTION_COL,
+          lh: AR_BODY_LH,
           rows,
         });
         out.push({ kind: 'spacer', size: 'sm' });
@@ -339,7 +347,7 @@
         // This is what makes the AR document ONE warrant with attached
         // addendums rather than one page set per provider.
         const lead = _safe(rb.lead).trim();
-        if (lead) out.push(ar ? { kind: 'paragraph', text: lead, tight: true } : { kind: 'paragraph', text: lead });
+        if (lead) out.push(ar ? { kind: 'paragraph', text: lead, tight: true, lh: AR_BODY_LH } : { kind: 'paragraph', text: lead });
         const entries = Array.isArray(rb.entries) ? rb.entries : [];
         if (!entries.length) {
           out.push({ kind: 'paragraph', text: '[no addendums attached]' });
@@ -352,7 +360,7 @@
             // every entry reads as a series of separate one-line
             // paragraphs rather than an enumeration of the addendums.
             out.push(ar
-              ? { kind: 'paragraph', text: `${label}: ${name}`, tight: true }
+              ? { kind: 'paragraph', text: `${label}: ${name}`, tight: true, lh: AR_BODY_LH }
               : { kind: 'paragraph', text: `${label}: ${name}` });
           });
         }
@@ -391,7 +399,7 @@
         rows.push({ label: 'Zip Code:',     value: _safe(rb.zip).trim() });
         rows.push({ label: 'Phone Number:', value: _safe(rb.phone).trim() });
         rows.push({ label: 'Email:',        value: _safe(rb.email).trim() });
-        out.push({ kind: 'field-table', lead: leadText, leadBold: true, col: leadText ? AR_FIELD_COL : 0, rows });
+        out.push({ kind: 'field-table', lead: leadText, leadBold: true, col: leadText ? AR_FIELD_COL : 0, lh: AR_BODY_LH, rows });
         out.push({ kind: 'spacer', size: 'sm' });
         break;
       }
@@ -404,8 +412,8 @@
         // its identifying lines never straddle a page break — a judge
         // seeing a lone signature rule on its own page will reject it.
         out.push({ kind: 'signature', label: 'Signature of Affiant', keepWithNext: ar || undefined });
-        out.push({ kind: 'paragraph', text: [rank, name].filter(Boolean).join(' ') || '[Affiant]', tight: ar || undefined, keepWithNext: ar || undefined });
-        out.push({ kind: 'paragraph', text: _safe(rb.agencyName).trim() || '[Agency]', tight: ar || undefined });
+        out.push({ kind: 'paragraph', text: [rank, name].filter(Boolean).join(' ') || '[Affiant]', tight: ar || undefined, keepWithNext: ar || undefined, lh: ar ? AR_BODY_LH : undefined });
+        out.push({ kind: 'paragraph', text: _safe(rb.agencyName).trim() || '[Agency]', tight: ar || undefined, lh: ar ? AR_BODY_LH : undefined });
         break;
       }
 
@@ -414,8 +422,8 @@
         const division = _safe(rb.division).trim();
         out.push({ kind: 'spacer', size: 'md' });
         out.push({ kind: 'signature', label: 'Honorable Judge', keepWithNext: ar || undefined });
-        out.push({ kind: 'paragraph', text: `${county} County Circuit Court`, tight: ar || undefined, keepWithNext: ar || undefined });
-        out.push({ kind: 'paragraph', text: `${division || '____'} Division`, tight: ar || undefined });
+        out.push({ kind: 'paragraph', text: `${county} County Circuit Court`, tight: ar || undefined, keepWithNext: ar || undefined, lh: ar ? AR_BODY_LH : undefined });
+        out.push({ kind: 'paragraph', text: `${division || '____'} Division`, tight: ar || undefined, lh: ar ? AR_BODY_LH : undefined });
         break;
       }
 

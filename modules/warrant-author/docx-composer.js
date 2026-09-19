@@ -7,8 +7,8 @@
 //   - Numbered lists with hanging indent
 //   - Signature blocks rendered as underscore line + label
 //   - Page-break before each addendum
-//   - Header (right): SW# / Case Ref
-//   - Footer (right): Page X of Y · affiant name
+//   - Header: none by default (CA running banner only) — matches pdf-composer
+//   - Footer: affiant (left) · "Page X of Y · SW#/Case Ref" (right)
 //
 // Returns a Buffer ready for disk persistence (encrypted by warrant-author-main
 // when Field Security is active).
@@ -18,10 +18,29 @@ const {
   Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel,
   PageBreak, PageOrientation, Header, Footer, PageNumber,
   TabStopType, TabStopPosition, BorderStyle, ImageRun,
+  Table, TableRow, TableCell, WidthType, TableLayoutType, LineRuleType,
 } = docxLib;
 
 // Convert inches → twentieths-of-a-point (TWIPs) — Word's unit.
 function _in(inches) { return Math.round(inches * 1440); }
+
+// Leading, in twips, for a block. Blocks may state `lh` IN POINTS — the
+// PDF composer's own line height — so Word matches the PDF instead of
+// falling back to this module's 16pt default. Only the Arkansas blocks
+// set it today; every other jurisdiction keeps `dflt`.
+//
+// Pair it with _lineRule(): with no w:lineRule Word treats w:line as a
+// MULTIPLE of single spacing, not an absolute height, so an `lh` of 18pt
+// would silently become 1.5 x single (~20.7pt in Times 12). AT_LEAST
+// pins the absolute value while still growing for tall glyphs.
+function _lineTw(b, dflt) {
+  const lh = b && b.lh;
+  return (typeof lh === 'number' && isFinite(lh) && lh > 0) ? Math.round(lh * 20) : dflt;
+}
+function _lineRule(b) {
+  const lh = b && b.lh;
+  return (typeof lh === 'number' && isFinite(lh) && lh > 0) ? LineRuleType.AT_LEAST : undefined;
+}
 
 // Twips for vertical spacing chunks (matching jsPDF spacer sizes ~6/14/24 pt).
 function _spacerTwips(size) {
@@ -92,7 +111,9 @@ function _h2(text) {
 // Centered + bold + UNDERLINED section heading (Arkansas exemplar style).
 // Every other jurisdiction keeps _h2 above. keepNext is Word's native
 // orphan guard — the heading cannot end a page.
-function _h2CenteredUnderlined(text) {
+function _h2CenteredUnderlined(b) {
+  const text = (b && typeof b === 'object') ? b.text : b;
+  const line = _lineTw(b, 320);
   return new Paragraph({
     children: [new TextRun({
       text: _safe(text),
@@ -103,69 +124,142 @@ function _h2CenteredUnderlined(text) {
     })],
     alignment: AlignmentType.CENTER,
     keepNext: true,
-    spacing: { before: 160, after: 100, line: 320 },
+    // 6pt before / 2pt after mirrors pdf-composer's heading-2 arm
+    // (`y += 6` … `y += 2`). The module default of 160/100 opened a
+    // visibly larger gap in Word than the same heading had in the PDF.
+    spacing: { before: 120, after: 40, line, lineRule: _lineRule(b) },
   });
 }
 
-// Three-column ")" caption (Arkansas). Rendered with real LEFT tab stops
-// so Word aligns the separator column regardless of how long the county
-// name is — space padding drifts in a proportional face. Tab-stop
-// positions are twips measured from the LEFT MARGIN, which is the same
-// origin block-builder's `indent`/`sepCol` point values use.
+// ─── Borderless layout tables ─────────────────────────────────────────
+// Word can fake columns with tab stops, but a tabbed paragraph wraps back
+// to the paragraph indent, NOT to the tab column — so a long document
+// title or provider name in the Arkansas caption spilled underneath
+// column 1. A real (invisible) table wraps inside its cell, which is what
+// pdf-composer does, so the two outputs agree.
+const _NO_BORDER = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
+const _NO_BORDERS = {
+  top: _NO_BORDER, bottom: _NO_BORDER, left: _NO_BORDER, right: _NO_BORDER,
+  insideHorizontal: _NO_BORDER, insideVertical: _NO_BORDER,
+};
+
+function _cell(widthTw, children) {
+  return new TableCell({
+    width: { size: widthTw, type: WidthType.DXA },
+    borders: _NO_BORDERS,
+    margins: { top: 0, bottom: 0, left: 0, right: 0 },
+    children,
+  });
+}
+
+function _cellPara(text, line, opts = {}) {
+  return new Paragraph({
+    children: text ? [_run(text, opts)] : [],
+    spacing: { before: 0, after: 0, line, lineRule: LineRuleType.AT_LEAST },
+    alignment: AlignmentType.LEFT,
+  });
+}
+
+// A table may not be the last body element of a section, and Word needs a
+// paragraph between two consecutive tables. One empty, near-zero-height
+// paragraph is the standard guard.
+function _tableGuard() {
+  return new Paragraph({
+    children: [],
+    spacing: { before: 0, after: 0, line: 20, lineRule: LineRuleType.EXACT },
+  });
+}
+
+// Three-column ")" caption (Arkansas). Column geometry comes verbatim
+// from the block (points, measured from the LEFT MARGIN) so it matches
+// pdf-composer's drawCaptionTable.
 function _captionTable(b) {
   const rows = Array.isArray(b.rows) ? b.rows : [];
   if (!rows.length) return [];
   const sep = _safe(b.sep || ')');
+  const line = _lineTw(b, 300);
   const indentTw = Math.round((((b.indent | 0) || 72)) * 20);
   const sepTw = Math.round((((b.sepCol | 0) || 234)) * 20);
-  const rightTw = sepTw + 320;
-  return rows.map(r => new Paragraph({
-    children: [
-      _run(_safe((r && r.left) || '').trim()),
-      new TextRun({ text: '\t', font: 'Times New Roman', size: 24 }),
-      _run(sep),
-      new TextRun({ text: '\t', font: 'Times New Roman', size: 24 }),
-      _run(_safe((r && r.right) || '').trim()),
-    ],
-    indent: { left: indentTw },
-    tabStops: [
-      { type: TabStopType.LEFT, position: sepTw },
-      { type: TabStopType.LEFT, position: rightTw },
-    ],
-    spacing: { before: 0, after: 0, line: 300 },
-  }));
+  const CONTENT_TW = _in(6.5);
+  const col1 = Math.max(720, sepTw - indentTw);
+  const col2 = 320;                                   // ~16pt ")" gutter
+  const col3 = Math.max(1440, CONTENT_TW - indentTw - col1 - col2);
+  const tbl = new Table({
+    layout: TableLayoutType.FIXED,
+    borders: _NO_BORDERS,
+    indent: { size: indentTw, type: WidthType.DXA },
+    width: { size: col1 + col2 + col3, type: WidthType.DXA },
+    columnWidths: [col1, col2, col3],
+    rows: rows.map(r => new TableRow({
+      children: [
+        _cell(col1, [_cellPara(_safe((r && r.left) || '').trim(), line)]),
+        _cell(col2, [_cellPara(sep, line)]),
+        _cell(col3, [_cellPara(_safe((r && r.right) || '').trim(), line)]),
+      ],
+    })),
+  });
+  return [tbl, _tableGuard()];
 }
 
-// Two-column label/value block (Arkansas warrant page). `lead` sits bold
-// in column 1 of the first row; every row prints a BOLD field label and a
-// plain value in column 2. `col: 0` means there is no lead column, so the
-// fields sit flush at the left margin and no tab is emitted.
+// Two-column label/value block (Arkansas). `lead` sits bold in column 1;
+// every row prints a BOLD field label and a plain value in column 2.
+// `col: 0` means there is no lead column, so the fields sit flush at the
+// left margin as plain paragraphs — exactly what the PDF composer does.
 function _fieldTable(b) {
   const rows = Array.isArray(b.rows) ? b.rows : [];
+  if (!rows.length) return [];
   const colPt = (typeof b.col === 'number' && isFinite(b.col)) ? Math.max(0, b.col) : 216;
   const colTw = Math.round(colPt * 20);
+  const line = _lineTw(b, 300);
   const lead = _safe(b.lead || '').trim();
-  const stops = colTw > 0 ? [{ type: TabStopType.LEFT, position: colTw }] : [];
-  return rows.map((r, i) => {
-    const label = _safe((r && r.label) || '').trim();
-    const value = _safe((r && r.value) || '').trim();
-    const kids = [];
-    if (i === 0 && lead) kids.push(_run(lead, { bold: !!b.leadBold }));
-    if (colTw > 0) kids.push(new TextRun({ text: '\t', font: 'Times New Roman', size: 24 }));
-    if (label) kids.push(_run(label + ' ', { bold: true }));
-    if (value) kids.push(_run(value));
-    return new Paragraph({
-      children: kids,
-      tabStops: stops,
-      spacing: { before: 0, after: 0, line: 300 },
+
+  if (colTw <= 0) {
+    return rows.map((r) => {
+      const label = _safe((r && r.label) || '').trim();
+      const value = _safe((r && r.value) || '').trim();
+      const kids = [];
+      if (label) kids.push(_run(label + ' ', { bold: true }));
+      if (value) kids.push(_run(value));
+      return new Paragraph({ children: kids, spacing: { before: 0, after: 0, line, lineRule: LineRuleType.AT_LEAST } });
     });
+  }
+
+  const CONTENT_TW = _in(6.5);
+  const col1 = Math.max(720, colTw);
+  const col2 = Math.max(1440, CONTENT_TW - col1);
+  const tbl = new Table({
+    layout: TableLayoutType.FIXED,
+    borders: _NO_BORDERS,
+    width: { size: col1 + col2, type: WidthType.DXA },
+    columnWidths: [col1, col2],
+    rows: rows.map((r, i) => {
+      const label = _safe((r && r.label) || '').trim();
+      const value = _safe((r && r.value) || '').trim();
+      const right = [];
+      if (label) right.push(_run(label + ' ', { bold: true }));
+      if (value) right.push(_run(value));
+      return new TableRow({
+        children: [
+          _cell(col1, [(i === 0 && lead)
+            ? _cellPara(lead, line, { bold: !!b.leadBold })
+            : _cellPara('', line)]),
+          _cell(col2, [new Paragraph({ children: right, spacing: { before: 0, after: 0, line, lineRule: LineRuleType.AT_LEAST } })]),
+        ],
+      });
+    }),
   });
+  return [tbl, _tableGuard()];
 }
 
 function _spacer(size) {
+  // An EXACT line rule on an empty paragraph makes the gap exactly the
+  // height pdf-composer reserves (6 / 14 / 24 pt). The previous form —
+  // a space run at 12pt plus `after` — stacked the run's own line height
+  // on top of the gap, so every spacer in the document came out roughly
+  // three times taller in Word than in the PDF.
   return new Paragraph({
-    children: [_run(' ', { size: 24 })],
-    spacing: { before: 0, after: _spacerTwips(size), line: 240 },
+    children: [],
+    spacing: { before: 0, after: 0, line: _spacerTwips(size), lineRule: LineRuleType.EXACT },
   });
 }
 
@@ -190,6 +284,11 @@ function _signature(label) {
   return [
     new Paragraph({
       children: [_run(underscores, {})],
+      // The rule must never be the last line on a page with its label
+      // stranded at the top of the next one — a signature line with no
+      // caption is unsignable. jsPDF's flow keeps the pair together via
+      // the orphan guard; keepNext is Word's equivalent.
+      keepNext: true,
       spacing: { before: 240, after: 40, line: 240 },
     }),
     new Paragraph({
@@ -249,7 +348,7 @@ function _renderBlock(b) {
     case 'heading-1':        return [_h1(b.text)];
     case 'heading-2':
       return [(b.align === 'center' || b.underline)
-        ? _h2CenteredUnderlined(b.text)
+        ? _h2CenteredUnderlined(b)
         : _h2(b.text)];
     case 'caption-table':    return _captionTable(b);
     case 'field-table':      return _fieldTable(b);
@@ -265,14 +364,27 @@ function _renderBlock(b) {
       // AR prose sets `tight` and marks its breaks with a first-line
       // indent instead, matching the exemplar.
       const firstLine = (b.firstIndent | 0) ? Math.round((b.firstIndent | 0) * 20) : 0;
-      return [new Paragraph({
-        children: [_run(b.text, { bold: !!b.bold })],
+      const line = _lineTw(b, 320);
+      const indent = (b.indent || firstLine)
+        ? { left: b.indent ? 360 : 0, firstLine: firstLine || undefined }
+        : undefined;
+      // Block text may carry hard line breaks. jsPDF's splitTextToSize
+      // honours "\n", but a docx TextRun does NOT — the newline lands
+      // verbatim inside <w:t> and Word collapses it to a space, which
+      // silently fused every multi-paragraph boilerplate (training /
+      // experience narratives, probable cause) into one wall of text.
+      // Emit one Paragraph per segment so Word matches the PDF; a blank
+      // segment becomes an empty paragraph, i.e. the blank line the
+      // author typed.
+      const segs = _safe(b.text).split(/\r?\n/);
+      const mk = (t, isLast) => new Paragraph({
+        children: t ? [_run(t, { bold: !!b.bold })] : [],
         alignment: align,
-        spacing: { before: 0, after: b.tight ? 0 : 200, line: 320 },
-        indent: (b.indent || firstLine)
-          ? { left: b.indent ? 360 : 0, firstLine: firstLine || undefined }
-          : undefined,
-      })];
+        spacing: { before: 0, after: (isLast && !b.tight) ? 200 : 0, line, lineRule: _lineRule(b) },
+        indent,
+      });
+      if (segs.length <= 1) return [mk(segs[0] || '', true)];
+      return segs.map((t, i) => mk(t, i === segs.length - 1));
     }
     case 'numbered': {
       const items = Array.isArray(b.items) ? b.items : [];
@@ -332,16 +444,12 @@ async function composeDocx({ blockStream, draft, agency } = {}) {
       })),
     });
   } else {
-    // Default header (right-aligned with case ref).
-    header = new Header({
-      children: [
-        new Paragraph({
-          alignment: AlignmentType.RIGHT,
-          children: [_run(ref, { size: 18, italics: true })],
-          spacing: { after: 0, line: 240 },
-        }),
-      ],
-    });
+    // No default header. pdf-composer stamps a top banner ONLY for the CA
+    // running header; every other jurisdiction's PDF starts at the top
+    // margin with no case-ref strip. An empty Header keeps the DOCX page
+    // geometry identical to the PDF instead of pushing body text down a
+    // line and printing a ref the PDF never shows.
+    header = new Header({ children: [] });
   }
 
   let footer;
@@ -370,20 +478,21 @@ async function composeDocx({ blockStream, draft, agency } = {}) {
       ],
     });
   } else {
-    // Default footer (page X of Y · affiant).
+    // Default footer — mirrors pdf-composer._stampFooters: affiant name on
+    // the left, "Page X of N · {sw or caseRef}" on the right, same 9pt.
     footer = new Footer({
       children: [
         new Paragraph({
-          alignment: AlignmentType.RIGHT,
           children: [
+            _run(affiantName, { size: 18 }),
+            new TextRun({ text: '\t', font: 'Times New Roman', size: 18 }),
             new TextRun({ text: 'Page ', font: 'Times New Roman', size: 18 }),
             new TextRun({ children: [PageNumber.CURRENT], font: 'Times New Roman', size: 18 }),
             new TextRun({ text: ' of ', font: 'Times New Roman', size: 18 }),
             new TextRun({ children: [PageNumber.TOTAL_PAGES], font: 'Times New Roman', size: 18 }),
-            ...(affiantName ? [
-              new TextRun({ text: ` · ${affiantName}`, font: 'Times New Roman', size: 18 }),
-            ] : []),
+            new TextRun({ text: ` · ${ref}`, font: 'Times New Roman', size: 18 }),
           ],
+          tabStops: [{ type: TabStopType.RIGHT, position: TabStopPosition.MAX }],
           spacing: { line: 240 },
         }),
       ],

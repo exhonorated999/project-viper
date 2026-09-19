@@ -443,9 +443,24 @@
         var out = [];
         for (var p = 0; p < pages.length; p++) {
             var lines = pages[p].lines;
-            // Offense band runs from the OFFENSE #/UCR CODE label row to the
-            // LOCATION CODE legend (or the VICTIM band if the legend is lost).
-            var start = _findLine(lines, /OFFENSE\s*#/i, 0, lines.length);
+            /*
+             * Offense band runs from the label row down to the LOCATION CODE
+             * legend (or the VICTIM band if the legend is lost).
+             *
+             * THREE anchors, earliest wins. The original code keyed only on
+             * "OFFENSE #", which does not survive this form: the printed
+             * header on the Faulkner exemplar reads "UCR CODE" and OCRs as
+             * "UCRCODE" (no space), so `start` came back -1, every page was
+             * skipped, and the report imported with zero offenses AND no
+             * address of offense. "STATUTE" is the last-resort anchor because
+             * it sits on the column-header row directly above the data row.
+             */
+            var start = -1;
+            var anchors = [/OFFENSE\s*#/i, /UCR\s*_?\s*CODE/i, /\bSTATUTE\b/i];
+            for (var a = 0; a < anchors.length; a++) {
+                var at = _findLine(lines, anchors[a], 0, lines.length);
+                if (at >= 0 && (start < 0 || at < start)) start = at;
+            }
             if (start < 0) continue;
             var end = _findLine(lines, /LOCATION\s*CODE/i, start, lines.length);
             if (end < 0) end = _findLine(lines, /VICTIM\s*#/i, start, lines.length);
@@ -455,8 +470,19 @@
             var ucr = '';
             for (var i = start + 1; i < end; i++) {
                 var row = _strip(lines[i]);
-                var mn = /^(\d{1,2})\s+(\d{2}[A-Z]?)\b/.exec(row);
+                var mn = /^(\d{1,2})\s+(\d{2}[A-Z]|\d{3})\b/.exec(row);
                 if (mn) { number = mn[1]; ucr = mn[2]; break; }
+                /* The offense-number column is one narrow digit in a tall
+                 * ruled cell and OCR routinely drops it, leaving the NIBRS
+                 * code alone at the head of the row. Accept the code on its
+                 * own, but only on a row that also carries the OFFENSE
+                 * STATUS / OFFENDER USED checkbox labels, so a stray number
+                 * elsewhere in the band can never be read as a UCR code. */
+                var mu = /^(\d{2}[A-Z]|\d{3})\b/.exec(row);
+                if (mu && /Attempted|Completed|Alcohol|Cptr|Drugs|Premises/i.test(row)) {
+                    ucr = mu[1];
+                    break;
+                }
             }
 
             for (var j = start + 1; j < end; j++) {
@@ -732,6 +758,22 @@
     var RE_ABBREV_END = /(?:^|\s)(?:mr|mrs|ms|dr|prof|det|sgt|lt|cpl|ofc|jr|sr|st|ave|rd|blvd|ln|apt|ste|dept|approx|est|no|vs|etc|inc|co|corp|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|[a-z])\.$/i;
     var RE_SENTENCE_START = /^["'(\u201c\u2018]?[A-Z0-9]/;
 
+    /* "INCIDENT REPORT NARRATIVE CONTINUATION" — the printed banner on every
+     * page that continues the narrative. It survives OCR far more reliably than
+     * the "NARRATIVE:" cell label does, because it is set large and sits clear
+     * of the ruled grid. A continuation page proves the narrative STARTED on an
+     * earlier page, which is how we find a narrative page whose own header the
+     * primary OCR pass lost entirely. */
+    function _looksLikeNarrativeContinuation(lines) {
+        for (var i = 0; i < lines.length && i < 12; i++) {
+            var s = _clean(lines[i]);
+            if (!s) continue;
+            if (/NARRATIVE\s+CONTINUATION/i.test(s)) return true;
+            if (/\bNARRATIVE\b/i.test(s) && /\bCONTINU/i.test(s)) return true;
+        }
+        return false;
+    }
+
     function _paragraphize(body) {
         var out = [];
         for (var i = 0; i < body.length; i++) {
@@ -749,10 +791,13 @@
     function _readNarrative(pages, warn) {
         var chunks = [];
         var srcPages = [];
+        var byPage = {};
+        var contPages = [];
         var started = false;
         for (var p = 0; p < pages.length; p++) {
             var page = pages[p];
             var lines = page.lines;
+            if (_looksLikeNarrativeContinuation(lines)) contPages.push(page.index);
             var idx = _findLine(lines, /^\W{0,3}NARRATIVE\s*:?/i, 0, lines.length);
 
             if (idx >= 0) {
@@ -767,6 +812,7 @@
                 }
                 if (body.length) {
                     chunks.push(_paragraphize(body));
+                    byPage[page.index] = chunks[chunks.length - 1];
                     if (srcPages.indexOf(page.index) === -1) srcPages.push(page.index);
                 }
                 continue;
@@ -774,24 +820,72 @@
 
             // Unlabelled narrative spill onto a later page: prose only, and only
             // once the narrative has actually started.
+            //
+            // PROSE MUST DOMINATE THE PAGE. A bare "2 or more prose lines"
+            // test is not a narrative detector on this form — the NIBRS
+            // location-code, weapon and relationship legends OCR into long
+            // lowercase-heavy lines that _isProse() accepts, so every
+            // remaining form page appended its checkbox furniture to the
+            // officer's narrative. Measured on the reference report: a form
+            // page runs 0.03–0.39 prose, an intact narrative page runs far
+            // higher. A page that fails this gate is still offered to the
+            // banded re-read below — it just cannot contribute raw text.
             if (!started || _hasOthersHeading(lines) >= 0) continue;
             var prose = [];
+            var nonEmpty = 0;
             for (var j = 0; j < lines.length; j++) {
                 if (RE_PAGE_HEADER.test(lines[j])) continue;
+                if (!_clean(lines[j])) continue;
+                nonEmpty++;
                 if (_isProse(lines[j])) prose.push(_clean(lines[j]));
             }
-            if (prose.length >= 2) {
+            if (prose.length >= 4 && prose.length >= nonEmpty * 0.6) {
                 chunks.push(_paragraphize(prose));
+                byPage[page.index] = chunks[chunks.length - 1];
                 if (srcPages.indexOf(page.index) === -1) srcPages.push(page.index);
+            }
+        }
+
+        /*
+         * Pages a banded re-read should be offered.
+         *
+         * Once the dominance gate above rejects a page, a narrative that ran
+         * onto a continuation page whose "NARRATIVE:" cell label the primary
+         * OCR destroyed leaves NO trace in srcPages at all — and on the
+         * reference report that is exactly what happens to the page carrying
+         * the charging paragraph. Walk forward from the last page that did
+         * yield narrative and offer every contiguous continuation page.
+         * Offering a page is cheap and reversible: recoverNarrativeBanded()
+         * takes nothing from it unless the banded read is a material gain.
+         */
+        var bandCandidates = srcPages.slice();
+        if (srcPages.length) {
+            var lastPage = srcPages[srcPages.length - 1];
+            var lastIdx = -1;
+            for (var k = 0; k < pages.length; k++) {
+                if (pages[k].index === lastPage) { lastIdx = k; break; }
+            }
+            for (var m = lastIdx + 1; lastIdx >= 0 && m < pages.length && m <= lastIdx + 3; m++) {
+                if (!pages[m].isContinuation) break;
+                if (_hasOthersHeading(pages[m].lines) >= 0) break;
+                if (bandCandidates.indexOf(pages[m].index) === -1) {
+                    bandCandidates.push(pages[m].index);
+                }
             }
         }
 
         if (!chunks.length) {
             warn('No NARRATIVE section found.');
-            return { items: [], pages: [] };
+            return {
+                items: [], pages: [], byPage: byPage,
+                continuationPages: contPages, bandCandidates: bandCandidates
+            };
         }
         return {
             pages: srcPages,
+            byPage: byPage,
+            continuationPages: contPages,
+            bandCandidates: bandCandidates,
             items: [{
                 officer: '',            // filled by parse() from the ADM footer
                 badge: '',
@@ -902,6 +996,229 @@
             }
         }
         return added;
+    }
+
+    /* ================================================================
+     * Banded narrative rebuild.
+     * ----------------------------------------------------------------
+     * The recovery above is ADDITIVE and anchored, which is the right shape
+     * when the primary pass read MOST of a page and dropped a trailing row.
+     * It cannot help when the primary pass read essentially NOTHING: with no
+     * matched line there is no anchor, so nothing is ever inserted.
+     *
+     * That is the failure mode on agency forms that print the narrative into a
+     * ruled grid with a horizontal rule on each text baseline. Measured on a
+     * real Arkansas report, the two narrative pages OCR'd to 476 and 201
+     * characters of "A / ER / EE / ___" while every other page read 2.6k-6.2k.
+     * The pages are perfectly legible; Tesseract's line finder is merging the
+     * rule with the glyphs.
+     *
+     * modules/rms/band-ocr.js re-reads such a page row by row, using the rules
+     * themselves as the line boundaries (PSM 7 per band). It returns rows in
+     * document order, each with a confidence. Empty rows come back blank, and
+     * those are the paragraph breaks.
+     *
+     * Here we decide whether to TRUST that read. Unlike recoverNarrative(),
+     * this REPLACES a page's narrative, so the bar is deliberately high:
+     *   * a band is narrative only if it clears BAND_MIN_CONF and looks like
+     *     prose rather than a label grid or a checkbox row;
+     *   * we take the last contiguous run of such bands on the page, which is
+     *     where the narrative sits on these forms (the label grid is above it
+     *     and the unused ruled rows below it read as low-confidence noise);
+     *   * the run must be materially better than what the primary pass got for
+     *     that page, or the primary read stands.
+     * Any replacement is disclosed in diagnostics.warnings — an examiner must
+     * know the narrative came from a re-read.
+     * ================================================================ */
+    var BAND_MIN_CONF = 55;   // real rows measured 74-95, noise rows 0-35
+    var BAND_GAP = 2;         // blank rows tolerated inside one narrative run
+    var BAND_MIN_RUN = 3;     // fewer rows than this is not a narrative
+
+    /*
+     * The band's own vertical rules survive whitening as a thin antialiased
+     * edge that PSM 7 reads as a stray glyph at one or both margins:
+     *
+     *   "| Upon arrival, I made contact with Ms Stivers. I immediately |"
+     *   "...near his mother's |"      "...taken into custody. a"
+     *
+     * Erasing more pixels in band-ocr.js removes these AND occasionally the
+     * whole line (measured — see the comment there), so they are stripped
+     * textually instead. STRICTLY at the margins, and ONLY tokens that are
+     * pure punctuation and therefore cannot be the officer's own words:
+     * a leading pipe/bracket run followed by a space, and a trailing
+     * pipe/bracket run. "I " is not in the set — a police narrative is full
+     * of lines that genuinely start "I ".
+     *
+     * A wider rule WAS tried: strip a one-to-two LETTER token sitting after a
+     * sentence-terminating period, on the theory that a printed line does not
+     * end one letter into a new sentence. It does. On the reference report it
+     * deleted the real word "Ms" from "...brought it back to Ms Stivers. Ms"
+     * — a wrapped line ending on the first word of the next sentence. Single
+     * stray letters (" i", " I", " a", " oo") therefore SURVIVE into the
+     * narrative. That is deliberate: the rebuild already carries a warning
+     * telling the examiner to verify against the source, and a visible
+     * artifact is always better than a silently deleted word of evidence.
+     */
+    var RE_RULE_LEAD = /^[|\[\]{}!¦]+\s+/;
+    var RE_RULE_TAIL_PUNCT = /\s+[|\[\]{}!¦]+\s*$/;
+
+    function _stripRuleGlyphs(s) {
+        var t = String(s == null ? '' : s);
+        t = t.replace(RE_RULE_LEAD, '');
+        t = t.replace(RE_RULE_TAIL_PUNCT, '');
+        return t.replace(/\s+$/, '');
+    }
+
+    function _bandIsNarrative(band) {
+        if (!band) return false;
+        var s = _clean(band.text);
+        if (!s) return false;
+        if ((band.conf || 0) < BAND_MIN_CONF) return false;
+        if (RE_PAGE_HEADER.test(s)) return false;
+        if (/^\W{0,3}NARRATIVE\b/i.test(s)) return false;
+        if (_isPageBreak(s)) return false;
+        return _isProse(s) || _isNarrativeFragment(s);
+    }
+
+    /* Last contiguous run of narrative bands on the page, blanks kept so they
+     * can become paragraph breaks. */
+    function _narrativeRunFromBands(bands) {
+        var runs = [];
+        var cur = null;
+        var gap = 0;
+        for (var i = 0; i < bands.length; i++) {
+            if (_bandIsNarrative(bands[i])) {
+                var txt = _stripRuleGlyphs(_clean(bands[i].text));
+                if (!txt) { if (cur) gap++; continue; }
+                if (!cur) { cur = { items: [], count: 0 }; runs.push(cur); }
+                else if (gap) { for (var g = 0; g < Math.min(gap, 1); g++) cur.items.push(''); }
+                cur.items.push(txt);
+                cur.count++;
+                gap = 0;
+            } else if (cur) {
+                gap++;
+                if (gap > BAND_GAP) { cur = null; gap = 0; }
+            }
+        }
+        var best = null;
+        for (var r = 0; r < runs.length; r++) {
+            if (runs[r].count >= BAND_MIN_RUN) best = runs[r];   // last qualifying run
+        }
+        if (!best) return null;
+        var out = best.items.slice();
+        while (out.length && !out[out.length - 1]) out.pop();
+        while (out.length && !out[0]) out.shift();
+        return out.length ? out : null;
+    }
+
+    function _proseCount(text) {
+        var ls = _lines(text || '');
+        var n = 0;
+        for (var i = 0; i < ls.length; i++) if (_isProse(ls[i])) n++;
+        return n;
+    }
+
+    /* Pages a banded re-read should cover. Union of:
+     *   (a) pages the primary pass took narrative from — they may still be
+     *       degraded even when a little text came through;
+     *   (b) pages carrying the "NARRATIVE CONTINUATION" banner;
+     *   (c) the page immediately before the first continuation page. A
+     *       continuation page continues something, so the narrative began
+     *       earlier; that earlier page is invisible to (a) when its own
+     *       "NARRATIVE:" cell label was destroyed — which is exactly what
+     *       happened on page 4 of the reference report. */
+    function narrativeBandPages(report) {
+        var rec = (report && report.narrativeRecovery) || {};
+        var seen = {};
+        var out = [];
+        function add(n) {
+            n = parseInt(n, 10);
+            if (!Number.isInteger(n) || n < 1 || seen[n]) return;
+            seen[n] = true; out.push(n);
+        }
+        (rec.pages || []).forEach(add);
+        (rec.bandCandidates || []).forEach(add);
+        var cont = (rec.continuationPages || []).slice().sort(function (a, b) { return a - b; });
+        cont.forEach(add);
+        if (cont.length && cont[0] > 1) add(cont[0] - 1);
+        return out.sort(function (a, b) { return a - b; });
+    }
+
+    /**
+     * @param {object} report        a parse() result, mutated in place
+     * @param {object} bandedByPage  { "<page>": { lines:[{text,conf,blank}] } }
+     *                               as returned by band-ocr.bandOcrPages()
+     * @returns {number} how many pages were replaced
+     */
+    function recoverNarrativeBanded(report, bandedByPage) {
+        if (!report || !bandedByPage) return 0;
+        var rec = report.narrativeRecovery || (report.narrativeRecovery = {});
+        var byPage = rec.byPage || (rec.byPage = {});
+        var replaced = [];
+
+        Object.keys(bandedByPage).forEach(function (key) {
+            var pageNo = parseInt(key, 10);
+            if (!Number.isInteger(pageNo)) return;
+            var page = bandedByPage[key];
+            var bands = (page && page.lines) || (Array.isArray(page) ? page : null);
+            if (!bands || !bands.length) return;
+
+            var run = _narrativeRunFromBands(bands);
+            if (!run) return;
+
+            var body = [];
+            for (var i = 0; i < run.length; i++) {
+                if (run[i]) body.push(run[i]);
+                else if (body.length && body[body.length - 1] !== '') body.push('');
+            }
+            while (body.length && !body[body.length - 1]) body.pop();
+            if (!body.length) return;
+
+            // A banded row IS a printed row, so the blank rows already carry the
+            // paragraph structure. Join directly rather than re-guessing it.
+            var text = body.join('\n').replace(/\n{3,}/g, '\n\n');
+
+            var prior = byPage[pageNo] || '';
+            // Replace only on a material gain. A banded read that merely ties
+            // the primary read buys nothing and costs provenance.
+            if (_proseCount(text) < _proseCount(prior) + 3) return;
+
+            byPage[pageNo] = text;
+            replaced.push(pageNo);
+        });
+
+        if (!replaced.length) return 0;
+
+        var order = Object.keys(byPage)
+            .map(Number)
+            .filter(function (n) { return Number.isInteger(n); })
+            .sort(function (a, b) { return a - b; });
+        var joined = order.map(function (n) { return byPage[n]; })
+            .filter(function (t) { return t && t.trim(); })
+            .join('\n\n');
+
+        if (!report.narratives) report.narratives = [];
+        if (!report.narratives.length) {
+            report.narratives.push({ officer: '', badge: '', text: '' });
+        }
+        report.narratives[0].text = joined;
+
+        rec.pages = order;
+        report.diagnostics = report.diagnostics || {};
+        report.diagnostics.warnings = report.diagnostics.warnings || [];
+        report.diagnostics.narrativeChars = joined.length;
+        report.diagnostics.narrativePagesRebuilt =
+            (report.diagnostics.narrativePagesRebuilt || 0) + replaced.length;
+
+        replaced.sort(function (a, b) { return a - b; });
+        var msg = 'Narrative: the ruled grid defeated the primary OCR pass on page' +
+            (replaced.length === 1 ? ' ' : 's ') + replaced.join(', ') +
+            '. Those page' + (replaced.length === 1 ? ' was' : 's were') +
+            ' re-read row by row — verify the narrative against the source document.';
+        if (report.diagnostics.warnings.indexOf(msg) === -1) {
+            report.diagnostics.warnings.push(msg);
+        }
+        return replaced.length;
     }
 
     /* ================================================================
@@ -1019,7 +1336,15 @@
 
         // Pages a second (PSM 3) OCR pass should cover to recover narrative
         // rows the primary pass dropped. See recoverNarrative().
-        report.narrativeRecovery = { pages: narrRead.pages || [] };
+        // `byPage` keeps per-page provenance so a banded re-read can replace a
+        // single page without disturbing the others — see
+        // recoverNarrativeBanded().
+        report.narrativeRecovery = {
+            pages: narrRead.pages || [],
+            byPage: narrRead.byPage || {},
+            continuationPages: narrRead.continuationPages || [],
+            bandCandidates: narrRead.bandCandidates || []
+        };
 
         _describeProvisional(report, warn);
         return report;
@@ -1171,7 +1496,7 @@
      * ================================================================ */
     function quickScan(text, fileName) {
         var t = String(text == null ? '' : text);
-        var result = { caseNum: '', synopsis: '', detected: {}, matched: false };
+        var result = { caseNum: '', synopsis: '', location: '', primaryOffense: '', offenseList: [], detected: {}, matched: false };
         if (!detect(t)) return result;
         result.matched = true;
 
@@ -1187,6 +1512,24 @@
         var narratives = _readNarrative(pages, noop).items;
 
         result.caseNum = header.incidentNumber || '';
+
+        /*
+         * ADDRESS OF OFFENSE is the case's Location of Occurrence — the same
+         * fact under two names. Surface it (and the primary offense) so the
+         * create-case screen can pre-fill those fields instead of leaving the
+         * officer to re-type what is printed on page 1.
+         *
+         * The offense description is carried VERBATIM, statute citation
+         * included, exactly as the Overview tab's primaryOffense is treated
+         * everywhere else in VIPER. Never reworded.
+         */
+        for (var q = 0; q < offenses.length; q++) {
+            if (!result.location && offenses[q].location) result.location = offenses[q].location;
+            if (!offenses[q].description) continue;
+            var lbl = [offenses[q].statute, offenses[q].description].filter(Boolean).join(' ');
+            if (result.offenseList.indexOf(lbl) === -1) result.offenseList.push(lbl);
+        }
+        result.primaryOffense = result.offenseList[0] || '';
 
         var parts = [];
         if (offenses.length) {
@@ -1240,6 +1583,8 @@
         recoverNames: recoverNames,
         narrativeRecoveryPages: narrativeRecoveryPages,
         recoverNarrative: recoverNarrative,
+        narrativeBandPages: narrativeBandPages,
+        recoverNarrativeBanded: recoverNarrativeBanded,
         // exposed for tests
         _internal: {
             extractName: _extractName,
@@ -1249,7 +1594,11 @@
             isNarrativeFragment: _isNarrativeFragment,
             paragraphize: _paragraphize,
             fmtPhone: _fmtPhone,
-            scanAddress: _scanAddress
+            scanAddress: _scanAddress,
+            bandIsNarrative: _bandIsNarrative,
+            stripRuleGlyphs: _stripRuleGlyphs,
+            narrativeRunFromBands: _narrativeRunFromBands,
+            looksLikeNarrativeContinuation: _looksLikeNarrativeContinuation
         }
     };
 });

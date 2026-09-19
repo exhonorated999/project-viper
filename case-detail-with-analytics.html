@@ -1460,13 +1460,65 @@
         }
 
         // --- Process Pending RMS Import (from "Import from RMS PDF" on case creation) ---
+        /*
+         * Backfill the case Overview from an imported RMS report.
+         *
+         * ADDRESS OF OFFENSE and Location of Occurrence are the same fact
+         * under two names; the offence row carries the statute + description
+         * the Overview tab calls primaryOffense. Both were being parsed and
+         * then thrown away, leaving the officer to re-type what is printed on
+         * page 1 of their own report.
+         *
+         * STRICTLY additive: a field the officer has already filled is never
+         * touched, and offence text is carried VERBATIM (statute citation
+         * included) — the same rule the Warrant Author relies on. Returns the
+         * list of field labels actually written, for the result toast.
+         */
+        function _rmsBackfillCaseOverview(report) {
+            if (!report || !currentCase) return [];
+            const applied = [];
+
+            const loc = String(report.location || '').trim();
+            if (loc && !String(currentCase.locationOfOccurrence || '').trim()) {
+                currentCase.locationOfOccurrence = loc;
+                applied.push('Location of Occurrence');
+            }
+
+            const offs = Array.isArray(report.offenses) ? report.offenses : [];
+            const labels = [];
+            for (const o of offs) {
+                if (!o) continue;
+                const label = [o.statute, o.description].filter(Boolean).join(' ').trim();
+                if (label && labels.indexOf(label) === -1) labels.push(label);
+            }
+            if (labels.length && !String(currentCase.primaryOffense || '').trim()) {
+                currentCase.primaryOffense = labels[0];
+                // Severity is a checkbox field the Arkansas form never fills,
+                // so offenseType stays blank rather than being inferred.
+                if (!currentCase.offenseType && offs[0] && offs[0].severity) {
+                    currentCase.offenseType = offs[0].severity;
+                }
+                const extra = labels.slice(1);
+                if (extra.length && !(Array.isArray(currentCase.additionalOffenses) && currentCase.additionalOffenses.length)) {
+                    currentCase.additionalOffenses = extra.map(x => ({ offense: x, type: '' }));
+                }
+                applied.push(`Offenses (${labels.length})`);
+            }
+
+            if (applied.length) {
+                try { saveCase({ silent: true }); }
+                catch (e) { console.warn('[RMS Import] overview backfill save failed:', e); }
+            }
+            return applied;
+        }
+
         function processPendingRmsImport() {
             const key = 'pendingRmsImport_' + currentCase.id;
             const raw = localStorage.getItem(key);
             if (!raw) return;
 
             try {
-                const { text, fileName, arSparsePages, arAltPages } = JSON.parse(raw);
+                const { text, fileName, arSparsePages, arAltPages, arBandPages } = JSON.parse(raw);
                 localStorage.removeItem(key); // consume immediately
 
                 // Parse using the full RMS parser
@@ -1481,13 +1533,24 @@
                 // supplementary passes index.html ran while it still had the
                 // file path. Synchronous, so this function stays synchronous.
                 if (window.ArIncidentParser && report.arFormat === 'ar-incident-report') {
+                    let rebuilt = 0;
                     try {
                         if (arSparsePages) window.ArIncidentParser.recoverNames(report, arSparsePages);
                     } catch (arErr) {
                         console.warn('[RMS Import] Arkansas name recovery failed:', arErr);
                     }
                     try {
-                        if (arAltPages) window.ArIncidentParser.recoverNarrative(report, arAltPages);
+                        // Banded rebuild first — see _arRecoverRmsOcr() for why
+                        // it supersedes the additive PSM 3 merge on a page it
+                        // was able to replace.
+                        if (arBandPages && window.ArIncidentParser.recoverNarrativeBanded) {
+                            rebuilt = window.ArIncidentParser.recoverNarrativeBanded(report, arBandPages);
+                        }
+                    } catch (arErr3) {
+                        console.warn('[RMS Import] Arkansas banded narrative rebuild failed:', arErr3);
+                    }
+                    try {
+                        if (!rebuilt && arAltPages) window.ArIncidentParser.recoverNarrative(report, arAltPages);
                     } catch (arErr2) {
                         console.warn('[RMS Import] Arkansas narrative recovery failed:', arErr2);
                     }
@@ -1695,6 +1758,11 @@
                     localStorage.setItem(`recoveredVehicles_${currentCase.id}`, JSON.stringify(existing));
                     populated.push(`Vehicles (${report.vehicles.length})`);
                 }
+
+                // Backfill Overview fields (Location of Occurrence, Offenses)
+                // that the report already carries. Only-if-blank.
+                const overviewFilled = _rmsBackfillCaseOverview(report);
+                if (overviewFilled.length) populated = populated.concat(overviewFilled);
 
                 // Show result
                 if (populated.length > 0) {
@@ -38695,13 +38763,13 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
          * rather than routed into the case tabs with a blank name.
          */
         async function _arRecoverRmsOcr(report, filePath) {
-            let names = 0, narrativeLines = 0;
+            let names = 0, narrativeLines = 0, narrativePages = 0;
             try {
                 const AR = window.ArIncidentParser;
-                if (!AR || !filePath) return { names, narrativeLines };
-                if (report.arFormat !== 'ar-incident-report') return { names, narrativeLines };
+                if (!AR || !filePath) return { names, narrativeLines, narrativePages };
+                if (report.arFormat !== 'ar-incident-report') return { names, narrativeLines, narrativePages };
                 if (!window.electronAPI || !window.electronAPI.ocrPdfPagesSparse) {
-                    return { names, narrativeLines };
+                    return { names, narrativeLines, narrativePages };
                 }
 
                 if (AR.needsNameRecovery(report)) {
@@ -38712,15 +38780,31 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     }
                 }
 
-                const nPages = AR.narrativeRecoveryPages(report);
-                if (nPages.length) {
-                    const res2 = await window.electronAPI.ocrPdfPagesSparse(filePath, nPages, '3');
-                    if (res2 && res2.pages) narrativeLines = AR.recoverNarrative(report, res2.pages);
+                // Banded re-read FIRST. It rebuilds a whole page, so it must run
+                // before the additive PSM 3 merge — and where it succeeds the
+                // PSM 3 pass has nothing left to add (it exists to repair a page
+                // the primary read mostly got, not one it lost entirely).
+                if (window.electronAPI.ocrPdfPagesBanded && AR.narrativeBandPages) {
+                    const bPages = AR.narrativeBandPages(report);
+                    if (bPages.length) {
+                        const resB = await window.electronAPI.ocrPdfPagesBanded(filePath, bPages);
+                        if (resB && resB.pages) {
+                            narrativePages = AR.recoverNarrativeBanded(report, resB.pages);
+                        }
+                    }
+                }
+
+                if (!narrativePages) {
+                    const nPages = AR.narrativeRecoveryPages(report);
+                    if (nPages.length) {
+                        const res2 = await window.electronAPI.ocrPdfPagesSparse(filePath, nPages, '3');
+                        if (res2 && res2.pages) narrativeLines = AR.recoverNarrative(report, res2.pages);
+                    }
                 }
             } catch (err) {
                 console.warn('[RMS Parser] supplementary OCR recovery failed:', err);
             }
-            return { names, narrativeLines };
+            return { names, narrativeLines, narrativePages };
         }
 
         async function handleRmsImport() {
@@ -38731,6 +38815,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 showLoadingIndicator('Parsing RMS reports...');
                 let imported = 0;
                 let unnamedBlocks = 0;
+                let overviewFilled = [];
 
                 for (const filePath of filePaths) {
                     try {
@@ -38739,6 +38824,10 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         report.pageCount = result.numPages;
                         await _arRecoverRmsOcr(report, filePath);
                         if (report.provisionalPersons) unnamedBlocks += report.provisionalPersons.length;
+                        // Location of Occurrence / Offenses from the report's
+                        // offence row — only-if-blank. See
+                        // _rmsBackfillCaseOverview().
+                        overviewFilled = overviewFilled.concat(_rmsBackfillCaseOverview(report));
 
                         // Check for duplicate
                         const existingIdx = rmsImports.findIndex(r =>
@@ -38768,6 +38857,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     loadInvolvedPersons();
                     loadRecoveredVehicles();
                     showToast(`Imported ${imported} RMS report${imported !== 1 ? 's' : ''} — persons routed to case tabs`, 'success');
+                    if (overviewFilled.length) {
+                        showToast(`Case Overview updated from the report: ${overviewFilled.join(', ')}`, 'success');
+                    }
                     if (unnamedBlocks > 0) {
                         showToast(`${unnamedBlocks} person block${unnamedBlocks !== 1 ? 's' : ''} had no readable name and ${unnamedBlocks !== 1 ? 'were' : 'was'} not imported — verify against the source PDF`, 'warning');
                     }
@@ -38926,7 +39018,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                 <span class="text-viper-orange font-mono text-sm font-bold">${o.statute || ''}</span>
                                 <span class="text-gray-300 text-sm ml-2">${o.description || ''}</span>
                             </div>
-                            <span class="text-xs px-2 py-0.5 rounded ${o.severity === 'FELONY' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'}">${o.severity || ''}</span>
+                            <span class="text-xs px-2 py-0.5 rounded ${o.severity === 'FELONY' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'} ${o.severity ? '' : 'hidden'}">${o.severity || ''}</span>
                         </div>
                     `).join('')}
                 </div>

@@ -100,6 +100,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // NIBRS incident-report importer to recover typed names that Tesseract's
   // layout-preserving pass drops. extractPdfText is unchanged.
   ocrPdfPagesSparse: (filePath, pages, psm) => ipcRenderer.invoke('ocr-pdf-pages-sparse', filePath, pages, psm),
+  ocrPdfPagesBanded: (filePath, pages) => ipcRenderer.invoke('ocr-pdf-pages-banded', filePath, pages),
   readFileAsDataUrl: (filePath) => ipcRenderer.invoke('read-file-as-data-url', filePath),
   resolveWarrantPath: (data) => ipcRenderer.invoke('resolve-warrant-path', data),
   viewWarrantExternal: (filePath) => ipcRenderer.invoke('view-warrant-external', filePath),

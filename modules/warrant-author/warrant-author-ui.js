@@ -157,7 +157,32 @@ function _resolveCaseRecord() {
   } catch (_e) { return null; }
 }
 
-// A bare YYYY-MM-DD reads badly inside warrant prose ("reported on
+// The host case record carries the number under one of two keys depending
+// on how old the record is. Prefer the live object, fall back to the
+// persisted roster (that is what _resolveCaseRecord already does), so a
+// missing `window.currentCase` mirror no longer kills the Open buttons.
+function _resolveCaseNumber() {
+  const rec = _resolveCaseRecord();
+  if (!rec) return '';
+  return String(rec.caseNumber || rec.number || '').trim();
+}
+
+// Single user-feedback channel. window.showToast is the host's; alert() is
+// a native modal that Chromium silently drops when another modal is
+// already pending on the window, so it is the LAST resort, not the first.
+function _notify(msg, kind) {
+  const text = String(msg == null ? '' : msg);
+  try {
+    if (typeof window !== 'undefined' && typeof window.showToast === 'function') {
+      window.showToast(text, kind || 'info');
+      return;
+    }
+  } catch (_e) { /* fall through */ }
+  try { console[(kind === 'error') ? 'error' : 'log']('[WarrantAuthor] ' + text); } catch (_e) {}
+  if (kind === 'error') { try { alert(text); } catch (_e) {} }
+}
+
+
 // 2026-03-14"). Render it as MM/DD/YYYY. Anything that is NOT a bare ISO
 // date — a free-typed string like "March 2026" or "on or about 3/14/26" —
 // is passed through VERBATIM. The warrant never rewrites what the
@@ -5514,51 +5539,70 @@ const bus = {
   },
   onDownloadGeneratedPdf() {
     const blob = _state._genPdfBlob;
-    if (!blob) return;
-    const url = URL.createObjectURL(blob);
-    const a   = document.createElement('a');
-    a.href = url;
-    a.download = (_state._genFilename || 'warrant') + '.pdf';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    if (!blob) { _notify('No PDF was generated for this draft.', 'error'); return; }
+    const name = (_state._genFilename || 'warrant') + '.pdf';
+    try {
+      _downloadBlob(blob, name, 'application/pdf');
+      _notify('PDF downloaded — ' + name, 'success');
+    } catch (e) {
+      _notify('Download failed: ' + e.message, 'error');
+    }
   },
   onDownloadGeneratedDocx() {
     const blob = _state._genDocxBlob;
-    if (!blob) return;
-    const url = URL.createObjectURL(blob);
-    const a   = document.createElement('a');
-    a.href = url;
-    a.download = (_state._genFilename || 'warrant') + '.docx';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    if (!blob) { _notify('No DOCX was generated for this draft.', 'error'); return; }
+    const name = (_state._genFilename || 'warrant') + '.docx';
+    try {
+      _downloadBlob(blob, name,
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      _notify('DOCX downloaded — ' + name, 'success');
+    } catch (e) {
+      _notify('Download failed: ' + e.message, 'error');
+    }
   },
   onPreviewGeneratedPdf() {
     const blob = _state._genPdfBlob;
-    if (!blob) return;
+    if (!blob) { _notify('No PDF was generated for this draft.', 'error'); return; }
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank', 'noopener');
     // Note: we leak the URL on purpose so the new tab/preview window stays valid.
   },
   async onOpenGeneratedOnDisk(caseId, draftId, format) {
-    if (!window.electronAPI || typeof window.electronAPI.warrantAuthorOpenGenerated !== 'function') return;
-    const caseNumber = (window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || '';
-    if (!caseNumber) { alert('No case number available.'); return; }
-    const r = await window.electronAPI.warrantAuthorOpenGenerated(`cases/${caseNumber}`, draftId, format);
-    if (!r || !r.success) {
-      alert((r && r.error) || 'Open failed.');
+    // Every failure path here used to be a bare `return` or an alert().
+    // A bare return makes the button look dead, and alert() is a native
+    // modal that Chromium will swallow when another modal is already
+    // pending on the window — so "nothing happens" was the symptom for
+    // half a dozen different causes. Everything is toasted now.
+    try {
+      if (!window.electronAPI || typeof window.electronAPI.warrantAuthorOpenGenerated !== 'function') {
+        _notify('Desktop bridge unavailable — use Download ' + String(format || '').toUpperCase() + ' instead.', 'error');
+        return;
+      }
+      const caseNumber = _resolveCaseNumber();
+      if (!caseNumber) { _notify('No case number available — use Download instead.', 'error'); return; }
+      const r = await window.electronAPI.warrantAuthorOpenGenerated(`cases/${caseNumber}`, draftId, format);
+      if (!r || !r.success) {
+        _notify((r && r.error) || 'Open failed.', 'error');
+        return;
+      }
+      if (r.openedDir) _notify('Field Security is active — opened the folder instead.', 'info');
+      else _notify('Handed to Windows. If nothing appears, check for a hidden Word window.', 'info');
+    } catch (e) {
+      _notify('Open failed: ' + e.message, 'error');
     }
   },
   async onOpenGeneratedFolder(caseId, draftId) {
-    if (!window.electronAPI || typeof window.electronAPI.warrantAuthorOpenDraftFolder !== 'function') return;
-    const caseNumber = (window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || '';
-    if (!caseNumber) { alert('No case number available.'); return; }
-    const r = await window.electronAPI.warrantAuthorOpenDraftFolder(`cases/${caseNumber}`, draftId);
-    if (!r || !r.success) {
-      alert((r && r.error) || 'Open folder failed.');
+    try {
+      if (!window.electronAPI || typeof window.electronAPI.warrantAuthorOpenDraftFolder !== 'function') {
+        _notify('Desktop bridge unavailable.', 'error');
+        return;
+      }
+      const caseNumber = _resolveCaseNumber();
+      if (!caseNumber) { _notify('No case number available.', 'error'); return; }
+      const r = await window.electronAPI.warrantAuthorOpenDraftFolder(`cases/${caseNumber}`, draftId);
+      if (!r || !r.success) _notify((r && r.error) || 'Open folder failed.', 'error');
+    } catch (e) {
+      _notify('Open folder failed: ' + e.message, 'error');
     }
   },
 

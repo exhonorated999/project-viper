@@ -148,6 +148,210 @@
       }
     }
 
+    /**
+     * Centered heading with an underline sized to the rendered text.
+     * Used by the Arkansas templates, whose exemplar centers, bolds AND
+     * underlines every section heading. Other jurisdictions keep the
+     * left-aligned bold heading drawn by drawLeft().
+     */
+    function drawCenteredUnderlined(font, text) {
+      _setFont(doc, font);
+      const lines = doc.splitTextToSize(_safeText(text), CONTENT_W);
+      const cx = PAGE_W / 2;
+      for (const ln of lines) {
+        ensureRoom(font.lh + 3);
+        const w = doc.getTextWidth(ln);
+        const baseline = y + font.size;
+        doc.text(ln, cx, baseline, { align: 'center' });
+        doc.setLineWidth(0.7);
+        doc.line(cx - w / 2, baseline + 1.8, cx + w / 2, baseline + 1.8);
+        y += font.lh;
+      }
+    }
+
+    /**
+     * Word-level paragraph flow with an optional first-line indent and
+     * optional full justification. jsPDF's splitTextToSize can't do
+     * either (one wrap width, no word-space control), so we wrap greedily
+     * against measured widths and place each word ourselves.
+     *
+     * opts: { firstIndent, justify, align }
+     *   firstIndent — pt added to line 1's left edge only
+     *   justify     — distribute slack into the word gaps on every line
+     *                 EXCEPT the last of each hard-wrapped run (a
+     *                 justified final line looks broken)
+     *
+     * Embedded newlines are honoured: each run between them flows as its
+     * own paragraph (so a multi-paragraph probable-cause narrative keeps
+     * its breaks and each sub-paragraph gets its own first-line indent).
+     */
+    function drawFlowed(font, text, opts) {
+      opts = opts || {};
+      const firstIndent = Math.max(0, opts.firstIndent | 0);
+      _setFont(doc, font);
+      const spaceW = doc.getTextWidth(' ');
+      const segments = _safeText(text).split(/\r?\n/);
+
+      // Lay out every segment first so widow/orphan control can see the
+      // whole block height before the first line is committed.
+      const laid = [];
+      for (const seg of segments) {
+        const words = seg.split(/\s+/).filter(Boolean);
+        if (!words.length) { laid.push(null); continue; } // blank line
+        let ind = firstIndent;
+        let cur = [];
+        let curW = 0;
+        for (const w of words) {
+          const ww = doc.getTextWidth(w);
+          if (!cur.length) { cur = [w]; curW = ww; continue; }
+          const need = curW + spaceW + ww;
+          if (need > (CONTENT_W - ind)) {
+            laid.push({ words: cur, indent: ind, width: curW, last: false });
+            cur = [w]; curW = ww; ind = 0;
+          } else {
+            cur.push(w); curW = need;
+          }
+        }
+        if (cur.length) laid.push({ words: cur, indent: ind, width: curW, last: true });
+      }
+
+      // Same paragraph-level pagination policy as drawLeft().
+      const lineCount = laid.length;
+      const totalH = lineCount * font.lh;
+      const remaining = contentBottom - y;
+      if (totalH > remaining) {
+        if (lineCount <= 3) {
+          newPage();
+        } else {
+          const linesNowFit = Math.floor(remaining / font.lh);
+          if (linesNowFit < 2 || (lineCount - linesNowFit) < 2) newPage();
+        }
+      }
+
+      for (const L of laid) {
+        ensureRoom(font.lh);
+        if (!L) { y += font.lh; continue; }
+        const x0 = MARGIN + L.indent;
+        const avail = CONTENT_W - L.indent;
+        const gaps = L.words.length - 1;
+        const slack = avail - L.width;
+        _setFont(doc, font);
+        // Don't justify the closing line of a segment, a single-word
+        // line, or a line that would need grotesque word spacing.
+        const doJustify = !!opts.justify && !L.last && gaps > 0
+          && slack > 0 && slack < avail * 0.35;
+        if (doJustify) {
+          const gapW = spaceW + (slack / gaps);
+          let x = x0;
+          for (const w of L.words) {
+            doc.text(w, x, y + font.size);
+            x += doc.getTextWidth(w) + gapW;
+          }
+        } else if (opts.align === 'center') {
+          doc.text(L.words.join(' '), PAGE_W / 2, y + font.size, { align: 'center' });
+        } else {
+          doc.text(L.words.join(' '), x0, y + font.size);
+        }
+        y += font.lh;
+      }
+    }
+
+    /**
+     * Three-column ")" caption (Arkansas). Column 1 carries the
+     * STATE/COUNTY literals, the separator glyph sits at a real tab stop
+     * and column 3 carries the document title / provider list. The tab
+     * stop is the larger of the requested x and the widest measured
+     * column-1 literal, so a long county name pushes the column instead
+     * of colliding with it.
+     */
+    function drawCaptionTable(b) {
+      const rows = Array.isArray(b.rows) ? b.rows : [];
+      if (!rows.length) return;
+      _setFont(doc, FONT_BODY);
+      const indent = Math.max(0, b.indent | 0);
+      let sepCol = Math.max(0, b.sepCol | 0) || 234;
+      let widest = 0;
+      for (const r of rows) {
+        widest = Math.max(widest, doc.getTextWidth(_safeText((r && r.left) || '')));
+      }
+      sepCol = Math.max(sepCol, indent + widest + 12);
+      const sep = _safeText(b.sep || ')');
+      const sepW = doc.getTextWidth(sep);
+      const rightX = MARGIN + sepCol + sepW + 12;
+      const rightW = Math.max(60, PAGE_W - MARGIN - rightX);
+      const laid = rows.map(r => ({
+        left: _safeText((r && r.left) || '').trim(),
+        right: doc.splitTextToSize(_safeText((r && r.right) || '').trim(), rightW),
+      }));
+      const totalH = laid.reduce((a, L) => a + Math.max(1, L.right.length) * FONT_BODY.lh, 0);
+      if (y + totalH > contentBottom) newPage();
+      for (const L of laid) {
+        const n = Math.max(1, L.right.length);
+        _setFont(doc, FONT_BODY);
+        if (L.left) doc.text(L.left, MARGIN + indent, y + FONT_BODY.size);
+        doc.text(sep, MARGIN + sepCol, y + FONT_BODY.size);
+        for (let i = 0; i < L.right.length; i++) {
+          doc.text(L.right[i], rightX, y + FONT_BODY.size + (i * FONT_BODY.lh));
+        }
+        y += n * FONT_BODY.lh;
+      }
+    }
+
+    /**
+     * Two-column label/value block (Arkansas warrant page). `lead` sits
+     * bold in column 1; every row renders a BOLD field label followed by
+     * a plain value in column 2, exactly as the exemplar prints the
+     * ordered provider's details.
+     */
+    function drawFieldTable(b) {
+      const rows = Array.isArray(b.rows) ? b.rows : [];
+      // col === 0 is meaningful (a lead-less table sits flush at the left
+      // margin), so don't collapse it with `|| default`.
+      const col = (typeof b.col === 'number' && isFinite(b.col)) ? Math.max(0, b.col) : 216;
+      const x2 = MARGIN + col;
+      const w2 = Math.max(80, PAGE_W - MARGIN - x2);
+      const lead = _safeText(b.lead || '').trim();
+      const leadFont = b.leadBold ? FONT_BODY_BOLD : FONT_BODY;
+      _setFont(doc, leadFont);
+      const leadLines = lead ? doc.splitTextToSize(lead, Math.max(60, col - 12)) : [];
+      const laid = rows.map(r => {
+        const label = _safeText((r && r.label) || '').trim();
+        const value = _safeText((r && r.value) || '').trim();
+        _setFont(doc, FONT_BODY_BOLD);
+        const labelW = label ? doc.getTextWidth(label + ' ') : 0;
+        _setFont(doc, FONT_BODY);
+        const wrapped = doc.splitTextToSize(value, Math.max(40, w2 - labelW));
+        const head = wrapped.length ? wrapped[0] : '';
+        const rest = wrapped.length > 1
+          ? doc.splitTextToSize(wrapped.slice(1).join(' '), Math.max(40, w2 - 12))
+          : [];
+        return { label, labelW, head, rest };
+      });
+      const rowH = laid.reduce((a, L) => a + (1 + L.rest.length) * FONT_BODY.lh, 0);
+      const totalH = Math.max(rowH, leadLines.length * FONT_BODY.lh);
+      if (y + totalH > contentBottom) newPage();
+      const y0 = y;
+      leadLines.forEach((ln, i) => {
+        _setFont(doc, leadFont);
+        doc.text(ln, MARGIN, y0 + FONT_BODY.size + (i * FONT_BODY.lh));
+      });
+      let yy = y0;
+      for (const L of laid) {
+        if (L.label) {
+          _setFont(doc, FONT_BODY_BOLD);
+          doc.text(L.label, x2, yy + FONT_BODY.size);
+        }
+        _setFont(doc, FONT_BODY);
+        if (L.head) doc.text(L.head, x2 + L.labelW, yy + FONT_BODY.size);
+        yy += FONT_BODY.lh;
+        for (const rl of L.rest) {
+          doc.text(rl, x2 + 12, yy + FONT_BODY.size);
+          yy += FONT_BODY.lh;
+        }
+      }
+      y = y0 + totalH;
+    }
+
     function drawNumbered(items) {
       _setFont(doc, FONT_BODY);
       const indent = 24;
@@ -224,10 +428,18 @@
       if (!b) return 0;
       switch (b.kind) {
         case 'paragraph': {
-          _setFont(doc, FONT_BODY);
-          const indent = b.indent ? 18 : 0;
+          _setFont(doc, b.bold ? FONT_BODY_BOLD : FONT_BODY);
+          const indent = b.indent ? 18 : (b.firstIndent | 0);
           const lines = doc.splitTextToSize(_safeText(b.text), CONTENT_W - indent);
-          return (lines.length * FONT_BODY.lh) + 12;
+          return (lines.length * FONT_BODY.lh) + (b.tight ? 0 : 12);
+        }
+        case 'caption-table': {
+          const rows = Array.isArray(b.rows) ? b.rows : [];
+          return Math.max(1, rows.length) * FONT_BODY.lh;
+        }
+        case 'field-table': {
+          const rows = Array.isArray(b.rows) ? b.rows : [];
+          return Math.max(1, rows.length) * FONT_BODY.lh;
         }
         case 'cover-heading':    return FONT_COVER_H.lh;
         case 'cover-subheading': return FONT_COVER_SUB.lh;
@@ -302,20 +514,47 @@
           y += 4;
           break;
         case 'heading-2':
-          ensureRoom(FONT_H2.lh + 4);
+          // orphanGuard reserves N following body lines so a section
+          // header is never stranded at the foot of a page.
+          ensureRoom(FONT_H2.lh + 4 + (Math.max(0, b.orphanGuard | 0) * FONT_BODY.lh));
           y += 6;
-          drawLeft(FONT_H2, b.text);
+          // AR templates center + underline section headings; every other
+          // jurisdiction keeps the original left-aligned bold heading.
+          if (b.align === 'center' || b.underline) {
+            drawCenteredUnderlined(FONT_H2, b.text);
+          } else {
+            drawLeft(FONT_H2, b.text);
+          }
           y += 2;
           break;
-        case 'paragraph':
-          if (b.align === 'right') {
-            drawRight(FONT_BODY, b.text);
+        case 'paragraph': {
+          const pFont = b.bold ? FONT_BODY_BOLD : FONT_BODY;
+          if (b.justify || b.firstIndent) {
+            // Word-placed flow — first-line indent and/or justification.
+            drawFlowed(pFont, b.text, {
+              firstIndent: b.firstIndent | 0,
+              justify: !!b.justify,
+              align: b.align,
+            });
+          } else if (b.align === 'right') {
+            drawRight(pFont, b.text);
           } else if (b.align === 'center') {
-            drawCentered(FONT_BODY, b.text);
+            drawCentered(pFont, b.text);
           } else {
-            drawLeft(FONT_BODY, b.text, b.indent ? 18 : 0);
+            drawLeft(pFont, b.text, b.indent ? 18 : 0);
           }
-          y += 12; // ~one body line gap between paragraphs (readability)
+          // `tight` suppresses the inter-paragraph gap. AR prose marks its
+          // paragraph breaks with a first-line indent instead of a blank
+          // line, matching the exemplar; a gap there reads as a section
+          // break the judge will look for and not find.
+          if (!b.tight) y += 12;
+          break;
+        }
+        case 'caption-table':
+          drawCaptionTable(b);
+          break;
+        case 'field-table':
+          drawFieldTable(b);
           break;
         case 'numbered':
           drawNumbered(Array.isArray(b.items) ? b.items : []);

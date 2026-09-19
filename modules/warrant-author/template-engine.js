@@ -858,6 +858,15 @@ function compose(template, ctx) {
       continue;
     }
     const resolved = resolver(block, ctx);
+    // Presentation passthrough. `format` is a purely VISUAL hint declared
+    // on the template block ('prose' = first-line indent + justified,
+    // 'center' = centered line). It never participates in slot
+    // resolution, so it is forwarded verbatim rather than being threaded
+    // through every resolver. The block-builder and the live preview both
+    // read it; composers that don't understand a value ignore it.
+    if (block.format && resolved && !resolved.format) {
+      resolved.format = String(block.format);
+    }
     out.push(resolved);
     if (resolved.danglingSlots && resolved.danglingSlots.length) {
       for (const d of resolved.danglingSlots) allDangling.push(d);

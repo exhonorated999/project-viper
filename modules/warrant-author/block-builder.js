@@ -38,15 +38,13 @@
 
   function _safe(s) { return (s == null) ? '' : String(s); }
 
-  // Column layout for the Arkansas three-column ")" caption. The
-  // composers render with a proportional font, so this is a visual
-  // approximation of the exemplar's tab stops — intentionally plain
-  // spaces so both jsPDF (Times) and docx behave identically.
-  // AR_CAPTION_LEAD is the literal that anchors column 1; continuation
-  // and county rows are padded out to the widest column-1 literal so the
-  // ")" column cannot walk when the county name is long or short.
+  // Column layout for the Arkansas three-column ")" caption.
+  // AR_CAPTION_LEAD is the literal that anchors column 1. The caption is
+  // emitted as a `caption-table` block and the composers place the ")" at
+  // a real tab stop (see AR_CAPTION_COL below) — space padding was tried
+  // first and drifts, because both composers typeset in Times, not a
+  // monospace face.
   const AR_CAPTION_LEAD = 'STATE OF ARKANSAS';
-  const AR_CAPTION_GAP = '   ';
 
   // Default lead for the AR warrant-page order block. Overridden per-block
   // via `lead` on the template (the Addendum page does exactly that).
@@ -65,48 +63,91 @@
     return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   }
 
+  // ─── AR presentation geometry (points, from the Faulkner exemplar) ───
+  // The Arkansas exemplar is typeset differently from every other
+  // jurisdiction VIPER supports: section headings are CENTERED, BOLD and
+  // UNDERLINED; body prose carries a half-inch FIRST-LINE indent and is
+  // FULLY JUSTIFIED with no blank line between paragraphs; the caption and
+  // the warrant-page order block are true two/three-column layouts rather
+  // than space-padded text. These constants are consumed ONLY when
+  // _mapResolvedBlock is called with { ar: true } (i.e. from _buildArEsp),
+  // so CA / CO / VA / US rendering is bit-for-bit unchanged.
+  const AR_FIRST_INDENT = 36;    // 0.5" first-line indent on body prose
+  const AR_CAPTION_INDENT = 72;  // 1" inset of the whole ")" caption block
+  const AR_CAPTION_COL = 234;    // x of the ")" column, from the left margin
+  const AR_FIELD_COL = 216;      // x of the warrant-page field column
+
   /**
    * Map a single template-engine resolved block to one or more output blocks.
    * Returns an array (may be empty).
+   *
+   * opts.ar — apply the Arkansas exemplar's typography (see the AR_*
+   *   constants above). Scoped deliberately: the emitted primitives carry
+   *   plain visual flags (`align`, `underline`, `justify`, `firstIndent`,
+   *   `tight`, `bold`) that BOTH composers honour, and no other
+   *   jurisdiction sets them.
    */
-  function _mapResolvedBlock(rb) {
+  function _mapResolvedBlock(rb, opts) {
     const out = [];
     if (!rb) return out;
+    const ar = !!(opts && opts.ar);
     const kind = rb.kind;
     const heading = _safe(rb.heading).trim();
     const text = _safe(rb.text).trim();
+    const format = _safe(rb.format).trim();
+
+    // Section heading. AR centers + underlines; everyone else keeps the
+    // original left-aligned bold heading-2. `orphanGuard` asks the
+    // composer to keep N following body lines on the same page, so a
+    // section header can never be the last thing before a page break.
+    const h2 = t => (ar
+      ? { kind: 'heading-2', text: t, align: 'center', underline: true, orphanGuard: 3 }
+      : { kind: 'heading-2', text: t });
+
+    // Body paragraph. Under AR, a block tagged `format:"prose"` in the
+    // template gets the exemplar's first-line indent + justification and
+    // drops the inter-paragraph gap (the indent already marks the break);
+    // `format:"center"` gets a single centered line.
+    const para = t => {
+      if (!ar) return { kind: 'paragraph', text: t };
+      if (format === 'center') return { kind: 'paragraph', text: t, align: 'center' };
+      if (format === 'prose') {
+        return { kind: 'paragraph', text: t, firstIndent: AR_FIRST_INDENT, justify: true, tight: true };
+      }
+      return { kind: 'paragraph', text: t };
+    };
 
     switch (kind) {
       case 'constant':
       case 'verbatim':
       case 'provider-slot-paragraph':
       case 'optional':
-        if (heading) out.push({ kind: 'heading-2', text: heading });
-        if (text) out.push({ kind: 'paragraph', text });
+        if (heading) out.push(h2(heading));
+        if (text) out.push(para(text));
         break;
 
       case 'label':
-        if (text) out.push({ kind: 'heading-2', text });
-        else if (heading) out.push({ kind: 'heading-2', text: heading });
+        if (text) out.push(h2(text));
+        else if (heading) out.push(h2(heading));
         break;
 
       case 'provider-block':
         if (heading) out.push({ kind: 'heading-1', text: heading });
-        if (text) out.push({ kind: 'paragraph', text });
+        if (text) out.push(para(text));
         break;
 
       case 'target-account':
-        if (heading) out.push({ kind: 'heading-2', text: heading });
+        if (heading) out.push(h2(heading));
         if (text) out.push({ kind: 'paragraph', text });
         break;
 
       case 'date-range':
-        if (heading) out.push({ kind: 'heading-2', text: heading });
+        if (heading) out.push(h2(heading));
         if (text) out.push({ kind: 'paragraph', text });
         break;
 
       case 'items-to-seize': {
-        if (heading) out.push({ kind: 'heading-2', text: heading });
+        if (heading) out.push(h2(heading));
         const items = Array.isArray(rb.items) ? rb.items : [];
         if (items.length === 0) {
           out.push({ kind: 'paragraph', text: '[NO ITEMS SELECTED — review Items to Produce]' });
@@ -145,17 +186,24 @@
       }
 
       case 'affiant-contact': {
-        if (heading) out.push({ kind: 'heading-2', text: heading });
+        if (heading) out.push(h2(heading));
         // Affiant contact resolves a multi-field block (Affiant / Agency /
         // Phone / Email / Address). Render one paragraph per non-blank
         // source line so it reads as a vertical list instead of a single
         // run-on paragraph (composer otherwise reflows on `\n`).
+        // AR: the exemplar centers this block and sets it bold — it is the
+        // service address the provider mails the return to, so it is meant
+        // to stand out from the surrounding prose.
         if (text) {
           const lines = text.split(/\r?\n/);
           for (const ln of lines) {
             const t = ln.trim();
-            if (t) out.push({ kind: 'paragraph', text: t });
+            if (!t) continue;
+            out.push(ar
+              ? { kind: 'paragraph', text: t, align: 'center', bold: true, tight: true }
+              : { kind: 'paragraph', text: t });
           }
+          if (ar) out.push({ kind: 'spacer', size: 'md' });
         }
         break;
       }
@@ -260,18 +308,25 @@
         // Three-column ")" caption. Title may be multi-line; line 1 sits
         // beside "STATE OF ARKANSAS", any further lines hang beneath it,
         // and the provider name sits beside "COUNTY OF <county>".
+        //
+        // This is emitted as a real COLUMN block, not space-padded text.
+        // Space padding only lines up in a monospace font and the
+        // composers typeset in Times, so the ")" column used to walk with
+        // the length of the county name. The composers place the ")" at a
+        // measured/fixed tab stop instead.
         const titleLines = _safe(rb.documentTitle).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-        // Column 1 is variable-width ("COUNTY OF <county>" can be longer
-        // or shorter than "STATE OF ARKANSAS"), so pad every row out to
-        // the widest literal + the gap. Otherwise the ")" column walks.
-        const countyLead = `COUNTY OF ${countyUpper}`;
-        const col1 = Math.max(AR_CAPTION_LEAD.length, countyLead.length) + AR_CAPTION_GAP.length;
-        const padTo = s => s + ' '.repeat(Math.max(1, col1 - s.length));
-        out.push({ kind: 'paragraph', text: `${padTo(AR_CAPTION_LEAD)})  ${titleLines[0] || ''}` });
+        const rows = [{ left: AR_CAPTION_LEAD, right: titleLines[0] || '' }];
         for (let li = 1; li < titleLines.length; li++) {
-          out.push({ kind: 'paragraph', text: `${padTo('')})  ${titleLines[li]}` });
+          rows.push({ left: '', right: titleLines[li] });
         }
-        out.push({ kind: 'paragraph', text: `${padTo(countyLead)})  ${provLine}` });
+        rows.push({ left: `COUNTY OF ${countyUpper}`, right: provLine });
+        out.push({
+          kind: 'caption-table',
+          sep: ')',
+          indent: AR_CAPTION_INDENT,
+          sepCol: AR_CAPTION_COL,
+          rows,
+        });
         out.push({ kind: 'spacer', size: 'sm' });
         break;
       }
@@ -284,15 +339,21 @@
         // This is what makes the AR document ONE warrant with attached
         // addendums rather than one page set per provider.
         const lead = _safe(rb.lead).trim();
-        if (lead) out.push({ kind: 'paragraph', text: lead });
+        if (lead) out.push(ar ? { kind: 'paragraph', text: lead, tight: true } : { kind: 'paragraph', text: lead });
         const entries = Array.isArray(rb.entries) ? rb.entries : [];
         if (!entries.length) {
           out.push({ kind: 'paragraph', text: '[no addendums attached]' });
         } else {
+          if (ar) out.push({ kind: 'spacer', size: 'sm' });
           entries.forEach((e) => {
             const label = _safe(e && e.label).trim() || 'Addendum';
             const name  = _safe(e && e.providerName).trim() || '[provider]';
-            out.push({ kind: 'paragraph', text: `${label}: ${name}` });
+            // `tight` under AR: the index is a LIST, so a 12pt gap between
+            // every entry reads as a series of separate one-line
+            // paragraphs rather than an enumeration of the addendums.
+            out.push(ar
+              ? { kind: 'paragraph', text: `${label}: ${name}`, tight: true }
+              : { kind: 'paragraph', text: `${label}: ${name}` });
           });
         }
         out.push({ kind: 'spacer', size: 'sm' });
@@ -304,13 +365,33 @@
         // Addendum pages pass lead:"Online Service:" so the block reads as
         // an identification header rather than a second order sentence.
         const lead = _safe(rb.lead).trim() || AR_ORDER_LEAD_DEFAULT;
-        out.push({ kind: 'paragraph', text: `${lead} ${name}`.trim() });
-        out.push({ kind: 'paragraph', text: `Address: ${_safe(rb.street).trim()}` });
-        out.push({ kind: 'paragraph', text: `City: ${_safe(rb.city).trim()}` });
-        out.push({ kind: 'paragraph', text: `State: ${_safe(rb.state).trim()}` });
-        out.push({ kind: 'paragraph', text: `Zip Code: ${_safe(rb.zip).trim()}` });
-        out.push({ kind: 'paragraph', text: `Phone Number: ${_safe(rb.phone).trim()}` });
-        out.push({ kind: 'paragraph', text: `Email: ${_safe(rb.email).trim()}` });
+        // The exemplar typesets this as a two-column block: the order
+        // sentence sits bold at the left margin and the provider's details
+        // sit in a second column with BOLD field labels and plain values.
+        // Emitted as a `field-table` so both composers can align the
+        // column; a `lead` that already ends in a field label (the
+        // addendum's "Online Service:") is folded into row 1 instead so it
+        // isn't printed twice. The tail group must NOT start with ':' or
+        // the lazy match splits "…ordered:" / ": Online Service:".
+        const m = lead.match(/^(.*?)\s*([^\s:][^:]*:)\s*$/);
+        const rows = [];
+        let leadText = lead;
+        if (m && m[1].trim()) {
+          leadText = m[1].trim();
+          rows.push({ label: m[2], value: name });
+        } else if (m) {
+          leadText = '';
+          rows.push({ label: m[2], value: name });
+        } else {
+          rows.push({ label: '', value: `${lead} ${name}`.trim() });
+        }
+        rows.push({ label: 'Address:',      value: _safe(rb.street).trim() });
+        rows.push({ label: 'City:',         value: _safe(rb.city).trim() });
+        rows.push({ label: 'State:',        value: _safe(rb.state).trim() });
+        rows.push({ label: 'Zip Code:',     value: _safe(rb.zip).trim() });
+        rows.push({ label: 'Phone Number:', value: _safe(rb.phone).trim() });
+        rows.push({ label: 'Email:',        value: _safe(rb.email).trim() });
+        out.push({ kind: 'field-table', lead: leadText, leadBold: true, col: leadText ? AR_FIELD_COL : 0, rows });
         out.push({ kind: 'spacer', size: 'sm' });
         break;
       }
@@ -319,9 +400,12 @@
         const rank = _safe(rb.affiantRank).trim();
         const name = _safe(rb.affiantName).trim();
         out.push({ kind: 'spacer', size: 'md' });
-        out.push({ kind: 'signature', label: 'Signature of Affiant' });
-        out.push({ kind: 'paragraph', text: [rank, name].filter(Boolean).join(' ') || '[Affiant]' });
-        out.push({ kind: 'paragraph', text: _safe(rb.agencyName).trim() || '[Agency]' });
+        // keepWithNext chains the whole signature group so the rule and
+        // its identifying lines never straddle a page break — a judge
+        // seeing a lone signature rule on its own page will reject it.
+        out.push({ kind: 'signature', label: 'Signature of Affiant', keepWithNext: ar || undefined });
+        out.push({ kind: 'paragraph', text: [rank, name].filter(Boolean).join(' ') || '[Affiant]', tight: ar || undefined, keepWithNext: ar || undefined });
+        out.push({ kind: 'paragraph', text: _safe(rb.agencyName).trim() || '[Agency]', tight: ar || undefined });
         break;
       }
 
@@ -329,16 +413,18 @@
         const county = _safe(rb.county).trim() || '[County]';
         const division = _safe(rb.division).trim();
         out.push({ kind: 'spacer', size: 'md' });
-        out.push({ kind: 'signature', label: 'Honorable Judge' });
-        out.push({ kind: 'paragraph', text: `${county} County Circuit Court` });
-        out.push({ kind: 'paragraph', text: `${division || '____'} Division` });
+        out.push({ kind: 'signature', label: 'Honorable Judge', keepWithNext: ar || undefined });
+        out.push({ kind: 'paragraph', text: `${county} County Circuit Court`, tight: ar || undefined, keepWithNext: ar || undefined });
+        out.push({ kind: 'paragraph', text: `${division || '____'} Division`, tight: ar || undefined });
         break;
       }
 
       default:
-        // Unknown kind — render as plain paragraph with heading fallback
-        if (heading) out.push({ kind: 'heading-2', text: heading });
-        if (text) out.push({ kind: 'paragraph', text });
+        // Unknown kind — render as plain paragraph with heading fallback.
+        // NOTE: 'verbatim-paragraph' has no explicit arm and lands here by
+        // design, so AR's h2()/para() styling must be applied.
+        if (heading) out.push(h2(heading));
+        if (text) out.push(para(text));
         break;
     }
     return out;
@@ -1426,6 +1512,10 @@
     }
     const isAddendumBlock = rb =>
       String((rb && rb.key) || '').startsWith(AR_ADDENDUM_KEY_PREFIX);
+    // Arkansas typography (centered/underlined headings, indented +
+    // justified prose, real caption/field columns). Scoped to this
+    // builder so CA / CO / VA / US output is untouched.
+    const AR_OPTS = { ar: true };
 
     // Pass 1 — the Affidavit + Search Warrant, ONCE, from the first
     // compose. Every later compose differs only in its 'ad-' blocks.
@@ -1434,7 +1524,7 @@
       const resolvedBlocks = Array.isArray(composed.blocks) ? composed.blocks : [];
       for (const rb of resolvedBlocks) {
         if (isAddendumBlock(rb)) continue;
-        for (const m of _mapResolvedBlock(rb)) blocks.push(m);
+        for (const m of _mapResolvedBlock(rb, AR_OPTS)) blocks.push(m);
       }
     }
 
@@ -1446,7 +1536,7 @@
       const resolvedBlocks = Array.isArray(composed.blocks) ? composed.blocks : [];
       for (const rb of resolvedBlocks) {
         if (!isAddendumBlock(rb)) continue;
-        for (const m of _mapResolvedBlock(rb)) blocks.push(m);
+        for (const m of _mapResolvedBlock(rb, AR_OPTS)) blocks.push(m);
       }
     });
 

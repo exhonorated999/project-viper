@@ -3143,10 +3143,16 @@ function _renderLivePreview(caseId, draft, activeId) {
   // flag, danglingSlots as an array. Be defensive for both shapes.
   const dangling = Array.isArray(danglingRaw) ? danglingRaw : [];
   const missingItems = Array.isArray(missingRaw) ? missingRaw : (missingRaw ? ['(see Items to Seize)'] : []);
+  const isArTpl = String(draft.template || '') === 'ar-multi-business-esp';
 
   const html = blocks.map((b, i) => {
     if (b.omitted) return '';
-    const heading = b.heading ? `<div class="wa-pv-heading">${esc(b.heading)}</div>` : '';
+    // Arkansas typesets section headings centered + underlined and body
+    // prose first-line-indented + justified (see the exemplar). Mirror it
+    // here or the preview stops predicting the PDF.
+    const heading = b.heading
+      ? `<div class="wa-pv-heading"${isArTpl ? ' style="text-align:center;text-decoration:underline"' : ''}>${esc(b.heading)}</div>`
+      : '';
     let body = '';
     if (b.kind === 'label') {
       // Section header (block-builder maps this to heading-2). Without
@@ -3188,24 +3194,22 @@ function _renderLivePreview(caseId, draft, activeId) {
     } else if (b.kind === 'co-da-approval') {
       body = `<div class="wa-pv-text">APPROVED AS TO FORM:<br>${esc(b.daName || '[District Attorney Name]')}<br>${esc(b.daTitle || 'District Attorney')}<br>By /s<br>${esc(b.daDeputyLine || '[Chief][Senior] Deputy District Attorney')}</div>`;
     } else if (b.kind === 'ar-caption') {
-      // Three-column ")" caption. wa-pv-text is monospace, so pad column 1
-      // out to the widest literal exactly as block-builder does — otherwise
-      // the continuation row's ")" sits flush left and the preview no
-      // longer shows what the PDF will contain.
+      // Three-column ")" caption, rendered as a CSS grid so column 1 is
+      // sized to its widest cell. The old version space-padded for the
+      // monospace preview font, which no longer matches the PDF — the
+      // composers now place the ")" at a real tab stop.
       const county = String(b.county || '[County]').toUpperCase();
-      const lead = 'STATE OF ARKANSAS';
-      const countyLead = `COUNTY OF ${county}`;
-      const col1 = Math.max(lead.length, countyLead.length) + 3;
-      const padTo = s => s + ' '.repeat(Math.max(1, col1 - s.length));
-      const nb = s => esc(s).replace(/ /g, '&nbsp;');
       const titleLines = String(b.documentTitle || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-      const rows = [`${nb(padTo(lead))})&nbsp;&nbsp;<span class="font-bold">${esc(titleLines[0] || '')}</span>`];
+      const capRows = [{ left: 'STATE OF ARKANSAS', right: titleLines[0] || '' }];
       for (let li = 1; li < titleLines.length; li++) {
-        rows.push(`${nb(padTo(''))})&nbsp;&nbsp;<span class="font-bold">${esc(titleLines[li])}</span>`);
+        capRows.push({ left: '', right: titleLines[li] });
       }
-      rows.push(`${nb(padTo(countyLead))})&nbsp;&nbsp;<span class="font-bold">${esc(b.providerLine || '[Provider]')}</span>`);
+      capRows.push({ left: `COUNTY OF ${county}`, right: String(b.providerLine || '[Provider]') });
+      const capCells = capRows.map(r =>
+        `<div>${esc(r.left)}</div><div>)</div><div class="font-bold">${esc(r.right)}</div>`
+      ).join('');
       body = `<div class="wa-pv-text text-center font-semibold">IN THE CIRCUIT COURT OF THE STATE OF ARKANSAS<br>FOR THE COUNTY OF ${esc(county)}</div>
-              <div class="wa-pv-text mt-1">${rows.join('<br>')}</div>`;
+              <div class="wa-pv-text mt-1" style="display:grid;grid-template-columns:max-content 1.25em 1fr;column-gap:.6em;margin-left:2em">${capCells}</div>`;
     } else if (b.kind === 'ar-addendum-index') {
       // "See the Addendums attached hereto..." + one line per provider.
       // Missing this arm renders "(empty block)".
@@ -3218,15 +3222,29 @@ function _renderLivePreview(caseId, draft, activeId) {
     } else if (b.kind === 'ar-provider-order-block') {
       // `lead` is set by the Addendum page block so it reads as an
       // identification header instead of a second order sentence. Must
-      // mirror block-builder's AR_ORDER_LEAD_DEFAULT.
+      // mirror block-builder's AR_ORDER_LEAD_DEFAULT and its two-column
+      // field-table layout: the order sentence bold in column 1, BOLD
+      // field labels with plain values in column 2.
       const arLead = String(b.lead || '').trim() || 'The following party is ordered: Online Service:';
-      body = `<div class="wa-pv-text">${esc(arLead)} ${esc(b.providerName || '[Provider]')}<br>
-              Address: ${esc(b.street || '')}<br>
-              City: ${esc(b.city || '')}<br>
-              State: ${esc(b.state || '')}<br>
-              Zip Code: ${esc(b.zip || '')}<br>
-              Phone Number: ${esc(b.phone || '')}<br>
-              Email: ${esc(b.email || '')}</div>`;
+      const lm = arLead.match(/^(.*?)\s*([^\s:][^:]*:)\s*$/);
+      const arLeadText = lm ? lm[1].trim() : arLead;
+      const fieldRows = [];
+      if (lm) fieldRows.push({ label: lm[2], value: String(b.providerName || '[Provider]') });
+      else fieldRows.push({ label: '', value: `${arLead} ${b.providerName || '[Provider]'}`.trim() });
+      fieldRows.push({ label: 'Address:',      value: String(b.street || '') });
+      fieldRows.push({ label: 'City:',         value: String(b.city || '') });
+      fieldRows.push({ label: 'State:',        value: String(b.state || '') });
+      fieldRows.push({ label: 'Zip Code:',     value: String(b.zip || '') });
+      fieldRows.push({ label: 'Phone Number:', value: String(b.phone || '') });
+      fieldRows.push({ label: 'Email:',        value: String(b.email || '') });
+      const fieldCells = fieldRows.map((r, ri) =>
+        `<div class="font-bold">${ri === 0 ? esc(arLeadText) : ''}</div>`
+        + `<div>${r.label ? `<span class="font-bold">${esc(r.label)}</span> ` : ''}${esc(r.value)}</div>`
+      ).join('');
+      body = `<div class="wa-pv-text" style="display:grid;grid-template-columns:max-content 1fr;column-gap:1.5em">${fieldCells}</div>`;
+    } else if (b.kind === 'affiant-contact' && isArTpl) {
+      // The exemplar centers + bolds the service-address block.
+      body = `<div class="wa-pv-text text-center font-bold">${_safeMultilineHtml(b.text || '')}</div>`;
     } else if (b.kind === 'ar-affiant-signature') {
       body = `<div class="wa-pv-text">______________________________<br><span class="text-slate-400">Signature of Affiant</span><br>${esc([b.affiantRank, b.affiantName].filter(Boolean).join(' ') || '[Affiant]')}<br>${esc(b.agencyName || '[Agency]')}</div>`;
     } else if (b.kind === 'ar-judge-block') {
@@ -3235,7 +3253,12 @@ function _renderLivePreview(caseId, draft, activeId) {
     } else if (b.kind === 'page-break') {
       body = `<div class="wa-pv-text text-center text-amber-400 italic border-t border-b border-dashed border-amber-500/40 py-1 my-1">— Page Break —</div>`;
     } else if (b.text) {
-      body = `<div class="wa-pv-text">${_safeMultilineHtml(b.text)}</div>`;
+      // AR prose: first-line indent + justified, matching the exemplar
+      // (and the composers' `firstIndent`/`justify` primitives).
+      const fmtStyle = (isArTpl && b.format === 'prose')
+        ? ' style="text-indent:2.5em;text-align:justify"'
+        : (isArTpl && b.format === 'center') ? ' style="text-align:center"' : '';
+      body = `<div class="wa-pv-text"${fmtStyle}>${_safeMultilineHtml(b.text)}</div>`;
     } else if (b.heading) {
       // Heading-only block (the AR section headers are constant blocks
       // carrying only `heading`, which block-builder maps to heading-2).

@@ -89,6 +89,79 @@ function _h2(text) {
   });
 }
 
+// Centered + bold + UNDERLINED section heading (Arkansas exemplar style).
+// Every other jurisdiction keeps _h2 above. keepNext is Word's native
+// orphan guard — the heading cannot end a page.
+function _h2CenteredUnderlined(text) {
+  return new Paragraph({
+    children: [new TextRun({
+      text: _safe(text),
+      font: 'Times New Roman',
+      size: 26,
+      bold: true,
+      underline: {},
+    })],
+    alignment: AlignmentType.CENTER,
+    keepNext: true,
+    spacing: { before: 160, after: 100, line: 320 },
+  });
+}
+
+// Three-column ")" caption (Arkansas). Rendered with real LEFT tab stops
+// so Word aligns the separator column regardless of how long the county
+// name is — space padding drifts in a proportional face. Tab-stop
+// positions are twips measured from the LEFT MARGIN, which is the same
+// origin block-builder's `indent`/`sepCol` point values use.
+function _captionTable(b) {
+  const rows = Array.isArray(b.rows) ? b.rows : [];
+  if (!rows.length) return [];
+  const sep = _safe(b.sep || ')');
+  const indentTw = Math.round((((b.indent | 0) || 72)) * 20);
+  const sepTw = Math.round((((b.sepCol | 0) || 234)) * 20);
+  const rightTw = sepTw + 320;
+  return rows.map(r => new Paragraph({
+    children: [
+      _run(_safe((r && r.left) || '').trim()),
+      new TextRun({ text: '\t', font: 'Times New Roman', size: 24 }),
+      _run(sep),
+      new TextRun({ text: '\t', font: 'Times New Roman', size: 24 }),
+      _run(_safe((r && r.right) || '').trim()),
+    ],
+    indent: { left: indentTw },
+    tabStops: [
+      { type: TabStopType.LEFT, position: sepTw },
+      { type: TabStopType.LEFT, position: rightTw },
+    ],
+    spacing: { before: 0, after: 0, line: 300 },
+  }));
+}
+
+// Two-column label/value block (Arkansas warrant page). `lead` sits bold
+// in column 1 of the first row; every row prints a BOLD field label and a
+// plain value in column 2. `col: 0` means there is no lead column, so the
+// fields sit flush at the left margin and no tab is emitted.
+function _fieldTable(b) {
+  const rows = Array.isArray(b.rows) ? b.rows : [];
+  const colPt = (typeof b.col === 'number' && isFinite(b.col)) ? Math.max(0, b.col) : 216;
+  const colTw = Math.round(colPt * 20);
+  const lead = _safe(b.lead || '').trim();
+  const stops = colTw > 0 ? [{ type: TabStopType.LEFT, position: colTw }] : [];
+  return rows.map((r, i) => {
+    const label = _safe((r && r.label) || '').trim();
+    const value = _safe((r && r.value) || '').trim();
+    const kids = [];
+    if (i === 0 && lead) kids.push(_run(lead, { bold: !!b.leadBold }));
+    if (colTw > 0) kids.push(new TextRun({ text: '\t', font: 'Times New Roman', size: 24 }));
+    if (label) kids.push(_run(label + ' ', { bold: true }));
+    if (value) kids.push(_run(value));
+    return new Paragraph({
+      children: kids,
+      tabStops: stops,
+      spacing: { before: 0, after: 0, line: 300 },
+    });
+  });
+}
+
 function _spacer(size) {
   return new Paragraph({
     children: [_run(' ', { size: 24 })],
@@ -174,16 +247,32 @@ function _renderBlock(b) {
     case 'cover-subheading': return [_coverSubheading(b.text)];
     case 'cover-meta':       return [_coverMeta(b.label, b.value)];
     case 'heading-1':        return [_h1(b.text)];
-    case 'heading-2':        return [_h2(b.text)];
+    case 'heading-2':
+      return [(b.align === 'center' || b.underline)
+        ? _h2CenteredUnderlined(b.text)
+        : _h2(b.text)];
+    case 'caption-table':    return _captionTable(b);
+    case 'field-table':      return _fieldTable(b);
     case 'paragraph': {
-      const align = (b.align === 'right')  ? AlignmentType.RIGHT
+      const align = b.justify              ? AlignmentType.JUSTIFIED
+                  : (b.align === 'right')  ? AlignmentType.RIGHT
                   : (b.align === 'center') ? AlignmentType.CENTER
                   : AlignmentType.LEFT;
       // after: 200 twips (~10pt) gives a clear visible gap between
       // paragraphs — important on un-indented legal-document prose
       // where "IT APPEARING", "IT IS ORDERED", etc. each open a new
       // logical section the reader needs to find quickly.
-      return [_para(b.text, { indent: b.indent ? 360 : 0, align, after: 200 })];
+      // AR prose sets `tight` and marks its breaks with a first-line
+      // indent instead, matching the exemplar.
+      const firstLine = (b.firstIndent | 0) ? Math.round((b.firstIndent | 0) * 20) : 0;
+      return [new Paragraph({
+        children: [_run(b.text, { bold: !!b.bold })],
+        alignment: align,
+        spacing: { before: 0, after: b.tight ? 0 : 200, line: 320 },
+        indent: (b.indent || firstLine)
+          ? { left: b.indent ? 360 : 0, firstLine: firstLine || undefined }
+          : undefined,
+      })];
     }
     case 'numbered': {
       const items = Array.isArray(b.items) ? b.items : [];

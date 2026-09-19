@@ -25,26 +25,31 @@
     },
     {
       "key": "03-oath-line",
+      "format": "center",
       "kind": "verbatim-paragraph",
       "text": "I, {{agency.affiantName}}, after being first duly sworn upon oath, depose and say:"
     },
     {
       "key": "04-agent-background",
+      "format": "prose",
       "kind": "verbatim-paragraph",
       "text": "{{agency.trainingExperienceBoilerplate}}"
     },
     {
       "key": "05-assignment",
+      "format": "prose",
       "kind": "verbatim-paragraph",
       "text": "I am a full time {{agency.affiantRank}} with the {{agency.agencyName}} and have been assigned to investigate {{case.offenseDescription}} reported on {{case.offenseDate}} (Report# {{case.number}})."
     },
     {
       "key": "06-records-belief",
+      "format": "prose",
       "kind": "constant",
       "text": "I have reason to believe that particular Electronic Service subscriber records may contain evidence identifying and linking, victim(s), suspect(s), and possible witness(es) to the referenced investigation."
     },
     {
       "key": "07-request-paragraph",
+      "format": "prose",
       "kind": "constant",
       "text": "I am requesting a search warrant allowing for the release of subscriber records from the Electronic Service Providers set forth in the Addendums attached hereto, and to disclose the contents of any record pertaining to a customer or subscriber within such provider's possession, custody, or control."
     },
@@ -65,6 +70,7 @@
     },
     {
       "key": "11-probable-cause",
+      "format": "prose",
       "kind": "verbatim-paragraph",
       "text": "{{addendum.probableCause}}"
     },
@@ -75,6 +81,7 @@
     },
     {
       "key": "13-conclusion",
+      "format": "prose",
       "kind": "constant",
       "text": "Based on the foregoing information, I believe evidence relating to this investigation are currently within the records described above. I therefore respectfully request that a Search Warrant be issued authorizing the release and examination of the records set forth herein."
     },
@@ -112,6 +119,7 @@
     },
     {
       "key": "21-investigation-ref",
+      "format": "prose",
       "kind": "verbatim-paragraph",
       "text": "Search Warrant is in reference to an ongoing investigation, {{agency.agencyName}} Incident #{{case.number}}."
     },
@@ -126,6 +134,7 @@
     },
     {
       "key": "24-execution-window",
+      "format": "prose",
       "kind": "constant",
       "text": "You are further directed to execute the search warrant within five (5) days of issuance between the hours of 7 am and 10 pm, and make return of this search warrant to me within five (5) days after execution, except as otherwise provided herein:"
     },

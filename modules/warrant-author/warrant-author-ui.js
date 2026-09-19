@@ -210,6 +210,51 @@ function _resolveCaseCtxForDraft(draft) {
 }
 
 // ─── AR-specific compose-ctx helper ─────────────────────────────────────
+// ONE WARRANT, MANY ADDENDUMS.
+//
+// The AR document is a single affidavit + single warrant with one Addendum
+// page per provider. Three blocks need the WHOLE provider list rather than
+// just the addendum being composed: the caption's third column, the
+// "RECORDS TO BE PROVIDED" index, and the warrant's ordered-parties index.
+// This builds that list and it is placed on `ctx.addendums` at BOTH compose
+// sites (live preview and generate) — the engine's _arAddendumList() reads
+// it and degrades to a one-entry list built from ctx.provider if absent.
+//
+// pageLabel mirrors draft-store's _pageLabelFor sequencer; the fallback
+// only fires for a draft written before labels were assigned.
+function _pageLabelFallback(idx) {
+  let n = Number(idx) || 0;
+  let out = '';
+  do { out = String.fromCharCode(65 + (n % 26)) + out; n = Math.floor(n / 26) - 1; } while (n >= 0);
+  return out;
+}
+
+function _resolveAddendumListForDraft(draft, providersMerged) {
+  const ads = (draft && Array.isArray(draft.addendums)) ? draft.addendums : [];
+  if (!ads.length) return [];
+  let merged = Array.isArray(providersMerged) ? providersMerged : null;
+  if (!merged) {
+    try {
+      const pdir = _pdir();
+      merged = pdir ? pdir.mergeProviders({
+        providerOverrides: _safeLS('viperWarrantAuthorProviderOverrides'),
+        customProviders:   _safeLS('viperWarrantAuthorCustomProviders'),
+        providerDeletions: _safeLS('viperWarrantAuthorProviderDeletions')
+      }) : [];
+    } catch (_e) { merged = []; }
+  }
+  return ads.map((a, i) => {
+    const p = merged.find(x => x && x.key === a.providerKey) || null;
+    return {
+      providerKey:  String(a.providerKey || ''),
+      providerName: String((p && (p.legalEntity || p.name)) || a.providerKey || '').trim(),
+      businessName: String(a.businessName || '').trim(),
+      pageLabel:    String(a.pageLabel || _pageLabelFallback(i)).trim(),
+    };
+  });
+}
+
+// ─── AR-specific compose-ctx helper ─────────────────────────────────────
 // The Arkansas exemplar prints "<County> County Circuit Court" / "<N>
 // Division" beneath the judge signature line, and "FOR THE COUNTY OF
 // <County>" in the caption. County comes from the agency profile (shared
@@ -3079,6 +3124,9 @@ function _renderLivePreview(caseId, draft, activeId) {
     // the same ctx.court key for {county, division}.
     court: _resolveCourtCtxForDraft(draft),
     case: _resolveCaseCtxForDraft(draft),
+    // AR: the whole provider list, so the caption + the two addendum-index
+    // blocks name every attached provider even while previewing one.
+    addendums: _resolveAddendumListForDraft(draft),
   };
 
   let result;
@@ -3100,7 +3148,12 @@ function _renderLivePreview(caseId, draft, activeId) {
     if (b.omitted) return '';
     const heading = b.heading ? `<div class="wa-pv-heading">${esc(b.heading)}</div>` : '';
     let body = '';
-    if (b.kind === 'items-to-seize' && Array.isArray(b.items)) {
+    if (b.kind === 'label') {
+      // Section header (block-builder maps this to heading-2). Without
+      // this arm the preview shows it as ordinary body text and the
+      // examiner cannot see the document's section structure.
+      body = `<div class="wa-pv-text font-bold">${esc(b.text || b.heading || '')}</div>`;
+    } else if (b.kind === 'items-to-seize' && Array.isArray(b.items)) {
       if (b.style === 'prose') {
         // AR flowing-prose list — one semicolon-joined sentence, verbatim
         // to the Arkansas exemplar. Mirrors block-builder's 'prose' arm.
@@ -3153,6 +3206,15 @@ function _renderLivePreview(caseId, draft, activeId) {
       rows.push(`${nb(padTo(countyLead))})&nbsp;&nbsp;<span class="font-bold">${esc(b.providerLine || '[Provider]')}</span>`);
       body = `<div class="wa-pv-text text-center font-semibold">IN THE CIRCUIT COURT OF THE STATE OF ARKANSAS<br>FOR THE COUNTY OF ${esc(county)}</div>
               <div class="wa-pv-text mt-1">${rows.join('<br>')}</div>`;
+    } else if (b.kind === 'ar-addendum-index') {
+      // "See the Addendums attached hereto..." + one line per provider.
+      // Missing this arm renders "(empty block)".
+      const idxEntries = Array.isArray(b.entries) ? b.entries : [];
+      const idxLead = String(b.lead || '').trim();
+      const idxRows = idxEntries.length
+        ? idxEntries.map(e => `${esc(e.label || 'Addendum')}: ${esc(e.providerName || '[Provider]')}`).join('<br>')
+        : '<span class="text-amber-300 italic">[no addendums attached]</span>';
+      body = `<div class="wa-pv-text">${idxLead ? esc(idxLead) + '<br><br>' : ''}${idxRows}</div>`;
     } else if (b.kind === 'ar-provider-order-block') {
       // `lead` is set by the Addendum page block so it reads as an
       // identification header instead of a second order sentence. Must
@@ -3174,6 +3236,12 @@ function _renderLivePreview(caseId, draft, activeId) {
       body = `<div class="wa-pv-text text-center text-amber-400 italic border-t border-b border-dashed border-amber-500/40 py-1 my-1">— Page Break —</div>`;
     } else if (b.text) {
       body = `<div class="wa-pv-text">${_safeMultilineHtml(b.text)}</div>`;
+    } else if (b.heading) {
+      // Heading-only block (the AR section headers are constant blocks
+      // carrying only `heading`, which block-builder maps to heading-2).
+      // The heading is already rendered above — emitting the "(empty
+      // block)" placeholder here would be a false defect signal.
+      body = '';
     } else {
       body = '<div class="wa-pv-text text-slate-500 italic">(empty block)</div>';
     }
@@ -5213,6 +5281,9 @@ const bus = {
     // 1. Compose each addendum
     const addendumComposes = [];
     const issues = [];
+    // AR: every compose gets the FULL provider list so the single
+    // affidavit/warrant page set names all of them (see _buildArEsp).
+    const addendumList = _resolveAddendumListForDraft(draft, providersMerged);
     for (const ad of ads) {
       const provider = providersMerged.find(p => p.key === ad.providerKey) || { key: ad.providerKey, name: ad.providerKey || '(no provider)' };
       const adForEngine = Object.assign({}, ad, {
@@ -5244,6 +5315,7 @@ const bus = {
         // off the same ctx.court key.
         court: _resolveCourtCtxForDraft(draft),
         case: _resolveCaseCtxForDraft(draft),
+        addendums: addendumList,
       };
       let composed;
       try {
@@ -5260,6 +5332,7 @@ const bus = {
         providerKey:  provider.key,
         providerName: provider.name || provider.key,
         businessName: ad.businessName || '',
+        pageLabel:    ad.pageLabel || '',
         compose:      composed,
       });
     }

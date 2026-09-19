@@ -276,6 +276,29 @@
         break;
       }
 
+      case 'ar-addendum-index': {
+        // "See the Addendums attached hereto..."
+        //     Addendum A: Google LLC
+        //     Addendum B: Meta Platforms, Inc.
+        //
+        // This is what makes the AR document ONE warrant with attached
+        // addendums rather than one page set per provider.
+        const lead = _safe(rb.lead).trim();
+        if (lead) out.push({ kind: 'paragraph', text: lead });
+        const entries = Array.isArray(rb.entries) ? rb.entries : [];
+        if (!entries.length) {
+          out.push({ kind: 'paragraph', text: '[no addendums attached]' });
+        } else {
+          entries.forEach((e) => {
+            const label = _safe(e && e.label).trim() || 'Addendum';
+            const name  = _safe(e && e.providerName).trim() || '[provider]';
+            out.push({ kind: 'paragraph', text: `${label}: ${name}` });
+          });
+        }
+        out.push({ kind: 'spacer', size: 'sm' });
+        break;
+      }
+
       case 'ar-provider-order-block': {
         const name = _safe(rb.providerName).trim() || '[provider]';
         // Addendum pages pass lead:"Online Service:" so the block reads as
@@ -1375,17 +1398,23 @@
   // than a hand-built page set. pcNarrative is unused here — the template
   // pulls PC via {{addendum.probableCause}}, injected by the UI compose ctx.
   //
-  // TWO-PASS LAYOUT (examiner's call, 5.2.1): each composed provider is
-  // partitioned on the 'ad-' block-key prefix into
+  // ONE WARRANT, MANY ADDENDUMS (examiner's call, revised 5.2.1):
+  // Each composed provider is partitioned on the 'ad-' block-key prefix:
   //   • document part  — Affidavit + hard page-break + Search Warrant
   //   • addendum part  — ADDENDUM <letter>: provider block, target
   //                      identifier(s), date range, records list
-  // Pass 1 emits every provider's document part (page-break between
-  // providers). Pass 2 emits every provider's addendum part, so ALL
-  // addendums land at the very end of the deliverable after the last judge
-  // signature — the officer tears them off and serves one per provider.
-  // The in-body cross-reference ("...set forth in Addendum A...") comes
-  // from {{addendum.pageLabel}}, resolved by the template engine.
+  //
+  // The document part is emitted EXACTLY ONCE, from the first compose.
+  // Introduction/Background, Facts of the Investigation, the affiant
+  // signature, the jurat and both judge signatures must never repeat —
+  // this is a single warrant that covers every provider. The blocks that
+  // would otherwise be provider-specific (the caption's third column and
+  // the two 'ar-addendum-index' blocks) resolve against ctx.addendums,
+  // the FULL provider list, so the first compose already names them all.
+  //
+  // Pass 2 then emits every provider's addendum part, so all ADDENDUM
+  // pages land at the end after the last judge signature — the officer
+  // tears one off and serves it with the warrant per provider.
   function _buildArEsp(draft, agency, caseInfo, addendumComposes, pcNarrative) {
     const blocks = [];
     if (!Array.isArray(addendumComposes) || !addendumComposes.length) {
@@ -1398,20 +1427,20 @@
     const isAddendumBlock = rb =>
       String((rb && rb.key) || '').startsWith(AR_ADDENDUM_KEY_PREFIX);
 
-    // Pass 1 — Affidavit + Search Warrant, one page set per provider.
-    addendumComposes.forEach((ac, i) => {
-      if (i > 0) blocks.push({ kind: 'page-break' });
-      const composed = ac.compose || {};
+    // Pass 1 — the Affidavit + Search Warrant, ONCE, from the first
+    // compose. Every later compose differs only in its 'ad-' blocks.
+    {
+      const composed = addendumComposes[0].compose || {};
       const resolvedBlocks = Array.isArray(composed.blocks) ? composed.blocks : [];
       for (const rb of resolvedBlocks) {
         if (isAddendumBlock(rb)) continue;
         for (const m of _mapResolvedBlock(rb)) blocks.push(m);
       }
-    });
+    }
 
-    // Pass 2 — all ADDENDUM pages, grouped, in provider order. Each
-    // addendum section opens with its own page-break block (ad-01), so no
-    // extra break is inserted here.
+    // Pass 2 — all ADDENDUM pages, in provider order. Each addendum
+    // section opens with its own page-break block (ad-01), so no extra
+    // break is inserted here.
     addendumComposes.forEach((ac) => {
       const composed = ac.compose || {};
       const resolvedBlocks = Array.isArray(composed.blocks) ? composed.blocks : [];

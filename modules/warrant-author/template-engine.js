@@ -603,18 +603,61 @@ function _arDivision(ctx) {
   return String(court.division || agency.arCircuitDivision || '').trim();
 }
 
+// ONE WARRANT, MANY ADDENDUMS (5.2.1).
+//
+// The Arkansas document is a single affidavit + single warrant with one
+// Addendum page per Electronic Service Provider. The caption's third
+// column and the two "addendum index" blocks therefore need the WHOLE
+// provider list, not just the addendum currently being composed.
+//
+// `ctx.addendums` is that list — `[{pageLabel, providerName, businessName,
+// providerKey}]`, supplied by the UI at BOTH compose sites. When it is
+// absent (a bare ctx, an older caller, a single-addendum harness) we
+// degrade to a one-entry list built from `ctx.provider` + `ctx.addendum`
+// so the block still renders something truthful rather than dangling.
+function _arAddendumList(ctx) {
+  const raw = Array.isArray(ctx.addendums) ? ctx.addendums : null;
+  if (raw && raw.length) {
+    return raw.map((a, i) => ({
+      pageLabel:    String((a && a.pageLabel) || _arFallbackLabel(i)).trim(),
+      providerName: String((a && (a.providerName || a.provider || a.providerKey)) || '').trim(),
+      businessName: String((a && a.businessName) || '').trim(),
+    })).filter(e => e.providerName);
+  }
+  const provider = ctx.provider || {};
+  const addendum = ctx.addendum || {};
+  const name = String(provider.legalEntity || provider.name || '').trim();
+  if (!name) return [];
+  return [{
+    pageLabel:    String(addendum.pageLabel || 'A').trim(),
+    providerName: name,
+    businessName: String(addendum.businessName || '').trim(),
+  }];
+}
+
+// Mirrors draft-store.js _pageLabelFor: A..Z then AA, AB, ...
+function _arFallbackLabel(idx) {
+  let n = Number(idx) || 0;
+  let out = '';
+  do { out = String.fromCharCode(65 + (n % 26)) + out; n = Math.floor(n / 26) - 1; } while (n >= 0);
+  return out;
+}
+
 function _resolveArCaption(block, ctx) {
   // IN THE CIRCUIT COURT OF THE STATE OF ARKANSAS
   // FOR THE COUNTY OF <COUNTY>
   // STATE OF ARKANSAS   )  <documentTitle line 1>
   //                     )  <documentTitle line 2>
-  // COUNTY OF <COUNTY>  )  <PROVIDER>
-  const provider = ctx.provider || {};
+  // COUNTY OF <COUNTY>  )  <PROVIDER>[, <PROVIDER>...]
+  //
+  // Third column lists EVERY provider attached to the warrant, comma
+  // separated, because this is one warrant covering all addendums.
   const dangling = [];
   const county = _arCounty(ctx);
   if (!county) dangling.push('court.county');
   const titleRes = substituteSlots(block.documentTitle || '', ctx);
-  const providerLine = String(provider.legalEntity || provider.name || '').trim();
+  const list = _arAddendumList(ctx);
+  const providerLine = list.map(e => e.providerName).join(', ');
   if (!providerLine) dangling.push('provider.name');
   return {
     key: block.key,
@@ -625,6 +668,35 @@ function _resolveArCaption(block, ctx) {
     documentTitle: titleRes.text,
     providerLine,
     danglingSlots: dangling.concat(titleRes.danglingSlots || []),
+  };
+}
+
+function _resolveArAddendumIndex(block, ctx) {
+  // <lead sentence>
+  //     Addendum A: Google LLC
+  //     Addendum B: Meta Platforms, Inc.
+  //
+  // Used TWICE in the AR template: once as "RECORDS TO BE PROVIDED"
+  // (which says, in effect, see the attached addendums) and once on the
+  // warrant page as the ordered-parties list. Only the lead differs, so
+  // it comes off the block.
+  const dangling = [];
+  const leadRes = substituteSlots(block.lead || '', ctx);
+  const list = _arAddendumList(ctx);
+  if (!list.length) dangling.push('provider.name');
+  const entries = list.map(e => ({
+    label: 'Addendum ' + e.pageLabel,
+    providerName: e.providerName,
+    businessName: e.businessName,
+  }));
+  return {
+    key: block.key,
+    kind: block.kind,
+    heading: '',
+    text: '',
+    lead: leadRes.text,
+    entries,
+    danglingSlots: dangling.concat(leadRes.danglingSlots || []),
   };
 }
 
@@ -739,6 +811,7 @@ const RESOLVERS = Object.freeze({
   'co-da-approval':          _resolveCoDaApproval,
   // AR-specific
   'ar-caption':              _resolveArCaption,
+  'ar-addendum-index':       _resolveArAddendumIndex,
   'ar-provider-order-block': _resolveArProviderOrderBlock,
   'ar-affiant-signature':    _resolveArAffiantSignature,
   'ar-judge-block':          _resolveArJudgeBlock,

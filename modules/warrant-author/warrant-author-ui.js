@@ -5441,6 +5441,9 @@ const bus = {
     _state._genFilename = (draft.caseRef || 'warrant') + '_' + (
       draft.template === 'ca-multi-business-esp' ? 'CA'
       : draft.template === 'va-multi-business-esp' ? 'VA'
+      : draft.template === 'co-multi-business-esp' ? 'CO'
+      : draft.template === 'ar-multi-business-esp' ? 'AR'
+      : draft.template === 'pa-multi-business-esp' ? 'PA'
       : 'US'
     );
     _state._genPageCount = pdfResult.pageCount;

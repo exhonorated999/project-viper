@@ -3462,6 +3462,42 @@ ipcMain.handle('ocr-pdf-pages-sparse', async (event, filePath, pages, psm) => {
   }
 });
 
+// --- Ruled-grid (banded) OCR for specific PDF pages (ADDITIVE — used only by
+// the Arkansas NIBRS incident-report importer).
+//
+// `extract-pdf-text` and `ocr-pdf-pages-sparse` above are UNCHANGED.
+//
+// The sparse pass repairs a page the primary read MOSTLY got.  It cannot
+// repair a page the primary read lost entirely, which is what happens when the
+// form prints the narrative into a ruled grid with a horizontal rule on each
+// text baseline — Tesseract merges the rule with the glyphs.  On a real report
+// the two narrative pages OCR'd to 476 and 201 characters while every other
+// page read 2.6k-6.2k, and the officer saw a card full of "A / ER / EE / ___".
+//
+// modules/rms/band-ocr.js re-reads such a page row by row, using the printed
+// rules as the line boundaries (PSM 7 per band).  See that file for the
+// measurements.  Deciding whether the result is good enough to REPLACE the
+// primary read belongs to the parser, not here.
+ipcMain.handle('ocr-pdf-pages-banded', async (event, filePath, pages) => {
+  try {
+    const bandOcr = require('./modules/rms/band-ocr.js');
+    const mupdf = await import('mupdf');
+    const Tesseract = (await import('tesseract.js')).default;
+    const res = await bandOcr.bandOcrPages({
+      data: fs.readFileSync(filePath),
+      pages: pages || [],
+      mupdf: mupdf,
+      Tesseract: Tesseract
+    });
+    return { ok: true, pages: res.pages };
+  } catch (error) {
+    // Never fail the import because the supplementary pass failed — the caller
+    // simply keeps whatever the primary extraction read.
+    console.error('ocr-pdf-pages-banded error:', error);
+    return { ok: false, pages: {}, error: String((error && error.message) || error) };
+  }
+});
+
 // --- Case Export / Import ---
 ipcMain.handle('save-case-export', async (event, { fileName, data }) => {
   const result = await dialog.showSaveDialog(mainWindow, {

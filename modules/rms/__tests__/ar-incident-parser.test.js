@@ -115,6 +115,70 @@ eq('OFFENSE STATUS is a checkbox, so status stays blank', off.status, '');
 eq('offense page', off.page, 1);
 
 /* ────────────────────────────────────────────────────────────────
+ * 4b. Degraded offense band — the Faulkner report the field reported
+ *     as "not parsing" OCR'd the label row as "UCRCODE" with no
+ *     "OFFENSE #", and lost the one-digit offense-number column
+ *     entirely. The old single "OFFENSE #" anchor therefore skipped
+ *     EVERY page, and the report imported with zero offenses and no
+ *     address of offense. All values below are REDACTED synthetics
+ *     carrying the real OCR damage verbatim.
+ * ──────────────────────────────────────────────────────────────── */
+console.log('\n[offense — degraded label row]');
+const degradedOcr = [
+    'ORI NUMBER INTERNAL INCIDENT EXCEPTIONAL',
+    'AR0230000 ARKANSAS STATUS: CLEARANCE STATUS:',
+    'INCIDENT NUMBER',
+    'Z INCIDENT REPORT [J (CA) Closed by Arrest [J (B) Prosecution Declined',
+    '26-0905538 UNAPPROVED , ; !',
+    'a DATE(S) OF INCIDENT AGENCY NAME',
+    '&) 09/18/2026 Faulkner County Sheriff\'s Office (1 Inactive (E) Juvenile, No Custody',
+    'Zz, TIME(S) OF INCIDENT DAY(S) OF INCIDENT : (0) Unfounded = N) Not Ap : able',
+    'w=i| 19:41 - 23:56 Friday moun pic',
+    'DISPATCHER TIME RECEVED TIME ARRIVED | REPORTING AREA EXCEPT. CLEAR. DATE',
+    'dbrabham - Brabham, Dixie 19:48 20:07 FCSQ-Delta',
+    'UCRCODE | OFFENSE STATUS: OFFENDER USED: [IB (N) Not Applicable Burglary (220) Location 14819: FORCED ENTRY?',
+    '13C [J (A Attempted [g (C) Completed | [7] (A) Alcohol [] (C)Cptr. Equip. [J (D) Drugs | # PREMISES ENTERED? [J Yes [J No',
+    'STATUTE OFFENSE DESCRIPTION ADDRESS OF OFFENSE',
+    '5-13-301a(1a) TERRORISTIC THREATENING - 1ST DEGREE / THRE | 124 JONES RD, CONWAY, AR 72076',
+    'LOCATION CODE (Enter 1) [J (47) Liquor Store [] (48) Farm Facility WEAPON FORCE: (Max. 3'
+].join('\n');
+const rd = AR.parse(degradedOcr, 'degraded.pdf');
+eq('degraded band still yields one offense', rd.offenses.length, 1);
+const offd = rd.offenses[0] || {};
+eq('degraded statute', offd.statute, '5-13-301a(1a)');
+eq('degraded description stops at the column pipe', offd.description,
+    'TERRORISTIC THREATENING - 1ST DEGREE / THRE');
+eq('degraded address of offense', offd.location, '124 JONES RD, CONWAY, AR 72076');
+eq('UCR code read without the offense-number column', offd.ucrCode, '13C');
+eq('offense number falls back to document order', offd.number, '1');
+eq('degraded address surfaced as report location', rd.location, '124 JONES RD, CONWAY, AR 72076');
+ok('no "offense row not recognised" warning',
+    !rd.diagnostics.warnings.some(w => /No offense row recognised/i.test(w)));
+
+/* quickScan must surface the same two facts to the create-case screen. */
+const qsd = AR.quickScan(degradedOcr, 'degraded.pdf');
+ok('quickScan matched', qsd.matched === true);
+eq('quickScan surfaces ADDRESS OF OFFENSE as location', qsd.location,
+    '124 JONES RD, CONWAY, AR 72076');
+eq('quickScan primary offense is statute + description, verbatim', qsd.primaryOffense,
+    '5-13-301a(1a) TERRORISTIC THREATENING - 1ST DEGREE / THRE');
+eq('quickScan offenceList length', qsd.offenseList.length, 1);
+ok('quickScan location is a string on a non-Arkansas report',
+    typeof AR.quickScan('not an arkansas report', 'x.pdf').location === 'string');
+ok('quickScan offenseList is an array on a non-Arkansas report',
+    Array.isArray(AR.quickScan('not an arkansas report', 'x.pdf').offenseList));
+
+/* A property row that opens with a three-digit number must never be
+ * mistaken for a UCR code — the guard is the OFFENSE STATUS checkbox
+ * labels on the same line. */
+const propOcr = degradedOcr.replace(
+    '13C [J (A Attempted [g (C) Completed | [7] (A) Alcohol [] (C)Cptr. Equip. [J (D) Drugs | # PREMISES ENTERED? [J Yes [J No',
+    '520 6 1 RUGER EC9s 9mm Handgun ; SN:00000000 ; MK:RUGER ; 200.00');
+const rp = AR.parse(propOcr, 'prop.pdf');
+eq('property row is not read as a UCR code', (rp.offenses[0] || {}).ucrCode, '');
+eq('the offense row itself still parses', (rp.offenses[0] || {}).statute, '5-13-301a(1a)');
+
+/* ────────────────────────────────────────────────────────────────
  * 5. Persons before recovery
  * ──────────────────────────────────────────────────────────────── */
 console.log('\n[persons — layout pass]');
@@ -498,6 +562,81 @@ ok('narrative text is prose', pr('On Thursday, August 13, 2026 at approximately 
 ok('a checkbox grid is not prose', pr('[J (05) Commercial/Office Building [J (23) Service/Gas Station [J (50) Park/Playground') === false);
 ok('an all-caps label row is not prose', pr('RESIDENT ADDRESS: STREET CITY STATE ZIP RESIDENT PHONE EMPLOYMENT PHONE') === false);
 ok('a short line is not prose', pr('CASE WORKER') === false);
+
+/* ────────────────────────────────────────────────────────────────
+ * 14b. Banded narrative rebuild — glyph stripping and page selection.
+ *      Both gates below were written against real failures on the
+ *      Faulkner report and both protect EVIDENCE, so they are pinned.
+ * ──────────────────────────────────────────────────────────────── */
+console.log('\n[banded narrative]');
+const strip = AR._internal.stripRuleGlyphs;
+eq('leading rule pipe is stripped',
+    strip('| Upon arrival, I made contact with Ms Stivers.'),
+    'Upon arrival, I made contact with Ms Stivers.');
+eq('trailing rule pipe is stripped',
+    strip('...in an area near his mother\u2019s |'),
+    '...in an area near his mother\u2019s');
+eq('both margins at once',
+    strip('| Jones Rd. Still, Ms Miracle Stivers had taken her kids to 122 Jones Rd., |'),
+    'Jones Rd. Still, Ms Miracle Stivers had taken her kids to 122 Jones Rd.,');
+/* "I " is a real line start in a police narrative and must survive. */
+eq('a line that genuinely starts with I is untouched',
+    strip('I went outside to gather a Lethality Screening Assessment.'),
+    'I went outside to gather a Lethality Screening Assessment.');
+/* The regression that forced the narrow rule: a wrapped line ending on
+ * the first word of the next sentence. Deleting it loses evidence. */
+eq('a real trailing word after a period is NEVER deleted',
+    strip('...and brought it back to Ms Stivers. Ms'),
+    '...and brought it back to Ms Stivers. Ms');
+eq('a trailing single letter is left visible rather than guessed at',
+    strip('...he pushed her and threw her phone on the ground. Ms i'),
+    '...he pushed her and threw her phone on the ground. Ms i');
+eq('strip is inert on empty input', strip(''), '');
+eq('strip is inert on null', strip(null), '');
+
+/* Prose must DOMINATE an unlabelled page before its text joins the
+ * narrative. A NIBRS legend page reads as a dozen prose-shaped lines
+ * among sixty of checkbox furniture, and it used to be appended whole. */
+const junkPage = [
+    'CONTINUATION PAGE',
+    '09/18/2026 | 26-0905538 AR0230000 | BRANDON WHITFIELD F4388',
+    'NARRATIVE:',
+    'On 09/18/2026 at approximately 1948 hours, I was dispatched to a domestic disturbance at 124 Jones',
+    'Rd. Before I arrived, I was advised by my emergency operations that the incident occurred at 306',
+    'Jones Rd. Still, the victim had taken her kids to another residence for safety.',
+    'CONTINUATION PAGE',
+    '09/18/2026 | 26-0905538 AR0230000 | BRANDON WHITFIELD F4388',
+    '801 LOCUST ST, CONWAY, AR 72034 (check relationship under appropriate offender number):',
+    'Aggravated Assault/Murder: (max. 2) Negligent Manslaughter: (enter 1) (RU) Relationship Unknown',
+    '(01) Argument (30) Child Playing With Weapon afin] ] C1 (ST) Stranger',
+    '[ (14) HoteliMotelEtc. LC] (41) Auto Dealership New/Used I (40) Personal Weapons (Hands, etc.)',
+    '[J (02) Bank/Savings & Loan [1 (19) Rental/Storage Facility Track',
+    '[J (03) Bar/Night Club [l (20) Residence/Home [7 (48) Industrial Site',
+    '[1 (04) Church/Synagogue/Temple/Mosque [7] (21) Restaurant [3 (49) Military Installation',
+    '[J (05) Commercial/Office Building [C1 (23) Service/Gas Station [1 (50) Park/Playground'
+].join('\n');
+const rj = AR.parse('INCIDENT REPORT\n' + junkPage, 'junk.pdf');
+const njt = (rj.narratives[0] || {}).text || '';
+ok('the labelled narrative page is kept', /dispatched to a domestic disturbance/.test(njt));
+ok('the NIBRS relationship legend does NOT reach the narrative',
+    !/Relationship Unknown/.test(njt), njt.slice(-200));
+ok('the location-code legend does NOT reach the narrative',
+    !/Auto Dealership/.test(njt), njt.slice(-200));
+ok('the form address line does NOT reach the narrative',
+    !/check relationship under appropriate offender number/.test(njt), njt.slice(-200));
+
+/* ...but the rejected page must still be OFFERED to the banded re-read,
+ * or a narrative that ran onto it is lost outright. */
+const bandPages = AR.narrativeBandPages(rj);
+ok('narrativeBandPages returns an array', Array.isArray(bandPages));
+ok('the narrative page is offered to the banded re-read', bandPages.indexOf(1) !== -1, bandPages);
+ok('the rejected continuation page is still offered', bandPages.indexOf(2) !== -1, bandPages);
+ok('narrativeBandPages is safe on a report with no narrative',
+    Array.isArray(AR.narrativeBandPages(AR.parse('INCIDENT REPORT', 'x.pdf'))));
+ok('narrativeBandPages is safe on a non-report', Array.isArray(AR.narrativeBandPages(null)));
+eq('recoverNarrativeBanded replaces nothing when handed nothing',
+    AR.recoverNarrativeBanded(rj, {}), 0);
+eq('recoverNarrativeBanded is safe on null', AR.recoverNarrativeBanded(null, null), 0);
 
 /* ────────────────────────────────────────────────────────────────
  * 15. Degrade, never throw — a half-understood report must import

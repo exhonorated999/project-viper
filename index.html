@@ -2973,12 +2973,18 @@
                 // number, synopsis and module checkboxes would all come back empty.
                 let arSparsePages = null;
                 let arAltPages = null;
+                let arBandPages = null;
+                let rmsLocation = '';
+                let rmsOffenses = [];
                 if (window.ArIncidentParser && window.ArIncidentParser.detect(text)) {
                     try {
                         const arScan = window.ArIncidentParser.quickScan(text, result.fileName);
                         if (arScan.matched) {
                             if (!caseNum && arScan.caseNum) caseNum = arScan.caseNum;
                             if (!synopsis && arScan.synopsis) synopsis = arScan.synopsis;
+                            // ADDRESS OF OFFENSE == Location of Occurrence.
+                            if (arScan.location) rmsLocation = arScan.location;
+                            if (Array.isArray(arScan.offenseList)) rmsOffenses = arScan.offenseList;
                             Object.keys(arScan.detected).forEach(k => {
                                 if (arScan.detected[k]) detected[k] = true;
                             });
@@ -3002,13 +3008,23 @@
                                 if (alt && alt.pages) arAltPages = alt.pages;
                             }
                         }
+                        // Banded re-read of the narrative pages. Kept separate
+                        // from the sparse passes above because it REPLACES a
+                        // page rather than adding to it — see band-ocr.js.
+                        if (window.electronAPI.ocrPdfPagesBanded && window.ArIncidentParser.narrativeBandPages) {
+                            const bPages = window.ArIncidentParser.narrativeBandPages(arReport);
+                            if (bPages.length) {
+                                const banded = await window.electronAPI.ocrPdfPagesBanded(chosenPath, bPages);
+                                if (banded && banded.pages) arBandPages = banded.pages;
+                            }
+                        }
                     } catch (arErr) {
                         console.warn('[RMS Import] Arkansas quick scan failed:', arErr);
                     }
                 }
 
                 // Store for case creation
-                pendingRmsData = { text: result.text, fileName: result.fileName, detected, caseNum, synopsis, arSparsePages, arAltPages };
+                pendingRmsData = { text: result.text, fileName: result.fileName, detected, caseNum, synopsis, arSparsePages, arAltPages, arBandPages, rmsLocation, rmsOffenses };
 
                 // Auto-fill form fields
                 if (caseNum) {
@@ -3016,6 +3032,17 @@
                 }
                 if (synopsis) {
                     document.getElementById('caseSynopsis').value = synopsis;
+                }
+                // ADDRESS OF OFFENSE from the report's offence row is the case's
+                // Location of Occurrence. Only fill a field the officer has left
+                // blank — never overwrite something they typed.
+                if (rmsLocation) {
+                    const locEl = document.getElementById('caseLocationOfOccurrence');
+                    if (locEl && !locEl.value.trim()) locEl.value = rmsLocation;
+                }
+                if (rmsOffenses.length) {
+                    try { ncApplyOffensesFromRms(rmsOffenses); }
+                    catch (offErr) { console.warn('[RMS Import] offence autofill failed:', offErr); }
                 }
 
                 // Auto-check module checkboxes based on detected data
@@ -3129,6 +3156,26 @@
         function ncPopulateOffensesEditor() {
             const list = document.getElementById('newCaseOffensesList');
             if (list) list.innerHTML = ncOffenseRowHtml(0, '', '');
+        }
+        /*
+         * Fill the offence editor from an imported RMS report. Values are
+         * carried VERBATIM (statute citation included) — they are the
+         * officer's own source document, and rewording an offence on a case
+         * record is never acceptable. Rows the officer has already typed are
+         * left alone; only blank rows are replaced. Type is left unset: the
+         * Arkansas form has no severity field, and inferring one from the
+         * statute would be fabrication.
+         */
+        function ncApplyOffensesFromRms(values) {
+            const list = document.getElementById('newCaseOffensesList');
+            if (!list || !Array.isArray(values) || !values.length) return;
+            const existing = ncReadOffenses();
+            if (existing.primary) return;      // officer already entered offences
+            // ncOffenseLibraryOptionsHtml already pre-selects __custom__ and
+            // ncOffenseRowHtml un-hides the free-text input for any value that
+            // is not in the offence library, so a verbatim statute string
+            // round-trips through ncReadOffenses() unchanged.
+            list.innerHTML = values.map((v, i) => ncOffenseRowHtml(i, v, '')).join('');
         }
         function ncRenumberOffenseRows() {
             const list = document.getElementById('newCaseOffensesList');
@@ -3427,11 +3474,13 @@
                         text: pendingRmsData.text,
                         fileName: pendingRmsData.fileName,
                         // Arkansas format only: supplementary OCR of the pages whose
-                        // typed names the layout OCR pass dropped (PSM 11) and of the
-                        // narrative page (PSM 3). Carried across because
+                        // typed names the layout OCR pass dropped (PSM 11), of the
+                        // narrative page (PSM 3), and the row-by-row banded re-read
+                        // of the ruled narrative grid. Carried across because
                         // processPendingRmsImport has no file path.
                         arSparsePages: pendingRmsData.arSparsePages || null,
-                        arAltPages: pendingRmsData.arAltPages || null
+                        arAltPages: pendingRmsData.arAltPages || null,
+                        arBandPages: pendingRmsData.arBandPages || null
                     }));
                     pendingRmsData = null;
                 }

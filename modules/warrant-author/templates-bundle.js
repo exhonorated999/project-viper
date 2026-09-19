@@ -15,8 +15,8 @@
     "id": "ar-multi-business-esp",
     "name": "Arkansas Circuit Court ESP (Affidavit + Search Warrant)",
     "jurisdiction": "AR",
-    "version": 2,
-    "description": "Arkansas combined Affidavit for Search Warrant to Provide Records + Search Warrant to Provide Records, for Electronic Service Providers. Modelled verbatim on a Faulkner County Circuit Court exemplar. The exemplar carries no statutory citations and none are added. The judge is identified by court stamp, so the judge block prints a blank signature line plus the county Circuit Court and Division. Court caption county comes from the agency profile (county) and the Division from the agency profile (arCircuitDivision).\n\nBLOCK KEY CONVENTION — LOAD BEARING: keys prefixed 'ad-' form the per-provider ADDENDUM section. block-builder._buildArEsp() partitions each composed provider on that prefix so every provider's Affidavit + Warrant page set prints first and ALL addendums are grouped at the very end of the document (Addendum A, B, C ... in provider order), ready to be detached and served on the individual providers. Renaming an 'ad-' key breaks that grouping.",
+    "version": 3,
+    "description": "Arkansas combined Affidavit for Search Warrant to Provide Records + Search Warrant to Provide Records, for Electronic Service Providers. Modelled on a Faulkner County Circuit Court exemplar. The exemplar carries no statutory citations and none are added. The judge is identified by court stamp, so each judge block prints a blank signature line plus the county Circuit Court and Division. Court caption county comes from the agency profile (county) and the Division from the agency profile (arCircuitDivision).\n\nONE WARRANT, MANY ADDENDUMS (v3): the Affidavit and the Search Warrant are each emitted EXACTLY ONCE no matter how many providers are attached. Introduction and Agent Background, Facts of Investigation, the affiant signature, the affidavit jurat and the warrant order signature therefore appear once. Per-provider detail lives entirely in the Addendums. 'RECORDS TO BE PROVIDED' and the warrant's ordered-party section are both ar-addendum-index blocks that simply index the attached addendums (\"Addendum A: Google LLC\").\n\nBLOCK KEY CONVENTION — LOAD BEARING: keys prefixed 'ad-' form the per-provider ADDENDUM section. block-builder._buildArEsp() takes the document blocks from the FIRST composed provider only, then appends every provider's 'ad-' blocks in order (Addendum A, B, C ...), ready to be detached and served on the individual providers. Renaming an 'ad-' key breaks that partition.",
     "compatibleProviderTypes": [
       "ESP",
       "Phone",
@@ -34,12 +34,12 @@
       {
         "key": "02-intro-header",
         "kind": "constant",
-        "text": "INTRODUCTION AND AGENT BACKGROUND"
+        "heading": "INTRODUCTION AND AGENT BACKGROUND"
       },
       {
         "key": "03-oath-line",
         "kind": "verbatim-paragraph",
-        "text": "I, {{agency.affiantRank}} {{agency.affiantName}}, after being first duly sworn upon oath, depose and say:"
+        "text": "I, {{agency.affiantName}}, after being first duly sworn upon oath, depose and say:"
       },
       {
         "key": "04-agent-background",
@@ -49,139 +49,111 @@
       {
         "key": "05-assignment",
         "kind": "verbatim-paragraph",
-        "text": "I am currently assigned to the {{agency.unit}} of the {{agency.agencyName}} and have been assigned to investigate {{case.offenseDescription}} reported on {{case.offenseDate}} ({{agency.agencyName}} report# {{case.number}})."
+        "text": "I am a full time {{agency.affiantRank}} with the {{agency.agencyName}} and have been assigned to investigate {{case.offenseDescription}} reported on {{case.offenseDate}} (Report# {{case.number}})."
       },
       {
         "key": "06-records-belief",
         "kind": "constant",
-        "text": "I have reason to believe that particular internet service subscriber records may contain evidence identifying and linking, victim(s), suspect(s), and possible witness(es) to the referenced investigation."
+        "text": "I have reason to believe that particular Electronic Service subscriber records may contain evidence identifying and linking, victim(s), suspect(s), and possible witness(es) to the referenced investigation."
       },
       {
         "key": "07-request-paragraph",
-        "kind": "provider-slot-paragraph",
-        "text": "I am requesting a search warrant allowing for the release of subscriber records from {{provider.name}}, an electronic service provider with a physical address that includes {{provider.address}}, and to disclose the contents of any record pertaining to a customer or subscriber within such provider's possession, custody, or control."
+        "kind": "constant",
+        "text": "I am requesting a search warrant allowing for the release of subscriber records from the Electronic Service Providers set forth in the Addendums attached hereto, and to disclose the contents of any record pertaining to a customer or subscriber within such provider's possession, custody, or control."
       },
       {
         "key": "08-records-header",
         "kind": "constant",
-        "text": "RECORDS TO BE PROVIDED"
+        "heading": "RECORDS TO BE PROVIDED"
       },
       {
-        "key": "09-records-lead-in",
-        "kind": "provider-slot-paragraph",
-        "text": "This applicant seeks permission for release of records relating to the referenced investigation that are associated with records currently under the control of {{provider.name}}."
+        "key": "09-records-addendum-index",
+        "kind": "ar-addendum-index",
+        "lead": "See the Addendums attached hereto and incorporated herein by reference:"
       },
       {
-        "key": "10-addendum-reference",
-        "kind": "verbatim-paragraph",
-        "text": "The records to be provided are set forth in Addendum {{addendum.pageLabel}}, attached hereto and incorporated herein by reference."
-      },
-      {
-        "key": "11-facts-header",
+        "key": "10-facts-header",
         "kind": "constant",
-        "text": "FACTS OF INVESTIGATION"
+        "heading": "FACTS OF INVESTIGATION"
       },
       {
-        "key": "12-probable-cause",
+        "key": "11-probable-cause",
         "kind": "verbatim-paragraph",
         "text": "{{addendum.probableCause}}"
       },
       {
-        "key": "13-conclusion-header",
+        "key": "12-conclusion-header",
         "kind": "constant",
-        "text": "CONCLUSION"
+        "heading": "CONCLUSION"
       },
       {
-        "key": "14-conclusion",
+        "key": "13-conclusion",
         "kind": "constant",
         "text": "Based on the foregoing information, I believe evidence relating to this investigation are currently within the records described above. I therefore respectfully request that a Search Warrant be issued authorizing the release and examination of the records set forth herein."
       },
       {
-        "key": "15-affiant-signature",
+        "key": "14-affiant-signature",
         "kind": "ar-affiant-signature"
       },
       {
-        "key": "16-oath-jurat",
+        "key": "15-oath-jurat",
         "kind": "constant",
         "text": "Subscribed and sworn to before me this ______ day of ____________________, 20____."
       },
       {
-        "key": "17-judge-block",
+        "key": "16-judge-block",
         "kind": "ar-judge-block"
       },
       {
-        "key": "18-page-break",
+        "key": "17-page-break",
         "kind": "page-break"
       },
       {
-        "key": "19-warrant-caption",
+        "key": "18-warrant-caption",
         "kind": "ar-caption",
         "documentTitle": "SEARCH WARRANT\nTO PROVIDE RECORDS"
       },
       {
-        "key": "20-warrant-header",
+        "key": "19-warrant-header",
         "kind": "constant",
-        "text": "SEARCH WARRANT TO PROVIDE RECORDS"
+        "heading": "SEARCH WARRANT TO PROVIDE RECORDS"
       },
       {
-        "key": "21-ordered-party",
-        "kind": "ar-provider-order-block"
+        "key": "20-ordered-parties",
+        "kind": "ar-addendum-index",
+        "lead": "The following parties are ordered to provide the records set forth in the Addendums attached hereto and incorporated herein by reference:"
       },
       {
-        "key": "22-addendum-reference-warrant",
-        "kind": "verbatim-paragraph",
-        "text": "The records to be provided are set forth in Addendum {{addendum.pageLabel}}, attached hereto and incorporated herein by reference."
-      },
-      {
-        "key": "23-investigation-ref",
+        "key": "21-investigation-ref",
         "kind": "verbatim-paragraph",
         "text": "Search Warrant is in reference to an ongoing investigation, {{agency.agencyName}} Incident #{{case.number}}."
       },
       {
-        "key": "24-comply-header",
+        "key": "22-comply-header",
         "kind": "constant",
         "text": "This search warrant may be complied with by providing said records to:"
       },
       {
-        "key": "25-affiant-contact",
-        "kind": "affiant-contact",
-        "fields": [
-          "affiantName",
-          "agencyName",
-          "agencyAddress",
-          "affiantEmail",
-          "affiantPhone"
-        ],
-        "labels": {
-          "affiantName": "",
-          "agencyName": "",
-          "agencyAddress": "",
-          "affiantEmail": "Email",
-          "affiantPhone": "Phone"
-        },
-        "requiredFields": [
-          "affiantName",
-          "agencyName",
-          "affiantEmail"
-        ]
+        "key": "23-affiant-contact",
+        "kind": "affiant-contact"
       },
       {
-        "key": "26-execution-window",
+        "key": "24-execution-window",
         "kind": "constant",
         "text": "You are further directed to execute the search warrant within five (5) days of issuance between the hours of 7 am and 10 pm, and make return of this search warrant to me within five (5) days after execution, except as otherwise provided herein:"
       },
       {
-        "key": "27-dated-line",
+        "key": "25-dated-line",
         "kind": "constant",
         "text": "Dated this ______ day of ____________________, 20____."
       },
       {
-        "key": "28-order-line",
+        "key": "26-order-line",
         "kind": "constant",
         "text": "IT IS HEREBY ORDERED BY THIS COURT THAT THE ABOVE-MENTIONED INFORMATION BE PROVIDED"
       },
       {
-        "key": "29-judge-block-warrant",
+        "key": "27-judge-block-warrant",
         "kind": "ar-judge-block"
       },
       {

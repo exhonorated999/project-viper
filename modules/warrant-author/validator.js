@@ -366,7 +366,7 @@ function validateDraft(input) {
             warnings.push(_warn(
                 'draft.offenseDescription.empty.ar',
                 'AR_OFFENSE_DESCRIPTION_EMPTY',
-                'No offense description on the case — the AR affidavit will print "{{case.offenseDescription}}". Set it in the Case Probable Cause panel.',
+                'No offense description on the case — the AR affidavit will print "{{case.offenseDescription}}". Set the Primary Offense on the case Overview tab, or override it in the Case Probable Cause panel.',
                 { scope: 'case', fieldPath: 'case.offenseDescription' }
             ));
         }
@@ -374,7 +374,7 @@ function validateDraft(input) {
             warnings.push(_warn(
                 'draft.offenseDate.empty.ar',
                 'AR_OFFENSE_DATE_EMPTY',
-                'No offense date on the case — the AR affidavit will print "{{case.offenseDate}}". Set it in the Case Probable Cause panel.',
+                'No offense date on the case — the AR affidavit will print "{{case.offenseDate}}". Set Date of Offense on the case Overview tab, or override it in the Case Probable Cause panel.',
                 { scope: 'case', fieldPath: 'case.offenseDate' }
             ));
         }

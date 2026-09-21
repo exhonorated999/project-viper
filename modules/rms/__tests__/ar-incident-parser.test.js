@@ -679,5 +679,206 @@ eq('CRLF yields the same report number', crlf.reportNumber, '26-0417295');
 ok('a report with nothing readable still records warnings',
     AR.parse('INCIDENT REPORT', 'x.pdf').diagnostics.warnings.length > 0);
 
+/* ────────────────────────────────────────────────────────────────
+ * 16. The junk gate — OCR wreckage is NOT the officer's narrative.
+ *
+ *     A field officer photographed a VIPER case whose Officer Narratives
+ *     card rendered 22 rows of "a e———  /  ee — eee AB  /  Ee en". The
+ *     labelled-NARRATIVE branch had accepted every non-empty line on
+ *     trust. Rendering noise as evidence is worse than rendering nothing.
+ * ──────────────────────────────────────────────────────────────── */
+console.log('\n[junk gate]');
+const WRECK = [
+    'INCIDENT REPORT',
+    '09/18/2026 | 26-0905538 AR0230000 | BRANDON WHITFIELD F4388',
+    'NARRATIVE:',
+    'a e———', 'ee — eee AB', 'Le————eerie', 'Ee en', 'ee———|', 'a————',
+    'ee —', 'ES——', 'rr——', 'ee ee r——', 'Ce—————', '—————', 'A a——',
+    'oe — me', '——', '[a————l', 'eae', 'ee————', 'EO —', 'Fo ————'
+].join('\n');
+const rw = AR.parse(WRECK, 'wreck.pdf');
+eq('an unreadable narrative page yields NO narrative', rw.narratives.length, 0);
+ok('the wreckage never reaches a narrative',
+    !JSON.stringify(rw.narratives).includes('Le'), rw.narratives);
+ok('the withheld page is named in a warning',
+    rw.diagnostics.warnings.some(w => /^Narrative text on page\(s\) 1\b/.test(w)),
+    rw.diagnostics.warnings);
+eq('the withheld page is recorded', rw.narrativeRecovery.unreadablePages, [1]);
+ok('the withheld page is offered to the banded re-read',
+    AR.narrativeBandPages(rw).indexOf(1) !== -1, AR.narrativeBandPages(rw));
+
+// A terse but READABLE narrative is not wreckage.
+const terse = AR.parse([
+    'INCIDENT REPORT',
+    '09/18/2026 | 26-0905538 AR0230000 | BRANDON WHITFIELD F4388',
+    'NARRATIVE:',
+    'I responded to the address and made contact with the complainant.',
+    'No further action was taken at this time.'
+].join('\n'), 'terse.pdf');
+eq('a short readable narrative is kept', terse.narratives.length, 1);
+eq('no unreadable pages are claimed', terse.narrativeRecovery.unreadablePages, []);
+
+const bir = AR._internal.bodyIsReadable;
+ok('bodyIsReadable rejects pure wreckage', bir(['A', 'ER', 'EE', '-—', 'Ce ——']) === false);
+ok('bodyIsReadable accepts two prose lines',
+    bir(['I made contact with the complainant at the residence.',
+         'She advised that the suspect had left on foot.']) === true);
+ok('bodyIsReadable accepts a single-line narrative',
+    bir(['I collected the evidence and placed it into the property room.']) === true);
+ok('bodyIsReadable is safe on an empty body', bir([]) === false);
+
+/* A banded rebuild must clear the warning it just made untrue. */
+const rw2 = AR.parse(WRECK, 'wreck.pdf');
+const rebuilt = AR.recoverNarrativeBanded(rw2, {
+    1: {
+        lines: [
+            { conf: 90, text: 'I was dispatched to a disturbance at 124 Jones Rd. and made contact' },
+            { conf: 91, text: 'with the complainant, who advised the suspect had left on foot before' },
+            { conf: 88, text: 'my arrival. I documented the damage to the front door and cleared.' }
+        ]
+    }
+});
+eq('the banded re-read rebuilds the page', rebuilt, 1);
+ok('the stale unreadable warning is dropped',
+    !rw2.diagnostics.warnings.some(w => /^Narrative text on page\(s\)/.test(w)),
+    rw2.diagnostics.warnings);
+ok('the "No NARRATIVE section found" warning is dropped too',
+    !rw2.diagnostics.warnings.includes('No NARRATIVE section found.'),
+    rw2.diagnostics.warnings);
+eq('nothing is still listed as unreadable', rw2.narrativeRecovery.unreadablePages, []);
+ok('the rebuild is disclosed',
+    rw2.diagnostics.warnings.some(w => /re-read row by row/.test(w)), rw2.diagnostics.warnings);
+
+/* ────────────────────────────────────────────────────────────────
+ * 17. Banded / primary row reconciliation.
+ *
+ *     Band OCR shares its first band with the form's "NARRATIVE:" cell
+ *     label, which wrecks the words beside it — while the primary pass,
+ *     though it collapsed on the PAGE, read that ROW correctly. Measured
+ *     on Faulkner 26-0506420 page 4: the banded row lost the dispatch
+ *     date, which is evidence.
+ * ──────────────────────────────────────────────────────────────── */
+console.log('\n[reconcile]');
+const rec = AR._internal.reconcileBandedWithPrimary;
+const banded1 = ['rg SN at ——— 2309, T was dispatched to 48 Brown Rd. in regards to a sexual Ri'];
+const primary1 = ['On 05/22/2026 at approximately 2309, I was dispatched to 48 Brown Rd. in regards to a sexual'];
+eq('a wrecked banded row loses to the clean primary row',
+    rec(banded1, primary1), primary1);
+eq('a clean banded row survives a wrecked primary row',
+    rec(primary1, banded1), primary1);
+eq('an unmatched banded row is left alone',
+    rec(['He stated that he had been drinking earlier in the evening.'],
+        ['The vehicle was towed from the scene by a licensed operator.']),
+    ['He stated that he had been drinking earlier in the evening.']);
+eq('a short banded row is never substituted', rec(['Rd.'], primary1), ['Rd.']);
+eq('no primary lines is a no-op', rec(banded1, null), banded1);
+eq('an empty primary page is a no-op', rec(banded1, []), banded1);
+// One primary row may not be spent twice, or a repeated wrap duplicates it.
+const twice = rec(banded1.concat(banded1), primary1);
+eq('a primary row is spent at most once', twice[1], banded1[0]);
+
+const lq = AR._internal.lineQuality;
+ok('lineQuality scores prose above debris',
+    lq('I was dispatched to 48 Brown Rd. in regards to a sexual') >
+    lq('rg SN at ——— 2309, T was Ri'));
+
+/* ────────────────────────────────────────────────────────────────
+ * 18. The SUPPLEMENT NARRATIVE form — a SECOND Arkansas form.
+ *
+ *     Follow-up work (evidence collection, later interviews, transports)
+ *     arrives on its own one-page form carrying the parent incident
+ *     number and nothing but a narrative. Three of the four reference
+ *     documents for one incident were supplements, and before this branch
+ *     existed detect() returned false for every one of them.
+ * ──────────────────────────────────────────────────────────────── */
+console.log('\n[supplement]');
+const SUPP = loadFixture('ar-supplement-narrative.ocr.txt');
+const SUPP_WRECKED = loadFixture('ar-supplement-narrative.wrecked.txt');
+
+ok('detects the supplement form', AR.detect(SUPP) === true);
+ok('a bare title is not a supplement', AR.detect('SUPPLEMENT NARRATIVE') === false);
+ok('a supplement needs an incident number',
+    AR.detect('SUPPLEMENT NARRATIVE\nINCIDENT NUMBER\nSUPPLEMENTING OFFICER\n') === false);
+ok('another agency\'s supplement wording is not claimed',
+    AR.detect('Supplement No: 1\nNarrative\nGenerated By: jdoe') === false);
+
+const rs = AR.parse(SUPP, 'Report 2 Sup 4.pdf');
+eq('arFormat', rs.arFormat, 'ar-supplement-narrative');
+eq('the parent incident number', rs.reportNumber, '26-0512833');
+eq('the supplement number', rs.supplementNo, '4');
+eq('reportDate is the supplement date', rs.reportDate, '06/12/2026');
+eq('incident date/time', rs.fromDateTime, '06/11/2026 21:40');
+eq('supplement type', rs.ar.supplementType, 'ADDITIONAL INFORMATION');
+eq('supplement time', rs.ar.supplementTime, '8:14');
+eq('reportType names the form and the type', rs.reportType,
+    'Arkansas Supplement Narrative (ADDITIONAL INFORMATION)');
+eq('one narrative', rs.narratives.length, 1);
+eq('the supplementing officer', rs.narratives[0].officer, 'RANDALL PIKE');
+eq('the officer code lands in badge', rs.narratives[0].badge, 'F4102');
+ok('the narrative opens with the officer\'s first line',
+    /^On June 12, 2026 at approximately 0755 hours/.test(rs.narratives[0].text),
+    rs.narratives[0].text.slice(0, 80));
+ok('the narrative carries the seizure', /folding knife/.test(rs.narratives[0].text));
+ok('the form header never reaches the narrative',
+    !/SUPPLEMENT (TYPE|DATE)|INCIDENT NUMBER|NARRATIVE:/.test(rs.narratives[0].text),
+    rs.narratives[0].text);
+eq('a supplement routes no persons', rs.personsInvolved.length, 0);
+eq('a supplement claims no offenses', rs.offenses.length, 0);
+eq('a supplement claims no location', rs.location, '');
+ok('narrative officer is a string', typeof rs.narratives[0].officer === 'string');
+eq('page 1 is offered to both recovery passes', AR.narrativeBandPages(rs), [1]);
+eq('page 1 is offered to the PSM 3 pass', AR.narrativeRecoveryPages(rs), [1]);
+ok('nameRecovery is present and empty', AR.needsNameRecovery(rs) === false);
+
+const qsSupp = AR.quickScan(SUPP, 'Report 2 Sup 4.pdf');
+ok('quickScan matches the supplement', qsSupp.matched === true);
+eq('quickScan returns the parent case number', qsSupp.caseNum, '26-0512833');
+ok('quickScan ticks the RMS module', qsSupp.detected.rmsImports === true);
+ok('quickScan names the supplementing officer', /RANDALL PIKE/.test(qsSupp.synopsis), qsSupp.synopsis);
+ok('quickScan summarises the narrative', /folding knife|responded to/.test(qsSupp.synopsis), qsSupp.synopsis);
+eq('a supplement offers no offense to the create-case form', qsSupp.offenseList, []);
+
+// The SUPP# column is not always printed.
+const noSupp = SUPP.replace('INCIDENT NUMBER SUPP# |', 'INCIDENT NUMBER')
+    .replace('26-0512833 4 06/11/2026', '26-0512833 06/11/2026');
+eq('no SUPP# column means no supplement number', AR.parse(noSupp, 'x.pdf').supplementNo, '');
+eq('the incident number still reads', AR.parse(noSupp, 'x.pdf').reportNumber, '26-0512833');
+
+// The junk gate applies to supplements too.
+const rsw = AR.parse(SUPP_WRECKED, 'wrecked sup.pdf');
+eq('a wrecked supplement yields no narrative', rsw.narratives.length, 0);
+eq('the header still reads on a wrecked supplement', rsw.reportNumber, '26-0512833');
+ok('the wrecked supplement warns about the withheld page',
+    rsw.diagnostics.warnings.some(w => /^Narrative text on page\(s\) 1\b/.test(w)),
+    rsw.diagnostics.warnings);
+eq('the wrecked supplement still offers page 1 to band OCR',
+    AR.narrativeBandPages(rsw), [1]);
+
+// Degrade, never throw.
+[
+    ['supplement title only', 'SUPPLEMENT NARRATIVE'],
+    ['supplement header, no narrative',
+        'SUPPLEMENT NARRATIVE\nINCIDENT NUMBER\n26-0512833\nSUPPLEMENTING OFFICER\nF4102 - RANDALL PIKE'],
+    ['supplement with CRLF', SUPP.replace(/\n/g, '\r\n')],
+    ['supplement reversed', SUPP.split('\n').reverse().join('\n')]
+].forEach(([label, input]) => {
+    let out = null, threw = null;
+    try { out = AR.parse(input, 'x.pdf'); } catch (e) { threw = e; }
+    ok('parse survives: ' + label, !threw, threw && threw.message);
+    if (out) {
+        ok('  ...returns arrays: ' + label,
+            Array.isArray(out.offenses) && Array.isArray(out.personsInvolved) &&
+            Array.isArray(out.narratives) && Array.isArray(out.provisionalPersons));
+        ok('  ...narrative officer is always a string: ' + label,
+            out.narratives.every(n => typeof n.officer === 'string'));
+    }
+    let q = null;
+    try { q = AR.quickScan(input, 'x.pdf'); } catch (e) { q = null; }
+    ok('quickScan survives: ' + label, !!q);
+});
+const crlfSupp = AR.parse(SUPP.replace(/\n/g, '\r\n'), 'x.pdf');
+eq('CRLF yields the same supplement narrative',
+    crlfSupp.narratives[0].text, rs.narratives[0].text);
+
 console.log('\n' + (fail ? 'FAILED' : 'OK') + ' — ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

@@ -1,0 +1,21 @@
+# REDACTED FIXTURE — real Tesseract OCR of a real Arkansas SUPPLEMENT
+# NARRATIVE form, with every identifying value swapped for a same-shaped
+# synthetic one (incident number, dates, times, officer code and name,
+# civilian names, address, and the item seized). All OCR damage is preserved
+# verbatim: the welded "SUPP#" label, the missing column pipes, and the blank
+# CASE STATUS cell.
+SUPPLEMENT NARRATIVE
+
+INCIDENT NUMBER SUPP# | INCIDENT DATE | INCIDENT TIME CASE STATUS
+
+26-0512833 4 06/11/2026 21:40
+SUPPLEMENT TYPE SUPPLEMENT DATE | SUPPLEMENT TIME | SUPPLEMENTING OFFICER
+ADDITIONAL INFORMATION 06/12/2026 8:14 F4102 - RANDALL PIKE
+NARRATIVE:
+On June 12, 2026 at approximately 0755 hours I responded to 12 Cedar RD. Greenbrier, Ar, 72058
+regarding a follow up. Upon arrival I spoke with Dana Whitlow (Complainant) who advised she had
+an item she needed to give deputies that was related to the case. Ms. Whitlow then signed a consent
+to search, and allowed deputies to enter her master bedroom where a folding knife was located in
+the nightstand beside her bed. I collected the folding knife and placed it into BCSO CID Evidence
+without further incident.
+

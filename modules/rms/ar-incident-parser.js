@@ -57,6 +57,11 @@
     /* ================================================================
      * Regex vocabulary
      * ================================================================ */
+    /* Stable prefix so a banded re-read can find and drop its own stale
+     * warning after it rebuilds a page. Do not localise or reword without
+     * updating _dropUnreadableWarnings(). */
+    var NARRATIVE_UNREADABLE_PREFIX = 'Narrative text on page(s) ';
+
     var RE_PAGE_BREAK = /^\W{0,3}(INCIDENT\s+REPORT|CONTINUATION\s+PAGE)\W{0,3}$/i;
     var RE_PAGE_HEADER = /\d{1,2}\/\d{1,2}\/\d{4}\s*\|?\s*\d{2}-\d{6,8}/;
     var RE_INCIDENT_NO = /(?<!\d)(\d{2}-\d{6,8})(?!\d)/;
@@ -299,6 +304,9 @@
     function detect(text) {
         var t = String(text == null ? '' : text);
         if (!t) return false;
+        // Follow-up work comes on a separate one-page form, not on the NIBRS
+        // incident report. See the SUPPLEMENT NARRATIVE section below.
+        if (_isSupplementForm(t)) return true;
         if (!/INCIDENT\s+REPORT/i.test(t)) return false;
 
         var strong = /\bARKANSAS\b/i.test(t) || /\bAR\d{7}\b/.test(t);
@@ -319,6 +327,240 @@
         for (var i = 0; i < signals.length; i++) if (signals[i]) score++;
 
         return strong ? score >= 2 : score >= 5;
+    }
+
+    /* ================================================================
+     * SUPPLEMENT NARRATIVE — a SECOND Arkansas form
+     * ----------------------------------------------------------------
+     * Follow-up work (evidence collection, later interviews, transports) is
+     * NOT written onto the NIBRS incident report. The agency issues a
+     * separate one-page form carrying the parent incident number and nothing
+     * but a narrative:
+     *
+     *     SUPPLEMENT NARRATIVE
+     *     INCIDENT NUMBER [SUPP# |] INCIDENT DATE | INCIDENT TIME  CASE STATUS
+     *     26-0506420      [4     ] 05/22/2026       23:09
+     *     SUPPLEMENT TYPE  SUPPLEMENT DATE | SUPPLEMENT TIME | SUPPLEMENTING OFFICER
+     *     ADDITIONAL INFORMATION  05/23/2026  9:30  F4484 - DEREK MCCOY
+     *     NARRATIVE:
+     *     ...
+     *
+     * Three of the four reference documents for incident 26-0506420 are
+     * supplements. Before this branch existed detect() returned false for
+     * every one of them, so they fell through to the legacy INFORM fallback
+     * and the officer's follow-up narrative — which is where the evidence
+     * chain actually lives — was never imported.
+     *
+     * The label row and the value row are separate OCR lines, so each field
+     * is read positionally from the line FOLLOWING its label.
+     * ================================================================ */
+
+    var RE_SUPP_TITLE = /SUPPLEMENT\s+NARRATIVE/i;
+    var RE_NARRATIVE_LABEL = /^\W{0,3}NARRATIVE\s*[:.]?\s*$/i;
+    var RE_TIME_1 = /(?<![\d:])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])/;
+    var RE_SUPP_OFFICER = /\b([A-Z]{1,2}\d{3,5})\s*[-–—]+\s*([A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*)*)\s*$/;
+
+    function _isSupplementForm(t) {
+        return RE_SUPP_TITLE.test(t) &&
+            /SUPPLEMENTING\s+OFFICER/i.test(t) &&
+            /INCIDENT\s+NUMBER/i.test(t) &&
+            RE_INCIDENT_NO.test(t);
+    }
+
+    /* The first line after `i` that carries values rather than more labels. */
+    function _nextValueLine(lines, i) {
+        for (var k = i + 1; k < lines.length && k <= i + 3; k++) {
+            var s = _clean(lines[k]);
+            if (!s) continue;
+            if (RE_NARRATIVE_LABEL.test(s)) return '';
+            return s;
+        }
+        return '';
+    }
+
+    function _readSupplementHeader(lines) {
+        var h = {
+            incidentNumber: '', incidentDate: '', incidentTime: '', supplementNo: '',
+            supplementType: '', supplementDate: '', supplementTime: '',
+            officer: '', officerCode: ''
+        };
+        for (var i = 0; i < lines.length; i++) {
+            var s = _clean(lines[i]);
+            if (!s) continue;
+
+            if (!h.incidentNumber && /INCIDENT\s+NUMBER/i.test(s)) {
+                var hasSupp = /SUPP\s*#/i.test(s);
+                var v = _nextValueLine(lines, i);
+                if (v) {
+                    var mi = RE_INCIDENT_NO.exec(v);
+                    if (mi) {
+                        h.incidentNumber = mi[1];
+                        var rest = v.slice(mi.index + mi[1].length);
+                        // The SUPP# column is only present on some supplements,
+                        // and only then is a bare digit a supplement number
+                        // rather than part of a date.
+                        if (hasSupp) {
+                            var ms = /^\s*(\d{1,3})\b/.exec(rest);
+                            if (ms) h.supplementNo = ms[1];
+                        }
+                        var md = RE_DATE.exec(rest);
+                        if (md) {
+                            h.incidentDate = md[1];
+                            var mt = RE_TIME_1.exec(rest.slice(md.index + md[1].length));
+                            if (mt) h.incidentTime = mt[0];
+                        }
+                    }
+                }
+            }
+
+            if (!h.officer && /SUPPLEMENTING\s+OFFICER/i.test(s)) {
+                var v2 = _nextValueLine(lines, i);
+                if (v2) {
+                    var mo = RE_SUPP_OFFICER.exec(v2);
+                    if (mo) { h.officerCode = mo[1]; h.officer = _clean(mo[2]); }
+                    var md2 = RE_DATE.exec(v2);
+                    if (md2) {
+                        h.supplementDate = md2[1];
+                        h.supplementType = _clean(v2.slice(0, md2.index));
+                        var mt2 = RE_TIME_1.exec(v2.slice(md2.index + md2[1].length));
+                        if (mt2) h.supplementTime = mt2[0];
+                    }
+                }
+            }
+        }
+        return h;
+    }
+
+    /* Everything below the NARRATIVE: label, minus page headers and the
+     * form's own footer furniture. */
+    function _readSupplementNarrative(lines) {
+        var start = -1;
+        for (var i = 0; i < lines.length; i++) {
+            if (RE_NARRATIVE_LABEL.test(_clean(lines[i]))) { start = i; break; }
+        }
+        if (start === -1) {
+            // OCR sometimes welds the label to the first sentence.
+            for (var j = 0; j < lines.length; j++) {
+                if (/^\W{0,3}NARRATIVE\s*:/i.test(_clean(lines[j]))) { start = j - 1; break; }
+            }
+        }
+        if (start === -1) return [];
+
+        var body = [];
+        for (var k = start + 1; k < lines.length; k++) {
+            var s = _stripRuleGlyphs(_clean(lines[k]));
+            // Blank rows are NOT carried through: paragraph breaks are decided
+            // by _paragraphize(), exactly as on the incident report, so the
+            // two forms can never disagree about where a paragraph starts.
+            if (!s) continue;
+            if (RE_PAGE_HEADER.test(s)) continue;
+            if (/^\W{0,3}NARRATIVE\s*[:.]?\s*$/i.test(s)) continue;
+            if (/^\W{0,3}PAGE\s*#?\s*\d*\W{0,3}$/i.test(s)) continue;
+            if (/^\W{0,3}SUPPLEMENT\s+NARRATIVE\W{0,3}$/i.test(s)) continue;
+            var m0 = /^\W{0,3}NARRATIVE\s*:\s*(.+)$/i.exec(s);
+            if (m0) s = _clean(m0[1]);
+            body.push(s);
+        }
+        while (body.length && !body[body.length - 1]) body.pop();
+        return body;
+    }
+
+    function _parseSupplement(raw, lines, fileName) {
+        var warnings = [];
+        function warn(msg) { if (warnings.indexOf(msg) === -1) warnings.push(msg); }
+
+        var h = _readSupplementHeader(lines);
+        if (!h.incidentNumber) warn('Supplement incident number not read from this scan.');
+        if (!h.officer) warn('Supplementing officer not read from this scan.');
+
+        var body = _readSupplementNarrative(lines);
+        var unreadable = [];
+        var text = '';
+        if (!body.length) {
+            warn('No NARRATIVE section found.');
+        } else if (!_bodyIsReadable(body)) {
+            // Same rule as the incident report: noise is not evidence.
+            unreadable.push(1);
+            warn(NARRATIVE_UNREADABLE_PREFIX + '1' +
+                ' could not be read from this scan. It was left out rather than imported as OCR noise - read it from the source document.');
+        } else {
+            text = _paragraphize(body);
+        }
+
+        var narratives = text ? [{
+            officer: h.officer || '',
+            badge: h.officerCode || '',
+            text: text
+        }] : [];
+
+        var typeLabel = h.supplementType ? ' (' + h.supplementType + ')' : '';
+        var report = {
+            id: 'rms_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+            fileName: fileName || '',
+            importedAt: new Date().toISOString(),
+            reportNumber: h.incidentNumber || '',
+            reportDate: h.supplementDate || h.incidentDate || '',
+            reportType: 'Arkansas Supplement Narrative' + typeLabel,
+            supplementNo: h.supplementNo || '',
+            agencyName: '',
+            location: '',
+            beat: '',
+            fromDateTime: _clean((h.incidentDate || '') + ' ' + (h.incidentTime || '')),
+            toDateTime: '',
+            offenses: [],
+            personsInvolved: [],
+            provisionalPersons: [],
+            vehicles: [],
+            property: [],
+            narratives: narratives,
+            digital: [],
+            confidentialPersons: [],
+            pageCount: 1,
+            rawText: raw,
+
+            arFormat: 'ar-supplement-narrative',
+            arFormatLabel: 'Arkansas Supplement Narrative',
+            ar: {
+                incidentDate: h.incidentDate || '',
+                incidentTime: h.incidentTime || '',
+                supplementType: h.supplementType || '',
+                supplementDate: h.supplementDate || '',
+                supplementTime: h.supplementTime || '',
+                reportingOfficer: h.officer || '',
+                officerCode: h.officerCode || ''
+            },
+            diagnostics: {
+                pages: 1,
+                offenses: 0,
+                persons: 0,
+                victims: 0,
+                arrestees: 0,
+                witnesses: 0,
+                othersInvolved: 0,
+                provisional: 0,
+                namesRecovered: 0,
+                narrativeChars: text.length,
+                narrativeLinesRecovered: 0,
+                checkboxFieldsSkipped: true,
+                warnings: warnings
+            }
+        };
+
+        /* The supplement is one page of solid prose in a ruled box, so it is
+         * exposed to exactly the OCR failures the incident report is: PSM 6
+         * drops the short trailing row of a paragraph, and a skewed ruled
+         * grid can defeat the page outright. Offer page 1 to BOTH recovery
+         * passes — measured on the three reference supplements, the banded
+         * read correctly declined to replace a good primary read. */
+        report.narrativeRecovery = {
+            pages: [1],
+            byPage: text ? { 1: text } : {},
+            continuationPages: [],
+            bandCandidates: [1],
+            unreadablePages: unreadable
+        };
+        report.nameRecovery = { pages: [], count: 0 };
+        return report;
     }
 
     /* ================================================================
@@ -774,6 +1016,38 @@
         return false;
     }
 
+    /* Is a narrative body actually readable, or is it OCR wreckage?
+     * A ruled grid that has defeated OCR yields rows like "EE", "-—", "A PTA",
+     * "Ce ——" — none of which is a sentence. A genuinely short narrative is
+     * short but READABLE, so "one good line among twenty" is the failure
+     * signature, not a terse officer. */
+    function _bodyIsReadable(body) {
+        var good = 0;
+        for (var i = 0; i < body.length; i++) {
+            if (_isProse(body[i]) || _isNarrativeFragment(body[i])) good++;
+        }
+        if (!good) return false;
+        return good >= 2 || body.length <= 3;
+    }
+
+    /* Share of a page's lines that carry no readable word at all. Used only to
+     * PRIORITISE pages for a banded re-read when the primary pass produced no
+     * narrative whatsoever — the most damaged page is the likeliest narrative
+     * page, because the narrative is the only part of this form printed as
+     * continuous prose over a ruled grid. */
+    function _junkRatio(lines) {
+        var nonEmpty = 0, junk = 0;
+        for (var i = 0; i < lines.length; i++) {
+            var s = _clean(lines[i]);
+            if (!s) continue;
+            if (RE_PAGE_HEADER.test(s)) continue;
+            nonEmpty++;
+            var words = s.match(/[A-Za-z]{3,}/g) || [];
+            if (words.length < 2) junk++;
+        }
+        return nonEmpty ? junk / nonEmpty : 0;
+    }
+
     function _paragraphize(body) {
         var out = [];
         for (var i = 0; i < body.length; i++) {
@@ -793,6 +1067,7 @@
         var srcPages = [];
         var byPage = {};
         var contPages = [];
+        var unreadable = [];
         var started = false;
         for (var p = 0; p < pages.length; p++) {
             var page = pages[p];
@@ -809,6 +1084,28 @@
                     if (_isPageBreak(s)) break;
                     if (RE_PAGE_HEADER.test(s)) continue;
                     body.push(s);
+                }
+                /*
+                 * A labelled page still has to be READABLE.
+                 *
+                 * This branch used to take every non-empty line under the
+                 * NARRATIVE label on trust, and that is exactly how an
+                 * officer ended up looking at a narrative card containing
+                 *
+                 *     A / A / ER / EE / -— / Pa / Ce —— / ... / A PTA / fr / ES
+                 *
+                 * — 22 rows of pure OCR wreckage from a ruled grid, presented
+                 * as their own words. Rendering noise as evidence is worse
+                 * than rendering nothing: it is not merely useless, it is
+                 * misleading in a case file. So a page whose narrative body
+                 * carries no readable sentence at all contributes NOTHING
+                 * here; it is recorded as unreadable, offered to the banded
+                 * re-read, and — if that fails too — reported as a warning
+                 * telling the examiner to read it from the source document.
+                 */
+                if (body.length && !_bodyIsReadable(body)) {
+                    if (unreadable.indexOf(page.index) === -1) unreadable.push(page.index);
+                    continue;
                 }
                 if (body.length) {
                     chunks.push(_paragraphize(body));
@@ -859,8 +1156,17 @@
          * takes nothing from it unless the banded read is a material gain.
          */
         var bandCandidates = srcPages.slice();
-        if (srcPages.length) {
-            var lastPage = srcPages[srcPages.length - 1];
+        unreadable.forEach(function (n) {
+            if (bandCandidates.indexOf(n) === -1) bandCandidates.push(n);
+        });
+        /* Anchor the forward walk on the last page that carried narrative
+         * text AT ALL — including a page whose text was withheld as
+         * unreadable. A page rejected by the junk gate still proves where the
+         * narrative was, and its spill page must still be offered; leaving it
+         * out cost the closing paragraph of the reference report. */
+        var anchorPages = srcPages.concat(unreadable).sort(function (a, b) { return a - b; });
+        if (anchorPages.length) {
+            var lastPage = anchorPages[anchorPages.length - 1];
             var lastIdx = -1;
             for (var k = 0; k < pages.length; k++) {
                 if (pages[k].index === lastPage) { lastIdx = k; break; }
@@ -874,11 +1180,54 @@
             }
         }
 
+        /*
+         * LAST-RESORT CANDIDATES — the "we found nothing at all" case.
+         *
+         * When the scan is skewed as well as ruled, the primary OCR of the
+         * narrative page can collapse so completely that the NARRATIVE label
+         * is gone, the prose-dominance gate rejects the page, and no
+         * continuation banner survives either. srcPages is then empty, so the
+         * two rules above nominate NOTHING and the banded re-read — the only
+         * thing that can actually read the page — never runs. Measured on the
+         * Faulkner 26-0506420 report: five pages, the whole narrative on page
+         * 4, zero narratives imported, zero band candidates offered.
+         *
+         * So when nothing was found, nominate pages on GEOMETRY-FREE grounds:
+         * every page except the face page and the Others-Involved pages,
+         * ordered most-damaged first so the MAX_PAGES budget is spent where
+         * it can help. This is safe because offering a page is not the same
+         * as using it — recoverNarrativeBanded() takes text from a page only
+         * when the banded read clears the confidence, prose and material-gain
+         * gates. Verified on that report: offering ALL FIVE pages caused
+         * exactly one (page 4, the real narrative) to be accepted.
+         */
+        if (!bandCandidates.length) {
+            var ranked = [];
+            for (var f = 0; f < pages.length; f++) {
+                if (pages[f].index <= 1) continue;
+                if (_hasOthersHeading(pages[f].lines) >= 0) continue;
+                ranked.push({ index: pages[f].index, junk: _junkRatio(pages[f].lines) });
+            }
+            ranked.sort(function (a, b) { return b.junk - a.junk || a.index - b.index; });
+            for (var r2 = 0; r2 < ranked.length; r2++) bandCandidates.push(ranked[r2].index);
+        }
+
+        /* Tell the examiner which pages were withheld. A withheld page is a
+         * page whose narrative text EXISTS on the paper but could not be read
+         * from this scan; silently dropping it would look identical to a page
+         * the officer left blank. recoverNarrativeBanded() clears the entry
+         * for any page it later rebuilds. */
+        if (unreadable.length) {
+            warn(NARRATIVE_UNREADABLE_PREFIX + unreadable.join(', ') +
+                ' could not be read from this scan. It was left out rather than imported as OCR noise - read it from the source document.');
+        }
+
         if (!chunks.length) {
             warn('No NARRATIVE section found.');
             return {
                 items: [], pages: [], byPage: byPage,
-                continuationPages: contPages, bandCandidates: bandCandidates
+                continuationPages: contPages, bandCandidates: bandCandidates,
+                unreadablePages: unreadable
             };
         }
         return {
@@ -886,6 +1235,7 @@
             byPage: byPage,
             continuationPages: contPages,
             bandCandidates: bandCandidates,
+            unreadablePages: unreadable,
             items: [{
                 officer: '',            // filled by parse() from the ADM footer
                 badge: '',
@@ -1118,6 +1468,93 @@
         return n;
     }
 
+    /* ---- banded / primary row reconciliation ----------------------------
+     * Band OCR reads a ruled row in isolation, which is exactly why it works
+     * — but the first narrative row shares its band with the form's
+     * "NARRATIVE:" cell label, and PSM 7 reading that whole row makes a mess
+     * of the words beside the label. Measured on Faulkner 26-0506420 page 4:
+     *
+     *   banded : "rg SN at ——— 2309, T was dispatched to 48 Brown Rd. ..."
+     *   primary: "On 05/22/2026 at approximately 2309, I was dispatched ..."
+     *
+     * The primary pass collapsed on that PAGE yet still read that ROW
+     * correctly — and that row carries the dispatch date, which is evidence.
+     *
+     * So each rebuilt row is compared against the page's primary rows, and
+     * where the two are plainly the same printed row AND the primary read is
+     * plainly cleaner, the primary text wins. Deliberately conservative: a
+     * strong word overlap, a clear quality margin, and each primary row may
+     * be spent at most once. A tie always leaves the banded row alone.
+     */
+    function _wordSet(s) {
+        var out = {};
+        var m = String(s == null ? '' : s).toLowerCase().match(/[a-z0-9]{3,}/g) || [];
+        for (var i = 0; i < m.length; i++) out[m[i]] = true;
+        return out;
+    }
+
+    function _wordOverlap(a, b) {
+        var ka = Object.keys(a), kb = Object.keys(b);
+        if (!ka.length || !kb.length) return 0;
+        var hit = 0;
+        for (var i = 0; i < ka.length; i++) if (b[ka[i]]) hit++;
+        return hit / Math.min(ka.length, kb.length);
+    }
+
+    /* Crude but stable: how many tokens on this line are plausibly words or
+     * numbers, less how many are OCR debris. */
+    function _lineQuality(s) {
+        var toks = String(s == null ? '' : s).trim().split(/\s+/);
+        var good = 0, junk = 0;
+        for (var i = 0; i < toks.length; i++) {
+            var t = toks[i].replace(/^[("'[]+/, '').replace(/[.,;:!?)"'\]]+$/, '');
+            if (!t) { junk++; continue; }
+            if (/^[A-Za-z][A-Za-z'-]+$/.test(t)) good++;
+            else if (/^\d[\d\/:.,-]*\d$/.test(t)) good++;
+            else if (/^[AaIi]$/.test(t)) good++;
+            else junk++;
+        }
+        return good - junk;
+    }
+
+    function _reconcileBandedWithPrimary(bandLines, primaryLines) {
+        if (!primaryLines || !primaryLines.length) return bandLines;
+        var out = bandLines.slice();
+        var used = {};
+        for (var i = 0; i < out.length; i++) {
+            var b = _clean(out[i]);
+            if (!b) continue;
+            var bw = _wordSet(b);
+            if (Object.keys(bw).length < 5) continue;   // too short to match safely
+            var bestIdx = -1, bestOv = 0;
+            for (var j = 0; j < primaryLines.length; j++) {
+                if (used[j]) continue;
+                var p = _clean(primaryLines[j]);
+                if (!p || !_isProse(p)) continue;
+                var ov = _wordOverlap(bw, _wordSet(p));
+                if (ov > bestOv) { bestOv = ov; bestIdx = j; }
+            }
+            if (bestIdx < 0 || bestOv < 0.6) continue;
+            var pl = _clean(primaryLines[bestIdx]);
+            if (_lineQuality(pl) - _lineQuality(b) >= 2) {
+                out[i] = pl;
+                used[bestIdx] = true;
+            }
+        }
+        return out;
+    }
+
+    /* The primary OCR lines of one page, straight from the text parse() was
+     * given. Used only to reconcile a banded rebuild. */
+    function _primaryPageLines(report, pageNo) {
+        if (!report || !report.rawText) return null;
+        var pages = _splitPages(_lines(report.rawText));
+        for (var i = 0; i < pages.length; i++) {
+            if (pages[i].index === pageNo) return pages[i].lines;
+        }
+        return null;
+    }
+
     /* Pages a banded re-read should cover. Union of:
      *   (a) pages the primary pass took narrative from — they may still be
      *       degraded even when a little text came through;
@@ -1174,6 +1611,10 @@
             while (body.length && !body[body.length - 1]) body.pop();
             if (!body.length) return;
 
+            // Where the primary pass read a row better than the band did,
+            // keep the primary row. See _reconcileBandedWithPrimary().
+            body = _reconcileBandedWithPrimary(body, _primaryPageLines(report, pageNo));
+
             // A banded row IS a printed row, so the blank rows already carry the
             // paragraph structure. Join directly rather than re-guessing it.
             var text = body.join('\n').replace(/\n{3,}/g, '\n\n');
@@ -1211,6 +1652,24 @@
             (report.diagnostics.narrativePagesRebuilt || 0) + replaced.length;
 
         replaced.sort(function (a, b) { return a - b; });
+
+        /* A page we just rebuilt is no longer unreadable, and the report is no
+         * longer narrative-less. Drop both stale warnings and re-state the
+         * unreadable one for whatever is still genuinely missing. */
+        var stillBad = (rec.unreadablePages || []).filter(function (n) {
+            return replaced.indexOf(n) === -1;
+        });
+        rec.unreadablePages = stillBad;
+        var w = report.diagnostics.warnings;
+        for (var wi = w.length - 1; wi >= 0; wi--) {
+            if (w[wi].indexOf(NARRATIVE_UNREADABLE_PREFIX) === 0) w.splice(wi, 1);
+            else if (w[wi] === 'No NARRATIVE section found.') w.splice(wi, 1);
+        }
+        if (stillBad.length) {
+            w.push(NARRATIVE_UNREADABLE_PREFIX + stillBad.join(', ') +
+                ' could not be read from this scan. It was left out rather than imported as OCR noise - read it from the source document.');
+        }
+
         var msg = 'Narrative: the ruled grid defeated the primary OCR pass on page' +
             (replaced.length === 1 ? ' ' : 's ') + replaced.join(', ') +
             '. Those page' + (replaced.length === 1 ? ' was' : 's were') +
@@ -1228,6 +1687,13 @@
     function parse(text, fileName) {
         var raw = String(text == null ? '' : text);
         var lines = _lines(raw);
+
+        // The supplement form shares only the incident number with the NIBRS
+        // report — no offense band, no person blocks, no continuation pages.
+        if (_isSupplementForm(raw) && !/INCIDENT\s+REPORT/i.test(raw)) {
+            return _parseSupplement(raw, lines, fileName);
+        }
+
         var pages = _splitPages(lines);
 
         var warnings = [];
@@ -1343,7 +1809,8 @@
             pages: narrRead.pages || [],
             byPage: narrRead.byPage || {},
             continuationPages: narrRead.continuationPages || [],
-            bandCandidates: narrRead.bandCandidates || []
+            bandCandidates: narrRead.bandCandidates || [],
+            unreadablePages: narrRead.unreadablePages || []
         };
 
         _describeProvisional(report, warn);
@@ -1501,6 +1968,32 @@
         result.matched = true;
 
         var lines = _lines(t);
+
+        /* A supplement carries the PARENT incident number and a narrative,
+         * nothing else — no offense row, no address of offense. Return the
+         * case number so the create-case screen can link it, and a synopsis
+         * drawn from the narrative itself. */
+        if (_isSupplementForm(t) && !/INCIDENT\s+REPORT/i.test(t)) {
+            var sh = _readSupplementHeader(lines);
+            var sBody = _readSupplementNarrative(lines);
+            result.caseNum = sh.incidentNumber || '';
+            var sParts = [];
+            if (sh.supplementType) sParts.push(sh.supplementType);
+            if (sh.supplementDate) {
+                sParts.push('Supplement ' + sh.supplementDate +
+                    (sh.supplementTime ? ' ' + sh.supplementTime : ''));
+            }
+            if (sh.officer) sParts.push('Supplementing officer ' + sh.officer);
+            result.synopsis = sParts.join('. ');
+            if (result.synopsis) result.synopsis += '.';
+            if (_bodyIsReadable(sBody)) {
+                var sTxt = sBody.filter(Boolean).slice(0, 3).join(' ').slice(0, 400);
+                result.synopsis = (result.synopsis ? result.synopsis + ' ' : '') + sTxt;
+            }
+            result.detected.rmsImports = true;
+            return result;
+        }
+
         var pages = _splitPages(lines);
         var noop = function () {};
         var header = _readHeader(pages, noop);
@@ -1596,6 +2089,13 @@
             fmtPhone: _fmtPhone,
             scanAddress: _scanAddress,
             bandIsNarrative: _bandIsNarrative,
+            bodyIsReadable: _bodyIsReadable,
+            junkRatio: _junkRatio,
+            lineQuality: _lineQuality,
+            reconcileBandedWithPrimary: _reconcileBandedWithPrimary,
+            isSupplementForm: _isSupplementForm,
+            readSupplementHeader: _readSupplementHeader,
+            readSupplementNarrative: _readSupplementNarrative,
             stripRuleGlyphs: _stripRuleGlyphs,
             narrativeRunFromBands: _narrativeRunFromBands,
             looksLikeNarrativeContinuation: _looksLikeNarrativeContinuation

@@ -1,0 +1,37 @@
+# REDACTED FIXTURE — the same SUPPLEMENT NARRATIVE form from a scan whose
+# ruled grid defeated the primary OCR pass. The header still reads; the
+# narrative box comes back as the dash-and-two-letter wreckage an officer
+# photographed on 09/21/2026 after importing one of these into VIPER.
+# Nothing below the NARRATIVE: label is the officer's text — that is the
+# whole point of the fixture.
+SUPPLEMENT NARRATIVE
+
+INCIDENT NUMBER SUPP# | INCIDENT DATE | INCIDENT TIME CASE STATUS
+
+26-0512833 2 06/11/2026 21:40
+SUPPLEMENT TYPE SUPPLEMENT DATE | SUPPLEMENT TIME | SUPPLEMENTING OFFICER
+ADDITIONAL INFORMATION 06/12/2026 8:14 F4102 - RANDALL PIKE
+NARRATIVE:
+a e———
+ee — eee AB
+Le————eerie
+Ee en
+ee———|
+a————
+ee —
+ES——
+rr——
+ee ee r——
+Ce—————
+—————
+A a——
+oe — me
+——
+[a————l
+eae
+ee————
+EO —
+Fo ————
+ee re——— eee)
+Ce————
+

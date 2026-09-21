@@ -103,9 +103,20 @@
     // Full unit-metric map for the supervisor's configurable stat cards /
     // Quick Stats. Present only on the dashboard page (index.html); omitted on
     // pages without it — the supervisor backfills from the headline in that case.
+    //
+    // Prefer the period-bucketed snapshot (month / quarter / year / all-time)
+    // so the supervisor can show calendar-month plus QTD/YTD figures. The flat
+    // `metrics` all-time map stays on the wire for older supervisor builds.
+    let metricsByPeriod;
     let metrics;
     try {
-      if (typeof window !== 'undefined' && typeof window.viperMetricsSnapshot === 'function') {
+      if (typeof window !== 'undefined' && typeof window.viperMetricsByPeriod === 'function') {
+        metricsByPeriod = window.viperMetricsByPeriod();
+        metrics = metricsByPeriod && metricsByPeriod.buckets && metricsByPeriod.buckets.allTime;
+      }
+    } catch (_) { metricsByPeriod = undefined; }
+    try {
+      if (!metrics && typeof window !== 'undefined' && typeof window.viperMetricsSnapshot === 'function') {
         metrics = window.viperMetricsSnapshot();
       }
     } catch (_) { metrics = undefined; }
@@ -126,6 +137,7 @@
         byStatus: Object.entries(byStatus).map(([label, count]) => ({ label, count })),
         byType: Object.entries(byPriority).map(([label, count]) => ({ label, count })),
         metrics,
+        metricsByPeriod,
         investigator: id.name,
         badge: id.badge,
       },

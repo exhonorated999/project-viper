@@ -197,20 +197,13 @@
             }
         }
         
-        // Get warrants written this month count (counts all warrant types)
+        // Warrants written in the active metric period (counts all warrant types)
         function getWarrantsWrittenThisMonth() {
             const allWarrants = JSON.parse(localStorage.getItem('viperCaseWarrants')) || {};
-            const now = new Date();
-            const currentMonth = now.getMonth();
-            const currentYear = now.getFullYear();
-
             let count = 0;
             Object.values(allWarrants).forEach(caseWarrants => {
                 caseWarrants.forEach(warrant => {
-                    const createdDate = new Date(warrant.createdAt);
-                    if (createdDate.getMonth() === currentMonth && createdDate.getFullYear() === currentYear) {
-                        count++;
-                    }
+                    if (_inThisMonth(warrant.createdAt)) count++;
                 });
             });
 
@@ -4922,20 +4915,11 @@
 
         function getNewCasesThisMonth() {
             const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
-            const now = new Date();
-            const currentMonth = now.getMonth();
-            const currentYear = now.getFullYear();
-            
             let count = 0;
             cases.forEach(caseItem => {
-                if (caseItem.createdAt) {
-                    const createdDate = new Date(caseItem.createdAt);
-                    if (createdDate.getMonth() === currentMonth && createdDate.getFullYear() === currentYear) {
-                        count++;
-                    }
-                }
+                if (_inThisMonth(caseItem.createdAt)) count++;
             });
-            
+
             return count;
         }
         function getTotalNewCases() {
@@ -4957,12 +4941,60 @@
             return monthNames[new Date().getMonth()] + ' ' + new Date().getFullYear();
         }
 
-        // Helpers for "this month" filtering. Each metric falls back to the parent
+        // ── Metric period windows ─────────────────────────────────────────
+        // Every "monthly" metric computation funnels through _inThisMonth().
+        // By swapping a single module-scoped window we can re-run the exact
+        // same computations for a quarter or a year without duplicating any
+        // of the ~20 getMonthly* functions. `null` = current calendar month,
+        // which is the dashboard's normal behaviour.
+        //
+        // `var` (not let/const) so the declaration hoists — _inThisMonth is
+        // called from functions defined far earlier in this script.
+        var _metricPeriod = null; // { start: Date, end: Date, label: string }
+
+        function _setMetricPeriod(p) { _metricPeriod = p || null; }
+
+        /**
+         * Build a CALENDAR period window. Quarters are Jan-Mar / Apr-Jun /
+         * Jul-Sep / Oct-Dec; the year runs Jan 1 → Dec 31 (so "year" reads as
+         * year-to-date since future events don't exist).
+         */
+        function viperPeriodWindow(kind, ref) {
+            const now = ref ? new Date(ref) : new Date();
+            const y = now.getFullYear();
+            if (kind === 'year') {
+                return { start: new Date(y, 0, 1), end: new Date(y + 1, 0, 1), label: String(y) };
+            }
+            if (kind === 'quarter') {
+                const q = Math.floor(now.getMonth() / 3);
+                return {
+                    start: new Date(y, q * 3, 1),
+                    end: new Date(y, q * 3 + 3, 1),
+                    label: 'Q' + (q + 1) + ' ' + y,
+                };
+            }
+            const m = now.getMonth();
+            return {
+                start: new Date(y, m, 1),
+                end: new Date(y, m + 1, 1),
+                label: new Date(y, m, 1).toLocaleString(undefined, { month: 'long' }) + ' ' + y,
+            };
+        }
+
+        // Helpers for period filtering. Each metric falls back to the parent
         // case.createdAt when the item itself has no timestamp.
+        // Despite the legacy name this honours whatever window _setMetricPeriod
+        // installed; with no window it means "the current calendar month".
         function _inThisMonth(d) {
             if (!d) return false;
-            const dt = new Date(d);
+            // Date-only strings ("2026-09-04") parse as UTC midnight, which can
+            // land in the previous month for negative-offset locales. Pin them
+            // to local midnight instead.
+            const raw = (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) ? d + 'T00:00:00' : d;
+            const dt = new Date(raw);
             if (isNaN(dt.getTime())) return false;
+            const w = _metricPeriod;
+            if (w) return dt >= w.start && dt < w.end;
             const now = new Date();
             return dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear();
         }
@@ -4973,7 +5005,7 @@
         }
         
         // Update dashboard with case data
-        function updateDashboardCaseData() {
+        function updateDashboardCaseData(metricsOnly) {
             const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
             
             // Build status sets — custom statuses fold into the bucket matching their
@@ -5014,6 +5046,10 @@
             dashboardMetrics['closed_with_arrest'].monthly = closedWithArrestCases.filter(c => _inThisMonth(_closedDate(c))).length;
             dashboardMetrics['transferred_cases'].monthly  = cases.filter(c => c.status === 'transferred' && _inThisMonth(_closedDate(c))).length;
             
+            // Numbers only — the period sweep calls this repeatedly and must
+            // not touch the DOM.
+            if (metricsOnly) return;
+
             // Update case analytics section
             updateCaseAnalytics(activeCases.length, closedCases.length + otherClosureCases.length, closedWithArrestCases.length);
             
@@ -5985,14 +6021,8 @@
         // keys (examined + pending review + by-tool + by-category).
         function _recomputeDeviceMetrics() {
             const all = JSON.parse(localStorage.getItem('viperCaseForensicDevices') || '{}');
-            const now = new Date();
-            const curM = now.getMonth(), curY = now.getFullYear();
-            const inMonth = (iso) => {
-                if (!iso) return false;
-                const d = new Date(iso.length === 10 ? iso + 'T00:00:00' : iso);
-                if (isNaN(d.getTime())) return false;
-                return d.getMonth() === curM && d.getFullYear() === curY;
-            };
+            // Period-aware (honours _setMetricPeriod; defaults to this month).
+            const inMonth = (iso) => _inThisMonth(iso);
 
             const toolKey = {
                 cellebrite: 'devices_tool_cellebrite',
@@ -6044,7 +6074,12 @@
         // ── Unit-wide metric computation (shared by dashboard load + the
         //    Supervisor Link stats push). Recomputes every dashboardMetrics
         //    value from localStorage, then callers read the fresh numbers.
-        function viperComputeAllMetrics() {
+        function viperComputeAllMetrics(opts) {
+            // metricsOnly: recompute the numbers but skip every DOM re-render.
+            // Used by the period sweep below, which runs the whole computation
+            // three extra times and must not repaint (or flicker) the page.
+            const metricsOnly = !!(opts && opts.metricsOnly);
+
             // Update new cases assigned (lifetime + this month)
             dashboardMetrics['new_cases_assigned'].value   = getTotalNewCases();
             dashboardMetrics['new_cases_assigned'].monthly = getNewCasesThisMonth();
@@ -6095,30 +6130,82 @@
             syncCustomMetricsIntoDashboard();
 
             // Update case data on dashboard (open/closed/transferred/inactive…)
-            updateDashboardCaseData();
+            updateDashboardCaseData(metricsOnly);
         }
 
         // Fresh, numeric { key -> number } snapshot of all built-in metrics for
         // the Supervisor Link stats push. Coerces '$1,234' / multi-unit objects
         // to plain numbers; skips custom_* metrics.
-        window.viperMetricsSnapshot = function () {
-            try { viperComputeAllMetrics(); } catch (_) {}
-            const toNum = (v) => {
-                if (typeof v === 'number') return isFinite(v) ? v : 0;
-                if (v && typeof v === 'object') {
-                    let s = 0;
-                    for (const k in v) { const n = parseFloat(v[k]); if (!isNaN(n)) s += n; }
-                    return s;
-                }
-                const n = parseInt(String(v == null ? '' : v).replace(/[^0-9-]/g, ''), 10);
-                return isNaN(n) ? 0 : n;
-            };
+        function _viperMetricsToNum(v) {
+            if (typeof v === 'number') return isFinite(v) ? v : 0;
+            if (v && typeof v === 'object') {
+                let s = 0;
+                for (const k in v) { const n = parseFloat(v[k]); if (!isNaN(n)) s += n; }
+                return s;
+            }
+            const n = parseInt(String(v == null ? '' : v).replace(/[^0-9-]/g, ''), 10);
+            return isNaN(n) ? 0 : n;
+        }
+
+        // Harvest one field ('value' = lifetime, 'monthly' = active period) off
+        // every built-in metric. Metrics whose `monthly` is null are static
+        // (no period dimension) and are OMITTED so the supervisor can render
+        // "—" rather than a misleading zero.
+        function _viperHarvestMetrics(field) {
             const out = {};
             for (const k in dashboardMetrics) {
                 if (k.startsWith('custom_')) continue;
-                out[k] = toNum(dashboardMetrics[k].value);
+                const raw = dashboardMetrics[k][field];
+                if (field === 'monthly' && (raw === null || raw === undefined)) continue;
+                out[k] = _viperMetricsToNum(raw);
             }
             return out;
+        }
+
+        window.viperMetricsSnapshot = function () {
+            try { viperComputeAllMetrics(); } catch (_) {}
+            return _viperHarvestMetrics('value');
+        };
+
+        /**
+         * Period-bucketed metric snapshot for the Supervisor dashboard.
+         *
+         * Re-runs the full metric computation once per CALENDAR period with a
+         * different window installed, harvesting the `monthly` field each pass
+         * (which, thanks to _inThisMonth honouring _metricPeriod, now means
+         * "within the installed window"). Restores the live month window and
+         * recomputes before returning so the investigator's own dashboard is
+         * left exactly as it was.
+         *
+         * Shape:
+         *   { buckets: { allTime, month, quarter, year },
+         *     periods: { month:{label,start,end}, quarter:{…}, year:{…} },
+         *     generatedAt }
+         */
+        window.viperMetricsByPeriod = function () {
+            const buckets = {};
+            const periods = {};
+            try {
+                ['month', 'quarter', 'year'].forEach(kind => {
+                    const w = viperPeriodWindow(kind);
+                    periods[kind] = {
+                        label: w.label,
+                        start: w.start.toISOString(),
+                        end: w.end.toISOString(),
+                    };
+                    _setMetricPeriod(w);
+                    viperComputeAllMetrics({ metricsOnly: true });
+                    buckets[kind] = _viperHarvestMetrics('monthly');
+                });
+            } catch (e) {
+                console.warn('viperMetricsByPeriod failed:', e);
+            } finally {
+                // Always hand the dashboard back its normal month window.
+                _setMetricPeriod(null);
+                try { viperComputeAllMetrics({ metricsOnly: true }); } catch (_) {}
+            }
+            buckets.allTime = _viperHarvestMetrics('value');
+            return { buckets, periods, generatedAt: new Date().toISOString() };
         };
 
         document.addEventListener('DOMContentLoaded', function() {

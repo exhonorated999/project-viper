@@ -57,7 +57,30 @@ const MAX_BAND = 1200;   // taller than this is a whole form region, not a row
 const MIN_PITCH = 45;    // plausible printed row pitch, low end
 const MAX_PITCH = 85;    // ... and high end
 const INK_BLANK = 250;   // a band with less ink than this is an empty row
+const INK_RETRY = 2000;  // ... and with more than this it is definitely NOT one
 const MAX_PAGES = 6;     // hard cap: each page is ~40 recognize() calls
+
+/* ---- deskew ------------------------------------------------------------
+ * A flatbed scan of a stapled report is routinely a fraction of a degree off
+ * square, and findHorizontalRules() is STRICTLY contiguous along a scanline,
+ * so even a tiny rotation destroys it: on page 4 of the second reference
+ * report (Faulkner County, incident 26-0506420) the printed rule drifts 12 px
+ * vertically across 1266 px horizontally — 0.54° — and the longest contiguous
+ * dark run on ANY scanline of that page falls to 785 px, below H_RUN. The
+ * detector found ZERO rules, band OCR returned ZERO rows, and the narrative
+ * was lost outright even though the page is perfectly legible to a human.
+ *
+ * Loosening H_RUN cannot fix that: the rule is not short, it is diagonal.
+ * The page has to be squared up first. Skew is estimated by the classic
+ * projection-profile method — shear the ink census by a candidate slope and
+ * keep the slope whose profile is most peaked (sum of squares) — then the
+ * grayscale is resampled once and everything downstream runs unchanged.
+ * ---------------------------------------------------------------------- */
+const SKEW_STEP = 4;        // subsample factor while searching for the angle
+const SKEW_MAX = 0.045;     // widest slope searched, dy/dx (~2.6°)
+const SKEW_COARSE = 0.0045; // coarse search step (~0.26°)
+const SKEW_FINE = 0.0009;   // fine search step (~0.05°, ≈2px over the page)
+const SKEW_MIN = 0.0015;    // below this the page is square enough to leave alone
 
 /* ---- minimal 8-bit grayscale PNG encoder ------------------------------
  * There is no image library in the tree (no sharp/jimp), and mupdf's asPNG()
@@ -116,6 +139,72 @@ function _median(arr) {
 }
 
 /* ---- geometry ---------------------------------------------------------- */
+
+/** Peakedness of the ink profile after shearing by `slope`.  A squared-up
+ *  ruled form puts every rule into one profile bin and the score spikes. */
+function _skewScore(dk, dw, dh, slope) {
+    const pad = Math.ceil(Math.abs(slope) * dw) + 2;
+    const prof = new Int32Array(dh + 2 * pad);
+    for (let y = 0; y < dh; y++) {
+        const row = y * dw;
+        for (let x = 0; x < dw; x++) {
+            if (!dk[row + x]) continue;
+            prof[y - Math.round(slope * x) + pad]++;
+        }
+    }
+    let s = 0;
+    for (let i = 0; i < prof.length; i++) s += prof[i] * prof[i];
+    return s;
+}
+
+/** Estimated skew as a slope dy/dx.  Positive means a printed horizontal rule
+ *  descends left-to-right.  Coarse sweep, then a fine sweep around the winner. */
+function estimateSkew(g, w, h) {
+    const dw = Math.floor(w / SKEW_STEP);
+    const dh = Math.floor(h / SKEW_STEP);
+    if (dw < 50 || dh < 50) return 0;
+    const dk = new Uint8Array(dw * dh);
+    for (let y = 0; y < dh; y++) {
+        const src = (y * SKEW_STEP) * w;
+        const dst = y * dw;
+        for (let x = 0; x < dw; x++) dk[dst + x] = g[src + x * SKEW_STEP] < DARK ? 1 : 0;
+    }
+
+    let best = 0, bestScore = -1;
+    for (let s = -SKEW_MAX; s <= SKEW_MAX + 1e-9; s += SKEW_COARSE) {
+        const sc = _skewScore(dk, dw, dh, s);
+        if (sc > bestScore) { bestScore = sc; best = s; }
+    }
+    const lo = best - SKEW_COARSE, hi = best + SKEW_COARSE;
+    for (let s = lo; s <= hi + 1e-9; s += SKEW_FINE) {
+        const sc = _skewScore(dk, dw, dh, s);
+        if (sc > bestScore) { bestScore = sc; best = s; }
+    }
+    // A page with no ink has no skew. Without this the first candidate angle
+    // wins on a score of zero and a blank page is needlessly resampled.
+    if (bestScore <= 0) return 0;
+    return Math.abs(best) < SKEW_MIN ? 0 : best;
+}
+
+/** Resample the grayscale so printed horizontal rules become horizontal.
+ *  Output is taller than the input by the drift the shear introduces, so no
+ *  row of the page is ever clipped; the extra margin is white.
+ *  Nearest-neighbour on purpose: interpolation greys out the 1-2 px rules and
+ *  the contiguous-run detector then misses them. */
+function deskewGray(g, w, h, slope) {
+    const pad = Math.ceil(Math.abs(slope) * w) + 1;
+    const ho = h + 2 * pad;
+    const out = Buffer.alloc(w * ho, 255);
+    for (let x = 0; x < w; x++) {
+        const shift = Math.round(slope * x);
+        for (let yo = 0; yo < ho; yo++) {
+            const sy = yo - pad + shift;
+            if (sy < 0 || sy >= h) continue;
+            out[yo * w + x] = g[sy * w + x];
+        }
+    }
+    return { gray: out, width: w, height: ho };
+}
 
 /** Rows whose longest contiguous dark run reaches H_RUN, collapsed into rules.
  *  Detection is deliberately STRICT and contiguous: a gap tolerance large
@@ -247,11 +336,20 @@ async function bandOcrPages(opts) {
                 mupdf.Matrix.scale(DPI / 72, DPI / 72),
                 mupdf.ColorSpace.DeviceGray, false, true);
             const w = pm.getWidth();
-            const h = pm.getHeight();
+            let h = pm.getHeight();
             const px = pm.getPixels();
             const nc = Math.max(1, Math.round(px.length / (w * h)));
-            const g = Buffer.alloc(w * h);
+            let g = Buffer.alloc(w * h);
             for (let i = 0; i < w * h; i++) g[i] = px[i * nc];
+
+            // Square the page up first. A 0.5° rotation is invisible to a
+            // human and fatal to contiguous-run rule detection.
+            const skew = estimateSkew(g, w, h);
+            if (skew) {
+                const ds = deskewGray(g, w, h, skew);
+                g = ds.gray;
+                h = ds.height;
+            }
 
             const rules = findHorizontalRules(g, w, h);
             const gaps = [];
@@ -299,6 +397,7 @@ async function bandOcrPages(opts) {
 
                 const sub = Buffer.alloc(cw * bh);
                 g.copy(sub, 0, t * w, (bt + 1) * w);
+                const raw = Buffer.from(sub);      // pre-whitening copy, for the retry below
                 // Vertical rules — the table border and the column separators —
                 // become white so PSM 7 sees words rather than a run of "|".
                 // Without this the leading "[" bleeds into the first word:
@@ -328,12 +427,38 @@ async function bandOcrPages(opts) {
                     conf = Math.round((r && r.data && r.data.confidence) || 0);
                 } catch (_) { /* a single unreadable band must not kill the page */ }
 
+                // A well-inked row that comes back as the EMPTY STRING is the
+                // whitening misfiring, not a blank row: erasing a column that
+                // happens to be dark in almost every scanline of this band can
+                // take a glyph stem with it and PSM 7 then refuses the line
+                // outright. Measured on page 4 of the Faulkner 26-0506420
+                // report, band 22 ("my body-worn camera. Mr. Barber was read
+                // his Miranda Rights and he agreed to speak with us. He") came
+                // back '' at confidence 0 with whitening and at confidence 95
+                // WITHOUT it — a whole line of an officer's narrative.
+                //
+                // So retry that one band unwhitened. It is only ever reached
+                // for a row the first pass already gave up on, so it cannot
+                // degrade a row that read. Rows that are genuinely rule noise
+                // come back at confidence 0-44 ("Lo]", "- —", "Ee") and are
+                // dropped downstream by the caller's confidence gate.
+                if (!text && ink >= INK_RETRY) {
+                    try {
+                        const r2 = await worker.recognize(encodeGrayPng(raw, cw, bh));
+                        const t2 = String((r2 && r2.data && r2.data.text) || '').replace(/\s+/g, ' ').trim();
+                        if (t2) {
+                            text = t2;
+                            conf = Math.round((r2 && r2.data && r2.data.confidence) || 0);
+                        }
+                    } catch (_) { /* ignore */ }
+                }
+
                 lines.push({ y: b.top, h: bh, conf: conf, text: text, blank: !text });
             }
 
             out[String(pageNo)] = {
                 width: w, height: h, pitch: pitch, ruleCount: rules.length,
-                lines: lines
+                skew: skew, lines: lines
             };
         }
     } finally {
@@ -350,5 +475,7 @@ module.exports = {
     findHorizontalRules,
     findVerticalRules,
     bandsFromRules,
-    _consts: { DPI, DARK, H_RUN, V_RUN, MIN_BAND, MAX_BAND, INK_BLANK, MAX_PAGES }
+    estimateSkew,
+    deskewGray,
+    _consts: { DPI, DARK, H_RUN, V_RUN, MIN_BAND, MAX_BAND, INK_BLANK, INK_RETRY, MAX_PAGES, SKEW_MIN, SKEW_MAX }
 };

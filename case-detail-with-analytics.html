@@ -1532,7 +1532,11 @@
                 // and re-merge narrative rows it discarded, using the
                 // supplementary passes index.html ran while it still had the
                 // file path. Synchronous, so this function stays synchronous.
-                if (window.ArIncidentParser && report.arFormat === 'ar-incident-report') {
+                // Both Arkansas forms ('ar-incident-report' and
+                // 'ar-supplement-narrative') are ruled-grid scans and hit the
+                // same OCR failures, so gate on the family prefix — a
+                // supplement's narrative is the WHOLE document.
+                if (window.ArIncidentParser && /^ar-/.test(report.arFormat || '')) {
                     let rebuilt = 0;
                     try {
                         if (arSparsePages) window.ArIncidentParser.recoverNames(report, arSparsePages);
@@ -38767,7 +38771,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             try {
                 const AR = window.ArIncidentParser;
                 if (!AR || !filePath) return { names, narrativeLines, narrativePages };
-                if (report.arFormat !== 'ar-incident-report') return { names, narrativeLines, narrativePages };
+                // Family prefix, not one id: the SUPPLEMENT NARRATIVE form is
+                // a ruled-grid scan too, and its narrative IS the document.
+                if (!/^ar-/.test(report.arFormat || '')) return { names, narrativeLines, narrativePages };
                 if (!window.electronAPI || !window.electronAPI.ocrPdfPagesSparse) {
                     return { names, narrativeLines, narrativePages };
                 }

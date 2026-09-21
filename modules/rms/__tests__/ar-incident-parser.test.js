@@ -62,7 +62,9 @@ ok('two structural signals alone are not enough without a strong marker',
  * 2. Page splitting
  * ──────────────────────────────────────────────────────────────── */
 console.log('\n[pages]');
-const pages = AR._internal.splitPages(TEXT.replace(/\r\n?/g, '\n').split('\n'));
+const pageSplit = AR._internal.splitPages(TEXT.replace(/\r\n?/g, '\n').split('\n'));
+const pages = pageSplit.pages;
+ok('banner inference is not flagged authoritative', !pageSplit.authoritative);
 eq('splits into 5 pages', pages.length, 5);
 eq('page ordinals are 1..5', pages.map(p => p.index), [1, 2, 3, 4, 5]);
 ok('page 1 starts at line 0 (its title never survives standalone)', pages[0].from === 0);
@@ -749,6 +751,20 @@ eq('nothing is still listed as unreadable', rw2.narrativeRecovery.unreadablePage
 ok('the rebuild is disclosed',
     rw2.diagnostics.warnings.some(w => /re-read row by row/.test(w)), rw2.diagnostics.warnings);
 
+/* A rebuilt narrative must still carry the REPORTING OFFICER.
+ *
+ * When the primary pass finds no narrative at all, parse() has no narrative
+ * item to stamp the officer onto, so the item created by the banded rebuild
+ * was rendering in the case file as "Unknown Officer" — an officer's own
+ * narrative, unattributed. The name is printed in the page header band and
+ * was already read at parse time. */
+eq('the header officer was read', rw2.ar.reportingOfficer, 'BRANDON WHITFIELD');
+eq('a rebuilt narrative is attributed to the reporting officer',
+    rw2.narratives[0].officer, 'BRANDON WHITFIELD');
+eq('a rebuilt narrative carries the officer code', rw2.narratives[0].badge, 'F4388');
+ok('the rebuilt narrative officer is a string (UI invariant)',
+    rw2.narratives.every(n => typeof n.officer === 'string' && typeof n.badge === 'string'));
+
 /* ────────────────────────────────────────────────────────────────
  * 17. Banded / primary row reconciliation.
  *
@@ -879,6 +895,388 @@ eq('the wrecked supplement still offers page 1 to band OCR',
 const crlfSupp = AR.parse(SUPP.replace(/\n/g, '\r\n'), 'x.pdf');
 eq('CRLF yields the same supplement narrative',
     crlfSupp.narratives[0].text, rs.narratives[0].text);
+
+/* ────────────────────────────────────────────────────────────────
+ * 19. AUTHORITATIVE PAGE NUMBERS.
+ *
+ *     Page ordinals used to be inferred from the printed "INCIDENT
+ *     REPORT" / "CONTINUATION PAGE" banner. On the Faulkner scan of
+ *     26-0905538 the banner is a rotated left-margin element that OCR'd
+ *     as punctuation on five of nine pages, so a NINE page PDF was read
+ *     as five logical pages. Every page-addressed recovery pass then
+ *     aimed at the wrong page and the narrative came back empty.
+ *
+ *     extract-pdf-text now hands over the real per-page text. The
+ *     contract is exact — it builds its flat text as
+ *     `pages.join('\n') + '\n'` — and a page array that does not
+ *     reconcile with the text is REJECTED rather than trusted, because
+ *     a page number that is quietly wrong is worse than one that is
+ *     openly guessed.
+ * ──────────────────────────────────────────────────────────────── */
+console.log('\n[authoritative pages]');
+const splitPages = AR._internal.splitPages;
+const flatten = (pageTexts) => pageTexts.join('\n') + '\n';
+const linesOf = (t) => String(t).replace(/\r\n?/g, '\n').split('\n');
+
+const P3 = [
+    "INCIDENT REPORT\nAGENCY NAME: Boone County Sheriff's Office\nINCIDENT NUMBER 26-0417295",
+    'ARRESTEE # 1\nNAME: Last, First, Middle\nMARCHETTI, ROWENA CLAIRE',
+    'CONTINUATION PAGE\nOthers Involved\nOTHER\nNAME: Last, First, Middle'
+];
+const a3 = splitPages(linesOf(flatten(P3)), P3);
+ok('a reconciled page array is flagged authoritative', a3.authoritative === true);
+eq('the page count comes from the PDF', a3.pages.length, 3);
+eq('page ordinals are 1..3', a3.pages.map(p => p.index), [1, 2, 3]);
+eq('page bounds are contiguous and cover the text',
+    a3.bounds, [[0, 3], [3, 6], [6, 10]]);
+eq('each page keeps its own lines', a3.pages[1].lines[2], 'MARCHETTI, ROWENA CLAIRE');
+eq('continuation is answered from the real page, not the banner position',
+    a3.pages.map(p => p.isContinuation), [false, false, true]);
+eq('an authoritative split raises no warning', a3.warning, '');
+
+// The regression itself: the identical text, inferred from banners, undercounts.
+eq('banner inference collapses the same three pages into two',
+    splitPages(linesOf(flatten(P3))).pages.length, 2);
+
+const badPages = splitPages(linesOf(flatten(P3)), ['NOT THE SAME TEXT', 'AT ALL']);
+ok('a page array that does not reconcile is rejected', badPages.authoritative === false);
+ok('...and the reader is told page numbers were inferred instead',
+    /did not match/.test(badPages.warning), badPages.warning);
+eq('...and the banner inference still yields pages', badPages.pages.length, 2);
+
+ok('a short page array is rejected rather than truncating the report',
+    splitPages(linesOf(flatten(P3)), [P3[0], P3[1]]).authoritative === false);
+ok('a page array with a page too many is rejected',
+    splitPages(linesOf(flatten(P3)), P3.concat(['EXTRA PAGE'])).authoritative === false);
+eq('an empty page array falls back silently',
+    splitPages(linesOf(flatten(P3)), []).warning, '');
+ok('a null page array falls back silently',
+    splitPages(linesOf(flatten(P3)), null).authoritative === false);
+
+/* A page array that AGREES with the banners must change nothing. This is the
+ * guard on every existing fixture: threading real page text through must not
+ * move a single field. */
+const bannerPages = pages.map(p => p.lines.join('\n'));
+// `r` has been mutated in place by the recoverNames() section above, so the
+// baseline has to be a fresh parse of the same text.
+const rBase = AR.parse(TEXT, 'Incident Report - Boone Arkansas.pdf');
+const rMirror = AR.parse(flatten(bannerPages), 'Incident Report - Boone Arkansas.pdf',
+    { pageTexts: bannerPages });
+ok('the mirrored split is authoritative', rMirror.arPagesAuthoritative === true);
+ok('the banner-inferred parse is not', rBase.arPagesAuthoritative === false);
+eq('an agreeing page array changes no person',
+    rMirror.personsInvolved, rBase.personsInvolved);
+eq('...no provisional person', rMirror.provisionalPersons, rBase.provisionalPersons);
+eq('...no offense', rMirror.offenses, rBase.offenses);
+eq('...no narrative', rMirror.narratives.map(n => n.text), rBase.narratives.map(n => n.text));
+eq('...and no page count', rMirror.pageCount, rBase.pageCount);
+eq('...and no warning', rMirror.diagnostics.warnings, rBase.diagnostics.warnings);
+eq('...and no recovery target', rMirror.narrativeRecovery, rBase.narrativeRecovery);
+
+// Page bounds are recorded so a later recovery pass re-slices identically.
+eq('page bounds are published on the report', r.arPageBounds.length, 5);
+eq('published bounds match the split', r.arPageBounds, pageSplit.bounds);
+
+/* ────────────────────────────────────────────────────────────────
+ * 20. THE IDENTITY / EMPLOYMENT BAND — licence, issuing state, SSN.
+ *
+ *     PSM 6 left-packs a printed row, so the label count and the value
+ *     count do not agree whenever a cell is blank: the reference
+ *     arrestee row prints FIVE labels and FOUR values. These are read
+ *     by token SHAPE, never by column position — which is also what
+ *     will let the same reader work on another agency's form.
+ *
+ *     Every assertion here is about refusing to guess. A wrong licence
+ *     number on a person in a case file is not recoverable.
+ * ──────────────────────────────────────────────────────────────── */
+console.log('\n[identity band]');
+const hir = AR._internal.harvestIdentityRow;
+function harvestId(rows) {
+    const person = {
+        name: '', dob: '', dl: '', dlState: '', ssn: '',
+        phone: '', employmentPhone: '', occupation: '', placeOfEmployment: ''
+    };
+    hir(rows, 0, rows.length, person);
+    return person;
+}
+
+// The victim band prints the licence beside the NAME label.
+const vId = harvestId([
+    "VICTIM # NAME: Last, First, Middle SOC. SEC. NO. DRIVER'S LICENSE DR. LI. STATE | DATE OF BIRTH",
+    '1 HOLLOWAY (JV2), MARISOL 934013641 AR 04/22/2011'
+]);
+eq('the licence number is the token left of the state code', vId.dl, '934013641');
+eq('the issuing state is the state code itself', vId.dlState, 'AR');
+eq('no SSN was printed, so none is claimed', vId.ssn, '');
+
+// The arrestee band prints it beside RESIDENT PHONE / SSN.
+const aId = harvestId([
+    "ARRESTEE # RESIDENT PHONE EMPLOYMENT PHONE SSN DRIVER'S LICENSE DR. LI. STATE",
+    '(501) 472-5938 (501) 555-0143 472-89-0060 933481021 AR'
+]);
+eq('the SSN is read from a labelled row', aId.ssn, '472-89-0060');
+eq('the licence is read from the same row', aId.dl, '933481021');
+eq('the issuing state is read from the same row', aId.dlState, 'AR');
+eq('the first printed number is the resident phone', aId.phone, '(501) 472-5938');
+eq('the second printed number is the employment phone', aId.employmentPhone, '(501) 555-0143');
+
+// One number under two phone labels is ambiguous — it is the resident's.
+const oneP = harvestId([
+    'ARRESTEE # RESIDENT PHONE EMPLOYMENT PHONE SSN',
+    '(501) 472-5938 472-89-0060'
+]);
+eq('a single number is the resident phone', oneP.phone, '(501) 472-5938');
+eq('no employment phone is invented from one number', oneP.employmentPhone, '');
+eq('the SSN is not mistaken for a phone number', oneP.ssn, '472-89-0060');
+
+// Shape rejections — each of these sits immediately left of a state code.
+eq('a city name is not a licence number',
+    harvestId(["DRIVER'S LICENSE DR. LI. STATE", '912 THISTLEDOWN LN, Bellefonte, AR 72611']).dl, '');
+eq('a date of birth is not a licence number',
+    harvestId(["DRIVER'S LICENSE DR. LI. STATE", 'SMITH, JOHN 04/22/2011 AR']).dl, '');
+eq('an SSN is not a licence number',
+    harvestId(["DRIVER'S LICENSE DR. LI. STATE SSN", 'DOE, JANE 472-89-0060 AR']).dl, '');
+eq('a ZIP code is not a licence number',
+    harvestId(["DRIVER'S LICENSE DR. LI. STATE", 'DOE, JANE 72611 AR']).dl, '');
+eq('with no state code, no licence is claimed',
+    harvestId(["DRIVER'S LICENSE DR. LI. STATE", 'DOE, JANE 933481021']).dl, '');
+eq('the state is never inferred from the resident address',
+    harvestId(["DRIVER'S LICENSE DR. LI. STATE", 'DOE, JANE 933481021']).dlState, '');
+eq('an unlabelled row yields no SSN',
+    harvestId(["DRIVER'S LICENSE DR. LI. STATE", 'DOE, JANE 472-89-0060 933481021 AR']).ssn, '');
+eq('...but the licence on that row still reads',
+    harvestId(["DRIVER'S LICENSE DR. LI. STATE", 'DOE, JANE 472-89-0060 933481021 AR']).dl, '933481021');
+eq('a blank value row yields nothing',
+    harvestId(["DRIVER'S LICENSE DR. LI. STATE SSN", '', '| |']).dl, '');
+
+/* ────────────────────────────────────────────────────────────────
+ * 21. THE ARREST OFFENSE(S) CROSS-REFERENCE is a label, not a person.
+ *
+ *     "Arrestee #1: WINN, BRENTON CONNER" is printed inside the offence
+ *     table. Reading it as a person block produced a phantom suspect
+ *     wearing whichever date of birth happened to follow it. It is used
+ *     for exactly one thing: naming a band whose NAME cell OCR lost,
+ *     and only when the pairing cannot be anything else.
+ * ──────────────────────────────────────────────────────────────── */
+console.log('\n[arrestee cross-reference]');
+const xref = AR._internal.arresteeXref;
+eq('the offence-table cross-reference is recognised',
+    xref('Arrestee #1: MARCHETTI, ROWENA CLAIRE'),
+    { num: '1', name: 'MARCHETTI, ROWENA CLAIRE' });
+eq('gutter noise before it is tolerated',
+    xref('| Arrestee #2: DOE, JOHN Q.'), { num: '2', name: 'DOE, JOHN Q.' });
+ok('the person-band template is NOT a cross-reference',
+    xref("ARRESTEE # NAME: Last, First, Middle SOC. SEC. NO. DRIVER'S LICENSE") === null);
+ok('a bare ARRESTEE # column header is not a cross-reference',
+    xref('ARRESTEE #') === null);
+ok('a cross-reference with nothing after the colon is rejected',
+    xref('Arrestee #2:') === null);
+ok('a cross-reference whose value is an address is rejected',
+    xref('Arrestee #1: 164 S COKER RD') === null);
+ok('a cross-reference with no comma is rejected',
+    xref('Arrestee #1: UNKNOWN') === null);
+ok('empty input', xref('') === null);
+ok('null input', xref(null) === null);
+
+/* ────────────────────────────────────────────────────────────────
+ * 22. ONE ARRESTEE BAND PER ARREST OFFENCE.
+ *
+ *     The form reprints the whole person band for each charge, so one
+ *     human appears two or three times on one page with the same typed
+ *     values and a different offence in the last row. On 26-0905538 the
+ *     first band carried the licence and the second the SSN, so the
+ *     duplicate is merged INTO the first rather than discarded.
+ *
+ *     The merge demands agreement on at least two of DOB / licence /
+ *     SSN / phone, treats any conflict in those as proof of a different
+ *     person, and never crosses a page — a family sharing one address
+ *     must not be collapsed.
+ * ──────────────────────────────────────────────────────────────── */
+console.log('\n[duplicate arrestee bands]');
+const mdb = AR._internal.mergeDuplicateBands;
+const band = (o) => Object.assign({
+    involvement: AR.ROLE.ARRESTEE, name: '', dob: '', dl: '', ssn: '',
+    phone: '', address: '', sourcePage: 2
+}, o);
+
+const dup = mdb([
+    band({ dob: '12/11/1995', phone: '(501) 472-5938', dl: '933481021', address: '164 S COKER RD' }),
+    band({ dob: '12/11/1995', phone: '(501) 472-5938', ssn: '472-89-0060' })
+]);
+eq('two prints of one person become one record', dup.length, 1);
+eq('the licence from the first band survives', dup[0].dl, '933481021');
+eq('the SSN from the second band is filled in', dup[0].ssn, '472-89-0060');
+eq('the address is not lost', dup[0].address, '164 S COKER RD');
+
+eq('a conflicting date of birth means two people',
+    mdb([
+        band({ dob: '12/11/1995', phone: '(501) 472-5938' }),
+        band({ dob: '08/05/2022', phone: '(501) 472-5938' })
+    ]).length, 2);
+eq('a conflicting licence means two people',
+    mdb([
+        band({ dob: '12/11/1995', dl: '933481021', phone: '(501) 472-5938' }),
+        band({ dob: '12/11/1995', dl: '934013641', phone: '(501) 472-5938' })
+    ]).length, 2);
+eq('one shared identifier is not enough',
+    mdb([band({ dob: '12/11/1995' }), band({ dob: '12/11/1995' })]).length, 2);
+eq('the merge never crosses a page',
+    mdb([
+        band({ sourcePage: 2, dob: '12/11/1995', phone: '(501) 472-5938' }),
+        band({ sourcePage: 3, dob: '12/11/1995', phone: '(501) 472-5938' })
+    ]).length, 2);
+eq('the merge never crosses a role',
+    mdb([
+        band({ involvement: AR.ROLE.ARRESTEE, dob: '12/11/1995', phone: '(501) 472-5938' }),
+        band({ involvement: AR.ROLE.VICTIM, dob: '12/11/1995', phone: '(501) 472-5938' })
+    ]).length, 2);
+eq('two different names are two people',
+    mdb([
+        band({ name: 'DOE, JOHN', dob: '12/11/1995', phone: '(501) 472-5938' }),
+        band({ name: 'DOE, JANE', dob: '12/11/1995', phone: '(501) 472-5938' })
+    ]).length, 2);
+const namedDup = mdb([
+    band({ name: '', dob: '12/11/1995', phone: '(501) 472-5938', dl: '933481021' }),
+    band({ name: 'DOE, JOHN', dob: '12/11/1995', phone: '(501) 472-5938' })
+]);
+eq('a nameless print merges into its named twin', namedDup.length, 1);
+eq('...and takes the name that was read', namedDup[0].name, 'DOE, JOHN');
+eq('an empty list is handled', mdb([]), []);
+
+/* ────────────────────────────────────────────────────────────────
+ * 23. END TO END on a synthetic arrestee page — the cross-reference
+ *     names the band, the duplicate prints merge, and the source of
+ *     the name is disclosed.
+ *
+ *     Synthetic, LF, and modelled on the shape of 26-0905538 page 2
+ *     with every value replaced.
+ * ──────────────────────────────────────────────────────────────── */
+console.log('\n[arrestee page, end to end]');
+const ARR_PAGE = [
+    'INCIDENT REPORT',
+    'ARKANSAS',
+    "AGENCY NAME: Boone County Sheriff's Office",
+    'ORI NUMBER AR0450000',
+    'INCIDENT NUMBER 26-0417295',
+    'INCIDENT DATE 08/13/2026',
+    'REPORTING OFFICER D0312 - DERRICK LANE',
+    'CONTINUATION PAGE',
+    'Arrest Offense(s)',
+    'Arrestee #1: MARCHETTI, ROWENA CLAIRE',
+    "ARRESTEE # NAME: Last, First, Middle SOC. SEC. NO. DRIVER'S LICENSE DR. LI. STATE DATE OF BIRTH",
+    '1 ee ee 933481021 AR 12/11/1995',
+    'RESIDENT ADDRESS: Street City State Zip',
+    '164 S COKER RD, Vilonia, AR 72173',
+    'RESIDENT PHONE',
+    '(501) 472-5938',
+    'OFFENSE DESCRIPTION BATTERY 2ND DEGREE',
+    "ARRESTEE # NAME: Last, First, Middle SOC. SEC. NO. DRIVER'S LICENSE DR. LI. STATE DATE OF BIRTH",
+    '2 aa aa 472-89-0060 12/11/1995',
+    'RESIDENT PHONE',
+    '(501) 472-5938',
+    'OFFENSE DESCRIPTION FLEEING'
+].join('\n');
+
+const ra = AR.parse(ARR_PAGE, 'synthetic.pdf');
+const arrestees = ra.personsInvolved.filter(p => p.involvement === AR.ROLE.ARRESTEE);
+eq('the two printed bands import as one person', arrestees.length, 1);
+eq('the cross-reference supplied the name', arrestees[0].name, 'MARCHETTI, ROWENA CLAIRE');
+eq('the source of that name is recorded', arrestees[0].nameSource, 'Arrest Offense(s) box');
+eq('the licence came from the first band', arrestees[0].dl, '933481021');
+eq('the issuing state came with it', arrestees[0].dlState, 'AR');
+eq('the SSN came from the second band', arrestees[0].ssn, '472-89-0060');
+eq('the date of birth is the one printed on the band', arrestees[0].dob, '12/11/1995');
+eq('the address survived the merge', arrestees[0].address, '164 S COKER RD, Vilonia, AR 72173');
+eq('the phone survived the merge', arrestees[0].phone, '(501) 472-5938');
+eq('the band is on page 2', arrestees[0].sourcePage, 2);
+ok('the inferred name is disclosed to the reader',
+    ra.diagnostics.warnings.some(w => /Arrest Offense\(s\) box/.test(w) && /Verify it/.test(w)),
+    ra.diagnostics.warnings);
+ok('the cross-reference is not itself imported as a person',
+    !ra.personsInvolved.some(p => p.sourcePage === 2 && p !== arrestees[0] &&
+        p.name === 'MARCHETTI, ROWENA CLAIRE'));
+eq('nothing is left provisional', ra.provisionalPersons.length, 0);
+
+// Two names in the box and one nameless band is a GUESS — refuse it and say so.
+const ambiguous = AR.parse(
+    ARR_PAGE.replace('Arrest Offense(s)\n', 'Arrest Offense(s)\nArrestee #2: QUILLEN, DELPHINE\n'),
+    'synthetic.pdf');
+eq('an ambiguous pairing names nobody',
+    ambiguous.personsInvolved.filter(p => p.involvement === AR.ROLE.ARRESTEE).length, 0);
+eq('...and the band is held as provisional', ambiguous.provisionalPersons.length, 1);
+ok('...and the reason is disclosed',
+    ambiguous.diagnostics.warnings.some(w => /no name was assigned/.test(w)),
+    ambiguous.diagnostics.warnings);
+
+/* ────────────────────────────────────────────────────────────────
+ * 24. ONE "Others Involved" ROLE HEADING CAN COVER SEVERAL PEOPLE.
+ *
+ *     The continuation page prints "OTHER" once and then repeats the
+ *     person template beneath it. Splitting on the heading alone
+ *     collapsed them into a single record wearing the first person's
+ *     date of birth and the last person's name — on 26-0905538 that
+ *     produced a 51-year-old carrying a 4-year-old's DOB and dropped a
+ *     whole person from the page before it.
+ * ──────────────────────────────────────────────────────────────── */
+console.log('\n[others involved — several people, one heading]');
+const OTHERS_PAGE = [
+    'INCIDENT REPORT',
+    'ARKANSAS',
+    "AGENCY NAME: Boone County Sheriff's Office",
+    'ORI NUMBER AR0450000',
+    'INCIDENT NUMBER 26-0417295',
+    'INCIDENT DATE 08/13/2026',
+    'REPORTING OFFICER D0312 - DERRICK LANE',
+    'CONTINUATION PAGE',
+    'Others Involved',
+    'OTHER',
+    'NAME: Last, First, Middle',
+    'MARCHETTI, WRENLEIGH J (M) Male',
+    'DATE OF BIRTH',
+    '03/14/2014',
+    'RESIDENT ADDRESS: Street City State Zip',
+    '912 THISTLEDOWN LN, Bellefonte, AR 72611',
+    'NAME: Last, First, Middle',
+    'MARCHETTI, WESTON Z be [J (00) Unknown ot cs',
+    'DATE OF BIRTH',
+    '07/22/2016',
+    'RESIDENT ADDRESS: Street City State Zip',
+    '912 THISTLEDOWN LN, Bellefonte, AR 72611'
+].join('\n');
+
+const ro = AR.parse(OTHERS_PAGE, 'synthetic.pdf');
+const oth = ro.personsInvolved.filter(p => /^Others Involved/.test(p.detail || ''));
+eq('one heading yields two people', oth.length, 2);
+eq('both names are read', oth.map(p => p.name),
+    ['MARCHETTI, WRENLEIGH', 'MARCHETTI, WESTON Z']);
+eq('each keeps its OWN date of birth', oth.map(p => p.dob), ['03/14/2014', '07/22/2016']);
+eq('both carry the role from the heading', oth.map(p => p.involvement), ['OTHER', 'OTHER']);
+eq('both are attributed to page 2', oth.map(p => p.sourcePage), [2, 2]);
+eq('the heading is recorded on each', oth[0].detail, 'Others Involved — OTHER');
+
+/* ────────────────────────────────────────────────────────────────
+ * 25. THE MIDDLE INITIAL vs THE TICKED CHECKBOX.
+ *
+ *     A middle initial is printed without a full stop ("WINN, WESTON
+ *     Z"), so the initial-needs-a-dot rule dropped it from every
+ *     imported name. But a lone capital is ALSO exactly how OCR renders
+ *     a ticked checkbox. On this form a checkbox glyph is always
+ *     followed by its parenthesised option code — "I (0) Male",
+ *     "J (M) Male" — and that is the only thing separating them.
+ * ──────────────────────────────────────────────────────────────── */
+console.log('\n[middle initials]');
+eq('a bare middle initial is kept',
+    xn('MARCHETTI, WESTON Z be [J (00) Unknown ot cs'), 'MARCHETTI, WESTON Z');
+eq('...including at the end of a packed row',
+    xn('MARCHETTI, AMANDA K = 5 op [J (00) Unknown = od fr'), 'MARCHETTI, AMANDA K');
+eq('a capital followed by an option code is a checkbox, not an initial',
+    xn('MARCHETTI, WRENLEIGH J (M) Male'), 'MARCHETTI, WRENLEIGH');
+eq('...for the sex column too', xn('DOE, JANE F (F) Female'), 'DOE, JANE');
+eq('an initial WITH a period still works', xn('DOE, JOHN Q.'), 'DOE, JOHN Q.');
+eq('a two-letter glyph is still never a middle name',
+    xn('Marchetti, Rowena Claire IH (F) Female Bl (W) White'), 'Marchetti, Rowena Claire');
+eq('a middle initial does not swallow the row after it',
+    xn('MARCHETTI, WESTON Z 07/22/2016'), 'MARCHETTI, WESTON Z');
 
 console.log('\n' + (fail ? 'FAILED' : 'OK') + ' — ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

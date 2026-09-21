@@ -3344,12 +3344,31 @@ ipcMain.handle('extract-pdf-text', async (event, filePath) => {
     // First try MuPDF's own text extraction (much faster than OCR)
     const doc = mupdf.Document.openDocument(dataBuffer, 'application/pdf');
     const numPages = doc.countPages();
-    let mupdfText = '';
+
+    /*
+     * ADDITIVE `pages[]`: collect per-page text as an array and join it to
+     * build `text`, instead of string-appending as we go. `text` comes out
+     * BYTE-IDENTICAL (the old loop was `text += pageText + '\n'`, which is
+     * exactly `arr.join('\n') + '\n'`), but callers that want to know which
+     * PDF page a line came from no longer have to guess.
+     *
+     * This matters: the Arkansas NIBRS importer used to infer page breaks
+     * from the form's own printed "INCIDENT REPORT" / "CONTINUATION PAGE"
+     * banner. On a scan where that banner is a rotated margin element it
+     * OCRs as punctuation, nine PDF pages collapsed into five logical ones,
+     * and every page-addressed recovery pass (sparse-OCR name recovery,
+     * banded narrative re-read) was then pointed at the wrong page.
+     *
+     * The pdf-parse fast tier above returns NO `pages` key — pdf-parse has
+     * no per-page split. Consumers must treat `pages` as optional.
+     */
+    const pageTexts = [];
     for (let i = 0; i < numPages; i++) {
       const page = doc.loadPage(i);
       const stext = page.toStructuredText();
-      mupdfText += stext.asText() + '\n';
+      pageTexts.push(stext.asText());
     }
+    const mupdfText = pageTexts.join('\n') + '\n';
 
     // Check if MuPDF text is usable (has proper spacing)
     const mupdfLongLines = mupdfText.split('\n').filter(l => l.length > 60);
@@ -3362,6 +3381,7 @@ ipcMain.handle('extract-pdf-text', async (event, filePath) => {
       console.log('MuPDF text extraction succeeded');
       return {
         text: mupdfText,
+        pages: pageTexts.length === numPages ? pageTexts : undefined,
         numPages,
         info: data.info || {},
         fileName: path.basename(filePath)
@@ -3372,24 +3392,31 @@ ipcMain.handle('extract-pdf-text', async (event, filePath) => {
     console.log('MuPDF text also garbled, falling back to Tesseract OCR...');
     const Tesseract = (await import('tesseract.js')).default;
 
-    let ocrText = '';
+    const ocrPages = [];
     for (let i = 0; i < numPages; i++) {
       const page = doc.loadPage(i);
       const matrix = mupdf.Matrix.scale(300 / 72, 300 / 72);
       const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false, true);
       const pngBuf = pixmap.asPNG();
       const result = await Tesseract.recognize(Buffer.from(pngBuf), 'eng');
-      ocrText += result.data.text + '\n';
+      ocrPages.push(result.data.text);
     }
 
-    // Clean common OCR artifacts
-    ocrText = ocrText
-      .replace(/©/g, '0')           // © misread as 0
+    /* Clean common OCR artifacts. Applied PER PAGE so that `pages[i]` and the
+     * corresponding slice of `text` stay identical — all three replacements
+     * are intra-line, so per-page application is equivalent to applying them
+     * to the joined string. */
+    const cleanOcr = (s) => String(s)
+      .replace(/©/g, '0')                 // © misread as 0
       .replace(/\(([A-Z])0\)/g, '($1O)')  // state code: (C0) → (CO)
-      .replace(/['']/g, "'");        // smart quotes
+      .replace(/['']/g, "'");             // smart quotes
+
+    for (let i = 0; i < ocrPages.length; i++) ocrPages[i] = cleanOcr(ocrPages[i]);
+    const ocrText = ocrPages.join('\n') + '\n';
 
     return {
       text: ocrText,
+      pages: ocrPages.length === numPages ? ocrPages : undefined,
       numPages,
       info: data.info || {},
       fileName: path.basename(filePath),

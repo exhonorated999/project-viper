@@ -1518,11 +1518,12 @@
             if (!raw) return;
 
             try {
-                const { text, fileName, arSparsePages, arAltPages, arBandPages } = JSON.parse(raw);
+                const { text, fileName, pageTexts, arSparsePages, arAltPages, arBandPages } = JSON.parse(raw);
                 localStorage.removeItem(key); // consume immediately
 
                 // Parse using the full RMS parser
-                const report = parseRmsReport(text, fileName);
+                const report = parseRmsReport(text, fileName,
+                    pageTexts ? { pageTexts } : null);
                 if (!report) {
                     viperToast('Failed to parse RMS report', 'error');
                     return;
@@ -1577,190 +1578,20 @@
                 saveRmsImports(rmsImports);
                 populated.push('RMS Imports');
 
-                // 2. Route suspects
-                if (report.personsInvolved && report.personsInvolved.length > 0) {
-                    const suspectPersons = report.personsInvolved.filter(p =>
-                        /SUSPECT|ARRESTED|DEFENDANT/i.test(p.involvement || ''));
-                    if (suspectPersons.length > 0) {
-                        const existing = _lsParse(`suspects_${currentCase.id}`, []);
-                        for (const p of suspectPersons) {
-                            const phones = _rmsSplitPhones(p.phone);
-                            const phoneIdentifiers = phones.map(v => ({ type: 'phone', value: v, provider: '' }));
-                            existing.push({
-                                name: p.name || '',
-                                dob: p.dob || '',
-                                dlNumber: '',
-                                sex: p.sex || '',
-                                height: p.height || '',
-                                weight: p.weight || '',
-                                hairColor: p.hair || '',
-                                eyeColor: p.eyes || '',
-                                scarsMarksTattoos: '',
-                                address: p.address || '',
-                                addressCityStateZip: '',
-                                phone: phones[0] || '',
-                                phone2: phones[1] || '',
-                                photo: '',
-                                residencePhoto: '',
-                                employerName: '',
-                                occupation: '',
-                                employerAddress: '',
-                                employerPhone: '',
-                                firearms: [],
-                                vehicles: [],
-                                identifiers: phoneIdentifiers,
-                                criminalHistory: [],
-                                rapSheet: null,
-                                firearmsDoc: null,
-                                rmsSource: report.reportNumber || fileName
-                            });
-                        }
-                        localStorage.setItem(`suspects_${currentCase.id}`, JSON.stringify(existing));
-                        populated.push(`Suspects (${suspectPersons.length})`);
-                    }
+                /* 2-5. Route persons and vehicles into the case tabs.
+                 *
+                 * This used to be a second, hand-copied implementation of
+                 * routeRmsPersonsToTabs(). The two drifted: this one still
+                 * wrote an empty driver's licence long after the parser had
+                 * learned to read one, so a case created FROM a report lost
+                 * fields that the same report imported INTO an open case kept.
+                 * One router now serves both entry points. */
+                populated = populated.concat(routeRmsPersonsToTabs(report));
 
-                    // 3. Route victims (exclude "Victim's Parent/Guardian" — those go to Involved Persons)
-                    const victimPersons = report.personsInvolved.filter(p =>
-                        /VICTIM/i.test(p.involvement || '') && !/VICTIM'S|PARENT|GUARDIAN/i.test(p.involvement || ''));
-                    if (victimPersons.length > 0) {
-                        const existing = _lsParse(`victims_${currentCase.id}`, []);
-                        for (const p of victimPersons) {
-                            const phones = _rmsSplitPhones(p.phone);
-                            existing.push({
-                                name: p.name || '',
-                                dob: p.dob || '',
-                                dlNumber: '',
-                                phone: phones[0] || '',
-                                phone2: phones[1] || '',
-                                email: '',
-                                email2: '',
-                                height: p.height || '',
-                                weight: p.weight || '',
-                                hairColor: p.hair || '',
-                                eyeColor: p.eyes || '',
-                                address: p.address || '',
-                                addressCityStateZip: '',
-                                photo: '',
-                                residencePhoto: '',
-                                employerName: '',
-                                occupation: '',
-                                employerAddress: '',
-                                employerPhone: '',
-                                injuryPhotos: [],
-                                propertyPhotos: [],
-                                vehicles: [],
-                                rmsSource: report.reportNumber || fileName
-                            });
-                        }
-                        localStorage.setItem(`victims_${currentCase.id}`, JSON.stringify(existing));
-                        populated.push(`Victims (${victimPersons.length})`);
-                    }
-
-                    // 4. Route witnesses (exclude REPORTING PARTY — goes to Involved Persons)
-                    const witnessPersons = report.personsInvolved.filter(p =>
-                        /WITNESS/i.test(p.involvement || ''));
-                    if (witnessPersons.length > 0) {
-                        const existing = _lsParse(`witnesses_${currentCase.id}`, []);
-                        for (const p of witnessPersons) {
-                            const phones = _rmsSplitPhones(p.phone);
-                            existing.push({
-                                name: p.name || '',
-                                dob: p.dob || '',
-                                dlNumber: '',
-                                phone: phones[0] || '',
-                                phone2: phones[1] || '',
-                                email: '',
-                                email2: '',
-                                height: p.height || '',
-                                weight: p.weight || '',
-                                hairColor: p.hair || '',
-                                eyeColor: p.eyes || '',
-                                address: p.address || '',
-                                addressCityStateZip: '',
-                                photo: '',
-                                residencePhoto: '',
-                                employerName: '',
-                                occupation: '',
-                                employerAddress: '',
-                                employerPhone: '',
-                                statement: '',
-                                rmsSource: report.reportNumber || fileName
-                            });
-                        }
-                        localStorage.setItem(`witnesses_${currentCase.id}`, JSON.stringify(existing));
-                        populated.push(`Witnesses (${witnessPersons.length})`);
-                    }
-
-                    // 4b. Route unmatched persons + Reporting Party/Informant/Parent/Guardian → involvedPersons
-                    const matchedRoles = /SUSPECT|ARRESTED|DEFENDANT|WITNESS/i;
-                    const involvedRouted = report.personsInvolved.filter(p => {
-                        const inv = p.involvement || '';
-                        // Explicit roles → involvedPersons
-                        if (/REPORTING\s*PARTY|INFORMANT|PARENT|GUARDIAN/i.test(inv)) return true;
-                        // VICTIM without Parent/Guardian qualifier → already routed to victims
-                        if (/VICTIM/i.test(inv) && !/PARENT|GUARDIAN/i.test(inv)) return false;
-                        // Matched suspect/witness roles → already routed
-                        if (matchedRoles.test(inv)) return false;
-                        // Everything else → involvedPersons
-                        return true;
-                    });
-                    if (involvedRouted.length > 0) {
-                        const existing = _lsParse(`involvedPersons_${currentCase.id}`, []);
-                        for (const p of involvedRouted) {
-                            const phones = _rmsSplitPhones(p.phone);
-                            existing.push({
-                                name: p.name || '',
-                                dob: p.dob || '',
-                                dlNumber: '',
-                                sex: p.sex || '',
-                                height: p.height || '',
-                                weight: p.weight || '',
-                                hairColor: p.hair || '',
-                                eyeColor: p.eyes || '',
-                                scarsMarksTattoos: '',
-                                address: p.address || '',
-                                addressCityStateZip: '',
-                                phone: phones[0] || '',
-                                phone2: phones[1] || '',
-                                email: '',
-                                email2: '',
-                                photo: '',
-                                residencePhoto: '',
-                                role: p.involvement || 'Otherwise Involved',
-                                relationship: '',
-                                notes: '',
-                                rmsSource: report.reportNumber || fileName,
-                                rmsRole: p.involvement || 'Unknown'
-                            });
-                        }
-                        localStorage.setItem(`involvedPersons_${currentCase.id}`, JSON.stringify(existing));
-                        populated.push(`Involved Persons (${involvedRouted.length})`);
-
-                        // Auto-add involvedPersons module if not already active
-                        ensureCaseModule('involvedPersons');
-                    }
-                }
-
-                // 5. Route vehicles
-                if (report.vehicles && report.vehicles.length > 0) {
-                    const existing = _lsParse(`recoveredVehicles_${currentCase.id}`, []);
-                    for (const v of report.vehicles) {
-                        const makeModel = [v.year, v.make, v.model || v.type].filter(Boolean).join(' ').trim();
-                        existing.push({
-                            makeModel: makeModel,
-                            licensePlate: v.license || '',
-                            vin: v.vin || '',
-                            color: v.colors || '',
-                            year: v.year || '',
-                            recoveryDate: '',
-                            recoveryLocation: '',
-                            photo: '',
-                            notes: v.status ? `Status: ${v.status}` + (v.state ? ` | State: ${v.state}` : '') : '',
-                            rmsSource: report.reportNumber || fileName
-                        });
-                    }
-                    localStorage.setItem(`recoveredVehicles_${currentCase.id}`, JSON.stringify(existing));
-                    populated.push(`Vehicles (${report.vehicles.length})`);
+                if (report.provisionalPersons && report.provisionalPersons.length) {
+                    const n = report.provisionalPersons.length;
+                    viperToast(`${n} person block${n !== 1 ? 's' : ''} had no readable name — ` +
+                        `${n !== 1 ? 'they are' : 'it is'} listed under "Name Not Read" on the RMS Imports tab`, 'warning', 6000);
                 }
 
                 // Backfill Overview fields (Location of Occurrence, Offenses)
@@ -13128,6 +12959,18 @@
          * `dlState` travels with `dlNumber`: a licence number is only
          * meaningful alongside its issuing jurisdiction.
          */
+        /* Shown on any person card whose printed name the scanner could not
+         * read. The record is real — address, date of birth and licence were
+         * read normally — but the name on it is not evidence until a human has
+         * checked the paper, and the card has to say so. */
+        function _unverifiedNameChip(rec) {
+            if (!rec || !rec.nameUnverified) return '';
+            const pg = rec.rmsSourcePage ? ' · page ' + rec.rmsSourcePage : '';
+            return '<div class="mb-2"><span class="text-[11px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40" ' +
+                'title="The name could not be read from the scanned report. Verify against the source document.">' +
+                '\u26A0 UNVERIFIED NAME' + pg + '</span></div>';
+        }
+
         function _buildPersonRecordForTab(person, destTab) {
             if (!person) return null;
             const common = {
@@ -13143,7 +12986,12 @@
                 address: person.address || '',
                 addressCityStateZip: person.addressCityStateZip || '',
                 photo: person.photo || '',
-                residencePhoto: person.residencePhoto || ''
+                residencePhoto: person.residencePhoto || '',
+                /* A record whose name the scan could not read stays flagged
+                 * wherever it is moved. Losing the flag on a move would turn
+                 * an unverified block into an apparently confirmed person. */
+                nameUnverified: !!person.nameUnverified,
+                rmsSourcePage: person.rmsSourcePage || ''
             };
 
             if (destTab === 'suspects') {
@@ -13360,6 +13208,7 @@
                         <img ${_S}="${photoUrl}" alt="${suspect.name || 'Suspect'}" class="w-full h-full object-cover">
                     </div>
                     <h3 class="text-xl font-bold text-white mb-2">${suspect.name || 'Unknown Suspect'}</h3>
+                    ${_unverifiedNameChip(suspect)}
                     <div class="space-y-1 text-sm text-gray-400">
                         ${suspect.dob ? `<p>DOB: ${formatDate(suspect.dob)}</p>` : ''}
                         ${suspect.height ? `<p>Height: ${suspect.height}"</p>` : ''}
@@ -16513,6 +16362,7 @@
                         <img ${_S}="${photoUrl}" alt="${victim.name || 'Victim'}" class="w-full h-full object-cover">
                     </div>
                     <h3 class="text-xl font-bold text-white mb-2">${victim.name || 'Unknown Victim'}</h3>
+                    ${_unverifiedNameChip(victim)}
                     <div class="space-y-1 text-sm text-gray-400">
                         ${victim.dob ? `<p>DOB: ${formatDate(victim.dob)}</p>` : ''}
                         ${victim.height ? `<p>Height: ${victim.height}"</p>` : ''}
@@ -18869,6 +18719,7 @@
                         <img ${_S}="${photoUrl}" alt="${witness.name || 'Witness'}" class="w-full h-full object-cover">
                     </div>
                     <h3 class="text-xl font-bold text-white mb-2">${witness.name || 'Unknown Witness'}</h3>
+                    ${_unverifiedNameChip(witness)}
                     <div class="space-y-1 text-sm text-gray-400">
                         ${witness.dob ? `<p>DOB: ${formatDate(witness.dob)}</p>` : ''}
                         ${witness.height ? `<p>Height: ${witness.height}"</p>` : ''}
@@ -19703,6 +19554,7 @@
                         <img ${_S}="${photoUrl}" alt="${person.name || 'Person'}" class="w-full h-full object-cover">
                     </div>
                     <h3 class="text-xl font-bold text-white mb-2">${person.name || 'Unknown Person'}</h3>
+                    ${_unverifiedNameChip(person)}
                     <div class="space-y-1 text-sm text-gray-400">
                         ${person.role ? `<p><span class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">${person.role}</span></p>` : ''}
                         ${person.rmsRole ? `<p class="text-amber-400 text-xs">RMS: ${person.rmsRole}</p>` : ''}
@@ -36527,27 +36379,39 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             return 0;
         }
 
-        function rmsManualRoutePerson(reportIdx, personIdx, target) {
+        /* listName is 'personsInvolved' (the default) or 'provisionalPersons' —
+         * the blocks whose printed NAME cell the scan could not read. Those are
+         * shown separately and can still be sent to a tab, where they arrive
+         * flagged as an unverified name rather than silently nameless. */
+        function rmsManualRoutePerson(reportIdx, personIdx, target, listName) {
             if (!rmsImports || !rmsImports[reportIdx]) return;
             const rpt = rmsImports[reportIdx];
-            const p = rpt.personsInvolved && rpt.personsInvolved[personIdx];
+            const list = rpt[listName === 'provisionalPersons' ? 'provisionalPersons' : 'personsInvolved'];
+            const p = list && list[personIdx];
             if (!p) return;
             const fileName = rpt.fileName || '';
             const source = rpt.reportNumber || fileName;
             const phones = (typeof _rmsSplitPhones === 'function')
                 ? _rmsSplitPhones(p.phone || '')
                 : (p.phone ? [p.phone] : []);
+            const unverified = !p.name;
 
-            // Strip any prior auto-route across all four tabs (idempotent move)
-            ['suspects', 'victims', 'witnesses', 'involvedPersons'].forEach(k => {
-                _rmsRemoveRoutedPerson(k, p.name, source);
-            });
+            // Strip any prior auto-route across all four tabs (idempotent move).
+            // Skipped for a nameless block: the strip matches on name, so a
+            // blank one would sweep away every OTHER unnamed person routed
+            // from the same report.
+            if (p.name) {
+                ['suspects', 'victims', 'witnesses', 'involvedPersons'].forEach(k => {
+                    _rmsRemoveRoutedPerson(k, p.name, source);
+                });
+            }
 
             let tabKey = '', label = '', moduleId = null, entry = null;
             const common = {
                 name: p.name || '',
                 dob: p.dob || '',
-                dlNumber: '',
+                dlNumber: p.dl || '',
+                dlState: p.dlState || '',
                 sex: p.sex || '',
                 height: p.height || '',
                 weight: p.weight || '',
@@ -36559,19 +36423,28 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 phone2: phones[1] || '',
                 photo: '',
                 residencePhoto: '',
-                employerName: '',
-                occupation: '',
+                employerName: p.placeOfEmployment || '',
+                occupation: p.occupation || '',
                 employerAddress: '',
-                employerPhone: '',
-                rmsSource: source
+                employerPhone: p.employmentPhone || '',
+                rmsSource: source,
+                nameUnverified: unverified,
+                rmsSourcePage: p.sourcePage || ''
             };
+            if (unverified) {
+                common.notes = 'Name could not be read from the scanned report' +
+                    (p.sourcePage ? ' (page ' + p.sourcePage + ')' : '') +
+                    '. Verify against the source document before relying on this record.';
+            }
 
             if (target === 'suspect') {
                 tabKey = 'suspects'; label = 'Suspects';
+                const ids = phones.map(v => ({ type: 'phone', value: v, provider: '' }));
+                if (p.ssn) ids.push({ type: 'ssn', value: p.ssn, provider: 'RMS Import' });
                 entry = Object.assign({}, common, {
                     scarsMarksTattoos: '',
                     firearms: [], vehicles: [],
-                    identifiers: phones.map(v => ({ type: 'phone', value: v, provider: '' })),
+                    identifiers: ids,
                     criminalHistory: [], rapSheet: null, firearmsDoc: null
                 });
             } else if (target === 'victim') {
@@ -36592,7 +36465,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     scarsMarksTattoos: '',
                     email: '', email2: '',
                     role: p.involvement || 'Otherwise Involved',
-                    relationship: '', notes: '',
+                    relationship: '',
+                    notes: common.notes || '',
                     rmsRole: p.involvement || 'Unknown'
                 });
             } else {
@@ -36618,7 +36492,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             try { if (typeof loadInvolvedPersons === 'function') loadInvolvedPersons(); } catch (e) {}
             try { if (typeof renderInvolvedPersons === 'function') renderInvolvedPersons(); } catch (e) {}
 
-            viperToast(`${p.name || 'Person'} moved to ${label}`, 'success', 2500);
+            viperToast(`${p.name || ('Unnamed person' + (p.sourcePage ? ' (page ' + p.sourcePage + ')' : ''))} moved to ${label}`, 'success', 2500);
             // Re-render the RMS Import tab so the routed badge updates without
             // navigating away. currentTab is the active tab id at call time.
             if (typeof renderTabContent === 'function') {
@@ -38070,8 +37944,13 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             return report;
         }
 
-        /* ---------- RMS PDF Text Parser ---------- */
-        function parseRmsReport(text, fileName) {
+        /* ---------- RMS PDF Text Parser ----------
+         *
+         * `opts.pageTexts` (optional) is the extractor's per-page text array.
+         * When present a parser can address real PDF pages instead of inferring
+         * page breaks from printed banners — see ar-incident-parser's
+         * _splitPages. Only the Arkansas branch consumes it today. */
+        function parseRmsReport(text, fileName, opts) {
             console.log('[RMS Parser] parseRmsReport called for:', fileName, '| text length:', text.length);
             console.log('[RMS Parser] First 300 chars:', text.substring(0, 300));
             // --- Format detection ---
@@ -38097,7 +37976,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             // Placed LAST so it can never pre-empt a format already supported above.
             if (window.ArIncidentParser && window.ArIncidentParser.detect(text)) {
                 console.log('[RMS Parser] → ArIncidentParser (Arkansas NIBRS Incident Report)');
-                return window.ArIncidentParser.parse(text, fileName);
+                return window.ArIncidentParser.parse(text, fileName, opts || null);
             }
             console.log('[RMS Parser] → original INFORM parser (fallback)');
 
@@ -38616,82 +38495,108 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             return String(phoneStr).split(/\s*[;|]\s*/).map(s => s.trim()).filter(Boolean);
         }
         // Route parsed RMS persons into case tabs (Suspects, Victims, Witnesses, Involved Persons)
+
+        /* The fields every tab record shares, read off one parsed RMS person.
+         * Kept in one place so a newly parsed field (driver's licence, SSN,
+         * employment) reaches all four tabs instead of only the one that was
+         * remembered. */
+        function _rmsPersonCommon(p, src) {
+            const phones = _rmsSplitPhones(p.phone);
+            return {
+                name: p.name || '',
+                dob: p.dob || '',
+                dlNumber: p.dl || '',
+                dlState: p.dlState || '',
+                sex: p.sex || '',
+                height: p.height || '',
+                weight: p.weight || '',
+                hairColor: p.hair || '',
+                eyeColor: p.eyes || '',
+                address: p.address || '',
+                addressCityStateZip: '',
+                phone: phones[0] || '',
+                phone2: phones[1] || '',
+                photo: '',
+                residencePhoto: '',
+                employerName: p.placeOfEmployment || '',
+                occupation: p.occupation || '',
+                employerAddress: '',
+                employerPhone: p.employmentPhone || '',
+                nameUnverified: !p.name,
+                rmsSourcePage: p.sourcePage || '',
+                rmsSource: src
+            };
+        }
+
+        /* Duplicate detection was keyed on the name alone, which silently
+         * dropped the second of two people a scan could not name — and on this
+         * form a page of "Others Involved" can hold several. The key now also
+         * carries the date of birth, the address and the source page, so two
+         * genuinely different people are never folded into one. */
+        function _rmsPersonKey(p) {
+            return [p.name || '', p.dob || '', p.address || '', p.sourcePage || ''].join('|');
+        }
+        function _rmsAlreadyRouted(existing, src, p) {
+            const key = _rmsPersonKey(p);
+            return existing.some(e => e.rmsSource === src &&
+                [e.name || '', e.dob || '', e.address || '', e.rmsSourcePage || ''].join('|') === key);
+        }
+
         function routeRmsPersonsToTabs(report) {
-            if (!report.personsInvolved || report.personsInvolved.length === 0) return [];
+            if (!report) return [];
             const caseId = currentCase.id;
             const src = report.reportNumber || report.fileName || 'RMS Import';
             let populated = [];
+            const people = Array.isArray(report.personsInvolved) ? report.personsInvolved : [];
 
             // Suspects
-            const suspectPersons = report.personsInvolved.filter(p =>
+            const suspectPersons = people.filter(p =>
                 /SUSPECT|ARRESTED|DEFENDANT/i.test(p.involvement || ''));
             if (suspectPersons.length > 0) {
                 const existing = _lsParse(`suspects_${caseId}`, []);
                 for (const p of suspectPersons) {
-                    // Skip if already imported from same source with same name
-                    if (existing.some(e => e.rmsSource === src && e.name === (p.name || ''))) continue;
+                    // Skip if already imported from the same source
+                    if (_rmsAlreadyRouted(existing, src, p)) continue;
                     const phones = _rmsSplitPhones(p.phone);
-                    const phoneIdentifiers = phones.map(v => ({ type: 'phone', value: v, provider: '' }));
-                    existing.push({
-                        name: p.name || '', dob: p.dob || '', dlNumber: '',
-                        sex: p.sex || '', height: p.height || '', weight: p.weight || '',
-                        hairColor: p.hair || '', eyeColor: p.eyes || '', scarsMarksTattoos: '',
-                        address: p.address || '', addressCityStateZip: '',
-                        phone: phones[0] || '', phone2: phones[1] || '',
-                        photo: '', residencePhoto: '',
-                        employerName: '', occupation: '', employerAddress: '', employerPhone: '',
-                        firearms: [], vehicles: [], identifiers: phoneIdentifiers, criminalHistory: [],
-                        rapSheet: null, firearmsDoc: null,
-                        rmsSource: src
-                    });
+                    const identifiers = phones.map(v => ({ type: 'phone', value: v, provider: '' }));
+                    if (p.ssn) identifiers.push({ type: 'ssn', value: p.ssn, provider: 'RMS Import' });
+                    existing.push(Object.assign(_rmsPersonCommon(p, src), {
+                        scarsMarksTattoos: '',
+                        firearms: [], vehicles: [], identifiers: identifiers, criminalHistory: [],
+                        rapSheet: null, firearmsDoc: null
+                    }));
                 }
                 localStorage.setItem(`suspects_${caseId}`, JSON.stringify(existing));
                 populated.push(`Suspects (${suspectPersons.length})`);
             }
 
             // Victims (exclude "Victim's Parent/Guardian" — those go to Involved Persons)
-            const victimPersons = report.personsInvolved.filter(p =>
+            const victimPersons = people.filter(p =>
                 /VICTIM/i.test(p.involvement || '') && !/VICTIM'S|PARENT|GUARDIAN/i.test(p.involvement || ''));
             if (victimPersons.length > 0) {
                 const existing = _lsParse(`victims_${caseId}`, []);
                 for (const p of victimPersons) {
-                    if (existing.some(e => e.rmsSource === src && e.name === (p.name || ''))) continue;
-                    const phones = _rmsSplitPhones(p.phone);
-                    existing.push({
-                        name: p.name || '', dob: p.dob || '', dlNumber: '',
-                        phone: phones[0] || '', phone2: phones[1] || '', email: '', email2: '',
-                        height: p.height || '', weight: p.weight || '',
-                        hairColor: p.hair || '', eyeColor: p.eyes || '',
-                        address: p.address || '', addressCityStateZip: '',
-                        photo: '', residencePhoto: '',
-                        employerName: '', occupation: '', employerAddress: '', employerPhone: '',
-                        injuryPhotos: [], propertyPhotos: [], vehicles: [],
-                        rmsSource: src
-                    });
+                    if (_rmsAlreadyRouted(existing, src, p)) continue;
+                    existing.push(Object.assign(_rmsPersonCommon(p, src), {
+                        email: '', email2: '',
+                        injuryPhotos: [], propertyPhotos: [], vehicles: []
+                    }));
                 }
                 localStorage.setItem(`victims_${caseId}`, JSON.stringify(existing));
                 populated.push(`Victims (${victimPersons.length})`);
             }
 
             // Witnesses
-            const witnessPersons = report.personsInvolved.filter(p =>
+            const witnessPersons = people.filter(p =>
                 /WITNESS/i.test(p.involvement || ''));
             if (witnessPersons.length > 0) {
                 const existing = _lsParse(`witnesses_${caseId}`, []);
                 for (const p of witnessPersons) {
-                    if (existing.some(e => e.rmsSource === src && e.name === (p.name || ''))) continue;
-                    const phones = _rmsSplitPhones(p.phone);
-                    existing.push({
-                        name: p.name || '', dob: p.dob || '', dlNumber: '',
-                        phone: phones[0] || '', phone2: phones[1] || '', email: '', email2: '',
-                        height: p.height || '', weight: p.weight || '',
-                        hairColor: p.hair || '', eyeColor: p.eyes || '',
-                        address: p.address || '', addressCityStateZip: '',
-                        photo: '', residencePhoto: '',
-                        employerName: '', occupation: '', employerAddress: '', employerPhone: '',
-                        statement: '',
-                        rmsSource: src
-                    });
+                    if (_rmsAlreadyRouted(existing, src, p)) continue;
+                    existing.push(Object.assign(_rmsPersonCommon(p, src), {
+                        email: '', email2: '',
+                        statement: ''
+                    }));
                 }
                 localStorage.setItem(`witnesses_${caseId}`, JSON.stringify(existing));
                 populated.push(`Witnesses (${witnessPersons.length})`);
@@ -38699,7 +38604,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
             // Reporting Party / Informant / Parent/Guardian / unmatched → Involved Persons
             const matchedRoles = /SUSPECT|ARRESTED|DEFENDANT|WITNESS/i;
-            const involvedRouted = report.personsInvolved.filter(p => {
+            const involvedRouted = people.filter(p => {
                 const inv = p.involvement || '';
                 if (/REPORTING\s*PARTY|INFORMANT|PARENT|GUARDIAN/i.test(inv)) return true;
                 if (/VICTIM/i.test(inv) && !/PARENT|GUARDIAN/i.test(inv)) return false;
@@ -38709,21 +38614,14 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             if (involvedRouted.length > 0) {
                 const existing = _lsParse(`involvedPersons_${caseId}`, []);
                 for (const p of involvedRouted) {
-                    if (existing.some(e => e.rmsSource === src && e.name === (p.name || ''))) continue;
-                    const phones = _rmsSplitPhones(p.phone);
-                    existing.push({
-                        name: p.name || '', dob: p.dob || '', dlNumber: '',
-                        sex: p.sex || '', height: p.height || '', weight: p.weight || '',
-                        hairColor: p.hair || '', eyeColor: p.eyes || '',
+                    if (_rmsAlreadyRouted(existing, src, p)) continue;
+                    existing.push(Object.assign(_rmsPersonCommon(p, src), {
                         scarsMarksTattoos: '',
-                        address: p.address || '', addressCityStateZip: '',
-                        phone: phones[0] || '', phone2: phones[1] || '', email: '', email2: '',
-                        photo: '', residencePhoto: '',
+                        email: '', email2: '',
                         role: p.involvement || 'Otherwise Involved',
                         relationship: '', notes: '',
-                        rmsSource: src,
                         rmsRole: p.involvement || 'Unknown'
-                    });
+                    }));
                 }
                 localStorage.setItem(`involvedPersons_${caseId}`, JSON.stringify(existing));
                 populated.push(`Involved Persons (${involvedRouted.length})`);
@@ -38826,7 +38724,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 for (const filePath of filePaths) {
                     try {
                         const result = await window.electronAPI.extractPdfText(filePath);
-                        const report = parseRmsReport(result.text, result.fileName);
+                        const report = parseRmsReport(result.text, result.fileName,
+                            result.pages ? { pageTexts: result.pages } : null);
                         report.pageCount = result.numPages;
                         await _arRecoverRmsOcr(report, filePath);
                         if (report.provisionalPersons) unnamedBlocks += report.provisionalPersons.length;
@@ -38867,7 +38766,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         showToast(`Case Overview updated from the report: ${overviewFilled.join(', ')}`, 'success');
                     }
                     if (unnamedBlocks > 0) {
-                        showToast(`${unnamedBlocks} person block${unnamedBlocks !== 1 ? 's' : ''} had no readable name and ${unnamedBlocks !== 1 ? 'were' : 'was'} not imported — verify against the source PDF`, 'warning');
+                        showToast(`${unnamedBlocks} person block${unnamedBlocks !== 1 ? 's' : ''} had no readable name — ${unnamedBlocks !== 1 ? 'they are' : 'it is'} listed under "Name Not Read" on the report so you can place ${unnamedBlocks !== 1 ? 'them' : 'it'} after checking the source PDF`, 'warning');
                     }
                     renderTabContent('rmsImport');
                 } else {
@@ -39031,40 +38930,78 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             `) : '';
 
             // Persons Involved
+            /* One card renderer for both lists. `listName` decides which array
+             * the Move-to buttons index, so a block whose NAME cell the scan
+             * could not read can still be sent to a tab. */
+            const personCard = (p, pi, listName) => {
+                const invColor = p.involvement.startsWith('SUSPECT') ? 'red' : p.involvement.startsWith('VICTIM') ? 'orange' : p.involvement.startsWith('WITNESS') ? 'blue' : p.involvement.startsWith('DEFENDANT') ? 'red' : 'gray';
+                const physicals = [p.height ? 'Ht: ' + p.height : '', p.weight ? 'Wt: ' + p.weight : '', p.hair ? 'Hair: ' + p.hair : '', p.eyes ? 'Eyes: ' + p.eyes : ''].filter(Boolean).join(' | ');
+                const routedBadge = p.routedTo ? `<span class="text-xs px-2 py-0.5 rounded bg-green-500/15 text-green-400 border border-green-500/30 ml-2">✓ ${p.routedTo}</span>` : '';
+                const unverified = !p.name;
+                const unverifiedBadge = unverified ? `<span class="text-xs px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 ml-2">UNVERIFIED NAME</span>` : '';
+                const btn = (target, label, color) => `<button type="button" onclick="rmsManualRoutePerson(${index}, ${pi}, '${target}', '${listName}')" class="px-2 py-0.5 rounded text-xs bg-${color}-500/10 hover:bg-${color}-500/30 text-${color}-400 border border-${color}-500/30 transition-colors" title="Move ${(p.name || 'this person').replace(/'/g, '&apos;')} to ${label}">${label}</button>`;
+                /* The SSN is masked on screen. It is carried into the tab
+                 * record in full, but an import summary is the one place it
+                 * would be read over someone's shoulder. */
+                const ssnMasked = p.ssn ? '***-**-' + String(p.ssn).slice(-4) : '';
+                const employment = [
+                    p.occupation ? 'Occupation: ' + p.occupation : '',
+                    p.placeOfEmployment ? 'Employer: ' + p.placeOfEmployment : '',
+                    p.employmentPhone ? 'Empl. phone: ' + p.employmentPhone : ''
+                ].filter(Boolean).join(' | ');
+                return `
+                <div class="p-3 bg-viper-dark/50 rounded-lg${unverified ? ' border border-amber-500/30' : ''}">
+                    <div class="flex items-center flex-wrap">
+                        <span class="text-xs px-2 py-0.5 rounded bg-${invColor}-500/20 text-${invColor}-400 border border-${invColor}-500/30">${p.involvement}</span>
+                        ${unverifiedBadge}
+                        ${routedBadge}
+                    </div>
+                    <p class="${unverified ? 'text-amber-300 italic' : 'text-white'} font-medium mt-2">${p.name || 'Name not read from the scan'}</p>
+                    ${p.nameSource ? '<div class="text-xs text-amber-300/80 mt-1">Name taken from: ' + p.nameSource + ' — verify against the source document</div>' : ''}
+                    <div class="text-xs text-gray-400 mt-1">
+                        ${p.dob ? 'DOB: ' + p.dob : ''}${p.age ? ' (' + p.age + ')' : ''} ${p.sex ? '| ' + p.sex : ''} ${p.race ? '| ' + p.race : ''}${p.ethnicity ? ' | ' + p.ethnicity : ''}
+                    </div>
+                    ${p.address ? '<div class="text-xs text-gray-400 mt-1">\uD83D\uDCCD ' + p.address + '</div>' : ''}
+                    ${p.phone ? '<div class="text-xs text-gray-400 mt-1">\uD83D\uDCDE ' + p.phone + '</div>' : ''}
+                    ${physicals ? '<div class="text-xs text-gray-400 mt-1">' + physicals + '</div>' : ''}
+                    ${p.dl ? '<div class="text-xs text-gray-400 mt-1">DL: ' + p.dl + (p.dlState ? ' (' + p.dlState + ')' : '') + '</div>' : ''}
+                    ${ssnMasked ? '<div class="text-xs text-gray-400 mt-1">SSN: <span class="font-mono">' + ssnMasked + '</span></div>' : ''}
+                    ${employment ? '<div class="text-xs text-gray-400 mt-1">' + employment + '</div>' : ''}
+                    ${p.sid || p.fbi ? '<div class="text-xs text-gray-400 mt-1">' + (p.sid ? 'SID: ' + p.sid + ' ' : '') + (p.fbi ? 'FBI: ' + p.fbi : '') + '</div>' : ''}
+                    ${p.guardian ? '<div class="text-xs text-gray-400 mt-1">\uD83D\uDC64 Guardian: ' + p.guardian + '</div>' : ''}
+                    ${p.comments ? '<div class="text-xs text-cyan-400/70 mt-1 italic">' + p.comments + '</div>' : ''}
+                    ${p.detail ? '<div class="text-xs text-gray-500 mt-1">' + p.detail + '</div>' : ''}
+                    ${p.sourcePage ? '<div class="text-xs text-gray-500 mt-1">Source: page ' + p.sourcePage + '</div>' : ''}
+                    <div class="mt-3 pt-2 border-t border-gray-700/50 flex items-center gap-1.5 flex-wrap">
+                        <span class="text-[10px] uppercase tracking-wide text-gray-500">Move to:</span>
+                        ${btn('suspect', 'Suspect', 'red')}
+                        ${btn('victim', 'Victim', 'orange')}
+                        ${btn('witness', 'Witness', 'blue')}
+                        ${btn('involved', 'Involved', 'gray')}
+                    </div>
+                </div>`;
+            };
+
             const personsHtml = rpt.personsInvolved.length ? sectionCard('Persons Involved', '👥', `
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    ${rpt.personsInvolved.map((p, pi) => {
-                        const invColor = p.involvement.startsWith('SUSPECT') ? 'red' : p.involvement.startsWith('VICTIM') ? 'orange' : p.involvement.startsWith('WITNESS') ? 'blue' : p.involvement.startsWith('DEFENDANT') ? 'red' : 'gray';
-                        const physicals = [p.height ? 'Ht: ' + p.height : '', p.weight ? 'Wt: ' + p.weight : '', p.hair ? 'Hair: ' + p.hair : '', p.eyes ? 'Eyes: ' + p.eyes : ''].filter(Boolean).join(' | ');
-                        const routedBadge = p.routedTo ? `<span class="text-xs px-2 py-0.5 rounded bg-green-500/15 text-green-400 border border-green-500/30 ml-2">✓ ${p.routedTo}</span>` : '';
-                        const btn = (target, label, color) => `<button type="button" onclick="rmsManualRoutePerson(${index}, ${pi}, '${target}')" class="px-2 py-0.5 rounded text-xs bg-${color}-500/10 hover:bg-${color}-500/30 text-${color}-400 border border-${color}-500/30 transition-colors" title="Move ${(p.name || 'this person').replace(/'/g, '&apos;')} to ${label}">${label}</button>`;
-                        return `
-                        <div class="p-3 bg-viper-dark/50 rounded-lg">
-                            <div class="flex items-center flex-wrap">
-                                <span class="text-xs px-2 py-0.5 rounded bg-${invColor}-500/20 text-${invColor}-400 border border-${invColor}-500/30">${p.involvement}</span>
-                                ${routedBadge}
-                            </div>
-                            <p class="text-white font-medium mt-2">${p.name || 'Unknown'}</p>
-                            <div class="text-xs text-gray-400 mt-1">
-                                ${p.dob ? 'DOB: ' + p.dob : ''}${p.age ? ' (' + p.age + ')' : ''} ${p.sex ? '| ' + p.sex : ''} ${p.race ? '| ' + p.race : ''}${p.ethnicity ? ' | ' + p.ethnicity : ''}
-                            </div>
-                            ${p.address ? '<div class="text-xs text-gray-400 mt-1">\uD83D\uDCCD ' + p.address + '</div>' : ''}
-                            ${p.phone ? '<div class="text-xs text-gray-400 mt-1">\uD83D\uDCDE ' + p.phone + '</div>' : ''}
-                            ${physicals ? '<div class="text-xs text-gray-400 mt-1">' + physicals + '</div>' : ''}
-                            ${p.dl ? '<div class="text-xs text-gray-400 mt-1">DL: ' + p.dl + (p.dlState ? ' (' + p.dlState + ')' : '') + '</div>' : ''}
-                            ${p.sid || p.fbi ? '<div class="text-xs text-gray-400 mt-1">' + (p.sid ? 'SID: ' + p.sid + ' ' : '') + (p.fbi ? 'FBI: ' + p.fbi : '') + '</div>' : ''}
-                            ${p.guardian ? '<div class="text-xs text-gray-400 mt-1">\uD83D\uDC64 Guardian: ' + p.guardian + '</div>' : ''}
-                            ${p.comments ? '<div class="text-xs text-cyan-400/70 mt-1 italic">' + p.comments + '</div>' : ''}
-                            ${p.detail ? '<div class="text-xs text-gray-500 mt-1">' + p.detail + '</div>' : ''}
-                            <div class="mt-3 pt-2 border-t border-gray-700/50 flex items-center gap-1.5 flex-wrap">
-                                <span class="text-[10px] uppercase tracking-wide text-gray-500">Move to:</span>
-                                ${btn('suspect', 'Suspect', 'red')}
-                                ${btn('victim', 'Victim', 'orange')}
-                                ${btn('witness', 'Witness', 'blue')}
-                                ${btn('involved', 'Involved', 'gray')}
-                            </div>
-                        </div>`;
-                    }).join('')}
+                    ${rpt.personsInvolved.map((p, pi) => personCard(p, pi, 'personsInvolved')).join('')}
+                </div>
+            `) : '';
+
+            /* Blocks the scan found but could not name. They are held back from
+             * the case tabs on purpose — routing a person with no name silently
+             * merges them with the next nameless person — but hiding them
+             * entirely lost real people off the report, so they are shown here
+             * and the officer can place them by hand after checking the paper. */
+            const provisional = Array.isArray(rpt.provisionalPersons) ? rpt.provisionalPersons : [];
+            const provisionalHtml = provisional.length ? sectionCard(
+                'Name Not Read — ' + provisional.length + ' Unverified ' + (provisional.length === 1 ? 'Person' : 'Persons'), '⚠️', `
+                <p class="text-xs text-amber-300/90 mb-3">
+                    The scan found ${provisional.length === 1 ? 'this person block' : 'these person blocks'} on the report but could not read the printed name.
+                    Everything else below was read normally. Check the source document, then move each one to the right tab.
+                </p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    ${provisional.map((p, pi) => personCard(p, pi, 'provisionalPersons')).join('')}
                 </div>
             `) : '';
 
@@ -39159,6 +39096,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 ${eventHtml}
                 ${offensesHtml}
                 ${personsHtml}
+                ${provisionalHtml}
                 ${vehiclesHtml}
                 ${propertyHtml}
                 ${narrativesHtml}

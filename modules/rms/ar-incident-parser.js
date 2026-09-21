@@ -109,6 +109,143 @@
     /* Standalone form-label lines that are never a role heading. */
     var NOT_A_ROLE = /^(NAME|SEX|RACE|AGE|ETHNIC|SSN|DOB|ZIP|OCCUPATION|NARRATIVE|OTHERS\s+INVOLVED|CONTINUATION\s+PAGE|INCIDENT\s+REPORT|ARKANSAS|UNAPPROVED|APPROVED|DATE\s+OF\s+BIRTH|RESIDENT\s+ADDRESS|RESIDENT\s+PHONE|PLACE\s+OF\s+EMPLOYMENT|EMPLOY.{0,3}\s*PHONE|EMPLOYMENT\s+PHONE|SOC\.?\s*SEC\.?\s*NO\.?|DRIVER.{0,2}S\s+LICENSE|DR\.?\s*LI\.?\s*STATE|LOCATION\s+CODE|WEAPON\s+FORCE|VICTIM\s+WAS|PAGE|ORI(\s+NUMBER)?|CODE\s*#?|DISPATCHER|REPORTING\s+(OFFICER|AREA)|TIME\s+(RECEIVED|ARRIVED)|AGENCY\s+NAME|STATUTE|OFFENSE(\s+(DESCRIPTION|STATUS|NAME))?|ADDRESS\s+OF\s+OFFENSE|SUBJECT\s+DESCRIPTORS|HEIGHT|WEIGHT|BUILD|SKIN\s+TONE)\b[:.]?$/i;
 
+    /* ---------------- identity band (DL / SSN / employment) ----------------
+     *
+     * The VICTIM, ARRESTEE and Others-Involved bands all carry a licence
+     * number, its issuing state and (arrestees only) an SSN. The values are
+     * printed in ruled columns but PSM 6 gives us a left-packed row, and the
+     * label count does not match the value count when a cell is blank — the
+     * reference arrestee row has FIVE labels and FOUR values because the
+     * employment phone was never filled in. So these are read by TOKEN SHAPE,
+     * not by column position. That also makes the reader indifferent to which
+     * agency's form it is looking at, which is where this is all heading.
+     */
+    var RE_SSN = /(?<!\d)(\d{3}-\d{2}-\d{4})(?!\d)/;
+    var RE_DL_LABEL = /DRIVER.{0,2}S\s*LICEN[CS]E|\bDLN?\b|\bOLN\b/i;
+    var RE_SSN_LABEL = /\bSSN\b|SOC\.?\s*SEC/i;
+    var RE_DL_STATE_LABEL = /DR\.?\s*L[IL1]\.?\s*STATE|LICEN[CS]E\s*STATE/i;
+
+    var US_STATE = {};
+    ('AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE ' +
+     'NV NH NJ NM NY NC ND OH OK OR PA PR RI SC SD TN TX UT VT VA WA WV WI WY')
+        .split(/\s+/).forEach(function (s) { US_STATE[s] = true; });
+
+    /* Tokenise a value row, keeping phones and SSNs whole. */
+    function _identityTokens(line) {
+        var s = _clean(line);
+        if (!s) return [];
+        // Fold "(501) 472-5938" into one token so the area code is not read as
+        // a licence number.
+        s = s.replace(/\((\d{3})\)\s*(\d{3})[\s.\-]?(\d{4})/g, '($1)$2-$3');
+        return s.split(/\s+/);
+    }
+
+    function _looksLikeDlNumber(tok) {
+        var t = String(tok || '').replace(/[^A-Za-z0-9]/g, '');
+        if (t.length < 5 || t.length > 13) return false;
+        if (!/\d/.test(t)) return false;              // must carry digits
+        if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(tok)) return false;
+        if (RE_SSN.test(tok)) return false;
+        if (/^\(\d{3}\)/.test(tok)) return false;
+        if (/^\d{5}(-\d{4})?$/.test(t)) return false; // ZIP
+        if (/^\d{2}-\d{6,8}$/.test(tok)) return false; // incident number
+        return /^[A-Za-z0-9]+$/.test(t);
+    }
+
+    /*
+     * Read the identity values that sit under a DRIVER'S LICENSE / SSN label
+     * row. `labelIdx` is the label row; values are on the next non-empty rows
+     * (the reference document has a stray "=" row between them).
+     *
+     * Returns only what it is sure of. A wrong licence number on a person is
+     * worse than a blank one.
+     */
+    function _harvestIdentityRow(lines, labelIdx, to, person) {
+        var label = _clean(lines[labelIdx]);
+        var wantsDl = RE_DL_LABEL.test(label) || RE_DL_STATE_LABEL.test(label);
+        var wantsSsn = RE_SSN_LABEL.test(label);
+        // Two phone labels on this row, in printed order, means the first
+        // phone is the resident's and the second is the employer's.
+        var twoPhones = /RESIDENT\s*PHONE/i.test(label) && /EMPLOY/i.test(label);
+
+        var scanned = 0;
+        for (var i = labelIdx + 1; i < to && scanned < 3; i++) {
+            var toks = _identityTokens(lines[i]);
+            if (!toks.length) continue;
+            // A row of one or two punctuation glyphs is the ruled grid, not data
+            var meat = toks.filter(function (t) { return /[A-Za-z0-9]/.test(t); });
+            if (!meat.length) continue;
+            scanned++;
+            if (_isPageBreak(lines[i]) || RE_DL_LABEL.test(_clean(lines[i]))) break;
+
+            if (wantsSsn && !person.ssn) {
+                var ms = RE_SSN.exec(lines[i]);
+                if (ms) person.ssn = ms[1];
+            }
+
+            // State code, then the licence number immediately to its left.
+            var stateAt = -1;
+            for (var s = 0; s < toks.length; s++) {
+                var bare = toks[s].replace(/[^A-Za-z]/g, '').toUpperCase();
+                if (bare.length === 2 && US_STATE[bare] && !/\d/.test(toks[s])) { stateAt = s; break; }
+            }
+            if (wantsDl && stateAt > 0 && !person.dl) {
+                for (var d = stateAt - 1; d >= 0; d--) {
+                    if (!/[A-Za-z0-9]/.test(toks[d])) continue;
+                    if (_looksLikeDlNumber(toks[d])) {
+                        person.dl = toks[d].replace(/[^A-Za-z0-9]/g, '');
+                        /* The 2-letter token sitting immediately right of the
+                         * number IS the DR. LI. STATE cell — that is the printed
+                         * column order on every one of these forms. Taken even
+                         * when the state label itself was shredded by OCR,
+                         * because a licence number without its jurisdiction is
+                         * half a fact. Never inferred from the address. */
+                        person.dlState = toks[stateAt].replace(/[^A-Za-z]/g, '').toUpperCase();
+                    }
+                    break;      // only the token immediately left of the state
+                }
+            }
+
+            if (twoPhones) {
+                var ph = [];
+                for (var p = 0; p < toks.length; p++) {
+                    var f = _fmtPhone(toks[p]);
+                    if (f && ph.indexOf(f) === -1) ph.push(f);
+                }
+                if (!person.phone && ph[0]) person.phone = ph[0];
+                // Only claim an employment phone when a SECOND number is
+                // actually printed. One number under two labels is ambiguous,
+                // and a wrong employer phone in a case file is not recoverable.
+                if (!person.employmentPhone && ph[1]) person.employmentPhone = ph[1];
+            }
+        }
+    }
+
+    /* OCCUPATION / PLACE OF EMPLOYMENT sit under their own label row. Both
+     * cells are blank on the reference document; read them when typed and
+     * never guess. */
+    function _harvestEmployment(lines, from, to, person) {
+        var idx = _findLine(lines, /\bOCCUPATION\b|PLACE\s+OF\s+EMPLOYMENT/i, from, to);
+        if (idx < 0) return;
+        var label = _clean(lines[idx]);
+        var hasOcc = /\bOCCUPATION\b/i.test(label);
+        var hasPoe = /PLACE\s+OF\s+EMPLOYMENT/i.test(label);
+        for (var i = idx + 1; i < Math.min(idx + 3, to); i++) {
+            var v = _strip(lines[i]);
+            if (!v) continue;
+            if (_isPageBreak(lines[i])) break;
+            // Reject checkbox furniture, dates and anything that is itself a label.
+            if (RE_DATE.test(v) || NOT_A_ROLE.test(v)) break;
+            var words = v.replace(/[^A-Za-z ]/g, ' ').split(/\s+/).filter(Boolean);
+            if (!words.length) continue;
+            if (hasOcc && hasPoe) break;   // two blank cells, one row: unsplittable
+            var val = words.join(' ');
+            if (hasOcc && !person.occupation) person.occupation = val;
+            else if (hasPoe && !person.placeOfEmployment) person.placeOfEmployment = val;
+            break;
+        }
+    }
+
     /* ================================================================
      * Small helpers
      * ================================================================ */
@@ -167,6 +304,21 @@
         return true;
     }
 
+    /* A middle initial is printed WITHOUT a full stop on this form
+     * ("WINN, WESTON Z"), so _isNameToken rejects it and the initial was
+     * being dropped from every imported name. It is worth recovering — the
+     * initial is often the only thing separating two relatives on the same
+     * report — but a lone capital is also exactly how OCR renders a ticked
+     * checkbox, so it is taken only in the one position where it cannot be
+     * anything else: directly after a given name, and not followed by the
+     * parenthesised option code that always trails a checkbox glyph
+     * ("I (0) Male", "J (M) Male", "[J (00) Unknown"). */
+    function _isMiddleInitial(tok, next) {
+        if (!/^[A-Z]$/.test(String(tok == null ? '' : tok))) return false;
+        if (/^\(/.test(String(next == null ? '' : next))) return false;
+        return true;
+    }
+
     /*
      * Pull a "Last[ (ALIAS)], First [Middle...]" name out of an OCR line that
      * also carries checkbox junk. Walks outward from each candidate comma and
@@ -193,8 +345,11 @@
             // walk right for given / middle names
             var right = [];
             for (var j = c + 1; j < toks.length && right.length < 4; j++) {
-                if (!_isNameToken(toks[j])) break;
-                right.push(toks[j]);
+                if (_isNameToken(toks[j])) { right.push(toks[j]); continue; }
+                if (right.length && _isMiddleInitial(toks[j], toks[j + 1])) {
+                    right.push(toks[j]);
+                }
+                break;
             }
             if (!right.length) continue;
 
@@ -220,8 +375,89 @@
      * and never survives OCR as a standalone line, so page 1 starts at index 0
      * and every later page is introduced by a standalone INCIDENT REPORT or
      * CONTINUATION PAGE marker. Ordinal index therefore equals the PDF page.
+     *
+     * ...except when it doesn't. That inference is only as good as the OCR of
+     * one printed banner. On a Faulkner scan where the title is a rotated
+     * left-margin element it came through as punctuation, so a NINE page PDF
+     * yielded four markers and five logical pages: the arrestee block landed on
+     * "page 1" together with the victim, sparse name recovery was pointed at
+     * page 1 instead of page 2, and the banded narrative re-read was pointed at
+     * pages 1-3 instead of 4-5 (narrative length: zero).
+     *
+     * So when the caller can supply the REAL per-page text — `extract-pdf-text`
+     * now returns `pages[]` — use it and stop guessing. The banner inference
+     * stays as the fallback for callers that only have a flat string (the
+     * pdf-parse fast tier, and every existing fixture-driven test).
+     *
+     * Returns { pages, bounds, warning, authoritative }.
      */
-    function _splitPages(lines) {
+    function _splitPages(lines, pageTexts) {
+        if (pageTexts && pageTexts.length) {
+            var auth = _pagesFromTexts(lines, pageTexts);
+            if (auth) return auth;
+            // Page array did not reconcile with the text we were given. A page
+            // array we can't line up is worse than none — fall through to the
+            // banner inference and say so.
+            var inferred = _pagesFromBanners(lines);
+            inferred.warning = 'Page boundaries reported by the PDF reader did not ' +
+                'match the extracted text, so page numbers were inferred from the ' +
+                'printed page banners instead. Page-specific notes below may be off by a page.';
+            return inferred;
+        }
+        return _pagesFromBanners(lines);
+    }
+
+    /* Build pages directly from the extractor's per-page text.
+     *
+     * The contract is exact: `extract-pdf-text` builds its flat text as
+     * `pages.join('\n') + '\n'`, so concatenating `_lines()` of each page must
+     * reproduce the caller's line array element for element. If it doesn't,
+     * something re-wrote the text between extraction and here and we must not
+     * trust the mapping — return null and let the caller fall back. */
+    function _pagesFromTexts(lines, pageTexts) {
+        var pages = [];
+        var bounds = [];
+        var cursor = 0;
+        for (var i = 0; i < pageTexts.length; i++) {
+            var pl = _lines(pageTexts[i]);
+            var from = cursor;
+            var to = cursor + pl.length;
+            if (to > lines.length) return null;
+            for (var k = 0; k < pl.length; k++) {
+                if (lines[from + k] !== pl[k]) return null;
+            }
+            cursor = to;
+            var slice = lines.slice(from, to);
+            // The printed banner is no longer load-bearing, but downstream
+            // readers still ask "is this a continuation page?" — answer it from
+            // the first couple of non-empty lines of the real page.
+            var isCont = false;
+            for (var c = 0, seen = 0; c < slice.length && seen < 3; c++) {
+                var cl = _clean(slice[c]);
+                if (!cl) continue;
+                seen++;
+                if (/CONTINUATION/i.test(cl)) { isCont = true; break; }
+            }
+            pages.push({
+                index: i + 1,
+                from: from,
+                to: to,
+                lines: slice,
+                text: slice.join('\n'),
+                isContinuation: isCont
+            });
+            bounds.push([from, to]);
+        }
+        // Trailing remainder is allowed only if it is the single empty element
+        // left by the joining newline.
+        for (var t = cursor; t < lines.length; t++) {
+            if (_clean(lines[t])) return null;
+        }
+        if (!pages.length) return null;
+        return { pages: pages, bounds: bounds, warning: '', authoritative: true };
+    }
+
+    function _pagesFromBanners(lines) {
         var breaks = [];
         for (var i = 0; i < lines.length; i++) {
             if (_isPageBreak(lines[i])) breaks.push(i);
@@ -267,7 +503,9 @@
                 for (var k = 0; k < pages.length; k++) pages[k].index = k + 1;
             }
         }
-        return pages;
+        var outBounds = [];
+        for (var q = 0; q < pages.length; q++) outBounds.push([pages[q].from, pages[q].to]);
+        return { pages: pages, bounds: outBounds, warning: '', authoritative: false };
     }
 
     /* Find the index of the first line matching a predicate within a range. */
@@ -673,7 +911,40 @@
                 var c2 = RE_OFFICER_CODE.exec(hdr.replace(RE_ORI, ' ').replace(RE_INCIDENT_NO, ' '));
                 if (c2) h.officerCode = c2[1];
             }
-            if (h.victimNameHeader && h.officerCode) break;
+            if (!h.reportingOfficer) {
+                /* The page-header band repeats REPORTING OFFICER on EVERY
+                 * page, so the officer's name survives even when the page-1
+                 * ADM footer — the only place it was being read from — does
+                 * not. On report 26-0905538 the footer read fine, but a report
+                 * whose page 1 is degraded lost the officer entirely and the
+                 * narrative rendered as "Unknown Officer".
+                 *
+                 * Shape:
+                 *   8 09/18/2026 | 26-0905538 AR0230000 | BRANDON WHITFIELD F4388 | STIVERS, MIRACLE
+                 * The name sits between the incident/ORI numbers and the
+                 * officer code; the VICTIM NAME column follows the code, so
+                 * taking only what precedes the code cannot pick up a victim.
+                 *
+                 * Accepted only when it is shaped like a name — two or more
+                 * capitalised words and none of the column labels. A guessed
+                 * officer on a narrative is worse than no officer. */
+                var bare = hdr.replace(RE_ORI, ' ')
+                    .replace(RE_INCIDENT_NO, ' ')
+                    .replace(RE_DATE_G, ' ');
+                var c3 = RE_OFFICER_CODE.exec(bare);
+                if (c3) {
+                    var cand = _clean(bare.slice(0, bare.indexOf(c3[1])))
+                        .replace(/[|\[\]()<>=~"']+/g, ' ')
+                        .replace(/\s{2,}/g, ' ')
+                        .replace(/^[^A-Za-z]+/, '')
+                        .trim();
+                    if (/^[A-Z][A-Za-z.'\-]+(?:\s+[A-Z][A-Za-z.'\-]+)+$/.test(cand) &&
+                        !/REPORT|OFFICER|INCIDENT|VICTIM|DATE|PAGE|CODE|NAME|CONTINUATION/i.test(cand)) {
+                        h.reportingOfficer = cand;
+                    }
+                }
+            }
+            if (h.victimNameHeader && h.officerCode && h.reportingOfficer) break;
         }
 
         if (!h.incidentNumber) warn('Incident number not found — the report number will be blank.');
@@ -764,9 +1035,12 @@
     function _personShell(involvement) {
         return {
             involvement: involvement || ROLE.OTHER,
-            name: '', alias: '', dob: '', age: '',
+            name: '', alias: '', nameSource: '', dob: '', age: '',
             sex: '', race: '', ethnicity: '',        // checkbox fields — stay blank
             address: '', phone: '',
+            // Identity / employment band. Typed values, read by token shape.
+            dl: '', dlState: '', ssn: '',
+            employmentPhone: '', occupation: '', placeOfEmployment: '',
             height: '', weight: '', hair: '', eyes: '',
             comments: '', guardian: '', detail: '',
             sourcePage: 0
@@ -831,11 +1105,34 @@
             if (mal) person.age = mal[1];
         }
 
+        /* Identity band: driver's licence, its issuing state, SSN and the
+         * employment phone. Every label row in the block is offered, because
+         * the victim band prints the licence beside the NAME label while the
+         * arrestee band prints it beside RESIDENT PHONE / SSN. */
+        for (var q = from; q < to; q++) {
+            var lbl = _clean(lines[q]);
+            if (!lbl) continue;
+            if (!RE_DL_LABEL.test(lbl) && !RE_SSN_LABEL.test(lbl) && !RE_DL_STATE_LABEL.test(lbl)) continue;
+            _harvestIdentityRow(lines, q, to, person);
+            if (person.dl && person.ssn) break;
+        }
+        _harvestEmployment(lines, from, to, person);
+
         return person;
     }
 
     function _hasData(p) {
         return !!(p.name || p.dob || p.address || p.phone || p.age);
+    }
+
+    /* The arrestee band prints the one-digit OFFENDER# column immediately to
+     * the left of the address, and PSM 6 packs the row so the two run
+     * together: "1 164 S COKER RD, Vilonia, AR 72173". Strip that column only
+     * when doing so still leaves a street number behind — "1 Main St" is a
+     * real address and must survive untouched. */
+    function _stripLeadingColumnDigit(addr) {
+        var m = /^(\d{1,2})\s+(\d.*)$/.exec(addr);
+        return m ? m[2] : addr;
     }
 
     /* Scan a window for a resident address, skipping the two rows that follow
@@ -847,7 +1144,7 @@
             if (/ARREST\s*LOCATION/i.test(lines[i])) { skipUntil = i + 2; continue; }
             if (i <= skipUntil) continue;
             var m = RE_ADDR_ZIP.exec(lines[i]) || RE_ADDR_NOZIP.exec(lines[i]);
-            if (m) return _clean(m[1]);
+            if (m) return _stripLeadingColumnDigit(_clean(m[1]));
         }
         return '';
     }
@@ -869,13 +1166,52 @@
         return out;
     }
 
+    /* ---- arrestees ------------------------------------------------------
+     *
+     * Two very different things on this form say "Arrestee":
+     *
+     *   1. the ARRESTEE#/OFFENDER# person band, a full template with its own
+     *      address, DOB, licence and SSN cells; and
+     *   2. the "Arrest Offense(s)" box on a continuation page, which
+     *      cross-references the arrestee by TYPED name on one line —
+     *      "Arrestee #1: WINN, BRENTON CONNER" — and is then followed by the
+     *      SEQ./OFFENSE CODE table.
+     *
+     * Reading (2) as a person block is wrong twice over: it invents a suspect,
+     * and then dresses that suspect in whatever values happen to follow on the
+     * page. On report 26-0905538 the block printed beneath it belonged to a
+     * two-year-old child, so the import produced an arrestee with a 2024 date
+     * of birth and the child's address.
+     *
+     * So (2) is read for the one thing it genuinely is: the arrestee's typed
+     * name, which the arrestee's own band may have lost to OCR.
+     * -------------------------------------------------------------------- */
+    var RE_ARRESTEE_XREF = /^\W{0,3}Arrestee\s*#?\s*(\d{0,2})\s*[:.]\s*(.+)$/i;
+    var RE_XREF_NAME = /^[A-Z][A-Za-z''\-]+\s*,\s*[A-Z][A-Za-z''\-.]/;
+
+    function _arresteeXref(line) {
+        var s = _clean(line);
+        if (!s) return null;
+        // "ARRESTEE# | NAME Last, First, Middle," is the person band template.
+        if (/\bNAME\b/i.test(s)) return null;
+        var m = RE_ARRESTEE_XREF.exec(s);
+        if (!m) return null;
+        var name = _clean(m[2]).replace(/\s{2,}/g, ' ');
+        if (!RE_XREF_NAME.test(name)) return null;
+        return { num: m[1] || '', name: name };
+    }
+
     function _readArrestees(pages, warn) {
         var out = [];
+        var xrefs = [];
         for (var p = 0; p < pages.length; p++) {
             var lines = pages[p].lines;
             var starts = [];
             for (var i = 0; i < lines.length; i++) {
-                if (/ARRESTEE\s*#/i.test(lines[i])) starts.push(i);
+                if (!/ARRESTEE\s*#/i.test(lines[i])) continue;
+                var xr = _arresteeXref(lines[i]);
+                if (xr) { xrefs.push(xr.name); continue; }
+                starts.push(i);
             }
             if (!starts.length) continue;
             for (var s = 0; s < starts.length; s++) {
@@ -890,7 +1226,94 @@
                 if (_hasData(a)) out.push(a);
             }
         }
+        return { items: out, xrefNames: xrefs };
+    }
+
+    /* The arrestee band is printed once per arrest offence, so one person can
+     * appear two or three times on the same page with identical typed values
+     * and a different offence name in the last row. Those are one person.
+     *
+     * The merge is keyed on the TYPED identifiers rather than on the whole
+     * record, because OCR reads the same address twice with different case and
+     * different column bleed. It demands agreement on at least two of
+     * DOB / licence / SSN / phone, treats any conflict in those as proof of a
+     * different person, and is confined to a single page and role — never
+     * across pages, where a family sharing one address would be at risk.
+     *
+     * Fields are filled in from the duplicate rather than discarded: on report
+     * 26-0905538 the first band carried the licence and the second the SSN. */
+    function _sameBandPerson(a, b) {
+        var an = _clean(a.name || '').toUpperCase();
+        var bn = _clean(b.name || '').toUpperCase();
+        if (an && bn && an !== bn) return false;
+        var strong = ['dob', 'dl', 'ssn', 'phone'];
+        var agree = 0;
+        for (var i = 0; i < strong.length; i++) {
+            var x = _clean(a[strong[i]] || '');
+            var y = _clean(b[strong[i]] || '');
+            if (!x || !y) continue;
+            if (x !== y) return false;
+            agree++;
+        }
+        return agree >= 2;
+    }
+
+    function _fillBlanks(target, src) {
+        var keys = Object.keys(src);
+        for (var i = 0; i < keys.length; i++) {
+            var k = keys[i];
+            if (typeof src[k] !== 'string' || !src[k]) continue;
+            if (target[k]) continue;
+            target[k] = src[k];
+        }
+    }
+
+    function _mergeDuplicateBands(list) {
+        var out = [];
+        for (var i = 0; i < list.length; i++) {
+            var p = list[i];
+            var merged = false;
+            for (var j = 0; j < out.length; j++) {
+                var q = out[j];
+                if (q.sourcePage !== p.sourcePage) continue;
+                if (q.involvement !== p.involvement) continue;
+                if (!_sameBandPerson(q, p)) continue;
+                _fillBlanks(q, p);
+                merged = true;
+                break;
+            }
+            if (!merged) out.push(p);
+        }
         return out;
+    }
+
+    /* An arrestee band whose NAME cell was lost to OCR can be named with
+     * certainty when the Arrest Offense(s) box names exactly one arrestee and
+     * exactly one band is nameless — there is nothing else that name could
+     * belong to. With two or more of either, the pairing would be a guess, so
+     * the band stays nameless (held in provisionalPersons) and the reader is
+     * told why. Either way the source of the name is disclosed. */
+    function _applyArresteeXrefNames(arrestees, xrefNames, warn) {
+        if (!xrefNames || !xrefNames.length) return;
+        var uniq = [];
+        for (var i = 0; i < xrefNames.length; i++) {
+            if (uniq.indexOf(xrefNames[i]) === -1) uniq.push(xrefNames[i]);
+        }
+        var nameless = [];
+        for (var j = 0; j < arrestees.length; j++) {
+            if (!arrestees[j].name) nameless.push(arrestees[j]);
+        }
+        if (!nameless.length) return;
+        if (uniq.length === 1 && nameless.length === 1) {
+            nameless[0].name = uniq[0];
+            nameless[0].alias = _aliasOf(uniq[0]);
+            nameless[0].nameSource = 'Arrest Offense(s) box';
+            warn('The arrestee NAME cell did not read, so the name "' + uniq[0] +
+                '" was taken from the Arrest Offense(s) box on the same report. Verify it against the source document.');
+            return;
+        }
+        warn('The Arrest Offense(s) box names ' + uniq.length + ' arrestee(s) (' + uniq.join('; ') +
+            ') but ' + nameless.length + ' arrestee block(s) have no readable name, so no name was assigned.');
     }
 
     /*
@@ -970,13 +1393,35 @@
             for (var hh = 0; hh < heads.length; hh++) {
                 var from = heads[hh].idx;
                 var to = hh + 1 < heads.length ? heads[hh + 1].idx : lines.length;
-                var person = _harvestBlock(lines, from + 1, to, heads[hh].role, page.index);
-                person.detail = 'Others Involved — ' + heads[hh].role;
-                // Emitted even when completely empty: the typed role heading is
-                // proof the block exists, and a sparse-OCR pass can still
-                // recover the name. parse() keeps nameless blocks out of
-                // personsInvolved until a name is actually read.
-                out.push(person);
+
+                /* One role heading can cover SEVERAL people: the continuation
+                 * page prints "OTHER" once and then repeats the person
+                 * template for each person beneath it. Splitting on the
+                 * heading alone collapsed them into a single record wearing
+                 * the first person's date of birth and the last person's name
+                 * — on report 26-0905538 page 9 that produced a 51-year-old
+                 * "WINN, AMANDA K" carrying a 4-year-old's DOB, and dropped
+                 * "WINN, WESTON Z" from page 8 entirely.
+                 *
+                 * Each "NAME: Last, First, Middle" cell starts a new person,
+                 * which is the same boundary _readGenericPersonBlocks uses. */
+                var subs = [];
+                for (var k = from + 1; k < to; k++) {
+                    if (/NAME\s*:\s*Last/i.test(lines[k])) subs.push(k);
+                }
+                if (!subs.length) subs = [from + 1];
+
+                for (var ss = 0; ss < subs.length; ss++) {
+                    var sFrom = subs[ss];
+                    var sTo = ss + 1 < subs.length ? subs[ss + 1] : to;
+                    var person = _harvestBlock(lines, sFrom, sTo, heads[hh].role, page.index);
+                    person.detail = 'Others Involved — ' + heads[hh].role;
+                    // Emitted even when completely empty: the typed role
+                    // heading is proof the block exists, and a sparse-OCR pass
+                    // can still recover the name. parse() keeps nameless
+                    // blocks out of personsInvolved until a name is read.
+                    out.push(person);
+                }
             }
         }
         return out;
@@ -1545,10 +1990,21 @@
     }
 
     /* The primary OCR lines of one page, straight from the text parse() was
-     * given. Used only to reconcile a banded rebuild. */
+     * given. Used only to reconcile a banded rebuild.
+     *
+     * Re-splitting from rawText must land on the SAME boundaries parse() used,
+     * so when parse() had authoritative page bounds it records them on the
+     * report and we slice with those rather than re-running the inference. */
     function _primaryPageLines(report, pageNo) {
         if (!report || !report.rawText) return null;
-        var pages = _splitPages(_lines(report.rawText));
+        var lines = _lines(report.rawText);
+        var bounds = report.arPageBounds;
+        if (bounds && bounds.length) {
+            var b = bounds[pageNo - 1];
+            if (!b) return null;
+            return lines.slice(b[0], b[1]);
+        }
+        var pages = _splitPages(lines).pages;
         for (var i = 0; i < pages.length; i++) {
             if (pages[i].index === pageNo) return pages[i].lines;
         }
@@ -1640,9 +2096,28 @@
 
         if (!report.narratives) report.narratives = [];
         if (!report.narratives.length) {
-            report.narratives.push({ officer: '', badge: '', text: '' });
+            /* The primary pass found no narrative at all, so parse() had no
+             * narrative item to stamp the REPORTING OFFICER onto and the
+             * rebuilt narrative was rendering as "Unknown Officer". The
+             * officer and code are printed in the page header band and were
+             * read at parse time — carry them onto the item we are creating
+             * here rather than leaving an officer's own narrative unattributed
+             * in the case file. */
+            report.narratives.push({
+                officer: (report.ar && report.ar.reportingOfficer) || '',
+                badge: (report.ar && report.ar.officerCode) || '',
+                text: ''
+            });
         }
         report.narratives[0].text = joined;
+        /* Also covers the case where parse() created the item before the
+         * header band had been read on a later page. */
+        if (!report.narratives[0].officer && report.ar && report.ar.reportingOfficer) {
+            report.narratives[0].officer = report.ar.reportingOfficer;
+        }
+        if (!report.narratives[0].badge && report.ar && report.ar.officerCode) {
+            report.narratives[0].badge = report.ar.officerCode;
+        }
 
         rec.pages = order;
         report.diagnostics = report.diagnostics || {};
@@ -1684,7 +2159,7 @@
      * parse()
      * ================================================================ */
 
-    function parse(text, fileName) {
+    function parse(text, fileName, opts) {
         var raw = String(text == null ? '' : text);
         var lines = _lines(raw);
 
@@ -1694,15 +2169,19 @@
             return _parseSupplement(raw, lines, fileName);
         }
 
-        var pages = _splitPages(lines);
+        var split = _splitPages(lines, opts && opts.pageTexts);
+        var pages = split.pages;
 
         var warnings = [];
         function warn(msg) { if (warnings.indexOf(msg) === -1) warnings.push(msg); }
+        if (split.warning) warn(split.warning);
 
         var header = _readHeader(pages, warn);
         var offenses = _readOffenses(pages, warn);
         var victims = _readVictims(pages, warn);
-        var arrestees = _readArrestees(pages, warn);
+        var arrRead = _readArrestees(pages, warn);
+        var arrestees = _mergeDuplicateBands(arrRead.items);
+        _applyArresteeXrefNames(arrestees, arrRead.xrefNames, warn);
         var generic = _readGenericPersonBlocks(pages, warn);
         var others = _readOthersInvolved(pages, warn);
         var narrRead = _readNarrative(pages, warn);
@@ -1763,6 +2242,12 @@
             confidentialPersons: [],
             pageCount: pages.length,
             rawText: raw,
+
+            /* Line bounds of each page, so a later recovery pass re-slices on
+             * exactly the boundaries this parse used instead of re-running the
+             * banner inference and possibly disagreeing with itself. */
+            arPageBounds: split.bounds,
+            arPagesAuthoritative: !!split.authoritative,
 
             // --- Arkansas-specific metadata (additive; ignored by shared UI) ---
             arFormat: 'ar-incident-report',
@@ -1961,7 +2446,7 @@
      * case number, a synopsis and the set of modules to tick BEFORE the case
      * exists. Cheap, read-only, and safe to call on any text.
      * ================================================================ */
-    function quickScan(text, fileName) {
+    function quickScan(text, fileName, opts) {
         var t = String(text == null ? '' : text);
         var result = { caseNum: '', synopsis: '', location: '', primaryOffense: '', offenseList: [], detected: {}, matched: false };
         if (!detect(t)) return result;
@@ -1994,12 +2479,14 @@
             return result;
         }
 
-        var pages = _splitPages(lines);
+        var pages = _splitPages(lines, opts && opts.pageTexts).pages;
         var noop = function () {};
         var header = _readHeader(pages, noop);
         var offenses = _readOffenses(pages, noop);
         var victims = _readVictims(pages, noop);
-        var arrestees = _readArrestees(pages, noop);
+        var qArr = _readArrestees(pages, noop);
+        var arrestees = _mergeDuplicateBands(qArr.items);
+        _applyArresteeXrefNames(arrestees, qArr.xrefNames, noop);
         var generic = _readGenericPersonBlocks(pages, noop);
         var others = _readOthersInvolved(pages, noop);
         var narratives = _readNarrative(pages, noop).items;
@@ -2098,7 +2585,10 @@
             readSupplementNarrative: _readSupplementNarrative,
             stripRuleGlyphs: _stripRuleGlyphs,
             narrativeRunFromBands: _narrativeRunFromBands,
-            looksLikeNarrativeContinuation: _looksLikeNarrativeContinuation
+            looksLikeNarrativeContinuation: _looksLikeNarrativeContinuation,
+            harvestIdentityRow: _harvestIdentityRow,
+            arresteeXref: _arresteeXref,
+            mergeDuplicateBands: _mergeDuplicateBands
         }
     };
 });

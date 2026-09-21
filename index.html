@@ -2971,7 +2971,14 @@
                 let rmsOffenses = [];
                 if (window.ArIncidentParser && window.ArIncidentParser.detect(text)) {
                     try {
-                        const arScan = window.ArIncidentParser.quickScan(text, result.fileName);
+                        /* Per-page text from the extractor, when it could supply
+                         * it. With it the parser addresses real PDF pages
+                         * instead of inferring breaks from the form's printed
+                         * banner — which on a scan where that banner is a
+                         * rotated margin element collapsed nine pages into five
+                         * and pointed every recovery pass at the wrong page. */
+                        const arOpts = result.pages ? { pageTexts: result.pages } : null;
+                        const arScan = window.ArIncidentParser.quickScan(text, result.fileName, arOpts);
                         if (arScan.matched) {
                             if (!caseNum && arScan.caseNum) caseNum = arScan.caseNum;
                             if (!synopsis && arScan.synopsis) synopsis = arScan.synopsis;
@@ -2986,7 +2993,7 @@
                         // hold the file path, and hand the results across with the
                         // text — processPendingRmsImport is synchronous and only
                         // ever receives text.
-                        const arReport = window.ArIncidentParser.parse(text, result.fileName);
+                        const arReport = window.ArIncidentParser.parse(text, result.fileName, arOpts);
                         if (window.electronAPI.ocrPdfPagesSparse) {
                             if (window.ArIncidentParser.needsNameRecovery(arReport)) {
                                 const pages = window.ArIncidentParser.nameRecoveryPages(arReport);
@@ -3017,7 +3024,7 @@
                 }
 
                 // Store for case creation
-                pendingRmsData = { text: result.text, fileName: result.fileName, detected, caseNum, synopsis, arSparsePages, arAltPages, arBandPages, rmsLocation, rmsOffenses };
+                pendingRmsData = { text: result.text, pageTexts: result.pages || null, fileName: result.fileName, detected, caseNum, synopsis, arSparsePages, arAltPages, arBandPages, rmsLocation, rmsOffenses };
 
                 // Auto-fill form fields
                 if (caseNum) {
@@ -3463,8 +3470,12 @@
                 
                 // Store pending RMS data for case-detail to pick up
                 if (pendingRmsData) {
-                    localStorage.setItem('pendingRmsImport_' + newCase.id, JSON.stringify({
+                    const rmsHandoff = {
                         text: pendingRmsData.text,
+                        // Per-page text from the extractor. Lets the Arkansas
+                        // parser address real PDF pages rather than inferring
+                        // page breaks from the form's printed banner.
+                        pageTexts: pendingRmsData.pageTexts || null,
                         fileName: pendingRmsData.fileName,
                         // Arkansas format only: supplementary OCR of the pages whose
                         // typed names the layout OCR pass dropped (PSM 11), of the
@@ -3474,7 +3485,21 @@
                         arSparsePages: pendingRmsData.arSparsePages || null,
                         arAltPages: pendingRmsData.arAltPages || null,
                         arBandPages: pendingRmsData.arBandPages || null
-                    }));
+                    };
+                    try {
+                        localStorage.setItem('pendingRmsImport_' + newCase.id, JSON.stringify(rmsHandoff));
+                    } catch (quotaErr) {
+                        // pageTexts roughly doubles this payload. If it won't
+                        // fit, drop it and let the parser fall back to banner
+                        // inference — degraded page numbering beats a lost import.
+                        console.warn('[RMS Import] handoff too large, retrying without page texts:', quotaErr);
+                        rmsHandoff.pageTexts = null;
+                        try {
+                            localStorage.setItem('pendingRmsImport_' + newCase.id, JSON.stringify(rmsHandoff));
+                        } catch (quotaErr2) {
+                            console.error('[RMS Import] handoff could not be stored:', quotaErr2);
+                        }
+                    }
                     pendingRmsData = null;
                 }
                 

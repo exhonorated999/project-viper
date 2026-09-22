@@ -1852,7 +1852,7 @@ footer {
                         No room on the C:\ drive? Install and run it entirely from a USB stick.
                     </span>
                 </div>
-                <p class="sup-dl-meta">Version 0.1.0 (Beta) · Windows 10/11 · Unsigned installer · ~98 MB</p>
+                <p class="sup-dl-meta" data-sup-version-meta>Version 0.1.1 (Beta) · Windows 10/11 · Unsigned installer · ~98 MB</p>
             </div>
         </div>
     </section>
@@ -2330,13 +2330,48 @@ function handleDownload(e) {
         })
         .catch(() => { /* keep the pinned version */ });
 })();
+/* Supervisor Edition ships from its own repo (sharing VIPER's would collide
+   latest.yml), so it gets its own pinned fallback and its own auto-detect.
+   Same contract as above: bump SUP_VERSION with each release, and if that is
+   ever missed the GitHub lookup retargets the button to the newest build. */
+const SUP_VERSION = '0.1.1';
+let   SUP_DOWNLOAD_URL =
+    'https://github.com/exhonorated999/viper-supervisor-edition/releases/download/v' +
+    SUP_VERSION + '/VIPER-Supervisor-Edition-Setup-' + SUP_VERSION + '.exe';
+
 function handleSupervisorDownload(e) {
     if (e) e.preventDefault();
-    const downloadUrl = 'https://github.com/exhonorated999/viper-supervisor-edition/releases/download/v0.1.0/VIPER-Supervisor-Edition-Setup-0.1.0.exe';
     // Track supervisor download click
     if (window._iq) _iq('supervisor_download_click');
-    window.location.href = downloadUrl;
+    window.location.href = SUP_DOWNLOAD_URL;
 }
+
+(function syncSupervisorVersion() {
+    const cmp = (a, b) => {
+        const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
+        for (let i = 0; i < 3; i++) {
+            const d = (pa[i] || 0) - (pb[i] || 0);
+            if (d) return d;
+        }
+        return 0;
+    };
+    fetch('https://api.github.com/repos/exhonorated999/viper-supervisor-edition/releases/latest',
+          { headers: { Accept: 'application/vnd.github+json' } })
+        .then(r => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
+        .then(rel => {
+            const tag = String(rel && rel.tag_name || '');
+            const m = tag.match(/^v?(\d+\.\d+\.\d+)$/);
+            if (!m || cmp(m[1], SUP_VERSION) <= 0) return;
+            const ver = m[1];
+            const setup = (rel.assets || [])
+                .find(a => /^VIPER-Supervisor-Edition-Setup-.*\.exe$/i.test(a.name || ''));
+            if (!setup || !setup.browser_download_url) return;
+            SUP_DOWNLOAD_URL = setup.browser_download_url;
+            document.querySelectorAll('[data-sup-version-meta]')
+                .forEach(el => { el.textContent = el.textContent.replace(/\d+\.\d+\.\d+/, ver); });
+        })
+        .catch(() => { /* keep the pinned version */ });
+})();
 </script>
 
 <!-- Intellect Analytics -->

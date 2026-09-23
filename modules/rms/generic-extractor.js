@@ -187,13 +187,28 @@
           not: /AGENCY\s*NAME|OFFENSE\s*NAME|BUSINESS\s*NAME|SCHOOL\s*NAME|FILE\s*NAME|LOCATION\s*NAME|PLACE\s*NAME|PREMISES?\s*NAME|STREET\s*NAME|CITY\s*NAME|DEVICE\s*NAME|USER\s*-?\s*NAME|USERNAME|NAME\s*OF\s*(BUSINESS|LOCATION|PLACE|SCHOOL|AGENCY)/i },
         { key: 'dob',    cls: 'field', field: 'dob',    type: 'date',
           re: /\bD\.?O\.?B\.?\b|DATE\s*OF\s*BIRTH|\bBIRTH\s*DATE\b|\bBIRTHDATE\b/i },
+        /* Two age labels, because these forms print both and they do not
+         * agree. "AGE:" on the Arkansas form heads a column of checkboxes and
+         * OCR reads the boxes as digits — "ETHNIC: AGE: 100 [m} [0 [1" put a
+         * hundred-year-old on a report about a fifteen-year-old. "EXACT AGE"
+         * heads the cell a clerk actually types into, so it is the more
+         * specific label and `prefer` lets it overrule the generic one
+         * wherever both are printed. */
+        { key: 'exactage', cls: 'field', field: 'age', type: 'age', prefer: 2,
+          re: /\bEXACT\s*AGE\b/i },
         { key: 'age',    cls: 'field', field: 'age',    type: 'age',
-          re: /\bEXACT\s*AGE\b|\bAGE\b/i, not: /AGE\s*RANGE|\bPAGE\b/i },
+          re: /\bAGE\b/i, not: /AGE\s*RANGE|\bPAGE\b|EXACT\s*AGE/i },
         { key: 'address', cls: 'field', field: 'address', type: 'address',
           re: /RESIDENT\s*ADDRESS|HOME\s*ADDRESS|MAILING\s*ADDRESS|STREET\s*ADDRESS|\bADDRESS\b/i,
           not: /ADDRESS\s*OF\s*OFFENSE|EMAIL\s*ADDRESS|IP\s*ADDRESS/i },
+        /* "PH #" is how these forms abbreviate a phone cell, and knowing that
+         * does two jobs. It reads a number that is printed on the page, and —
+         * because the value window is cut at the NEXT label — it stops the
+         * neighbouring cell swallowing it. Without it the Arkansas victim's
+         * occupation came back as "RESIDENT PH #MOH2 #3 #4 #5 #6 #7 #8 #9
+         * #10": the column ruling of the phone cell, filed as her job. */
         { key: 'phone',  cls: 'field', field: 'phone',  type: 'phone',
-          re: /\bPHONES?\b|\bTELEPHONE\b|\bCELL(ULAR)?\b|CONTACT\s*(NO|NUMBER|#)/i,
+          re: /\bPHONES?\b|\bTELEPHONE\b|\bCELL(ULAR)?\b|CONTACT\s*(NO|NUMBER|#)|RESIDENT\s*PH\b|\bPH\s*(?:#|NO\b|NUMBER\b)/i,
           not: /EMPLOY/i },
         { key: 'emplphone', cls: 'field', field: 'employmentPhone', type: 'phone',
           re: /EMPLOY\w*\s*PHONE|WORK\s*PHONE|BUSINESS\s*PHONE/i },
@@ -211,9 +226,9 @@
           re: /\bHEIGHT\b|\bHGT\b|\bHT\b/i },
         { key: 'weight', cls: 'field', field: 'weight', type: 'weight',
           re: /\bWEIGHT\b|\bWGT\b|\bWT\b/i },
-        { key: 'hair',   cls: 'field', field: 'hair',   type: 'text',
+        { key: 'hair',   cls: 'field', field: 'hair',   type: 'color',
           re: /\bHAIR(\s*COLOR)?\b/i },
-        { key: 'eyes',   cls: 'field', field: 'eyes',   type: 'text',
+        { key: 'eyes',   cls: 'field', field: 'eyes',   type: 'color',
           re: /\bEYES?(\s*COLOR)?\b/i },
         /* Typed-only. A checkbox glyph is never read — see the header. */
         { key: 'sex',    cls: 'field', field: 'sex',    type: 'word',
@@ -234,7 +249,7 @@
           re: /\bMODEL\b/i },
         { key: 'vyear',  cls: 'field', field: 'year',   type: 'year', scope: 'vehicle',
           re: /\bYEAR\b|\bYR\b/i },
-        { key: 'vcolor', cls: 'field', field: 'color',  type: 'text', scope: 'vehicle',
+        { key: 'vcolor', cls: 'field', field: 'color',  type: 'color', scope: 'vehicle',
           re: /\bCOLOR\b|\bCOLOUR\b/i },
         { key: 'vstyle', cls: 'field', field: 'style',  type: 'text', scope: 'vehicle',
           re: /\bSTYLE\b|\bBODY\s*(TYPE|STYLE)?\b/i },
@@ -274,8 +289,41 @@
         return m[1] || m[2] || m[3] || '';
     }
 
+    /* An age is the loosest shape on the page — one to three digits — so where
+     * it is read from matters more than for any other field.
+     *
+     * Reading it anywhere in the value window found "1" in the checkbox row
+     * "1 (M) Male [0 W)White" and "3" in the alias of "VANDERLINDE (JV3),
+     * EMMETT", and put a one-year-old and a three-year-old on a report whose
+     * people are teenagers. Reading it from the label's own cell alone then
+     * lost every age on the forms that print "Age" on one row and the number
+     * on the next.
+     *
+     * So: the label's own cell first, and failing that the ONE row beneath it
+     * — but only when that row is a value cell rather than a packed grid row.
+     * A checkbox legend is never a value, and neither is a row of five or more
+     * tokens: a vertical form's age cell holds "34", not a sentence of form
+     * furniture. A blank age is honest; a wrong one on a person's card is not. */
     function _matchAge(win) {
-        var m = /(?<!\d)(\d{1,3})(?!\d)/.exec(win);
+        var v = _ageIn(win.first);
+        if (v) return v;
+        var next = win.lines.length > 1 ? S.clean(win.lines[1]) : '';
+        if (!next) return '';
+        if (next.split(' ').length > 4) return '';
+        return _ageIn(next);
+    }
+
+    function _ageIn(cell) {
+        var s = String(cell || '');
+        /* Cut the cell at the first checkbox glyph. On a left-packed row the
+         * neighbouring cell's boxes run straight on from this cell's value —
+         * "EXACT AGE 14 [J (C) Count Arrestee" — so everything from the first
+         * glyph rightwards belongs to somebody else's column. Refusing the
+         * whole row instead lost the arrestee's age off a report that prints
+         * it plainly. */
+        var g = /\[\s*[A-Za-z0-9\]]|\((?:\d{2}|[A-Z]{1,2})\)|\((?:Max\.|Enter|check|Place)\b/i.exec(s);
+        if (g) s = s.slice(0, g.index);
+        var m = /(?<!\d)(\d{1,3})(?!\d)/.exec(s);
         if (!m) return '';
         var n = parseInt(m[1], 10);
         if (!(n >= 1 && n <= 120)) return '';
@@ -412,8 +460,17 @@
         return best;
     }
 
-    /* Free text to the end of the cell. The window text has already been cut
-     * at the next label, so what is left is the value — minus grid debris. */
+    /* Free text to the end of the cell, and ONLY that cell.
+     *
+     * Looking at the row beneath — the way the age and colour readers do —
+     * was tried and measured, and it cannot be made safe here. Two real
+     * reports settle it: one prints "Occupation" with "TRUCK DRIVER" on the
+     * very next row, and another prints "Occupation" with "Gang Affiliation"
+     * on the very next row, an unfilled label in a stack of unfilled labels.
+     * Nothing about the two rows tells them apart — free text has no shape,
+     * which is the whole reason the other readers can look down and this one
+     * cannot. The cost is a blank occupation on some vertical forms. The
+     * alternative was a form label printed on a person's card as their job. */
     function _matchText(win) {
         var raw = S.clean(win);
         /* Label furniture is not a value. Without this, "ARREST TYPE: [J (0)
@@ -430,6 +487,45 @@
         if (/^[A-Z]{1,2}$/.test(v)) return '';
         if (S.NAME_STOP[v.replace(/[^A-Za-z]/g, '').toUpperCase()]) return '';
         return v;
+    }
+
+    /* Hair, eyes and a vehicle's paint are the one kind of free text these
+     * forms print from a fixed vocabulary — "BRO", "Brown", "BLN", "Silver" —
+     * and a vocabulary is a shape. That is what makes it safe to read them
+     * off the row BENEATH the label, which is where every vertical form puts
+     * them: "Hair Color" over "BLN". An unfilled form stacks its labels
+     * instead ("Hair" over "Eyes", "Eye Color" over "Home Address"), and a
+     * label is not a colour, so it is refused.
+     *
+     * A row carrying three or more colour words is a legend or a packed grid
+     * row from a neighbouring column — "6'01" 240 BRO - Brown BLU - Blue" is
+     * two people's worth of columns, not one person's hair. */
+    var COLOR_WORDS = ('BLACK BLK BLU BLUE BRO BRN BROWN BLN BLOND BLONDE GRY GRAY GREY ' +
+        'GRN GREEN HAZ HAZEL RED AUB AUBURN WHI WHT WHITE BLD BALD SDY SANDY ' +
+        'PNK PINK PUR PURPLE ORG ORANGE SILVER SIL SLV TAN GOLD GLD BEIGE MAROON ' +
+        'BURGUNDY CREAM CHARCOAL YELLOW YEL UNK UNKNOWN').split(' ');
+
+    function _matchColor(win) {
+        var v = _colorIn(win.first);
+        if (v) return v;
+        /* Only look down when the label's own cell is genuinely empty. A cell
+         * that already answered the label is never second-guessed. */
+        if (/[A-Za-z0-9]/.test(S.clean(win.first))) return '';
+        var next = win.lines.length > 1 ? S.clean(win.lines[1]) : '';
+        if (_labelRowScore(next)) return '';
+        return _colorIn(next);
+    }
+
+    function _colorIn(cell) {
+        var raw = S.clean(cell);
+        if (!raw || raw.length > 24) return '';
+        var up = ' ' + raw.toUpperCase().replace(/[^A-Z]+/g, ' ').trim() + ' ';
+        var found = 0;
+        for (var i = 0; i < COLOR_WORDS.length; i++) {
+            if (up.indexOf(' ' + COLOR_WORDS[i] + ' ') >= 0) found++;
+        }
+        if (found < 1 || found > 2) return '';
+        return raw;                                   // verbatim, as printed
     }
 
     /* ----------------------------------------------------------------
@@ -651,7 +747,7 @@
 
     var MATCHERS = {
         date: function (w) { return _matchDate(w.text); },
-        age: function (w) { return _matchAge(w.text); },
+        age: function (w) { return _matchAge(w); },
         phone: function (w) { return _matchPhone(w.text); },
         ssn: function (w) { return _matchSsn(w.text); },
         state: function (w) { return _matchState(w.text); },
@@ -665,6 +761,7 @@
         statute: function (w) { return _matchStatute(w.text); },
         caseno: function (w) { return _matchCaseNo(w.text); },
         text: function (w) { return _matchText(w.first); },
+        color: function (w) { return _matchColor(w); },
         word: function (w, entry) { return _matchWord(w.first, entry.words || []); },
         name: function (w) { return _matchName(w.lines, true); }
     };
@@ -1131,12 +1228,18 @@
 
     function _harvestInto(target, hits, seg, pageLines, allowedScopes) {
         var fieldHits = _hitsIn(hits, seg, 'field');
+        /* Which label strength claimed each field so far. A plain label never
+         * overwrites a value a more specific one already produced, but a more
+         * specific one always overwrites a plain one — see `prefer` in the
+         * lexicon. Everything else stays first-hit-wins. */
+        var pref = {};
         for (var i = 0; i < fieldHits.length; i++) {
             var hit = fieldHits[i];
             var entry = hit.entry;
             var scope = entry.scope || 'person';
             if (allowedScopes.indexOf(scope) === -1) continue;
-            if (target[entry.field]) continue;              // first labelled hit wins
+            var strength = entry.prefer || 0;
+            if (target[entry.field] && strength <= (pref[entry.field] || 0)) continue;
 
             var win = _window(pageLines, hit.line, hit.end, entry.type === 'address' ? 4 : 3);
             var matcher = MATCHERS[entry.type];
@@ -1145,6 +1248,7 @@
             if (!value) continue;
 
             target[entry.field] = value;
+            pref[entry.field] = strength;
             target.fieldSources[entry.field] = {
                 page: hit.page, line: hit.line, label: hit.label
             };
@@ -1192,6 +1296,22 @@
         var at = head.indexOf(seg.label);
         if (at === -1) return '';
         return _looseNameOn(_cutAtNextLabel(head.slice(at + seg.label.length)));
+    }
+
+    /* A licence STATE with no licence NUMBER is not half a fact — it is no
+     * fact at all, printed in a way that suggests the licence was read.
+     *
+     * The DR. LI. STATE cell on these forms is usually empty, and the value
+     * window opened under it runs on into the resident address on the row
+     * below: "912 THISTLEDOWN LN, Bellefonte, AR 72611" put "AR" on the
+     * licence of a fourteen-year-old who has none. 5.2.4 settled this for the
+     * Arkansas reader and the rule is the same here — the state is never
+     * inferred from where somebody lives. */
+    function _dropUnbackedDlState(person) {
+        if (person.dlState && !person.dl) {
+            person.dlState = '';
+            if (person.fieldSources) delete person.fieldSources.dlState;
+        }
     }
 
     function _harvestPerson(seg, hits, pageLines) {
@@ -1296,6 +1416,7 @@
         }
 
         person.nameUnverified = !person.name;
+        _dropUnbackedDlState(person);
         person.confidence = _confidence(person);
         return person;
     }
@@ -1397,6 +1518,7 @@
                 if (!_bandsAgree(q, p)) continue;
                 _fillBlanks(q, p);
                 q.nameUnverified = !q.name;
+                _dropUnbackedDlState(q);
                 q.confidence = _confidence(q);
                 merged = true;
                 break;
@@ -1579,6 +1701,7 @@
                     }
                 }
                 person.detail = 'Found with no section heading above it.';
+                _dropUnbackedDlState(person);
                 person.confidence = _confidence(person);
                 taken[_nameKey(name)] = true;
                 out.push(person);

@@ -1414,6 +1414,7 @@
         var chunks = [];
         var srcPages = [];
         var unreadable = [];
+        var furniture = [];
         var used = {};
 
         /* Labelled narrative sections first. */
@@ -1425,6 +1426,11 @@
             if (!body.length) continue;
             if (!S.bodyIsReadable(body)) {
                 if (unreadable.indexOf(seg.page) === -1) unreadable.push(seg.page);
+                continue;
+            }
+            if (_isFormFurniture(body)) {
+                if (furniture.indexOf(seg.page) === -1) furniture.push(seg.page);
+                used[seg.pageIdx] = true;
                 continue;
             }
             chunks.push(body.join('\n'));
@@ -1452,6 +1458,7 @@
                 if (unreadable.indexOf(pages[p].index) === -1) unreadable.push(pages[p].index);
                 continue;
             }
+            if (_isFormFurniture(pbody)) continue;
             chunks.push(pbody.join('\n'));
             if (srcPages.indexOf(pages[p].index) === -1) srcPages.push(pages[p].index);
         }
@@ -1460,6 +1467,12 @@
             warn('Narrative text on page(s) ' + unreadable.join(', ') +
                  ' could not be read from the scan and was left out rather than ' +
                  'imported as unreadable characters.');
+        }
+        if (furniture.length) {
+            warn('A narrative section on page(s) ' + furniture.join(', ') +
+                 ' held no account of the incident — only the form\'s own headings ' +
+                 'and printing details — so it was not imported as a narrative. ' +
+                 'Check that page against the source document.');
         }
         if (!chunks.length) return { narratives: [], srcPages: srcPages, unreadable: unreadable };
 
@@ -1475,6 +1488,42 @@
             srcPages: srcPages,
             unreadable: unreadable
         };
+    }
+
+    /* A narrative section that holds no sentence of an account is the form's
+     * own furniture printed under a NARRATIVE heading. Westminster's summary
+     * report prints an INDEX of narratives — "Original Report Narrative By
+     * Cody Clearwater 1607", "Photos Taken: No Body-Worn Camera Footage
+     * Captured: No", "Printed by Aron, Robert on 4/15/2026" — and not one
+     * word of what happened. Every one of those rows passes a word-count
+     * prose test, so 952 characters of it were being imported as an
+     * officer's narrative.
+     *
+     * Two INDEPENDENT tests must BOTH fail before a section is thrown away,
+     * because dropping a real narrative is far worse than keeping a
+     * furniture one:
+     *   - not one line opens the way an account opens, and
+     *   - not one line ends in a full stop.
+     * A narrative of any length trips at least one. Even a two-line one —
+     * "Suspect fled westbound on foot. Unable to locate." — ends in a stop.
+     * Form furniture ends in "No", "1607", "AM", ")". */
+    function _isFormFurniture(body) {
+        for (var i = 0; i < body.length; i++) {
+            var l = S.clean(body[i]);
+            if (!l) continue;
+            if (RE_NARRATIVE_OPENER.test(l) && S.isProse(l)) return false;
+            if (_endsSentence(l)) return false;
+        }
+        return true;
+    }
+
+    /* A line that ends a sentence. The word before the stop has to be a real
+     * word — "Incident No." and "Call for Service No." are column headings,
+     * not sentences, and they are the whole of one report's narrative
+     * section. */
+    function _endsSentence(line) {
+        var m = /([A-Za-z]+)["')\]]?\s*[.!?]["')\]]?\s*$/.exec(String(line || ''));
+        return !!m && m[1].length >= 3 && !S.RE_ABBREV_END.test(line);
     }
 
     function _proseIn(lines, from, to) {
@@ -1569,11 +1618,66 @@
             if (!matcher) continue;
             var v = matcher(win, hit.entry);
             if (!v) continue;
+            if (hit.entry.field === 'agencyName' && !_looksLikeAgency(v)) continue;
             out[hit.entry.field] = v;
             sources[hit.entry.field] = { page: hit.page, line: hit.line, label: hit.label };
         }
         out.fieldSources = sources;
         return out;
+    }
+
+    /* An agency is a thing with "Police", "Sheriff", "Department" or the like
+     * in its name. The AGENCY label on a ruled form sits in a header strip
+     * packed with status words, and taking whatever follows it gave
+     * "INTERNAL INCIDENT EXCEPTIONAL" on the Arkansas report and
+     * "s Jurisdiction" — half of a wrapped label — on Alleghany County's.
+     * Both would have been written onto a case record as the agency that
+     * filed the report. Leaving the field blank is honest. */
+    var RE_AGENCY_WORD = /\b(?:POLICE|SHERIFF(?:'?S)?|DEPARTMENT|DEPT\.?|CONSTABLE|MARSHAL(?:S|'?S)?|PATROL|TROOP(?:ER)?S?|BUREAU|TASK\s*FORCE|PUBLIC\s*SAFETY|D\.?P\.?S\.?|P\.?D\.?)\b/i;
+    function _looksLikeAgency(t) {
+        var s = String(t || '').trim();
+        if (s.length < 4 || s.length > 80) return false;
+        if (_isLabelRow(s)) return false;
+        return RE_AGENCY_WORD.test(s);
+    }
+
+    /* The opening of an officer's account. Narratives are written in a very
+     * narrow register — a date, a time, or the writer — and that is what
+     * makes this safe to key on where a general prose test is not.
+     *
+     * It is needed because the top of a narrative BLOCK is usually not the
+     * top of the narrative. Three of the reference reports print the
+     * narrative under a strip of form furniture — "Name (Last, First,
+     * Middle, Suffix)", "Original Report Narrative By Cody Clearwater 1607",
+     * "Photos Taken: No Body-Worn Camera Footage Captured: No" — and every
+     * one of those rows passes a word-count prose test. One scan's first
+     * narrative row is the OCR debris "lil FY lll ee N". */
+    var RE_NARRATIVE_OPENER = /^(?:on\b|at\s+(?:approximately|about|around)\b|i\b|we\b|this\s+(?:officer|investigator|detective|deputy|agent|affiant|report|case|supplement)\b|the\s+(?:above|following|undersigned|victim|reporting|suspect|complainant)\b|officer\b|investigator\b|detective\b|deputy\b|sgt\.?\b|sergeant\b|cpl\.?\b|corporal\b|dispatch(?:ed)?\b|while\b|during\b|upon\b|prior\s+to\b|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}\b)/i;
+
+    /* Build the create-case synopsis out of a narrative. Returns '' rather
+     * than a guess — the officer can type a synopsis, but they cannot easily
+     * tell that one V.I.P.E.R. typed for them came from the form's header. */
+    function _synopsisFrom(text) {
+        var lines = String(text || '').split('\n');
+        var start = -1;
+        for (var i = 0; i < lines.length; i++) {
+            var l = lines[i].trim();
+            if (!l || _isLabelRow(l)) continue;
+            if (!RE_NARRATIVE_OPENER.test(l)) continue;
+            if (!S.isProse(l)) continue;
+            start = i;
+            break;
+        }
+        if (start === -1) return '';
+        var out = [];
+        for (var j = start; j < lines.length; j++) {
+            if (!lines[j].trim()) break;            // end of the first paragraph
+            out.push(lines[j].trim());
+            if (out.join(' ').length > 600) break;
+        }
+        var s = out.join(' ').replace(/\s+/g, ' ').trim();
+        if (s.length > 600) s = s.slice(0, 600).replace(/\s+\S*$/, '') + '…';
+        return s;
     }
 
     /* The fingerprint of a printed checkbox legend: option codes in brackets
@@ -1772,10 +1876,21 @@
             roles[hits[i].entry.role] = (roles[hits[i].entry.role] || 0) + 1;
         }
 
+        /* Vehicles are counted, not listed. The create-case form only needs
+         * to know whether to offer a Vehicles tab, and a VEHICLE heading over
+         * an empty box is not a vehicle — so the block is harvested far
+         * enough to tell the difference, then thrown away. */
+        var vehicleCount = 0;
+        for (var vs = 0; vs < segs.length; vs++) {
+            if (segs[vs].kind !== 'vehicle') continue;
+            if (_vehicleHasData(_harvestVehicle(segs[vs], hits, ctx.pages[segs[vs].pageIdx].lines))) {
+                vehicleCount++;
+            }
+        }
+
         var synopsis = '';
         if (narr.narratives.length) {
-            synopsis = narr.narratives[0].text.split(/\n\s*\n/)[0] || '';
-            if (synopsis.length > 600) synopsis = synopsis.slice(0, 600).replace(/\s+\S*$/, '') + '…';
+            synopsis = _synopsisFrom(narr.narratives[0].text);
         }
 
         return {
@@ -1791,6 +1906,7 @@
                 .filter(function (x) { return !!x; }),
             primaryOffense: offenses.length ? (offenses[0].description || offenses[0].statute) : '',
             roles: roles,
+            vehicleCount: vehicleCount,
             narrativeFound: !!narr.narratives.length,
             hits: hits.length,
             pageCount: ctx.pages.length

@@ -353,6 +353,11 @@
         if (RE_SSN.test(tok)) return false;
         if (/^\(\d{3}\)/.test(tok)) return false;
         if (/^\d{5}(-\d{4})?$/.test(t)) return false; // ZIP
+        /* ...and the same test on the token AS PRINTED. Stripping the hyphen
+         * first turns a ZIP+4 into nine plain digits, which is licence-shaped,
+         * so "72032-1180" was being offered as somebody's licence number
+         * whenever the value window ran on into their address. */
+        if (/^\d{5}-\d{4}$/.test(String(tok || '').trim())) return false;
         if (/^\d{2}-\d{6,8}$/.test(tok)) return false; // incident number
         return /^[A-Za-z0-9]+$/.test(t);
     }

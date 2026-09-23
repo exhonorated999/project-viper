@@ -1,0 +1,81 @@
+# SYNTHETIC fixture — hand-written, not extracted from any real document.
+#
+# It imitates the VERTICAL label/value layout used by several RMS engines:
+# the label sits on its own row and the value on the row beneath it, and the
+# role is printed INSIDE the record as an "Involvement Type" value BELOW the
+# name. That is the layout that made _alignVerticalRecords necessary — opening
+# a record at the role hit starts it below the name, so every record picks up
+# the NEXT person's name and prints it against this person's date of birth.
+#
+# No real report is reproduced here. Every name, date, address, telephone
+# number, licence number and plate below is invented, and the narrative was
+# written for this test.
+Northgate Police Department
+Case Report
+
+Case Number
+26-0043117
+Report Date
+04/02/2026
+Location Of Occurrence
+418 Larkspur Way, Northgate, WA 98133
+
+Name (Last, First, Middle, Suffix)
+Halvorsen, Dana Rae
+Involvement Type
+Victim
+Date Of Birth
+11/04/1992
+Resident Address
+418 Larkspur Way, Northgate, WA 98133
+Resident Phone
+(206) 555-0174
+Driver's License
+WDL4471820
+Dr. Li. State
+WA
+Occupation
+Dental Hygienist
+
+Name (Last, First, Middle, Suffix)
+Ockerman, Trey Lamont
+Involvement Type
+Suspect
+Date Of Birth
+06/18/1988
+Resident Address
+2210 Foxglove Ave, Northgate, WA 98133
+Exact Age
+37
+
+Name (Last, First, Middle, Suffix)
+Brennecke, Aloysius
+Involvement Type
+Witness
+Date Of Birth
+02/27/1970
+Resident Phone
+(206) 555-0198
+
+Vehicle
+License Plate
+BKR4429
+VIN
+1HGCM82633A004352
+Make
+Honda
+Model
+Accord
+Year
+2003
+Color
+Silver
+
+Narrative
+On April 2, 2026 at approximately 0915 hours I was dispatched to 418 Larkspur
+Way in reference to a burglary that had already occurred. I made contact with
+the reporting party in the driveway of the residence.
+
+She stated she had left for work at 0700 hours and returned to find the rear
+sliding door forced open. She further stated that a silver sedan had been
+parked across the street for most of the previous week.

@@ -11002,6 +11002,97 @@
             } catch (_) {}
         }
 
+        /* ------------------------------------------------------------------
+         * Preservation requests are not warrants
+         * ------------------------------------------------------------------
+         * A preservation request asks a provider to freeze an account. No
+         * judge signs it, nothing is produced back, and there is no court
+         * return to file. Showing those four fields invited the detective to
+         * record facts that do not exist for this kind of request, and a
+         * blank "Date Signed" on a preservation request reads, in a case
+         * file, as a warrant nobody got signed.
+         *
+         * So the type drives the form and the card. The four fields that do
+         * not apply are dateSigned, dueDate, judge and courtReturnDate. */
+        function _warrantIsPreservation(typeOrWarrant) {
+            const t = typeof typeOrWarrant === 'string' ? typeOrWarrant : (typeOrWarrant && typeOrWarrant.type);
+            return !!(window.WarrantStatus && WarrantStatus.hasNothingToReceive({ type: t }));
+        }
+
+        /* Show or hide the warrant-only fields, and reword the two that mean
+         * something different for a preservation request. Called on every
+         * change of the type select and whenever the form is opened. */
+        function warrantTypeChanged() {
+            const sel = document.getElementById('warrantType');
+            const isPres = _warrantIsPreservation(sel ? sel.value : '');
+            const show = (id, on) => {
+                const el = document.getElementById(id);
+                if (el) el.classList.toggle('hidden', !on);
+            };
+            show('warrantDateSignedField', !isPres);
+            show('warrantDueDateField', !isPres);
+            show('warrantCourtFieldsRow', !isPres);
+
+            const row = document.getElementById('warrantDatesRow');
+            if (row) {
+                row.classList.toggle('grid-cols-3', !isPres);
+                row.classList.toggle('grid-cols-1', isPres);
+            }
+            const served = document.getElementById('warrantDateServedLabel');
+            if (served) served.textContent = isPres ? 'Date Sent to Provider' : 'Date Served';
+            const fileLabel = document.getElementById('warrantFileLabel');
+            if (fileLabel) {
+                fileLabel.textContent = isPres
+                    ? 'Upload Preservation Request (PDF) — optional'
+                    : 'Upload Signed Warrant (PDF)';
+            }
+            const fileBtn = document.getElementById('warrantFileButtonText');
+            if (fileBtn && fileBtn.textContent.indexOf('Change') === -1) {
+                fileBtn.textContent = isPres
+                    ? 'Click to upload preservation request'
+                    : 'Click to upload signed warrant';
+            }
+        }
+
+        /* Which cards are open. Empty on load on purpose: the officer who
+         * asked for this has four warrants and a stack of preservation
+         * requests in one case, and the page ran to several screens. */
+        var _warrantExpanded = {};
+
+        function toggleWarrantCard(id, ev) {
+            /* The header carries the edit and delete buttons. A click on one
+             * of those must not also fold the card. */
+            if (ev && ev.target && ev.target.closest && ev.target.closest('button, a, input, select, textarea, label')) return;
+            const body = document.getElementById('warrantBody-' + id);
+            if (!body) return;
+            const open = !body.classList.toggle('hidden');
+            _warrantExpanded[id] = open;
+            const chev = document.getElementById('warrantChevron-' + id);
+            if (chev) chev.style.transform = open ? 'rotate(90deg)' : 'rotate(0deg)';
+        }
+
+        function setAllWarrantCards(open) {
+            caseWarrants.forEach(w => { _warrantExpanded[w.id] = !!open; });
+            const c = document.getElementById('warrantListContainer');
+            if (c) c.innerHTML = renderWarrantItems();
+        }
+
+        /* The one-line status the collapsed header has to carry. Wording
+         * comes from WarrantStatus so the header, the card and the DA report
+         * cannot drift apart. */
+        function _warrantHeaderChip(w) {
+            const txt = window.WarrantStatus ? WarrantStatus.label(w) : '';
+            if (!txt) return '';
+            let cls = 'bg-gray-700/40 border-gray-600 text-gray-300';
+            if (WarrantStatus.isOverdue(w)) cls = 'bg-red-500/15 border-red-500/50 text-red-300';
+            else if (w.returnReceived || w.closedOut) cls = 'bg-viper-green/15 border-viper-green/40 text-viper-green';
+            else {
+                const n = WarrantStatus.daysUntilDue(w);
+                if (n !== null && n <= 7) cls = 'bg-viper-orange/15 border-viper-orange/40 text-viper-orange';
+            }
+            return `<span class="px-2 py-0.5 rounded-full border text-xs font-medium whitespace-nowrap ${cls}">${txt}</span>`;
+        }
+
         function renderWarrantsTab() {
             return `
                 <div class="space-y-6">
@@ -11014,6 +11105,13 @@
                             Warrant Management
                         </h3>
                         <div class="flex items-center space-x-3">
+                            ${caseWarrants.length > 1 ? `
+                                <div class="flex items-center rounded-lg border border-gray-600 overflow-hidden">
+                                    <button onclick="setAllWarrantCards(true)" class="px-3 py-2 text-xs text-gray-300 hover:bg-viper-card/60 transition-colors">Expand all</button>
+                                    <span class="w-px self-stretch bg-gray-600"></span>
+                                    <button onclick="setAllWarrantCards(false)" class="px-3 py-2 text-xs text-gray-300 hover:bg-viper-card/60 transition-colors">Collapse all</button>
+                                </div>
+                            ` : ''}
                             <select id="warrantSortSelect" onchange="warrantSortBy = this.value; document.getElementById('warrantListContainer').innerHTML = caseWarrants.length === 0 ? '' : renderWarrantItems();" class="px-3 py-2 rounded-lg bg-viper-card/50 border border-gray-600 text-sm text-gray-300 focus:border-viper-orange outline-none">
                                 <option value="dateSigned">Sort: Date Signed</option>
                                 <option value="dueDate">Sort: Due Date</option>
@@ -11035,7 +11133,7 @@
                                 <div class="grid grid-cols-2 gap-4">
                                     <div>
                                         <label class="block text-sm font-medium text-gray-300 mb-2">Warrant Type *</label>
-                                        <select id="warrantType" required class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white">
+                                        <select id="warrantType" required onchange="warrantTypeChanged()" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white">
                                             <option value="">Select type...</option>
                                             <option value="search">Search Warrant</option>
                                             <option value="arrest">Arrest Warrant</option>
@@ -11064,22 +11162,22 @@
                                     <textarea id="warrantDescription" required rows="2" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white placeholder-gray-500 resize-none" placeholder="Brief description of what the warrant seeks..."></textarea>
                                 </div>
                                 
-                                <div class="grid grid-cols-3 gap-4">
-                                    <div>
+                                <div class="grid grid-cols-3 gap-4" id="warrantDatesRow">
+                                    <div id="warrantDateSignedField">
                                         <label class="block text-sm font-medium text-gray-300 mb-2">Date Signed</label>
                                         <input type="date" id="warrantDateSigned" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white">
                                     </div>
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-300 mb-2">Date Served</label>
+                                    <div id="warrantDateServedField">
+                                        <label class="block text-sm font-medium text-gray-300 mb-2" id="warrantDateServedLabel">Date Served</label>
                                         <input type="date" id="warrantDateServed" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white">
                                     </div>
-                                    <div>
+                                    <div id="warrantDueDateField">
                                         <label class="block text-sm font-medium text-gray-300 mb-2">Production Due Date</label>
                                         <input type="date" id="warrantDueDate" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white">
                                     </div>
                                 </div>
                                 
-                                <div class="grid grid-cols-2 gap-4">
+                                <div class="grid grid-cols-2 gap-4" id="warrantCourtFieldsRow">
                                     <div>
                                         <label class="block text-sm font-medium text-gray-300 mb-2">Issuing Judge / Magistrate</label>
                                         <input type="text" id="warrantJudge" placeholder="e.g., Hon. Jane Smith" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white placeholder-gray-500">
@@ -11091,7 +11189,7 @@
                                 </div>
                                 
                                 <div>
-                                    <label class="block text-sm font-medium text-gray-300 mb-2">Upload Signed Warrant (PDF)</label>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2" id="warrantFileLabel">Upload Signed Warrant (PDF)</label>
                                     <input type="file" id="warrantFile" accept=".pdf" class="hidden" onchange="handleWarrantFileSelect(event)">
                                     <button type="button" onclick="document.getElementById('warrantFile').click()" class="w-full px-4 py-3 bg-viper-card/50 border-2 border-dashed border-gray-600 rounded-lg hover:border-viper-orange transition-colors flex items-center justify-center space-x-2 text-gray-400 hover:text-viper-orange">
                                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -11178,22 +11276,47 @@
                 const isResolved = WarrantStatus.isResolved(warrant);
                 const noReturnExpected = WarrantStatus.hasNothingToReceive(warrant);
                 const daysUntilDue = dueDateLocal ? Math.ceil((dueDateLocal - todayLocal) / (1000 * 60 * 60 * 24)) : null;
+                const isPres = _warrantIsPreservation(warrant);
+                const expanded = !!_warrantExpanded[warrant.id];
+                const typeLabel = isPres ? 'PRESERVATION REQUEST' : warrant.type.toUpperCase().replace('-', ' ');
                 
                 return `
-                    <div class="glass-card rounded-xl p-6 mb-4 ${isOverdue ? 'border-2 border-red-500/50' : 'border-viper-orange/20'}">
-                        <div class="flex items-start justify-between mb-4">
-                            <div class="flex-1">
-                                <div class="flex items-center space-x-3 mb-2">
-                                    ${isOverdue ? `<span class="text-2xl">⚠️</span>` : `<span class="text-2xl">📜</span>`}
-                                    <div>
-                                        <div class="flex items-center space-x-2">
-                                            <h4 class="text-lg font-bold">${warrant.type.toUpperCase().replace('-', ' ')}</h4>
-                                            ${warrant.issuedTo ? `<span class="text-sm text-gray-400">→ ${warrant.issuedTo}</span>` : ''}
-                                        </div>
-                                        <p class="text-sm text-gray-400">Created ${new Date(warrant.createdAt).toLocaleString()}</p>
+                    <div class="glass-card rounded-xl mb-4 ${isOverdue ? 'border-2 border-red-500/50' : 'border-viper-orange/20'}">
+                        <!-- Header. Always visible, and the whole strip is the
+                             fold control except where a button sits. -->
+                        <div class="flex items-start justify-between p-5 cursor-pointer select-none" onclick="toggleWarrantCard(${warrant.id}, event)">
+                            <div class="flex items-start space-x-3 flex-1 min-w-0">
+                                <svg id="warrantChevron-${warrant.id}" style="transform: rotate(${expanded ? 90 : 0}deg)" class="w-4 h-4 mt-1.5 text-gray-400 flex-shrink-0 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                                </svg>
+                                ${isOverdue ? `<span class="text-2xl leading-none">⚠️</span>` : `<span class="text-2xl leading-none">📜</span>`}
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex items-center flex-wrap gap-2">
+                                        <h4 class="text-lg font-bold">${typeLabel}</h4>
+                                        ${warrant.issuedTo ? `<span class="text-sm text-gray-400">→ ${warrant.issuedTo}</span>` : ''}
+                                        ${_warrantHeaderChip(warrant)}
                                     </div>
+                                    ${!expanded && warrant.description ? `
+                                        <p class="text-sm text-gray-400 truncate mt-0.5">${warrant.description}</p>
+                                    ` : `<p class="text-sm text-gray-500 mt-0.5">Created ${new Date(warrant.createdAt).toLocaleString()}</p>`}
                                 </div>
-                                
+                            </div>
+                            <div class="flex items-start space-x-2 ml-4 flex-shrink-0">
+                                <button onclick="editWarrant(${warrant.id})" class="p-2 rounded-lg text-gray-400 hover:text-viper-orange hover:bg-viper-orange/10 transition-colors">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                                    </svg>
+                                </button>
+                                <button onclick="deleteWarrant(${warrant.id})" class="p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-400/10 transition-colors">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="warrantBody-${warrant.id}" class="px-5 pb-5 ${expanded ? '' : 'hidden'}">
+                            <div class="flex-1">
                                 <p class="text-gray-300 mb-3">${warrant.description}</p>
                                 
                                 ${warrant.referenceNumber ? `
@@ -11206,15 +11329,18 @@
                                     </div>
                                 ` : ''}
                                 
-                                ${warrant.judge ? `
+                                ${warrant.judge && !isPres ? `
                                     <p class="text-sm text-gray-400 mb-3">
                                         <span class="text-gray-500">Judge/Magistrate:</span> <span class="text-white">${warrant.judge}</span>
                                     </p>
                                 ` : ''}
                                 
-                                <!-- Dates Grid -->
+                                <!-- Dates Grid. A preservation request has no
+                                     signing date, no production due date and
+                                     no court return, so only the date it was
+                                     sent to the provider is shown. -->
                                 <div class="grid grid-cols-4 gap-4 mb-4 text-sm">
-                                    ${warrant.dateSigned ? `
+                                    ${warrant.dateSigned && !isPres ? `
                                         <div class="bg-viper-card/50 rounded p-2">
                                             <p class="text-gray-400 text-xs">Signed</p>
                                             <p class="text-white">${formatDate(warrant.dateSigned)}</p>
@@ -11222,11 +11348,11 @@
                                     ` : ''}
                                     ${warrant.dateServed ? `
                                         <div class="bg-viper-card/50 rounded p-2">
-                                            <p class="text-gray-400 text-xs">Served</p>
+                                            <p class="text-gray-400 text-xs">${isPres ? 'Sent to Provider' : 'Served'}</p>
                                             <p class="text-white">${formatDate(warrant.dateServed)}</p>
                                         </div>
                                     ` : ''}
-                                    ${warrant.dueDate ? `
+                                    ${warrant.dueDate && !isPres ? `
                                         <div class="bg-viper-card/50 rounded p-2 ${isOverdue ? 'border-2 border-red-500' : ''}">
                                             <p class="text-gray-400 text-xs">Due Date</p>
                                             <p class="${isOverdue ? 'text-red-400 font-bold' : 'text-white'}">${formatDate(warrant.dueDate)}</p>
@@ -11237,7 +11363,7 @@
                                             ` : ''}
                                         </div>
                                     ` : ''}
-                                    ${warrant.courtReturnDate ? `
+                                    ${warrant.courtReturnDate && !isPres ? `
                                         <div class="bg-viper-card/50 rounded p-2 border border-viper-green/30">
                                             <p class="text-gray-400 text-xs">Court Return Filed</p>
                                             <p class="text-viper-green">${formatDate(warrant.courtReturnDate)}</p>
@@ -11245,14 +11371,21 @@
                                     ` : ''}
                                 </div>
                                 
-                                <!-- Return Status -->
+                                <!-- Return Status. A preservation request has no
+                                     production to receive, so the "return received"
+                                     tick is hidden for one unless a previous edit
+                                     already set it. The close-out button below is
+                                     still offered: that is how a preservation is
+                                     finished. -->
                                 <div class="border-t border-gray-700 pt-4">
+                                    ${(!isPres || warrant.returnReceived) ? `
                                     <label class="flex items-center space-x-3 ${warrant.closedOut ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}">
                                         <input type="checkbox" ${warrant.returnReceived ? 'checked' : ''} ${warrant.closedOut ? 'disabled' : ''} onchange="toggleWarrantReturn(${warrant.id})" class="w-5 h-5 rounded border-gray-600 text-viper-green focus:ring-viper-green focus:ring-offset-0">
                                         <span class="text-sm font-medium ${warrant.returnReceived ? 'text-viper-green' : 'text-gray-400'}">
                                             ${warrant.returnReceived ? '✓ Warrant Return Received' : 'Mark Return as Received'}
                                         </span>
                                     </label>
+                                    ` : ''}
                                     ${warrant.returnReceived ? `
                                         <!-- Received date is EDITABLE: a production that lands
                                              over a weekend or on the detective's day off gets
@@ -11298,13 +11431,16 @@
                                 <!-- Attachments -->
                                 <div class="border-t border-gray-700 pt-4 mt-4">
                                     <div class="space-y-2">
+                                        ${isPres && !warrant.hasWarrantFile && !warrant.hasProduction && !warrant.hasCourtReturn ? `
+                                            <p class="text-xs text-gray-500">No preservation request attached. Use Edit to upload one — it is optional.</p>
+                                        ` : ''}
                                         ${warrant.hasWarrantFile ? `
                                             <div class="flex items-center justify-between bg-viper-card/30 rounded p-2">
                                                 <div class="flex items-center space-x-2">
                                                     <svg class="w-4 h-4 text-viper-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                                                     </svg>
-                                                    <span class="text-sm">Signed Warrant</span>
+                                                    <span class="text-sm">${isPres ? 'Preservation Request' : 'Signed Warrant'}</span>
                                                 </div>
                                                 <div class="flex gap-1">
                                                     <button onclick="viewWarrantFile(${warrant.id}, 'warrant')" class="text-xs px-3 py-1 rounded bg-viper-orange/20 text-viper-orange hover:bg-viper-orange/30">
@@ -11334,7 +11470,7 @@
                                                     </button>
                                                 </div>
                                             </div>
-                                        ` : `
+                                        ` : (isPres ? '' : `
                                             <button onclick="uploadWarrantProduction(${warrant.id})" class="w-full text-left flex items-center justify-between bg-viper-card/30 rounded p-2 hover:bg-viper-card/50 transition-colors">
                                                 <div class="flex items-center space-x-2">
                                                     <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -11346,7 +11482,7 @@
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                                                 </svg>
                                             </button>
-                                        `}
+                                        `)}
                                         
                                         ${warrant.hasCourtReturn ? `
                                             <div class="flex items-center justify-between bg-viper-card/30 rounded p-2">
@@ -11365,7 +11501,7 @@
                                                     </button>
                                                 </div>
                                             </div>
-                                        ` : `
+                                        ` : (isPres ? '' : `
                                             <button onclick="uploadCourtReturn(${warrant.id})" class="w-full text-left flex items-center justify-between bg-viper-card/30 rounded p-2 hover:bg-viper-card/50 transition-colors">
                                                 <div class="flex items-center space-x-2">
                                                     <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -11377,36 +11513,23 @@
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                                                 </svg>
                                             </button>
-                                        `}
+                                        `)}
                                     </div>
                                 </div>
                             </div>
-                            
-                            <div class="flex items-start space-x-2 ml-4">
-                                <button onclick="editWarrant(${warrant.id})" class="p-2 rounded-lg text-gray-400 hover:text-viper-orange hover:bg-viper-orange/10 transition-colors">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+
+                            ${isOverdue ? `
+                                <div class="bg-red-500/10 border-2 border-red-500/50 rounded-lg p-3 mt-4 flex items-start space-x-2">
+                                    <svg class="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
                                     </svg>
-                                </button>
-                                <button onclick="deleteWarrant(${warrant.id})" class="p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-400/10 transition-colors">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                                    </svg>
-                                </button>
-                            </div>
-                        </div>
-                        
-                        ${isOverdue ? `
-                            <div class="bg-red-500/10 border-2 border-red-500/50 rounded-lg p-3 flex items-start space-x-2">
-                                <svg class="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-                                </svg>
-                                <div class="flex-1">
-                                    <p class="text-red-400 font-bold text-sm">OVERDUE WARRANT</p>
-                                    <p class="text-red-300 text-xs mt-1">Production was due ${Math.abs(daysUntilDue)} days ago. Follow up required.</p>
+                                    <div class="flex-1">
+                                        <p class="text-red-400 font-bold text-sm">OVERDUE WARRANT</p>
+                                        <p class="text-red-300 text-xs mt-1">Production was due ${Math.abs(daysUntilDue)} days ago. Follow up required.</p>
+                                    </div>
                                 </div>
-                            </div>
-                        ` : ''}
+                            ` : ''}
+                        </div>
                     </div>
                 `;
             }).join('');
@@ -11425,6 +11548,7 @@
             document.getElementById('warrantJudge').value = '';
             document.getElementById('warrantCourtReturnDate').value = '';
             clearWarrantFile();
+            warrantTypeChanged();
             document.getElementById('warrantForm').classList.remove('hidden');
         }
         
@@ -11443,6 +11567,7 @@
             document.getElementById('warrantDueDate').value = warrant.dueDate || '';
             document.getElementById('warrantJudge').value = warrant.judge || '';
             document.getElementById('warrantCourtReturnDate').value = warrant.courtReturnDate || '';
+            warrantTypeChanged();
             
             if (warrant.hasWarrantFile) {
                 document.getElementById('warrantFileName').textContent = warrant.warrantFileName;
@@ -11487,11 +11612,17 @@
             const issuedTo = document.getElementById('warrantIssuedTo').value;
             const referenceNumber = document.getElementById('warrantReferenceNumber').value.trim();
             const description = document.getElementById('warrantDescription').value;
-            const dateSigned = document.getElementById('warrantDateSigned').value;
+            const isPres = _warrantIsPreservation(type);
+            // A preservation request is not signed by a judge, has no
+            // production due date and produces no court return.  Those inputs
+            // are hidden for one, but a warrant switched to preservation on
+            // edit could still be carrying stale values, so clear them at the
+            // source rather than merely hiding them in the card.
+            const dateSigned = isPres ? '' : document.getElementById('warrantDateSigned').value;
             const dateServed = document.getElementById('warrantDateServed').value;
-            const dueDate = document.getElementById('warrantDueDate').value;
-            const judge = document.getElementById('warrantJudge').value;
-            const courtReturnDate = document.getElementById('warrantCourtReturnDate').value;
+            const dueDate = isPres ? '' : document.getElementById('warrantDueDate').value;
+            const judge = isPres ? '' : document.getElementById('warrantJudge').value;
+            const courtReturnDate = isPres ? '' : document.getElementById('warrantCourtReturnDate').value;
 
             // Generate the warrant id NOW so we can pass it to the file-save IPC.
             // The IPC prefixes the on-disk filename with this id to prevent
@@ -11582,6 +11713,9 @@
                 });
             }
             
+            /* Leave the card the officer just saved open. Everything else
+             * stays folded. */
+            _warrantExpanded[targetWarrantId] = true;
             saveWarrantsToStorage();
             renderTabContent('warrants');
         }

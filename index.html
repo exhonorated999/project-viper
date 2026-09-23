@@ -21,6 +21,9 @@
     <script src="modules/offense-reference-ui.js"></script>
     <!-- RMS: Arkansas state NIBRS Incident Report format (additive; used by
          importRmsForNewCase to derive the case number, synopsis and modules) -->
+    <!-- rms-shapes.js MUST load first: ar-incident-parser.js resolves it at
+         factory time and throws if it is missing. -->
+    <script src="modules/rms/rms-shapes.js"></script>
     <script src="modules/rms/ar-incident-parser.js"></script>
     <script src="modules/supervisor-link/supervisor-link-ui.js"></script>
     <script src="case-snapshot.js"></script>

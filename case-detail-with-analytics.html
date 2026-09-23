@@ -40,6 +40,9 @@
     <script src="modules/flock/flock-parser.js" defer></script>
     <!-- RMS: Arkansas state NIBRS Incident Report format (additive; the other
          RMS formats stay in the inline parseRmsReport dispatcher) -->
+    <!-- rms-shapes.js MUST load first: ar-incident-parser.js resolves it at
+         factory time and throws if it is missing. -->
+    <script src="modules/rms/rms-shapes.js"></script>
     <script src="modules/rms/ar-incident-parser.js"></script>
     <script src="modules/flock/flock-module.js" defer></script>
     <script src="modules/flock/flock-ui.js" defer></script>

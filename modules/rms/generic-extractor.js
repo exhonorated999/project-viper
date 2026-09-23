@@ -465,6 +465,22 @@
         /* "DR. LL." — every token is a 1-2 letter abbreviation. A real name
          * has at least one token of three letters or more. */
         if (!/[A-Za-z]{3,}/.test(n)) return true;
+        /* A token that flips between upper and lower case over and over is
+         * OCR reading a column of empty checkboxes, not a surname:
+         * "OOoOOoOoOgogoQg". Real names flip at most a few times —
+         * "McDonald" is three, so the bar sits above it. */
+        var toks = n.split(/\s+/);
+        for (var t = 0; t < toks.length; t++) {
+            var w = toks[t].replace(/[^A-Za-z]/g, '');
+            if (w.length < 5) continue;
+            var flips = 0;
+            for (var c = 1; c < w.length; c++) {
+                var a = w[c - 1] === w[c - 1].toUpperCase();
+                var b = w[c] === w[c].toUpperCase();
+                if (a !== b) flips++;
+            }
+            if (flips >= 4) return true;
+        }
         return false;
     }
 
@@ -480,6 +496,70 @@
         return times.length >= 1 && /^\s*[a-z][a-z0-9._]{2,}\s*[-\u2013]\s*\S/.test(s);
     }
 
+    /* An agency, a business or a place — name-shaped, but not a person.
+     * "Westminster Police Department" sits directly under an employee-witness
+     * heading and is three capitalised tokens, so the loose name matcher will
+     * take it unless it is named as an organisation here. */
+    var RE_ORG = new RegExp('\\b(?:' + [
+        'POLICE', 'SHERIFF', 'DEPARTMENT', 'DEPT', 'OFFICE', 'COUNTY', 'CITY',
+        'BUREAU', 'DIVISION', 'DISTRICT', 'COURT', 'HOSPITAL', 'SCHOOL',
+        'ACADEMY', 'UNIVERSITY', 'COLLEGE', 'CENTER', 'CENTRE', 'COMPANY',
+        'INC', 'LLC', 'CORP', 'FIRE', 'RESCUE', 'MEDICAL', 'SECURITY',
+        'SERVICES', 'CORRECTIONS', 'PATROL', 'AGENCY', 'TROOPER', 'MARSHAL',
+        'PRECINCT', 'STATION', 'DETENTION', 'JAIL', 'PROSECUTION', 'ATTORNEY',
+        'REPORT', 'INCIDENT', 'SUPPLEMENT', 'PAGE', 'CONTINUED'
+    ].join('|') + ')\\b', 'i');
+
+    function _isOrgLine(line) {
+        return RE_ORG.test(String(line || ''));
+    }
+
+    /* Words a form prints to describe a person rather than to name one.
+     * Under a role heading the next line is usually the name — but on the
+     * Arkansas form it is sometimes the relationship legend ("(SB) Sibling")
+     * or a role ("CASE WORKER"), and both are shaped exactly like a name. */
+    var GENERIC_PERSON_WORDS = (function () {
+        var m = {};
+        var w = ('SIBLING PARENT GUARDIAN CASE WORKER SPOUSE CHILD CHILDREN ' +
+            'FRIEND NEIGHBOR NEIGHBOUR OTHER UNKNOWN RELATIONSHIP ACQUAINTANCE ' +
+            'STEPFATHER STEPMOTHER STEPSON STEPDAUGHTER FATHER MOTHER BROTHER ' +
+            'SISTER SON DAUGHTER GRANDPARENT GRANDFATHER GRANDMOTHER ' +
+            'EMPLOYER EMPLOYEE OFFICER DEPUTY DETECTIVE SERGEANT CORPORAL ' +
+            'LIEUTENANT CAPTAIN CHIEF BADGE NAME LAST FIRST MIDDLE SUFFIX ' +
+            'TYPE DATE TIME INVOLVEMENT COMMENTS ADDRESS PHONE HOME WORK CELL ' +
+            'MALE FEMALE VICTIM SUSPECT WITNESS ARRESTEE COMPLAINANT SUBJECT ' +
+            'PERSON PARTY REPORTING INVOLVED NONE SELF ADULT JUVENILE ' +
+            /* Report furniture. Every one of these was harvested as somebody's
+             * name off a real document: "Event Information" became a victim,
+             * "Justified Homicide Circumstances" became a suspect. */
+            'EVENT INFORMATION CIRCUMSTANCES JUSTIFIED HOMICIDE CRIME OFFENSE ' +
+            'PROPERTY VEHICLE NARRATIVE EVIDENCE STATEMENT SUMMARY DETAILS ' +
+            'STATUS DISPOSITION ENTRY CANCELLATION LINK SERVED RIGHTS ' +
+            'JOB TITLE POSITION ROLE ' +
+            'DISCOVERED TREATED TRANSPORTED INJURIES INJURY WEAPON FORCE ' +
+            'ACTIVITY LOCATION METHOD SEQUENCE SEQ NUMBER TOTAL VALUE ' +
+            'DESCRIPTION REMARKS NOTES CONTINUED DRAFT INITIAL FINAL').split(' ');
+        for (var i = 0; i < w.length; i++) m[w[i]] = true;
+        return m;
+    })();
+
+    /* A name needs at least two tokens that are not form vocabulary and not a
+     * parenthesised code. "(SB) Sibling" and "CASE WORKER" both fail; "Marie
+     * Sanchez" and "Macie Sara Gayle Deleon" both pass. */
+    function _looksLikePersonName(name) {
+        var toks = String(name || '').trim().split(/\s+/);
+        var real = 0;
+        for (var i = 0; i < toks.length; i++) {
+            var tk = toks[i];
+            if (/^\(.*\)$/.test(tk)) continue;                 // (SB), (JV1)
+            var w = tk.replace(/[^A-Za-z]/g, '');
+            if (w.length < 2) continue;
+            if (GENERIC_PERSON_WORDS[w.toUpperCase()]) continue;
+            real++;
+        }
+        return real >= 2;
+    }
+
     /* The single gate every name path goes through. */
     function _safeName(line, name) {
         if (!name) return '';
@@ -490,7 +570,12 @@
 
     /* A "Last, First Middle" name, or — only when a NAME label vouched for the
      * neighbourhood — a run of capitalised tokens with no comma. The loose form
-     * is label-gated on purpose: "RODEN MILL RD" is two name-shaped tokens. */
+     * is label-gated on purpose: "RODEN MILL RD" is two name-shaped tokens.
+     * It also goes through _looseNameOn, the same gate the heading paths use:
+     * a NAME label whose value cell is empty leaves the window pointing at
+     * the next form row, and Alleghany County's "State Entry # - Date - ByState
+     * Cancellation #..." row was being filed as a suspect called "ByState
+     * Cancellation". */
     function _matchName(winLines, labelled) {
         var i;
         for (i = 0; i < winLines.length; i++) {
@@ -499,7 +584,7 @@
         }
         if (!labelled) return '';
         for (i = 0; i < winLines.length; i++) {
-            var loose = _safeName(winLines[i], _nameLoose(winLines[i]));
+            var loose = _looseNameOn(winLines[i]);
             if (loose) return loose;
         }
         return '';
@@ -565,10 +650,30 @@
          * there, and taking them as one truncated the narrative at that
          * sentence and threw away everything after it.
          *
+         * The test is NOT "is this line prose" — that was the first attempt
+         * and it was too blunt. Westminster's reports title their narrative
+         * "Original Report Narrative By Officer Cody Clearwater 1607", which
+         * reads as prose to that test, so the whole narrative was dropped.
+         *
+         * What actually separates the two is what FOLLOWS the label. A label
+         * swallowed by a sentence has the rest of that sentence after it, or
+         * the line closes as a sentence. A heading has a title, a name or
+         * nothing after it, and no full stop.
+         *
          * Field labels are exempt: those sit in grid cells beside their
          * values and are not expected to be standalone. */
-        if ((entry.cls === 'role' || entry.cls === 'section') && S.isProse(line)) {
-            return null;
+        if (entry.cls === 'role' || entry.cls === 'section') {
+            if (S.isProse(line)) {
+                var after = line.slice(m.index + m[0].length);
+                /* Prose continues after the label — it was swallowed by a
+                 * sentence. */
+                if (S.isProse(after)) return null;
+                /* Or the line simply finishes as a sentence. An officer
+                 * closing with "I then placed the rape kit ... in FCSO CID
+                 * Evidence without further incident." is not opening an
+                 * evidence section; a heading does not end in a full stop. */
+                if (/[.!?]["')\]]?\s*$/.test(line)) return null;
+            }
         }
         return { index: m.index, end: m.index + m[0].length, text: m[0] };
     }
@@ -663,6 +768,23 @@
                 close(open.pageIdx, pages[open.pageIdx].lines.length);
             }
             if (hit.cls === 'role') {
+                /* A role word inside a FIELD LABEL is not a new person.
+                 * Westminster's prosecution report labels one defendant's
+                 * cells "Defendant Information", "Defendant Name" and
+                 * "Defendant's Address" — three role hits, one human. Taking
+                 * each as a heading split him into three cards, two of them
+                 * nameless.
+                 *
+                 * But "Victim Name" is the ONLY thing marking the victim on
+                 * that same report, so label rows cannot simply be ignored.
+                 * The rule that satisfies both: a role hit on a label row
+                 * EXTENDS an open block of the SAME role, and opens a new one
+                 * when the role changes. A role heading that is not a label
+                 * row ("Witness #1", "Witness #2") always opens. */
+                if (open && open.kind === 'person' && open.role === hit.entry.role &&
+                    _isLabelRow(S.clean(pages[hit.pageIdx].lines[hit.line] || ''))) {
+                    continue;
+                }
                 close(hit.pageIdx, hit.line);
                 open = {
                     kind: 'person', role: hit.entry.role, label: hit.label,
@@ -678,7 +800,136 @@
         }
         if (open) close(open.pageIdx, pages[open.pageIdx].lines.length);
 
-        return _splitOnRepeatedNames(pages, hits, segs);
+        return _splitOnRepeatedNames(
+            pages, hits, _alignVerticalRecords(pages, hits, segs));
+    }
+
+    /* ----------------------------------------------------------------
+     * Vertical label/value forms: the NAME label starts the record
+     * ----------------------------------------------------------------
+     * Some RMS engines print one field per line — the label on its own row,
+     * the value on the row beneath — and put the role INSIDE the record as
+     * an "Involvement Type" value, below the name:
+     *
+     *     Name (Last, First, Middle, Suffix)
+     *     Chapman, Summer Rose
+     *     Involvement Type
+     *     Witness's Parent/Guardian     <- the role hit
+     *     Date Of Birth
+     *     07/30/1985
+     *
+     * Opening the block at the role hit starts it BELOW the name, so the
+     * block runs on into the next record and picks that person's name up
+     * instead. On Westminster's summary report that shifted every name one
+     * record out of step and printed Marie Sanchez with Kristen
+     * Pfeiffenberger's date of birth. A gap an officer can see is survivable;
+     * a wrong date of birth on a correctly-spelled name is not.
+     *
+     * Where a page is laid out this way, the name label — not the role — is
+     * the record boundary, so the records are rebuilt around it.
+     */
+
+    /* A label is "vertical" when nothing but its own furniture follows it on
+     * its own line — the value lives on the row beneath. The parenthetical in
+     * "Name (Last, First, Middle, Suffix)" is part of the label, not a value,
+     * so it is stripped before the line is judged. */
+    function _isVerticalLabel(lines, hit) {
+        var whole = S.clean(lines[hit.line] || '');
+        var rest = whole.slice(Math.min(hit.end, whole.length))
+            .replace(/\([^)]*\)/g, ' ');
+        return !/[A-Za-z0-9]/.test(_cutAtNextLabel(rest));
+    }
+
+    /* How far below the name label the record's own role value may sit.
+     * Three rows in the layout above; four allows one stray blank. */
+    var VERT_ROLE_SPAN = 4;
+
+    function _alignVerticalRecords(pages, hits, segs) {
+        var out = [];
+        var byPage = {};
+        var i;
+        for (i = 0; i < segs.length; i++) {
+            if (segs[i].kind !== 'person') { out.push(segs[i]); continue; }
+            var k = segs[i].pageIdx;
+            (byPage[k] || (byPage[k] = [])).push(segs[i]);
+        }
+        for (var pk in byPage) {
+            if (!Object.prototype.hasOwnProperty.call(byPage, pk)) continue;
+            var rebuilt = _alignPage(pages[Number(pk)], hits, byPage[pk], Number(pk));
+            for (i = 0; i < rebuilt.length; i++) out.push(rebuilt[i]);
+        }
+        out.sort(function (a, b) {
+            return a.pageIdx - b.pageIdx || a.from - b.from;
+        });
+        return out;
+    }
+
+    function _alignPage(page, hits, personSegs, pageIdx) {
+        var lines = page.lines;
+        var lo = personSegs[0].from, hi = personSegs[0].to;
+        var i;
+        for (i = 1; i < personSegs.length; i++) {
+            if (personSegs[i].from < lo) lo = personSegs[i].from;
+            if (personSegs[i].to > hi) hi = personSegs[i].to;
+        }
+
+        /* Name labels that start a record, and the role/section hits used to
+         * name and bound them. */
+        var nameAt = [], roleHits = [], sectionAt = [];
+        for (i = 0; i < hits.length; i++) {
+            var h = hits[i];
+            if (h.pageIdx !== pageIdx) continue;
+            if (h.cls === 'role') { roleHits.push(h); continue; }
+            if (h.cls === 'section') { sectionAt.push(h.line); continue; }
+            if (h.key !== 'name') continue;
+            /* The record may open a line or two above the first role hit. */
+            if (h.line < lo - VERT_ROLE_SPAN || h.line >= hi) continue;
+            if (!_isVerticalLabel(lines, h)) continue;
+            if (nameAt.length && nameAt[nameAt.length - 1] === h.line) continue;
+            nameAt.push(h.line);
+        }
+
+        /* Two names prove nothing; a repeating record does. Anything less and
+         * the page keeps the segments it already had. */
+        if (nameAt.length < 3) return personSegs;
+
+        var recs = [];
+        for (i = 0; i < nameAt.length; i++) {
+            var start = nameAt[i];
+            var stop = (i + 1 < nameAt.length) ? nameAt[i + 1] : hi;
+            for (var s = 0; s < sectionAt.length; s++) {
+                if (sectionAt[s] > start && sectionAt[s] < stop) stop = sectionAt[s];
+            }
+            if (stop <= start) continue;
+
+            /* The record's OWN role sits just under its name label. Failing
+             * that, the banner that introduced it — "Victim(s) - 1 Involved"
+             * — is the last role hit at or above the name. */
+            var pick = null, r;
+            for (r = 0; r < roleHits.length; r++) {
+                if (roleHits[r].line <= start ||
+                    roleHits[r].line > start + VERT_ROLE_SPAN) continue;
+                /* Several roles can share the row. "Witness's
+                 * Parent/Guardian" is a guardian, not a witness — in an
+                 * English compound the head noun comes last, so the
+                 * rightmost match on the earliest qualifying row wins. */
+                if (pick && roleHits[r].line !== pick.line) break;
+                pick = roleHits[r];
+            }
+            if (!pick) {
+                for (r = 0; r < roleHits.length; r++) {
+                    if (roleHits[r].line <= start) pick = roleHits[r];
+                }
+            }
+            recs.push({
+                kind: 'person',
+                role: pick ? pick.entry.role : ROLE.OTHER,
+                label: pick ? pick.label : '',
+                pageIdx: pageIdx, page: page.index,
+                from: start, to: stop
+            });
+        }
+        return recs.length ? recs : personSegs;
     }
 
     function _splitOnRepeatedNames(pages, hits, segs) {
@@ -771,20 +1022,132 @@
         }
     }
 
+    /* A run of capitalised tokens that survives every junk gate. Used only
+     * where a role heading or a NAME label has vouched for the position. */
+    function _looseNameOn(line) {
+        var s = S.clean(line);
+        if (!s) return '';
+        if (_labelRowScore(s) > 0) return '';
+        if (_isOrgLine(s) || _isLogRow(s)) return '';
+        /* A parenthesised one- or two-character code is a checkbox legend
+         * key — "(M) Apparent Minor Injury", "(SB) Sibling". No loose name
+         * ever needs one. (Arkansas's juvenile aliases, "PUTNEY (JV2),
+         * ISABELLA", carry one too, but those arrive through the comma form
+         * and never touch this path.) */
+        if (/\((?:\d{1,2}|[A-Za-z]{1,2})\)/.test(s)) return '';
+        /* Extractors that drop the whitespace between column headings glue
+         * them into name-shaped tokens: "Discovered CrimeCan ID SuspectVictim
+         * Crime Rights Served", "State Entry # - Date - ByState Cancellation
+         * # - Date - ByNCIC Entry #". Both were filed as suspects. A single
+         * lower-to-upper join inside a token is a real surname (McDonald,
+         * DeLeon); two or more in one line is a header row. */
+        var joins = s.match(/[a-z][A-Z]/g);
+        if (joins && joins.length >= 2) return '';
+        var loose = _safeName(s, _nameLoose(s));
+        return (loose && _looksLikePersonName(loose)) ? loose : '';
+    }
+
+    /* The part of the role heading line that follows the role word. */
+    function _nameOnHeadingLine(seg, pageLines) {
+        if (!seg.label) return '';
+        var head = S.clean(pageLines[seg.from] || '');
+        if (!head) return '';
+        /* Judge the WHOLE row before slicing it. Arkansas prints the injury
+         * and relationship legends across the same row as the VICTIM banner —
+         * "VICTIM INJURY: (Max. 5) (M) Apparent Minor Injury THIS VICTIM
+         * RELATED ..." — and the slice on its own no longer looks like a
+         * legend, so "(M) Apparent Minor Inju THIS" came back as a victim's
+         * name. Checkbox fields are never imported; neither are their
+         * legends. */
+        if (_isCheckboxLegend(head)) return '';
+        var at = head.indexOf(seg.label);
+        if (at === -1) return '';
+        return _looseNameOn(_cutAtNextLabel(head.slice(at + seg.label.length)));
+    }
+
     function _harvestPerson(seg, hits, pageLines) {
         var person = _personShell(seg.role);
         person.sourcePage = seg.page;
         _harvestInto(person, hits, seg, pageLines, ['person']);
 
-        /* The name label is frequently destroyed by OCR, so fall back to a
-         * comma-walk over the whole block — but only the strict form, never
-         * the loose one, because nothing vouched for the neighbourhood. */
-        if (!person.name) {
+        /* NAME PRECEDENCE, strongest first. The order is the whole point:
+         * each rung was added because the rung below it produced a wrong
+         * answer on a real report.
+         *
+         *   1. a labelled "Last, First Middle" field
+         *   2. an unlabelled "Last, First Middle" anywhere in the block
+         *   3. a name printed on the role heading line itself
+         *   4. a bare name on one of the first lines under the heading
+         *
+         * 2 beats 3 because Arkansas packs the given names onto the heading
+         * row and the surname into the cell below — taking the heading there
+         * turned "BARBER, SEAN OCASEY" into "SEAN OCASEY".
+         *
+         * 3 beats a labelled NON-comma field because Westminster's
+         * page-continuation header reads "Defendant: Zakary Lombardi  DOB:
+         * 12/08/01" while the block below it carries the "Employee Name and
+         * Badge/ID Number" cell for the filing officer — so the labelled
+         * field won and the reader filed OFFICER ROBERT ARON as a suspect. */
+        function _hasComma(n) { return !!n && n.indexOf(',') > -1; }
+
+        /* 2 — the name label is frequently destroyed by OCR, so walk the
+         * block for the strict comma form. */
+        if (!_hasComma(person.name)) {
             for (var i = seg.from; i < seg.to; i++) {
                 var n = _safeName(pageLines[i], S.extractName(pageLines[i]));
                 if (n) {
                     person.name = n;
+                    person.nameSource = 'comma-walk';
                     person.fieldSources.name = { page: seg.page, line: i, label: '(unlabelled)' };
+                    break;
+                }
+            }
+        }
+
+        /* 3 — the heading line's own remainder. */
+        if (!_hasComma(person.name)) {
+            var headName = _nameOnHeadingLine(seg, pageLines);
+            if (headName) {
+                person.name = headName;
+                person.nameSource = 'heading-inline';
+                person.fieldSources.name = {
+                    page: seg.page, line: seg.from,
+                    label: '(named on the "' + seg.label + '" line)'
+                };
+            }
+        }
+
+        /* 4 — Not every agency prints "Last, First". Westminster lists
+         * witnesses as a bare heading followed by the name on its own line:
+         *
+         *     Witness #1
+         *     Marie Sanchez
+         *     2685 Carnation Way
+         *
+         * Eight witnesses on that report came back with a date of birth, an
+         * age and no name at all, because the only name form the reader knew
+         * was the comma form Arkansas happens to print. The role heading is
+         * the voucher here — the same job the NAME label does elsewhere — so
+         * the loose form is allowed, but only on the first few lines of the
+         * block and only on a line carrying no label vocabulary at all. */
+        if (!person.name) {
+            var looked = 0;
+            var cand = [];
+            for (var j = seg.from + 1; j < seg.to && looked < 3; j++) {
+                var raw = S.clean(pageLines[j]);
+                if (!raw) continue;
+                looked++;
+                cand.push({ line: j, text: raw });
+            }
+            for (var c = 0; c < cand.length; c++) {
+                var loose = _looseNameOn(cand[c].text);
+                if (loose) {
+                    person.name = loose;
+                    person.nameSource = 'under-heading';
+                    person.fieldSources.name = {
+                        page: seg.page, line: cand[c].line,
+                        label: '(under ' + (seg.label || 'heading') + ')'
+                    };
                     break;
                 }
             }

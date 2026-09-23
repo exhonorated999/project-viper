@@ -144,6 +144,15 @@
           head: 24 },
         { key: 'otherparty', cls: 'role', role: ROLE.OTHER,
           re: /OTHER\s*(PARTY|PARTIES|PERSONS?|SUBJECTS?)/i, head: 24 },
+        /* A bare "PERSON" on its own row is a record header, not a field.
+         * Alleghany County opens every extra party with "PERSON / Seq / 1 /
+         * Person Type / SUBJECT / Name (...) / FORAND, TAMARA". Without this
+         * the "Reported By" cell forty rows above stayed open across the
+         * whole block and a subject was filed as the reporting party. It is
+         * matched near-standalone on purpose — "Person Type" and "Offender
+         * LinkPerson Link" are fields inside a record, not new records. */
+        { key: 'personrec',  cls: 'role', role: ROLE.OTHER, recordOnly: true,
+          re: /^\W{0,3}PERSONS?\W{0,3}$/i, head: 24 },
         { key: 'informant',  cls: 'role', role: ROLE.INFORMANT,
           re: /\bINFORMANT\b/i, head: 24 },
         { key: 'missing',    cls: 'role', role: ROLE.MISSING,
@@ -172,7 +181,10 @@
         /* ---------------- person fields ---------------- */
         { key: 'name',   cls: 'field', field: 'name',   type: 'name',
           re: /\bNAMES?\b|LAST\s*,?\s*FIRST|\bSURNAME\b/i,
-          not: /AGENCY\s*NAME|OFFENSE\s*NAME|BUSINESS\s*NAME|SCHOOL\s*NAME|FILE\s*NAME/i },
+          /* Not every NAME cell holds a person. Alleghany County's DETAILS
+           * box prints "Location Name / FORT YOUNG" — a place — and it was
+           * filed as a person on the report. */
+          not: /AGENCY\s*NAME|OFFENSE\s*NAME|BUSINESS\s*NAME|SCHOOL\s*NAME|FILE\s*NAME|LOCATION\s*NAME|PLACE\s*NAME|PREMISES?\s*NAME|STREET\s*NAME|CITY\s*NAME|DEVICE\s*NAME|USER\s*-?\s*NAME|USERNAME|NAME\s*OF\s*(BUSINESS|LOCATION|PLACE|SCHOOL|AGENCY)/i },
         { key: 'dob',    cls: 'field', field: 'dob',    type: 'date',
           re: /\bD\.?O\.?B\.?\b|DATE\s*OF\s*BIRTH|\bBIRTH\s*DATE\b|\bBIRTHDATE\b/i },
         { key: 'age',    cls: 'field', field: 'age',    type: 'age',
@@ -560,11 +572,33 @@
         return real >= 2;
     }
 
-    /* The single gate every name path goes through. */
-    function _safeName(line, name) {
+    /* The single gate every name path goes through.
+     *
+     * `loose` turns on two further gates, and it is only ever set on the
+     * weakest-evidence paths — a comma form found by walking a block with no
+     * label to vouch for it, and the no-comma capitalised-run reader. They
+     * are NOT applied to a value cell a NAME label points at, because a
+     * ruled form packs the row: Arkansas prints the sex and race legends to
+     * the right of the typed name, so "KITTLER (JV3), JAXON £5 (F) Female OJ
+     * 0) Unknown | = 1 american Indian" reads as a sentence by word count.
+     * Gating that row lost a witness off a report she is printed on. Where a
+     * label vouches for the cell, the label is the stronger evidence. */
+    function _safeName(line, name, loose) {
         if (!name) return '';
         if (_nameLooksLikeJunk(name)) return '';
         if (_isLabelRow(line)) return '';
+        if (loose) {
+            /* An address is not a person. "3 SERRAMONTE CENTER, DALY CITY CA
+             * 94015" has the comma form exactly, and was filed as a guardian
+             * called "SERRAMONTE CENTER, DALY". */
+            if (S.RE_ADDR_ZIP.test(line) || S.RE_ADDR_NOZIP.test(line)) return '';
+            /* Neither is a sentence. Officers write addresses into the
+             * narrative — "...at 508 Richmond Drive, Apt. 5, Millbrae, and at
+             * her mother's apartment..." produced a person called "Richmond
+             * Drive, Apt.". An unvouched name comes off the form, not out of
+             * the prose. */
+            if (S.isProse(line)) return '';
+        }
         return name;
     }
 
@@ -768,6 +802,10 @@
                 close(open.pageIdx, pages[open.pageIdx].lines.length);
             }
             if (hit.cls === 'role') {
+                /* A record header only bounds PEOPLE. The word "person" also
+                 * turns up on its own line inside a narrative, and closing
+                 * the narrative there threw the officer's account away. */
+                if (hit.entry.recordOnly && open && open.kind !== 'person') continue;
                 /* A role word inside a FIELD LABEL is not a new person.
                  * Westminster's prosecution report labels one defendant's
                  * cells "Defendant Information", "Defendant Name" and
@@ -853,10 +891,11 @@
             var k = segs[i].pageIdx;
             (byPage[k] || (byPage[k] = [])).push(segs[i]);
         }
-        for (var pk in byPage) {
-            if (!Object.prototype.hasOwnProperty.call(byPage, pk)) continue;
-            var rebuilt = _alignPage(pages[Number(pk)], hits, byPage[pk], Number(pk));
-            for (i = 0; i < rebuilt.length; i++) out.push(rebuilt[i]);
+        for (var pi = 0; pi < pages.length; pi++) {
+            var ps = byPage[pi] || [];
+            if (ps.length) ps = _alignPage(pages[pi], hits, ps, pi);
+            ps = ps.concat(_orphanNameRecords(pages[pi], hits, ps, pi));
+            for (i = 0; i < ps.length; i++) out.push(ps[i]);
         }
         out.sort(function (a, b) {
             return a.pageIdx - b.pageIdx || a.from - b.from;
@@ -864,8 +903,105 @@
         return out;
     }
 
+    /* Collect the page's vertical NAME labels and the hits used to bound and
+     * name a record built around them. */
+    function _pageRecordAnchors(page, hits, pageIdx) {
+        var a = { names: [], roles: [], sections: [] };
+        for (var i = 0; i < hits.length; i++) {
+            var h = hits[i];
+            if (h.pageIdx !== pageIdx) continue;
+            if (h.cls === 'role') { a.roles.push(h); continue; }
+            if (h.cls === 'section') { a.sections.push(h.line); continue; }
+            if (h.key !== 'name') continue;
+            if (!_isVerticalLabel(page.lines, h)) continue;
+            if (a.names.length && a.names[a.names.length - 1] === h.line) continue;
+            a.names.push(h.line);
+        }
+        return a;
+    }
+
+    /* Does the cell under a vertical label hold something name-shaped? */
+    function _valueCellHasName(lines, labelLine) {
+        var looked = 0;
+        for (var i = labelLine + 1; i < lines.length && looked < 2; i++) {
+            var raw = S.clean(lines[i]);
+            if (!raw) continue;
+            looked++;
+            if (_safeName(raw, S.extractName(raw))) return true;
+            if (_looseNameOn(raw)) return true;
+        }
+        return false;
+    }
+
+    /* A NAME label that no role heading covers is still a person.
+     *
+     * Alleghany County prints each person as "PERSON / Seq / 2 / Person Type
+     * / PRIMARY CALLER / Name (Last, First Middle - Business) / NICELY,
+     * LINDA". Nothing in that header is a role word the reader knows, so no
+     * block opened and Linda Nicely was simply absent from a report she is
+     * printed on. Her brother two records earlier was found only because an
+     * unrelated "Reported By" heading further up happened to span him.
+     *
+     * The label is the evidence that a person is printed here. Where no role
+     * vouches for one, the record still opens — with whatever role sits
+     * within a few rows of the name, and OTHER PERSON when none does. An
+     * honest "other person" card an officer can re-file beats a person the
+     * report never mentions.
+     */
+    function _orphanNameRecords(page, hits, personSegs, pageIdx) {
+        var a = _pageRecordAnchors(page, hits, pageIdx);
+        if (!a.names.length) return [];
+        var recs = [];
+        for (var n = 0; n < a.names.length; n++) {
+            var start = a.names[n];
+            var covered = false, s;
+            for (s = 0; s < personSegs.length; s++) {
+                if (start >= personSegs[s].from && start < personSegs[s].to) {
+                    covered = true;
+                    break;
+                }
+            }
+            if (covered) continue;
+            /* The label alone is not enough. "PAGE# | DATE INCIDENT NUMBER
+             * REPORTING OFFICER CODE # VICTIM NAME" is the Arkansas page
+             * banner and ends in the word NAME with nothing after it, which
+             * is exactly what a vertical label looks like. What separates a
+             * real record is that the cell beneath it holds a name. */
+            if (!_valueCellHasName(page.lines, start)) continue;
+
+            var stop = page.lines.length;
+            for (s = 0; s < a.names.length; s++) {
+                if (a.names[s] > start && a.names[s] < stop) stop = a.names[s];
+            }
+            for (s = 0; s < a.sections.length; s++) {
+                if (a.sections[s] > start && a.sections[s] < stop) stop = a.sections[s];
+            }
+            for (s = 0; s < personSegs.length; s++) {
+                if (personSegs[s].from > start && personSegs[s].from < stop) {
+                    stop = personSegs[s].from;
+                }
+            }
+            if (stop <= start + 1) continue;
+
+            /* The record's own role, below the name or just above it. */
+            var pick = null, r;
+            for (r = 0; r < a.roles.length; r++) {
+                var d = a.roles[r].line - start;
+                if (d > 0 && d <= VERT_ROLE_SPAN) { pick = a.roles[r]; }
+                else if (d < 0 && d >= -VERT_ROLE_SPAN && !pick) { pick = a.roles[r]; }
+            }
+            recs.push({
+                kind: 'person',
+                role: pick ? pick.entry.role : ROLE.OTHER,
+                label: pick ? pick.label : '',
+                pageIdx: pageIdx, page: page.index,
+                from: start, to: stop
+            });
+        }
+        return recs;
+    }
+
     function _alignPage(page, hits, personSegs, pageIdx) {
-        var lines = page.lines;
         var lo = personSegs[0].from, hi = personSegs[0].to;
         var i;
         for (i = 1; i < personSegs.length; i++) {
@@ -873,20 +1009,13 @@
             if (personSegs[i].to > hi) hi = personSegs[i].to;
         }
 
-        /* Name labels that start a record, and the role/section hits used to
-         * name and bound them. */
-        var nameAt = [], roleHits = [], sectionAt = [];
-        for (i = 0; i < hits.length; i++) {
-            var h = hits[i];
-            if (h.pageIdx !== pageIdx) continue;
-            if (h.cls === 'role') { roleHits.push(h); continue; }
-            if (h.cls === 'section') { sectionAt.push(h.line); continue; }
-            if (h.key !== 'name') continue;
+        var a = _pageRecordAnchors(page, hits, pageIdx);
+        var roleHits = a.roles, sectionAt = a.sections;
+        var nameAt = [];
+        for (i = 0; i < a.names.length; i++) {
             /* The record may open a line or two above the first role hit. */
-            if (h.line < lo - VERT_ROLE_SPAN || h.line >= hi) continue;
-            if (!_isVerticalLabel(lines, h)) continue;
-            if (nameAt.length && nameAt[nameAt.length - 1] === h.line) continue;
-            nameAt.push(h.line);
+            if (a.names[i] < lo - VERT_ROLE_SPAN || a.names[i] >= hi) continue;
+            nameAt.push(a.names[i]);
         }
 
         /* Two names prove nothing; a repeating record does. Anything less and
@@ -1043,7 +1172,7 @@
          * DeLeon); two or more in one line is a header row. */
         var joins = s.match(/[a-z][A-Z]/g);
         if (joins && joins.length >= 2) return '';
-        var loose = _safeName(s, _nameLoose(s));
+        var loose = _safeName(s, _nameLoose(s), true);
         return (loose && _looksLikePersonName(loose)) ? loose : '';
     }
 
@@ -1094,7 +1223,7 @@
          * block for the strict comma form. */
         if (!_hasComma(person.name)) {
             for (var i = seg.from; i < seg.to; i++) {
-                var n = _safeName(pageLines[i], S.extractName(pageLines[i]));
+                var n = _safeName(pageLines[i], S.extractName(pageLines[i]), true);
                 if (n) {
                     person.name = n;
                     person.nameSource = 'comma-walk';
@@ -1375,7 +1504,7 @@
             for (var i = 0; i < lines.length; i++) {
                 if (covered[i]) continue;
                 if (_isLogRow(lines[i])) continue;      // CAD/dispatch personnel row
-                var name = _safeName(lines[i], S.extractName(lines[i]));
+                var name = _safeName(lines[i], S.extractName(lines[i]), true);
                 if (!name) continue;
                 if (taken[_nameKey(name)]) continue;
 

@@ -25,6 +25,10 @@
          factory time and throws if it is missing. -->
     <script src="modules/rms/rms-shapes.js"></script>
     <script src="modules/rms/ar-incident-parser.js"></script>
+    <!-- Format-agnostic fallback reader. Fills whatever the light ladder in
+         importRmsForNewCase left blank on a report no bespoke reader claims.
+         Resolves rms-shapes.js at factory time, so it stays below it. -->
+    <script src="modules/rms/generic-extractor.js"></script>
     <script src="modules/supervisor-link/supervisor-link-ui.js"></script>
     <script src="case-snapshot.js"></script>
     <script src="libs/tailwindcss.js"></script>
@@ -3026,6 +3030,71 @@
                     }
                 }
 
+                /* --- Format-agnostic fallback read (runs LAST, fills only blanks) ---
+                 *
+                 * Every ladder above is keyed to a form somebody has already
+                 * written support for. When an agency sends a report none of
+                 * them recognise, the officer got an empty create-case form
+                 * and had to copy the case number off the page by hand. The
+                 * generic reader looks for labelled fields wherever they fall
+                 * on the document instead of matching a known layout.
+                 *
+                 * It never overwrites anything already read, and it files
+                 * nobody — the people it finds are read again on the case
+                 * page and shown there for review. */
+                let genericScan = null;
+                const ladderFoundPeople = !!(detected.suspects || detected.victims ||
+                    detected.witnesses || detected.involvedPersons);
+                if (window.GenericRmsExtractor &&
+                    (!ladderFoundPeople || !caseNum || !synopsis || !rmsLocation)) {
+                    try {
+                        const gOpts = result.pages ? { pageTexts: result.pages } : null;
+                        if (window.GenericRmsExtractor.viable(text, gOpts)) {
+                            genericScan = window.GenericRmsExtractor.quickScan(text, gOpts);
+                            if (!caseNum && genericScan.reportNumber) caseNum = genericScan.reportNumber;
+                            if (!synopsis && genericScan.synopsis) synopsis = genericScan.synopsis;
+                            if (!rmsLocation && genericScan.location) rmsLocation = genericScan.location;
+                            if (!rmsOffenses.length && genericScan.offenseList.length) {
+                                rmsOffenses = genericScan.offenseList;
+                            }
+                            /* Tabs are opened from the generic read ONLY when
+                             * no ladder above found anybody. A role word can
+                             * sit in a form legend, and adding a tab a reader
+                             * that understands the format decided against
+                             * would be second-guessing it. On a report nothing
+                             * recognises the generous answer is the right one:
+                             * the review cards' Move-to buttons need somewhere
+                             * to move a person to. A ticked box only creates a
+                             * tab — it files nobody into it. */
+                            if (!ladderFoundPeople) {
+                                const R = window.GenericRmsExtractor.ROLE;
+                                const roleModule = {};
+                                roleModule[R.SUSPECT] = 'suspects';
+                                roleModule[R.ARRESTEE] = 'suspects';
+                                roleModule[R.VICTIM] = 'victims';
+                                roleModule[R.WITNESS] = 'witnesses';
+                                roleModule[R.COMPLAINANT] = 'involvedPersons';
+                                roleModule[R.RP] = 'involvedPersons';
+                                roleModule[R.INVOLVED] = 'involvedPersons';
+                                roleModule[R.OTHER] = 'involvedPersons';
+                                roleModule[R.MISSING] = 'involvedPersons';
+                                roleModule[R.GUARDIAN] = 'involvedPersons';
+                                roleModule[R.DRIVER] = 'involvedPersons';
+                                roleModule[R.OWNER] = 'involvedPersons';
+                                roleModule[R.INFORMANT] = 'involvedPersons';
+                                for (const role of Object.keys(genericScan.roles || {})) {
+                                    if (roleModule[role]) detected[roleModule[role]] = true;
+                                }
+                            }
+                            if (!detected.vehicles && genericScan.vehicleCount > 0) {
+                                detected.vehicles = true;
+                            }
+                        }
+                    } catch (gErr) {
+                        console.warn('[RMS Import] generic scan failed:', gErr);
+                    }
+                }
+
                 // Store for case creation
                 pendingRmsData = { text: result.text, pageTexts: result.pages || null, fileName: result.fileName, detected, caseNum, synopsis, arSparsePages, arAltPages, arBandPages, rmsLocation, rmsOffenses };
 
@@ -3072,6 +3141,7 @@
                 statusText.textContent = result.fileName;
                 details.innerHTML = `<p>Detected data: <span class="text-viper-cyan">${counts.join(', ')}</span></p>` +
                     (caseNum ? `<p>Case #: <span class="text-white font-mono">${caseNum}</span></p>` : '') +
+                    (genericScan ? `<p class="text-cyan-300">🔎 This report's format is not one V.I.P.E.R. recognises, so it was read generically. Check every field against the PDF — nothing will be filed into the case automatically.</p>` : '') +
                     `<p class="text-gray-400 italic">Data will be distributed to modules on case creation</p>`;
                 statusDiv.classList.remove('hidden');
 

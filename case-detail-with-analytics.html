@@ -36496,14 +36496,21 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             return 0;
         }
 
-        /* listName is 'personsInvolved' (the default) or 'provisionalPersons' —
-         * the blocks whose printed NAME cell the scan could not read. Those are
-         * shown separately and can still be sent to a tab, where they arrive
-         * flagged as an unverified name rather than silently nameless. */
+        /* listName is 'personsInvolved' (the default), 'provisionalPersons' —
+         * the blocks whose printed NAME cell the scan could not read — or
+         * 'reviewPersons', everything the format-agnostic fallback reader
+         * found on a report V.I.P.E.R. does not recognise. None of the latter
+         * two are ever filed automatically; both are shown separately and can
+         * still be sent to a tab, where they arrive flagged rather than
+         * silently asserted. An allow-list rather than a ternary, so adding a
+         * fourth list is one word and cannot fall through to the wrong one. */
+        const RMS_ROUTABLE_LISTS = ['personsInvolved', 'provisionalPersons', 'reviewPersons'];
+
         function rmsManualRoutePerson(reportIdx, personIdx, target, listName) {
             if (!rmsImports || !rmsImports[reportIdx]) return;
             const rpt = rmsImports[reportIdx];
-            const list = rpt[listName === 'provisionalPersons' ? 'provisionalPersons' : 'personsInvolved'];
+            const key = RMS_ROUTABLE_LISTS.indexOf(listName) !== -1 ? listName : 'personsInvolved';
+            const list = rpt[key];
             const p = list && list[personIdx];
             if (!p) return;
             const fileName = rpt.fileName || '';
@@ -36552,6 +36559,16 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 common.notes = 'Name could not be read from the scanned report' +
                     (p.sourcePage ? ' (page ' + p.sourcePage + ')' : '') +
                     '. Verify against the source document before relying on this record.';
+            }
+            /* A generic read is a reading of an unfamiliar form, not a parse of
+             * a known one. The record carries that on its face so nobody
+             * downstream mistakes it for a format-pinned import. */
+            if (key === 'reviewPersons') {
+                common.rmsGenericRead = true;
+                common.notes = (common.notes ? common.notes + ' ' : '') +
+                    'Read by the generic reader from a report format V.I.P.E.R. does not ' +
+                    'recognise' + (p.sourcePage ? ' (page ' + p.sourcePage + ')' : '') +
+                    '. Every field must be checked against the source document.';
             }
 
             if (target === 'suspect') {
@@ -38982,6 +38999,12 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         const offCount = rpt.offenses.length;
                         const narCount = rpt.narratives.length;
                         const personCount = rpt.personsInvolved.length;
+                        /* A generic read files nobody, so personCount is 0 by
+                         * design. Showing only that made an import that had
+                         * actually found eleven people read as "Persons: 0". */
+                        const reviewCount = (Array.isArray(rpt.reviewPersons) ? rpt.reviewPersons.length : 0)
+                            + (Array.isArray(rpt.provisionalPersons) ? rpt.provisionalPersons.length : 0);
+                        const genericRead = !!(rpt.genericSweep && rpt.genericSweep.ran);
                         const vehCount = rpt.vehicles.length;
                         const topOffense = rpt.offenses[0];
                         const officers = rpt.narratives.map(n => n.officer.split(/\s+\d+$/)[0]).join(', ');
@@ -38992,6 +39015,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                     <div class="flex items-center gap-2 mb-1">
                                         <span class="text-xs font-mono px-2 py-0.5 rounded bg-viper-orange/20 text-viper-orange border border-viper-orange/30">${rpt.reportType || 'Report'}</span>
                                         ${rpt.supplementNo ? `<span class="text-xs px-2 py-0.5 rounded bg-gray-600/30 text-gray-300 border border-gray-600">${rpt.supplementNo}</span>` : ''}
+                                        ${genericRead ? `<span class="text-xs px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30" title="Format not recognised — read generically, nothing filed">🔎 GENERIC READ</span>` : ''}
                                     </div>
                                     <h3 class="text-lg font-bold text-white">#${rpt.reportNumber || 'Unknown'}</h3>
                                     <p class="text-sm text-gray-400">${rpt.agencyName || rpt.fileName}</p>
@@ -39006,7 +39030,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                 <div class="bg-viper-dark/50 rounded px-2 py-1.5"><span class="text-gray-500">Date:</span> <span class="text-gray-300">${rpt.reportDate || rpt.fromDateTime || '—'}</span></div>
                                 <div class="bg-viper-dark/50 rounded px-2 py-1.5"><span class="text-gray-500">Beat:</span> <span class="text-gray-300">${rpt.beat || '—'}</span></div>
                                 <div class="bg-viper-dark/50 rounded px-2 py-1.5"><span class="text-gray-500">Offenses:</span> <span class="text-viper-orange">${offCount}</span></div>
-                                <div class="bg-viper-dark/50 rounded px-2 py-1.5"><span class="text-gray-500">Persons:</span> <span class="text-gray-300">${personCount}</span></div>
+                                <div class="bg-viper-dark/50 rounded px-2 py-1.5"><span class="text-gray-500">Persons:</span> <span class="text-gray-300">${personCount}</span>${reviewCount ? `<span class="text-cyan-300" title="Found but not filed — awaiting review"> +${reviewCount} to review</span>` : ''}</div>
                             </div>
                             ${topOffense ? `<p class="text-xs text-gray-400 truncate mb-2">📋 ${topOffense.statute} — ${topOffense.description || ''}</p>` : ''}
                             ${officers ? `<p class="text-xs text-gray-500 truncate">👮 ${officers}</p>` : ''}
@@ -39131,6 +39155,59 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 </div>
             `) : '';
 
+            /* Everything the format-agnostic fallback reader found on a report
+             * V.I.P.E.R. does not recognise. None of it is filed — the whole
+             * point is that a reading of an unfamiliar form is a lead for an
+             * officer to confirm, not a parse to be trusted. Visually distinct
+             * from the amber "Name Not Read" block above, which is a known
+             * format that lost one cell. */
+            const review = Array.isArray(rpt.reviewPersons) ? rpt.reviewPersons : [];
+            const reviewHtml = review.length ? sectionCard(
+                'Generic Reader — ' + review.length + ' Possible ' +
+                (review.length === 1 ? 'Person' : 'Persons') + ' — Not Filed', '🔎', `
+                <p class="text-xs text-cyan-300/90 mb-3">
+                    ${rpt.genericBanner || 'This report is not in a format V.I.P.E.R. recognises, so it was read generically. Nothing below has been filed into the case.'}
+                </p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    ${review.map((p, pi) => personCard(p, pi, 'reviewPersons')).join('')}
+                </div>
+            `) : '';
+
+            const reviewVeh = Array.isArray(rpt.reviewVehicles) ? rpt.reviewVehicles : [];
+            const reviewVehHtml = reviewVeh.length ? sectionCard(
+                'Generic Reader — ' + reviewVeh.length + ' Possible ' +
+                (reviewVeh.length === 1 ? 'Vehicle' : 'Vehicles') + ' — Not Filed', '🔎', `
+                <p class="text-xs text-cyan-300/90 mb-3">
+                    Read from an unrecognised format and listed for reference only. There is no
+                    one-click file for vehicles — check each against the source document and add
+                    it on the Recovered Vehicles tab if it belongs in the case.
+                </p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    ${reviewVeh.map(v => `
+                        <div class="p-3 bg-viper-dark/50 rounded-lg border border-cyan-500/20">
+                            <p class="text-white font-medium">${[v.year, v.color, v.make, v.model].filter(Boolean).join(' ') || 'Unknown vehicle'}</p>
+                            <div class="text-xs text-gray-400 mt-1 space-y-0.5">
+                                ${v.plate ? '<div>Plate: <span class="text-gray-300 font-mono">' + v.plate + '</span>' + (v.plateState ? ' ' + v.plateState : '') + '</div>' : ''}
+                                ${v.vin ? '<div>VIN: <span class="text-gray-300 font-mono">' + v.vin + '</span></div>' : ''}
+                                ${v.sourcePage ? '<div class="text-gray-500">Source: page ' + v.sourcePage + '</div>' : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `) : '';
+
+            /* One line at the top of the report, because a reader who scrolls
+             * straight to the narrative must still know how it was read. */
+            const genericNoticeHtml = (rpt.genericSweep && rpt.genericSweep.ran) ? `
+                <div class="rounded-xl p-4 mb-2 bg-cyan-500/10 border border-cyan-500/30">
+                    <p class="text-sm text-cyan-200 font-semibold">🔎 Read by the generic reader</p>
+                    <p class="text-xs text-cyan-200/80 mt-1">
+                        V.I.P.E.R. does not recognise this report's format, so it was read by looking for
+                        labelled fields anywhere on the page. Verify every field against the source PDF
+                        before relying on it. Nothing has been filed into the case automatically.
+                    </p>
+                </div>` : '';
+
             // Vehicles
             const vehiclesHtml = rpt.vehicles.length ? sectionCard('Vehicles', '🚗', `
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -39219,10 +39296,13 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         </div>
                     </div>
                 </div>
+                ${genericNoticeHtml}
                 ${eventHtml}
                 ${offensesHtml}
                 ${personsHtml}
                 ${provisionalHtml}
+                ${reviewHtml}
+                ${reviewVehHtml}
                 ${vehiclesHtml}
                 ${propertyHtml}
                 ${narrativesHtml}

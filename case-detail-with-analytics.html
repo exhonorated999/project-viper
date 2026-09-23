@@ -44,6 +44,10 @@
          factory time and throws if it is missing. -->
     <script src="modules/rms/rms-shapes.js"></script>
     <script src="modules/rms/ar-incident-parser.js"></script>
+    <!-- Format-agnostic fallback reader. Runs ONLY when one of the bespoke
+         readers above comes back thin, and never files anything itself. Also
+         resolves rms-shapes.js at factory time, so it stays below it. -->
+    <script src="modules/rms/generic-extractor.js"></script>
     <script src="modules/flock/flock-module.js" defer></script>
     <script src="modules/flock/flock-ui.js" defer></script>
     <!-- Analytics CDR Libraries -->
@@ -1515,6 +1519,102 @@
             return applied;
         }
 
+        /* ── The format-agnostic fallback sweep ────────────────────────────
+         *
+         * Six bespoke readers sit in parseRmsReport(). Each was written
+         * against one agency's paperwork, and when an unfamiliar report walks
+         * in the closest one claims it and returns a near-empty shell: no
+         * people, no narrative, and no way for the officer to tell whether the
+         * report was empty or the reader simply did not understand it.
+         *
+         * When that happens the generic reader re-reads the same text looking
+         * for labelled fields anywhere on the page. Two rules make it safe:
+         *
+         *   1. It only runs when the bespoke reader came back thin. A reader
+         *      that produced something is trusted and left alone.
+         *   2. Nothing it finds is filed. Everything lands in reviewPersons /
+         *      reviewVehicles as a card the officer places by hand.
+         *
+         * Scalar backfill is only-if-blank, the same rule as
+         * _rmsBackfillCaseOverview.
+         */
+        function _rmsNarrativeChars(report) {
+            const ns = Array.isArray(report && report.narratives) ? report.narratives : [];
+            let n = 0;
+            for (const x of ns) n += String((x && x.text) || '').length;
+            return n;
+        }
+
+        function _rmsResultIsThin(report) {
+            if (!report) return false;
+            const persons = Array.isArray(report.personsInvolved) ? report.personsInvolved.length : 0;
+            const provisional = Array.isArray(report.provisionalPersons) ? report.provisionalPersons.length : 0;
+            // A supplement legitimately carries no people — its narrative IS
+            // the document. Judging it on the person count would run the sweep
+            // over every supplement an agency files.
+            const isSupplement = !!String(report.supplementNo || '').trim() ||
+                report.arFormat === 'ar-supplement-narrative';
+            if (isSupplement) return _rmsNarrativeChars(report) === 0;
+            return (persons + provisional) === 0 || _rmsNarrativeChars(report) === 0;
+        }
+
+        function _rmsAttachGenericReview(report, gen) {
+            if (!report || !gen) return 0;
+            const people = Array.isArray(gen.reviewPersons) ? gen.reviewPersons : [];
+            const vehicles = Array.isArray(gen.reviewVehicles) ? gen.reviewVehicles : [];
+
+            report.reviewPersons = people;
+            report.reviewVehicles = vehicles;
+            report.reviewSources = gen.reviewSources || {};
+            report.genericBanner = gen.genericBanner || '';
+            report.genericFormatLabel = gen.genericFormatLabel || '';
+
+            // Only-if-blank, never an overwrite.
+            for (const f of ['reportNumber', 'reportDate', 'agencyName', 'location']) {
+                if (!String(report[f] || '').trim() && String(gen[f] || '').trim()) {
+                    report[f] = gen[f];
+                }
+            }
+            if (!(Array.isArray(report.offenses) && report.offenses.length) &&
+                Array.isArray(gen.offenses) && gen.offenses.length) {
+                report.offenses = gen.offenses;
+            }
+            if (!_rmsNarrativeChars(report) && Array.isArray(gen.narratives) && gen.narratives.length) {
+                report.narratives = gen.narratives;
+            }
+
+            const gd = gen.diagnostics || {};
+            report.genericSweep = {
+                ran: true,
+                found: people.length,
+                vehicles: vehicles.length,
+                warnings: Array.isArray(gd.warnings) ? gd.warnings.slice() : []
+            };
+            if (!report.diagnostics) report.diagnostics = { warnings: [] };
+            if (!Array.isArray(report.diagnostics.warnings)) report.diagnostics.warnings = [];
+            report.diagnostics.warnings.push(
+                'This report is not in a recognised format, so it was read generically. ' +
+                people.length + ' possible person' + (people.length === 1 ? '' : 's') +
+                ' and ' + vehicles.length + ' possible vehicle' + (vehicles.length === 1 ? '' : 's') +
+                ' are listed for review and have NOT been filed into the case.');
+            return people.length;
+        }
+
+        /* Runs the sweep if the bespoke read was thin. Never throws — a
+         * failure here must not fail an import that otherwise worked. */
+        function _rmsMaybeGenericSweep(report, text, fileName, opts) {
+            try {
+                const G = window.GenericRmsExtractor;
+                if (!G || !report || !text) return 0;
+                if (!_rmsResultIsThin(report)) return 0;
+                if (!G.viable(text)) return 0;
+                return _rmsAttachGenericReview(report, G.parse(text, fileName, opts || null));
+            } catch (err) {
+                console.warn('[RMS Import] generic sweep failed:', err);
+                return 0;
+            }
+        }
+
         function processPendingRmsImport() {
             const key = 'pendingRmsImport_' + currentCase.id;
             const raw = localStorage.getItem(key);
@@ -1568,6 +1668,13 @@
                     '| persons:', report.personsInvolved?.length || 0,
                     '| offenses:', report.offenses?.length || 0,
                     '| vehicles:', report.vehicles?.length || 0);
+
+                // The format-agnostic fallback. AFTER the Arkansas recovery
+                // passes above — sweeping pre-recovery text would see a thin
+                // parse that those passes were about to fix.
+                const genericFound = _rmsMaybeGenericSweep(report, text, fileName,
+                    pageTexts ? { pageTexts } : null);
+
                 if (report.personsInvolved) {
                     report.personsInvolved.forEach((p, i) =>
                         console.log(`[RMS Import]   Person ${i}: ${p.involvement} — ${p.name}`));
@@ -1595,6 +1702,13 @@
                     const n = report.provisionalPersons.length;
                     viperToast(`${n} person block${n !== 1 ? 's' : ''} had no readable name — ` +
                         `${n !== 1 ? 'they are' : 'it is'} listed under "Name Not Read" on the RMS Imports tab`, 'warning', 6000);
+                }
+
+                if (genericFound) {
+                    viperToast(`This report is not in a format V.I.P.E.R. recognises. It was read ` +
+                        `generically and ${genericFound} possible person${genericFound !== 1 ? 's' : ''} ` +
+                        `${genericFound !== 1 ? 'are' : 'is'} listed for review on the RMS Imports tab — ` +
+                        `nothing has been filed into the case`, 'warning', 9000);
                 }
 
                 // Backfill Overview fields (Location of Occurrence, Offenses)
@@ -38722,6 +38836,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 showLoadingIndicator('Parsing RMS reports...');
                 let imported = 0;
                 let unnamedBlocks = 0;
+                let genericFound = 0;
                 let overviewFilled = [];
 
                 for (const filePath of filePaths) {
@@ -38731,6 +38846,11 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             result.pages ? { pageTexts: result.pages } : null);
                         report.pageCount = result.numPages;
                         await _arRecoverRmsOcr(report, filePath);
+                        // The format-agnostic fallback. AFTER the recovery pass
+                        // above — sweeping pre-recovery text would see a thin
+                        // parse that the OCR passes were about to fix.
+                        genericFound += _rmsMaybeGenericSweep(report, result.text, result.fileName,
+                            result.pages ? { pageTexts: result.pages } : null);
                         if (report.provisionalPersons) unnamedBlocks += report.provisionalPersons.length;
                         // Location of Occurrence / Offenses from the report's
                         // offence row — only-if-blank. See
@@ -38770,6 +38890,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     }
                     if (unnamedBlocks > 0) {
                         showToast(`${unnamedBlocks} person block${unnamedBlocks !== 1 ? 's' : ''} had no readable name — ${unnamedBlocks !== 1 ? 'they are' : 'it is'} listed under "Name Not Read" on the report so you can place ${unnamedBlocks !== 1 ? 'them' : 'it'} after checking the source PDF`, 'warning');
+                    }
+                    if (genericFound > 0) {
+                        showToast(`Not a format V.I.P.E.R. recognises — read generically. ${genericFound} possible person${genericFound !== 1 ? 's' : ''} ${genericFound !== 1 ? 'are' : 'is'} listed for review on the RMS Imports tab. Nothing has been filed into the case`, 'warning');
                     }
                     renderTabContent('rmsImport');
                 } else {

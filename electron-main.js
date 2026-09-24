@@ -2540,20 +2540,27 @@ ipcMain.handle('note-save-attachment', async (_e, payload) => {
     // Collision handling: if a file with the same name already exists,
     // append a short numeric suffix until we find a free slot. The renderer
     // gets back the final saved name so its note JSON can reference it.
+    //
+    // The name is claimed by the WRITE: 'wx' fails with EEXIST instead of
+    // overwriting, so the check and the write are one step. Probing with
+    // existsSync first leaves a window in which a second attachment picks
+    // the same name and silently replaces the first one on disk while both
+    // notes still claim to have it.
+    const bytes = (security && security.isEnabled() && security.isUnlocked())
+      ? security.encryptBuffer(buf)
+      : buf;
     const ext = path.extname(rawName);
     const stem = rawName.slice(0, rawName.length - ext.length);
-    let finalName = rawName, n = 1;
-    while (fs.existsSync(path.join(notesDir, finalName))) {
-      finalName = `${stem} (${n})${ext}`;
-      n++;
-      if (n > 999) return { success: false, error: 'Too many collisions' };
-    }
-    const filePath = path.join(notesDir, finalName);
-
-    if (security && security.isEnabled() && security.isUnlocked()) {
-      fs.writeFileSync(filePath, security.encryptBuffer(buf));
-    } else {
-      fs.writeFileSync(filePath, buf);
+    let finalName = rawName;
+    for (let n = 1; ; n++) {
+      try {
+        fs.writeFileSync(path.join(notesDir, finalName), bytes, { flag: 'wx' });
+        break;
+      } catch (e) {
+        if (!e || e.code !== 'EEXIST') throw e;
+        if (n > 999) return { success: false, error: 'Too many collisions' };
+        finalName = `${stem} (${n})${ext}`;
+      }
     }
     return { success: true, fileName: finalName, size: buf.length };
   } catch (err) {

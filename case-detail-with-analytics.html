@@ -6093,6 +6093,15 @@
                                     </div>
                                 </div>
 
+                                <!-- Assign to people on this case -->
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Assign to People (Optional)</label>
+                                    <div id="noteAssignList" class="glass-card rounded-lg border border-gray-700 p-3">
+                                        ${_renderNoteAssignPicker()}
+                                    </div>
+                                    <p class="text-[11px] text-gray-500 mt-2">The note stays here in Case Notes. Anyone you tick also sees it on their profile.</p>
+                                </div>
+
                                 <!-- Attachments (multi-file, persisted to disk) -->
                                 <div>
                                     <label class="block text-sm font-medium text-gray-300 mb-2">Attachments (Optional — PDFs, images, any file)</label>
@@ -6246,6 +6255,9 @@
 
             const groups = _groupNotesByDay(caseNotes.slice());
             _initNoteDayState(groups);
+            // Built once per list render: resolving a chip per-note would
+            // re-read all five party lists out of localStorage every time.
+            const personIndex = _buildPersonNoteIndex();
 
             const controls = groups.length > 1 ? `
                 <div class="flex items-center justify-between text-xs text-gray-400 px-1">
@@ -6274,13 +6286,13 @@
                         </span>
                     </button>
                     <div id="noteDay-${g.key}" class="px-5 pb-5 space-y-4 ${open ? '' : 'hidden'}">
-                        ${g.items.map(_renderNoteCard).join('')}
+                        ${g.items.map(n => _renderNoteCard(n, personIndex)).join('')}
                     </div>
                 </div>`;
             }).join('');
         }
 
-        function _renderNoteCard(note) {
+        function _renderNoteCard(note, personIndex) {
             const html = _noteRenderHtml(note);
             const atts = _noteAttachmentList(note);
             return `
@@ -6319,6 +6331,7 @@
                 <div class="note-rendered text-gray-200" style="line-height: 1.6;">${html}</div>
 
                 ${atts}
+                ${_noteAssigneeChips(note, personIndex)}
             </div>`;
         }
         
@@ -6333,6 +6346,7 @@
             requestAnimationFrame(() => {
                 initializeNoteEditor('');
                 renderNoteAttachmentsList();
+                _syncNoteAssignBoxes(null);
                 const ed = document.getElementById('noteEditor');
                 if (ed) ed.focus();
             });
@@ -6366,6 +6380,7 @@
             requestAnimationFrame(() => {
                 initializeNoteEditor(initialHtml);
                 renderNoteAttachmentsList();
+                _syncNoteAssignBoxes(note);
                 const ed = document.getElementById('noteEditor');
                 if (ed) ed.focus();
                 document.getElementById('noteForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -6844,6 +6859,8 @@
                 const finalAttachments = [...savedNoteAttachments.filter(a => !a.legacy), ...successfullySaved];
 
                 // 2. Update note JSON
+                // Read the picker BEFORE any re-render tears the form down.
+                const assignments = _collectNoteAssignments();
                 let savedNoteCreatedAt = null;
                 if (editingNoteId) {
                     const note = caseNotes.find(n => n.id === editingNoteId);
@@ -6853,6 +6870,7 @@
                         note.attachments = finalAttachments;
                         delete note.hasAttachment;
                         delete note.attachmentName;
+                        if (assignments) note.assignedTo = assignments;
                         note.editHistory = note.editHistory || [];
                         note.editHistory.push(new Date().toISOString());
                         savedNoteCreatedAt = note.createdAt;
@@ -6864,7 +6882,8 @@
                         contentHtml,
                         createdAt,
                         editHistory: [],
-                        attachments: finalAttachments
+                        attachments: finalAttachments,
+                        assignedTo: assignments || []
                     });
                     savedNoteCreatedAt = createdAt;
                 }
@@ -6873,9 +6892,7 @@
                 // appears to do nothing because its day happened to be shut.
                 try { if (savedNoteCreatedAt) _revealNoteDay(savedNoteCreatedAt); } catch (_) {}
 
-                const allNotes = _lsParse('viperCaseNotes', {});
-                allNotes[currentCase.caseNumber] = caseNotes;
-                localStorage.setItem('viperCaseNotes', JSON.stringify(allNotes));
+                _persistCaseNotes();
                 console.log('[saveNote] saved. caseNotes count:', caseNotes.length);
 
                 // Defensive: ensure the 'notes' module stays in the case's
@@ -6901,14 +6918,399 @@
             }
             
             caseNotes = caseNotes.filter(n => n.id !== noteId);
-            
-            // Save to localStorage
-            const allNotes = _lsParse('viperCaseNotes', {});
-            allNotes[currentCase.caseNumber] = caseNotes;
-            localStorage.setItem('viperCaseNotes', JSON.stringify(allNotes));
+            _persistCaseNotes();
             
             // Refresh the tab
             renderTabContent('notes');
+        }
+
+        // ─── Notes ↔ people ──────────────────────────────────────────────
+        // A note about a particular person is still a CASE note. It lives in
+        // the Case Notes module and nowhere else; assigning it to a person
+        // only files a pointer, so that person's profile can show the very
+        // same record. Nothing is duplicated — edit it from either surface
+        // and both move together, which is the only version of this that
+        // survives discovery.
+        //
+        // People are addressed by a durable `noteUid` stamped onto the person
+        // record the first time they are linked. Array position is NOT usable
+        // as an identity: deleting a suspect would silently re-point every
+        // note at whoever slid into that slot. The uid also rides along
+        // through "Move to…", which is correct — the person did not change,
+        // only their role did.
+
+        const NOTE_PERSON_ROLES = [
+            { role: 'suspects',        label: 'Suspect' },
+            { role: 'victims',         label: 'Victim' },
+            { role: 'witnesses',       label: 'Witness' },
+            { role: 'involvedPersons', label: 'Involved Person' },
+            { role: 'missingpersons',  label: 'Missing Person' }
+        ];
+
+        function _noteRoleLabel(role) {
+            const def = NOTE_PERSON_ROLES.find(d => d.role === role);
+            return def ? def.label : 'Person';
+        }
+
+        /**
+         * Load/save/read accessors for one party list.
+         *
+         * The arrays are top-level `let` in this classic script, so they are
+         * reachable as bare identifiers from here but are NOT on window.
+         * Returning closures keeps every caller on the same copy.
+         */
+        function _notePersonAccess(role) {
+            switch (role) {
+                case 'suspects':        return { load: loadSuspects,        save: saveSuspects,        get: () => suspects };
+                case 'victims':         return { load: loadVictims,         save: saveVictims,         get: () => victims };
+                case 'witnesses':       return { load: loadWitnesses,       save: saveWitnesses,       get: () => witnesses };
+                case 'involvedPersons': return { load: loadInvolvedPersons, save: saveInvolvedPersons, get: () => involvedPersons };
+                case 'missingpersons':  return { load: loadMissingPersons,  save: saveMissingPersons,  get: () => missingPersons };
+                default: return null;
+            }
+        }
+
+        function _persistCaseNotes() {
+            const allNotes = _lsParse('viperCaseNotes', {});
+            allNotes[currentCase.caseNumber] = caseNotes;
+            localStorage.setItem('viperCaseNotes', JSON.stringify(allNotes));
+        }
+
+        /** A person only gets a uid when something is actually filed against
+         *  them, so merely opening a profile never rewrites the party list. */
+        function _ensurePersonNoteUid(role, index) {
+            const acc = _notePersonAccess(role);
+            if (!acc) return '';
+            try { acc.load(); } catch (_) { return ''; }
+            const person = (acc.get() || [])[index];
+            if (!person) return '';
+            if (!person.noteUid) {
+                person.noteUid = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+                acc.save();
+            }
+            return person.noteUid;
+        }
+
+        /** uid → {role,label,index,name} for every person on the case. */
+        function _buildPersonNoteIndex() {
+            const map = {};
+            for (const def of NOTE_PERSON_ROLES) {
+                const acc = _notePersonAccess(def.role);
+                if (!acc) continue;
+                try { acc.load(); } catch (_) { continue; }
+                (acc.get() || []).forEach((p, i) => {
+                    if (p && p.noteUid) {
+                        map[p.noteUid] = { role: def.role, label: def.label, index: i, name: p.name || '' };
+                    }
+                });
+            }
+            return map;
+        }
+
+        function _findPersonByNoteUid(uid) {
+            if (!uid) return null;
+            const hit = _buildPersonNoteIndex()[uid];
+            return hit || null;
+        }
+
+        function _noteAssignments(note) {
+            if (!note || !Array.isArray(note.assignedTo)) return [];
+            return note.assignedTo.filter(a => a && typeof a.uid === 'string' && a.uid);
+        }
+
+        function _notesForPersonUid(uid) {
+            if (!uid || !Array.isArray(caseNotes)) return [];
+            return caseNotes
+                .filter(n => _noteAssignments(n).some(a => a.uid === uid))
+                .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+        }
+
+        /** Jump from a note chip straight to the person's profile. */
+        function openPersonFromNote(uid) {
+            const hit = _findPersonByNoteUid(uid);
+            if (!hit) { viperToast('That person is no longer on this case.', 'info'); return; }
+            try { ensureCaseModule(hit.role); } catch (_) {}
+            if (hit.role === 'suspects') currentSuspectView = hit.index;
+            else if (hit.role === 'victims') currentVictimView = hit.index;
+            else if (hit.role === 'witnesses') currentWitnessView = hit.index;
+            else if (hit.role === 'involvedPersons') currentInvolvedPersonView = hit.index;
+            else if (hit.role === 'missingpersons') currentMissingPersonView = hit.index;
+            try { renderTabs(); } catch (_) {}
+            renderTabContent(hit.role);
+        }
+
+        // ── The assignment picker inside the Case Notes form ──────────────
+
+        function _renderNoteAssignPicker() {
+            const groups = [];
+            for (const def of NOTE_PERSON_ROLES) {
+                const acc = _notePersonAccess(def.role);
+                if (!acc) continue;
+                try { acc.load(); } catch (_) { continue; }
+                const list = acc.get() || [];
+                if (list.length) groups.push({ def, list });
+            }
+
+            if (!groups.length) {
+                return `<p class="text-[11px] text-gray-500">No people on this case yet. Add a suspect, victim or witness and you will be able to file notes against them.</p>`;
+            }
+
+            return groups.map(g => `
+                <div class="mb-2 last:mb-0">
+                    <div class="text-[10px] uppercase tracking-wide text-gray-500 mb-1">${_escapeHtml(g.def.label)}</div>
+                    <div class="flex flex-wrap gap-2">
+                        ${g.list.map((p, i) => `
+                            <label class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-600 bg-viper-card/40 hover:border-viper-cyan cursor-pointer text-xs transition-colors">
+                                <input type="checkbox" class="note-assign-box" data-role="${g.def.role}" data-index="${i}" data-uid="${_escapeAttr(p.noteUid || '')}">
+                                <span class="text-gray-200">${_escapeHtml(p.name || ('Unnamed ' + g.def.label))}</span>
+                            </label>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        /** Tick the boxes for whoever this note is already filed against. */
+        function _syncNoteAssignBoxes(note) {
+            const wrap = document.getElementById('noteAssignList');
+            if (!wrap) return;
+            const uids = _noteAssignments(note).map(a => a.uid);
+            wrap.querySelectorAll('.note-assign-box').forEach(box => {
+                const uid = box.getAttribute('data-uid') || '';
+                box.checked = !!uid && uids.indexOf(uid) !== -1;
+            });
+        }
+
+        function _collectNoteAssignments() {
+            const wrap = document.getElementById('noteAssignList');
+            if (!wrap) return null;   // picker not mounted — leave assignments alone
+            const out = [];
+            wrap.querySelectorAll('.note-assign-box').forEach(box => {
+                if (!box.checked) return;
+                const role = box.getAttribute('data-role');
+                const index = parseInt(box.getAttribute('data-index'), 10);
+                if (!role || isNaN(index)) return;
+                const uid = _ensurePersonNoteUid(role, index);
+                if (!uid) return;
+                const acc = _notePersonAccess(role);
+                const person = acc ? (acc.get() || [])[index] : null;
+                out.push({ uid, role, name: (person && person.name) || '' });
+            });
+            return out;
+        }
+
+        function _noteAssigneeChips(note, personIndex) {
+            const links = _noteAssignments(note);
+            if (!links.length) return '';
+            const idx = personIndex || _buildPersonNoteIndex();
+            return `
+                <div class="mt-4 pt-3 border-t border-gray-700/60 flex flex-wrap items-center gap-2">
+                    <span class="text-[10px] uppercase tracking-wide text-gray-500">Assigned to</span>
+                    ${links.map(a => {
+                        const hit = idx[a.uid];
+                        const nm = (hit && hit.name) || a.name || 'Unknown person';
+                        if (!hit) {
+                            return `<span class="px-2 py-0.5 rounded-full border border-gray-600 text-gray-500 text-xs" title="This person is no longer on the case">${_escapeHtml(nm)} — removed</span>`;
+                        }
+                        return `<button type="button" onclick="openPersonFromNote('${_escapeAttr(a.uid)}')" class="px-2 py-0.5 rounded-full border border-viper-cyan/40 bg-viper-cyan/10 text-viper-cyan text-xs hover:bg-viper-cyan/20 transition-colors">${_escapeHtml(nm)} <span class="text-[10px] text-gray-400">${_escapeHtml(hit.label)}</span></button>`;
+                    }).join('')}
+                </div>`;
+        }
+
+        // ── The notes card on a person's profile ──────────────────────────
+
+        function renderPersonNotesCard(role, index) {
+            const acc = _notePersonAccess(role);
+            if (!acc) return '';
+            try { acc.load(); } catch (_) {}
+            const person = (acc.get() || [])[index];
+            if (!person) return '';
+
+            const uid = person.noteUid || '';
+            const notes = uid ? _notesForPersonUid(uid) : [];
+            const who = person.name || ('this ' + _noteRoleLabel(role).toLowerCase());
+
+            return `
+                <div class="glass-card rounded-xl p-5">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-lg font-bold text-viper-cyan flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                            </svg>
+                            Case Notes
+                            ${notes.length ? `<span class="px-2 py-0.5 rounded-full border border-viper-cyan/40 bg-viper-cyan/10 text-xs font-medium">${notes.length}</span>` : ''}
+                        </h3>
+                        <button onclick="openPersonNoteEditor('${role}', ${index}, null)" class="px-3 py-1 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan text-sm transition">
+                            + Add Note
+                        </button>
+                    </div>
+                    <p class="text-[11px] text-gray-500 mb-3">
+                        These live in the Case Notes module — this card is the same record, filed against ${_escapeHtml(who)}.
+                    </p>
+                    ${notes.length === 0 ? `
+                        <p class="text-gray-500 text-sm">No notes assigned yet.</p>
+                    ` : `
+                        <div class="space-y-3">
+                            ${notes.map(n => `
+                                <div class="bg-viper-card/40 border border-gray-700 rounded-lg p-4">
+                                    <div class="flex items-start justify-between gap-3 mb-2">
+                                        <span class="text-xs text-gray-400">${new Date(n.createdAt).toLocaleString()}${n.editHistory && n.editHistory.length ? ` &middot; edited ${new Date(n.editHistory[n.editHistory.length - 1]).toLocaleString()}` : ''}</span>
+                                        <div class="flex items-center gap-1 shrink-0">
+                                            <button onclick="openPersonNoteEditor('${role}', ${index}, ${n.id})" class="p-1.5 rounded text-gray-400 hover:text-viper-cyan hover:bg-viper-cyan/10 transition-colors" title="Edit this note">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                                            </button>
+                                            <button onclick="unassignNoteFromPerson(${n.id}, '${_escapeAttr(uid)}', '${role}', ${index})" class="p-1.5 rounded text-gray-400 hover:text-amber-400 hover:bg-amber-400/10 transition-colors" title="Unassign from this person (the note stays in Case Notes)">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="note-rendered text-gray-200 text-sm" style="line-height:1.6;">${_noteRenderHtml(n)}</div>
+                                    ${_noteAttachmentList(n)}
+                                </div>
+                            `).join('')}
+                        </div>
+                    `}
+                </div>`;
+        }
+
+        // ── Editing a note from inside a profile ──────────────────────────
+        // Deliberately a light editor: bold/italic/underline and text. Files
+        // and pasted screenshots still belong to the full Case Notes form,
+        // and the card links straight to whatever is already attached. What
+        // matters is that this writes to the SAME `caseNotes` record — there
+        // is no second store to drift out of sync.
+
+        let _personNoteCtx = null;
+
+        function openPersonNoteEditor(role, index, noteId) {
+            const acc = _notePersonAccess(role);
+            if (!acc) return;
+            try { acc.load(); } catch (_) {}
+            const person = (acc.get() || [])[index];
+            if (!person) return;
+
+            const note = noteId ? caseNotes.find(n => n.id === noteId) : null;
+            _personNoteCtx = { role, index, noteId: note ? note.id : null };
+
+            const title = note ? 'Edit Note' : 'Add Note';
+            const who = person.name || ('Unnamed ' + _noteRoleLabel(role));
+            const initial = note ? _noteResolveHtml(note) : '';
+
+            document.body.insertAdjacentHTML('beforeend', `
+                <div id="personNoteModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id==='personNoteModal') closePersonNoteEditor()">
+                    <div class="glass-card rounded-xl p-6 max-w-2xl w-full">
+                        <h3 class="text-xl font-bold text-white mb-1">${_escapeHtml(title)}</h3>
+                        <p class="text-xs text-gray-400 mb-4">Filed against <span class="text-viper-cyan">${_escapeHtml(who)}</span> &middot; saved to Case Notes</p>
+                        <div class="glass-card rounded-lg overflow-hidden border border-gray-600 focus-within:border-viper-cyan transition-colors">
+                            <div class="bg-viper-card/70 border-b border-gray-700 p-2 flex items-center gap-1">
+                                <button type="button" onclick="document.execCommand('bold', false, null); document.getElementById('personNoteEditor').focus();" title="Bold" class="p-2 rounded hover:bg-viper-cyan/20 text-gray-300 hover:text-viper-cyan w-9 h-9 flex items-center justify-center"><span class="font-bold text-sm">B</span></button>
+                                <button type="button" onclick="document.execCommand('italic', false, null); document.getElementById('personNoteEditor').focus();" title="Italic" class="p-2 rounded hover:bg-viper-cyan/20 text-gray-300 hover:text-viper-cyan w-9 h-9 flex items-center justify-center"><span class="italic text-sm">I</span></button>
+                                <button type="button" onclick="document.execCommand('underline', false, null); document.getElementById('personNoteEditor').focus();" title="Underline" class="p-2 rounded hover:bg-viper-cyan/20 text-gray-300 hover:text-viper-cyan w-9 h-9 flex items-center justify-center"><span class="underline text-sm">U</span></button>
+                                <button type="button" onclick="document.execCommand('insertUnorderedList', false, null); document.getElementById('personNoteEditor').focus();" title="Bullet list" class="p-2 rounded hover:bg-viper-cyan/20 text-gray-300 hover:text-viper-cyan w-9 h-9 flex items-center justify-center text-sm">&bull;&equiv;</button>
+                                <div class="flex-1"></div>
+                                <span class="text-[10px] text-gray-500">For files or screenshots, use the Case Notes tab</span>
+                            </div>
+                            <div class="p-4 bg-viper-card/30">
+                                <div id="personNoteEditor" contenteditable="true" spellcheck="true" class="outline-none text-gray-100 min-h-[180px]" style="font-size:14px; line-height:1.6;"></div>
+                            </div>
+                        </div>
+                        <div class="flex gap-3 justify-between items-center pt-4 mt-4 border-t border-gray-700">
+                            <div>
+                                ${note ? `<button type="button" onclick="deleteNoteFromProfile(${note.id})" class="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/40 rounded-lg text-red-400 transition text-sm">Delete Note</button>` : ''}
+                            </div>
+                            <div class="flex gap-3">
+                                <button type="button" onclick="closePersonNoteEditor()" class="px-5 py-2 rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-700 transition">Cancel</button>
+                                <button type="button" onclick="savePersonNote()" class="px-6 py-2 rounded-lg bg-gradient-to-r from-viper-green to-viper-cyan font-medium text-viper-dark hover:shadow-lg hover:shadow-viper-green/50 transition-all">Save Note</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `);
+
+            requestAnimationFrame(() => {
+                const ed = document.getElementById('personNoteEditor');
+                if (!ed) return;
+                ed.innerHTML = initial;
+                ed.focus();
+            });
+        }
+
+        function closePersonNoteEditor() {
+            const m = document.getElementById('personNoteModal');
+            if (m) m.remove();
+            _personNoteCtx = null;
+        }
+
+        function savePersonNote() {
+            const ctx = _personNoteCtx;
+            const ed = document.getElementById('personNoteEditor');
+            if (!ctx || !ed) return;
+
+            const contentHtml = ed.innerHTML.trim();
+            const plain = (ed.innerText || ed.textContent || '').trim();
+            if (!plain && !/<img\b/i.test(contentHtml)) {
+                viperToast('Note is empty — type something first.', 'info');
+                return;
+            }
+
+            // Stamping the uid here is what actually creates the link, so it
+            // must happen before the note is written.
+            const uid = _ensurePersonNoteUid(ctx.role, ctx.index);
+            if (!uid) { viperToast('Could not identify that person.', 'error'); return; }
+            const acc = _notePersonAccess(ctx.role);
+            const person = acc ? (acc.get() || [])[ctx.index] : null;
+            const link = { uid, role: ctx.role, name: (person && person.name) || '' };
+
+            if (ctx.noteId) {
+                const note = caseNotes.find(n => n.id === ctx.noteId);
+                if (note) {
+                    note.contentHtml = contentHtml;
+                    delete note.content;
+                    note.editHistory = note.editHistory || [];
+                    note.editHistory.push(new Date().toISOString());
+                    const links = _noteAssignments(note);
+                    if (!links.some(a => a.uid === uid)) links.push(link);
+                    note.assignedTo = links;
+                }
+            } else {
+                caseNotes.push({
+                    id: Date.now(),
+                    contentHtml,
+                    createdAt: new Date().toISOString(),
+                    editHistory: [],
+                    attachments: [],
+                    assignedTo: [link]
+                });
+            }
+
+            _persistCaseNotes();
+            try { ensureCaseModule('notes'); } catch (_) {}
+
+            const role = ctx.role;
+            closePersonNoteEditor();
+            viperToast('Note saved to Case Notes.', 'success');
+            renderTabContent(role);
+        }
+
+        async function deleteNoteFromProfile(noteId) {
+            const ctx = _personNoteCtx;
+            if (!await viperConfirm('Delete this note from the case entirely? This removes it from Case Notes too.', { danger: true, okText: 'Delete' })) return;
+            caseNotes = caseNotes.filter(n => n.id !== noteId);
+            _persistCaseNotes();
+            const role = ctx ? ctx.role : null;
+            closePersonNoteEditor();
+            viperToast('Note deleted.', 'success');
+            if (role) renderTabContent(role);
+        }
+
+        /** Detach a note from one person. The note itself is untouched. */
+        async function unassignNoteFromPerson(noteId, uid, role, index) {
+            const note = caseNotes.find(n => n.id === noteId);
+            if (!note) return;
+            if (!await viperConfirm('Remove this note from this profile? It stays in the Case Notes module.', { okText: 'Remove' })) return;
+            note.assignedTo = _noteAssignments(note).filter(a => a.uid !== uid);
+            _persistCaseNotes();
+            renderTabContent(role);
         }
         
         async function exportNotesToPDF() {
@@ -13982,6 +14384,9 @@
                                 ` : '<p class="text-gray-500">No registered vehicles</p>'}
                             </div>
                         </div>
+
+                        <!-- Case Notes filed against this person -->
+                        ${renderPersonNotesCard('suspects', index)}
                     </div>
                 </div>
             `;
@@ -17032,6 +17437,9 @@
                                 </div>
                             ` : '<p class="text-gray-500">No registered vehicles</p>'}
                         </div>
+
+                        <!-- Case Notes filed against this person -->
+                        ${renderPersonNotesCard('victims', index)}
                     </div>
                 </div>
             `;
@@ -19303,6 +19711,9 @@
 
                         <!-- Identifiers -->
                         ${renderPeopleIdentifiersSection(witness, 'witness', index)}
+
+                        <!-- Case Notes filed against this person -->
+                        ${renderPersonNotesCard('witnesses', index)}
                     </div>
                 </div>
             `;
@@ -20155,6 +20566,9 @@
                                 ` : '<p class="text-gray-400 text-base">No notes recorded</p>'}
                             `}
                         </div>
+
+                        <!-- Case Notes filed against this person -->
+                        ${renderPersonNotesCard('involvedPersons', index)}
                     </div>
                 </div>
             `;
@@ -21486,6 +21900,9 @@
                                 }
                             </div>
                         </div>
+
+                        <!-- Case Notes filed against this person -->
+                        ${renderPersonNotesCard('missingpersons', index)}
 
                     </div>
                 </div>

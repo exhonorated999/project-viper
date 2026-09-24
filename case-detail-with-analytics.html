@@ -6100,58 +6100,203 @@
                     
                     <!-- Notes List -->
                     <div id="notesList" class="space-y-4">
-                        ${caseNotes.length === 0 ? `
-                            <div class="glass-card rounded-xl p-12 text-center">
-                                <svg class="w-20 h-20 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
-                                </svg>
-                                <h3 class="text-xl font-bold text-gray-300 mb-2">No Notes Yet</h3>
-                                <p class="text-gray-400 mb-6">Start documenting this case by adding your first note</p>
-                            </div>
-                        ` : caseNotes.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(note => {
-                            const html = _noteRenderHtml(note);
-                            const atts = _noteAttachmentList(note);
-                            return `
-                            <div class="glass-card rounded-xl p-6 hover:border-viper-cyan/30 transition-colors">
-                                <div class="flex items-start justify-between mb-4">
-                                    <div class="flex-1">
-                                        <div class="flex items-center space-x-2 mb-2">
-                                            <svg class="w-4 h-4 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-                                            </svg>
-                                            <span class="text-sm text-gray-400">Created: ${new Date(note.createdAt).toLocaleString()}</span>
-                                        </div>
-                                        ${note.editHistory && note.editHistory.length > 0 ? `
-                                            <div class="flex items-center space-x-2 mb-2">
-                                                <svg class="w-4 h-4 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
-                                                </svg>
-                                                <span class="text-sm text-gray-400">Last Edited: ${new Date(note.editHistory[note.editHistory.length - 1]).toLocaleString()}</span>
-                                            </div>
-                                        ` : ''}
-                                    </div>
-                                    <div class="flex items-center space-x-2">
-                                        <button onclick="editNote(${note.id})" class="p-2 rounded-lg text-gray-400 hover:text-viper-cyan hover:bg-viper-cyan/10 transition-colors" title="Edit note">
-                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
-                                            </svg>
-                                        </button>
-                                        <button onclick="deleteNote(${note.id})" class="p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-400/10 transition-colors" title="Delete note">
-                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                                            </svg>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div class="note-rendered text-gray-200" style="line-height: 1.6;">${html}</div>
-
-                                ${atts}
-                            </div>
-                        `; }).join('')}
+                        ${renderNotesListHtml()}
                     </div>
                 </div>
             `;
+        }
+
+        // ─── Notes: collapsible day segments ─────────────────────────────
+        // A long-running case accumulates a wall of notes, and scrolling it
+        // to find what was written on a particular day is miserable. Notes
+        // are grouped by the LOCAL calendar day they were created on, newest
+        // day first, each day collapsible on its own.
+        //
+        // Grouping is by created date, not last-edited: an officer looks for
+        // "what did I write on the 14th", and editing a note later must not
+        // move it to a different day.
+
+        /** Local YYYY-MM-DD for a note's createdAt. 'unknown' if unreadable. */
+        function _noteDayKey(iso) {
+            if (!iso) return 'unknown';
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return 'unknown';
+            const p = n => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+        }
+
+        /** Human label for a day key. Parsed as LOCAL midnight, never UTC. */
+        function _noteDayLabel(key) {
+            if (key === 'unknown') return 'No date recorded';
+            const parts = key.split('-').map(Number);
+            const dt = new Date(parts[0], parts[1] - 1, parts[2]);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const diff = Math.round((today.getTime() - dt.getTime()) / 86400000);
+            if (diff === 0) return 'Today';
+            if (diff === 1) return 'Yesterday';
+            return dt.toLocaleDateString(undefined, {
+                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+            });
+        }
+
+        function _groupNotesByDay(notes) {
+            const map = new Map();
+            (notes || []).forEach(n => {
+                const k = _noteDayKey(n && n.createdAt);
+                if (!map.has(k)) map.set(k, []);
+                map.get(k).push(n);
+            });
+            const groups = [];
+            map.forEach((items, key) => {
+                items.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                groups.push({ key, label: _noteDayLabel(key), items });
+            });
+            // Newest day first; undated notes sink to the bottom rather than
+            // sorting as if they were the year 0.
+            groups.sort((a, b) => {
+                if (a.key === 'unknown') return 1;
+                if (b.key === 'unknown') return -1;
+                return b.key.localeCompare(a.key);
+            });
+            return groups;
+        }
+
+        // Which day segments are open. `var` so it hoists — the render call
+        // sits above this block in source order.
+        var _noteDaysExpanded = null;
+
+        function _initNoteDayState(groups) {
+            if (_noteDaysExpanded) {
+                // A new day may have appeared since the last render (a note
+                // added today). Default any day we have not seen to closed,
+                // except when it is the only one.
+                groups.forEach(g => {
+                    if (!(g.key in _noteDaysExpanded)) {
+                        _noteDaysExpanded[g.key] = groups.length === 1;
+                    }
+                });
+                return;
+            }
+            _noteDaysExpanded = {};
+            // Open the most recent day, close the rest. A single day is
+            // always open — collapsing it would just add a click for no gain.
+            groups.forEach((g, i) => { _noteDaysExpanded[g.key] = (i === 0); });
+        }
+
+        function toggleNoteDay(key) {
+            const body = document.getElementById('noteDay-' + key);
+            if (!body) return;
+            const open = !body.classList.toggle('hidden');
+            if (!_noteDaysExpanded) _noteDaysExpanded = {};
+            _noteDaysExpanded[key] = open;
+            const chev = document.getElementById('noteDayChevron-' + key);
+            if (chev) chev.style.transform = open ? 'rotate(90deg)' : 'rotate(0deg)';
+        }
+
+        function setAllNoteDays(open) {
+            const groups = _groupNotesByDay(caseNotes);
+            if (!_noteDaysExpanded) _noteDaysExpanded = {};
+            groups.forEach(g => { _noteDaysExpanded[g.key] = !!open; });
+            const c = document.getElementById('notesList');
+            if (c) c.innerHTML = renderNotesListHtml();
+        }
+
+        /** Make sure the day a given note belongs to is open after a save. */
+        function _revealNoteDay(createdAt) {
+            const k = _noteDayKey(createdAt);
+            if (!_noteDaysExpanded) _noteDaysExpanded = {};
+            _noteDaysExpanded[k] = true;
+        }
+
+        function renderNotesListHtml() {
+            if (!caseNotes || caseNotes.length === 0) {
+                return `
+                    <div class="glass-card rounded-xl p-12 text-center">
+                        <svg class="w-20 h-20 text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                        </svg>
+                        <h3 class="text-xl font-bold text-gray-300 mb-2">No Notes Yet</h3>
+                        <p class="text-gray-400 mb-6">Start documenting this case by adding your first note</p>
+                    </div>`;
+            }
+
+            const groups = _groupNotesByDay(caseNotes.slice());
+            _initNoteDayState(groups);
+
+            const controls = groups.length > 1 ? `
+                <div class="flex items-center justify-between text-xs text-gray-400 px-1">
+                    <span>${caseNotes.length} note${caseNotes.length === 1 ? '' : 's'} across ${groups.length} days</span>
+                    <div class="flex items-center space-x-2">
+                        <button onclick="setAllNoteDays(true)" class="px-2 py-1 rounded border border-gray-600 hover:border-viper-cyan hover:text-viper-cyan transition-colors">Expand all</button>
+                        <button onclick="setAllNoteDays(false)" class="px-2 py-1 rounded border border-gray-600 hover:border-viper-cyan hover:text-viper-cyan transition-colors">Collapse all</button>
+                    </div>
+                </div>
+            ` : '';
+
+            return controls + groups.map(g => {
+                const open = !!_noteDaysExpanded[g.key];
+                return `
+                <div class="rounded-xl border border-gray-700/60 bg-viper-card/25 overflow-hidden">
+                    <button type="button" onclick="toggleNoteDay('${g.key}')"
+                        class="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-viper-cyan/5 transition-colors">
+                        <span class="flex items-center min-w-0">
+                            <svg id="noteDayChevron-${g.key}" class="w-4 h-4 mr-2 text-viper-cyan flex-shrink-0 transition-transform" style="transform: rotate(${open ? 90 : 0}deg);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                            </svg>
+                            <span class="text-sm font-semibold text-gray-200 truncate">${g.label}</span>
+                        </span>
+                        <span class="ml-3 flex-shrink-0 px-2 py-0.5 rounded-full border border-viper-cyan/40 bg-viper-cyan/10 text-viper-cyan text-xs font-medium">
+                            ${g.items.length} note${g.items.length === 1 ? '' : 's'}
+                        </span>
+                    </button>
+                    <div id="noteDay-${g.key}" class="px-5 pb-5 space-y-4 ${open ? '' : 'hidden'}">
+                        ${g.items.map(_renderNoteCard).join('')}
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function _renderNoteCard(note) {
+            const html = _noteRenderHtml(note);
+            const atts = _noteAttachmentList(note);
+            return `
+            <div class="glass-card rounded-xl p-6 hover:border-viper-cyan/30 transition-colors">
+                <div class="flex items-start justify-between mb-4">
+                    <div class="flex-1">
+                        <div class="flex items-center space-x-2 mb-2">
+                            <svg class="w-4 h-4 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                            </svg>
+                            <span class="text-sm text-gray-400">Created: ${new Date(note.createdAt).toLocaleString()}</span>
+                        </div>
+                        ${note.editHistory && note.editHistory.length > 0 ? `
+                            <div class="flex items-center space-x-2 mb-2">
+                                <svg class="w-4 h-4 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                                </svg>
+                                <span class="text-sm text-gray-400">Last Edited: ${new Date(note.editHistory[note.editHistory.length - 1]).toLocaleString()}</span>
+                            </div>
+                        ` : ''}
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <button onclick="editNote(${note.id})" class="p-2 rounded-lg text-gray-400 hover:text-viper-cyan hover:bg-viper-cyan/10 transition-colors" title="Edit note">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                            </svg>
+                        </button>
+                        <button onclick="deleteNote(${note.id})" class="p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-400/10 transition-colors" title="Delete note">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="note-rendered text-gray-200" style="line-height: 1.6;">${html}</div>
+
+                ${atts}
+            </div>`;
         }
         
         function openAddNoteForm() {
@@ -6676,6 +6821,7 @@
                 const finalAttachments = [...savedNoteAttachments.filter(a => !a.legacy), ...successfullySaved];
 
                 // 2. Update note JSON
+                let savedNoteCreatedAt = null;
                 if (editingNoteId) {
                     const note = caseNotes.find(n => n.id === editingNoteId);
                     if (note) {
@@ -6686,16 +6832,23 @@
                         delete note.attachmentName;
                         note.editHistory = note.editHistory || [];
                         note.editHistory.push(new Date().toISOString());
+                        savedNoteCreatedAt = note.createdAt;
                     }
                 } else {
+                    const createdAt = new Date().toISOString();
                     caseNotes.push({
                         id: Date.now(),
                         contentHtml,
-                        createdAt: new Date().toISOString(),
+                        createdAt,
                         editHistory: [],
                         attachments: finalAttachments
                     });
+                    savedNoteCreatedAt = createdAt;
                 }
+
+                // Open the day segment the note landed in, so a save never
+                // appears to do nothing because its day happened to be shut.
+                try { if (savedNoteCreatedAt) _revealNoteDay(savedNoteCreatedAt); } catch (_) {}
 
                 const allNotes = _lsParse('viperCaseNotes', {});
                 allNotes[currentCase.caseNumber] = caseNotes;

@@ -907,18 +907,22 @@
   function launchCaseForAssignment(a) {
     const cases = lsJSON('viperCases', []);
     // The supervisor types this case number, so it can arrive padded or in a
-    // different letter case than the copy the investigator already has. Trim
-    // it and compare normalised — otherwise "2026-01506 " sails past the
-    // collision check and lands on the dashboard as a second, identical-
-    // looking case.
+    // different letter case than the copy the investigator already has.
+    // Compare normalised so the "-2" suffix actually fires — otherwise
+    // "2026-01506 " sails past the collision check and lands on the
+    // dashboard as a second, identical-LOOKING case.
+    //
+    // A collision still forks to a suffixed case number rather than opening
+    // the existing case: the supervisor's assignment is its own piece of
+    // work, and silently folding it into a case the investigator already
+    // has would hide the assignment.
     const norm = (v) => (window.viperSnapshot && window.viperSnapshot.normCaseNumber)
       ? window.viperSnapshot.normCaseNumber(v)
       : String(v == null ? '' : v).trim().replace(/\s+/g, ' ').toUpperCase();
     let caseNumber = String(a.caseNumber || ('MC-' + Date.now())).trim();
-    // Re-assigning a case number the investigator already holds must open
-    // that case, not fork a second copy of it.
-    const existing = cases.find((c) => norm(c && c.caseNumber) === norm(caseNumber));
-    if (existing) return existing;
+    const base = caseNumber;
+    let n = 1;
+    while (cases.find((c) => norm(c && c.caseNumber) === norm(caseNumber))) caseNumber = base + '-' + (++n);
     const now = new Date().toISOString();
     const newCase = {
       id: Date.now(),

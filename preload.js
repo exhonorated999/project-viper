@@ -75,6 +75,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   noteReadAttachment: (data) => ipcRenderer.invoke('note-read-attachment', data),
   noteDeleteAttachment: (data) => ipcRenderer.invoke('note-delete-attachment', data),
   noteListAttachments: (caseNumber) => ipcRenderer.invoke('note-list-attachments', caseNumber),
+  // Area Canvas media — photos/video/audio per canvass entry, saved to
+  // cases/{caseNumber}/Canvas Media/ on disk for the same reason note
+  // attachments are: localStorage cannot hold a video.
+  canvasSaveMedia: (data) => ipcRenderer.invoke('canvas-save-media', data),
+  canvasReadMedia: (data) => ipcRenderer.invoke('canvas-read-media', data),
+  canvasDeleteMedia: (data) => ipcRenderer.invoke('canvas-delete-media', data),
   notesExportMergeAttachments: (data) => ipcRenderer.invoke('notes-export-merge-attachments', data),
 
   // Backup & Restore

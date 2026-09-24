@@ -2605,6 +2605,113 @@ ipcMain.handle('note-delete-attachment', async (_e, payload) => {
   }
 });
 
+// ── Area Canvas media (cases/{caseNumber}/Canvas Media/) ─────────────
+// Photos, video and audio captured against a single canvass entry. Same
+// contract as note attachments: the renderer hands over base64, we write
+// the bytes to disk under Field Security when it is enabled+unlocked,
+// and the entry's JSON in localStorage keeps only the file NAME.
+//
+// This has to be on disk. localStorage is a ~5MB quota and one minute of
+// 720p video is around 11MB, so a single canvass entry would blow it and
+// take the rest of the case record with it.
+const CANVAS_MEDIA_DIR = 'Canvas Media';
+
+ipcMain.handle('canvas-save-media', async (_e, payload) => {
+  try {
+    const caseNumber = _safeCaseNumber(payload && payload.caseNumber);
+    if (!caseNumber) return { success: false, error: 'Invalid case number' };
+    const rawName = _sanitizeAttachmentName(payload && payload.fileName);
+    if (!rawName) return { success: false, error: 'Invalid file name' };
+    if (!payload || typeof payload.dataBase64 !== 'string' || !payload.dataBase64.length) {
+      return { success: false, error: 'No file data provided' };
+    }
+
+    const buf = Buffer.from(payload.dataBase64, 'base64');
+    const dir = path.join(casesDir, caseNumber, CANVAS_MEDIA_DIR);
+    fs.mkdirSync(dir, { recursive: true });
+
+    // Collision handling suffixes until a name is free, like note
+    // attachments, but the name is claimed by the WRITE itself: 'wx' fails
+    // with EEXIST rather than overwriting, so checking and writing are one
+    // step. A separate existsSync probe leaves a window in which a second
+    // save picks the same name and silently destroys the first officer's
+    // photo — evidence loss with no error anywhere.
+    const bytes = (security && security.isEnabled() && security.isUnlocked())
+      ? security.encryptBuffer(buf)
+      : buf;
+    const ext = path.extname(rawName);
+    const stem = rawName.slice(0, rawName.length - ext.length);
+    let finalName = rawName;
+    for (let n = 1; ; n++) {
+      try {
+        fs.writeFileSync(path.join(dir, finalName), bytes, { flag: 'wx' });
+        break;
+      } catch (e) {
+        if (!e || e.code !== 'EEXIST') throw e;
+        if (n > 999) return { success: false, error: 'Too many collisions' };
+        finalName = `${stem} (${n})${ext}`;
+      }
+    }
+    return { success: true, fileName: finalName, size: buf.length };
+  } catch (err) {
+    console.error('canvas-save-media failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('canvas-read-media', async (_e, payload) => {
+  try {
+    const caseNumber = _safeCaseNumber(payload && payload.caseNumber);
+    if (!caseNumber) return { success: false, error: 'Invalid case number' };
+    const fileName = _sanitizeAttachmentName(payload && payload.fileName);
+    if (!fileName) return { success: false, error: 'Invalid file name' };
+    const filePath = path.join(casesDir, caseNumber, CANVAS_MEDIA_DIR, fileName);
+    if (!fs.existsSync(filePath)) return { success: false, error: 'File not found', missing: true };
+
+    let raw = fs.readFileSync(filePath);
+    if (security && security.isUnlocked() && security.isEncryptedBuffer && security.isEncryptedBuffer(raw)) {
+      raw = security.decryptBuffer(raw);
+    } else if (security && security.isEnabled() && !security.isUnlocked()) {
+      if (raw.length >= 6 && raw[0] === 0x56 && raw[1] === 0x49 && raw[2] === 0x50
+          && raw[3] === 0x45 && raw[4] === 0x4E && raw[5] === 0x43) {
+        return { success: false, error: 'File is encrypted; unlock Field Security to view.' };
+      }
+    }
+    return { success: true, dataBase64: raw.toString('base64'), size: raw.length };
+  } catch (err) {
+    console.error('canvas-read-media failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('canvas-delete-media', async (_e, payload) => {
+  try {
+    const caseNumber = _safeCaseNumber(payload && payload.caseNumber);
+    if (!caseNumber) return { success: false, error: 'Invalid case number' };
+    const names = Array.isArray(payload && payload.fileNames)
+      ? payload.fileNames
+      : [payload && payload.fileName];
+    const dir = path.join(casesDir, caseNumber, CANVAS_MEDIA_DIR);
+    let removed = 0;
+    const failed = [];
+    for (const n of names) {
+      const fileName = _sanitizeAttachmentName(n);
+      if (!fileName) continue;
+      const filePath = path.join(dir, fileName);
+      try {
+        if (fs.existsSync(filePath)) { fs.unlinkSync(filePath); removed++; }
+      } catch (e) {
+        // A locked file must not abort the rest of the cleanup.
+        failed.push(fileName);
+      }
+    }
+    return { success: true, removed, failed };
+  } catch (err) {
+    console.error('canvas-delete-media failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
 // Merge PDF attachments into the Notes-export PDF and save via dialog.
 // Renderer builds the cover/notes section with jsPDF, hands us the
 // base PDF as base64 + the names of PDF attachments to append.
@@ -3594,7 +3701,7 @@ ipcMain.handle('save-case-export', async (event, { fileName, data }) => {
 });
 
 // --- Export DA Package (ZIP with PDF + evidence files) ---
-ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber, excludeCsam, csamTags, nonDiscoverableTags }) => {
+ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber, excludeCsam, csamTags, nonDiscoverableTags, nonDiscoverableCanvasFiles }) => {
   const result = await dialog.showSaveDialog(mainWindow, {
     title: 'Save DA Export Package',
     defaultPath: fileName,
@@ -3615,6 +3722,14 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
   // ZIP, independent of the CSAM toggle. Matched by evidence-tag folder name.
   const nonDiscoverableSkipSet = new Set(
     (Array.isArray(nonDiscoverableTags) ? nonDiscoverableTags : [])
+      .filter(t => typeof t === 'string' && t.length > 0)
+  );
+
+  // Area Canvas media carries the same per-item Discovery Status flag, but
+  // it is stored as flat files rather than tag folders, so it is withheld
+  // by file name.
+  const nonDiscoverableCanvasSet = new Set(
+    (Array.isArray(nonDiscoverableCanvasFiles) ? nonDiscoverableCanvasFiles : [])
       .filter(t => typeof t === 'string' && t.length > 0)
   );
 
@@ -3667,7 +3782,11 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
     // opts.skipTopLevelDirs: Set<string> — names of immediate subdirectories
     //   of baseDir that should be omitted entirely (e.g. CSAM-flagged
     //   evidence folders when DA export is set to exclude CSAM).
+    // opts.skipFileNames: Set<string> — basenames omitted entirely. Canvas
+    //   media is flat files rather than tag folders, so its Not-Discoverable
+    //   items are withheld by file name instead of directory name.
     const skipTopLevelDirs = opts.skipTopLevelDirs instanceof Set ? opts.skipTopLevelDirs : null;
+    const skipFileNames = opts.skipFileNames instanceof Set ? opts.skipFileNames : null;
     if (!fs.existsSync(baseDir)) return;
     const walk = (dir, rel) => {
       let entries;
@@ -3683,6 +3802,11 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
         }
         if (entry.isDirectory()) {
           walk(full, relPath);
+          continue;
+        }
+        // Per-file Discovery Status exclusion (Area Canvas media).
+        if (skipFileNames && skipFileNames.has(entry.name)) {
+          csamSkippedLog.push(`${archivePrefix}/${entry.name}`);
           continue;
         }
         const archiveName = `${archivePrefix}/${sanitizeArchiveRel(relPath)}`;
@@ -3796,7 +3920,16 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
       // 4. Note attachments (PDFs, pasted images stored from the Notes tab)
       addTreeToArchive(path.join(casesDir, caseNumber, 'Notes'), 'Notes', archive);
 
-      // 5. Manifest with per-file outcome — useful for DA-side audit
+      // 5. Area Canvas media (photos/video/audio captured per canvass entry).
+      //    Flat files, so Not-Discoverable items are withheld by file name.
+      addTreeToArchive(
+        path.join(casesDir, caseNumber, CANVAS_MEDIA_DIR),
+        CANVAS_MEDIA_DIR,
+        archive,
+        { skipFileNames: nonDiscoverableCanvasSet.size ? nonDiscoverableCanvasSet : null }
+      );
+
+      // 6. Manifest with per-file outcome — useful for DA-side audit
       const manifest = {
         caseNumber,
         generatedAt: new Date().toISOString(),
@@ -3814,6 +3947,7 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
         },
         discoveryPolicy: {
           requestedNonDiscoverableTags: Array.from(nonDiscoverableSkipSet),
+          nonDiscoverableCanvasMedia: Array.from(nonDiscoverableCanvasSet),
           note: nonDiscoverableSkipSet.size > 0
             ? 'One or more evidence items were flagged NOT DISCOVERABLE (investigative-only, e.g. TLO reports, or CSAM in a non-disclosure jurisdiction) by the exporting officer. These items are omitted from the PDF report and their files were excluded from this package. They are not turned over in discovery. Folders physically skipped are listed under csamPolicy.csamFoldersSkipped-equivalent (evidenceFoldersSkipped).'
             : 'No Not-Discoverable evidence flagged; all recorded evidence is discoverable.',

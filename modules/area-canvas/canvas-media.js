@@ -624,6 +624,27 @@
             .slice(0, 40) || 'entry';
     }
 
+    /**
+     * The on-disk name for one canvass media file.
+     *
+     * Public because media arrives by two routes — captured here in the app,
+     * or relayed from an officer's phone through a shared canvas form — and
+     * a case folder where the same photo is named two different ways
+     * depending on how it got there is a bad look in discovery. Both paths
+     * call this.
+     *
+     * `opts`: { label, kind, mime, index, date }
+     */
+    function fileNameFor(opts) {
+        const o = opts || {};
+        const d = o.date instanceof Date ? o.date : (o.date ? new Date(o.date) : new Date());
+        const datePart = (isNaN(d.getTime()) ? new Date() : d).toISOString().slice(0, 10);
+        const word = o.kind === 'image' ? 'photo' : (o.kind === 'video' ? 'video' : 'audio');
+        const n = Math.max(1, Math.round(Number(o.index) || 1));
+        return 'Canvas ' + datePart + ' ' + _slug(o.label) + ' ' + word + ' ' + n
+            + '.' + _extFor(o.kind, o.mime);
+    }
+
     function _blobToBase64(blob) {
         return new Promise((resolve, reject) => {
             const fr = new FileReader();
@@ -664,14 +685,12 @@
             };
         }
 
-        const datePart = new Date().toISOString().slice(0, 10);
-        const slug = _slug(_state.label);
         let n = out.length + 1;
 
         for (const item of _state.staged) {
-            const ext = _extFor(item.kind, item.mime);
-            const word = item.kind === 'image' ? 'photo' : item.kind;
-            const fileName = 'Canvas ' + datePart + ' ' + slug + ' ' + word + ' ' + n + '.' + ext;
+            const fileName = fileNameFor({
+                label: _state.label, kind: item.kind, mime: item.mime, index: n
+            });
             try {
                 const dataBase64 = await _blobToBase64(item.blob);
                 const res = await api.canvasSaveMedia({
@@ -1033,6 +1052,7 @@
         IMAGE_MAX_EDGE,
         configure,
         attachBarHtml,
+        fileNameFor,
         mount,
         unmount,
         commit,

@@ -2623,6 +2623,40 @@ ipcMain.handle('note-delete-attachment', async (_e, payload) => {
 // take the rest of the case record with it.
 const CANVAS_MEDIA_DIR = 'Canvas Media';
 
+/**
+ * Write one canvas media file, applying Field Security and claiming the
+ * name atomically. Shared by the in-app capture path and the relay import.
+ *
+ * Collision handling suffixes until a name is free, like note attachments,
+ * but the name is claimed by the WRITE itself: 'wx' fails with EEXIST
+ * rather than overwriting, so checking and writing are one step. A separate
+ * existsSync probe leaves a window in which a second save picks the same
+ * name and silently destroys the first officer's photo — evidence loss with
+ * no error anywhere.
+ */
+function _writeCanvasMediaFile(caseNumber, rawName, buf) {
+  const dir = path.join(casesDir, caseNumber, CANVAS_MEDIA_DIR);
+  fs.mkdirSync(dir, { recursive: true });
+
+  const bytes = (security && security.isEnabled() && security.isUnlocked())
+    ? security.encryptBuffer(buf)
+    : buf;
+  const ext = path.extname(rawName);
+  const stem = rawName.slice(0, rawName.length - ext.length);
+  let finalName = rawName;
+  for (let n = 1; ; n++) {
+    try {
+      fs.writeFileSync(path.join(dir, finalName), bytes, { flag: 'wx' });
+      break;
+    } catch (e) {
+      if (!e || e.code !== 'EEXIST') throw e;
+      if (n > 999) throw new Error('Too many collisions');
+      finalName = `${stem} (${n})${ext}`;
+    }
+  }
+  return { fileName: finalName, size: buf.length };
+}
+
 ipcMain.handle('canvas-save-media', async (_e, payload) => {
   try {
     const caseNumber = _safeCaseNumber(payload && payload.caseNumber);
@@ -2633,33 +2667,8 @@ ipcMain.handle('canvas-save-media', async (_e, payload) => {
       return { success: false, error: 'No file data provided' };
     }
 
-    const buf = Buffer.from(payload.dataBase64, 'base64');
-    const dir = path.join(casesDir, caseNumber, CANVAS_MEDIA_DIR);
-    fs.mkdirSync(dir, { recursive: true });
-
-    // Collision handling suffixes until a name is free, like note
-    // attachments, but the name is claimed by the WRITE itself: 'wx' fails
-    // with EEXIST rather than overwriting, so checking and writing are one
-    // step. A separate existsSync probe leaves a window in which a second
-    // save picks the same name and silently destroys the first officer's
-    // photo — evidence loss with no error anywhere.
-    const bytes = (security && security.isEnabled() && security.isUnlocked())
-      ? security.encryptBuffer(buf)
-      : buf;
-    const ext = path.extname(rawName);
-    const stem = rawName.slice(0, rawName.length - ext.length);
-    let finalName = rawName;
-    for (let n = 1; ; n++) {
-      try {
-        fs.writeFileSync(path.join(dir, finalName), bytes, { flag: 'wx' });
-        break;
-      } catch (e) {
-        if (!e || e.code !== 'EEXIST') throw e;
-        if (n > 999) return { success: false, error: 'Too many collisions' };
-        finalName = `${stem} (${n})${ext}`;
-      }
-    }
-    return { success: true, fileName: finalName, size: buf.length };
+    const written = _writeCanvasMediaFile(caseNumber, rawName, Buffer.from(payload.dataBase64, 'base64'));
+    return { success: true, fileName: written.fileName, size: written.size };
   } catch (err) {
     console.error('canvas-save-media failed:', err);
     return { success: false, error: err.message };
@@ -8109,6 +8118,49 @@ async function _canvasApiFetch(apiKey, endpoint, options = {}) {
   });
 }
 
+/**
+ * Same call, but the response is bytes rather than JSON.
+ *
+ * Attachments come back as application/octet-stream — ciphertext the relay
+ * cannot read and we must not let anything in the chain try to decode. The
+ * JSON helper above would mangle them into a string, so this collects raw
+ * Buffers instead. The timeout is longer because this may be a 20 MB clip
+ * over a station's connection, not a small JSON body.
+ */
+async function _canvasApiFetchBinary(apiKey, endpoint) {
+  if (!apiKey) throw new Error('Not registered — activate your VIPER license first');
+  const https = require('https');
+  const http_ = require('http');
+  const url = new URL(endpoint, CANVAS_API_BASE);
+  const transport = url.protocol === 'https:' ? https : http_;
+
+  return new Promise((resolve, reject) => {
+    const req = transport.request({
+      hostname: url.hostname,
+      port: url.port || (url.protocol === 'https:' ? 443 : 80),
+      path: url.pathname + url.search,
+      method: 'GET',
+      headers: { 'X-API-Key': apiKey }
+    }, (res) => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        if (res.statusCode >= 400) {
+          let detail = `Server error ${res.statusCode}`;
+          try { detail = JSON.parse(buf.toString('utf8')).detail || detail; } catch (_) {}
+          reject(new Error(detail));
+          return;
+        }
+        resolve(buf);
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(120000, () => { req.destroy(); reject(new Error('Request timeout')); });
+    req.end();
+  });
+}
+
 // Canvas Form IPC handlers — all calls go to Railway server
 ipcMain.handle('canvas-form-create', async (event, { apiKey, title, caseRef, fields }) => {
   const result = await _canvasApiFetch(apiKey, '/api/canvas/forms', {
@@ -8120,19 +8172,98 @@ ipcMain.handle('canvas-form-create', async (event, { apiKey, title, caseRef, fie
     }
   });
 
+  // The media key for this form. Photos and clips the officer captures are
+  // encrypted on their phone with this key before they are uploaded, so the
+  // relay stores ciphertext it has no means of reading.
+  //
+  // It rides in the URL FRAGMENT. Browsers never put a fragment in an HTTP
+  // request, so scanning the QR hands the key to the phone without ever
+  // sending it to the server. That is the whole basis of the claim we make
+  // to an agency about this feature, and it is why the key must not be
+  // appended as a query string.
+  const mediaKey = require('crypto').randomBytes(32).toString('base64url');
+  const formUrl = String(result.form_url || '') + '#k=' + mediaKey;
+
   // Generate QR code for the form URL
   const QRCode = require('qrcode');
-  const qrDataUrl = await QRCode.toDataURL(result.form_url, {
+  const qrDataUrl = await QRCode.toDataURL(formUrl, {
     width: 300, margin: 2,
     color: { dark: '#22d3ee', light: '#0f1117' }
   });
 
   return {
     formId: result.form_id,
-    formUrl: result.form_url,
+    formUrl,
     qrDataUrl,
+    mediaKey,
     expiresAt: result.expires_at
   };
+});
+
+// Pull one encrypted attachment down, decrypt it, write it into the case
+// folder, and tell the relay to destroy its copy.
+//
+// The delete is deliberately not fatal. Once the bytes are on the
+// detective's disk the import has succeeded; a failed delete leaves a blob
+// the 48-hour TTL sweep will take anyway, whereas reporting failure here
+// would make the officer re-import a photo they already have.
+ipcMain.handle('canvas-fetch-media', async (_e, payload) => {
+  const p = payload || {};
+  try {
+    const caseNumber = _safeCaseNumber(p.caseNumber);
+    if (!caseNumber) return { success: false, error: 'Invalid case number' };
+    const rawName = _sanitizeAttachmentName(p.fileName);
+    if (!rawName) return { success: false, error: 'Invalid file name' };
+    const mediaId = parseInt(p.mediaId, 10);
+    if (!Number.isFinite(mediaId) || mediaId <= 0) return { success: false, error: 'Invalid media id' };
+
+    const nodeCrypto = require('crypto');
+    let key;
+    try {
+      key = Buffer.from(String(p.mediaKey || ''), 'base64url');
+    } catch (_) {
+      key = Buffer.alloc(0);
+    }
+    if (key.length !== 32) {
+      return { success: false, error: 'This form has no usable media key — the attachment cannot be decrypted.' };
+    }
+
+    const cipher = await _canvasApiFetchBinary(p.apiKey, `/api/canvas/media/${mediaId}`);
+    // 12-byte IV, then AES-GCM ciphertext with its 16-byte tag appended —
+    // exactly what SubtleCrypto's encrypt() produces on the phone.
+    if (!cipher || cipher.length < 12 + 16 + 1) {
+      return { success: false, error: 'Attachment came back empty or truncated.' };
+    }
+    const iv = cipher.subarray(0, 12);
+    const tag = cipher.subarray(cipher.length - 16);
+    const body = cipher.subarray(12, cipher.length - 16);
+    let plain;
+    try {
+      const decipher = nodeCrypto.createDecipheriv('aes-256-gcm', key, iv);
+      decipher.setAuthTag(tag);
+      plain = Buffer.concat([decipher.update(body), decipher.final()]);
+    } catch (err) {
+      // GCM authenticates as well as decrypts, so this means the bytes were
+      // altered in transit or the key does not belong to this form. Either
+      // way the file is not evidence and must not be written.
+      return { success: false, error: 'Attachment failed its integrity check and was not saved.' };
+    }
+
+    const written = _writeCanvasMediaFile(caseNumber, rawName, plain);
+
+    let purged = true;
+    try {
+      await _canvasApiFetch(p.apiKey, `/api/canvas/media/${mediaId}`, { method: 'DELETE' });
+    } catch (err) {
+      purged = false;
+      console.warn('canvas-fetch-media: server copy not purged:', err.message);
+    }
+
+    return { success: true, fileName: written.fileName, size: written.size, purged };
+  } catch (err) {
+    console.error('canvas-fetch-media failed:', err);
+    return { success: false, error: err.message };
+  }
 });
 
 ipcMain.handle('canvas-form-get-info', async (event, { apiKey, formId }) => {

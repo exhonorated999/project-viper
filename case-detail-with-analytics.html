@@ -50,6 +50,12 @@
     <script src="modules/rms/generic-extractor.js"></script>
     <script src="modules/flock/flock-module.js" defer></script>
     <script src="modules/flock/flock-ui.js" defer></script>
+    <!-- Area Canvas media: photos attached from disk, video/audio recorded
+         in-app. Loaded WITHOUT defer — the canvass tab's render functions
+         call CanvasMedia.galleryHtml()/attachBarHtml() synchronously while
+         building their template strings. -->
+    <link rel="stylesheet" href="modules/area-canvas/canvas-media.css" />
+    <script src="modules/area-canvas/canvas-media.js"></script>
     <!-- Analytics CDR Libraries -->
     <script src="libs/papaparse.min.js"></script>
     <script src="libs/d3.v7.min.js"></script>
@@ -3992,6 +3998,9 @@
                         excludeCsam: !!_daExportExcludeCsam,
                         csamTags: Array.isArray(_daExportCsamTags) ? _daExportCsamTags : [],
                         nonDiscoverableTags: Array.isArray(_daExportNonDiscoverableTags) ? _daExportNonDiscoverableTags : [],
+                        // Canvass media is flat files rather than tag
+                        // folders, so it is withheld by file name.
+                        nonDiscoverableCanvasFiles: _canvasNonDiscoverableFiles(),
                     });
                     if (savedPath) {
                         const withheldTags = Array.isArray(_daExportNonDiscoverableTags) ? _daExportNonDiscoverableTags : [];
@@ -4555,6 +4564,7 @@
                     excludeCsam: !!_daExportExcludeCsam,
                     csamTags: Array.isArray(_daExportCsamTags) ? _daExportCsamTags : [],
                     nonDiscoverableTags: Array.isArray(_daExportNonDiscoverableTags) ? _daExportNonDiscoverableTags : [],
+                    nonDiscoverableCanvasFiles: _canvasNonDiscoverableFiles(),
                 });
                 if (savedPath) {
                     const withheldTags = Array.isArray(_daExportNonDiscoverableTags) ? _daExportNonDiscoverableTags : [];
@@ -4692,7 +4702,20 @@
                     setTimeout(() => initMissingPersonMap(currentMissingPersonView), 200);
                 }
             } else if (tabId === 'areacanvas') {
+                _canvasMediaConfigure();
                 contentDiv.innerHTML = renderAreaCanvasTab();
+                // Hydrate disk-backed canvass photos. Same pattern as Ops
+                // Plan: the gallery renders placeholders, then this walks
+                // them and swaps in object URLs read off disk.
+                if (currentCanvasView !== null && window.CanvasMedia) {
+                    try {
+                        window.CanvasMedia.hydrate(
+                            contentDiv,
+                            (currentCase && currentCase.caseNumber) || '',
+                            canvasData[currentCanvasView]
+                        );
+                    } catch (_) {}
+                }
                 // Init canvas map after HTML is in DOM
                 setTimeout(() => {
                     if (document.getElementById('canvasMap')) initCanvasMap();
@@ -24028,7 +24051,41 @@
         function saveCanvasData() {
             localStorage.setItem(`areacanvas_${currentCase.id}`, JSON.stringify(canvasData));
         }
+
+        // Wire the canvas media module to this host. CanvasMedia owns no
+        // state of its own — it reaches back through these for the entry
+        // list, the case folder name, persistence and user feedback.
+        //
+        // canvasData and currentCase are top-level `let` in a classic
+        // <script>, so they are NOT on window. These closures are declared
+        // in the same lexical scope, which is the only way the module can
+        // see them.
+        function _canvasMediaConfigure() {
+            if (!window.CanvasMedia) return;
+            window.CanvasMedia.configure({
+                getEntries: () => canvasData,
+                getCaseNumber: () => (currentCase && currentCase.caseNumber) || '',
+                persist: () => saveCanvasData(),
+                rerender: () => renderTabContent('areacanvas'),
+                toast: (msg, kind) => viperToast(msg, kind),
+                confirm: (msg, opts) => viperConfirm(msg, opts)
+            });
+        }
         
+        // File names the DA export must withhold.
+        //
+        // Reads the store rather than the in-memory `canvasData`: the export
+        // can be run without ever opening the canvass tab, in which case
+        // canvasData is still [] while the files are sitting on disk. Getting
+        // this wrong would ship a withheld photo to the DA.
+        function _canvasNonDiscoverableFiles() {
+            try {
+                if (!window.CanvasMedia || !currentCase) return [];
+                const entries = _lsParse(`areacanvas_${currentCase.id}`, []);
+                return window.CanvasMedia.nonDiscoverableFileNames(entries);
+            } catch (_) { return []; }
+        }
+
         // Canvas Map Functions
         let canvasMap = null;
         let canvasMarkerCluster = null;
@@ -24535,7 +24592,7 @@
                 const originalIndex = canvasData.indexOf(location);
                 return `
                     <tr class="hover:bg-viper-dark/30 cursor-pointer" onclick="viewCanvasLocation(${originalIndex})">
-                        <td class="px-4 py-3 text-sm text-white">${location.address}</td>
+                        <td class="px-4 py-3 text-sm text-white">${location.address}${window.CanvasMedia ? window.CanvasMedia.summaryBadge(location) : ''}</td>
                         <td class="px-4 py-3 text-sm">
                             <span class="px-2 py-1 rounded text-xs ${location.contact === 'Yes' ? 'bg-viper-green/20 text-viper-green' : 'bg-gray-700 text-gray-400'}">
                                 ${location.contact}
@@ -24850,6 +24907,7 @@
                                 <label class="block text-sm text-gray-400 mb-2">Notes</label>
                                 <textarea id="entry_notes" rows="3" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-green focus:outline-none"></textarea>
                             </div>
+                            ${window.CanvasMedia ? window.CanvasMedia.attachBarHtml() : ''}
                             <div class="flex gap-3 justify-end mt-6">
                                 <button type="button" onclick="closeCanvasEntryModal()" class="px-6 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white transition">
                                     Cancel
@@ -24864,24 +24922,62 @@
             `;
             
             document.body.insertAdjacentHTML('beforeend', modalHTML);
+            // The modal's max-w-2xl body does not scroll on the Add form, so
+            // give it the same overflow the Edit form has now that there is
+            // a thumbnail strip in it.
+            const body = document.querySelector('#canvasEntryModal > div');
+            if (body) body.classList.add('max-h-[90vh]', 'overflow-y-auto');
+            if (window.CanvasMedia) {
+                _canvasMediaConfigure();
+                window.CanvasMedia.mount({
+                    caseNumber: (currentCase && currentCase.caseNumber) || '',
+                    media: [],
+                    label: ''
+                });
+            }
         }
 
         function closeCanvasEntryModal() {
+            // Tear the recorder down first — if the officer closes the modal
+            // mid-recording the camera light must go out with it.
+            if (window.CanvasMedia) {
+                try { window.CanvasMedia.unmount(); } catch (_) {}
+            }
             const modal = document.getElementById('canvasEntryModal');
             if (modal) modal.remove();
         }
 
-        function saveCanvasEntry(event) {
+        async function saveCanvasEntry(event) {
             event.preventDefault();
-            
+
+            const submitBtn = event.target.querySelector('button[type="submit"]');
+            const address = document.getElementById('entry_address').value.trim();
+
+            // Write the media to disk BEFORE the entry record is created, so
+            // the record can never reference a file that is not there.
+            let media = [];
+            if (window.CanvasMedia) {
+                if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving…'; }
+                try {
+                    const res = await window.CanvasMedia.commit();
+                    if (Array.isArray(res.media)) media = res.media;
+                    (res.errors || []).forEach(e => viperToast(e, 'error'));
+                } catch (err) {
+                    viperToast('Could not save the attached files: ' + (err.message || err), 'error');
+                } finally {
+                    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Add Entry'; }
+                }
+            }
+
             const newEntry = {
                 id: Date.now(),
-                address: document.getElementById('entry_address').value.trim(),
+                address: address,
                 contact: document.getElementById('entry_contact').value,
                 name: document.getElementById('entry_name').value.trim(),
                 phone: document.getElementById('entry_phone').value.trim(),
                 evidenceLocated: document.getElementById('entry_evidence').value,
                 notes: document.getElementById('entry_notes').value.trim(),
+                media: media,
                 needsFollowUp: false,
                 timestamp: new Date().toISOString()
             };
@@ -24978,6 +25074,10 @@
                             </div>
                         ` : ''}
 
+                        <!-- Photos, video and audio captured at this door.
+                             Returns '' when the entry has none. -->
+                        ${window.CanvasMedia ? window.CanvasMedia.galleryHtml(location, index) : ''}
+
                         <!-- Follow-Up Status -->
                         <div class="glass-card rounded-xl p-6">
                             <div class="flex items-center justify-between">
@@ -25070,6 +25170,7 @@
                                 <label class="block text-sm text-gray-400 mb-2">Notes</label>
                                 <textarea id="entry_notes" rows="3" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-green focus:outline-none">${esc(location.notes)}</textarea>
                             </div>
+                            ${window.CanvasMedia ? window.CanvasMedia.attachBarHtml() : ''}
 
                             <!-- Manual GPS override -->
                             <div class="border border-viper-cyan/30 bg-viper-cyan/5 rounded-lg p-4">
@@ -25107,6 +25208,14 @@
             `;
             
             document.body.insertAdjacentHTML('beforeend', modalHTML);
+            if (window.CanvasMedia) {
+                _canvasMediaConfigure();
+                window.CanvasMedia.mount({
+                    caseNumber: (currentCase && currentCase.caseNumber) || '',
+                    media: Array.isArray(location.media) ? location.media : [],
+                    label: location.street || location.address || ''
+                });
+            }
         }
 
         // Used by the canvas edit modal "Test Lookup" button — geocodes the
@@ -25137,7 +25246,7 @@
             }
         }
 
-        function updateCanvasEntry(event, index) {
+        async function updateCanvasEntry(event, index) {
             event.preventDefault();
             
             const street = document.getElementById('entry_address').value.trim();
@@ -25154,6 +25263,26 @@
             // string used throughout the app (legacy callers, geocoder, table).
             const composed = [street, city, state, zip].filter(Boolean).join(', ');
 
+            // Write new files and delete struck-out ones. commit() returns
+            // the entry's final media array — a file that failed to write is
+            // reported and left out rather than recorded as present.
+            let media = Array.isArray(canvasData[index].media) ? canvasData[index].media : [];
+            const submitBtn = event.target.querySelector('button[type="submit"]');
+            if (window.CanvasMedia) {
+                if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving…'; }
+                try {
+                    const res = await window.CanvasMedia.commit();
+                    // Only replace the array when the editor actually ran.
+                    // `media: null` means "not mounted", not "no files".
+                    if (Array.isArray(res.media)) media = res.media;
+                    (res.errors || []).forEach(e => viperToast(e, 'error'));
+                } catch (err) {
+                    viperToast('Could not save the attached files: ' + (err.message || err), 'error');
+                } finally {
+                    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Update Entry'; }
+                }
+            }
+
             canvasData[index] = {
                 ...canvasData[index],
                 address: composed,
@@ -25166,6 +25295,7 @@
                 phone: document.getElementById('entry_phone').value.trim(),
                 evidenceLocated: document.getElementById('entry_evidence').value,
                 notes: document.getElementById('entry_notes').value.trim(),
+                media: media,
                 manualLat: (manualLat !== null && !isNaN(manualLat)) ? manualLat : undefined,
                 manualLon: (manualLon !== null && !isNaN(manualLon)) ? manualLon : undefined
             };
@@ -25177,6 +25307,17 @@
 
         async function deleteCanvasLocation(index) {
             if (await viperConfirm('Are you sure you want to delete this canvas entry?', {danger:true, okText:'Delete'})) {
+                // The entry is going, so its files go with it. Nothing else
+                // references them, and leaving them would leave photos of a
+                // door in the DA export with no entry to explain them.
+                if (window.CanvasMedia) {
+                    try {
+                        await window.CanvasMedia.deleteAll(
+                            (currentCase && currentCase.caseNumber) || '',
+                            canvasData[index].media
+                        );
+                    } catch (_) {}
+                }
                 canvasData.splice(index, 1);
                 saveCanvasData();
                 backToCanvasList();

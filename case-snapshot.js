@@ -64,13 +64,61 @@
         } catch (e) { return []; }
     }
 
+    // ── Case identity ────────────────────────────────────────────────
+    // Two records are the SAME case when their case numbers match after
+    // trimming, collapsing internal whitespace and folding letter case.
+    // A re-typed "2026-01506 " with a trailing space is not a new case,
+    // and treating it as one is how duplicates reached an officer's
+    // dashboard. Every read and every write compares through this.
+    function normCaseNumber(n) {
+        return String(n == null ? '' : n).trim().replace(/\s+/g, ' ').toUpperCase();
+    }
+
+    // Locate a record in `arr` by id first, then by normalised case
+    // number. Returns -1 only when the case is genuinely absent. Any
+    // code about to push onto viperCases must consult this first.
+    function findCaseIndex(arr, rec) {
+        if (!Array.isArray(arr) || !rec) return -1;
+        if (rec.id != null && rec.id !== '') {
+            const i = arr.findIndex(c => c && String(c.id) === String(rec.id));
+            if (i !== -1) return i;
+        }
+        const n = normCaseNumber(rec.caseNumber);
+        if (!n) return -1;
+        return arr.findIndex(c => c && normCaseNumber(c.caseNumber) === n);
+    }
+
+    // Group the live case list by normalised case number and return only
+    // the groups holding more than one record. Read-only — the merge
+    // tool in Settings decides what to do about them, never this file.
+    function duplicateGroups(arr) {
+        const list = Array.isArray(arr) ? arr : getCases();
+        const by = new Map();
+        list.forEach(c => {
+            const n = normCaseNumber(c && c.caseNumber);
+            if (!n) return;
+            if (!by.has(n)) by.set(n, []);
+            by.get(n).push(c);
+        });
+        const out = [];
+        by.forEach((members, key) => {
+            if (members.length > 1) {
+                out.push({ key, caseNumber: members[0].caseNumber || '', members });
+            }
+        });
+        return out;
+    }
+
     function findCase({ id, number }) {
         const cases = getCases();
         if (id != null) {
             const found = cases.find(c => String(c.id) === String(id));
             if (found) return found;
         }
-        if (number) return cases.find(c => c.caseNumber === number) || null;
+        if (number) {
+            const n = normCaseNumber(number);
+            return cases.find(c => normCaseNumber(c.caseNumber) === n) || null;
+        }
         return null;
     }
 
@@ -221,12 +269,31 @@
                     const meta = pkg.caseMetadata;
                     if (!meta.caseNumber) continue;
 
-                    let existing = cases.find(c => c.caseNumber === meta.caseNumber);
+                    let existing = cases.find(c =>
+                        normCaseNumber(c && c.caseNumber) === normCaseNumber(meta.caseNumber));
                     let caseId;
                     let didCreateCase = false;
 
                     if (!existing) {
                         // Case is missing from localStorage — restore the case record itself.
+                        // Re-read the authoritative store first: this loop awaits on every
+                        // iteration, and another window (or an earlier iteration) may have
+                        // written the very case we are about to recreate. Resurrecting a
+                        // case that already exists is what puts a second copy of the same
+                        // case number on the dashboard.
+                        const live = getCases();
+                        const liveHit = live.find(c =>
+                            normCaseNumber(c && c.caseNumber) === normCaseNumber(meta.caseNumber));
+                        if (liveHit) {
+                            console.warn('[snapshot] skipped resurrecting', meta.caseNumber,
+                                '— it already exists in viperCases');
+                            existing = liveHit;
+                            caseId = liveHit.id;
+                            if (!cases.some(c => String(c.id) === String(liveHit.id))) cases.push(liveHit);
+                        }
+                    }
+
+                    if (!existing) {
                         // Re-use the original id when possible, but ensure no collision with
                         // any other case that may have been created since.
                         let proposedId = meta.id || (Date.now() + Math.floor(Math.random() * 1000));
@@ -382,6 +449,10 @@
         recover,
         buildSnapshot,
         flushPending,
+        // Case identity — every writer to viperCases must use these
+        normCaseNumber,
+        findCaseIndex,
+        duplicateGroups,
         // Internals (exposed for diagnostic use)
         _origSetItem,
         _origRemoveItem,

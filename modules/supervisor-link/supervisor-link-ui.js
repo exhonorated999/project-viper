@@ -906,10 +906,19 @@
   // Open a local case for the assignment, using the SUPERVISOR's case number.
   function launchCaseForAssignment(a) {
     const cases = lsJSON('viperCases', []);
-    let caseNumber = a.caseNumber || ('MC-' + Date.now());
-    const base = caseNumber;
-    let n = 1;
-    while (cases.find((c) => c.caseNumber === caseNumber)) caseNumber = base + '-' + (++n);
+    // The supervisor types this case number, so it can arrive padded or in a
+    // different letter case than the copy the investigator already has. Trim
+    // it and compare normalised — otherwise "2026-01506 " sails past the
+    // collision check and lands on the dashboard as a second, identical-
+    // looking case.
+    const norm = (v) => (window.viperSnapshot && window.viperSnapshot.normCaseNumber)
+      ? window.viperSnapshot.normCaseNumber(v)
+      : String(v == null ? '' : v).trim().replace(/\s+/g, ' ').toUpperCase();
+    let caseNumber = String(a.caseNumber || ('MC-' + Date.now())).trim();
+    // Re-assigning a case number the investigator already holds must open
+    // that case, not fork a second copy of it.
+    const existing = cases.find((c) => norm(c && c.caseNumber) === norm(caseNumber));
+    if (existing) return existing;
     const now = new Date().toISOString();
     const newCase = {
       id: Date.now(),

@@ -1410,7 +1410,7 @@
                         }
                     }
                     const cases = _lsParse('viperCases', []);
-                    const ci = cases.findIndex(c => String(c.id) === String(currentCase.id));
+                    const ci = _findCaseIndex(cases, currentCase);
                     if (ci >= 0) {
                         cases[ci].modules = currentCase.modules;
                         if (currentCase.tabOrder) cases[ci].tabOrder = currentCase.tabOrder;
@@ -1822,10 +1822,7 @@
                 // overwrite, so a stale in-memory copy can never delete a
                 // module that exists on disk.
                 const cases = _lsParse('viperCases', []);
-                let caseIndex = cases.findIndex(c => String(c.id) === String(currentCase.id));
-                if (caseIndex === -1 && currentCase.caseNumber) {
-                    caseIndex = cases.findIndex(c => c && c.caseNumber === currentCase.caseNumber);
-                }
+                let caseIndex = _findCaseIndex(cases, currentCase);
                 const stored = caseIndex !== -1 ? cases[caseIndex] : null;
 
                 currentCase.modules = _mergeModuleList(stored && stored.modules, currentCase.modules);
@@ -9075,7 +9072,7 @@
                 currentCase.modules.push('datapilot');
                 try {
                     const cases = _lsParse('viperCases', []);
-                    const idx = cases.findIndex(c => c.id === currentCase.id);
+                    const idx = _findCaseIndex(cases, currentCase);
                     if (idx !== -1) {
                         cases[idx].modules = currentCase.modules;
                         localStorage.setItem('viperCases', JSON.stringify(cases));
@@ -31779,12 +31776,45 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             return (cs && cs.label) ? cs.label : String(status || '');
         }
 
+        /**
+         * Locate `rec` inside a viperCases array: by id first, then by
+         * normalised case number. Delegates to case-snapshot.js so every
+         * page in the app agrees on what "the same case" means; the inline
+         * fallback exists only if that script failed to load.
+         */
+        function _findCaseIndex(arr, rec) {
+            try {
+                if (window.viperSnapshot && window.viperSnapshot.findCaseIndex) {
+                    return window.viperSnapshot.findCaseIndex(arr, rec);
+                }
+            } catch (_) {}
+            if (!Array.isArray(arr) || !rec) return -1;
+            const norm = v => String(v == null ? '' : v).trim().replace(/\s+/g, ' ').toUpperCase();
+            if (rec.id != null && rec.id !== '') {
+                const i = arr.findIndex(c => c && String(c.id) === String(rec.id));
+                if (i !== -1) return i;
+            }
+            const n = norm(rec.caseNumber);
+            if (!n) return -1;
+            return arr.findIndex(c => c && norm(c.caseNumber) === n);
+        }
+
         /** Write currentCase back into the viperCases array. */
         function _persistCurrentCase() {
             const cases = _lsParse('viperCases', []);
-            const index = cases.findIndex(c => c.id === currentCase.id);
-            if (index >= 0) cases[index] = currentCase;
-            else cases.push(currentCase);
+            // Match on id OR case number. Matching on id alone was the bug:
+            // a .vcase import, a backup restore or snapshot recovery can all
+            // hand the stored record a new id while this window still holds
+            // the old one, and the mismatch pushed a second copy of the same
+            // case onto the dashboard.
+            const index = _findCaseIndex(cases, currentCase);
+            if (index >= 0) {
+                cases[index] = currentCase;
+            } else {
+                console.warn('[case] _persistCurrentCase: no existing record for',
+                    currentCase.caseNumber, '(id', currentCase.id + ') — appending');
+                cases.push(currentCase);
+            }
             localStorage.setItem('viperCases', JSON.stringify(cases));
         }
 
@@ -31892,7 +31922,12 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             currentCase.priority = level || 0;
             currentCase.lastModified = new Date().toISOString();
             const cases = _lsParse('viperCases', []);
-            const index = cases.findIndex(c => c.id === currentCase.id);
+            // findIndex could return -1 here, and `cases[-1] = ...` sets a
+            // property JSON.stringify quietly drops — the priority change
+            // just vanished. Go through the shared lookup and fall back to
+            // the full save rather than writing into nowhere.
+            const index = _findCaseIndex(cases, currentCase);
+            if (index < 0) { saveCase({ silent: true }); return; }
             cases[index] = currentCase;
             localStorage.setItem('viperCases', JSON.stringify(cases));
         }

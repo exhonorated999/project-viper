@@ -807,7 +807,12 @@
       const setErr = (m) => { const d = back.querySelector('#ucLcErr'); if (d) d.innerHTML = m ? `<div class="mb-3 p-2 rounded text-sm" style="background:rgba(239,68,68,0.15);color:#fca5a5;">${esc(m)}</div>` : ''; };
       if (!num) { setErr('Case number is required'); return; }
       const cases = loadCases();
-      if (!cases.find(c => String(c.caseNumber) === num)) {
+      // Normalised compare — a difference in letter case or padding is not
+      // a different case, and creating one here would duplicate the record.
+      const _norm = (v) => (window.viperSnapshot && window.viperSnapshot.normCaseNumber)
+        ? window.viperSnapshot.normCaseNumber(v)
+        : String(v == null ? '' : v).trim().replace(/\s+/g, ' ').toUpperCase();
+      if (!cases.find(c => _norm(c && c.caseNumber) === _norm(num))) {
         const newCase = {
           id: Date.now(), caseNumber: num, synopsis: '', status: 'active', priority: 0,
           modules: ['suspect', 'warrants', 'report'], tabOrder: ['overview', 'suspect', 'warrants', 'report'],

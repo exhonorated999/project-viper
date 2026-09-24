@@ -31798,7 +31798,97 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             };
         }
 
-        function saveOverviewEdit() {
+        // ─── Changing a case number ──────────────────────────────────────
+        // A case number is not just a label. The whole on-disk layout is
+        // cases/{caseNumber}/ — Evidence, Warrants/Production, Notes
+        // attachments, CDR dumps, the recovery snapshot — and a dozen
+        // localStorage stores are objects keyed by the case number rather
+        // than the case id.
+        //
+        // So correcting a typo used to do three bad things at once: the
+        // folder kept the old name and every document in it went dark, the
+        // notes/evidence/warrant lists stayed filed under the old number and
+        // vanished from the tabs, and on the next launch the leftover
+        // snapshot under the old number was resurrected as a SECOND case.
+        // That is where the duplicate cases on the dashboard came from.
+        //
+        // A rename now moves everything or it does not happen at all.
+
+        // Every store that is an object keyed by CASE NUMBER. The first
+        // fifteen are the .vcase / snapshot schema (PATTERN1_KEYS in
+        // case-snapshot.js); the rest are keyed by number too but are not
+        // part of that schema, and they still have to move.
+        const CASE_NUMBER_KEYED_STORES = [
+            'viperCaseNotes', 'viperCaseReports', 'viperCaseEvidence',
+            'viperCaseWarrants', 'viperCaseSuspects', 'viperCaseVictims',
+            'viperCaseWitnesses', 'viperCaseVehicles', 'viperCaseFirearms',
+            'viperCaseNarcotics', 'viperCaseMoney', 'viperCaseMissingPersons',
+            'viperCaseCanvas', 'viperCaseProsecution', 'viperTraceImports',
+            'viperCaseForensicDevices', 'viperCaseOPSPlans',
+            'viperCaseActivityTimers', 'viperTranscripts', 'viperOpenEvidence'
+        ];
+
+        /**
+         * Move a case from one case number to another.
+         * Returns { ok: true } or { ok: false, error: '<plain english>' }.
+         * On failure NOTHING has been changed — the caller must abandon the
+         * whole save rather than apply a half-rename.
+         */
+        async function _renameCaseNumber(oldNumber, newNumber) {
+            // 1. Never land on a number another case already holds. Merging
+            //    two cases silently is not a recoverable mistake.
+            const cases = _lsParse('viperCases', []);
+            const clash = cases.find(c => c
+                && String(c.id) !== String(currentCase.id)
+                && _normCaseNumber(c.caseNumber) === _normCaseNumber(newNumber));
+            if (clash) {
+                return {
+                    ok: false,
+                    error: 'Case number "' + newNumber + '" is already used by ' +
+                        (clash.name || 'another case') + '. Two cases cannot share a number.'
+                };
+            }
+
+            // 2. Move the folder FIRST. If the files cannot move — a PDF open
+            //    in a viewer is enough to lock them — we stop here with the
+            //    case number untouched, so nothing is ever orphaned.
+            if (window.electronAPI && window.electronAPI.renameCaseFolder) {
+                let res = null;
+                try { res = await window.electronAPI.renameCaseFolder(oldNumber, newNumber); }
+                catch (err) { res = { success: false, error: (err && err.message) || String(err) }; }
+                if (!res || !res.success) {
+                    const why = (res && res.error) ? ' ' + res.error : '';
+                    return {
+                        ok: false,
+                        error: 'The case folder on disk could not be renamed, so the case ' +
+                            'number was left unchanged.' + why +
+                            ' Close any open case files and try again.'
+                    };
+                }
+            }
+
+            // 3. Re-file every case-number-keyed store under the new number.
+            const moved = [];
+            for (const key of CASE_NUMBER_KEYED_STORES) {
+                try {
+                    const store = _lsParse(key, {});
+                    if (!store || typeof store !== 'object' || Array.isArray(store)) continue;
+                    if (!(oldNumber in store)) continue;
+                    // Don't clobber: if the new number somehow already has an
+                    // entry, keep it and leave the old one alone for recovery.
+                    if (newNumber in store) continue;
+                    store[newNumber] = store[oldNumber];
+                    delete store[oldNumber];
+                    localStorage.setItem(key, JSON.stringify(store));
+                    moved.push(key);
+                } catch (_) { /* a single unreadable store must not abort the rename */ }
+            }
+            console.log('[case] renamed', oldNumber, '->', newNumber,
+                '| stores moved:', moved.length);
+            return { ok: true };
+        }
+
+        async function saveOverviewEdit() {
             const newCaseNumber = document.getElementById('editCaseNumber').value.trim();
             const newName = document.getElementById('editCaseName').value.trim();
             const newStatus = document.getElementById('editCaseStatus').value;
@@ -31819,6 +31909,17 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
             const oldCaseNumber = currentCase.caseNumber;
             const oldStatus = currentCase.status;
+
+            // Changing the case number moves files on disk and re-files a
+            // dozen stores. Do it BEFORE touching anything else, and abandon
+            // the entire save if it cannot be done cleanly — a half-applied
+            // rename is how a case loses its evidence.
+            if (_normCaseNumber(oldCaseNumber) !== _normCaseNumber(newCaseNumber)
+                || oldCaseNumber !== newCaseNumber) {
+                const r = await _renameCaseNumber(oldCaseNumber, newCaseNumber);
+                if (!r.ok) { showToast(r.error, 'error'); return; }
+            }
+
             currentCase.caseNumber = newCaseNumber;
             currentCase.name = newName || 'Case ' + newCaseNumber;
             currentCase.status = newStatus;
@@ -31950,6 +32051,16 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const n = norm(rec.caseNumber);
             if (!n) return -1;
             return arr.findIndex(c => c && norm(c.caseNumber) === n);
+        }
+
+        /** The shared definition of "the same case number". */
+        function _normCaseNumber(v) {
+            try {
+                if (window.viperSnapshot && window.viperSnapshot.normCaseNumber) {
+                    return window.viperSnapshot.normCaseNumber(v);
+                }
+            } catch (_) {}
+            return String(v == null ? '' : v).trim().replace(/\s+/g, ' ').toUpperCase();
         }
 
         /** Write currentCase back into the viperCases array. */

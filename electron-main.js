@@ -2341,6 +2341,56 @@ ipcMain.handle('delete-case-folder', async (_e, caseNumber) => {
   }
 });
 
+// --- Rename a case folder on disk (case number changed) ---
+// The whole on-disk layout is keyed by case number — cases/{caseNumber}/
+// holds Evidence, Warrants/Production, Notes attachments, CDR dumps and
+// the .case-snapshot.json. Every one of the ~60 path.join(casesDir, ...)
+// call sites below resolves through the CURRENT number, so if an officer
+// corrects a typo in the case number and the folder does not follow, all
+// of that becomes unreachable AND the stale snapshot gets resurrected on
+// the next launch as a second, duplicate case.
+//
+// Refuses rather than merges: if something already occupies the target
+// name we stop and say so. Quietly pouring one case's evidence into
+// another case's folder is not a recoverable mistake.
+ipcMain.handle('rename-case-folder', async (_e, payload) => {
+  const from = _safeCaseNumber(payload && payload.from);
+  const to = _safeCaseNumber(payload && payload.to);
+  if (!from || !to) return { success: false, error: 'Invalid case number', code: 'INVALID' };
+  if (from === to) return { success: true, moved: false };
+
+  const src = path.join(casesDir, from);
+  const dest = path.join(casesDir, to);
+
+  try {
+    if (!fs.existsSync(src)) {
+      // Nothing on disk under the old number — the rename is a no-op as
+      // far as files go. Not an error; a case can exist with no folder.
+      return { success: true, moved: false };
+    }
+    if (fs.existsSync(dest)) {
+      // An empty folder is almost certainly one create-case-folder made
+      // a moment ago for the new number. Anything else is another case.
+      let empty = false;
+      try { empty = fs.readdirSync(dest).length === 0; } catch (_) { empty = false; }
+      if (!empty) {
+        return {
+          success: false,
+          code: 'TARGET_EXISTS',
+          error: 'A folder already exists for case number "' + to + '".'
+        };
+      }
+      fs.rmdirSync(dest);
+    }
+    fs.renameSync(src, dest);
+    return { success: true, moved: true, path: dest };
+  } catch (err) {
+    // EBUSY/EPERM here normally means a file inside the case folder is
+    // open somewhere else (a PDF in a viewer, an export in progress).
+    return { success: false, code: err.code || 'ERROR', error: err.message };
+  }
+});
+
 // --- Delete only evidence files for a case ---
 ipcMain.handle('delete-case-evidence', async (_e, caseNumber) => {
   if (!caseNumber || typeof caseNumber !== 'string') return { success: false, error: 'Invalid case number' };

@@ -3495,7 +3495,9 @@
                     </h3>
                     <p class="text-xs text-gray-400 leading-relaxed mb-4">
                         Two records carrying the same case number will both show on your dashboard and in All Cases.
-                        This tool finds them. It does not decide for you — nothing is merged or combined automatically.
+                        This tool finds them. It also flags pairs whose numbers differ only in punctuation
+                        (2026-1506 and 20261506), and case folders left behind by a case number that was edited.
+                        It does not decide for you — nothing is merged or combined automatically.
                         Compare what each record holds, then remove the one you do not want to keep.
                     </p>
                     <button onclick="renderDuplicateCases()" id="dupScanBtn"
@@ -5793,7 +5795,100 @@
             return { stores, total, modules: Array.isArray(c.modules) ? c.modules.length : 0 };
         }
 
-        function renderDuplicateCases() {
+        /**
+         * Case numbers reduced to letters and digits only, so "2026-1506",
+         * "2026 1506" and "20261506" all collapse to the same string.
+         *
+         * This is NOT the identity rule — those really are three different
+         * numbers and the app treats them as three different cases. It is a
+         * detector: when two records differ only in punctuation it almost
+         * always means someone edited a case number, which used to leave a
+         * leftover copy behind.
+         */
+        function _dupLoose(v) {
+            return _dupNorm(v).replace(/[^A-Z0-9]/g, '');
+        }
+
+        /** Same-number pairs, plus punctuation-variant pairs. */
+        function _dupFindGroups(cases) {
+            const exact = new Map();
+            const loose = new Map();
+            cases.forEach(c => {
+                const k = _dupNorm(c && c.caseNumber);
+                if (!k) return;
+                if (!exact.has(k)) exact.set(k, []);
+                exact.get(k).push(c);
+                const l = _dupLoose(c.caseNumber);
+                if (!l) return;
+                if (!loose.has(l)) loose.set(l, []);
+                loose.get(l).push(c);
+            });
+
+            const out = [];
+            exact.forEach(members => {
+                if (members.length > 1) out.push({ kind: 'same', members });
+            });
+            loose.forEach(members => {
+                if (members.length < 2) return;
+                // Only interesting when the numbers actually differ — an
+                // identical-number group is already reported above.
+                const distinct = new Set(members.map(c => _dupNorm(c.caseNumber)));
+                if (distinct.size < 2) return;
+                out.push({ kind: 'variant', members });
+            });
+            return out;
+        }
+
+        /**
+         * Find case folders left behind by an edited case number.
+         *
+         * cases/{caseNumber}/ holds the case's documents and its recovery
+         * snapshot. Before this was fixed, editing a case number left that
+         * folder under the old name — its documents went dark, and on the
+         * next launch the leftover snapshot was rebuilt into a second case.
+         *
+         * A snapshot whose case ID belongs to a case that now uses a
+         * DIFFERENT number is exactly that leftover. Best-effort: any read
+         * problem just means we report nothing.
+         */
+        async function _dupFindRenameLeftovers(cases) {
+            const out = [];
+            try {
+                if (!window.electronAPI || !window.electronAPI.listCaseSnapshots) return out;
+                const snaps = await window.electronAPI.listCaseSnapshots();
+                if (!Array.isArray(snaps)) return out;
+
+                const byNumber = new Map();
+                cases.forEach(c => {
+                    const k = _dupNorm(c && c.caseNumber);
+                    if (k && !byNumber.has(k)) byNumber.set(k, c);
+                });
+
+                for (const s of snaps) {
+                    let meta = null;
+                    try {
+                        const raw = await window.electronAPI.loadCaseSnapshot(s.caseNumber);
+                        if (!raw) continue;
+                        const pkg = JSON.parse(raw);
+                        meta = pkg && pkg.caseMetadata;
+                    } catch (_) { continue; }
+                    if (!meta || meta.id == null || meta.id === '') continue;
+
+                    const owner = cases.find(c => c && String(c.id) === String(meta.id));
+                    if (!owner) continue;
+                    if (_dupNorm(owner.caseNumber) === _dupNorm(s.caseNumber)) continue; // healthy
+
+                    out.push({
+                        folder: s.caseNumber,
+                        owner,
+                        ghost: byNumber.get(_dupNorm(s.caseNumber)) || null
+                    });
+                }
+            } catch (_) { /* diagnostic only — never break the page */ }
+            return out;
+        }
+
+        async function renderDuplicateCases() {
             const body = document.getElementById('dupCasesBody');
             if (!body) return;
 
@@ -5801,18 +5896,10 @@
             try { cases = JSON.parse(localStorage.getItem('viperCases') || '[]') || []; } catch (_) { cases = []; }
             if (!Array.isArray(cases)) cases = [];
 
-            const by = new Map();
-            cases.forEach(c => {
-                const k = _dupNorm(c && c.caseNumber);
-                if (!k) return;
-                if (!by.has(k)) by.set(k, []);
-                by.get(k).push(c);
-            });
+            const groups = _dupFindGroups(cases);
+            const leftovers = await _dupFindRenameLeftovers(cases);
 
-            const groups = [];
-            by.forEach((members, key) => { if (members.length > 1) groups.push({ key, members }); });
-
-            if (!groups.length) {
+            if (!groups.length && !leftovers.length) {
                 body.innerHTML = `
                     <div class="p-4 rounded-lg bg-viper-green/10 border border-viper-green/40 text-sm text-viper-green">
                         No duplicate case numbers found. All ${cases.length} case${cases.length === 1 ? '' : 's'} are unique.
@@ -5851,16 +5938,41 @@
                     </div>`;
                 }).join('');
 
+                const title = g.kind === 'same'
+                    ? `${_dupEsc(g.members[0].caseNumber)} — ${g.members.length} records with the same case number`
+                    : `${g.members.map(c => _dupEsc(c.caseNumber)).join('  vs  ')} — same number written differently`;
+                const note = g.kind === 'same'
+                    ? ''
+                    : `<div class="text-xs text-gray-400 mb-2">These are stored as separate cases. This usually happens when a
+                        case number was edited and a leftover copy of the old one came back.</div>`;
+
                 return `
                 <div class="mb-4 p-3 rounded-lg border border-viper-orange/40 bg-viper-orange/5">
-                    <div class="text-sm font-semibold text-viper-orange mb-2">
-                        ${_dupEsc(g.members[0].caseNumber)} — ${g.members.length} records
-                    </div>
+                    <div class="text-sm font-semibold text-viper-orange mb-2">${title}</div>
+                    ${note}
                     ${rows}
                 </div>`;
             }).join('');
 
-            body.innerHTML = html + `
+            const leftoverHtml = leftovers.map(lo => `
+                <div class="mb-4 p-3 rounded-lg border border-yellow-500/40 bg-yellow-500/5">
+                    <div class="text-sm font-semibold text-yellow-400 mb-2">
+                        Leftover folder: cases/${_dupEsc(lo.folder)}
+                    </div>
+                    <div class="text-xs text-gray-300 leading-relaxed">
+                        This folder belongs to <strong>${_dupEsc(lo.owner.name || 'a case')}</strong>,
+                        which now uses case number <strong>${_dupEsc(lo.owner.caseNumber)}</strong>.
+                        The case number was changed at some point and the folder did not follow.
+                        Anything saved into it — documents, warrant returns, note attachments —
+                        is still on disk but the case no longer looks there.
+                        ${lo.ghost
+                            ? `The record <strong>${_dupEsc(lo.ghost.caseNumber)}</strong> on your dashboard
+                               was rebuilt from this folder and is a leftover copy of the same case.`
+                            : ''}
+                    </div>
+                </div>`).join('');
+
+            body.innerHTML = html + leftoverHtml + `
                 <div class="p-3 rounded-lg bg-viper-dark border border-gray-700/60 text-xs text-gray-400 leading-relaxed">
                     <strong class="text-gray-300">Before you remove one:</strong>
                     removing a record takes it off your dashboard and out of All Cases.

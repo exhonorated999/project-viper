@@ -294,6 +294,22 @@
                     }
 
                     if (!existing) {
+                        // Last guard: does a live case already carry this
+                        // snapshot's case ID under a DIFFERENT case number?
+                        // That is a case whose number was edited, leaving the
+                        // old folder behind. Resurrecting it hands the officer
+                        // a second copy of a case they already have — which is
+                        // exactly the duplicate-cases report. Skip it.
+                        if (meta.id != null && meta.id !== '') {
+                            const sameId = cases.find(c => c && String(c.id) === String(meta.id));
+                            if (sameId) {
+                                console.warn('[snapshot] leftover snapshot for', meta.caseNumber,
+                                    '— case', meta.id, 'now uses number',
+                                    sameId.caseNumber, '; not resurrecting');
+                                continue;
+                            }
+                        }
+
                         // Re-use the original id when possible, but ensure no collision with
                         // any other case that may have been created since.
                         let proposedId = meta.id || (Date.now() + Math.floor(Math.random() * 1000));

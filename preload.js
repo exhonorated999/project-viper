@@ -449,6 +449,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   canvasFormGetInfo: (params) => ipcRenderer.invoke('canvas-form-get-info', params),
   canvasFormDownload: (params) => ipcRenderer.invoke('canvas-form-download', params),
   canvasFormDelete: (params) => ipcRenderer.invoke('canvas-form-delete', params),
+  canvasFetchMedia: (params) => ipcRenderer.invoke('canvas-fetch-media', params),
 
   // Cellebrite Report Integration
   selectCellebriteFolder: () => ipcRenderer.invoke('select-cellebrite-folder'),

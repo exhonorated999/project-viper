@@ -25831,6 +25831,13 @@
                     formId: result.formId,
                     formUrl: result.formUrl,
                     qrDataUrl: result.qrDataUrl,
+                    // The AES-256 key for this form's attachments. It exists
+                    // in exactly two places: here, and in the fragment of the
+                    // URL on the officer's phone. The relay never sees it, so
+                    // if this record is lost the photos on the server become
+                    // permanently unreadable — which is the intended
+                    // trade-off, but it is why closing a form asks first.
+                    mediaKey: result.mediaKey || '',
                     expiresAt: result.expiresAt,
                     title,
                     caseRef,
@@ -25893,6 +25900,7 @@
                         </div>
                         
                         <p class="text-xs text-gray-500 mb-1">Officers can access this form from any device with internet.</p>
+                        <p class="text-xs text-gray-500 mb-1">Photos, video and audio are encrypted on the officer's phone. The key is in this link — share the whole link, and only with the officers working the canvass.</p>
                         <p class="text-xs text-viper-cyan mb-4">⏱ ${_timeRemaining(form.expiresAt)}</p>
                         
                         <button onclick="document.getElementById('canvasQRModal').remove()" class="px-6 py-2 bg-viper-orange hover:bg-viper-orange/80 rounded-lg text-white font-semibold transition">Done</button>
@@ -25916,14 +25924,133 @@
             }
         }
 
+        /**
+         * Pull one entry's relay attachments down, decrypt them and write
+         * them into the case folder.
+         *
+         * `descriptors` is what the server hands back in results[].media —
+         * ids and metadata only, never bytes. Each blob is fetched, verified
+         * and destroyed on the server one at a time, so a canvass with fifty
+         * photos never becomes one enormous response and a failure halfway
+         * through still leaves everything before it safely on disk.
+         *
+         * Anything that fails is returned in `pending` so it can be retried;
+         * it is never recorded on the entry as if it were on disk.
+         */
+        async function _fetchRelayMedia(caseNumber, label, mediaKey, descriptors, startIndex) {
+            const out = [];
+            const pending = [];
+            const list = Array.isArray(descriptors) ? descriptors : [];
+            if (!list.length) return { media: out, pending };
+
+            const api = window.electronAPI;
+            if (!api || !api.canvasFetchMedia) {
+                return { media: out, pending: list.slice() };
+            }
+            if (!mediaKey) {
+                // No key means no way to read these bytes, ever. Say so once
+                // rather than failing each file with a decryption error.
+                return { media: out, pending: [], noKey: true };
+            }
+
+            let n = Math.max(1, Number(startIndex) || 1);
+            for (const d of list) {
+                const kind = (d && d.kind) || 'image';
+                const mime = (d && d.mime) || '';
+                const fileName = window.CanvasMedia
+                    ? window.CanvasMedia.fileNameFor({ label, kind, mime, index: n })
+                    : ('Canvas relay ' + kind + ' ' + n);
+                let res = null;
+                try {
+                    res = await _canvasCallWithKey((key) => api.canvasFetchMedia({
+                        apiKey: key,
+                        mediaId: d.mediaId,
+                        mediaKey,
+                        caseNumber,
+                        fileName
+                    }));
+                } catch (err) {
+                    res = { success: false, error: String((err && err.message) || err) };
+                }
+                if (!res || !res.success) {
+                    console.warn('[canvas] relay attachment failed:', d && d.mediaId, res && res.error);
+                    pending.push(d);
+                    continue;
+                }
+                out.push({
+                    id: 'cm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+                    kind,
+                    fileName: res.fileName,
+                    mime,
+                    bytes: res.size || (d && d.byteSize) || 0,
+                    durationSec: (d && d.durationSeconds) || 0,
+                    capturedAt: new Date().toISOString(),
+                    source: 'field',
+                    discoverable: true
+                });
+                n++;
+            }
+            return { media: out, pending };
+        }
+
+        /**
+         * Re-attempt attachments that did not come down on a previous import.
+         *
+         * The submission rows are deleted by the server the moment results
+         * are downloaded, so a second Download returns nothing — the only
+         * record that these files exist is the descriptor parked on the
+         * entry. That is why a failure stores `relayPending` instead of
+         * being reported and forgotten.
+         */
+        async function _retryPendingRelayMedia(formId) {
+            const form = activeCanvasForms.find(f => f.formId === formId);
+            const key = form && form.mediaKey;
+            let recovered = 0;
+            let stillPending = 0;
+            let touched = false;
+
+            for (const entry of canvasData) {
+                const pend = entry && entry.relayPending;
+                if (!Array.isArray(pend) || !pend.length) continue;
+                if (entry.relayFormId && entry.relayFormId !== formId) continue;
+
+                const existing = Array.isArray(entry.media) ? entry.media : [];
+                const r = await _fetchRelayMedia(
+                    currentCase.caseNumber, entry.address, key, pend, existing.length + 1
+                );
+                if (r.media.length) {
+                    entry.media = existing.concat(r.media);
+                    recovered += r.media.length;
+                    touched = true;
+                }
+                if (r.pending.length !== pend.length) touched = true;
+                entry.relayPending = r.pending;
+                if (!r.pending.length) delete entry.relayPending;
+                stillPending += r.pending.length;
+            }
+
+            if (touched) saveCanvasData();
+            return { recovered, stillPending };
+        }
+
         async function downloadCanvasFormResults(formId, idx) {
             if (!window.electronAPI) return;
 
             try {
+                // Anything left over from a previous import goes first — it
+                // cannot be re-requested from the server, so it must not be
+                // stranded behind an early return when there are no new
+                // submissions to fetch.
+                const retried = await _retryPendingRelayMedia(formId);
+                if (retried.recovered) {
+                    viperToast(`Recovered ${retried.recovered} attachment(s) from a previous import`, 'success');
+                }
+
                 // Download results (server deletes them after retrieval)
                 const result = await _canvasCallWithKey((key) => window.electronAPI.canvasFormDownload({ apiKey: key, formId }));
                 if (!result.submissions || result.submissions.length === 0) {
-                    viperToast('No submissions to download yet.', 'info');
+                    if (retried.recovered) renderTabContent('areacanvas');
+                    else viperToast('No submissions to download yet.', 'info');
                     return;
                 }
 
@@ -25952,7 +26079,10 @@
                         evidenceLocated: s.evidenceLocated || 'No',
                         notes: s.notes || '',
                         needsFollowUp: false,
-                        timestamp: s.submittedAt || s.timestamp || new Date().toISOString()
+                        timestamp: s.submittedAt || s.timestamp || new Date().toISOString(),
+                        // Carried, not yet fetched. Resolved below once the
+                        // detective confirms the import.
+                        _relayMedia: Array.isArray(s.media) ? s.media : []
                     };
                 });
 
@@ -25965,20 +26095,62 @@
                     return;
                 }
 
-                if (await viperConfirm(`Import ${unique.length} canvas entries?\n\nThe form will be closed and all data removed from the server.`)) {
+                const mediaCount = unique.reduce((n, e) => n + e._relayMedia.length, 0);
+                const mediaLine = mediaCount
+                    ? `\n\n${mediaCount} photo/video/audio attachment(s) will be downloaded, decrypted and saved into the case folder.`
+                    : '';
+                if (await viperConfirm(`Import ${unique.length} canvas entries?${mediaLine}\n\nThe form will be closed and all data removed from the server.`)) {
+                    const form = activeCanvasForms.find(f => f.formId === formId);
+                    const mediaKey = form && form.mediaKey;
+                    let saved = 0;
+                    let failed = 0;
+                    let noKey = false;
+
+                    for (const entry of unique) {
+                        const descriptors = entry._relayMedia;
+                        delete entry._relayMedia;
+                        if (!descriptors.length) continue;
+                        entry.relayFormId = formId;
+                        const r = await _fetchRelayMedia(
+                            currentCase.caseNumber, entry.address, mediaKey, descriptors, 1
+                        );
+                        if (r.noKey) { noKey = true; continue; }
+                        if (r.media.length) entry.media = r.media;
+                        if (r.pending.length) { entry.relayPending = r.pending; }
+                        saved += r.media.length;
+                        failed += r.pending.length;
+                    }
+
                     canvasData.push(...unique);
                     saveCanvasData();
 
-                    // Delete form from server (link goes dead immediately)
-                    try {
-                        await _canvasCallWithKey((key) => window.electronAPI.canvasFormDelete({ apiKey: key, formId }));
-                    } catch { /* may already be expired */ }
+                    // The form delete purges every remaining blob on the
+                    // server, so it must not run while anything is still
+                    // waiting to be pulled down.
+                    if (!failed) {
+                        try {
+                            await _canvasCallWithKey((key) => window.electronAPI.canvasFormDelete({ apiKey: key, formId }));
+                        } catch { /* may already be expired */ }
+                        activeCanvasForms = activeCanvasForms.filter(f => f.formId !== formId);
+                        saveCanvasForms();
+                    }
 
-                    // Remove from local store
-                    activeCanvasForms = activeCanvasForms.filter(f => f.formId !== formId);
-                    saveCanvasForms();
-
-                    viperToast(`✓ Imported ${unique.length} entries — form closed`, 'success');
+                    if (noKey) {
+                        viperToast(
+                            'Entries imported, but their attachments cannot be decrypted — this form was created before media support and has no key.',
+                            'error'
+                        );
+                    } else if (failed) {
+                        viperToast(
+                            `Imported ${unique.length} entries and ${saved} attachment(s). ${failed} did not download — the form is still open, press Download again to retry.`,
+                            'error'
+                        );
+                    } else {
+                        viperToast(
+                            `✓ Imported ${unique.length} entries${saved ? ' and ' + saved + ' attachment(s)' : ''} — form closed`,
+                            'success'
+                        );
+                    }
                     renderTabContent('areacanvas');
                 }
             } catch (e) {
@@ -25988,7 +26160,10 @@
         }
 
         async function closeCanvasForm(formId, idx) {
-            const msg = 'Close and delete this canvas form? Any undownloaded submissions on the server will be lost.';
+            // Closing purges the server's copy of every attachment, and the
+            // encryption key goes with the form record, so this is not
+            // recoverable from either side.
+            const msg = 'Close and delete this canvas form? Any undownloaded submissions — and any photos, video or audio still waiting on the server — will be lost.';
             if (!await viperConfirm(msg, { danger: true, okText: 'Close Form' })) return;
 
             // Delete from server

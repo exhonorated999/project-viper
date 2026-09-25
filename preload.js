@@ -81,6 +81,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   canvasSaveMedia: (data) => ipcRenderer.invoke('canvas-save-media', data),
   canvasReadMedia: (data) => ipcRenderer.invoke('canvas-read-media', data),
   canvasDeleteMedia: (data) => ipcRenderer.invoke('canvas-delete-media', data),
+  canvasMediaToEvidence: (data) => ipcRenderer.invoke('canvas-media-to-evidence', data),
   notesExportMergeAttachments: (data) => ipcRenderer.invoke('notes-export-merge-attachments', data),
 
   // Backup & Restore

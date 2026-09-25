@@ -337,13 +337,17 @@
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
 }
+/* Three controls (Discovery Status, Preserve, Delete) have to share a tile
+   that is only as wide as a thumbnail. Let the row wrap rather than clip —
+   a Delete button pushed off the edge is a control the officer cannot reach. */
 .cm-tile-actions {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    flex-wrap: wrap;
     gap: 6px;
     padding: 4px 8px 8px;
 }
+.cm-tile-actions .cm-del { margin-left: auto; }
 
 /* Discovery Status chip — same two states evidence items carry. */
 .cm-disc {
@@ -384,6 +388,70 @@
     margin: 12px 0 0;
     font-size: 11px;
     color: #fbbf24;
+    line-height: 1.5;
+}
+
+/* ── Preserve for court ─────────────────────────────────────────────── */
+/* Ticking an item copies it into the Evidence module. The canvass entry
+   keeps its own copy, so the control is additive and never destructive. */
+.cm-pick {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 9px;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: #7dd3fc;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.cm-pick input { accent-color: #38bdf8; cursor: pointer; margin: 0; }
+.cm-preserved {
+    font-size: 9px;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    font-weight: 700;
+    border-radius: 4px;
+    padding: 3px 6px;
+    background: rgba(56, 189, 248, 0.14);
+    border: 1px solid rgba(56, 189, 248, 0.4);
+    color: #7dd3fc;
+    white-space: nowrap;
+}
+.cm-preserve-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
+.cm-preserve-hint {
+    font-size: 11px;
+    color: #94a3b8;
+    line-height: 1.5;
+    flex: 1 1 240px;
+}
+.cm-preserve-btn {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .03em;
+    padding: 7px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    background: rgba(56, 189, 248, 0.14);
+    border: 1px solid rgba(56, 189, 248, 0.45);
+    color: #7dd3fc;
+    white-space: nowrap;
+}
+.cm-preserve-btn:hover { background: rgba(56, 189, 248, 0.26); }
+.cm-preserved-note {
+    margin: 10px 0 0;
+    font-size: 11px;
+    color: #7dd3fc;
     line-height: 1.5;
 }
 .cm-missing {

@@ -20898,6 +20898,10 @@
             document.querySelector('.fixed.inset-0')?.remove();
 
             const pdfWindow = window.open('', '_blank');
+            if (!pdfWindow) {
+                viperToast('The report window was blocked. Allow pop-ups for VIPER and try again.', 'error');
+                return;
+            }
             const html = generateInvolvedPersonPDFHTML(personsToExport);
             pdfWindow.document.write(html);
             pdfWindow.document.close();
@@ -20905,6 +20909,10 @@
 
         function exportSingleInvolvedPersonPDF(index) {
             const pdfWindow = window.open('', '_blank');
+            if (!pdfWindow) {
+                viperToast('The report window was blocked. Allow pop-ups for VIPER and try again.', 'error');
+                return;
+            }
             const html = generateInvolvedPersonPDFHTML([involvedPersons[index]]);
             pdfWindow.document.write(html);
             pdfWindow.document.close();
@@ -20912,6 +20920,7 @@
 
         function generateInvolvedPersonPDFHTML(personsToExport) {
             return `
+                <!DOCTYPE html>
                 <html>
                 <head>
                     <meta charset="UTF-8">
@@ -20931,10 +20940,24 @@
                         .section-title { font-size: 13px; font-weight: bold; color: #1a5276; margin-top: 12px; border-bottom: 1px solid #eee; padding-bottom: 3px; }
                         .notes { background: #f8f9fa; padding: 8px; border-radius: 4px; font-size: 12px; white-space: pre-wrap; margin-top: 8px; }
                         .photo { max-width: 150px; max-height: 150px; border-radius: 8px; }
-                        @media print { body { margin: 0; } .person { break-inside: avoid; } }
+                        .no-print {
+                            position: fixed;
+                            top: 20px;
+                            right: 20px;
+                            background: #00ff88;
+                            color: #0a0e14;
+                            border: none;
+                            padding: 10px 20px;
+                            border-radius: 5px;
+                            cursor: pointer;
+                            font-size: 16px;
+                        }
+                        .no-print:hover { background: #00dd77; }
+                        @media print { body { margin: 0; } .person { break-inside: avoid; } .no-print { display: none; } }
                     </style>
                 </head>
                 <body>
+                    <button class="no-print" onclick="window.print()">Print / Save as PDF</button>
                     <div class="header">
                         <h1>INVOLVED PERSONS REPORT</h1>
                         <p>Case: ${currentCase?.caseNumber || 'N/A'} | Generated: ${new Date().toLocaleDateString()}</p>
@@ -24485,7 +24508,8 @@
                 persist: () => saveCanvasData(),
                 rerender: () => renderTabContent('areacanvas'),
                 toast: (msg, kind) => viperToast(msg, kind),
-                confirm: (msg, opts) => viperConfirm(msg, opts)
+                confirm: (msg, opts) => viperConfirm(msg, opts),
+                preserveToEvidence: (entryIndex, items) => showCanvasPreserveModal(entryIndex, items)
             });
         }
         
@@ -24501,6 +24525,283 @@
                 const entries = _lsParse(`areacanvas_${currentCase.id}`, []);
                 return window.CanvasMedia.nonDiscoverableFileNames(entries);
             } catch (_) { return []; }
+        }
+
+        // ─── Preserve canvass media for court ────────────────────────────
+        //
+        // A canvass entry is a record of what an officer was shown at a door.
+        // Something on it may turn out to be evidence — a doorbell clip, a
+        // photo of damage — and that needs to live in the Evidence module
+        // with a tag, a description and a Discovery Status of its own.
+        //
+        // This COPIES. The canvass entry keeps its own copy and gains a
+        // pointer to the evidence item, so the original record is never
+        // rewritten to manufacture the evidence item. Disk cost is the price
+        // of not editing history.
+
+        // Items handed over by CanvasMedia.preserveSelected, held while the
+        // officer fills in the evidence details.
+        let _canvasPreservePicks = null;
+        let _canvasPreserveEntryIndex = null;
+
+        function _canvasEvidenceTagFor(entry) {
+            const addr = String((entry && entry.address) || '').trim();
+            const base = addr ? ('Canvass ' + addr) : 'Canvass Media';
+            return base.replace(/[^a-zA-Z0-9 _.-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+        }
+
+        function _canvasEvidenceTypeFor(items) {
+            const kinds = new Set((items || []).map(m => m && m.kind));
+            if (kinds.size === 1) {
+                if (kinds.has('image')) return 'photo';
+                if (kinds.has('video')) return 'video';
+                if (kinds.has('audio')) return 'audio';
+            }
+            return 'digital';
+        }
+
+        function showCanvasPreserveModal(entryIndex, items) {
+            const entry = canvasData[entryIndex];
+            if (!entry || !items || !items.length) return;
+
+            _canvasPreservePicks = items;
+            _canvasPreserveEntryIndex = entryIndex;
+
+            const addr = String(entry.address || '').trim();
+            const when = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '';
+            const names = items.map(m => m.fileName);
+            const totalBytes = items.reduce((a, m) => a + (Number(m.bytes) || 0), 0);
+            const withheld = items.filter(m => m.discoverable === false).length;
+
+            // Discovery Status is per EVIDENCE ITEM, while canvass media carries
+            // it per file. Rather than silently pick one, default to the honest
+            // answer and say so when the selection disagrees with itself.
+            const allWithheld = withheld === items.length;
+            const mixed = withheld > 0 && !allWithheld;
+
+            const defaultDesc =
+                'Preserved from the area canvass' + (addr ? ' at ' + addr : '') +
+                (when ? ' on ' + when : '') + '. ' +
+                items.length + ' item' + (items.length === 1 ? '' : 's') +
+                ' captured by ' + (entry.officerName ? entry.officerName : 'the canvassing officer') + '.';
+
+            const modal = document.createElement('div');
+            modal.id = 'canvasPreserveModal';
+            modal.className = 'fixed inset-0 bg-black/70 flex items-center justify-center z-[9999] p-4';
+            modal.innerHTML = `
+                <div class="bg-viper-dark border border-gray-700 rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                    <div class="p-6 border-b border-gray-700">
+                        <h3 class="text-xl font-bold text-viper-green">⚖ Preserve for Court</h3>
+                        <p class="text-sm text-gray-400 mt-1">
+                            ${items.length} item${items.length === 1 ? '' : 's'} (${_prettyBytes(totalBytes)}) will be copied into the Evidence module.
+                            The canvass entry keeps its own copy.
+                        </p>
+                    </div>
+                    <div class="p-6 space-y-4">
+                        <div class="bg-viper-card/40 border border-gray-700 rounded-lg p-3 max-h-40 overflow-y-auto">
+                            ${names.map(n => `<div class="text-xs text-gray-300 font-mono truncate" title="${_esc(n)}">${_esc(n)}</div>`).join('')}
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Evidence ID/Tag *</label>
+                            <input type="text" id="canvasPreserveTag" value="${_esc(_canvasEvidenceTagFor(entry))}"
+                                   class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white">
+                            <p class="text-xs text-gray-500 mt-1">This is also the folder name inside the case's Evidence folder.</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Description *</label>
+                            <textarea id="canvasPreserveDesc" rows="3"
+                                      class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white resize-none">${_esc(defaultDesc)}</textarea>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Location Obtained</label>
+                            <input type="text" id="canvasPreserveLoc" value="${_esc(addr)}"
+                                   class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white">
+                            <p class="text-xs text-gray-500 mt-1">📍 Kept so the item maps on the Connection Board.</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Discovery Status</label>
+                            <select id="canvasPreserveDisc"
+                                    class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan outline-none text-white">
+                                <option value="yes" ${allWithheld ? '' : 'selected'}>Discoverable — include in the DA package</option>
+                                <option value="no" ${allWithheld ? 'selected' : ''}>Not Discoverable — withhold from the DA package</option>
+                            </select>
+                            ${mixed ? `<p class="text-xs text-amber-400 mt-2">⚠ ${withheld} of the ${items.length} selected item${withheld === 1 ? ' is' : 's are'} marked Not Discoverable on the canvass entry. Evidence carries one status for the whole item — file those separately if they need to stay withheld.</p>` : ''}
+                        </div>
+                    </div>
+                    <div class="p-6 border-t border-gray-700 flex justify-end gap-3">
+                        <button onclick="closeCanvasPreserveModal()" class="px-4 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white transition">Cancel</button>
+                        <button id="canvasPreserveGo" onclick="confirmCanvasPreserve()" class="px-4 py-2 bg-viper-green hover:bg-viper-green/80 rounded-lg text-black font-semibold transition">Copy to Evidence</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(modal);
+        }
+
+        function closeCanvasPreserveModal() {
+            const m = document.getElementById('canvasPreserveModal');
+            if (m) m.remove();
+            _canvasPreservePicks = null;
+            _canvasPreserveEntryIndex = null;
+        }
+
+        async function confirmCanvasPreserve() {
+            const items = _canvasPreservePicks;
+            const entryIndex = _canvasPreserveEntryIndex;
+            const entry = (entryIndex != null) ? canvasData[entryIndex] : null;
+            if (!items || !items.length || !entry) { closeCanvasPreserveModal(); return; }
+
+            const tag = (document.getElementById('canvasPreserveTag')?.value || '').trim();
+            const description = (document.getElementById('canvasPreserveDesc')?.value || '').trim();
+            const location = (document.getElementById('canvasPreserveLoc')?.value || '').trim();
+            const discoverable = (document.getElementById('canvasPreserveDisc')?.value || 'yes') !== 'no';
+
+            if (!tag) { viperToast('Give the evidence item a tag.', 'error'); return; }
+            if (!description) { viperToast('Describe what is being preserved.', 'error'); return; }
+            if (!window.electronAPI || !window.electronAPI.canvasMediaToEvidence) {
+                viperToast('The desktop app is required to move files into Evidence.', 'error');
+                return;
+            }
+
+            const go = document.getElementById('canvasPreserveGo');
+            if (go) { go.disabled = true; go.textContent = 'Copying…'; }
+
+            let res;
+            try {
+                res = await window.electronAPI.canvasMediaToEvidence({
+                    caseNumber: currentCase.caseNumber,
+                    evidenceTag: tag,
+                    fileNames: items.map(m => m.fileName)
+                });
+            } catch (err) {
+                res = { success: false, error: (err && err.message) || String(err) };
+            }
+
+            if (!res || !res.success) {
+                if (go) { go.disabled = false; go.textContent = 'Move to Evidence'; }
+                viperToast('Could not copy into Evidence: ' + ((res && res.error) || 'unknown error'), 'error');
+                return;
+            }
+
+            const copied = res.files || [];
+            const failed = res.failed || [];
+
+            if (!copied.length) {
+                if (go) { go.disabled = false; go.textContent = 'Move to Evidence'; }
+                viperToast('Nothing was copied — ' + ((failed[0] && failed[0].error) || 'the files could not be read.'), 'error');
+                return;
+            }
+
+            // Build the evidence record from what actually landed on disk, not
+            // from what was asked for.
+            const byIndex = copied.map((f, i) => ({ f, src: items[i] }));
+            const files = copied.map((f, i) => ({
+                name: f.name,
+                path: f.path,
+                size: f.size,
+                type: (items[i] && items[i].mime) || '',
+                lastModified: Date.now()
+            }));
+
+            const newEvidence = {
+                id: Date.now(),
+                type: _canvasEvidenceTypeFor(items),
+                tag: tag,
+                discoverable: discoverable,
+                description: description,
+                location: location,
+                fileCount: files.length,
+                totalSize: files.reduce((a, f) => a + (Number(f.size) || 0), 0),
+                files: files,
+                source: 'areacanvas',
+                canvasEntryId: entry.id != null ? entry.id : null,
+                createdAt: new Date().toISOString()
+            };
+
+            if (!Array.isArray(caseEvidence)) caseEvidence = [];
+            caseEvidence.push(newEvidence);
+            const allEvidence = _lsParse('viperCaseEvidence', {});
+            allEvidence[currentCase.caseNumber] = caseEvidence;
+            localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
+
+            try {
+                audit('evidence_added', {
+                    case_number: currentCase.caseNumber,
+                    case_id: currentCase.id,
+                    evidence_id: newEvidence.id,
+                    type: newEvidence.type,
+                    tag: tag,
+                    file_count: files.length,
+                    source: 'area_canvass',
+                });
+            } catch (_) {}
+
+            // Mark the canvass side so the gallery stops offering the same
+            // item again and can say where it went.
+            byIndex.forEach(({ src }) => {
+                if (!src) return;
+                src.evidenceTag = tag;
+                src.evidenceId = newEvidence.id;
+                src.preservedAt = newEvidence.createdAt;
+            });
+            saveCanvasData();
+
+            closeCanvasPreserveModal();
+
+            if (failed.length) {
+                viperToast(
+                    `Preserved ${copied.length} item(s) as evidence "${tag}". ${failed.length} could not be copied: ${failed[0].error}`,
+                    'error'
+                );
+            } else {
+                viperToast(`✓ Preserved ${copied.length} item(s) in Evidence as "${tag}"`, 'success');
+            }
+
+            // Keep the board in step — the new evidence item carries the
+            // canvass address, so it maps alongside the door it came from.
+            _canvasSyncConnectionBoard(true);
+            renderTabContent('areacanvas');
+        }
+
+        function _prettyBytes(n) {
+            const b = Number(n) || 0;
+            if (b < 1024) return b + ' B';
+            if (b < 1048576) return Math.round(b / 1024) + ' KB';
+            return (b / 1048576).toFixed(1) + ' MB';
+        }
+
+        // ─── Canvass → Connection Board ──────────────────────────────────
+        //
+        // Every canvassed door is a location and may carry photos, video or
+        // audio. The board already knows how to pin canvass addresses; this
+        // just asks it to, and it works with the board closed, so pins are
+        // waiting the next time the detective opens it.
+        //
+        // Pins are keyed by (sourceType, sourceId), so running this twice
+        // refreshes in place — a renamed, recolored or hand-dragged pin keeps
+        // the detective's changes.
+        function _canvasSyncConnectionBoard(quiet) {
+            try {
+                if (!currentCase) return false;
+                if (localStorage.getItem('viperConnectionBoardEnabled') === 'false') return false;
+                if (!window.ConnectionBoard || typeof window.ConnectionBoard.addFromCaseData !== 'function') {
+                    if (!quiet) viperToast('The Connection Board is not available.', 'error');
+                    return false;
+                }
+                window.ConnectionBoard.addFromCaseData('canvas', !!quiet);
+                return true;
+            } catch (e) {
+                console.warn('[areacanvas] connection board sync failed:', e);
+                if (!quiet) viperToast('Could not update the Connection Board: ' + e.message, 'error');
+                return false;
+            }
+        }
+
+        function syncCanvasToConnectionBoard() {
+            const withAddress = canvasData.filter(c => c && c.address).length;
+            if (!withAddress) {
+                viperToast('No canvass entries have an address to map yet.', 'info');
+                return;
+            }
+            _canvasSyncConnectionBoard(false);
         }
 
         // Canvas Map Functions
@@ -24790,6 +25091,12 @@
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
                                     </svg>
                                     Export PDF
+                                </button>
+                                <button onclick="syncCanvasToConnectionBoard()" title="Pin every canvassed address — and anything captured at it — on the Connection Board" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition flex items-center gap-2">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5M10.172 13.828a4 4 0 010-5.656l3-3a4 4 0 015.656 5.656l-1.5 1.5"/>
+                                    </svg>
+                                    Add to Board
                                 </button>
                             ` : ''}
                         </div>
@@ -26568,6 +26875,13 @@
                             'success'
                         );
                     }
+
+                    // Put the doors — and anything captured at them — on the
+                    // Connection Board straight away. Quiet: the import has
+                    // already reported, and the board merges rather than
+                    // duplicates, so this is safe to run every time.
+                    _canvasSyncConnectionBoard(true);
+
                     renderTabContent('areacanvas');
                 }
             } catch (e) {

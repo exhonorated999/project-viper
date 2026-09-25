@@ -199,6 +199,57 @@
     return out;
   }
 
+  // Collect viewable files off an area-canvass entry.
+  //
+  // Canvass media has no path of its own — it lives under the case folder's
+  // "Canvas Media" directory and is read by NAME through its own IPC, which
+  // also handles Field Security decryption. So the descriptor carries the
+  // name plus the case number, and _readPinMediaBytes dispatches on it.
+  function canvasEntryMedia(entry, caseNumber) {
+    var out = [];
+    var media = (entry && Array.isArray(entry.media)) ? entry.media : [];
+    media.forEach(function (m) {
+      if (!m || !m.fileName) return;
+      var mime = m.mime || _mimeFromExt(m.fileName);
+      var kind = m.kind || _mediaKind(mime);
+      if (!kind) return;
+      out.push({
+        canvasFile: m.fileName, caseNumber: String(caseNumber || ''),
+        name: m.fileName, mime: mime, kind: kind,
+        preserved: !!m.evidenceTag
+      });
+    });
+    return out;
+  }
+
+  /**
+   * Read the bytes behind one pin media descriptor.
+   *
+   * Two sources, one contract: evidence files are absolute paths read by
+   * readEvidenceFile, canvass media is read by name through canvasReadMedia.
+   * Everything downstream (the card, the standalone export) goes through
+   * here so neither has to know the difference.
+   *
+   * @returns {Promise<Uint8Array>} rejects when the bytes are unavailable.
+   */
+  function _readPinMediaBytes(m) {
+    var api = window.electronAPI;
+    if (!api) return Promise.reject(new Error('Desktop app required'));
+    if (m && m.canvasFile) {
+      if (!api.canvasReadMedia) return Promise.reject(new Error('Desktop app required'));
+      return api.canvasReadMedia({ caseNumber: m.caseNumber || '', fileName: m.canvasFile })
+        .then(function (res) {
+          if (!res || !res.success) throw new Error((res && res.error) || 'Could not read file');
+          var bin = atob(res.dataBase64);
+          var bytes = new Uint8Array(bin.length);
+          for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          return bytes;
+        });
+    }
+    if (!api.readEvidenceFile || !m || !m.path) return Promise.reject(new Error('File unavailable'));
+    return api.readEvidenceFile(m.path).then(function (bytes) { return new Uint8Array(bytes); });
+  }
+
   // ---- persistence ----
   function storeKey() { return 'connectionBoard_' + caseId; }
   function loadBoard() {
@@ -593,6 +644,16 @@
   // ---- Add-from-case-data sources ----
   function addFromCaseData(type, quiet) {
     if (!currentCase) return;
+    // The drawer may never have been opened this session — FLOCK and the
+    // area canvass both push from a closed board — in which case `caseId`
+    // and `board` are unset or still point at the previously opened case.
+    // saveBoard() keys off `caseId`, so without this the pins land in the
+    // wrong case's store. Same guard addPins() has carried since 5.1.5.
+    var drawerOpen = !!document.querySelector('#cbDrawer.cb-open');
+    if (!drawerOpen || caseId !== currentCase.id || !board) {
+      caseId = currentCase.id;
+      loadBoard();
+    }
     var added = 0;
     var jobs = [];
     var cid = currentCase.id, cnum = currentCase.caseNumber;
@@ -650,10 +711,45 @@
     else if (type === 'canvas') {
       var canv = lsParse('areacanvas_' + cid, []);
       canv.forEach(function (c, idx) {
-        if (!c.address) return;
-        var cPin = upsertAutoPin({ type: 'location', label: c.address, sourceType: 'canvas', sourceId: (c.id != null ? c.id : idx), address: c.address, data: { contact: c.contact, notes: c.notes } });
+        if (!c || !c.address) return;
+        var cMedia = canvasEntryMedia(c, cnum);
+        var noteBits = [];
+        if (c.notes) noteBits.push(String(c.notes));
+        if (c.evidenceLocated && String(c.evidenceLocated).toLowerCase() !== 'no') {
+          noteBits.push('Evidence located: ' + c.evidenceLocated);
+        }
+        var cPin = upsertAutoPin({
+          type: 'location', label: c.address,
+          sourceType: 'canvas', sourceId: (c.id != null ? c.id : idx),
+          address: c.address,
+          data: {
+            contact: c.contact, notes: noteBits.join(' \u2014 '),
+            name: c.contactName || c.name || '', phone: c.phone || '',
+            officer: c.officerName || '',
+            datetime: c.timestamp ? new Date(c.timestamp).toLocaleString() : '',
+            sourceTab: 'areacanvas', sourceIndex: idx,
+            media: cMedia
+          }
+        });
+        // upsertAutoPin only seeds `data` on CREATE, so an entry that gained
+        // photos after it was first pinned would show none. Refresh the
+        // fields that change.
+        cPin.data = cPin.data || {};
+        cPin.data.media = cMedia;
+        cPin.data.notes = noteBits.join(' \u2014 ');
+        cPin.data.sourceTab = 'areacanvas';
+        cPin.data.sourceIndex = idx;
         added++;
-        jobs.push(geocode(c.address).then(function (g) { if (g) { cPin.lat = g.lat; cPin.lng = g.lng; scheduleRefresh(); } }));
+
+        // A hand-set GPS pin on the canvass map is surveyed truth — it beats
+        // geocoding the address string, and it costs no network call.
+        var hasManual = typeof c.manualLat === 'number' && typeof c.manualLon === 'number'
+          && !isNaN(c.manualLat) && !isNaN(c.manualLon);
+        if (hasManual && !cPin._posManual) {
+          cPin.lat = c.manualLat; cPin.lng = c.manualLon; cPin.approx = false;
+        } else if (cPin.lat == null) {
+          jobs.push(geocode(c.address).then(function (g) { if (g) { cPin.lat = g.lat; cPin.lng = g.lng; cPin.approx = !!g.approx; scheduleRefresh(); } }));
+        }
       });
     }
     else if (type === 'evidence') {
@@ -694,8 +790,7 @@
 
     Promise.all(jobs).then(function () {
       saveBoard();
-      renderCurrentView();
-      renderLocPanel();
+      if (drawerOpen) { renderCurrentView(); renderLocPanel(); }
       if (!quiet) toast(added ? ('Added ' + added + ' item(s) to the board') : 'Nothing new to add', added ? 'success' : 'info');
     });
   }
@@ -1624,7 +1719,8 @@
     var boardBtn = (pin.x == null || pin.y == null) ? '<button class="cb-btn cb-card-toboard">\uD83E\uDDF5 Add to web</button>' : '';
     var video = pin.data && pin.data.video;
     var videoBtn = video ? '<button class="cb-btn cb-card-video">\u25B6 Play video</button>' : '';
-    var mediaList = (pin.type === 'evidence' && pin.data && pin.data.media && pin.data.media.length) ? pin.data.media : [];
+    // Evidence items and canvass entries both carry viewable attachments.
+    var mediaList = (pin.data && pin.data.media && pin.data.media.length) ? pin.data.media : [];
 
     el.innerHTML =
       '<div class="cb-card-head" style="background:' + (pin.color || meta.color) + '22;border-bottom:2px solid ' + (pin.color || meta.color) + '">' +
@@ -1698,7 +1794,7 @@
 
   function hideCard() { var c = document.getElementById('cbCards'); if (c) c.innerHTML = ''; selectedPinId = null; }
 
-  // Populate the evidence card's media host with inline image/video/audio.
+  // Populate a pin card's media host with inline image/video/audio.
   // Reads the file bytes through the Electron bridge and shows them as a blob
   // (same technique the Evidence tab uses); falls back to an "Open externally"
   // button if the bridge is missing or the read fails.
@@ -1711,10 +1807,20 @@
       wrap.className = 'cb-media-item';
       var name = document.createElement('div');
       name.className = 'cb-media-name';
-      name.textContent = m.name || m.kind;
+      name.textContent = (m.name || m.kind) + (m.preserved ? '  \u2696' : '');
+      if (m.preserved) name.title = 'Also preserved in the Evidence module';
       wrap.appendChild(name);
 
-      function fallback() {
+      function fallback(msg) {
+        // Canvass media has no path of its own, so there is nothing for the
+        // OS to open — say what went wrong instead of offering a dead button.
+        if (m.canvasFile) {
+          var s = document.createElement('div');
+          s.className = 'cb-media-name';
+          s.textContent = msg || 'Unavailable';
+          wrap.appendChild(s);
+          return;
+        }
         var b = document.createElement('button');
         b.className = 'cb-btn cb-media-open';
         b.textContent = '\u2197 Open externally';
@@ -1731,16 +1837,15 @@
       wrap.appendChild(mediaEl);
       host.appendChild(wrap);
 
-      if (window.electronAPI && window.electronAPI.readEvidenceFile) {
-        window.electronAPI.readEvidenceFile(m.path).then(function (data) {
-          try {
-            var blob = new Blob([new Uint8Array(data)], { type: m.mime });
-            mediaEl.src = URL.createObjectURL(blob);
-          } catch (e) { mediaEl.remove(); fallback(); }
-        }).catch(function () { mediaEl.src = 'file:///' + m.path.replace(/\\/g, '/'); });
-      } else {
-        mediaEl.src = 'file:///' + m.path.replace(/\\/g, '/');
-      }
+      _readPinMediaBytes(m).then(function (bytes) {
+        try {
+          var blob = new Blob([bytes], { type: m.mime });
+          mediaEl.src = URL.createObjectURL(blob);
+        } catch (e) { mediaEl.remove(); fallback(); }
+      }).catch(function (err) {
+        mediaEl.remove();
+        fallback((err && err.message) || 'Could not read that file');
+      });
     });
   }
 
@@ -2113,9 +2218,8 @@
     arr.forEach(function (m) {
       chain = chain.then(function () {
         var item = { name: m.name || '', kind: m.kind, mime: m.mime };
-        if (!(window.electronAPI && window.electronAPI.readEvidenceFile)) { item.note = 'Media unavailable'; out.push(item); return; }
-        return window.electronAPI.readEvidenceFile(m.path).then(function (bytes) {
-          var blob = new Blob([new Uint8Array(bytes)], { type: m.mime });
+        return _readPinMediaBytes(m).then(function (bytes) {
+          var blob = new Blob([bytes], { type: m.mime });
           item.size = blob.size;
           if (m.kind === 'image') { return _blobToDataUrl(blob).then(function (d) { item.src = d; out.push(item); }); }
           if (blob.size <= EXPORT_MEDIA_CAP) { return _blobToDataUrl(blob).then(function (d) { item.src = d; out.push(item); }); }
@@ -2143,7 +2247,7 @@
         },
         media: []
       };
-      if (p.type === 'evidence' && p.data && p.data.media && p.data.media.length) {
+      if (p.data && p.data.media && p.data.media.length) {
         return _collectMedia(p.data.media).then(function (mm) { base.media = mm; return base; });
       }
       return Promise.resolve(base);

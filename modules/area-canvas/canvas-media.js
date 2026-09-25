@@ -75,7 +75,11 @@
         persist: null,   // () => void   — save the case entry list
         rerender: null,  // () => void   — re-render the canvas tab
         toast: null,     // (msg, kind) => void
-        confirm: null    // async (msg, opts) => bool
+        confirm: null,   // async (msg, opts) => bool
+        // async (entryIndex, mediaItems[]) => void — file picked items into
+        // the Evidence module. Optional: when absent the gallery renders no
+        // preserve controls at all.
+        preserveToEvidence: null
     };
 
     function configure(opts) {
@@ -804,6 +808,7 @@
 
         const photos = media.filter(m => m.kind === 'image');
         const clips = media.filter(m => m.kind !== 'image');
+        const canPreserve = typeof _host.preserveToEvidence === 'function';
 
         const head = `
             <div class="flex items-center justify-between mb-4">
@@ -822,6 +827,16 @@
                     ${flag ? '\u2298 Not Discoverable' : '\u2713 Discoverable'}
                 </button>`;
 
+            // Already filed into Evidence, or available to be. A preserved item
+            // keeps its place in the canvass entry — the tick is spent, not the
+            // photo — so the control becomes a statement of fact, not a toggle.
+            const pickChip = !canPreserve ? '' : (m.evidenceTag
+                ? `<span class="cm-preserved" title="Filed into Evidence under tag &quot;${esc(m.evidenceTag)}&quot;">\u2696 In Evidence</span>`
+                : `<label class="cm-pick" title="Preserve this for court">
+                       <input type="checkbox" data-cm-pick="${entryIndex}:${idx}">
+                       <span>Preserve</span>
+                   </label>`);
+
             if (m.kind === 'image') {
                 return `
                     <div class="cm-tile">
@@ -836,6 +851,7 @@
                         </div>
                         <div class="cm-tile-actions">
                             ${discChip}
+                            ${pickChip}
                             <button type="button" class="cm-del" title="Delete this photo"
                                     onclick="CanvasMedia.removeOne(${entryIndex}, ${idx})">Delete</button>
                         </div>
@@ -858,6 +874,7 @@
                     </div>
                     <div class="cm-tile-actions">
                         ${discChip}
+                        ${pickChip}
                         <button type="button" class="cm-del" title="Delete this clip"
                                 onclick="CanvasMedia.removeOne(${entryIndex}, ${idx})">Delete</button>
                     </div>
@@ -869,11 +886,25 @@
             ? `<p class="cm-withheld">\u2298 ${withheld} item${withheld === 1 ? '' : 's'} marked Not Discoverable — withheld from the DA export package and its report.</p>`
             : '';
 
+        const openToPreserve = media.filter(m => !m.evidenceTag).length;
+        const preservedCount = media.length - openToPreserve;
+        const preserveBar = (!canPreserve || !openToPreserve) ? '' : `
+            <div class="cm-preserve-bar">
+                <span class="cm-preserve-hint">Tick what needs to be preserved for court, then file it into Evidence. The canvass entry keeps its copy — this is a copy, not a move.</span>
+                <button type="button" class="cm-preserve-btn"
+                        onclick="CanvasMedia.preserveSelected(${entryIndex})">\u2696 Preserve selected</button>
+            </div>`;
+        const preservedNote = (canPreserve && preservedCount)
+            ? `<p class="cm-preserved-note">\u2696 ${preservedCount} item${preservedCount === 1 ? ' is' : 's are'} preserved in the Evidence module.</p>`
+            : '';
+
         return `
             <div class="glass-card rounded-xl p-6">
                 ${head}
                 ${photos.length ? `<div class="cm-grid">${photos.map(tile).join('')}</div>` : ''}
                 ${clips.length ? `<div class="cm-grid cm-grid-wide">${clips.map(tile).join('')}</div>` : ''}
+                ${preserveBar}
+                ${preservedNote}
                 ${withheldNote}
             </div>`;
     }
@@ -990,6 +1021,41 @@
         if (el) el.remove();
     }
 
+    /**
+     * File the ticked items into the case's Evidence module.
+     *
+     * The module does not own evidence records or localStorage, so the actual
+     * filing is the host's job — this only resolves which items the officer
+     * picked and hands them over.
+     */
+    async function preserveSelected(entryIndex) {
+        if (typeof _host.preserveToEvidence !== 'function') return;
+        const entry = _entryAt(entryIndex);
+        if (!entry || !Array.isArray(entry.media)) return;
+
+        const picks = [];
+        const boxes = document.querySelectorAll('input[data-cm-pick^="' + entryIndex + ':"]:checked');
+        boxes.forEach(cb => {
+            const parts = String(cb.getAttribute('data-cm-pick') || '').split(':');
+            const i = parseInt(parts[1], 10);
+            const m = entry.media[i];
+            // Already-preserved items render a badge instead of a tick, but
+            // guard anyway so a stale DOM can never file the same photo twice.
+            if (m && !m.evidenceTag) picks.push(m);
+        });
+
+        if (!picks.length) {
+            _notify('Tick the photos, video or audio you want preserved for court first.', 'info');
+            return;
+        }
+
+        try {
+            await _host.preserveToEvidence(entryIndex, picks);
+        } catch (err) {
+            _notify((err && err.message) || 'Could not file that into Evidence.', 'error');
+        }
+    }
+
     function toggleDiscoverable(entryIndex, mediaIndex) {
         const entry = _entryAt(entryIndex);
         if (!entry || !Array.isArray(entry.media)) return;
@@ -1064,6 +1130,7 @@
         openLightbox,
         closeLightbox,
         toggleDiscoverable,
+        preserveSelected,
         removeOne,
         nonDiscoverableFileNames,
         releaseUrls,

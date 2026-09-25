@@ -2728,6 +2728,83 @@ ipcMain.handle('canvas-delete-media', async (_e, payload) => {
   }
 });
 
+/**
+ * Copy selected canvass media into the case's Evidence folder.
+ *
+ * A COPY, not a move. The canvass entry is itself a record — what an officer
+ * saw and was shown at that door — and lifting its photos out to build an
+ * evidence item would rewrite that record after the fact. The Evidence copy
+ * is the court copy; the canvass entry keeps its own and is marked preserved.
+ *
+ * Bytes are decrypted out of Canvas Media and re-encrypted into Evidence, so
+ * the copy obeys whatever Field Security is doing NOW rather than inheriting
+ * the state the canvass file happened to be written under.
+ */
+ipcMain.handle('canvas-media-to-evidence', async (_e, payload) => {
+  try {
+    const caseNumber = _safeCaseNumber(payload && payload.caseNumber);
+    if (!caseNumber) return { success: false, error: 'Invalid case number' };
+
+    const evidenceTag = String((payload && payload.evidenceTag) || '')
+      .replace(/[^a-zA-Z0-9 _.-]/g, '_').trim();
+    if (!evidenceTag) return { success: false, error: 'Invalid evidence tag' };
+
+    const names = Array.isArray(payload && payload.fileNames) ? payload.fileNames : [];
+    if (!names.length) return { success: false, error: 'Nothing selected' };
+
+    const srcDir = path.join(casesDir, caseNumber, CANVAS_MEDIA_DIR);
+    const destDir = path.join(casesDir, caseNumber, 'Evidence', evidenceTag);
+    fs.mkdirSync(destDir, { recursive: true });
+
+    const locked = !!(security && security.isEnabled() && !security.isUnlocked());
+    const files = [];
+    const failed = [];
+
+    for (const rawName of names) {
+      const fileName = _sanitizeAttachmentName(rawName);
+      if (!fileName) { failed.push({ fileName: String(rawName || ''), error: 'Invalid file name' }); continue; }
+      try {
+        const srcPath = path.join(srcDir, fileName);
+        if (!fs.existsSync(srcPath)) throw new Error('File not found in the case folder');
+
+        let buf = fs.readFileSync(srcPath);
+        if (security && security.isEncryptedBuffer && security.isEncryptedBuffer(buf)) {
+          if (locked) throw new Error('File is encrypted; unlock Field Security first.');
+          buf = security.decryptBuffer(buf);
+        }
+        const plainSize = buf.length;
+        const out = (security && security.isEnabled() && security.isUnlocked())
+          ? security.encryptBuffer(buf)
+          : buf;
+
+        // Claim the name with the write itself — a check-then-write window
+        // is how one officer's photo silently overwrites another's.
+        const ext = path.extname(fileName);
+        const stem = fileName.slice(0, fileName.length - ext.length);
+        let finalName = fileName;
+        for (let n = 1; ; n++) {
+          try {
+            fs.writeFileSync(path.join(destDir, finalName), out, { flag: 'wx' });
+            break;
+          } catch (err) {
+            if (!err || err.code !== 'EEXIST') throw err;
+            if (n > 999) throw new Error('Too many collisions');
+            finalName = `${stem} (${n})${ext}`;
+          }
+        }
+        files.push({ name: finalName, path: path.join(destDir, finalName), size: plainSize });
+      } catch (err) {
+        failed.push({ fileName, error: err.message });
+      }
+    }
+
+    return { success: true, files, failed, folder: destDir };
+  } catch (err) {
+    console.error('canvas-media-to-evidence failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
 // Merge PDF attachments into the Notes-export PDF and save via dialog.
 // Renderer builds the cover/notes section with jsPDF, hands us the
 // base PDF as base64 + the names of PDF attachments to append.

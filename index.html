@@ -29,6 +29,9 @@
          importRmsForNewCase left blank on a report no bespoke reader claims.
          Resolves rms-shapes.js at factory time, so it stays below it. -->
     <script src="modules/rms/generic-extractor.js"></script>
+    <!-- Rebuilds a PDF page in visual order from its own text layer. Pure
+         arithmetic, no dependencies. -->
+    <script src="modules/rms/pdf-rows.js"></script>
     <script src="modules/supervisor-link/supervisor-link-ui.js"></script>
     <script src="case-snapshot.js"></script>
     <script src="libs/tailwindcss.js"></script>
@@ -2837,6 +2840,48 @@
         // --- RMS Import for New Case ---
         let pendingRmsData = null; // holds {text, fileName, detected} until case is created
 
+        /*
+         * Arkansas NIBRS incident reports only: re-read a PDF that has its own
+         * text layer in VISUAL order before parsing it.
+         *
+         * A flattened fillable PDF normally writes every printed form label
+         * into the content stream first and the typed-in values afterwards, so
+         * the extractor hands back a page where the labels and their values
+         * are hundreds of characters apart and any prose is out of order. One
+         * officer's report imported with no victim at all and with the first
+         * line of the narrative sitting at the end of it.
+         *
+         * A scan has no text layer, rebuilds to nothing, and falls straight
+         * through to the OCR path untouched — which is every Arkansas report
+         * validated in the field so far. Best-effort throughout: a failure
+         * here leaves the original extraction exactly as it was.
+         */
+        async function _rmsVisualOrderResult(filePath, result) {
+            try {
+                const AR = window.ArIncidentParser;
+                const PR = window.PdfRows;
+                if (!AR || !PR || !filePath || !result) return result;
+                if (!window.electronAPI || !window.electronAPI.pdfPageRows) return result;
+                if (!AR.detect(result.text || '')) return result;
+
+                const res = await window.electronAPI.pdfPageRows(filePath);
+                if (!res || !res.ok || !res.pages || !res.pages.length) return result;
+                if (!PR.isUsable(res.pages, result.text || '')) return result;
+
+                return {
+                    fileName: result.fileName,
+                    text: res.pages.join('\n') + '\n',
+                    pages: res.pages,
+                    numPages: res.pages.length,
+                    ocr: false,
+                    visualOrder: true
+                };
+            } catch (err) {
+                console.warn('[RMS Import] visual-order re-read failed:', err);
+                return result;
+            }
+        }
+
         async function importRmsForNewCase(presetPath) {
             const btn = document.getElementById('rmsImportBtn');
             const statusDiv = document.getElementById('rmsImportStatus');
@@ -2859,13 +2904,14 @@
                 }
 
                 btn.textContent = 'Parsing...';
-                const result = await window.electronAPI.extractPdfText(chosenPath);
+                let result = await window.electronAPI.extractPdfText(chosenPath);
                 if (!result || !result.text) {
                     viperToast('Could not extract text from PDF', 'error');
                     btn.disabled = false;
                     btn.textContent = 'Select PDF';
                     return;
                 }
+                result = await _rmsVisualOrderResult(chosenPath, result);
 
                 // Light parse: extract case number and detect which sections have data
                 const text = result.text;
@@ -3048,8 +3094,13 @@
                         // hold the file path, and hand the results across with the
                         // text — processPendingRmsImport is synchronous and only
                         // ever receives text.
+                        //
+                        // Skipped entirely when the text came from the visual-order
+                        // re-read: that IS the PDF's own text layer, so re-reading
+                        // the same pages through OCR can only be worse, and the
+                        // banded pass REPLACES a page.
                         const arReport = window.ArIncidentParser.parse(text, result.fileName, arOpts);
-                        if (window.electronAPI.ocrPdfPagesSparse) {
+                        if (window.electronAPI.ocrPdfPagesSparse && !result.visualOrder) {
                             if (window.ArIncidentParser.needsNameRecovery(arReport)) {
                                 const pages = window.ArIncidentParser.nameRecoveryPages(arReport);
                                 if (pages.length) {
@@ -3066,7 +3117,7 @@
                         // Banded re-read of the narrative pages. Kept separate
                         // from the sparse passes above because it REPLACES a
                         // page rather than adding to it — see band-ocr.js.
-                        if (window.electronAPI.ocrPdfPagesBanded && window.ArIncidentParser.narrativeBandPages) {
+                        if (window.electronAPI.ocrPdfPagesBanded && window.ArIncidentParser.narrativeBandPages && !result.visualOrder) {
                             const bPages = window.ArIncidentParser.narrativeBandPages(arReport);
                             if (bPages.length) {
                                 const banded = await window.electronAPI.ocrPdfPagesBanded(chosenPath, bPages);

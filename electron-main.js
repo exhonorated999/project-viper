@@ -4054,6 +4054,52 @@ ipcMain.handle('ocr-pdf-pages-banded', async (event, filePath, pages) => {
   }
 });
 
+// --- Re-read a PDF's own text layer in VISUAL order (ADDITIVE).
+//
+// `extract-pdf-text` above is UNCHANGED and remains the only text path for
+// every format. This handler exists for one specific failure it cannot fix.
+//
+// A flattened fillable PDF usually writes all of its printed form labels into
+// the content stream first and the typed-in values afterwards. Every extractor
+// that walks the stream in order — pdf-parse and MuPDF's own asText() both do
+// — hands back a page whose labels and values are hundreds of characters
+// apart, with any prose on the page in the wrong order. On a real Arkansas
+// incident report (26-0905455) that cost the import the entire victim record
+// and moved the first line of the officer's narrative to the end of it.
+//
+// MuPDF's structured text carries a bounding box per line, so the page can be
+// put back into reading order. modules/rms/pdf-rows.js does that arithmetic
+// and is tested on its own; this handler only feeds it.
+//
+// A scanned document has no text layer, so it rebuilds to nothing and the
+// caller falls straight through to the existing OCR path. Every Arkansas
+// report validated in the field so far is a pure scan.
+ipcMain.handle('pdf-page-rows', async (event, filePath) => {
+  try {
+    const pdfRows = require('./modules/rms/pdf-rows.js');
+    const mupdf = await import('mupdf');
+    const doc = mupdf.Document.openDocument(fs.readFileSync(filePath), 'application/pdf');
+    const numPages = doc.countPages();
+    if (numPages > 60) return { ok: false, pages: [], error: 'too many pages' };
+
+    const stext = [];
+    for (let i = 0; i < numPages; i++) {
+      try {
+        stext.push(JSON.parse(doc.loadPage(i).toStructuredText().asJSON()));
+      } catch (_) {
+        stext.push(null);                 // a page that will not parse rebuilds to ''
+      }
+    }
+    const pages = pdfRows.buildPages(stext);
+    return { ok: true, pages: pages };
+  } catch (error) {
+    // Never fail an import because this pass failed — the caller keeps
+    // whatever the primary extraction read.
+    console.error('pdf-page-rows error:', error);
+    return { ok: false, pages: [], error: String((error && error.message) || error) };
+  }
+});
+
 // --- Case Export / Import ---
 ipcMain.handle('save-case-export', async (event, { fileName, data }) => {
   const result = await dialog.showSaveDialog(mainWindow, {

@@ -115,6 +115,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // layout-preserving pass drops. extractPdfText is unchanged.
   ocrPdfPagesSparse: (filePath, pages, psm) => ipcRenderer.invoke('ocr-pdf-pages-sparse', filePath, pages, psm),
   ocrPdfPagesBanded: (filePath, pages) => ipcRenderer.invoke('ocr-pdf-pages-banded', filePath, pages),
+  // Re-reads a PDF's own text layer in visual (reading) order. Returns no
+  // pages for a scan, which has no text layer. extractPdfText is unchanged.
+  pdfPageRows: (filePath) => ipcRenderer.invoke('pdf-page-rows', filePath),
   readFileAsDataUrl: (filePath) => ipcRenderer.invoke('read-file-as-data-url', filePath),
   resolveWarrantPath: (data) => ipcRenderer.invoke('resolve-warrant-path', data),
   viewWarrantExternal: (filePath) => ipcRenderer.invoke('view-warrant-external', filePath),

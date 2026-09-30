@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Case Note Editor</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0f1117;
+            color: #e2e8f0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .header {
+            background: #161921;
+            border-bottom: 1px solid rgba(0, 224, 255, 0.15);
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+            -webkit-app-region: drag;
+        }
+        .header-left { display: flex; align-items: baseline; gap: 10px; }
+        .header h1 { font-size: 14px; font-weight: 600; color: #00e0ff; }
+        .header .case-num { font-size: 12px; color: #64748b; }
+        .save-btn {
+            -webkit-app-region: no-drag;
+            background: rgba(0, 224, 255, 0.15);
+            border: 1px solid rgba(0, 224, 255, 0.4);
+            color: #00e0ff;
+            padding: 6px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .save-btn:hover { background: rgba(0, 224, 255, 0.25); border-color: rgba(0, 224, 255, 0.6); }
+        .save-btn.saved {
+            background: rgba(74, 222, 128, 0.15);
+            border-color: rgba(74, 222, 128, 0.4);
+            color: #4ade80;
+        }
+        .save-btn.unsaved {
+            background: rgba(251, 191, 36, 0.15);
+            border-color: rgba(251, 191, 36, 0.4);
+            color: #fbbf24;
+        }
+        .toolbar {
+            background: #161921;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            padding: 6px 12px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+        .toolbar button {
+            background: transparent;
+            border: 0;
+            color: #94a3b8;
+            width: 30px;
+            height: 30px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .toolbar button:hover { background: rgba(0, 224, 255, 0.15); color: #00e0ff; }
+        .toolbar .sep { width: 1px; height: 18px; background: #334155; margin: 0 6px; }
+        .toolbar select {
+            background: #0f1117;
+            border: 1px solid #334155;
+            color: #e2e8f0;
+            border-radius: 5px;
+            padding: 3px 6px;
+            font-size: 12px;
+        }
+        .editor-wrap { flex: 1; overflow: auto; padding: 20px 24px; }
+        #editor {
+            min-height: 100%;
+            outline: none;
+            font-size: 14px;
+            line-height: 1.7;
+            font-family: Arial, sans-serif;
+            color: #e2e8f0;
+        }
+        #editor img { max-width: 100%; height: auto; border-radius: 4px; margin: 10px 0; }
+        .status {
+            background: #12151d;
+            border-top: 1px solid rgba(255,255,255,0.06);
+            padding: 6px 16px;
+            font-size: 11px;
+            color: #64748b;
+            display: flex;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-left">
+            <h1>Case Note</h1>
+            <span class="case-num" id="caseLabel"></span>
+        </div>
+        <button class="save-btn" id="saveBtn" onclick="saveToMain()">Save to Main</button>
+    </div>
+
+    <div class="toolbar">
+        <button onclick="fmt('bold')" title="Bold (Ctrl+B)"><b>B</b></button>
+        <button onclick="fmt('italic')" title="Italic (Ctrl+I)"><i>I</i></button>
+        <button onclick="fmt('underline')" title="Underline (Ctrl+U)"><u>U</u></button>
+        <div class="sep"></div>
+        <button onclick="fmt('insertUnorderedList')" title="Bullet list">&bull;&equiv;</button>
+        <button onclick="fmt('insertOrderedList')" title="Numbered list">1.</button>
+        <div class="sep"></div>
+        <select id="sizeSel" onchange="setSize(this.value)" title="Font size">
+            <option value="12">12</option>
+            <option value="14" selected>14</option>
+            <option value="16">16</option>
+            <option value="18">18</option>
+            <option value="20">20</option>
+            <option value="24">24</option>
+        </select>
+    </div>
+
+    <div class="editor-wrap">
+        <div id="editor" contenteditable="true" spellcheck="true"></div>
+    </div>
+
+    <div class="status">
+        <span id="statusLeft">Loading&hellip;</span>
+        <span id="statusRight">Saves automatically every 5 minutes</span>
+    </div>
+
+    <script>
+        // Case Note pop-out.
+        //
+        // Mirrors report-popout.html, with one structural difference: a case
+        // has ONE report but MANY notes, so every call is addressed by note
+        // id as well as case number. The id is minted by the main window
+        // before this window opens — openNotePopout() commits the note first
+        // precisely so there is something to address here.
+        //
+        // The main window closes its inline editor when this one opens, so
+        // there is exactly one writer for this record at a time.
+        const params = new URLSearchParams(window.location.search);
+        const caseNumber = params.get('case') || '';
+        const noteId = params.get('note') || '';
+
+        document.getElementById('caseLabel').textContent =
+            caseNumber ? ('Case ' + caseNumber) : '';
+        document.title = 'Note \u2014 ' + (caseNumber || 'VIPER');
+
+        const editor = document.getElementById('editor');
+        const saveBtn = document.getElementById('saveBtn');
+        const statusLeft = document.getElementById('statusLeft');
+        const api = window.electronAPI;
+
+        const AUTOSAVE_MS = 5 * 60 * 1000;
+        let lastCommitted = null;
+        let loaded = false;
+
+        function fmt(cmd) { document.execCommand(cmd, false, null); editor.focus(); }
+        function setSize(px) { editor.style.fontSize = px + 'px'; editor.focus(); }
+
+        function markDirty() {
+            saveBtn.textContent = 'Save to Main *';
+            saveBtn.className = 'save-btn unsaved';
+        }
+        function markClean(label) {
+            saveBtn.textContent = 'Save to Main';
+            saveBtn.className = 'save-btn';
+            if (label) statusLeft.textContent = label;
+        }
+
+        function isDirty() {
+            return loaded && editor.innerHTML.trim() !== (lastCommitted || '');
+        }
+
+        async function loadNote() {
+            if (!api || !api.noteGet) {
+                statusLeft.textContent = 'Cannot load \u2014 desktop app required.';
+                return;
+            }
+            try {
+                const data = await api.noteGet(caseNumber, noteId);
+                if (!data) {
+                    statusLeft.textContent = 'That note is no longer in this case.';
+                    editor.contentEditable = 'false';
+                    return;
+                }
+                editor.innerHTML = data.contentHtml || '';
+                lastCommitted = editor.innerHTML.trim();
+                loaded = true;
+                statusLeft.textContent = data.createdAt
+                    ? ('Created ' + new Date(data.createdAt).toLocaleString())
+                    : 'Loaded.';
+            } catch (e) {
+                statusLeft.textContent = 'Could not load this note: ' + (e && e.message ? e.message : e);
+            }
+        }
+
+        // `silent` is the autosave path: no button flash, just the timestamp,
+        // matching how the main window behaves.
+        async function saveToMain(silent) {
+            if (!loaded) return false;
+            if (!api || !api.noteSave) {
+                statusLeft.textContent = 'Cannot save \u2014 desktop app required.';
+                return false;
+            }
+            const html = editor.innerHTML.trim();
+            let ok = false;
+            try {
+                ok = await api.noteSave(caseNumber, noteId, html);
+            } catch (e) {
+                statusLeft.textContent = 'Save failed: ' + (e && e.message ? e.message : e);
+                return false;
+            }
+            if (!ok) {
+                statusLeft.textContent = 'Save failed \u2014 the note may have been deleted in the main window.';
+                return false;
+            }
+            lastCommitted = html;
+            const stamp = new Date().toLocaleTimeString();
+            if (silent) {
+                markClean('Auto-saved ' + stamp);
+            } else {
+                statusLeft.textContent = 'Saved ' + stamp;
+                saveBtn.textContent = 'Saved';
+                saveBtn.className = 'save-btn saved';
+                setTimeout(() => { if (!isDirty()) markClean(); }, 2000);
+            }
+            return true;
+        }
+
+        editor.addEventListener('input', () => { if (isDirty()) markDirty(); });
+
+        // Paste images straight in, same as the main note editor.
+        editor.addEventListener('paste', (e) => {
+            const items = (e.clipboardData && e.clipboardData.items) || [];
+            for (let i = 0; i < items.length; i++) {
+                if (items[i].type.indexOf('image') === -1) continue;
+                e.preventDefault();
+                const blob = items[i].getAsFile();
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const img = document.createElement('img');
+                    img.src = ev.target.result;
+                    const sel = window.getSelection();
+                    if (sel && sel.rangeCount > 0) {
+                        const range = sel.getRangeAt(0);
+                        range.deleteContents();
+                        range.insertNode(img);
+                        range.setStartAfter(img);
+                        range.setEndAfter(img);
+                        sel.removeAllRanges();
+                        sel.addRange(range);
+                    } else {
+                        editor.appendChild(img);
+                    }
+                    markDirty();
+                };
+                reader.readAsDataURL(blob);
+                break;
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveToMain(); }
+        });
+
+        setInterval(() => { if (isDirty()) saveToMain(true); }, AUTOSAVE_MS);
+
+        // Closing the window is a "leave", exactly like switching tabs in
+        // the main window, so it commits too.
+        window.addEventListener('beforeunload', () => {
+            if (isDirty()) { try { saveToMain(true); } catch (_) {} }
+        });
+
+        loadNote().then(() => editor.focus());
+    </script>
+</body>
+</html>

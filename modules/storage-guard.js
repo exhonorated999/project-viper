@@ -39,6 +39,7 @@
         'expires_at', 'customer_name', 'contact_email', 'agency'
     ];
     const PREFIX = 'viper_';
+    const PROBE_KEY = '__viper_storage_probe__';
 
     function hasLocalRegistration() {
         try { return !!localStorage.getItem(PREFIX + 'registered_at'); }
@@ -60,7 +61,7 @@
      * a FAILED round-trip is conclusive proof of trouble.
      */
     function probeWritable() {
-        const k = '__viper_storage_probe__';
+        const k = PROBE_KEY;
         try {
             localStorage.setItem(k, '1');
             const ok = localStorage.getItem(k) === '1';
@@ -69,6 +70,55 @@
         } catch (e) {
             return false;
         }
+    }
+
+    /**
+     * Do two path strings name the same folder? Windows paths are
+     * case-insensitive and may or may not carry a trailing separator, and
+     * the same drive can be written with either slash. Anything subtler
+     * than that (junctions, substituted drives, UNC aliases) we treat as
+     * different on purpose: being wrong in that direction shows a
+     * registration prompt, not a hidden case list.
+     */
+    function samePath(a, b) {
+        if (!a || !b) return false;
+        const norm = (p) => String(p)
+            .replace(/[\\/]+/g, '\\')
+            .replace(/\\+$/, '')
+            .toLowerCase();
+        return norm(a) === norm(b);
+    }
+
+    /**
+     * Did localStorage come back carrying state this install wrote before?
+     *
+     * This is the difference between "Chromium handed us a dead, empty
+     * database" and "the database is fine, one write is missing". We ignore
+     * the registration keys themselves (that is what we are diagnosing) and
+     * our own probe key.
+     */
+    const IDENTITY_FALLBACK_KEYS = [
+        'viper_device_id', 'viper_install_id', 'viper_telemetry_consent',
+        'viperCases', 'viperTaskMode', 'viperInvestigationsFilter',
+        'cardPreferences', 'quickStatsPreferences',
+    ];
+    function storageHasPriorState() {
+        const regKeys = REG_KEYS.map(k => PREFIX + k);
+        const interesting = (k) =>
+            !!k && k !== PROBE_KEY && regKeys.indexOf(k) === -1 && /^viper/i.test(k);
+        try {
+            if (typeof localStorage.key === 'function' &&
+                typeof localStorage.length === 'number') {
+                for (let i = 0; i < localStorage.length; i++) {
+                    if (interesting(localStorage.key(i))) return true;
+                }
+                return false;
+            }
+        } catch (_) { /* fall through to the explicit list */ }
+        try {
+            return IDENTITY_FALLBACK_KEYS.some(k =>
+                regKeys.indexOf(k) === -1 && localStorage.getItem(k) != null);
+        } catch (_) { return false; }
     }
 
     /**
@@ -111,8 +161,48 @@
             return out;
         }
 
+        // A marker describes ONE install, and records the app-data folder it
+        // was written for. If this install keeps its data somewhere else, the
+        // marker is not ours — it belongs to another VIPER on the same
+        // computer (a portable drive, a second copy, a relocated install).
+        // Its empty localStorage is exactly what a genuine first run looks
+        // like, so do not block. The phantom reset is unaffected: there the
+        // path matches and the files are merely unreadable.
+        const markerRoot = h.marker && h.marker.userDataPath;
+        if (markerRoot && h.userDataPath && !samePath(markerRoot, h.userDataPath)) {
+            out.verdict = 'new-install';
+            out.reasons.push('A different VIPER install is registered on this ' +
+                'computer. This copy keeps its data in a separate folder and ' +
+                'has not been set up yet.');
+            return out;
+        }
+
         // Marker says this machine HAS been registered before, yet storage
         // is empty. That is the phantom reset.
+        //
+        // ...unless localStorage is demonstrably ALIVE: it came back holding
+        // state this install wrote earlier, and a write round-trip succeeds.
+        // Chromium did not hand us a dead database, so nothing is waiting to
+        // be synced or mounted and Retry will never change the outcome.
+        //
+        // What actually happened is narrower: the registration write never
+        // reached disk. Chromium commits localStorage asynchronously on a
+        // timer, while the main process writes the install marker the moment
+        // registration succeeds. Yank an external drive (or lose power) in
+        // between and the marker says "registered" while localStorage never
+        // received the keys. The lost value is sitting in the marker,
+        // addressed to this exact install — restoring it is not a guess.
+        out.hasPriorState = storageHasPriorState();
+        if (out.hasPriorState && out.writable) {
+            out.verdict = (h.marker && h.marker.hasRegistration)
+                ? 'lost-registration'
+                : 'new-install';
+            out.reasons.push('Your data folder opened normally, but the ' +
+                'registration details were not in it. This usually means the ' +
+                'drive was disconnected before VIPER finished saving them.');
+            return out;
+        }
+
         out.verdict = 'storage-fault';
         if (h.marker && h.marker.lastHealthyAt) {
             out.reasons.push('VIPER last confirmed your data on ' +
@@ -163,10 +253,22 @@
      * Explicit, user-initiated restore of registration only (never case
      * data). Used by the "I understand - continue" path so an officer who
      * genuinely wiped their profile is not forced to re-register.
+     *
+     * Refuses when the marker belongs to a DIFFERENT install on the same
+     * computer. Copying one install's licence key into another install's
+     * storage is never a recovery — and on a drive being prepared for
+     * someone else it would ship that key out the door.
      */
     async function restoreRegistration() {
         if (!window.electronAPI || !window.electronAPI.getInstallMarkerRegistration) return false;
         try {
+            if (window.electronAPI.getStorageHealth) {
+                const h = await window.electronAPI.getStorageHealth();
+                const markerRoot = h && h.marker && h.marker.userDataPath;
+                if (markerRoot && h.userDataPath && !samePath(markerRoot, h.userDataPath)) {
+                    return false;
+                }
+            }
             const reg = await window.electronAPI.getInstallMarkerRegistration();
             if (!reg || !reg.registered_at) return false;
             Object.keys(reg).forEach(k => {
@@ -281,10 +383,14 @@
     /**
      * Main entry. Returns the assessment so callers can decide whether to
      * run their own registration gate.
-     *   - 'ok'            -> marker refreshed, safe to proceed
-     *   - 'new-install'   -> caller shows the normal registration flow
-     *   - 'storage-fault' -> guard has blocked the UI; caller must NOT
-     *                        show a registration prompt
+     *   - 'ok'                -> marker refreshed, safe to proceed
+     *   - 'new-install'       -> caller shows the normal registration flow
+     *   - 'lost-registration' -> storage is healthy but the registration
+     *                            write was lost; we restore it from the
+     *                            marker and resolve to 'ok' (or, if the
+     *                            marker cannot give it back, 'new-install')
+     *   - 'storage-fault'     -> guard has blocked the UI; caller must NOT
+     *                            show a registration prompt
      */
     async function run() {
         let result;
@@ -293,6 +399,16 @@
         } catch (e) {
             console.error('[storage-guard] assessment failed:', e);
             return { verdict: 'ok', reasons: [], error: String(e) };
+        }
+
+        if (result.verdict === 'lost-registration') {
+            // Silent, in-place repair. No blocking screen: the officer did
+            // nothing wrong and there is nothing for them to fix.
+            console.warn('[storage-guard] registration missing from healthy ' +
+                'storage — restoring from the install marker.');
+            const restored = await restoreRegistration();
+            result.restoredRegistration = restored;
+            result.verdict = restored ? 'ok' : 'new-install';
         }
 
         if (result.verdict === 'ok') {
@@ -308,6 +424,6 @@
 
     window.ViperStorageGuard = {
         run, assess, markHealthy, restoreRegistration, forget,
-        probeWritable, hasLocalRegistration,
+        probeWritable, hasLocalRegistration, samePath, storageHasPriorState,
     };
 })();

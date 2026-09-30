@@ -101,6 +101,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openReportWindow: (caseNumber) => ipcRenderer.invoke('open-report-window', caseNumber),
   reportGet: (caseNumber) => ipcRenderer.invoke('report-get', caseNumber),
   reportSave: (caseNumber, content, lastSaved) => ipcRenderer.invoke('report-save', caseNumber, content, lastSaved),
+
+  // Case Notes pop-out. Addressed by note id as well as case number,
+  // because a case has many notes but only one report.
+  openNoteWindow: (caseNumber, noteId) => ipcRenderer.invoke('open-note-window', caseNumber, noteId),
+  noteGet: (caseNumber, noteId) => ipcRenderer.invoke('note-get', caseNumber, noteId),
+  noteSave: (caseNumber, noteId, contentHtml) => ipcRenderer.invoke('note-save', caseNumber, noteId, contentHtml),
   selectRmsFiles: () => ipcRenderer.invoke('select-rms-files'),
   selectDmvFile: () => ipcRenderer.invoke('select-dmv-file'),
   extractPdfText: (filePath) => ipcRenderer.invoke('extract-pdf-text', filePath),

@@ -4025,8 +4025,8 @@
                         need(30);
                         fieldBold(`${i + 1}. ${w.type || 'Warrant'}`, w.issuedTo ? `→ ${w.issuedTo}` : '');
                         fieldBold('   Description', w.description);
-                        fieldBold('   Date Signed', w.dateSigned ? formatDate(w.dateSigned) : 'Not signed');
-                        fieldBold('   Date Served', w.dateServed ? formatDate(w.dateServed) : 'Not served');
+                        fieldBold('   Date Signed', w.dateSigned ? formatDate(w.dateSigned) + (_warrantTimeLabel(w.timeSigned) ? ' at ' + _warrantTimeLabel(w.timeSigned) : '') : 'Not signed');
+                        fieldBold('   Date Served', w.dateServed ? formatDate(w.dateServed) + (_warrantTimeLabel(w.timeServed) ? ' at ' + _warrantTimeLabel(w.timeServed) : '') : 'Not served');
                         fieldBold('   Due Date', w.dueDate ? formatDate(w.dueDate) : 'None');
                         if (w.judge) fieldBold('   Judge/Magistrate', w.judge);
                         // Report the real disposition. A closed-out preservation
@@ -4042,7 +4042,7 @@
                         } else {
                             fieldBold('   Return Received', 'No');
                         }
-                        if (w.courtReturnDate) fieldBold('   Court Return Filed', formatDate(w.courtReturnDate));
+                        if (w.courtReturnDate) fieldBold('   Court Return Filed', formatDate(w.courtReturnDate) + (_warrantTimeLabel(w.timeCourtReturn) ? ' at ' + _warrantTimeLabel(w.timeCourtReturn) : ''));
                         if (w.hasWarrantFile) fieldBold('   Signed Warrant File', w.warrantFileName);
                         if (w.hasProduction) fieldBold('   Production Files', `${w.productionFileCount} file(s)`);
                         if (w.hasCourtReturn) fieldBold('   Court Return File', w.courtReturnFile?.name || 'Attached');
@@ -12015,6 +12015,58 @@
             return !!(window.WarrantStatus && WarrantStatus.hasNothingToReceive({ type: t }));
         }
 
+        /* ------------------------------------------------------------------
+         * Optional times on the warrant dates
+         * ------------------------------------------------------------------
+         * Times are stored in their OWN fields — timeSigned, timeServed and
+         * timeCourtReturn — as bare 'HH:MM', never folded into the date. Six
+         * other places already assume dateSigned/dateServed/dueDate/
+         * courtReturnDate are a bare 'YYYY-MM-DD': formatDate(), the warrant
+         * sort comparators, the overdue arithmetic, WarrantStatus, the pulse
+         * import and the case-report PDF. Widening the date fields would have
+         * broken all six for a feature that is optional by request.
+         *
+         * A time with no date is not a point in time, so it is dropped rather
+         * than stored — otherwise a cleared date leaves an orphan time that
+         * silently reappears the next time a date is entered.
+         *
+         * One predicate decides what counts as a time, and the reader, the
+         * card and the timeline all use it. If display were more forgiving
+         * than storage, a warrant could show "7:30 AM" on its card and still
+         * sit at midnight on the timeline. */
+        function _warrantTimeOk(hhmm) {
+            return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(hhmm == null ? '' : hhmm).trim());
+        }
+
+        function _warrantReadTime(inputId, dateValue) {
+            const el = document.getElementById(inputId);
+            const raw = el ? String(el.value || '').trim() : '';
+            if (!dateValue) return '';
+            return _warrantTimeOk(raw) ? raw : '';
+        }
+
+        /* 'HH:MM' → '2:10 AM' for display. Returns '' for anything that is not
+         * a 24-hour clock time, so a legacy warrant with no time renders
+         * exactly as it did before. */
+        function _warrantTimeLabel(hhmm) {
+            if (!_warrantTimeOk(hhmm)) return '';
+            const parts = String(hhmm).trim().split(':');
+            let h = parseInt(parts[0], 10);
+            const ampm = h < 12 ? 'AM' : 'PM';
+            h = h % 12; if (h === 0) h = 12;
+            return h + ':' + parts[1] + ' ' + ampm;
+        }
+
+        /* The timeline bridge. Every warrant event used to be pinned to local
+         * midnight; now it lands at the recorded time when there is one, and
+         * still at midnight when there is not. */
+        function _warrantEventIso(dateStr, hhmm) {
+            if (!dateStr) return null;
+            const t = _warrantTimeOk(hhmm) ? String(hhmm).trim() : '00:00';
+            const d = new Date(dateStr + 'T' + t + ':00');
+            return isNaN(d.getTime()) ? null : d.toISOString();
+        }
+
         /* Show or hide the warrant-only fields, and reword the two that mean
          * something different for a preservation request. Called on every
          * change of the type select and whenever the form is opened. */
@@ -12158,14 +12210,31 @@
                                     <textarea id="warrantDescription" required rows="2" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white placeholder-gray-500 resize-none" placeholder="Brief description of what the warrant seeks..."></textarea>
                                 </div>
                                 
+                                <!-- Dates, each with an OPTIONAL time beside it.
+                                     A warrant signed at 02:10 and served at
+                                     06:45 the same morning are two different
+                                     points on the case timeline, and with only
+                                     a date they both landed at midnight in the
+                                     order the records happened to be stored.
+                                     The time is never required: left blank the
+                                     entry behaves exactly as it always did.
+                                     The production due date is deliberately
+                                     date-only — it is a deadline, and the
+                                     overdue arithmetic counts whole days. -->
                                 <div class="grid grid-cols-3 gap-4" id="warrantDatesRow">
                                     <div id="warrantDateSignedField">
-                                        <label class="block text-sm font-medium text-gray-300 mb-2">Date Signed</label>
-                                        <input type="date" id="warrantDateSigned" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white">
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">Date Signed <span class="text-gray-500 font-normal">· time optional</span></label>
+                                        <div class="flex gap-2">
+                                            <input type="date" id="warrantDateSigned" class="flex-1 min-w-0 px-3 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white">
+                                            <input type="time" id="warrantTimeSigned" aria-label="Time signed (optional)" class="w-32 shrink-0 px-2 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white">
+                                        </div>
                                     </div>
                                     <div id="warrantDateServedField">
-                                        <label class="block text-sm font-medium text-gray-300 mb-2" id="warrantDateServedLabel">Date Served</label>
-                                        <input type="date" id="warrantDateServed" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white">
+                                        <label class="block text-sm font-medium text-gray-300 mb-2"><span id="warrantDateServedLabel">Date Served</span> <span class="text-gray-500 font-normal">· time optional</span></label>
+                                        <div class="flex gap-2">
+                                            <input type="date" id="warrantDateServed" class="flex-1 min-w-0 px-3 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white">
+                                            <input type="time" id="warrantTimeServed" aria-label="Time served (optional)" class="w-32 shrink-0 px-2 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white">
+                                        </div>
                                     </div>
                                     <div id="warrantDueDateField">
                                         <label class="block text-sm font-medium text-gray-300 mb-2">Production Due Date</label>
@@ -12179,8 +12248,11 @@
                                         <input type="text" id="warrantJudge" placeholder="e.g., Hon. Jane Smith" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white placeholder-gray-500">
                                     </div>
                                     <div>
-                                        <label class="block text-sm font-medium text-gray-300 mb-2">Court Return Submitted</label>
-                                        <input type="date" id="warrantCourtReturnDate" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white">
+                                        <label class="block text-sm font-medium text-gray-300 mb-2">Court Return Submitted <span class="text-gray-500 font-normal">· time optional</span></label>
+                                        <div class="flex gap-2">
+                                            <input type="date" id="warrantCourtReturnDate" class="flex-1 min-w-0 px-3 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white">
+                                            <input type="time" id="warrantTimeCourtReturn" aria-label="Time court return submitted (optional)" class="w-32 shrink-0 px-2 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white">
+                                        </div>
                                     </div>
                                 </div>
                                 
@@ -12340,12 +12412,14 @@
                                         <div class="bg-viper-card/50 rounded p-2">
                                             <p class="text-gray-400 text-xs">Signed</p>
                                             <p class="text-white">${formatDate(warrant.dateSigned)}</p>
+                                            ${_warrantTimeLabel(warrant.timeSigned) ? `<p class="text-xs text-gray-400">${_warrantTimeLabel(warrant.timeSigned)}</p>` : ''}
                                         </div>
                                     ` : ''}
                                     ${warrant.dateServed ? `
                                         <div class="bg-viper-card/50 rounded p-2">
                                             <p class="text-gray-400 text-xs">${isPres ? 'Sent to Provider' : 'Served'}</p>
                                             <p class="text-white">${formatDate(warrant.dateServed)}</p>
+                                            ${_warrantTimeLabel(warrant.timeServed) ? `<p class="text-xs text-gray-400">${_warrantTimeLabel(warrant.timeServed)}</p>` : ''}
                                         </div>
                                     ` : ''}
                                     ${warrant.dueDate && !isPres ? `
@@ -12363,6 +12437,7 @@
                                         <div class="bg-viper-card/50 rounded p-2 border border-viper-green/30">
                                             <p class="text-gray-400 text-xs">Court Return Filed</p>
                                             <p class="text-viper-green">${formatDate(warrant.courtReturnDate)}</p>
+                                            ${_warrantTimeLabel(warrant.timeCourtReturn) ? `<p class="text-xs text-gray-400">${_warrantTimeLabel(warrant.timeCourtReturn)}</p>` : ''}
                                         </div>
                                     ` : ''}
                                 </div>
@@ -12543,6 +12618,9 @@
             document.getElementById('warrantDueDate').value = '';
             document.getElementById('warrantJudge').value = '';
             document.getElementById('warrantCourtReturnDate').value = '';
+            document.getElementById('warrantTimeSigned').value = '';
+            document.getElementById('warrantTimeServed').value = '';
+            document.getElementById('warrantTimeCourtReturn').value = '';
             clearWarrantFile();
             warrantTypeChanged();
             document.getElementById('warrantForm').classList.remove('hidden');
@@ -12563,6 +12641,9 @@
             document.getElementById('warrantDueDate').value = warrant.dueDate || '';
             document.getElementById('warrantJudge').value = warrant.judge || '';
             document.getElementById('warrantCourtReturnDate').value = warrant.courtReturnDate || '';
+            document.getElementById('warrantTimeSigned').value = warrant.timeSigned || '';
+            document.getElementById('warrantTimeServed').value = warrant.timeServed || '';
+            document.getElementById('warrantTimeCourtReturn').value = warrant.timeCourtReturn || '';
             warrantTypeChanged();
             
             if (warrant.hasWarrantFile) {
@@ -12619,6 +12700,11 @@
             const dueDate = isPres ? '' : document.getElementById('warrantDueDate').value;
             const judge = isPres ? '' : document.getElementById('warrantJudge').value;
             const courtReturnDate = isPres ? '' : document.getElementById('warrantCourtReturnDate').value;
+            // Times follow their own date: cleared with it, and cleared with
+            // the whole field when the type says the field does not apply.
+            const timeSigned = isPres ? '' : _warrantReadTime('warrantTimeSigned', dateSigned);
+            const timeServed = _warrantReadTime('warrantTimeServed', dateServed);
+            const timeCourtReturn = isPres ? '' : _warrantReadTime('warrantTimeCourtReturn', courtReturnDate);
 
             // Generate the warrant id NOW so we can pass it to the file-save IPC.
             // The IPC prefixes the on-disk filename with this id to prevent
@@ -12660,6 +12746,9 @@
                     warrant.dueDate = dueDate;
                     warrant.judge = judge;
                     warrant.courtReturnDate = courtReturnDate;
+                    warrant.timeSigned = timeSigned;
+                    warrant.timeServed = timeServed;
+                    warrant.timeCourtReturn = timeCourtReturn;
                     warrant.lastModified = new Date().toISOString();
                     
                     if (savedFilePath) {
@@ -12680,6 +12769,9 @@
                     dueDate: dueDate,
                     judge: judge,
                     courtReturnDate: courtReturnDate,
+                    timeSigned: timeSigned,
+                    timeServed: timeServed,
+                    timeCourtReturn: timeCourtReturn,
                     hasWarrantFile: savedFilePath !== null,
                     warrantFileName: savedFileName,
                     warrantFilePath: savedFilePath,
@@ -33771,7 +33863,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 if (w.dateSigned) {
                     auto.push({
                         id: 'tl_auto_warrant_signed_' + w.id,
-                        timestamp: new Date(w.dateSigned + 'T00:00:00').toISOString(),
+                        timestamp: _warrantEventIso(w.dateSigned, w.timeSigned),
                         endTimestamp: null,
                         title: `${w.type || 'Warrant'} Signed` + (w.issuedTo ? ` — ${w.issuedTo}` : ''),
                         description: w.description || '',
@@ -33782,7 +33874,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 if (w.dateServed) {
                     auto.push({
                         id: 'tl_auto_warrant_served_' + w.id,
-                        timestamp: new Date(w.dateServed + 'T00:00:00').toISOString(),
+                        timestamp: _warrantEventIso(w.dateServed, w.timeServed),
                         endTimestamp: null,
                         title: `${w.type || 'Warrant'} Served` + (w.issuedTo ? ` — ${w.issuedTo}` : ''),
                         description: w.description || '',
@@ -33793,7 +33885,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 if (w.courtReturnDate) {
                     auto.push({
                         id: 'tl_auto_warrant_return_' + w.id,
-                        timestamp: new Date(w.courtReturnDate + 'T00:00:00').toISOString(),
+                        timestamp: _warrantEventIso(w.courtReturnDate, w.timeCourtReturn),
                         endTimestamp: null,
                         title: `Court Return` + (w.issuedTo ? ` — ${w.issuedTo}` : ''),
                         description: w.description || '',

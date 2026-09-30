@@ -170,12 +170,16 @@
     if (c.createdAt) push(c.createdAt, 'incident', 'custom', 'Case opened', 'major');
 
     // Warrants — type + status verb only (NO issuedTo / description)
+    // The optional times recorded on the warrant carry through, so the
+    // supervisor's roll-up orders same-day events the way they happened.
+    // No time recorded still means midnight, exactly as before.
+    const _at = (t) => (/^([01]\d|2[0-3]):[0-5]\d$/.test(String(t || '').trim()) ? 'T' + t + ':00' : 'T00:00:00');
     const warrants = (lsJSON('viperCaseWarrants', {})[caseNumber]) || [];
     warrants.forEach((w) => {
       const kind = String(w.provider || w.platform || w.service || w.type || 'Warrant').trim();
-      if (w.dateSigned)      push(w.dateSigned + 'T00:00:00', 'investigation', 'warrant', `${kind} warrant signed`, 'major');
-      if (w.dateServed)      push(w.dateServed + 'T00:00:00', 'investigation', 'warrant', `${kind} warrant served`, 'major');
-      if (w.courtReturnDate) push(w.courtReturnDate + 'T00:00:00', 'investigation', 'warrant', `${kind} court return`, 'supporting');
+      if (w.dateSigned)      push(w.dateSigned + _at(w.timeSigned), 'investigation', 'warrant', `${kind} warrant signed`, 'major');
+      if (w.dateServed)      push(w.dateServed + _at(w.timeServed), 'investigation', 'warrant', `${kind} warrant served`, 'major');
+      if (w.courtReturnDate) push(w.courtReturnDate + _at(w.timeCourtReturn), 'investigation', 'warrant', `${kind} court return`, 'supporting');
       if (w.uploadedAt || w.createdAt) push(w.uploadedAt || w.createdAt, 'investigation', 'warrant', `${kind} warrant uploaded`, 'supporting');
     });
 

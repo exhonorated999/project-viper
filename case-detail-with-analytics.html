@@ -1930,6 +1930,10 @@
                 } catch (_) { /* best-effort */ }
                 window.location.href = 'index.html';
             };
+            // Back to the case list is the other way out of Case Notes.
+            // This path CAN await, so attachments queued in the form are
+            // written properly rather than skipped the way unload has to.
+            try { if (typeof _noteAutosave === 'function') await _noteAutosave('leave-page'); } catch (_) {}
             if (hasUnsavedChanges) {
                 if (await viperConfirm('You have unsaved changes. Do you want to save before leaving?')) {
                     saveCase();
@@ -1940,6 +1944,12 @@
 
         // Warn user if they try to close the page with unsaved changes
         window.addEventListener('beforeunload', function(e) {
+            // Last chance for an open note. This runs SYNCHRONOUSLY: the
+            // sync flag makes _noteCommit reach localStorage before the
+            // first await, because beforeunload cannot wait for a promise.
+            // Attachments still queued in the form are the one thing that
+            // cannot be rescued here — the text always can.
+            try { if (typeof _noteAutosave === 'function') _noteAutosave('unload'); } catch (_) {}
             if (hasUnsavedChanges) {
                 e.preventDefault();
                 e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
@@ -4621,6 +4631,16 @@
             if (currentTab === 'reports' && tabId !== 'reports') {
                 try { if (window.ViperDictation && ViperDictation.isActive()) ViperDictation.stop(); } catch (_) {}
             }
+            // Leaving Case Notes must commit whatever is sitting in the open
+            // editor. A tab click is the most common way out of the module
+            // and was how an officer lost a note. _noteCommit reads the
+            // editor synchronously, so the text is captured before the
+            // innerHTML swap below destroys it; only the attachment upload
+            // finishes afterwards.
+            if (currentTab === 'notes' && tabId !== 'notes') {
+                try { _noteAutosave('leave-tab'); } catch (_) {}
+                try { _noteStopAutosave(); } catch (_) {}
+            }
             currentTab = tabId;
 
             // Leaving FLOCK must release the Leaflet instance and cancel the
@@ -6054,7 +6074,20 @@
                     
                     <!-- Add/Edit Note Form -->
                     <div id="noteForm" class="hidden glass-card rounded-xl p-6 border-2 border-viper-cyan/30">
-                        <h4 class="text-lg font-bold mb-4" id="noteFormTitle">Add New Note</h4>
+                        <div class="flex items-start justify-between flex-wrap gap-3 mb-4">
+                            <div>
+                                <h4 class="text-lg font-bold" id="noteFormTitle">Add New Note</h4>
+                                <!-- Autosave is deliberately quiet: this line is the
+                                     only place it speaks up. -->
+                                <p id="noteAutosaveStatus" class="hidden text-[11px] text-viper-green mt-1"></p>
+                            </div>
+                            <button type="button" onclick="openNotePopout()" title="Edit this note in its own window" class="px-3 py-1.5 rounded-lg bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/30 hover:bg-viper-cyan/30 transition-colors text-xs font-medium flex items-center space-x-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                                </svg>
+                                <span>Pop Out</span>
+                            </button>
+                        </div>
                         <form id="noteFormEl" onsubmit="return saveNote(event);">
                             <div class="space-y-4">
                                 <!-- Rich Editor -->
@@ -6118,13 +6151,21 @@
                                     </div>
                                 </div>
 
-                                <div class="flex justify-end space-x-3 pt-4">
-                                    <button type="button" onclick="cancelNoteForm()" class="px-4 py-2 rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-700 transition-colors">
-                                        Cancel
-                                    </button>
-                                    <button type="button" onclick="saveNote(event)" class="px-6 py-2 rounded-lg bg-gradient-to-r from-viper-green to-viper-cyan font-medium text-viper-dark hover:shadow-lg hover:shadow-viper-green/50 transition-all">
-                                        Save Note
-                                    </button>
+                                <!-- Wraps deliberately. At narrow widths the hint
+                                     text used to squeeze the button group until
+                                     "Save Note" broke onto two lines; the hint
+                                     takes its own row instead, and the buttons
+                                     never shrink. -->
+                                <div class="flex flex-wrap items-center justify-between gap-3 pt-4">
+                                    <p class="text-[11px] text-gray-500 flex-1 min-w-[220px]">Saved automatically every 5 minutes, and whenever you leave this tab.</p>
+                                    <div class="flex space-x-3 shrink-0 ml-auto">
+                                        <button type="button" onclick="cancelNoteForm()" class="px-4 py-2 rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-700 transition-colors">
+                                            Cancel
+                                        </button>
+                                        <button type="button" onclick="saveNote(event)" class="px-6 py-2 rounded-lg bg-gradient-to-r from-viper-green to-viper-cyan font-medium text-viper-dark hover:shadow-lg hover:shadow-viper-green/50 transition-all">
+                                            Save Note
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </form>
@@ -6347,6 +6388,8 @@
                 initializeNoteEditor('');
                 renderNoteAttachmentsList();
                 _syncNoteAssignBoxes(null);
+                _noteMarkClean();
+                _noteStartAutosave();
                 const ed = document.getElementById('noteEditor');
                 if (ed) ed.focus();
             });
@@ -6381,6 +6424,8 @@
                 initializeNoteEditor(initialHtml);
                 renderNoteAttachmentsList();
                 _syncNoteAssignBoxes(note);
+                _noteMarkClean();
+                _noteStartAutosave();
                 const ed = document.getElementById('noteEditor');
                 if (ed) ed.focus();
                 document.getElementById('noteForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -6388,6 +6433,13 @@
         }
 
         function cancelNoteForm() {
+            // Cancel is an explicit "do not keep this". Stop the timer
+            // BEFORE clearing the editor, or the next tick would read an
+            // empty form and do nothing useful anyway — but a note already
+            // committed by an earlier autosave stays committed, which is
+            // what "save it as a real note" means.
+            _noteStopAutosave();
+            _noteLastCommittedHtml = null;
             editingNoteId = null;
             pendingNoteAttachments = [];
             savedNoteAttachments = [];
@@ -6796,43 +6848,152 @@
                 </div>`;
         }
 
-        async function saveNote(event) {
-            if (event && typeof event.preventDefault === 'function') event.preventDefault();
-            if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-            console.log('[saveNote] invoked');
+        // ─── Autosave ────────────────────────────────────────────────────
+        // An officer reported losing a note by clicking another tab without
+        // pressing Save. Anything typed into the note editor is now
+        // committed on the way out of the module, and on a timer while the
+        // form sits open.
+        //
+        // Deliberately quiet: the officer is told by the timestamp under the
+        // form title, not by a toast every five minutes. A notification that
+        // fires on its own schedule stops being read after the second one.
+        //
+        // The timer only runs while the form is actually open — see
+        // _noteStartAutosave callers in openAddNoteForm/editNote and the
+        // matching _noteStopAutosave in cancelNoteForm/saveNote.
+        const NOTE_AUTOSAVE_MS = 5 * 60 * 1000;
+        let _noteAutosaveTimer = null;
+        let _noteLastCommittedHtml = null;
 
+        function _noteFormIsOpen() {
+            const form = document.getElementById('noteForm');
+            return !!(form && !form.classList.contains('hidden')
+                && document.getElementById('noteEditor'));
+        }
+
+        /**
+         * Has anything changed since the last commit? Without this the timer
+         * would rewrite an untouched note every five minutes and push a
+         * bogus entry onto its edit history, which is a discovery artifact
+         * we would then have to explain.
+         */
+        function _noteEditorIsDirty() {
+            const ed = document.getElementById('noteEditor');
+            if (!ed) return false;
+            if (pendingNoteAttachments.length > 0) return true;
+            return ed.innerHTML.trim() !== (_noteLastCommittedHtml || '');
+        }
+
+        /** Called after initializeNoteEditor so the baseline is the HTML the
+         *  browser actually produced, not the string we handed it. */
+        function _noteMarkClean() {
+            const ed = document.getElementById('noteEditor');
+            _noteLastCommittedHtml = ed ? ed.innerHTML.trim() : '';
+        }
+
+        function _noteStartAutosave() {
+            _noteStopAutosave();
+            _noteAutosaveTimer = setInterval(() => { _noteAutosave('timer'); }, NOTE_AUTOSAVE_MS);
+        }
+
+        function _noteStopAutosave() {
+            if (_noteAutosaveTimer) { clearInterval(_noteAutosaveTimer); _noteAutosaveTimer = null; }
+        }
+
+        /**
+         * reason: 'timer' | 'leave-tab' | 'leave-page' | 'unload' | 'popout'
+         *
+         * 'unload' runs sync — see the `sync` flag on _noteCommit. Every
+         * other reason may await, because the page is still alive.
+         */
+        async function _noteAutosave(reason) {
+            if (!_noteFormIsOpen()) return { saved: false, reason: 'form-closed' };
+            if (!_noteEditorIsDirty()) return { saved: false, reason: 'clean' };
+            let r;
             try {
-                const editor = document.getElementById('noteEditor');
-                if (!editor) {
-                    console.error('[saveNote] noteEditor element not found');
-                    viperToast('Editor element missing — close and reopen the form.', 'error');
-                    return;
-                }
-                if (!currentCase || !currentCase.caseNumber) {
-                    console.error('[saveNote] currentCase missing', currentCase);
-                    viperToast('No case loaded — cannot save note.', 'error');
-                    return;
-                }
+                r = await _noteCommit({ silent: true, sync: reason === 'unload' });
+            } catch (e) {
+                // Never let an autosave failure break a tab switch or a
+                // page close. The officer keeps whatever was already saved.
+                console.error('[note autosave] failed (' + reason + '):', e);
+                return { saved: false, reason: 'error' };
+            }
+            if (r.saved) _noteShowAutosaveStamp();
+            return r;
+        }
 
-                const contentHtml = editor.innerHTML.trim();
-                const plainText = (editor.innerText || editor.textContent || '').trim();
-                console.log('[saveNote] contentHtml length:', contentHtml.length, 'plainText length:', plainText.length, 'pendingAttachments:', pendingNoteAttachments.length);
+        function _noteShowAutosaveStamp() {
+            const el = document.getElementById('noteAutosaveStatus');
+            if (!el) return;
+            el.textContent = 'Auto-saved ' + new Date().toLocaleTimeString();
+            el.classList.remove('hidden');
+        }
 
-                const hasContent = plainText.length > 0
-                    || /<img\b/i.test(contentHtml)
-                    || pendingNoteAttachments.length > 0
-                    || savedNoteAttachments.filter(a => !a.legacy).length > 0;
-                if (!hasContent) {
-                    viperToast('Note is empty — type something, paste a screenshot, or attach a file.', 'info');
-                    return;
-                }
+        // ─── Note saving: ONE writer, several callers ────────────────────
+        // `_noteCommit()` is the only thing that writes a note. The Save
+        // button, the autosaves and the pop-out all go through it, because
+        // the moment there are two of these they drift — and a note the
+        // officer typed is not something we get to lose twice.
+        //
+        // What the callers vary:
+        //   silent — no toasts, and the caller does NOT tear the form down.
+        //            A five-minute timer that steals the caret mid-sentence
+        //            is a worse bug than the one we are fixing.
+        //   sync   — no `await` before the localStorage write, for
+        //            `beforeunload`, which cannot wait for a promise. Any
+        //            attachment still queued in the form is skipped rather
+        //            than half-written; the text lands either way.
+        //
+        // THE DUPLICATE TRAP: an unsaved new note has `editingNoteId === null`
+        // and takes the insert branch. If a silent commit left it null, the
+        // next pass five minutes later would file a SECOND copy, and the one
+        // after that a third. So an insert always promotes `editingNoteId` to
+        // the id it just created. Uploaded attachments move from `pending` to
+        // `saved` for exactly the same reason — otherwise the second pass
+        // writes the same bytes to disk again under a collision-suffixed name.
+        //
+        // Returns { saved, noteId, createdAt, reason }.
+        async function _noteCommit(opts) {
+            opts = opts || {};
+            const silent = !!opts.silent;
+            const sync = !!opts.sync;
+            const notify = (msg, kind) => { if (!silent) viperToast(msg, kind); };
 
-                // 1. Upload any pending attachments to disk before mutating note JSON
+            const editor = document.getElementById('noteEditor');
+            if (!editor) {
+                if (!silent) console.error('[noteCommit] noteEditor element not found');
+                notify('Editor element missing — close and reopen the form.', 'error');
+                return { saved: false, reason: 'no-editor' };
+            }
+            if (!currentCase || !currentCase.caseNumber) {
+                if (!silent) console.error('[noteCommit] currentCase missing', currentCase);
+                notify('No case loaded — cannot save note.', 'error');
+                return { saved: false, reason: 'no-case' };
+            }
+
+            // Read the editor and the picker FIRST. Everything after this
+            // can be interrupted by a re-render or a page teardown.
+            const contentHtml = editor.innerHTML.trim();
+            const plainText = (editor.innerText || editor.textContent || '').trim();
+            const assignments = _collectNoteAssignments();
+
+            const hasContent = plainText.length > 0
+                || /<img\b/i.test(contentHtml)
+                || pendingNoteAttachments.length > 0
+                || savedNoteAttachments.filter(a => !a.legacy).length > 0;
+            if (!hasContent) {
+                notify('Note is empty — type something, paste a screenshot, or attach a file.', 'info');
+                return { saved: false, reason: 'empty' };
+            }
+
+            // 1. Upload any pending attachments to disk before mutating note JSON
+            let finalAttachments = savedNoteAttachments.filter(a => !a.legacy);
+            if (!sync && pendingNoteAttachments.length) {
                 const successfullySaved = [];
                 for (const att of pendingNoteAttachments) {
                     try {
                         if (!window.electronAPI || !window.electronAPI.noteSaveAttachment) {
-                            viperToast('Attachments require the VIPER desktop app — note saved without files.', 'info');
+                            notify('Attachments require the VIPER desktop app — note saved without files.', 'info');
                             break;
                         }
                         const dataBase64 = await _fileToBase64(att.file);
@@ -6849,61 +7010,87 @@
                                 savedAt: new Date().toISOString()
                             });
                         } else {
-                            viperToast(`Failed to save attachment "${att.fileName}": ${(res && res.error) || 'unknown error'}`, 'error');
+                            notify(`Failed to save attachment "${att.fileName}": ${(res && res.error) || 'unknown error'}`, 'error');
                         }
                     } catch (e) {
-                        console.error('[saveNote] attachment save failed:', e);
-                        viperToast(`Failed to save attachment "${att.fileName}": ${e.message}`, 'error');
+                        console.error('[noteCommit] attachment save failed:', e);
+                        notify(`Failed to save attachment "${att.fileName}": ${e.message}`, 'error');
                     }
                 }
-                const finalAttachments = [...savedNoteAttachments.filter(a => !a.legacy), ...successfullySaved];
+                finalAttachments = [...savedNoteAttachments.filter(a => !a.legacy), ...successfullySaved];
+                // These bytes are on disk now. Move them across so a later
+                // commit against the same open form cannot write them twice.
+                savedNoteAttachments = finalAttachments.map(a => ({ ...a }));
+                pendingNoteAttachments = [];
+                try { renderNoteAttachmentsList(); } catch (_) { /* form may be gone */ }
+            }
 
-                // 2. Update note JSON
-                // Read the picker BEFORE any re-render tears the form down.
-                const assignments = _collectNoteAssignments();
-                let savedNoteCreatedAt = null;
-                if (editingNoteId) {
-                    const note = caseNotes.find(n => n.id === editingNoteId);
-                    if (note) {
-                        note.contentHtml = contentHtml;
-                        delete note.content;
-                        note.attachments = finalAttachments;
-                        delete note.hasAttachment;
-                        delete note.attachmentName;
-                        if (assignments) note.assignedTo = assignments;
-                        note.editHistory = note.editHistory || [];
-                        note.editHistory.push(new Date().toISOString());
-                        savedNoteCreatedAt = note.createdAt;
-                    }
-                } else {
-                    const createdAt = new Date().toISOString();
-                    caseNotes.push({
-                        id: Date.now(),
-                        contentHtml,
-                        createdAt,
-                        editHistory: [],
-                        attachments: finalAttachments,
-                        assignedTo: assignments || []
-                    });
-                    savedNoteCreatedAt = createdAt;
+            // 2. Update note JSON
+            let savedNoteCreatedAt = null;
+            let noteId = editingNoteId;
+            if (editingNoteId) {
+                const note = caseNotes.find(n => n.id === editingNoteId);
+                if (note) {
+                    note.contentHtml = contentHtml;
+                    delete note.content;
+                    note.attachments = finalAttachments;
+                    delete note.hasAttachment;
+                    delete note.attachmentName;
+                    if (assignments) note.assignedTo = assignments;
+                    note.editHistory = note.editHistory || [];
+                    note.editHistory.push(new Date().toISOString());
+                    savedNoteCreatedAt = note.createdAt;
                 }
+            } else {
+                const createdAt = new Date().toISOString();
+                noteId = Date.now();
+                caseNotes.push({
+                    id: noteId,
+                    contentHtml,
+                    createdAt,
+                    editHistory: [],
+                    attachments: finalAttachments,
+                    assignedTo: assignments || []
+                });
+                savedNoteCreatedAt = createdAt;
+                // See THE DUPLICATE TRAP above. The record exists from here
+                // on, so every later pass must update it, never insert.
+                editingNoteId = noteId;
+            }
 
-                // Open the day segment the note landed in, so a save never
-                // appears to do nothing because its day happened to be shut.
-                try { if (savedNoteCreatedAt) _revealNoteDay(savedNoteCreatedAt); } catch (_) {}
+            // Open the day segment the note landed in, so a save never
+            // appears to do nothing because its day happened to be shut.
+            try { if (savedNoteCreatedAt) _revealNoteDay(savedNoteCreatedAt); } catch (_) {}
 
-                _persistCaseNotes();
-                console.log('[saveNote] saved. caseNotes count:', caseNotes.length);
+            _persistCaseNotes();
 
-                // Defensive: ensure the 'notes' module stays in the case's
-                // module list so the tab survives a reload.
-                try { ensureCaseModule('notes'); }
-                catch (e) { console.warn('[saveNote] modules guard failed:', e); }
+            // Defensive: ensure the 'notes' module stays in the case's
+            // module list so the tab survives a reload.
+            try { ensureCaseModule('notes'); }
+            catch (e) { console.warn('[noteCommit] modules guard failed:', e); }
 
-                // Reset state and re-render
+            // The editor now matches what is on disk, so the next autosave
+            // tick has nothing to do until the officer types again.
+            _noteLastCommittedHtml = contentHtml;
+
+            return { saved: true, noteId, createdAt: savedNoteCreatedAt };
+        }
+
+        async function saveNote(event) {
+            if (event && typeof event.preventDefault === 'function') event.preventDefault();
+            if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+
+            try {
+                const r = await _noteCommit({ silent: false });
+                if (!r.saved) return;
+
+                // Reset state and re-render. Only the explicit Save button
+                // does this — see the `silent` note on _noteCommit.
+                _noteStopAutosave();
                 editingNoteId = null;
                 pendingNoteAttachments = [];
                 savedNoteAttachments = [];
+                _noteLastCommittedHtml = null;
                 renderTabContent('notes');
                 viperToast('Note saved.', 'success');
             } catch (err) {
@@ -6912,6 +7099,54 @@
             }
         }
         
+        /**
+         * Pop the note being edited into its own window, mirroring the
+         * Reports pop-out.
+         *
+         * SINGLE WRITER. The pop-out becomes the only editing surface for
+         * this note, so we commit first (which also gives a brand-new note
+         * the id the second window needs to address it) and then close the
+         * inline form. Leaving both open would mean two editors racing to
+         * write one record, and the five-minute autosave in this window
+         * would eventually overwrite whatever was typed in the other one.
+         */
+        async function openNotePopout() {
+            let r;
+            try {
+                r = await _noteCommit({ silent: true });
+            } catch (e) {
+                console.error('[openNotePopout] commit failed:', e);
+                viperToast('Could not save the note before popping it out.', 'error');
+                return;
+            }
+            if (!r.saved) {
+                viperToast('Type something first — there is nothing to pop out yet.', 'info');
+                return;
+            }
+
+            const noteId = r.noteId;
+            const caseNumber = currentCase.caseNumber;
+            cancelNoteForm();
+            renderTabContent('notes');
+
+            try {
+                if (window.electronAPI && window.electronAPI.openNoteWindow) {
+                    await window.electronAPI.openNoteWindow(caseNumber, noteId);
+                } else {
+                    // Fallback: open in a new browser window via the local server
+                    const popout = window.open(
+                        `http://localhost:8000/note-popout.html?case=${encodeURIComponent(caseNumber)}&note=${encodeURIComponent(noteId)}`,
+                        `note_${noteId}`,
+                        'width=900,height=700,menubar=no,toolbar=no,location=no,status=no'
+                    );
+                    if (popout) popout.focus();
+                }
+            } catch (error) {
+                console.error('Error opening note popout:', error);
+                viperToast('Could not open the note window.', 'error');
+            }
+        }
+
         async function deleteNote(noteId) {
             if (!await viperConfirm('Are you sure you want to delete this note? This action cannot be undone.', {danger:true, okText:'Delete'})) {
                 return;

@@ -221,7 +221,14 @@ const STORAGE_CONFIG_FILE = path.join(STORAGE_CONFIG_DIR, 'storage.json');
 // This marker lets the renderer tell those two states apart:
 //   marker absent + localStorage empty  -> genuinely a new install
 //   marker present + localStorage empty -> STORAGE FAULT, do not prompt
-const INSTALL_MARKER_FILE = path.join(STORAGE_CONFIG_DIR, 'install.json');
+//
+// SCOPE: the marker describes ONE install, not the whole computer. It
+// records the userData folder it was written for, and portable installs
+// keep their own copy on the stick (see the isPortable branch below).
+// Without that, a brand-new portable drive booted on a machine that
+// already runs VIPER would read the HOST's marker, see its own — correctly
+// empty — localStorage, and report a storage fault on a genuine first run.
+let INSTALL_MARKER_FILE = path.join(STORAGE_CONFIG_DIR, 'install.json');
 
 // Atomic write / cloud-path detection / localStorage probe live in a
 // shared module so they can be unit-tested in plain Node without booting
@@ -334,6 +341,10 @@ if (isPortable) {
   if (!fs.existsSync(portableData)) fs.mkdirSync(portableData, { recursive: true });
   app.setPath('userData', portableData);   // redirects localStorage, cookies, etc.
   casesDir = path.join(exeDir, 'cases');
+  // A portable stick is self-contained by design, so its install marker
+  // belongs ON THE STICK — never in the host machine's %APPDATA%, which
+  // belongs to whatever desktop install that computer already has.
+  INSTALL_MARKER_FILE = path.join(portableData, 'install.json');
   console.log('PORTABLE MODE — data stored on USB:', portableData);
 } else {
   // Desktop install: honor user overrides if present
@@ -2030,7 +2041,10 @@ function _readInstallMarker() {
 
 function _writeInstallMarker(next) {
   try {
-    if (!fs.existsSync(STORAGE_CONFIG_DIR)) fs.mkdirSync(STORAGE_CONFIG_DIR, { recursive: true });
+    // The marker is not always in STORAGE_CONFIG_DIR — portable installs
+    // keep it beside their own userData. Create whichever folder it needs.
+    const markerDir = path.dirname(INSTALL_MARKER_FILE);
+    if (!fs.existsSync(markerDir)) fs.mkdirSync(markerDir, { recursive: true });
     const out = { ...next, _v: 1, updatedAt: new Date().toISOString() };
     if (out.registration && typeof out.registration === 'object') {
       try {
@@ -2067,6 +2081,10 @@ ipcMain.handle('get-storage-health', async () => {
           lastKnownCaseCount: marker.lastKnownCaseCount || 0,
           registrationLocked: !!marker.registrationLocked,
           hasRegistration: !!(marker.registration && marker.registration.registered_at),
+          // Which install wrote this marker. The renderer compares it to
+          // storageHealth.userDataPath so a second, independent install is
+          // not mistaken for the phantom reset. See modules/storage-guard.js
+          userDataPath: marker.userDataPath || null,
         }
       : null,
   };
@@ -3498,6 +3516,135 @@ ipcMain.handle('report-save', async (event, caseNumber, content, lastSaved) => {
     if (typeof reportLastSaved !== 'undefined') reportLastSaved = d.lastSaved;
     const ts = document.getElementById('reportLastSavedText');
     if (ts) ts.textContent = 'Last saved: ' + new Date(d.lastSaved).toLocaleString();
+    return true;
+  })()`;
+  return await mainWindow.webContents.executeJavaScript(js);
+});
+
+// --- Case Note Pop-out Window ---
+// Mirrors the report pop-out above, with one structural difference: a case
+// has ONE report but MANY notes, so every call is addressed by note id as
+// well as case number.
+//
+// ONE WINDOW PER NOTE. Two pop-outs open on the same note would each hold
+// their own `lastCommitted` baseline and overwrite each other on autosave,
+// and the officer would have no way to tell which one won. Re-opening a
+// note that already has a window just focuses it.
+const _noteWindows = new Map(); // `${caseNumber}::${noteId}` -> BrowserWindow
+
+ipcMain.handle('open-note-window', async (event, caseNumber, noteId) => {
+  const key = `${caseNumber}::${noteId}`;
+  const existing = _noteWindows.get(key);
+  if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) existing.restore();
+    existing.focus();
+    return true;
+  }
+
+  const noteWin = new BrowserWindow({
+    width: 900,
+    height: 700,
+    title: `Note — Case ${caseNumber}`,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  _noteWindows.set(key, noteWin);
+  noteWin.on('closed', () => {
+    // Only drop the entry if it is still ours — a fast close/reopen could
+    // otherwise evict the newer window's registration.
+    if (_noteWindows.get(key) === noteWin) _noteWindows.delete(key);
+  });
+
+  noteWin.loadURL(
+    `http://localhost:8000/note-popout.html?case=${encodeURIComponent(caseNumber)}` +
+    `&note=${encodeURIComponent(noteId)}`
+  );
+  return true;
+});
+
+ipcMain.handle('note-get', async (event, caseNumber, noteId) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+  const safePayload = JSON.stringify(JSON.stringify({
+    caseNumber: String(caseNumber),
+    noteId: String(noteId)
+  }));
+  const js = `(() => {
+    const d = JSON.parse(${safePayload});
+    const all = JSON.parse(localStorage.getItem('viperCaseNotes') || '{}');
+    const list = all[d.caseNumber];
+    if (!Array.isArray(list)) return null;
+    // Note ids are Date.now() numbers, but they arrive over IPC as strings.
+    const note = list.find(n => n && String(n.id) === d.noteId);
+    if (!note) return null;
+    return {
+      contentHtml: note.contentHtml || note.content || '',
+      createdAt: note.createdAt || null
+    };
+  })()`;
+  return await mainWindow.webContents.executeJavaScript(js);
+});
+
+ipcMain.handle('note-save', async (event, caseNumber, noteId, contentHtml) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const safePayload = JSON.stringify(JSON.stringify({
+    caseNumber: String(caseNumber),
+    noteId: String(noteId),
+    contentHtml: String(contentHtml == null ? '' : contentHtml),
+    editedAt: new Date().toISOString()
+  }));
+  const js = `(() => {
+    const d = JSON.parse(${safePayload});
+    const all = JSON.parse(localStorage.getItem('viperCaseNotes') || '{}');
+    const list = all[d.caseNumber];
+    if (!Array.isArray(list)) return false;
+    const note = list.find(n => n && String(n.id) === d.noteId);
+    if (!note) return false;
+
+    note.contentHtml = d.contentHtml;
+    delete note.content;
+    note.editHistory = Array.isArray(note.editHistory) ? note.editHistory : [];
+    note.editHistory.push(d.editedAt);
+    localStorage.setItem('viperCaseNotes', JSON.stringify(all));
+
+    // The main window may be sitting on a DIFFERENT case, or on index.html,
+    // in which case there is no in-memory copy to patch and the localStorage
+    // write above is the whole job. These identifiers are top-level \`let\`
+    // in a classic script, so they are NOT on window — read them bare and
+    // let typeof guard the miss.
+    let sameCase = false;
+    try {
+      sameCase = (typeof currentCase !== 'undefined' && currentCase
+        && String(currentCase.caseNumber) === d.caseNumber);
+    } catch (_) { sameCase = false; }
+
+    if (sameCase) {
+      try {
+        if (typeof caseNotes !== 'undefined' && Array.isArray(caseNotes)) {
+          const live = caseNotes.find(n => n && String(n.id) === d.noteId);
+          if (live) {
+            live.contentHtml = d.contentHtml;
+            delete live.content;
+            live.editHistory = note.editHistory.slice();
+          }
+        }
+      } catch (_) {}
+
+      // Repaint so the officer sees the pop-out's text in the list behind it
+      // — but NOT while the inline editor is open. A re-render tears the form
+      // down, and if they had started a second note in it we would destroy
+      // whatever they had typed. Stale list text is recoverable; typing is not.
+      try {
+        const f = document.getElementById('noteForm');
+        const formOpen = !!(f && !f.classList.contains('hidden'));
+        if (!formOpen && typeof currentTab !== 'undefined' && currentTab === 'notes'
+            && typeof renderTabContent === 'function') {
+          renderTabContent('notes');
+        }
+      } catch (_) {}
+    }
     return true;
   })()`;
   return await mainWindow.webContents.executeJavaScript(js);

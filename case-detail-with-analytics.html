@@ -1509,7 +1509,18 @@
             if (!report || !currentCase) return [];
             const applied = [];
 
-            const loc = String(report.location || '').trim();
+            /* Tidied for whitespace only — the address itself is carried
+             * verbatim. A PDF table cell arrives as "7421 BEACH CT
+             * Westminster, CO  80031" with the column gaps still in it, which
+             * reads as a bug once it is sitting in the case's Location field.
+             * Same helper the create-case form uses, so both import paths put
+             * the identical string on the case. */
+            let loc = String(report.location || '').trim();
+            try {
+                if (loc && window.RmsShapes && window.RmsShapes.normalizeLocation) {
+                    loc = window.RmsShapes.normalizeLocation(loc);
+                }
+            } catch (_) { /* keep the raw value */ }
             if (loc && !String(currentCase.locationOfOccurrence || '').trim()) {
                 currentCase.locationOfOccurrence = loc;
                 applied.push('Location of Occurrence');
@@ -40026,7 +40037,35 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
          * When present a parser can address real PDF pages instead of inferring
          * page breaks from printed banners — see ar-incident-parser's
          * _splitPages. Only the Arkansas branch consumes it today. */
+        /**
+         * Dispatch to the right reader, then make sure the report carries a
+         * location of occurrence.
+         *
+         * Each bespoke reader below finds the location under its own form's
+         * label. This wrapper is the safety net for the ones that don't — a
+         * supplement, a partial scan, an agency whose form nobody has written
+         * support for. RmsShapes.findLocation holds the label vocabulary that
+         * the create-case form in index.html uses too, so both entry points
+         * come back with the same address off the same PDF.
+         *
+         * Only ever FILLS A BLANK. A reader that understood the form is never
+         * second-guessed.
+         */
         function parseRmsReport(text, fileName, opts) {
+            const report = _parseRmsReportCore(text, fileName, opts);
+            try {
+                if (report && !String(report.location || '').trim()
+                    && window.RmsShapes && window.RmsShapes.findLocation) {
+                    const loc = window.RmsShapes.findLocation(text);
+                    if (loc && loc.value) report.location = loc.value;
+                }
+            } catch (locErr) {
+                console.warn('[RMS Parser] location fallback failed:', locErr);
+            }
+            return report;
+        }
+
+        function _parseRmsReportCore(text, fileName, opts) {
             console.log('[RMS Parser] parseRmsReport called for:', fileName, '| text length:', text.length);
             console.log('[RMS Parser] First 300 chars:', text.substring(0, 300));
             // --- Format detection ---

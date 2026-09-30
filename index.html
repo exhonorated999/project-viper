@@ -3078,6 +3078,34 @@
                     }
                 }
 
+                /* --- Location of occurrence ---
+                 *
+                 * Requested by Westminster PD: their Initial Incident Report
+                 * prints "Incident Location" near the top of page 1 and the
+                 * officer was retyping it into the case by hand.
+                 *
+                 * This is deliberately NOT a Westminster branch. The case page
+                 * already reads a location out of all five report formats it
+                 * supports, each with its own label, and the create-case form
+                 * read none of them — it only ever got a location by accident,
+                 * as a side effect of the generic fallback below. RmsShapes
+                 * carries the whole label vocabulary in one place so both
+                 * entry points agree, and so the next agency's label is one
+                 * edit rather than six.
+                 *
+                 * Runs after Arkansas so that form's own ADDRESS OF OFFENSE
+                 * still wins, and before the generic fallback so a report
+                 * VIPER fully understands no longer has to fall through to it
+                 * just to find the address. */
+                if (!rmsLocation && window.RmsShapes && window.RmsShapes.findLocation) {
+                    try {
+                        const loc = window.RmsShapes.findLocation(text);
+                        if (loc && loc.value) rmsLocation = loc.value;
+                    } catch (locErr) {
+                        console.warn('[RMS Import] location read failed:', locErr);
+                    }
+                }
+
                 /* --- Format-agnostic fallback read (runs LAST, fills only blanks) ---
                  *
                  * Every ladder above is keyed to a form somebody has already
@@ -3091,6 +3119,14 @@
                  * nobody — the people it finds are read again on the case
                  * page and shown there for review. */
                 let genericScan = null;
+                /* What the generic read actually contributed, and whether it
+                 * was the reader of record. These are NOT the same thing, and
+                 * conflating them told officers a report VIPER fully
+                 * understands was "a format V.I.P.E.R. does not recognise" —
+                 * because the gate below fires whenever ANY single field is
+                 * still blank, which on most reports it is. */
+                const genericFilled = [];
+                let genericWasPrimary = false;
                 const ladderFoundPeople = !!(detected.suspects || detected.victims ||
                     detected.witnesses || detected.involvedPersons);
                 if (window.GenericRmsExtractor &&
@@ -3099,11 +3135,13 @@
                         const gOpts = result.pages ? { pageTexts: result.pages } : null;
                         if (window.GenericRmsExtractor.viable(text, gOpts)) {
                             genericScan = window.GenericRmsExtractor.quickScan(text, gOpts);
-                            if (!caseNum && genericScan.reportNumber) caseNum = genericScan.reportNumber;
-                            if (!synopsis && genericScan.synopsis) synopsis = genericScan.synopsis;
-                            if (!rmsLocation && genericScan.location) rmsLocation = genericScan.location;
+                            genericWasPrimary = !ladderFoundPeople;
+                            if (!caseNum && genericScan.reportNumber) { caseNum = genericScan.reportNumber; genericFilled.push('case number'); }
+                            if (!synopsis && genericScan.synopsis) { synopsis = genericScan.synopsis; genericFilled.push('synopsis'); }
+                            if (!rmsLocation && genericScan.location) { rmsLocation = genericScan.location; genericFilled.push('location'); }
                             if (!rmsOffenses.length && genericScan.offenseList.length) {
                                 rmsOffenses = genericScan.offenseList;
+                                genericFilled.push('offenses');
                             }
                             /* Tabs are opened from the generic read ONLY when
                              * no ladder above found anybody. A role word can
@@ -3189,7 +3227,12 @@
                 statusText.textContent = result.fileName;
                 details.innerHTML = `<p>Detected data: <span class="text-viper-cyan">${counts.join(', ')}</span></p>` +
                     (caseNum ? `<p>Case #: <span class="text-white font-mono">${caseNum}</span></p>` : '') +
-                    (genericScan ? `<p class="text-cyan-300">🔎 This report's format is not one V.I.P.E.R. recognises, so it was read generically. Check every field against the PDF — nothing will be filed into the case automatically.</p>` : '') +
+                    (rmsLocation ? `<p>Location: <span class="text-white">${String(rmsLocation).replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]))}</span></p>` : '') +
+                    (genericWasPrimary
+                        ? `<p class="text-cyan-300">🔎 This report's format is not one V.I.P.E.R. recognises, so it was read generically. Check every field against the PDF — nothing will be filed into the case automatically.</p>`
+                        : (genericFilled.length
+                            ? `<p class="text-cyan-300">🔎 Read generically from the document: ${genericFilled.join(', ')}. Check ${genericFilled.length > 1 ? 'those fields' : 'that field'} against the PDF.</p>`
+                            : '')) +
                     `<p class="text-gray-400 italic">Data will be distributed to modules on case creation</p>`;
                 statusDiv.classList.remove('hidden');
 

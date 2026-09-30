@@ -580,6 +580,181 @@
     }
 
     /* ================================================================ */
+    /* ── Location of Occurrence ──────────────────────────────────────
+     *
+     * Every bespoke reader in parseRmsReport() already pulls this field for
+     * its own form. The create-case form runs an INDEPENDENT light parse
+     * (importRmsForNewCase in index.html) and had no location step at all,
+     * so an officer creating a case from a report sat re-typing the address
+     * printed on page 1 of their own paperwork. Westminster asked for it;
+     * it costs nothing to read for everyone.
+     *
+     * One copy lives here rather than a sixth private implementation in
+     * index.html, because two readers with their own idea of where the
+     * address lives will eventually disagree about the same report.
+     *
+     * LABEL VOCABULARY — taken from the readers that actually ship:
+     *   "Incident Location"   prosecution report, incident summary (INFORM/
+     *                         Westminster)
+     *   "Location Address"    Virginia field incident report
+     *   "Location"            INFORM fallback, inside the Event section
+     *                         (Fontana-style reports)
+     *   "Address of Offense"  Arkansas NIBRS
+     *   "Location of Occurrence / Offense / Incident"  seen in the wild
+     *
+     * TWO CONFIDENCE TIERS, and the difference matters:
+     *
+     *   A specific label ("Incident Location") means what it says, so its
+     *   value is accepted as written — a station, a park, "behind the
+     *   Safeway" are all legitimate locations of occurrence.
+     *
+     *   The bare label "Location" is ambiguous. On the Virginia form the
+     *   OFFENSE block carries "Location" followed by "25" — a NIBRS
+     *   location CODE, not a place. So a bare "Location" is only believed
+     *   when its value is actually shaped like an address. Measured
+     *   against sample-data/_field_incident.txt, which contains both.
+     *
+     * Rejects "Location Name", "Location Code", "Location Type" and
+     * anything under an ARREST heading outright: a Westminster bundle can
+     * carry an Adult Arrest Report whose arrest location is not where the
+     * offence happened.
+     */
+
+    // Specific, unambiguous labels. Either "Label: value" on one line or the
+    // label alone with the value on the line below.
+    var RE_LOC_LABEL_STRICT =
+        /^(?:INCIDENT\s+LOCATION|LOCATION\s+ADDRESS|LOCATION\s+OF\s+(?:OCCURRENCE|OFFEN[CS]E|INCIDENT)|ADDRESS\s+OF\s+OFFEN[CS]E)\s*:?\s*$/i;
+    var RE_LOC_INLINE_STRICT =
+        /^(?:INCIDENT\s+LOCATION|LOCATION\s+ADDRESS|LOCATION\s+OF\s+(?:OCCURRENCE|OFFEN[CS]E|INCIDENT)|ADDRESS\s+OF\s+OFFEN[CS]E)\s*:\s*(\S.*)$/i;
+    // The ambiguous one.
+    var RE_LOC_LABEL_LOOSE = /^LOCATION\s*:?\s*$/i;
+    var RE_LOC_INLINE_LOOSE = /^LOCATION\s*:\s*(\S.*)$/i;
+    // Labels that look close but are a different fact.
+    var RE_LOC_NOT = /\b(?:NAME|CODE|TYPE|CATEGORY|ARREST|BOOKING|JAIL|COURT|CELL|TOWER|SECTOR)\b/i;
+
+    // A value that is plainly the next form label, a page footer, or a
+    // section heading rather than a place.
+    var RE_LOC_VALUE_REJECT = new RegExp(
+        '^(?:' +
+        'PAGE\\s+\\d+\\s+OF\\s+\\d+' +
+        '|OFFEN[CS]E(?:\\(S\\)|S)?' +
+        '|SUSPECT(?:\\(S\\))?|VICTIM(?:\\(S\\))?|WITNESS(?:E?\\(?S\\)?)?' +
+        '|(?:OTHER\\s+)?PERSON(?:\\(S\\))?|ORGANIZATION(?:\\(S\\))?' +
+        '|VEHICLE(?:\\(S\\))?|PROPERTY|NARRATIVE|EVENT\\s+INFORMATION' +
+        '|DETAILS|BEAT|SUB\\s+BEAT|RESPONSE|SOURCE|DISPOSITION' +
+        '|REPORTING\\s+EMPLOYEE(?:\\(?S\\)?)?|DEPARTMENT\\s+DISCLAIMER' +
+        '|LOCATION\\b.*' +
+        ')\\s*:?\\s*$', 'i');
+
+    /* Whitespace only. The address itself is carried verbatim — this just
+     * repairs what the PDF text layer does to a table cell, which is to
+     * leave "7421 BEACH CT  Westminster, CO  80031" with the column gaps
+     * still in it, and "17005 UPLAND AV , FONTANA" with a space before the
+     * comma. Both look like a bug in a form field the officer then reads. */
+    function _normalizeLocation(s) {
+        var t = String(s == null ? '' : s).replace(/[\s\u00a0]+/g, ' ').trim();
+        t = t.replace(/\s+([,;])/g, '$1');
+        t = t.replace(/([,;])(?=\S)/g, '$1 ');
+        return t.trim();
+    }
+
+    /* Does this value look like a street address, an intersection or a
+     * block reference? Used to police the ambiguous bare "Location". */
+    function _looksLikeAddressValue(s) {
+        var t = _normalizeLocation(s);
+        if (t.length < 4) return false;
+        if (!/[A-Za-z]/.test(t)) return false;          // "25" — a NIBRS code
+        if (!/\d/.test(t) && !/[&\/]/.test(t)) return false;
+        if (RE_ADDR_ZIP.test(t) || RE_ADDR_NOZIP.test(t)) return true;
+        if (/^\d+[A-Za-z]?\s+[A-Za-z]/.test(t)) return true;       // 1600 S CONRAD AVE
+        if (/\s(?:&|\/|AND|AT)\s/i.test(t) && /[A-Za-z]{3}/.test(t)) return true; // intersection
+        if (/\bBLOCK\b/i.test(t)) return true;                     // 700 BLOCK OF ...
+        if (/,\s*[A-Z]{2}\.?\s*,?\s*\d{5}(?:-\d{4})?\b/.test(t)) return true;
+        return false;
+    }
+
+    /* Is this value usable at all, under a label that already told us it is
+     * a location? Only has to not be the next label or a page footer. */
+    function _looksLikeLocationValue(s) {
+        var t = _normalizeLocation(s);
+        if (t.length < 3) return false;
+        if (!/[A-Za-z0-9]/.test(t)) return false;
+        if (RE_LOC_VALUE_REJECT.test(t)) return false;
+        if (RE_LOC_LABEL_STRICT.test(t) || RE_LOC_LABEL_LOOSE.test(t)) return false;
+        // A bare code with no letters is never a place.
+        if (!/[A-Za-z]/.test(t)) return false;
+        return true;
+    }
+
+    /**
+     * Read the location of occurrence out of an RMS report's text.
+     *
+     * @param {string} text  Flat extracted text.
+     * @returns {{value:string, label:string, confidence:string}}
+     *          value '' when nothing was found. confidence is 'labelled'
+     *          for a specific label, 'inferred' for a bare "Location"
+     *          whose value had to be shape-checked.
+     */
+    function _findLocation(text) {
+        var none = { value: '', label: '', confidence: '' };
+        var src = String(text == null ? '' : text);
+        if (!src) return none;
+        var lines = _lines(src);
+        var loose = null;
+
+        for (var i = 0; i < lines.length; i++) {
+            var line = _clean(lines[i]);
+            if (!line) continue;
+
+            // Same-line "Label: value".
+            var mi = RE_LOC_INLINE_STRICT.exec(line);
+            if (mi && !RE_LOC_NOT.test(line.slice(0, line.indexOf(':') + 1))) {
+                if (_looksLikeLocationValue(mi[1])) {
+                    return { value: _normalizeLocation(mi[1]), label: line.split(':')[0].trim(), confidence: 'labelled' };
+                }
+                continue;
+            }
+
+            // Label alone, value on the following line. Skip blanks between
+            // them — the text layer sometimes emits one.
+            if (RE_LOC_LABEL_STRICT.test(line) && !RE_LOC_NOT.test(line)) {
+                for (var j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+                    var v = _clean(lines[j]);
+                    if (!v) continue;
+                    if (_looksLikeLocationValue(v)) {
+                        return { value: _normalizeLocation(v), label: line.replace(/:\s*$/, '').trim(), confidence: 'labelled' };
+                    }
+                    break;
+                }
+                continue;
+            }
+
+            // The ambiguous bare label — remembered, not returned, so a
+            // specific label later in the document always wins.
+            if (loose) continue;
+            var ml = RE_LOC_INLINE_LOOSE.exec(line);
+            if (ml) {
+                if (_looksLikeAddressValue(ml[1])) {
+                    loose = { value: _normalizeLocation(ml[1]), label: 'Location', confidence: 'inferred' };
+                }
+                continue;
+            }
+            if (RE_LOC_LABEL_LOOSE.test(line)) {
+                for (var k = i + 1; k < Math.min(i + 4, lines.length); k++) {
+                    var lv = _clean(lines[k]);
+                    if (!lv) continue;
+                    if (_looksLikeAddressValue(lv)) {
+                        loose = { value: _normalizeLocation(lv), label: 'Location', confidence: 'inferred' };
+                    }
+                    break;
+                }
+            }
+        }
+
+        return loose || none;
+    }
+
+    /* ================================================================ */
     return {
         // regex vocabulary
         RE_PAGE_BREAK: RE_PAGE_BREAK,
@@ -625,6 +800,11 @@
         // address
         stripLeadingColumnDigit: _stripLeadingColumnDigit,
         scanAddress: _scanAddress,
+
+        // location of occurrence
+        findLocation: _findLocation,
+        normalizeLocation: _normalizeLocation,
+        looksLikeAddressValue: _looksLikeAddressValue,
 
         // identity shapes
         identityTokens: _identityTokens,

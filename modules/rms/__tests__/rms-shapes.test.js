@@ -296,6 +296,164 @@ console.log('\n[pages]');
         [none.authoritative, none.warning], [false, '']);
 })();
 
+/* ================================================================
+ * Location of occurrence
+ * ================================================================
+ * Westminster PD asked for the "Incident Location" on page 1 of their
+ * Initial Incident Report to land in the case instead of being retyped.
+ * This reader is shared by both import entry points — the create-case form
+ * in index.html and the RMS tab's parseRmsReport wrapper — so the same PDF
+ * produces the same address either way.
+ *
+ * The addresses below are taken from the extracts in sample-data/, which
+ * are the real reference documents' text layers.
+ */
+console.log('\n[location of occurrence]');
+
+(function normalise() {
+    // The address is carried VERBATIM. Only the damage the PDF text layer
+    // does to a table cell is repaired.
+    eq('column gaps inside a cell collapse',
+        S.normalizeLocation('7421 BEACH CT  Westminster, CO  80031'),
+        '7421 BEACH CT Westminster, CO 80031');
+    eq('a space before a comma is closed up',
+        S.normalizeLocation('17005 UPLAND AV , FONTANA, CA 92335'),
+        '17005 UPLAND AV, FONTANA, CA 92335');
+    eq('a missing space after a comma is opened up',
+        S.normalizeLocation('9 ELM ST,Aurora,CO 80010'),
+        '9 ELM ST, Aurora, CO 80010');
+    eq('a semicolon separator is spaced the same way',
+        S.normalizeLocation('1600 S CONRAD AVE;COVINGTON VA 24426'),
+        '1600 S CONRAD AVE; COVINGTON VA 24426');
+    eq('non-breaking space is whitespace too',
+        S.normalizeLocation('9 ELM\u00a0ST'), '9 ELM ST');
+    eq('nothing in, nothing out', S.normalizeLocation(null), '');
+    eq('the street name itself is never touched',
+        S.normalizeLocation('  SANTA ANA AV & ELM AV , FON, CA 92337  '),
+        'SANTA ANA AV & ELM AV, FON, CA 92337');
+})();
+
+(function shapes() {
+    ok('a street address is address-shaped',
+        S.looksLikeAddressValue('1600 S CONRAD AVE; COVINGTON VA 24426'));
+    ok('so is an intersection',
+        S.looksLikeAddressValue('SANTA ANA AV & ELM AV , FON, CA 92337'));
+    ok('so is a block reference',
+        S.looksLikeAddressValue('700 BLOCK OF W 92ND AVE'));
+    ok('a bare NIBRS location code is NOT an address',
+        !S.looksLikeAddressValue('25'), '25');
+    ok('nor is a place name with no number, under the ambiguous label',
+        !S.looksLikeAddressValue('FORT YOUNG'), 'FORT YOUNG');
+    ok('nor is an empty value', !S.looksLikeAddressValue(''));
+})();
+
+(function labelled() {
+    const r = S.findLocation('Event Information\nOccurred From\n11/18/2023\n' +
+        'Incident Location\n7421 BEACH CT  Westminster, CO  80031\nBeat\n');
+    eq('Westminster: the Incident Location cell is read',
+        r.value, '7421 BEACH CT Westminster, CO 80031');
+    eq('...under the label it was printed with', r.label, 'Incident Location');
+    eq('...and a specific label is believed outright', r.confidence, 'labelled');
+
+    const va = S.findLocation('OFFENSE\nLocation Address\n1600 S CONRAD AVE; COVINGTON VA 24426\n');
+    eq('Virginia: Location Address is read',
+        va.value, '1600 S CONRAD AVE; COVINGTON VA 24426');
+    eq('...as a labelled read', va.confidence, 'labelled');
+
+    const ar = S.findLocation('OFFENSE #1\nADDRESS OF OFFENSE\n9 ELM ST, Conway, AR 72032\n');
+    eq('Arkansas: ADDRESS OF OFFENSE is the location of occurrence',
+        ar.value, '9 ELM ST, Conway, AR 72032');
+
+    eq('the same label works inline',
+        S.findLocation('Incident Location: 123 MAIN ST, DENVER, CO 80202\n').value,
+        '123 MAIN ST, DENVER, CO 80202');
+
+    eq('a blank line between label and value is stepped over',
+        S.findLocation('Incident Location\n\n7421 BEACH CT  Westminster, CO  80031\n').value,
+        '7421 BEACH CT Westminster, CO 80031');
+
+    // A location of occurrence is not always an address, and under a label
+    // that says so outright we take the officer at their word.
+    eq('free text under a specific label is accepted as written',
+        S.findLocation('Location of Occurrence\nBehind the Safeway on 72nd\n').value,
+        'Behind the Safeway on 72nd');
+
+    eq('Location of Offense spells either way',
+        S.findLocation('Location of Offence\n9 ELM ST, Aurora, CO 80010\n').value,
+        '9 ELM ST, Aurora, CO 80010');
+})();
+
+(function inferred() {
+    // The Fontana-style INFORM report labels it with a bare "Location".
+    const f = S.findLocation('Event Information\nLocation\n17005 UPLAND AV , FONTANA, CA 92335\nBeat\n5\n');
+    eq('a bare Location that holds an address is read',
+        f.value, '17005 UPLAND AV, FONTANA, CA 92335');
+    eq('...but only ever as an inferred read', f.confidence, 'inferred');
+
+    eq('an intersection under the bare label still reads',
+        S.findLocation('Location\nSANTA ANA AV & ELM AV , FON, CA 92337\n').value,
+        'SANTA ANA AV & ELM AV, FON, CA 92337');
+})();
+
+(function theFalsePositive() {
+    /* The single reason the bare label needs a shape check at all.
+     * sample-data/_field_incident.txt carries, inside the OFFENSE block:
+     *     Location
+     *     25
+     *     Location Name
+     *     FORT YOUNG
+     * "25" is a NIBRS location CODE. Importing it as the place the offence
+     * happened would put a number in the officer's Location field and look
+     * like the import had mangled the report. */
+    const bad = 'OFFENSE\nLocation\n25\nLocation Name\nFORT YOUNG\nDescription\nASSAULT\n';
+    eq('a NIBRS location code is not imported as a location',
+        S.findLocation(bad).value, '');
+    eq('"Location Name" is a different fact and is never read',
+        S.findLocation('Location Name\nFORT YOUNG\n').value, '');
+    eq('nor is Location Code', S.findLocation('Location Code\n25\n').value, '');
+    eq('nor is Location Type', S.findLocation('Location Type\nResidence\n').value, '');
+})();
+
+(function precedence() {
+    // A Westminster bundle can carry an Adult Arrest Report whose arrest
+    // location is a jail, not the scene.
+    eq('an arrest location is never mistaken for the scene',
+        S.findLocation('Arrest Location\n55 JAIL RD, Denver, CO 80202\n').value, '');
+    eq('nor a booking location',
+        S.findLocation('Booking Location\n55 JAIL RD, Denver, CO 80202\n').value, '');
+    eq('nor a cell tower location',
+        S.findLocation('Cell Tower Location\n9 ELM ST, Aurora, CO 80010\n').value, '');
+
+    const both = 'Location\n17005 UPLAND AV, FONTANA, CA 92335\n' +
+        'Incident Location\n9 ELM ST, Aurora, CO 80010\n';
+    eq('a specific label later in the document beats an earlier bare one',
+        S.findLocation(both).value, '9 ELM ST, Aurora, CO 80010');
+    eq('...and reports itself as the labelled read',
+        S.findLocation(both).confidence, 'labelled');
+
+    const firstWins = 'Incident Location\n9 ELM ST, Aurora, CO 80010\n' +
+        'Incident Location\n123 MAIN ST, DENVER, CO 80202\n';
+    eq('between two identical labels the first one wins',
+        S.findLocation(firstWins).value, '9 ELM ST, Aurora, CO 80010');
+})();
+
+(function emptyHanded() {
+    // Reading nothing is a valid answer. The field is left blank for the
+    // officer rather than filled with the next line off the form.
+    eq('a label with the next form label under it reads nothing',
+        S.findLocation('Incident Location\nOffense(s)\nSUSPECT\n').value, '');
+    eq('a label with a page footer under it reads nothing',
+        S.findLocation('Incident Location\nPage 1 of 3\n').value, '');
+    eq('a label at the very end of the document reads nothing',
+        S.findLocation('Beat\n5\nIncident Location\n').value, '');
+    eq('a report with no location label at all reads nothing',
+        S.findLocation('Narrative\nOn the above date I responded.\n').value, '');
+    eq('empty text reads nothing', S.findLocation('').value, '');
+    eq('null reads nothing', S.findLocation(null).value, '');
+    eq('...and the empty answer carries no confidence claim',
+        S.findLocation(null).confidence, '');
+})();
+
 /* ================================================================ */
 console.log('\n' + (fail ? 'FAILED' : 'OK') + ' \u2014 ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

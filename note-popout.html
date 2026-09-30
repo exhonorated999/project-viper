@@ -278,7 +278,12 @@
         setInterval(() => { if (isDirty()) saveToMain(true); }, AUTOSAVE_MS);
 
         // Closing the window is a "leave", exactly like switching tabs in
-        // the main window, so it commits too.
+        // the main window, so it commits too. This is the FIRST attempt,
+        // not the guarantee — the call below is async and the window
+        // teardown can kill it in flight. The main process also flushes
+        // this editor on close and on app quit, and an identical-content
+        // write is a no-op there, so whichever lands first is the one that
+        // counts.
         window.addEventListener('beforeunload', () => {
             if (isDirty()) { try { saveToMain(true); } catch (_) {} }
         });

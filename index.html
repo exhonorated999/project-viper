@@ -238,6 +238,9 @@
             'inactive_cases':     { value: 0, monthly: null, subtitle: 'On hold / paused', color: 'viper-yellow' },
             'closed_with_arrest': { value: 0, monthly: 0, subtitle: 'All time', color: 'viper-green' },
             'transferred_cases':  { value: 0, monthly: 0, subtitle: 'All time', color: 'viper-purple' },
+            // Assisting on another detective's case. Deliberately NOT folded
+            // into any of the case counts above — see _statCases().
+            'assist_cases':       { value: 0, monthly: 0, subtitle: 'Not in case stats', color: 'viper-purple' },
             'warrants_written':   { value: 0, monthly: 0, subtitle: 'All time', color: 'viper-orange' },
             'devices_examined':       { value: 0, monthly: 0,    subtitle: 'All time',         color: 'viper-cyan'   },
             'devices_pending_review': { value: 0, monthly: null, subtitle: 'Awaiting review', color: 'viper-yellow' },
@@ -271,6 +274,7 @@
             'inactive_cases': 'Inactive',
             'closed_with_arrest': 'Closed w/ Arrest',
             'transferred_cases': 'Transferred Cases',
+            'assist_cases': 'Assists (Other Detectives)',
             'warrants_written': 'Warrants Written',
             'devices_examined': 'Devices Examined',
             'devices_pending_review': 'Devices Pending Review',
@@ -1275,6 +1279,7 @@
                                         <button onclick="setInvestigationsFilter('closed')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-gray-400/10 transition-colors text-gray-400" data-filter="closed">Closed</button>
                                         <button onclick="setInvestigationsFilter('closed-arrest')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-viper-green/10 transition-colors text-green-400" data-filter="closed-arrest">Closed with Arrest</button>
                                         <button onclick="setInvestigationsFilter('transferred')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-viper-orange/10 transition-colors text-viper-orange" data-filter="transferred">Transferred</button>
+                                        <button onclick="setInvestigationsFilter('assist')" class="inv-filter-btn w-full text-left px-4 py-2 text-sm hover:bg-viper-purple/10 transition-colors text-viper-purple" data-filter="assist">Assisting Other Detectives</button>
                                     </div>
                                 </div>
                             </div>
@@ -1450,6 +1455,42 @@
                     </div>
                 </div>
                 
+                <!-- Case Role: my own case, or assistance on another detective's -->
+                <div class="p-4 border border-gray-700 rounded-xl bg-viper-card/30">
+                    <label class="block text-sm font-medium text-gray-300 mb-3">Case Role</label>
+                    <div class="grid grid-cols-2 gap-3">
+                        <label class="flex items-start gap-3 p-3 rounded-lg border border-gray-600 cursor-pointer hover:border-viper-cyan/50 transition-colors" data-role-card="primary">
+                            <input type="radio" name="newCaseRole" value="primary" checked class="mt-0.5 accent-current text-viper-cyan" onchange="ncSyncCaseRole()">
+                            <span>
+                                <span class="block text-sm font-medium text-white">My case</span>
+                                <span class="block text-xs text-gray-500 mt-0.5">I am the assigned investigator. Counts toward my case statistics.</span>
+                            </span>
+                        </label>
+                        <label class="flex items-start gap-3 p-3 rounded-lg border border-gray-600 cursor-pointer hover:border-viper-purple/50 transition-colors" data-role-card="assist">
+                            <input type="radio" name="newCaseRole" value="assist" class="mt-0.5 accent-current text-viper-purple" onchange="ncSyncCaseRole()">
+                            <span>
+                                <span class="block text-sm font-medium text-white">Assisting another detective</span>
+                                <span class="block text-xs text-gray-500 mt-0.5">Supplemental work on someone else's case. Kept out of case open/closed statistics.</span>
+                            </span>
+                        </label>
+                    </div>
+                    <div id="newCaseAssistFields" class="hidden mt-4 space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Lead Detective <span class="text-gray-500 font-normal">(optional)</span></label>
+                            <input type="text" id="newCaseLeadDetective" maxlength="80" placeholder="e.g. Det. A. Ramirez #2210" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-purple focus:ring-1 focus:ring-viper-purple outline-none text-white placeholder-gray-500">
+                            <p class="text-xs text-gray-500 mt-1">Whose case this is. Printed on the cover of the assist package you hand back.</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Lead Detective's Agency / Unit <span class="text-gray-500 font-normal">(optional)</span></label>
+                            <input type="text" id="newCaseLeadAgency" maxlength="80" placeholder="e.g. Springfield PD — Crimes Against Persons" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-purple focus:ring-1 focus:ring-viper-purple outline-none text-white placeholder-gray-500">
+                        </div>
+                        <p class="text-xs text-viper-purple/90 bg-viper-purple/10 border border-viper-purple/30 rounded-lg px-3 py-2">
+                            Your warrants, arrests, seizures and recoveries on this case still count as your work.
+                            Only case-level counts — cases assigned, open, closed, clearance rate — leave it out.
+                        </p>
+                    </div>
+                </div>
+
                 <!-- Priority (only when enabled) -->
                 <div id="createCasePriorityRow" class="hidden">
                     <label class="block text-sm font-medium text-gray-300 mb-2">Priority</label>
@@ -3426,12 +3467,37 @@
             // Seed the Offenses editor (one empty primary row) + Custom Metrics flags.
             try { ncPopulateOffensesEditor(); } catch (_) {}
             try { ncRenderCustomMetrics(); } catch (_) {}
+            try { ncSyncCaseRole(); } catch (_) {}
             document.getElementById('createCaseModal').classList.add('show');
+        }
+
+        // ═══ Case Role ═══════════════════════════════════════════════════
+        // An "assist" case is work done on ANOTHER detective's case —
+        // warrants, interviews, follow-up. The officer wants it tracked in
+        // one place and handed back as a package, but it is not their case,
+        // so it must not move their case-level numbers. Work product
+        // (warrants, arrests, seizures, recoveries) still counts, because
+        // they did that work.
+        function ncSyncCaseRole() {
+            const sel = document.querySelector('input[name="newCaseRole"]:checked');
+            const role = sel ? sel.value : 'primary';
+            const fields = document.getElementById('newCaseAssistFields');
+            if (fields) fields.classList.toggle('hidden', role !== 'assist');
+            document.querySelectorAll('[data-role-card]').forEach(card => {
+                const on = card.getAttribute('data-role-card') === role;
+                const accent = card.getAttribute('data-role-card') === 'assist'
+                    ? 'border-viper-purple' : 'border-viper-cyan';
+                card.classList.toggle(accent, on);
+                card.classList.toggle('border-gray-600', !on);
+            });
         }
         
         function closeCreateCaseModal() {
             document.getElementById('createCaseModal').classList.remove('show');
             document.getElementById('createCaseForm').reset();
+            // form.reset() restores the checked radio but not the panel it
+            // controls, so re-run the sync or the assist fields stay open.
+            try { ncSyncCaseRole(); } catch (_) {}
             // Reset RMS import state
             pendingRmsData = null;
             const statusDiv = document.getElementById('rmsImportStatus');
@@ -3502,6 +3568,12 @@
                 const selectedModules = Array.from(document.querySelectorAll('.case-module:checked'))
                     .map(cb => cb.value);
                 const dateAssigned = document.getElementById('newDateAssigned')?.value || '';
+                const roleSel = document.querySelector('input[name="newCaseRole"]:checked');
+                const caseRole = (roleSel && roleSel.value === 'assist') ? 'assist' : 'primary';
+                const leadDetective = caseRole === 'assist'
+                    ? (document.getElementById('newCaseLeadDetective')?.value || '').trim() : '';
+                const leadAgency = caseRole === 'assist'
+                    ? (document.getElementById('newCaseLeadAgency')?.value || '').trim() : '';
                 const ncOff = ncReadOffenses();
                 const ncMetricVals = ncCollectMetricValues();
                 
@@ -3527,6 +3599,12 @@
                     offenseType: ncOff.primaryType || null,
                     additionalOffenses: ncOff.additional || [],
                     status: 'active',
+                    // 'primary' = my case. 'assist' = supplemental work on
+                    // another detective's case: excluded from case-level
+                    // statistics, included in work-product statistics.
+                    caseRole: caseRole,
+                    leadDetective: leadDetective || null,
+                    leadAgency: leadAgency || null,
                     priority: parseInt(document.getElementById('newCasePriority')?.value) || 0,
                     modules: selectedModules,
                     tabOrder: ['overview', ...selectedModules],
@@ -3550,6 +3628,7 @@
                     case_id: newCase.id,
                     modules: selectedModules,
                     priority: newCase.priority,
+                    case_role: caseRole,
                 });
                 
                 // Store pending RMS data for case-detail to pick up
@@ -4802,6 +4881,47 @@
             return overdueCount;
         }
         
+        // ═══ Assist cases and the statistics line ════════════════════════
+        // An "assist" case is work done on ANOTHER detective's case —
+        // writing warrants, interviewing, follow-up. The investigator wants
+        // it tracked in VIPER like any other case, but it is not their case.
+        //
+        // The line, decided with the officers who asked for this:
+        //
+        //   CASE-LEVEL counts — cases assigned, open, closed, clearance
+        //       rate — EXCLUDE assists. Counting them would inflate a
+        //       caseload the investigator was never assigned, and the lead
+        //       detective is already counting the same case on their side.
+        //
+        //   WORK-PRODUCT counts — warrants, arrests, seizures, recoveries,
+        //       devices examined — INCLUDE assists, combined into the same
+        //       number with no separate breakdown. The officer did that
+        //       work; whose case it was does not change that.
+        //
+        // So: anything reading viperCases for a CASE-level figure goes
+        // through _statCases(). Anything reading it for work product uses
+        // the raw list and needs no change. If you add a metric, decide
+        // which side of this line it falls on before you write it.
+        function _isAssistCase(c) { return !!c && c.caseRole === 'assist'; }
+
+        // Cases that count toward this investigator's caseload. Falsy entries
+        // are dropped as well — a corrupt row in viperCases must not reach the
+        // bucket filters below as a countable case.
+        function _statCases(list) {
+            const all = Array.isArray(list)
+                ? list
+                : (JSON.parse(localStorage.getItem('viperCases')) || []);
+            return all.filter(c => c && !_isAssistCase(c));
+        }
+
+        // The assists themselves — shown on their own card, never folded in.
+        function _assistCaseList(list) {
+            const all = Array.isArray(list)
+                ? list
+                : (JSON.parse(localStorage.getItem('viperCases')) || []);
+            return all.filter(_isAssistCase);
+        }
+
         function getTotalRecoveredVehicles() {
             const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
             let totalVehicles = 0;
@@ -5036,10 +5156,18 @@
             });
             // Also count closed-with-arrest cases (built-in + custom 'cleared-arrest' category)
             // that may not have suspect records.
+            //
+            // ASSISTS ARE EXCLUDED FROM THIS FALLBACK ONLY. The suspect loop
+            // above counts arrests this officer developed, wherever they
+            // developed them — that is their work product and it counts.
+            // This branch is different: it infers an arrest from a CASE
+            // STATUS. On an assist case that status is the LEAD detective's
+            // closure, not this officer's arrest, so counting it would put
+            // someone else's number on their dashboard.
             const customArrestIds = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]')
                 .filter(s => s.category === 'cleared-arrest').map(s => s.id);
             const arrestStatuses = new Set(['closed-arrest', ...customArrestIds]);
-            const arrestCases = cases.filter(c => arrestStatuses.has(c.status)).length;
+            const arrestCases = _statCases(cases).filter(c => arrestStatuses.has(c.status)).length;
             return Math.max(total, arrestCases);
         }
         function getMonthlyArrests() {
@@ -5053,11 +5181,14 @@
                     if (_inThisMonth(d)) total++;
                 });
             });
-            // Also count closed-with-arrest cases closed/created this month
+            // Also count closed-with-arrest cases closed/created this month.
+            // Assists excluded here for the same reason as getTotalArrests:
+            // this branch reads a case STATUS, which on an assist belongs to
+            // the lead detective, not to this officer.
             const customArrestIds = JSON.parse(localStorage.getItem('viperCustomStatuses') || '[]')
                 .filter(s => s.category === 'cleared-arrest').map(s => s.id);
             const arrestStatuses = new Set(['closed-arrest', ...customArrestIds]);
-            const arrestCasesThisMonth = cases.filter(c =>
+            const arrestCasesThisMonth = _statCases(cases).filter(c =>
                 arrestStatuses.has(c.status) && _inThisMonth(
                     c.dateClosed ? (String(c.dateClosed).slice(0, 10) + 'T00:00')
                                  : (c.closedAt || c.lastModified || c.lastUpdated || c.createdAt)
@@ -5067,7 +5198,8 @@
         }
 
         function getNewCasesThisMonth() {
-            const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            // Case-level: assists are not cases assigned to this officer.
+            const cases = _statCases();
             let count = 0;
             cases.forEach(caseItem => {
                 if (_inThisMonth(caseItem.createdAt)) count++;
@@ -5076,8 +5208,7 @@
             return count;
         }
         function getTotalNewCases() {
-            const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
-            return cases.length;
+            return _statCases().length;
         }
         function getTotalWarrantsWritten() {
             const allWarrants = JSON.parse(localStorage.getItem('viperCaseWarrants')) || {};
@@ -5159,7 +5290,12 @@
         
         // Update dashboard with case data
         function updateDashboardCaseData(metricsOnly) {
-            const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            const allCases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            // EVERY bucket below is case-level, so all of them work off the
+            // assist-free list. The full list is kept only for the assist
+            // card and for the table, which still shows assists.
+            const cases = _statCases(allCases);
+            const assistCases = _assistCaseList(allCases);
             
             // Build status sets — custom statuses fold into the bucket matching their
             // category. 'active' customs stay active; everything else rolls up into
@@ -5185,6 +5321,18 @@
             // 'cases_closed' = all closure-type buckets summed (closed + cleared-arrest + other).
             dashboardMetrics['cases_closed'].value       = closedCases.length + closedWithArrestCases.length + otherClosureCases.length;
             dashboardMetrics['transferred_cases'].value  = cases.filter(c => c.status === 'transferred').length;
+
+            // Assists, reported separately and never folded into the counts
+            // above. Shown so the officer can see the work is tracked — the
+            // card's own subtitle says it is not counted.
+            if (dashboardMetrics['assist_cases']) {
+                const assistActive = assistCases.filter(c => !inactiveStatuses.includes(c.status));
+                dashboardMetrics['assist_cases'].value = assistCases.length;
+                dashboardMetrics['assist_cases'].monthly =
+                    assistCases.filter(c => _inThisMonth(c.createdAt)).length;
+                dashboardMetrics['assist_cases'].subtitle =
+                    assistActive.length + ' open · not in case stats';
+            }
 
             // Monthly counts for closure events. The case-detail page records the
             // actual closure date in case.dateClosed (YYYY-MM-DD) and bumps
@@ -5296,7 +5444,7 @@
             const dd = document.getElementById('investigationsFilterDropdown');
             if (dd) dd.classList.add('hidden');
 
-            const builtinTitles = { active: 'Active Investigations', closed: 'Closed Investigations', 'closed-arrest': 'Closed with Arrest', transferred: 'Transferred Cases', all: 'All Cases' };
+            const builtinTitles = { active: 'Active Investigations', closed: 'Closed Investigations', 'closed-arrest': 'Closed with Arrest', transferred: 'Transferred Cases', all: 'All Cases', assist: 'Assisting Other Detectives' };
             const priorityTitles = { 'priority-1': 'Critical Priority', 'priority-2': 'High Priority', 'priority-3': 'Medium Priority', 'priority-4': 'Low Priority', 'priority-none': 'No Priority Assigned' };
             let title = builtinTitles[filter] || priorityTitles[filter];
             if (!title) {
@@ -5476,6 +5624,11 @@
             let filtered;
             if (f === 'all') {
                 filtered = allCases;
+            } else if (f === 'assist') {
+                // Only the assist cases. They also appear in Active/Closed
+                // alongside everything else — carrying an ASSIST badge — so
+                // the officer never loses sight of work they have done.
+                filtered = allCases.filter(c => c && c.caseRole === 'assist');
             } else if (f.startsWith('priority-')) {
                 const pVal = f === 'priority-none' ? null : parseInt(f.split('-')[1]);
                 filtered = allCases.filter(c => pVal === null ? !c.priority : c.priority === pVal);
@@ -5606,7 +5759,7 @@
             const colSpan = visCols.length + 1;
 
             if (filteredCases.length === 0) {
-                const builtinLabels = { active: 'active investigations', closed: 'closed cases', 'closed-arrest': 'cases closed with arrest', transferred: 'transferred cases', all: 'cases' };
+                const builtinLabels = { active: 'active investigations', closed: 'closed cases', 'closed-arrest': 'cases closed with arrest', transferred: 'transferred cases', all: 'cases', assist: 'assist cases' };
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="${colSpan}" class="py-8 text-center text-gray-400">
@@ -5631,6 +5784,15 @@
                                     ? '<span class="w-2.5 h-2.5 rounded-full flex-shrink-0 ' + (priorityDotMap[caseItem.priority] || '') + '" title="' + (priorityNameMap[caseItem.priority] || '') + '"></span>'
                                     : '')
                                 + '<span class="font-medium text-viper-cyan">' + (caseItem.caseNumber || '') + '</span>'
+                                // Assist cases stay in this list — hiding the
+                                // officer's own work would be worse — so the
+                                // badge is what explains why the case counts
+                                // above are lower than the row count.
+                                + (caseItem.caseRole === 'assist'
+                                    ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wide bg-viper-purple/15 text-viper-purple border border-viper-purple/40 flex-shrink-0" title="Assisting'
+                                        + (caseItem.leadDetective ? ' ' + caseTextEsc(caseItem.leadDetective) : ' another detective')
+                                        + ' — not counted in case statistics">ASSIST</span>'
+                                    : '')
                                 + '</div></td>';
                         case 'category': {
                             // Falls back to synopsis so cases created before the Category

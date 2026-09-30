@@ -862,6 +862,7 @@
                         <h2 class="text-3xl font-bold" id="caseNumberHeader">Loading...</h2>
                         <p class="text-gray-400 mt-1" id="caseCreatedDate">-</p>
                         <span id="caseCybertipBadge" class="hidden mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-viper-purple/15 text-viper-purple border border-viper-purple/40 text-sm font-medium font-mono"></span>
+                        <span id="caseAssistBadge" class="hidden mt-2 ml-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-viper-purple/15 text-viper-purple border border-viper-purple/40 text-sm font-semibold"></span>
                     </div>
                     <div class="flex items-center space-x-4">
                         <div class="px-4 py-2 rounded-lg border" id="statusBadge">
@@ -1985,7 +1986,24 @@
                     ctBadge.classList.add('hidden');
                 }
             }
-            
+            // ASSIST badge (header) — an assist case is deliberately excluded
+            // from the case-level statistics, so the officer needs to see that
+            // from the moment the case opens, not only on the Overview tab.
+            const asBadge = document.getElementById('caseAssistBadge');
+            if (asBadge) {
+                if (currentCase.caseRole === 'assist') {
+                    asBadge.textContent = currentCase.leadDetective
+                        ? `ASSIST — ${currentCase.leadDetective}`
+                        : 'ASSIST';
+                    asBadge.title = 'Assisting another detective — not counted in your case statistics';
+                    asBadge.classList.remove('hidden');
+                } else {
+                    asBadge.textContent = '';
+                    asBadge.removeAttribute('title');
+                    asBadge.classList.add('hidden');
+                }
+            }
+
             const statusBadge = document.getElementById('statusBadge');
             const statusConfig = {
                 active: { color: 'viper-green', text: 'Active', icon: '●' },
@@ -2396,11 +2414,18 @@
                 try { return getTabItemCount(tabId) > 0; } catch (e) { return false; }
             });
 
+            // On an assist case the recipient is the lead detective, not the
+            // DA, so the modal says so. Same selection mechanics either way.
+            const _asx = _assistPackageInfo();
+
             const modalHTML = `
                 <div id="exportCaseModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id === 'exportCaseModal') closeExportCaseModal()">
                     <div class="glass-card rounded-xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
-                        <h3 class="text-2xl font-bold text-white mb-2">Export Case for DA</h3>
-                        <p class="text-gray-400 mb-6">Select which tabs to include in the export package for the District Attorney</p>
+                        <h3 class="text-2xl font-bold text-white mb-2">${_asx ? 'Export Assist Package' : 'Export Case for DA'}</h3>
+                        <p class="text-gray-400 mb-6">${_asx
+                            ? 'Select what to hand to ' + (_asx.leadDetective ? _esc(_asx.leadDetective) : 'the lead detective')
+                              + '. Everything lands in one named folder with a manifest identifying it as your work.'
+                            : 'Select which tabs to include in the export package for the District Attorney'}</p>
                         
                         <div class="mb-6">
                             <div class="flex items-center justify-between mb-3">
@@ -2446,6 +2471,12 @@
                                             <li>Data tabs will be compiled into a professional PDF report with title page and table of contents</li>
                                             <li>Evidence and Warrant files will be bundled with the PDF or separately if no data tabs are selected</li>
                                             <li>All exports will be saved as a ZIP file for easy sharing</li>
+                                            ${_asx ? `
+                                            <li>Everything sits inside one folder named for you and this case, so it cannot scatter into the lead detective's own folders</li>
+                                            <li><strong class="text-white">File names are left exactly as they are</strong> — a renamed file stops matching the report that describes it. MANIFEST.csv lists every file with its SHA-256 hash and your name and badge</li>
+                                            <li>Every page of the PDF carries your name, badge and agency</li>
+                                            <li>Items you marked Not Discoverable are withheld here too</li>
+                                            ` : ''}
                                         </ul>
                                     </div>
                                 </div>
@@ -2460,7 +2491,7 @@
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                                 </svg>
-                                Generate Export
+                                ${_asx ? 'Generate Assist Package' : 'Generate Export'}
                             </button>
                         </div>
                     </div>
@@ -2729,6 +2760,46 @@
         // and items omitted from the report PDF. Set in exportCase().
         let _daExportNonDiscoverableTags = [];
 
+        // ─── Assist Package ───────────────────────────────────────────────────
+        // An assist case is supplemental work done on another detective's case,
+        // so its export is not a DA package — it is a hand-off. Returns null
+        // for a normal case, which is what keeps the DA export path unchanged.
+        //
+        // The officer's identity comes from the Warrant Author agency profile
+        // because that is the one place they have already typed their rank,
+        // name, badge and agency. If it is blank we fall back to the case's
+        // Created By and then the licensed customer name, and if all three are
+        // empty the package still generates — it just says so rather than
+        // inventing a name.
+        function _assistPackageInfo() {
+            try {
+                if (!currentCase || currentCase.caseRole !== 'assist') return null;
+            } catch (_) { return null; }
+            let ag = {};
+            try { ag = JSON.parse(localStorage.getItem('viperAgencyProfile')) || {}; } catch (_) { ag = {}; }
+            const officerName = String(ag.affiantName || currentCase.createdBy
+                || localStorage.getItem('viper_customer_name') || '').trim();
+            const officerRank = String(ag.affiantRank || '').trim();
+            const officerBadge = String(ag.affiantBadge || '').trim();
+            const agencyName = String(ag.agencyName || '').trim();
+            const who = [officerRank, officerName].filter(Boolean).join(' ').trim()
+                + (officerBadge ? ` ${officerBadge}` : '');
+            const dateStr = new Date().toISOString().split('T')[0];
+            // The root folder name is read by a human in Explorer before any
+            // file is opened, so it leads with what it is and whose it is.
+            // Illegal characters are stripped main-side.
+            const folderName = `Assist Package - ${currentCase.caseNumber}`
+                + (who ? ` - ${who}` : '')
+                + ` - ${dateStr}`;
+            return {
+                officerName, officerRank, officerBadge, agencyName,
+                who: who || '',
+                leadDetective: String(currentCase.leadDetective || '').trim(),
+                leadAgency: String(currentCase.leadAgency || '').trim(),
+                folderName, dateStr
+            };
+        }
+
         function showExportProgress() {
             const progressHTML = `
                 <div id="exportProgressModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
@@ -2750,6 +2821,8 @@
         async function generateCaseReportPDF(dataTabs, includeFilesList) {
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
+            // Resolved once — every page stamp and the cover read from it.
+            const _assist = _assistPackageInfo();
             const PH = doc.internal.pageSize.height;
             const PW = doc.internal.pageSize.width;
             const M = 20;           // margin
@@ -2768,10 +2841,20 @@
             function need(h) { if (y + h > PH - 25) newPage(); }
             function addHeader() {
                 doc.setFontSize(7); doc.setTextColor(...LGRAY);
-                doc.text(`Case ${currentCase.caseNumber} — DA Report`, M, 10);
+                doc.text(`Case ${currentCase.caseNumber} — ${_assist ? 'Assist Package' : 'DA Report'}`, M, 10);
                 doc.text(`Page ${doc.getNumberOfPages()}`, PW - M, 10, { align: 'right' });
                 doc.setDrawColor(...LGRAY); doc.setLineWidth(0.2);
                 doc.line(M, 12, PW - M, 12);
+                // Assist packages carry the contributing officer on EVERY page.
+                // A page that gets photocopied out of the binder must still say
+                // whose work it is — that was the whole point of the request.
+                if (_assist) {
+                    const stamp = 'Work product of ' + (_assist.who || 'an assisting investigator')
+                        + (_assist.agencyName ? ', ' + _assist.agencyName : '')
+                        + ' — assisting ' + (_assist.leadDetective || 'the lead detective');
+                    doc.setFontSize(6);
+                    doc.text(stamp, M, PH - 8);
+                }
                 // CRITICAL: restore body defaults so content rendered AFTER a page
                 // break doesn't inherit the header's 7pt LGRAY state. Without this
                 // reset, long narratives (RMS reports etc.) render light-gray on
@@ -3112,26 +3195,47 @@
             doc.rect(0, 0, PW, 6, 'F');
             // Title
             doc.setFontSize(36); doc.setFont(undefined, 'bold'); doc.setTextColor(...ACCENT);
-            doc.text('CASE REPORT', PW / 2, 70, { align: 'center' });
+            doc.text(_assist ? 'ASSIST PACKAGE' : 'CASE REPORT', PW / 2, 70, { align: 'center' });
             // Case Number
             doc.setFontSize(26); doc.setTextColor(...BLACK);
             doc.text(currentCase.caseNumber, PW / 2, 90, { align: 'center' });
             // Subtitle
             doc.setFontSize(14); doc.setFont(undefined, 'normal'); doc.setTextColor(...GRAY);
-            doc.text('Prepared for the District Attorney', PW / 2, 110, { align: 'center' });
+            doc.text(_assist
+                ? 'Supplemental work provided to the lead detective'
+                : 'Prepared for the District Attorney', PW / 2, 110, { align: 'center' });
             // Date
             const exportDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
             doc.text(exportDate, PW / 2, 122, { align: 'center' });
             // Case info box
             doc.setDrawColor(...ACCENT); doc.setLineWidth(0.4);
-            doc.roundedRect(M + 20, 140, CW - 40, 40, 3, 3, 'S');
+            doc.roundedRect(M + 20, 140, CW - 40, _assist ? 56 : 40, 3, 3, 'S');
             doc.setFontSize(10); doc.setTextColor(...BLACK);
             doc.text(`Case Type: ${currentCase.primaryOffense || currentCase.type || 'N/A'}`, PW / 2, 152, { align: 'center' });
             doc.text(`Status: ${currentCase.status || 'N/A'}`, PW / 2, 160, { align: 'center' });
             doc.text(`Created: ${formatDate(currentCase.createdAt || currentCase.createdDate)}`, PW / 2, 168, { align: 'center' });
             // Investigator
             const investigator = currentCase.investigator || currentCase.createdBy || localStorage.getItem('viper_customer_name') || '';
-            if (investigator) { doc.text(`Investigator: ${investigator}`, PW / 2, 176, { align: 'center' }); }
+            if (_assist) {
+                // On an assist package the two names that matter are WHO DID
+                // THIS WORK and WHO OWNS THE CASE. Both go on the cover, above
+                // the fold, so the lead detective never has to guess.
+                doc.text(`Contributed by: ${_assist.who || investigator || '(not recorded)'}`
+                    + (_assist.agencyName ? `, ${_assist.agencyName}` : ''), PW / 2, 176, { align: 'center' });
+                doc.text(`Lead detective: ${_assist.leadDetective || '(not recorded)'}`
+                    + (_assist.leadAgency ? `, ${_assist.leadAgency}` : ''), PW / 2, 184, { align: 'center' });
+                // Plain-English statement of what this package is and is not.
+                doc.setFontSize(9); doc.setTextColor(...GRAY);
+                const blurb = 'This package is supplemental work performed on the above case by an assisting '
+                    + 'investigator. It is not a second case file and it is not a discovery package. File names '
+                    + 'have been left exactly as they were created so each file still matches the report that '
+                    + 'describes it; MANIFEST.csv in the package lists every file with its SHA-256 hash and the '
+                    + 'officer who produced it.';
+                doc.text(doc.splitTextToSize(blurb, CW - 40), PW / 2, 210, { align: 'center' });
+                doc.setFontSize(10); doc.setTextColor(...BLACK);
+            } else if (investigator) {
+                doc.text(`Investigator: ${investigator}`, PW / 2, 176, { align: 'center' });
+            }
             // Footer
             doc.setFontSize(8); doc.setTextColor(...LGRAY);
             doc.text('Generated by V.I.P.E.R. Case Management System', PW / 2, PH - 15, { align: 'center' });
@@ -3997,7 +4101,9 @@
 
             // ========== SAVE VIA IPC (ZIP with evidence) ==========
             const pdfBytes = doc.output('arraybuffer');
-            const fileName = `${currentCase.caseNumber}_DA_Export_${new Date().toISOString().split('T')[0]}.zip`;
+            const fileName = _assist
+                ? `${currentCase.caseNumber}_Assist_Package_${new Date().toISOString().split('T')[0]}.zip`
+                : `${currentCase.caseNumber}_DA_Export_${new Date().toISOString().split('T')[0]}.zip`;
 
             if (window.electronAPI && window.electronAPI.saveDAExport) {
                 try {
@@ -4011,13 +4117,18 @@
                         // Canvass media is flat files rather than tag
                         // folders, so it is withheld by file name.
                         nonDiscoverableCanvasFiles: _canvasNonDiscoverableFiles(),
+                        // Null on a normal case — that is what keeps the DA
+                        // export path identical to what it has always been.
+                        assist: _assist,
                     });
                     if (savedPath) {
                         const withheldTags = Array.isArray(_daExportNonDiscoverableTags) ? _daExportNonDiscoverableTags : [];
                         const csamNote = withheldTags.length
                             ? `\n\n🔒 ${withheldTags.length} Not-Discoverable item(s) withheld from report & ZIP: ${withheldTags.join(', ')}`
                             : '';
-                        viperToast(`DA Export saved to:\n${savedPath}\n\nIncludes PDF report and all evidence files.${csamNote}`, 'success');
+                        viperToast(_assist
+                            ? `Assist Package saved to:\n${savedPath}\n\nOne folder, with MANIFEST.csv identifying every file as your work.${csamNote}`
+                            : `DA Export saved to:\n${savedPath}\n\nIncludes PDF report and all evidence files.${csamNote}`, 'success');
                     }
                 } catch (e) {
                     console.error('DA export IPC failed, falling back to PDF download:', e);
@@ -4567,21 +4678,27 @@
                 viperToast('File bundling requires the VIPER desktop app.', 'info'); return;
             }
             try {
+                const _assist = _assistPackageInfo();
                 const savedPath = await window.electronAPI.saveDAExport({
-                    fileName: `${currentCase.caseNumber}_Evidence_${new Date().toISOString().split('T')[0]}.zip`,
+                    fileName: _assist
+                        ? `${currentCase.caseNumber}_Assist_Files_${new Date().toISOString().split('T')[0]}.zip`
+                        : `${currentCase.caseNumber}_Evidence_${new Date().toISOString().split('T')[0]}.zip`,
                     pdfBytes: [],
                     caseNumber: currentCase.caseNumber,
                     excludeCsam: !!_daExportExcludeCsam,
                     csamTags: Array.isArray(_daExportCsamTags) ? _daExportCsamTags : [],
                     nonDiscoverableTags: Array.isArray(_daExportNonDiscoverableTags) ? _daExportNonDiscoverableTags : [],
                     nonDiscoverableCanvasFiles: _canvasNonDiscoverableFiles(),
+                    assist: _assist,
                 });
                 if (savedPath) {
                     const withheldTags = Array.isArray(_daExportNonDiscoverableTags) ? _daExportNonDiscoverableTags : [];
                     const csamNote = withheldTags.length
                         ? `\n🔒 ${withheldTags.length} Not-Discoverable item(s) withheld`
                         : '';
-                    viperToast(`Evidence files saved to:\n${savedPath}${csamNote}`, 'success');
+                    viperToast(_assist
+                        ? `Assist files saved to:\n${savedPath}${csamNote}`
+                        : `Evidence files saved to:\n${savedPath}${csamNote}`, 'success');
                 }
             } catch (e) { viperToast('Error bundling files: ' + e.message, 'error'); }
         }
@@ -5659,6 +5776,18 @@
                                     </div>
                                     ` : ''}
                                 </div>
+                                <div class="col-span-2">
+                                    <label class="text-sm text-gray-400">Case Role</label>
+                                    ${currentCase.caseRole === 'assist' ? `
+                                    <p class="mt-1 flex items-center gap-2 flex-wrap">
+                                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-viper-purple/15 text-viper-purple border border-viper-purple/40 text-sm font-semibold">ASSIST</span>
+                                        <span class="text-white">Assisting ${currentCase.leadDetective ? _esc(currentCase.leadDetective) : 'another detective'}${currentCase.leadAgency ? ' — ' + _esc(currentCase.leadAgency) : ''}</span>
+                                    </p>
+                                    <p class="text-xs text-gray-500 mt-1">Your warrants, arrests, seizures and recoveries here still count as your work. Case-level counts — cases assigned, open, closed, clearance rate — leave this case out.</p>
+                                    ` : `
+                                    <p class="text-white mt-1">My case <span class="text-gray-500">— counts toward my case statistics</span></p>
+                                    `}
+                                </div>
                                 ${currentCase.cybertipNumber ? `
                                 <div class="col-span-2">
                                     <label class="text-sm text-gray-400">CyberTip #</label>
@@ -5795,6 +5924,32 @@
                                         </button>
                                     </div>
                                     <div id="editOffensesList" class="space-y-2"></div>
+                                </div>
+                                <div class="col-span-2 p-4 border border-gray-700 rounded-xl bg-viper-card/30">
+                                    <label class="block text-sm text-gray-400 mb-3">Case Role</label>
+                                    <div class="grid grid-cols-2 gap-3">
+                                        <label class="cursor-pointer p-3 rounded-lg border ${currentCase.caseRole === 'assist' ? 'border-gray-600' : 'border-viper-cyan/50'} bg-viper-dark hover:border-viper-cyan/40 transition" data-ov-role-card="primary">
+                                            <input type="radio" name="editCaseRole" value="primary" ${currentCase.caseRole === 'assist' ? '' : 'checked'} onchange="ovSyncCaseRole()" class="mr-2 accent-viper-cyan">
+                                            <span class="text-sm font-medium text-white">My case</span>
+                                            <span class="block text-xs text-gray-500 mt-0.5 ml-6">I am the assigned investigator. Counts toward my case statistics.</span>
+                                        </label>
+                                        <label class="cursor-pointer p-3 rounded-lg border ${currentCase.caseRole === 'assist' ? 'border-viper-purple/50' : 'border-gray-600'} bg-viper-dark hover:border-viper-purple/40 transition" data-ov-role-card="assist">
+                                            <input type="radio" name="editCaseRole" value="assist" ${currentCase.caseRole === 'assist' ? 'checked' : ''} onchange="ovSyncCaseRole()" class="mr-2 accent-viper-purple">
+                                            <span class="text-sm font-medium text-white">Assisting another detective</span>
+                                            <span class="block text-xs text-gray-500 mt-0.5 ml-6">Supplemental work on someone else's case. Kept out of case open/closed statistics.</span>
+                                        </label>
+                                    </div>
+                                    <div id="editCaseAssistFields" class="${currentCase.caseRole === 'assist' ? '' : 'hidden'} mt-4 grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label class="text-sm text-gray-400 block mb-1">Lead Detective <span class="text-gray-600">(optional)</span></label>
+                                            <input type="text" id="editCaseLeadDetective" maxlength="80" value="${_esc(currentCase.leadDetective || '')}" placeholder="e.g. Det. A. Ramirez #2210" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-purple focus:outline-none">
+                                        </div>
+                                        <div>
+                                            <label class="text-sm text-gray-400 block mb-1">Lead Agency / Unit <span class="text-gray-600">(optional)</span></label>
+                                            <input type="text" id="editCaseLeadAgency" maxlength="80" value="${_esc(currentCase.leadAgency || '')}" placeholder="e.g. Springfield PD — Crimes Against Persons" class="w-full px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white focus:border-viper-purple focus:outline-none">
+                                        </div>
+                                        <p class="col-span-2 text-xs text-viper-purple/90 bg-viper-purple/10 border border-viper-purple/30 rounded-lg px-3 py-2">Your warrants, arrests, seizures and recoveries on this case still count as your work. Only case-level counts — cases assigned, open, closed, clearance rate — leave it out. Both names appear on the Assist Package export so the lead detective knows where the work came from.</p>
+                                    </div>
                                 </div>
                                 <div class="col-span-2">
                                     <label class="text-sm text-gray-400 block mb-1">CyberTip # <span class="text-gray-600">(optional)</span></label>
@@ -32861,6 +33016,24 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             document.getElementById('overviewEditBtn').classList.remove('hidden');
         }
 
+        // Shows/hides the lead-detective fields as the Case Role radio moves.
+        // The initial state is rendered inline with the form, so this only has
+        // to handle the change — but it also repaints the card accents, which
+        // are what make the choice readable at a glance.
+        function ovSyncCaseRole() {
+            const sel = document.querySelector('input[name="editCaseRole"]:checked');
+            const isAssist = !!sel && sel.value === 'assist';
+            const panel = document.getElementById('editCaseAssistFields');
+            if (panel) panel.classList.toggle('hidden', !isAssist);
+            document.querySelectorAll('[data-ov-role-card]').forEach(card => {
+                const on = card.getAttribute('data-ov-role-card') === (isAssist ? 'assist' : 'primary');
+                card.classList.remove('border-gray-600', 'border-viper-cyan/50', 'border-viper-purple/50');
+                card.classList.add(on
+                    ? (isAssist ? 'border-viper-purple/50' : 'border-viper-cyan/50')
+                    : 'border-gray-600');
+            });
+        }
+
         // ─── Unified Offenses Editor ───────────────────────────────────────────
         const _OFFENSE_TYPES = ['Felony', 'Misdemeanor', 'Wobbler', 'Infraction', 'Non-Criminal'];
 
@@ -33180,6 +33353,19 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const newDisposition = (document.getElementById('editCaseDisposition')?.value || '').trim();
             const newCybertip = (document.getElementById('editCaseCybertip')?.value || '').trim();
             const newLocationOfOccurrence = (document.getElementById('editCaseLocationOfOccurrence')?.value || '').trim();
+            // Case Role. 'assist' keeps this case out of CASE-level statistics
+            // (assigned / open / closed / clearance) while leaving every piece
+            // of work product — warrants, arrests, seizures, recoveries — on
+            // the officer's own numbers. The radios only exist if the overview
+            // form rendered, so a missing control means "leave it as it was".
+            const roleSel = document.querySelector('input[name="editCaseRole"]:checked');
+            const newCaseRole = roleSel
+                ? (roleSel.value === 'assist' ? 'assist' : 'primary')
+                : (currentCase.caseRole === 'assist' ? 'assist' : 'primary');
+            const newLeadDetective = newCaseRole === 'assist'
+                ? (document.getElementById('editCaseLeadDetective')?.value || '').trim().slice(0, 80) : '';
+            const newLeadAgency = newCaseRole === 'assist'
+                ? (document.getElementById('editCaseLeadAgency')?.value || '').trim().slice(0, 80) : '';
             const newDateAssigned = document.getElementById('editDateAssigned')?.value || '';
             const newOffenseDate = document.getElementById('editCaseOffenseDate')?.value || '';
             const offenses = _readOffensesFromEditor();
@@ -33214,6 +33400,14 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
             currentCase.cybertipNumber = newCybertip;
             currentCase.locationOfOccurrence = newLocationOfOccurrence;
+            // Switching a case OFF assist clears the lead's details rather
+            // than leaving a stale name attached to a case the officer now
+            // owns. The reverse — switching TO assist — keeps whatever was
+            // typed in the form above.
+            const roleChanged = (currentCase.caseRole === 'assist') !== (newCaseRole === 'assist');
+            currentCase.caseRole = newCaseRole;
+            currentCase.leadDetective = newLeadDetective || null;
+            currentCase.leadAgency = newLeadAgency || null;
             currentCase.dateAssigned = newDateAssigned || null;
             // Date of Offense — read by the Warrant Author (case.offenseDate slot).
             // Stored as YYYY-MM-DD, same shape as dateAssigned/dateClosed.
@@ -33244,6 +33438,22 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             renderCaseHeader();
             renderTabContent('overview');
             showToast('Case information updated', 'success');
+
+            // A role change moves this case across the statistics line, so it
+            // is worth an audit entry and an explicit confirmation — the
+            // officer should never have to guess whether it took.
+            if (roleChanged) {
+                try {
+                    audit('case_role_changed', {
+                        case_number: currentCase.caseNumber,
+                        case_role: newCaseRole,
+                        lead_detective: newLeadDetective || null
+                    });
+                } catch (_) {}
+                showToast(newCaseRole === 'assist'
+                    ? 'Marked as an assist — kept out of your case statistics'
+                    : 'Marked as your own case — counts in your case statistics', 'info');
+            }
 
             // Status just left active and no disposition was typed in the form —
             // ask for it now rather than losing the reasoning.

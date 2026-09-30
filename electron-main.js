@@ -3552,6 +3552,7 @@ ipcMain.handle('open-note-window', async (event, caseNumber, noteId) => {
     }
   });
   _noteWindows.set(key, noteWin);
+  _attachNoteCloseFlush(noteWin, caseNumber, noteId);
   noteWin.on('closed', () => {
     // Only drop the entry if it is still ours — a fast close/reopen could
     // otherwise evict the newer window's registration.
@@ -3587,7 +3588,11 @@ ipcMain.handle('note-get', async (event, caseNumber, noteId) => {
   return await mainWindow.webContents.executeJavaScript(js);
 });
 
-ipcMain.handle('note-save', async (event, caseNumber, noteId, contentHtml) => {
+// EVERY write to a note record comes through here — the pop-out's Save
+// button, its five-minute autosave, the flush when its window closes, and
+// the flush on app quit. Four callers, one writer; two write paths would
+// drift the moment one of them grew a guard the other did not.
+async function _noteWriteToMain(caseNumber, noteId, contentHtml) {
   if (!mainWindow || mainWindow.isDestroyed()) return false;
   const safePayload = JSON.stringify(JSON.stringify({
     caseNumber: String(caseNumber),
@@ -3602,6 +3607,12 @@ ipcMain.handle('note-save', async (event, caseNumber, noteId, contentHtml) => {
     if (!Array.isArray(list)) return false;
     const note = list.find(n => n && String(n.id) === d.noteId);
     if (!note) return false;
+
+    // Nothing changed — say so and leave the record alone. The pop-out's
+    // own beforeunload and the main-side close flush can both fire for the
+    // same close, and without this the note would collect two identical
+    // edit timestamps for one keystroke.
+    if (note.contentHtml === d.contentHtml) return true;
 
     note.contentHtml = d.contentHtml;
     delete note.content;
@@ -3648,6 +3659,86 @@ ipcMain.handle('note-save', async (event, caseNumber, noteId, contentHtml) => {
     return true;
   })()`;
   return await mainWindow.webContents.executeJavaScript(js);
+}
+
+ipcMain.handle('note-save', async (event, caseNumber, noteId, contentHtml) =>
+  await _noteWriteToMain(caseNumber, noteId, contentHtml));
+
+// Closing the pop-out window saves the note.
+//
+// The pop-out has its own `beforeunload` handler, but that is not a
+// guarantee: it fires an async IPC call, and the window teardown can kill
+// the renderer before the call reaches this process. So the reliable flush
+// lives here — hold the close, read the editor out of the still-live
+// window, commit it, and only then let the window go.
+const _noteFlushing = new WeakSet();
+const _noteFlushed = new WeakSet();
+
+// Reads the pop-out's editor and commits it. Resolves either way: a failed
+// save must never leave the officer with a window that will not close.
+async function _flushNoteWindow(noteWin) {
+  const id = noteWin && noteWin._viperNote;
+  if (!id) return;
+  try {
+    if (noteWin.isDestroyed() || noteWin.webContents.isDestroyed()) return;
+    const html = await noteWin.webContents.executeJavaScript(`(() => {
+      try {
+        // isDirty() stays false until loadNote() has run, and the pop-out
+        // never marks a missing note loaded — so an unloaded window, or one
+        // whose note was deleted in the main window, can never write an
+        // empty string over a real record.
+        if (typeof isDirty !== 'function' || !isDirty()) return null;
+        const ed = document.getElementById('editor');
+        return ed ? ed.innerHTML.trim() : null;
+      } catch (_) { return null; }
+    })()`);
+    if (typeof html === 'string') {
+      await _noteWriteToMain(id.caseNumber, id.noteId, html);
+    }
+  } catch (_) { /* never block a close or a quit on a save failure */ }
+}
+
+function _attachNoteCloseFlush(noteWin, caseNumber, noteId) {
+  noteWin._viperNote = { caseNumber: String(caseNumber), noteId: String(noteId) };
+  noteWin.on('close', (e) => {
+    // Our own second pass, or a re-click while the first flush is still
+    // running. Either way, do not start another one.
+    if (_noteFlushed.has(noteWin)) return;
+    if (_noteFlushing.has(noteWin)) { e.preventDefault(); return; }
+    if (noteWin.webContents.isDestroyed()) return;
+
+    e.preventDefault();
+    _noteFlushing.add(noteWin);
+    _flushNoteWindow(noteWin).then(() => {
+      _noteFlushed.add(noteWin);
+      _noteFlushing.delete(noteWin);
+      if (!noteWin.isDestroyed()) noteWin.close();
+    });
+  });
+}
+
+// Quitting with a pop-out open must not lose the note either. Window close
+// order on quit is not guaranteed, and the note record lives in the MAIN
+// window's localStorage — so flush every pop-out here, while that window is
+// still alive. Bounded by a timeout: a wedged save must never wedge the
+// quit, and losing a few seconds of typing beats an app that will not exit.
+let _noteQuitFlushDone = false;
+app.on('before-quit', (e) => {
+  if (_noteQuitFlushDone) return;
+  const open = [];
+  for (const win of _noteWindows.values()) {
+    if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) open.push(win);
+  }
+  if (!open.length) { _noteQuitFlushDone = true; return; }
+
+  e.preventDefault();
+  Promise.race([
+    Promise.all(open.map(w => _flushNoteWindow(w))),
+    new Promise(r => setTimeout(r, 3000))
+  ]).then(() => {
+    _noteQuitFlushDone = true;
+    app.quit();
+  });
 });
 
 // --- RMS PDF Import ---
@@ -3941,9 +4032,17 @@ ipcMain.handle('save-case-export', async (event, { fileName, data }) => {
 });
 
 // --- Export DA Package (ZIP with PDF + evidence files) ---
-ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber, excludeCsam, csamTags, nonDiscoverableTags, nonDiscoverableCanvasFiles }) => {
+// `assist` is present only when the case is flagged as an assist — supplemental
+// work done on another detective's case. It changes three things and nothing
+// else: the package gets a single named root folder instead of loose top-level
+// folders, it carries a MANIFEST.csv identifying every file as this officer's
+// work product, and the dialog/PDF names say Assist Package. The DA-export path
+// is left byte-for-byte as it was; it is field-validated and not worth
+// perturbing to save a few lines here.
+ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber, excludeCsam, csamTags, nonDiscoverableTags, nonDiscoverableCanvasFiles, assist }) => {
+  const assistInfo = (assist && typeof assist === 'object') ? assist : null;
   const result = await dialog.showSaveDialog(mainWindow, {
-    title: 'Save DA Export Package',
+    title: assistInfo ? 'Save Assist Package' : 'Save DA Export Package',
     defaultPath: fileName,
     filters: [{ name: 'ZIP Archive', extensions: ['zip'] }]
   });
@@ -4018,6 +4117,51 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
   };
   const sanitizeArchiveRel = (relPath) => relPath.split('/').map(shortenComponent).join('/');
 
+  // ── Assist package: one named root folder, and a manifest of provenance ──
+  // The lead detective receives a ZIP from someone else's machine. A single
+  // root folder means it cannot scatter over their own Evidence/Warrants
+  // folders when they extract, and the folder name itself says whose work it
+  // is before anything is opened.
+  const _assistSafeName = (s) => String(s || '')
+    .replace(/[\\/:*?"<>|]/g, '-')     // illegal on Windows
+    .replace(/[\u0000-\u001f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/, '')             // trailing dot/space breaks Windows dirs
+    .slice(0, 90);
+  const assistRoot = assistInfo
+    ? (_assistSafeName(assistInfo.folderName) || `Assist Package - ${_assistSafeName(caseNumber)}`)
+    : '';
+  const pfx = (p) => (assistRoot ? `${assistRoot}/${p}` : p);
+
+  // Provenance rows for MANIFEST.csv. Only collected for an assist package.
+  const manifestRows = assistInfo ? [] : null;
+
+  // Hash what actually lands in the ZIP so the lead detective can prove the
+  // file they received is the file that was sent. Synchronous and chunked so
+  // it neither blocks on a huge read nor holds a multi-GB buffer; past the cap
+  // we say plainly that it was not hashed rather than quietly omitting it.
+  const HASH_MAX_BYTES = 256 * 1024 * 1024;
+  const _sha256FileSync = (full, size) => {
+    if (size != null && size > HASH_MAX_BYTES) return { hash: '', note: 'not hashed (over 256 MB)' };
+    let fd = null;
+    try {
+      fd = fs.openSync(full, 'r');
+      const h = crypto.createHash('sha256');
+      const buf = Buffer.alloc(1024 * 1024);
+      for (;;) {
+        const n = fs.readSync(fd, buf, 0, buf.length, null);
+        if (n <= 0) break;
+        h.update(buf.subarray(0, n));
+      }
+      return { hash: h.digest('hex'), note: '' };
+    } catch (e) {
+      return { hash: '', note: 'not hashed (' + e.message + ')' };
+    } finally {
+      if (fd !== null) { try { fs.closeSync(fd); } catch (_) {} }
+    }
+  };
+
   const addTreeToArchive = (baseDir, archivePrefix, archive, opts = {}) => {
     // opts.skipTopLevelDirs: Set<string> — names of immediate subdirectories
     //   of baseDir that should be omitted entirely (e.g. CSAM-flagged
@@ -4069,6 +4213,16 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
               archive.append(plain, { name: archiveName });
               okCount++;
               totalBytes += plain.length;
+              if (manifestRows) {
+                // Hash the PLAINTEXT — that is what goes in the ZIP and what
+                // the lead detective will be holding.
+                manifestRows.push({
+                  archived: archiveName, original: relPath, module: opts.manifestModule || archivePrefix,
+                  bytes: plain.length,
+                  sha256: crypto.createHash('sha256').update(plain).digest('hex'),
+                  note: 'decrypted from VIPER Field Security on export'
+                });
+              }
             } else {
               log.push(`[skip-encrypted-locked] ${archiveName}`);
               skipCount++;
@@ -4078,6 +4232,13 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
             archive.file(full, { name: archiveName });
             okCount++;
             if (stat) totalBytes += stat.size;
+            if (manifestRows) {
+              const h = _sha256FileSync(full, stat ? stat.size : null);
+              manifestRows.push({
+                archived: archiveName, original: relPath, module: opts.manifestModule || archivePrefix,
+                bytes: stat ? stat.size : '', sha256: h.hash, note: h.note
+              });
+            }
           }
         } catch (e) {
           log.push(`[file-fail] ${archiveName}: ${e.message}`);
@@ -4095,7 +4256,7 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
     const exportDir = path.join(dir, base);
     try {
       fs.mkdirSync(exportDir, { recursive: true });
-      fs.writeFileSync(path.join(exportDir, `${caseNumber}_DA_Report.pdf`), Buffer.from(pdfBytes));
+      fs.writeFileSync(path.join(exportDir, assistInfo ? `${caseNumber}_Assist_Package.pdf` : `${caseNumber}_DA_Report.pdf`), Buffer.from(pdfBytes));
     } catch (e) {
       console.error('[save-da-export] sidecar write failed:', e);
       throw new Error('Could not write export sidecar: ' + e.message);
@@ -4135,8 +4296,14 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
     archive.pipe(output);
 
     try {
-      // 1. PDF report goes at archive root
-      archive.append(Buffer.from(pdfBytes), { name: `${caseNumber}_DA_Report.pdf` });
+      // 1. PDF report goes at archive root. A files-only export sends no PDF
+      //    bytes at all — appending an empty file there just left the
+      //    recipient with a 0-byte "report" that would not open.
+      if (pdfBytes && pdfBytes.length) {
+        archive.append(Buffer.from(pdfBytes), {
+          name: pfx(assistInfo ? `${caseNumber}_Assist_Package.pdf` : `${caseNumber}_DA_Report.pdf`)
+        });
+      }
 
       // 2. Evidence (streamed from disk) — skip Not-Discoverable
       //    (investigative-only) subfolders, matched by evidence-tag folder
@@ -4149,24 +4316,32 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
       for (const t of nonDiscoverableSkipSet) evidenceSkipSet.add(t);
       addTreeToArchive(
         path.join(casesDir, caseNumber, 'Evidence'),
-        'Evidence',
+        pfx('Evidence'),
         archive,
-        { skipTopLevelDirs: evidenceSkipSet.size ? evidenceSkipSet : null }
+        {
+          skipTopLevelDirs: evidenceSkipSet.size ? evidenceSkipSet : null,
+          manifestModule: 'Evidence'
+        }
       );
 
       // 3. Warrants (streamed from disk)
-      addTreeToArchive(path.join(casesDir, caseNumber, 'Warrants'), 'Warrants', archive);
+      addTreeToArchive(path.join(casesDir, caseNumber, 'Warrants'), pfx('Warrants'), archive,
+        { manifestModule: 'Warrants' });
 
       // 4. Note attachments (PDFs, pasted images stored from the Notes tab)
-      addTreeToArchive(path.join(casesDir, caseNumber, 'Notes'), 'Notes', archive);
+      addTreeToArchive(path.join(casesDir, caseNumber, 'Notes'), pfx('Notes'), archive,
+        { manifestModule: 'Case Notes' });
 
       // 5. Area Canvas media (photos/video/audio captured per canvass entry).
       //    Flat files, so Not-Discoverable items are withheld by file name.
       addTreeToArchive(
         path.join(casesDir, caseNumber, CANVAS_MEDIA_DIR),
-        CANVAS_MEDIA_DIR,
+        pfx(CANVAS_MEDIA_DIR),
         archive,
-        { skipFileNames: nonDiscoverableCanvasSet.size ? nonDiscoverableCanvasSet : null }
+        {
+          skipFileNames: nonDiscoverableCanvasSet.size ? nonDiscoverableCanvasSet : null,
+          manifestModule: 'Area Canvas'
+        }
       );
 
       // 6. Manifest with per-file outcome — useful for DA-side audit
@@ -4199,7 +4374,82 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
         renameMap: renameLog.length ? renameLog : undefined,
         log,
       };
-      archive.append(JSON.stringify(manifest, null, 2), { name: 'EXPORT_MANIFEST.json' });
+      if (assistInfo) {
+        // Everything the lead detective needs to know about where this came
+        // from, in the machine-readable manifest as well as the CSV.
+        manifest.assist = {
+          role: 'assist',
+          parentCaseNumber: caseNumber,
+          contributedBy: assistInfo.officerName || '',
+          rank: assistInfo.officerRank || '',
+          badge: assistInfo.officerBadge || '',
+          agency: assistInfo.agencyName || '',
+          leadDetective: assistInfo.leadDetective || '',
+          leadAgency: assistInfo.leadAgency || '',
+          note: 'Supplemental work product contributed by an assisting investigator. Original file names are preserved unchanged; provenance is carried by the root folder name, MANIFEST.csv and the page stamp on the PDF report.'
+        };
+      }
+      archive.append(JSON.stringify(manifest, null, 2), { name: pfx('EXPORT_MANIFEST.json') });
+
+      if (assistInfo && manifestRows) {
+        // MANIFEST.csv — the identifier the lead detective actually reads.
+        // File NAMES are deliberately untouched (renaming evidence after the
+        // fact is how a file stops matching the report that describes it), so
+        // this table is what ties each file back to the assisting officer.
+        const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+        const csv = [
+          ['Archived Path', 'Original Path', 'Module', 'Size (bytes)', 'SHA-256',
+           'Contributed By', 'Rank', 'Badge', 'Agency', 'Parent Case Number', 'Notes'].map(q).join(',')
+        ];
+        for (const r of manifestRows) {
+          csv.push([
+            r.archived, r.original, r.module, r.bytes, r.sha256,
+            assistInfo.officerName || '', assistInfo.officerRank || '', assistInfo.officerBadge || '',
+            assistInfo.agencyName || '', caseNumber, r.note || ''
+          ].map(q).join(','));
+        }
+        archive.append(csv.join('\r\n') + '\r\n', { name: pfx('MANIFEST.csv') });
+
+        // A plain-text note at the root, because the ZIP gets opened in
+        // Explorer before anyone opens a PDF.
+        const who = [assistInfo.officerRank, assistInfo.officerName].filter(Boolean).join(' ')
+          + (assistInfo.officerBadge ? ` #${assistInfo.officerBadge}` : '');
+        const readme = [
+          'ASSIST PACKAGE',
+          '',
+          `Case number:        ${caseNumber}`,
+          `Contributed by:     ${who || '(not recorded)'}`,
+          `Agency / unit:      ${assistInfo.agencyName || '(not recorded)'}`,
+          `Lead detective:     ${assistInfo.leadDetective || '(not recorded)'}`,
+          `Lead agency / unit: ${assistInfo.leadAgency || '(not recorded)'}`,
+          `Generated:          ${new Date().toLocaleString()}`,
+          '',
+          'This package is supplemental work performed on your case by an',
+          'assisting investigator. It is not a second case file and it is',
+          'not a discovery package. Review it and file what you need into',
+          'your own case.',
+          '',
+          'File names have been left exactly as they were created, so that each',
+          'file still matches the report that describes it. Provenance is carried',
+          'by this folder name, by MANIFEST.csv (which lists every file with its',
+          'SHA-256 hash and the officer who produced it), and by the stamp on',
+          'every page of the PDF report.',
+          '',
+          'Contents:',
+          ...(pdfBytes && pdfBytes.length
+            ? [`  ${caseNumber}_Assist_Package.pdf   the written report`]
+            : ['  (no written report in this package — files only)']),
+          '  MANIFEST.csv                       every file, hashed and attributed',
+          '  EXPORT_MANIFEST.json               machine-readable export record',
+          '  Evidence\\ Warrants\\ Notes\\ ...      the files themselves',
+          '',
+          'Files the assisting officer marked Not Discoverable were withheld,',
+          'and files still encrypted by a locked VIPER vault were skipped. Both',
+          'are recorded in EXPORT_MANIFEST.json.',
+          ''
+        ].join('\r\n');
+        archive.append(readme, { name: pfx('READ ME FIRST.txt') });
+      }
     } catch (e) {
       console.error('[save-da-export] pre-finalize error:', e);
       try { output.destroy(); } catch (_) {}

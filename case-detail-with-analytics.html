@@ -147,6 +147,23 @@
                edge. p-8 alone wasn't enough on shorter screens. */
             padding-bottom: 160px !important;
         }
+
+        /* A note body is free text an officer pasted in — it routinely
+           contains file paths, hashes, long URLs and device IDs with no
+           spaces to break on. #tabContent clips horizontal overflow with no
+           scrollbar, so an unbroken token used to push the card wider than
+           the pane and the tail of it was simply unreadable (measured at
+           492px lost on a 900px-wide window). Break anywhere rather than
+           lose text. */
+        .note-rendered {
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+        .note-rendered pre,
+        .note-rendered code {
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
         
         /* Custom scrollbar styling */
         ::-webkit-scrollbar {

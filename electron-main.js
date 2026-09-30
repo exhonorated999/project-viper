@@ -55,6 +55,15 @@ const SecurityManager = require('./modules/security');
 const AuditLogger = require('./modules/audit-log');
 const AUDIT_EVENTS = AuditLogger.EVENT_TYPES;
 
+// Main-window size/position memory. Resolved against the live display list so
+// VIPER can never open wider than the screen (see modules/_shared/window-state.js).
+const windowState = require('./modules/_shared/window-state');
+// Resolved lazily — userData can be relocated at runtime (portable mode, the
+// custom data-directory setting), so this must not be captured at module load.
+function windowStateFile() {
+  return path.join(app.getPath('userData'), 'window-state.json');
+}
+
 // Shared temp dir for Resource Hub captures (downloads, PDFs, single-file HTML).
 // Hoisted to module scope so IPC handlers can access it.
 const rhDownloadTmpDir = path.join(os.tmpdir(), 'viper-rh-downloads');
@@ -499,9 +508,33 @@ function startServer() {
 }
 
 function createWindow() {
+  // Never open larger than the screen can show. Electron does NOT clamp a
+  // requested size to the work area, and the app shell clips horizontal
+  // overflow without a scrollbar, so an oversized window put the right-hand
+  // buttons permanently out of reach (field report, 2026-09-30: 1080p at
+  // Windows' default 150% scaling gives only 1280x688 usable DIP).
+  let _winStartup = { bounds: { width: 1400, height: 900 }, maximized: false, minWidth: 860, minHeight: 560 };
+  try {
+    const displays = electron.screen.getAllDisplays();
+    const primaryWorkArea = electron.screen.getPrimaryDisplay().workArea;
+    _winStartup = windowState.resolveStartup(
+      windowState.read(windowStateFile()),
+      { displays, primaryWorkArea }
+    );
+    console.log('[window] work area', primaryWorkArea.width + 'x' + primaryWorkArea.height,
+      '-> opening at', _winStartup.bounds.width + 'x' + _winStartup.bounds.height,
+      _winStartup.maximized ? '(maximized)' : '');
+  } catch (e) {
+    console.warn('[window] size resolution failed, using defaults:', e.message);
+  }
+
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    x: _winStartup.bounds.x,
+    y: _winStartup.bounds.y,
+    width: _winStartup.bounds.width,
+    height: _winStartup.bounds.height,
+    minWidth: _winStartup.minWidth,
+    minHeight: _winStartup.minHeight,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -516,6 +549,14 @@ function createWindow() {
     show: false,
     backgroundColor: '#1a1a1a'
   });
+
+  // Restore maximised state and start remembering size/position.
+  try {
+    if (_winStartup.maximized) mainWindow.maximize();
+    windowState.attach(mainWindow, windowStateFile());
+  } catch (e) {
+    console.warn('[window] state memory not attached:', e.message);
+  }
 
   // Spellchecker language — default to system locale, fall back to en-US.
   try {

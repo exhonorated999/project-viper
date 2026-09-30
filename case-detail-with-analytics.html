@@ -48,6 +48,9 @@
          readers above comes back thin, and never files anything itself. Also
          resolves rms-shapes.js at factory time, so it stays below it. -->
     <script src="modules/rms/generic-extractor.js"></script>
+    <!-- Rebuilds a PDF page in visual order from its own text layer. Pure
+         arithmetic, no dependencies. -->
+    <script src="modules/rms/pdf-rows.js"></script>
     <script src="modules/flock/flock-module.js" defer></script>
     <script src="modules/flock/flock-ui.js" defer></script>
     <!-- Area Canvas media: photos attached from disk, video/audio recorded
@@ -40826,6 +40829,48 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             return { names, narrativeLines, narrativePages };
         }
 
+        /*
+         * Arkansas NIBRS incident reports only: re-read a PDF that has its own
+         * text layer in VISUAL order before parsing it.
+         *
+         * A flattened fillable PDF normally writes every printed form label
+         * into the content stream first and the typed-in values afterwards, so
+         * the extractor hands back a page where the labels and their values
+         * are hundreds of characters apart and any prose is out of order. One
+         * officer's report imported with no victim at all and with the first
+         * line of the narrative sitting at the end of it.
+         *
+         * A scan has no text layer, rebuilds to nothing, and falls straight
+         * through to the OCR path untouched — which is every Arkansas report
+         * validated in the field so far. Best-effort throughout: a failure
+         * here leaves the original extraction exactly as it was.
+         */
+        async function _rmsVisualOrderResult(filePath, result) {
+            try {
+                const AR = window.ArIncidentParser;
+                const PR = window.PdfRows;
+                if (!AR || !PR || !filePath || !result) return result;
+                if (!window.electronAPI || !window.electronAPI.pdfPageRows) return result;
+                if (!AR.detect(result.text || '')) return result;
+
+                const res = await window.electronAPI.pdfPageRows(filePath);
+                if (!res || !res.ok || !res.pages || !res.pages.length) return result;
+                if (!PR.isUsable(res.pages, result.text || '')) return result;
+
+                return {
+                    fileName: result.fileName,
+                    text: res.pages.join('\n') + '\n',
+                    pages: res.pages,
+                    numPages: res.pages.length,
+                    ocr: false,
+                    visualOrder: true
+                };
+            } catch (err) {
+                console.warn('[RMS Parser] visual-order re-read failed:', err);
+                return result;
+            }
+        }
+
         async function handleRmsImport() {
             try {
                 const filePaths = await window.electronAPI.selectRmsFiles();
@@ -40839,11 +40884,12 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
                 for (const filePath of filePaths) {
                     try {
-                        const result = await window.electronAPI.extractPdfText(filePath);
+                        let result = await window.electronAPI.extractPdfText(filePath);
+                        result = await _rmsVisualOrderResult(filePath, result);
                         const report = parseRmsReport(result.text, result.fileName,
                             result.pages ? { pageTexts: result.pages } : null);
                         report.pageCount = result.numPages;
-                        await _arRecoverRmsOcr(report, filePath);
+                        await _arRecoverRmsOcr(report, result.visualOrder ? null : filePath);
                         // The format-agnostic fallback. AFTER the recovery pass
                         // above — sweeping pre-recovery text would see a thin
                         // parse that the OCR passes were about to fix.

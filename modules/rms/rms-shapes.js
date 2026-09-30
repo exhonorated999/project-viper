@@ -229,7 +229,11 @@
      * ================================================================ */
     function _isNameToken(tok) {
         if (!tok) return false;
-        if (/^\([A-Za-z]{1,4}\d{0,3}\)$/.test(tok)) return true;       // (JV2), (JR)
+        /* (JV2), (JR), (AKA) — a parenthesised alias printed inside the name
+         * field. TWO letters minimum: a single parenthesised letter is a
+         * checkbox option code, not an alias, and "JUAREZ, STACY ANN  (F)
+         * Female" was importing the name as "JUAREZ, STACY ANN (F)". */
+        if (/^\([A-Za-z]{2,4}\d{0,3}\)$/.test(tok)) return true;
         if (!/^[A-Z][A-Za-z'\u2019\-.]*$/.test(tok)) return false;      // must start upper
         var bare = tok.replace(/[^A-Za-z]/g, '').toUpperCase();
         if (!bare) return false;

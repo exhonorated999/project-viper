@@ -89,8 +89,16 @@
      * loop mid-way and silently move the other's starting point. */
     var RE_DATE_G = /(?<!\d)(\d{1,2}\/\d{1,2}\/\d{4})(?!\d)/g;
     var RE_DAY = S.RE_DAY;
-    // Arkansas code citation: 5-14-103a(1), 5-36-103(b)(2), 27-50-306 ...
-    var RE_STATUTE = /(\d{1,2}-\d{1,3}-\d{1,4}(?:\.\d+)?[A-Za-z]?(?:\s*\([0-9A-Za-z]{1,4}\))*)/;
+    /* Arkansas code citation: 5-14-103a(1), 5-36-103(b)(2), 27-50-306 ...
+     * The trailing subdivision group is what lets 5-13-301(2)b1 come through
+     * whole. Without it the citation stopped at "5-13-301(2)" and the stray
+     * "b1" was left at the front of the rest of the row, where the address
+     * matcher latched onto the "1" and swallowed the offence description —
+     * incident 26-0905455 imported with the statute short, the description
+     * reduced to "b", and the location reading
+     * "1 TERRORISTIC THREATENING - 2ND DEGREE / THRE 36 N CORAN DR, ...".
+     * It only attaches with no space, so it cannot eat a following word. */
+    var RE_STATUTE = /(\d{1,2}-\d{1,3}-\d{1,4}(?:\.\d+)?[A-Za-z]?(?:\s*\([0-9A-Za-z]{1,4}\))*(?:[A-Za-z]\d{0,3})?)/;
     // Street address ending in a 2-letter state and a 5(+4) ZIP.
     var RE_ADDR_ZIP = S.RE_ADDR_ZIP;
     var RE_AGENCY = /([A-Z][A-Za-z.'\-]*(?:\s+[A-Z][A-Za-z.'\-]*){0,4}\s+(?:Sheriff's\s+(?:Office|Department|Dept\.?)|Police\s+(?:Department|Dept\.?)|Marshal's\s+Office|State\s+Police|Constable's\s+Office|Department\s+of\s+[A-Z][A-Za-z]+))/;
@@ -104,8 +112,35 @@
      * page and suppressed the WITNESSES band entirely. */
     var RE_OTHERS_HEADING = /^\W{0,3}Others\s+Involved\W{0,3}$/i;
 
+    /* Marks an "Others Involved" block whose role heading the officer left
+     * blank. Such a block is only kept when nothing else on the report has
+     * already named the same person. */
+    var OTHERS_NO_ROLE_DETAIL = 'Others Involved — role not stated on the form';
+
     /* Standalone form-label lines that are never a role heading. */
     var NOT_A_ROLE = /^(NAME|SEX|RACE|AGE|ETHNIC|SSN|DOB|ZIP|OCCUPATION|NARRATIVE|OTHERS\s+INVOLVED|CONTINUATION\s+PAGE|INCIDENT\s+REPORT|ARKANSAS|UNAPPROVED|APPROVED|DATE\s+OF\s+BIRTH|RESIDENT\s+ADDRESS|RESIDENT\s+PHONE|PLACE\s+OF\s+EMPLOYMENT|EMPLOY.{0,3}\s*PHONE|EMPLOYMENT\s+PHONE|SOC\.?\s*SEC\.?\s*NO\.?|DRIVER.{0,2}S\s+LICENSE|DR\.?\s*LI\.?\s*STATE|LOCATION\s+CODE|WEAPON\s+FORCE|VICTIM\s+WAS|PAGE|ORI(\s+NUMBER)?|CODE\s*#?|DISPATCHER|REPORTING\s+(OFFICER|AREA)|TIME\s+(RECEIVED|ARRIVED)|AGENCY\s+NAME|STATUTE|OFFENSE(\s+(DESCRIPTION|STATUS|NAME))?|ADDRESS\s+OF\s+OFFENSE|SUBJECT\s+DESCRIPTORS|HEIGHT|WEIGHT|BUILD|SKIN\s+TONE)\b[:.]?$/i;
+
+    /* A role heading stands alone on its printed row. A row that carries TWO
+     * or more column cells, one of which is a known form label, is the form's
+     * own label row — "RESIDENT PHONE      EMPLOY'T. PHONE" reads as a single
+     * ALL-CAPS string once the gaps are collapsed, and was being taken as the
+     * role of a person block, producing a nameless extra person on incident
+     * 26-0905455. Cells are separated by a run of blank space, which is what
+     * both the OCR and the positional rebuild emit at a column boundary. A
+     * genuine two-word role ("CASE WORKER") has no label cell and survives. */
+    function _isLabelRow(rawLine) {
+        var cells = String(rawLine == null ? '' : rawLine).split(/\s{2,}/);
+        var kept = [];
+        for (var i = 0; i < cells.length; i++) {
+            var c = cells[i].trim();
+            if (c) kept.push(c);
+        }
+        if (kept.length < 2) return false;
+        for (var k = 0; k < kept.length; k++) {
+            if (NOT_A_ROLE.test(kept[k])) return true;
+        }
+        return false;
+    }
 
     /* ---------------- identity band (DL / SSN / employment) ----------------
      *
@@ -1067,11 +1102,31 @@
                 if (!s || s.length > 32) continue;
                 if (!/^[A-Z][A-Z '\/&.\-]*$/.test(s)) continue;
                 if (NOT_A_ROLE.test(s)) continue;
+                if (_isLabelRow(lines[i])) continue;
                 if (!/[A-Z]{3}/.test(s)) continue;
                 heads.push({ idx: i, role: s });
             }
             if (!heads.length) {
-                warn('Page ' + page.index + ' has an "Others Involved" section but no readable role heading.');
+                /* No typed role. The block itself is still real — the officer
+                 * simply left the heading blank — so fall back to the person
+                 * cells if there are any, and only complain when there is
+                 * nothing at all to read. Incident 26-0905455 page 5 is this
+                 * case: a fully filled person template under a bare "Others
+                 * Involved" with no role above it. */
+                var bare = [];
+                for (var bi = oi + 1; bi < lines.length; bi++) {
+                    if (/NAME\s*:\s*Last/i.test(lines[bi])) bare.push(bi);
+                }
+                if (!bare.length) {
+                    warn('Page ' + page.index + ' has an "Others Involved" section but no readable role heading.');
+                    continue;
+                }
+                for (var bb = 0; bb < bare.length; bb++) {
+                    var bTo = bb + 1 < bare.length ? bare[bb + 1] : lines.length;
+                    var bPerson = _harvestBlock(lines, bare[bb], bTo, ROLE.OTHER, page.index);
+                    bPerson.detail = OTHERS_NO_ROLE_DETAIL;
+                    out.push(bPerson);
+                }
                 continue;
             }
 
@@ -1856,11 +1911,25 @@
         var candidates = [].concat(victims, arrestees, generic, others);
         var persons = [];
         var provisional = [];
+        var seenNames = {};
         for (var i = 0; i < candidates.length; i++) {
             var c = candidates[i];
             if (typeof c.involvement !== 'string' || !c.involvement) c.involvement = ROLE.OTHER;
-            if (c.name) persons.push(c);
-            else provisional.push(c);
+            if (c.name) {
+                /* An "Others Involved" block with no typed role carries no
+                 * fact the report has not already stated somewhere it DID
+                 * name a role. On incident 26-0905455 the continuation page
+                 * repeats the victim in full, which would have filed her a
+                 * second time as an involved person. Only that one case is
+                 * dropped — a block with a real role heading is always kept,
+                 * because the role itself is new information. */
+                var key = c.name.toUpperCase();
+                if (seenNames[key] && c.detail === OTHERS_NO_ROLE_DETAIL) continue;
+                seenNames[key] = true;
+                persons.push(c);
+            } else {
+                provisional.push(c);
+            }
         }
 
         var reportType = 'Arkansas Incident Report';

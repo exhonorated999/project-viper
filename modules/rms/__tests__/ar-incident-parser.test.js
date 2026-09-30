@@ -1278,5 +1278,143 @@ eq('a two-letter glyph is still never a middle name',
 eq('a middle initial does not swallow the row after it',
     xn('MARCHETTI, WESTON Z 07/22/2016'), 'MARCHETTI, WESTON Z');
 
+/* ────────────────────────────────────────────────────────────────
+ * 26. THE DIGITAL (NON-SCANNED) PRINT OF THE SAME FORM.
+ *
+ *     Incident 26-0905455 arrived as a flattened fillable PDF rather
+ *     than a scan. Once pdf-rows.js puts such a page back into
+ *     reading order it looks exactly like OCR of the scanned version
+ *     — which is the point — but it exposed three defects the OCR
+ *     noise had been hiding:
+ *
+ *       * the citation "5-13-301(2)b1" was read as "5-13-301(2)",
+ *         leaving a stray "1" at the head of the rest of the row,
+ *         which the address matcher then latched onto and swallowed
+ *         the whole offence description. The import showed statute
+ *         "5-13-301(2)", description "b", and a location reading
+ *         "1 TERRORISTIC THREATENING - 2ND DEGREE / THRE 36 N ...".
+ *       * the form's own label row "RESIDENT PHONE   EMPLOY'T. PHONE"
+ *         was taken as the ROLE HEADING of an Others Involved block,
+ *         inventing a nameless extra person.
+ *       * "(F)" from the sex column was read as a juvenile alias and
+ *         imported as part of the name.
+ *
+ *     Geometry and values below are from that report (names kept: the
+ *     officer's spelling is imported verbatim by design).
+ * ──────────────────────────────────────────────────────────────── */
+console.log('\n[the digital print — 26-0905455]');
+
+eq('a citation keeps its subdivision suffix',
+    AR.parse([
+        'OFFENSE #  UCR CODE  OFFENSE STATUS:',
+        '1  13C  (A) Attempted  (C) Completed',
+        'STATUTE  OFFENSE DESCRIPTION  ADDRESS OF OFFENSE',
+        '5-13-301(2)b1  TERRORISTIC THREATENING - 2ND DEGREE / THRE  36 N CORAN DR, CONWAY, AR 72032',
+        'LOCATION CODE  (Enter 1)'
+    ].join('\n'), 'x.pdf').offenses.map(o => [o.statute, o.description, o.location]),
+    [['5-13-301(2)b1',
+        'TERRORISTIC THREATENING - 2ND DEGREE / THRE',
+        '36 N CORAN DR, CONWAY, AR 72032']]);
+
+eq('...and the address of offense becomes the report location',
+    AR.parse([
+        'STATUTE  OFFENSE DESCRIPTION  ADDRESS OF OFFENSE',
+        '5-13-301(2)b1  TERRORISTIC THREATENING - 2ND DEGREE / THRE  36 N CORAN DR, CONWAY, AR 72032',
+        'LOCATION CODE'
+    ].join('\n'), 'x.pdf').location,
+    '36 N CORAN DR, CONWAY, AR 72032');
+
+eq('a plain citation is unchanged',
+    AR.parse([
+        'STATUTE  OFFENSE DESCRIPTION  ADDRESS OF OFFENSE',
+        '5-73-103  POSSESSION OF FIREARM  14 MAIN ST, Conway, AR 72032',
+        'LOCATION CODE'
+    ].join('\n'), 'x.pdf').offenses.map(o => [o.statute, o.description]),
+    [['5-73-103', 'POSSESSION OF FIREARM']]);
+
+const DIGITAL_CONT = [
+    'INCIDENT REPORT',
+    'ARKANSAS',
+    "AGENCY NAME: Faulkner County Sheriff's Office",
+    'ORI NUMBER AR0230000',
+    'INCIDENT NUMBER 26-0905455',
+    'INCIDENT DATE 09/18/2026',
+    'REPORTING OFFICER F4074 - ALEX HILL',
+    'CONTINUATION PAGE',
+    'PAGE #  DATE  INCIDENT #  REPORTING OFFICER  CODE #  VICTIM NAME',
+    '5  09/18/2026  26-0905455  ALEX HILL  F4074  DOE, JANE ANN',
+    'Others Involved',
+    'NAME:  Last,  First,  Middle  SEX:',
+    '(M) Male  AGE:  48  RACE:',
+    'ROE, RICHARD LEE  (F) Female  (00) Unknown  (W) White',
+    '(U) Unk.  (B) Black',
+    'RESIDENT ADDRESS:  Street  City  State  Zip  (I) American Indian',
+    "RESIDENT PHONE  EMPLOY'T. PHONE",
+    '(A) Asian/Pacific Islander',
+    '36 N CORAN DR, CONWAY, AR  72032  (510) 410-0403  (U) Unknown',
+    'DATE OF BIRTH  SSN  OCCUPATION  PLACE OF EMPLOYMENT',
+    '09/16/1978'
+].join('\n');
+
+const dig = AR.parse(DIGITAL_CONT, 'digital.pdf');
+const digOth = dig.personsInvolved.filter(p => /^Others Involved/.test(p.detail || ''));
+
+eq('a form label row is not a role heading', dig.provisionalPersons.length, 0);
+eq('the block is read as one person', digOth.length, 1);
+eq('the sex-column glyph is not part of the name', digOth[0].name, 'ROE, RICHARD LEE');
+eq('the role is recorded as not stated', digOth[0].involvement, 'OTHER PERSON');
+eq('...and said so in plain words', digOth[0].detail,
+    'Others Involved — role not stated on the form');
+eq('the date of birth is read', digOth[0].dob, '09/16/1978');
+eq('the address is read', digOth[0].address, '36 N CORAN DR, CONWAY, AR 72032');
+eq('the phone is read', digOth[0].phone, '(510) 410-0403');
+ok('no "no readable role heading" warning is raised',
+    !(dig.diagnostics.warnings || []).some(w => /role heading/i.test(w)),
+    dig.diagnostics.warnings);
+
+/* The same continuation page, but the person on it is the victim the
+ * report has already named. A block with no typed role carries no new
+ * fact, so it is not filed a second time. */
+const dupSrc = DIGITAL_CONT
+    .replace('ROE, RICHARD LEE', 'DOE, JANE ANN')
+    .replace('Others Involved\n', [
+        'VICTIM #  1',
+        'NAME: Last, First, Middle',
+        'DOE, JANE ANN  (F) Female',
+        'DATE OF BIRTH',
+        '09/16/1978',
+        'Others Involved'
+    ].join('\n') + '\n');
+const dupRep = AR.parse(dupSrc, 'dup.pdf');
+eq('a role-less repeat of someone already named is not filed twice',
+    dupRep.personsInvolved.filter(p => p.name === 'DOE, JANE ANN').length, 1);
+
+/* ...but a block that DOES carry a typed role is always kept, because
+ * the role itself is information the report has not stated elsewhere. */
+const roledSrc = dupSrc.replace('Others Involved\nNAME:', 'Others Involved\nGUARDIAN\nNAME:');
+const roled = AR.parse(roledSrc, 'roled.pdf');
+eq('a repeat WITH a typed role is kept',
+    roled.personsInvolved.filter(p => p.name === 'DOE, JANE ANN').length, 2);
+eq('...wearing that role',
+    roled.personsInvolved.filter(p => p.name === 'DOE, JANE ANN')[1].involvement, 'GUARDIAN');
+
+/* A genuine two-word role still reads. It is not a form label, so the
+ * label-row rule must not touch it. */
+eq('a two-word role heading survives',
+    AR.parse(DIGITAL_CONT.replace('Others Involved\n', 'Others Involved\nCASE  WORKER\n'),
+        'role.pdf').personsInvolved
+        .filter(p => /^Others Involved/.test(p.detail || ''))
+        .map(p => p.involvement),
+    ['CASE WORKER']);
+
+/* An Others Involved section with neither a role nor a person cell is
+ * still worth complaining about — there is nothing at all to read. */
+ok('an empty section still warns',
+    (AR.parse([
+        'INCIDENT REPORT', 'ARKANSAS', 'INCIDENT NUMBER 26-0905455',
+        'CONTINUATION PAGE', 'Others Involved', '(M) Male', '(U) Unk.'
+    ].join('\n'), 'empty.pdf').diagnostics.warnings || [])
+        .some(w => /no readable role heading/i.test(w)));
+
 console.log('\n' + (fail ? 'FAILED' : 'OK') + ' — ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

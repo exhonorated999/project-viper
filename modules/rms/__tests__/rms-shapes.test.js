@@ -118,6 +118,15 @@ console.log('\n[names]');
 
 ok('a surname is a name token', S.isNameToken('ABERNATHY'));
 ok('a juvenile alias is a name token', S.isNameToken('(JV2)'));
+/* A SINGLE parenthesised letter is a checkbox option code, not an alias.
+ * On a digital print of the Arkansas form the sex column sits right beside
+ * the name with nothing between them, and "JUAREZ, STACY ANN  (F) Female"
+ * imported as the name "JUAREZ, STACY ANN (F)". */
+ok('a lone parenthesised letter is NOT a name token', !S.isNameToken('(F)'));
+ok('...nor is the race column', !S.isNameToken('(W)'));
+eq('so the sex column never joins the name',
+    S.extractName('JUAREZ, STACY ANN  (F) Female  (00) Unknown  (W) White'),
+    'JUAREZ, STACY ANN');
 ok('a form label is never a name token', !S.isNameToken('VICTIM'));
 ok('a two-letter checkbox glyph is never a name token', !S.isNameToken('Bl'));
 ok('...nor is OJ', !S.isNameToken('OJ'));

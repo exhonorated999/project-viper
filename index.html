@@ -25,6 +25,11 @@
          factory time and throws if it is missing. -->
     <script src="modules/rms/rms-shapes.js"></script>
     <script src="modules/rms/ar-incident-parser.js"></script>
+    <!-- INFORM RMS printed through Microsoft Reporting Services (Fort Worth
+         TX style). Wired here as well as on the case page: this screen runs
+         its own light parse, so a reader registered in only one place leaves
+         the create-case form blank. -->
+    <script src="modules/rms/fw-inform-parser.js"></script>
     <!-- Format-agnostic fallback reader. Fills whatever the light ladder in
          importRmsForNewCase left blank on a report no bespoke reader claims.
          Resolves rms-shapes.js at factory time, so it stays below it. -->
@@ -3126,6 +3131,50 @@
                         }
                     } catch (arErr) {
                         console.warn('[RMS Import] Arkansas quick scan failed:', arErr);
+                    }
+                }
+
+                /* --- INFORM RMS, Microsoft Reporting Services layout (Fort Worth TX) ---
+                 *
+                 * Same reasoning as the Arkansas block above: this entry point
+                 * is an independent light parse, so a format wired only into
+                 * the case page would still open an empty create-case form.
+                 *
+                 * There is no quickScan here because the reader is pure text
+                 * work with no OCR passes behind it — parsing the whole thing
+                 * costs nothing and gives the same answers.
+                 *
+                 * Runs after Arkansas so it can never pre-empt a format
+                 * already supported, and the people it finds only TICK the
+                 * module boxes; nobody is filed from this screen. */
+                if (!caseNum || !synopsis || !rmsLocation) {
+                    if (window.FwInformParser && window.FwInformParser.detect(text)) {
+                        try {
+                            const fwReport = window.FwInformParser.parse(text, result.fileName);
+                            if (!caseNum && fwReport.reportNumber) caseNum = fwReport.reportNumber;
+                            if (!rmsLocation && fwReport.location) rmsLocation = fwReport.location;
+                            if (!rmsOffenses.length) {
+                                // Verbatim, statute first — the same shape the
+                                // Overview tab holds an offence in everywhere else.
+                                rmsOffenses = fwReport.offenses
+                                    .map(o => [o.statute, o.description].filter(Boolean).join(' '))
+                                    .filter(Boolean);
+                            }
+                            if (!synopsis) {
+                                synopsis = rmsOffenses.slice(0, 3).join('; ') ||
+                                    (fwReport.fw && fwReport.fw.natureOfCall) || '';
+                            }
+                            fwReport.personsInvolved.forEach(p => {
+                                const inv = String(p.involvement || '');
+                                if (/SUSPECT|ARRESTED|DEFENDANT/i.test(inv)) detected.suspects = true;
+                                else if (/VICTIM/i.test(inv) && !/VICTIM'S|PARENT|GUARDIAN/i.test(inv)) detected.victims = true;
+                                else if (/WITNESS/i.test(inv)) detected.witnesses = true;
+                                else detected.involvedPersons = true;
+                            });
+                            if (fwReport.narratives.length) detected.rmsImports = true;
+                        } catch (fwErr) {
+                            console.warn('[RMS Import] Fort Worth INFORM scan failed:', fwErr);
+                        }
                     }
                 }
 

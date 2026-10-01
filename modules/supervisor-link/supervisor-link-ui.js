@@ -79,6 +79,92 @@
 
   function getCases() { return lsJSON('viperCases', []); }
 
+  // ── Case notes (OPT-IN) ─────────────────────────────────────────────────
+  // Everything else this module sends is redacted metadata. Case notes are the
+  // one payload carrying investigator-written content, so they ride only when
+  // the investigator explicitly flips Settings → Supervisor Link → Case Notes
+  // Sharing. Read with the same === 'true' convention as the link flag, so an
+  // absent / legacy / garbage value is OFF.
+  function isNotesSharingEnabled() {
+    return lsGet('viperSupervisorShareNotes') === 'true';
+  }
+
+  // Notes are stored as rich HTML (note.contentHtml). We never put markup on
+  // the wire — the supervisor renders plain text — and we never parse with
+  // innerHTML on a live node, because note HTML is user content and an
+  // `<img onerror>` would execute. DOMParser output is inert.
+  function htmlToPlainText(html) {
+    const raw = String(html || '');
+    if (!raw) return '';
+    // Preserve block structure as newlines BEFORE parsing, otherwise
+    // textContent would run paragraphs together into one line.
+    const spaced = raw
+      .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+      .replace(/<\s*\/\s*(p|div|li|h[1-6]|tr|blockquote)\s*>/gi, '\n');
+    let text = '';
+    try {
+      text = new DOMParser().parseFromString(spaced, 'text/html').body.textContent || '';
+    } catch (_) {
+      // No DOMParser (non-browser host). Strip tags and decode the entities a
+      // rich-text editor actually emits — otherwise a literal "&nbsp;" or
+      // "&amp;" would reach the supervisor as markup. Only done on this path;
+      // DOMParser already decodes, and decoding twice would corrupt a note
+      // where the investigator typed an entity by hand.
+      const ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+      text = spaced
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/&#(\d+);/g, (_m, d) => String.fromCharCode(parseInt(d, 10)))
+        .replace(/&#x([0-9a-f]+);/gi, (_m, h) => String.fromCharCode(parseInt(h, 16)))
+        .replace(/&(amp|lt|gt|quot|apos|nbsp);/g, (_m, e) => ENT[e]);
+    }
+    return text
+      .replace(/\u00a0/g, ' ')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/ *\n */g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  const NOTES_PER_CASE = 40;   // newest-first cap, bounds payload size
+  const NOTE_TEXT_MAX = 2000;  // per-note character cap
+
+  // Returns undefined (field omitted entirely) unless sharing is ON, so a
+  // disabled toggle produces a byte-identical payload to before this feature.
+  function buildCaseNotes(c) {
+    if (!isNotesSharingEnabled()) return undefined;
+    const all = lsJSON('viperCaseNotes', {});
+    const key = c.caseNumber || ('#' + (c.id || ''));
+    const list = Array.isArray(all[key]) ? all[key] : [];
+    if (!list.length) return undefined;
+
+    const out = list.map((n) => {
+      // contentHtml is current; content/text are legacy shapes still on disk.
+      const text = htmlToPlainText(n.contentHtml || n.content || n.text || '');
+      const date = String(n.createdAt || '');
+      const edits = Array.isArray(n.editHistory) ? n.editHistory.length : 0;
+      return {
+        date,
+        text: text.length > NOTE_TEXT_MAX ? text.slice(0, NOTE_TEXT_MAX) + '…' : text,
+        truncated: text.length > NOTE_TEXT_MAX,
+        edited: edits > 0,
+        // COUNT ONLY — attachment bytes and file names never leave the device,
+        // and assignedTo[] (which carries person names) is dropped entirely.
+        attachments: Array.isArray(n.attachments) ? n.attachments.length : 0,
+      };
+    }).filter((n) => n.text);
+
+    if (!out.length) return undefined;
+    out.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    return out.slice(0, NOTES_PER_CASE);
+  }
+
+  // Count notes that WOULD be sent — used by the push dialog so the
+  // investigator sees the exposure before sending, not after.
+  function countSharedNotes() {
+    if (!isNotesSharingEnabled()) return 0;
+    return getCases().reduce((sum, c) => sum + ((buildCaseNotes(c) || []).length), 0);
+  }
+
   // Productivity snapshot — small headline numbers + breakdowns. No content.
   function buildStatsSnapshot() {
     const cases = getCases();
@@ -226,7 +312,10 @@
       push(m.timestamp, m.lane || 'investigation', m.category || 'custom', 'Activity logged', m.significance === 'major' ? 'major' : 'supporting');
     });
 
-    // NOTE: case notes (viperCaseNotes) intentionally NOT included.
+    // Case notes are NOT events. They never enter this feed, even when notes
+    // sharing is on — they travel as a separate `notes` field on the digest
+    // row so the supervisor UI can keep content visually quarantined from the
+    // metadata timeline. See buildCaseNotes().
 
     // Sort newest first
     ev.sort((a, b) => b.date.localeCompare(a.date));
@@ -263,23 +352,35 @@
     };
   }
 
-  // Case-status digest — one lightweight row per case, metadata only.
+  // Case-status digest — one lightweight row per case. Metadata only, unless
+  // the investigator has opted into Case Notes Sharing (see buildCaseNotes).
   function buildCaseDigest() {
     const cases = getCases();
-    const rows = cases.map((c) => ({
-      caseNumber: c.caseNumber || ('#' + (c.id || '')),
-      label: shortLabel(c.synopsis, 60),
-      state: statusLabel(c.status),
-      risk: priorityLabel(c.priority),
-      lastActivity: (c.lastModified || c.createdAt || '').slice(0, 10),
-      assignee: c.createdBy || getIdentity().name,
-      activity: buildCaseActivity(c),
-    }));
+    const sharingNotes = isNotesSharingEnabled();
+    const rows = cases.map((c) => {
+      const row = {
+        caseNumber: c.caseNumber || ('#' + (c.id || '')),
+        label: shortLabel(c.synopsis, 60),
+        state: statusLabel(c.status),
+        risk: priorityLabel(c.priority),
+        lastActivity: (c.lastModified || c.createdAt || '').slice(0, 10),
+        assignee: c.createdBy || getIdentity().name,
+        activity: buildCaseActivity(c),
+      };
+      const notes = buildCaseNotes(c);
+      if (notes) row.notes = notes;
+      return row;
+    });
+    const noteCount = rows.reduce((n, r) => n + ((r.notes || []).length), 0);
     return {
       manifest: {
         title: `Case-Status Digest — ${rows.length} case${rows.length === 1 ? '' : 's'}`,
         generatedAt: new Date().toISOString(),
         count: rows.length,
+        // Lets the supervisor side label the delivery honestly without
+        // having to walk every row.
+        notesShared: sharingNotes,
+        noteCount,
       },
       body: { rows },
     };
@@ -517,9 +618,27 @@
         return row;
       };
       const rowStats = mkCheck(true, 'Stats Snapshot', `${stats.body.headline[0].value} cases · clearance ${stats.body.headline[3].value}`);
-      const rowDigest = mkCheck(true, 'Case-Status Digest', `${digest.body.rows.length} case rows · metadata only, no content`);
+      const sharedNotes = digest.manifest.noteCount || 0;
+      const rowDigest = mkCheck(true, 'Case-Status Digest', sharedNotes
+        ? `${digest.body.rows.length} case rows · includes ${sharedNotes} case note${sharedNotes === 1 ? '' : 's'}`
+        : `${digest.body.rows.length} case rows · metadata only, no content`);
       payloadWrap.appendChild(rowStats);
       payloadWrap.appendChild(rowDigest);
+
+      // Case Notes Sharing is a Settings-level preference, not a per-push
+      // choice, so the dialog's job here is disclosure: make it impossible to
+      // send note text without having seen that you are about to.
+      if (sharedNotes) {
+        const warn = el('div', `margin:-2px 0 8px;padding:10px 12px;border-radius:10px;
+          background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.40);
+          color:#fbbf24;font-size:12px;line-height:1.5;`, {
+          textContent: '📝 Case Notes Sharing is ON — the text of ' + sharedNotes + ' note'
+            + (sharedNotes === 1 ? '' : 's') + ' will be readable by your supervisor. '
+            + 'Attachments and assigned-person names are not sent. '
+            + 'Turn this off in Settings → Supervisor Link.',
+        });
+        payloadWrap.appendChild(warn);
+      }
 
       getSelectedPushes = async () => {
         const out = [];

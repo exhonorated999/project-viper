@@ -51,6 +51,11 @@
     <!-- Rebuilds a PDF page in visual order from its own text layer. Pure
          arithmetic, no dependencies. -->
     <script src="modules/rms/pdf-rows.js"></script>
+    <!-- DMV printouts: Texas DPS Image Manager. Colorado and California are
+         still read by the inline parseDmvText dispatcher; this one needed its
+         own reader because the general-purpose one filled the name and the
+         licence number with the wrong text. -->
+    <script src="modules/dmv/tx-dps-parser.js"></script>
     <script src="modules/flock/flock-module.js" defer></script>
     <script src="modules/flock/flock-ui.js" defer></script>
     <!-- Area Canvas media: photos attached from disk, video/audio recorded
@@ -14936,12 +14941,23 @@
             'XXX': 'Unknown', 'UNK': 'Unknown'
         };
 
+        // Texas DPS printouts are read by modules/dmv/tx-dps-parser.js.  It is
+        // resolved lazily so that a missing or failed script tag degrades to
+        // "Texas not recognised" instead of breaking every DMV import.
+        function _txDps() {
+            try { return (typeof TxDpsParser !== 'undefined' && TxDpsParser) ? TxDpsParser : (window.TxDpsParser || null); }
+            catch (_) { return (typeof window !== 'undefined' && window.TxDpsParser) || null; }
+        }
+
         // Detect issuing state from the printout (e.g. Colorado DOR header, OLN
         // state suffix, CO__LICENSE_CATEGORY label).  Returns a 2-letter code
         // or '' when nothing recognisable was found.  Later printouts (CA, TX…)
         // can extend this list; the parser is otherwise format-agnostic.
         function detectDmvState(text) {
             const t = text || '';
+            // TX: DPS Image Manager printout — the page states no state of
+            // its own, but it is the only thing that produces this page.
+            if (_txDps() && _txDps().detect(t)) return 'TX';
             // CO: state-specific labels we've seen in DOR exports
             if (/\bCO__LICENSE_CATEGORY\b/i.test(t) || /\bColorado\s+Department\s+of\s+Revenue\b/i.test(t)
                 || /\bDOR(?:-R\d|\s*R\d)/i.test(t)) return 'CO';
@@ -15097,6 +15113,16 @@
         }
 
         function parseDmvText(text) {
+            // Texas DPS Image Manager printouts are label-over-value with a
+            // block of browser boilerplate underneath.  The general-purpose
+            // reader below does not just miss fields on that page, it fills
+            // them with the wrong text — so Texas is checked first and read
+            // by its own module.
+            const tx = _txDps();
+            if (tx && tx.detect(text)) {
+                return tx.parse(text);
+            }
+
             // CAL-PHOTO printouts use a distinct labeled-field layout with
             // concatenated tokens (HAIR: BLKEYES: BRNHEIGHT: 504WEIGHT: 220).
             // Dispatch to the dedicated parser so we don't fight the generic
@@ -15235,6 +15261,7 @@
                 if (parsed.weight) fields.push(`<b>Weight:</b> ${parsed.weight} lbs`);
                 if (parsed.eyeColor) fields.push(`<b>Eyes:</b> ${parsed.eyeColor}`);
                 if (parsed.hairColor) fields.push(`<b>Hair:</b> ${parsed.hairColor}`);
+                if (parsed.race) fields.push(`<b>Race:</b> ${parsed.race}`);
                 if (parsed.address) fields.push(`<b>Address:</b> ${parsed.address}`);
                 if (parsed.addressCityStateZip) fields.push(`<b>City/State:</b> ${parsed.addressCityStateZip}`);
                 if (parsed.ssn) fields.push(`<b>SSN:</b> ***-**-${parsed.ssn.slice(-4)}`);
@@ -15245,6 +15272,7 @@
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;font-size:14px;">
                             ${fields.map(f => `<div>${f}</div>`).join('')}
                         </div>
+                        ${parsed.dlClass === 'ID' ? '<p style="color:#facc15;font-size:12px;margin-top:8px;">This record is a state ID card, not a driver license — the number above is an ID number.</p>' : ''}
                         ${parsed.ssn ? '<p style="color:#f87171;font-size:12px;margin-top:8px;">⚠ SSN detected — will be stored as an identifier</p>' : ''}
                     </div>
                 `;
@@ -15268,6 +15296,7 @@
                     if (parsed.weight && !suspect.weight) suspect.weight = parsed.weight;
                     if (parsed.eyeColor && !suspect.eyeColor) suspect.eyeColor = parsed.eyeColor;
                     if (parsed.hairColor && !suspect.hairColor) suspect.hairColor = parsed.hairColor;
+                    if (parsed.race && !suspect.race) suspect.race = parsed.race;
                     if (parsed.address && !suspect.address) suspect.address = parsed.address;
                     if (parsed.addressCityStateZip && !suspect.addressCityStateZip) suspect.addressCityStateZip = parsed.addressCityStateZip;
                     if (parsed.sex && !suspect.sex) suspect.sex = parsed.sex;
@@ -15307,6 +15336,7 @@
                         weight: parsed.weight || '',
                         hairColor: parsed.hairColor || '',
                         eyeColor: parsed.eyeColor || '',
+                        race: parsed.race || '',
                         scarsMarksTattoos: '',
                         address: parsed.address || '',
                         addressCityStateZip: parsed.addressCityStateZip || '',
@@ -15376,6 +15406,7 @@
                 if (parsed.weight) fields.push(`<b>Weight:</b> ${parsed.weight} lbs`);
                 if (parsed.eyeColor) fields.push(`<b>Eyes:</b> ${parsed.eyeColor}`);
                 if (parsed.hairColor) fields.push(`<b>Hair:</b> ${parsed.hairColor}`);
+                if (parsed.race) fields.push(`<b>Race:</b> ${parsed.race}`);
                 if (parsed.address) fields.push(`<b>Address:</b> ${parsed.address}`);
                 if (parsed.addressCityStateZip) fields.push(`<b>City/State:</b> ${parsed.addressCityStateZip}`);
 
@@ -15385,6 +15416,7 @@
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;font-size:14px;">
                             ${fields.map(f => `<div>${f}</div>`).join('')}
                         </div>
+                        ${parsed.dlClass === 'ID' ? '<p style="color:#facc15;font-size:12px;margin-top:8px;">This record is a state ID card, not a driver license — the number above is an ID number.</p>' : ''}
                     </div>
                 `;
 
@@ -15406,6 +15438,7 @@
                     if (parsed.weight && !victim.weight) victim.weight = parsed.weight;
                     if (parsed.eyeColor && !victim.eyeColor) victim.eyeColor = parsed.eyeColor;
                     if (parsed.hairColor && !victim.hairColor) victim.hairColor = parsed.hairColor;
+                    if (parsed.race && !victim.race) victim.race = parsed.race;
                     if (parsed.address && !victim.address) victim.address = parsed.address;
                     if (parsed.addressCityStateZip && !victim.addressCityStateZip) victim.addressCityStateZip = parsed.addressCityStateZip;
                     if (printoutFile && !victim.dmvPrintout) {
@@ -15419,6 +15452,7 @@
                         dlNumber: parsed.dlNumber || '', dlState: parsed.dlState || '', phone: '', phone2: '', email: '', email2: '',
                         height: parsed.height || '', weight: parsed.weight || '',
                         hairColor: parsed.hairColor || '', eyeColor: parsed.eyeColor || '',
+                        race: parsed.race || '',
                         address: parsed.address || '', addressCityStateZip: parsed.addressCityStateZip || '',
                         residencePhoto: '', employerName: '', occupation: '',
                         employerAddress: '', employerPhone: '',
@@ -15466,6 +15500,7 @@
                 if (parsed.weight) fields.push(`<b>Weight:</b> ${parsed.weight} lbs`);
                 if (parsed.eyeColor) fields.push(`<b>Eyes:</b> ${parsed.eyeColor}`);
                 if (parsed.hairColor) fields.push(`<b>Hair:</b> ${parsed.hairColor}`);
+                if (parsed.race) fields.push(`<b>Race:</b> ${parsed.race}`);
                 if (parsed.address) fields.push(`<b>Address:</b> ${parsed.address}`);
                 if (parsed.addressCityStateZip) fields.push(`<b>City/State:</b> ${parsed.addressCityStateZip}`);
 
@@ -15475,6 +15510,7 @@
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;font-size:14px;">
                             ${fields.map(f => `<div>${f}</div>`).join('')}
                         </div>
+                        ${parsed.dlClass === 'ID' ? '<p style="color:#facc15;font-size:12px;margin-top:8px;">This record is a state ID card, not a driver license — the number above is an ID number.</p>' : ''}
                     </div>
                 `;
 
@@ -15496,6 +15532,7 @@
                     if (parsed.weight && !witness.weight) witness.weight = parsed.weight;
                     if (parsed.eyeColor && !witness.eyeColor) witness.eyeColor = parsed.eyeColor;
                     if (parsed.hairColor && !witness.hairColor) witness.hairColor = parsed.hairColor;
+                    if (parsed.race && !witness.race) witness.race = parsed.race;
                     if (parsed.address && !witness.address) witness.address = parsed.address;
                     if (parsed.addressCityStateZip && !witness.addressCityStateZip) witness.addressCityStateZip = parsed.addressCityStateZip;
                     if (printoutFile && !witness.dmvPrintout) {
@@ -15509,6 +15546,7 @@
                         dlNumber: parsed.dlNumber || '', dlState: parsed.dlState || '', phone: '', phone2: '', email: '', email2: '',
                         height: parsed.height || '', weight: parsed.weight || '',
                         hairColor: parsed.hairColor || '', eyeColor: parsed.eyeColor || '',
+                        race: parsed.race || '',
                         address: parsed.address || '', addressCityStateZip: parsed.addressCityStateZip || '',
                         residencePhoto: '', employerName: '', occupation: '',
                         employerAddress: '', employerPhone: '', statement: '',
@@ -15554,6 +15592,7 @@
                 if (parsed.weight) fields.push(`<b>Weight:</b> ${parsed.weight} lbs`);
                 if (parsed.eyeColor) fields.push(`<b>Eyes:</b> ${parsed.eyeColor}`);
                 if (parsed.hairColor) fields.push(`<b>Hair:</b> ${parsed.hairColor}`);
+                if (parsed.race) fields.push(`<b>Race:</b> ${parsed.race}`);
                 if (parsed.address) fields.push(`<b>Address:</b> ${parsed.address}`);
                 if (parsed.addressCityStateZip) fields.push(`<b>City/State:</b> ${parsed.addressCityStateZip}`);
 
@@ -15563,6 +15602,7 @@
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;font-size:14px;">
                             ${fields.map(f => `<div>${f}</div>`).join('')}
                         </div>
+                        ${parsed.dlClass === 'ID' ? '<p style="color:#facc15;font-size:12px;margin-top:8px;">This record is a state ID card, not a driver license — the number above is an ID number.</p>' : ''}
                     </div>
                 `;
 
@@ -15585,6 +15625,7 @@
                     if (parsed.weight && !person.weight) person.weight = parsed.weight;
                     if (parsed.eyeColor && !person.eyeColor) person.eyeColor = parsed.eyeColor;
                     if (parsed.hairColor && !person.hairColor) person.hairColor = parsed.hairColor;
+                    if (parsed.race && !person.race) person.race = parsed.race;
                     if (parsed.address && !person.address) person.address = parsed.address;
                     if (parsed.addressCityStateZip && !person.addressCityStateZip) person.addressCityStateZip = parsed.addressCityStateZip;
                     if (printoutFile && !person.dmvPrintout) {
@@ -15599,6 +15640,7 @@
                         phone: '', phone2: '', email: '', email2: '',
                         height: parsed.height || '', weight: parsed.weight || '',
                         hairColor: parsed.hairColor || '', eyeColor: parsed.eyeColor || '',
+                        race: parsed.race || '',
                         scarsMarksTattoos: '',
                         address: parsed.address || '', addressCityStateZip: parsed.addressCityStateZip || '',
                         residencePhoto: '', role: '', relationship: '', notes: '',

@@ -3358,6 +3358,38 @@
                             <div id="supervisorToggleKnob" class="absolute w-5 h-5 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
                         </button>
                     </div>
+
+                    <!--
+                        Case Notes sharing. Deliberately a SEPARATE opt-in from the
+                        link itself: everything the link normally sends is redacted
+                        metadata (counts, dates, status labels). Notes are the one
+                        payload that carries investigator-written case content, so
+                        turning the link on must never turn this on by side effect.
+                        Default OFF. Nested under the link toggle because it is
+                        meaningless while the link is disabled.
+                    -->
+                    <div class="flex items-center justify-between bg-viper-dark rounded-lg p-4 border border-amber-500/30 mt-3">
+                        <div class="flex items-center gap-3">
+                            <div class="w-12 h-12 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                                <span class="text-2xl">📝</span>
+                            </div>
+                            <div>
+                                <p class="font-medium" id="supervisorNotesToggleLabel">Case Notes Sharing — Off</p>
+                                <p class="text-gray-400 text-xs max-w-md leading-relaxed">
+                                    Off by default. Everything else the link sends is metadata only. Turn this on to include the
+                                    <span class="text-amber-300">text of your case notes</span> with each Case-Status push. Attachments and
+                                    assigned-person names are never sent.
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            id="supervisorNotesToggleBtn"
+                            onclick="toggleSupervisorNotesSharing()"
+                            class="relative w-14 h-7 rounded-full transition-colors bg-gray-600"
+                        >
+                            <div id="supervisorNotesToggleKnob" class="absolute w-5 h-5 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
+                        </button>
+                    </div>
                     </div>
                 </div>
 
@@ -6566,8 +6598,47 @@
         updateSupervisorToggleUI(enabled);
     }
 
+    // ── Case Notes sharing (localStorage: viperSupervisorShareNotes) ──────
+    // Separate opt-in from the link itself. The link's normal payloads are
+    // redacted metadata; this is the only switch that puts investigator-written
+    // case content on the wire, so it defaults OFF and is read with the same
+    // === 'true' convention (absent/garbage/legacy value ⇒ off).
+    function isSupervisorNotesSharingEnabled() {
+        return localStorage.getItem('viperSupervisorShareNotes') === 'true';
+    }
+
+    function updateSupervisorNotesToggleUI(enabled) {
+        const label = document.getElementById('supervisorNotesToggleLabel');
+        const btn = document.getElementById('supervisorNotesToggleBtn');
+        const knob = document.getElementById('supervisorNotesToggleKnob');
+        if (label) label.textContent = enabled
+            ? 'Case Notes Sharing — On (note text is included in pushes)'
+            : 'Case Notes Sharing — Off';
+        if (btn) btn.className = 'relative w-14 h-7 rounded-full transition-colors ' + (enabled ? 'bg-amber-500' : 'bg-gray-600');
+        if (knob) knob.className = 'absolute w-5 h-5 bg-white rounded-full top-1 transition-transform ' + (enabled ? 'translate-x-8' : 'translate-x-1');
+    }
+
+    async function toggleSupervisorNotesSharing() {
+        const next = !isSupervisorNotesSharingEnabled();
+        // Only the ON direction is confirmed. Turning it back off is always
+        // allowed without friction.
+        if (next) {
+            const ok = typeof viperConfirm === 'function'
+                ? await viperConfirm(
+                    'Include the text of your case notes in Supervisor pushes?\n\n' +
+                    'Your supervisor will be able to read note text for every case you push. ' +
+                    'Attachments and assigned-person names are still never sent. You can turn this off at any time.',
+                    { okText: 'Share Notes' })
+                : confirm('Include the text of your case notes in Supervisor pushes?');
+            if (!ok) return;
+        }
+        localStorage.setItem('viperSupervisorShareNotes', String(next));
+        updateSupervisorNotesToggleUI(next);
+    }
+
     // Set initial state on load.
     updateSupervisorToggleUI(isSupervisorLinkEnabled());
+    updateSupervisorNotesToggleUI(isSupervisorNotesSharingEnabled());
     </script>
 
     <!-- GenLogs API Service -->

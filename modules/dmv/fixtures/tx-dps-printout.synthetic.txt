@@ -1,0 +1,60 @@
+DL Number:
+41238876
+
+Name:
+MARGARET OLIVE FENWICK
+
+Date of Birth:
+19820417
+
+Photo:
+
+
+
+Address:
+1600 WOODSIDE LN, CLEBURNE, TX 76033
+
+Race:
+WHITE
+
+Ethnicity:
+NON-HISPANIC
+Sex:
+F
+
+Height:
+500
+Weight:
+140
+
+Eye Color:
+HAZEL
+Hair Color:
+BROWN
+
+Image Date:
+20230915
+Class:
+ID
+
+Expiration Date: 20300417
+Restriction:
+
+
+CDL Flag:
+N
+Endorsement:
+
+
+OFFICIAL STATE GOVERNMENT USE ONLY.
+Violations subject to civil and criminal penalties and termination of access.
+
+Get technical support for this application.
+
+Version: 3.7.0
+
+09/29/2026, 10:46 AM
+TXDPS Driver License Image Manager - Image Manager
+
+https://www.texasonline.state.tx.us/tolapp/txdlimage/DPSImageManager
+1/1

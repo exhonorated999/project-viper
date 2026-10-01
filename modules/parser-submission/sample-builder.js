@@ -13,9 +13,10 @@
  *   - Per-format `structure` blocks contain only counts, header names,
  *     key paths, format inferences — NEVER raw values.
  *
- * Envelope schema (wire-compatible with Scout v1; v3 adds robust PDF text):
+ * Envelope schema (wire-compatible with Scout v1; v3 adds robust PDF text;
+ * v4 hardens redaction and adds measured layout hints):
  *   {
- *     schema_version: 3,
+ *     schema_version: 4,
  *     scout_version:  "<viper version>",
  *     submitted_at:   "<ISO 8601 UTC>",
  *     provider_hint:  "T-Mobile CDR",
@@ -34,6 +35,24 @@
  * PII tokenized and free-text narratives collapsed to <NARRATIVE …>.  Broken
  * ToUnicode/Type3 fonts are recovered via MuPDF→Tesseract OCR fallback so the
  * sample matches what the runtime importer will feed the parser.
+ *
+ * Schema v4 (5.3.1) changes two things, both measured against real
+ * submissions that had to be thrown away and rebuilt synthetically:
+ *
+ *   PRIVACY.  headings / label_tokens / vertical_labels used to ship raw,
+ *   and the name patterns only caught comma-separated ("JONES, MARK") or
+ *   proper-case ("Mark Jones") names.  Police and DMV printouts use neither,
+ *   so ALL-CAPS names and ALL-CAPS street addresses were shipped verbatim.
+ *   Every emitted text channel is now redacted, the all-caps case is
+ *   covered, and street-suffix matching is case-insensitive.
+ *
+ *   FIDELITY.  Redaction tokens now carry the *shape* of what they removed
+ *   (<DATE MM/DD/YYYY>, <NUM:5>, <NAME CAPS x3>, <PHONE (NNN) NNN-NNNN>),
+ *   proven form labels are protected from the name passes instead of being
+ *   eaten by them, and a `layout_hints` block reports page breaks, repeating
+ *   furniture, mid-word wrap behaviour and multi-label cells — the three
+ *   measurements that otherwise have to be done by hand before a parser for
+ *   a stacked-label form can be written at all.
  */
 
 const fs = require('fs');
@@ -41,7 +60,7 @@ const path = require('path');
 
 // ─── Limits & knobs (mirror Scout) ─────────────────────────────────────────
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const PER_FILE_BUDGET_BYTES = 64 * 1024 * 1024;     // 64 MB
 const MAX_FILES = 50_000;
 const MAX_STRUCTURE_DEPTH = 32;
@@ -55,10 +74,15 @@ const MAX_INNER_ARCHIVE_BYTES = 64 * 1024 * 1024;   // per inner zip; skip absur
 const PDF_TEXT_SAMPLES_DEFAULT = 5;          // Max PDFs to text-extract per envelope.
 const PDF_TEXT_TIMEOUT_MS = 8000;            // Per-PDF pdf-parse timeout.
 const PDF_TEXT_MAX_PAGES = 50;               // pdf-parse `max` option.
-const PDF_TOP_HEADINGS = 40;
-const PDF_TOP_LABELS = 80;
-const PDF_TOP_VERTICAL_LABELS = 60;
-const PDF_TOP_SHAPES = 30;
+// Caps raised in v4.  The 11-page Fort Worth incident report came back with
+// headings and vertical_labels sitting EXACTLY on the old 40/60 limits —
+// i.e. silently truncated, with no way to tell from the envelope how many
+// labels were dropped.  Rarer labels are the ones a parser author is most
+// likely to need, so the caps now sit well clear of a long form.
+const PDF_TOP_HEADINGS = 160;
+const PDF_TOP_LABELS = 240;
+const PDF_TOP_VERTICAL_LABELS = 240;
+const PDF_TOP_SHAPES = 40;
 const PDF_TOP_FONTS = 20;
 const PDF_EXCERPT_CHARS = 1500;
 
@@ -69,7 +93,7 @@ const PDF_EXCERPT_CHARS = 1500;
 // fall back to MuPDF structured text and then full Tesseract OCR so the
 // emitted structural sample matches what the runtime parser will actually
 // receive.
-const PDF_SKELETON_MAX_CHARS = 24000;        // Full redacted form-layout budget.
+const PDF_SKELETON_MAX_CHARS = 48000;        // Full redacted form-layout budget.
 const PDF_OCR_MAX_PAGES = 12;                // Cap pages OCR'd per PDF (perf).
 const PDF_OCR_PAGE_TIMEOUT_MS = 25000;       // Per-page OCR budget.
 const PDF_GARBLE_THRESHOLD = 0.12;           // Garble-score ratio that triggers fallback.
@@ -642,30 +666,286 @@ function _lineShape(line) {
     return out;
 }
 
-/**
- * Redact a short PDF text excerpt so it's safe to ship in the envelope.
- * Keeps layout/punctuation; strips identifiers.  Schema labels (uppercase
- * single tokens like "NARRATIVE", lowercase mixed-case fragments) survive.
+/*
+ * Street-type suffixes, matched case-insensitively.  The pre-5.3.1 list was
+ * case-sensitive Title Case only, so every ALL-CAPS address on a police or
+ * DMV printout ("3226 LAS VEGAS TRL", "1600 WOODSIDE LN") sailed straight
+ * through unredacted.  Both Fort Worth submissions leaked a real home
+ * address that way.
  */
-function _redactExcerpt(s) {
-    return s
+const STREET_SUFFIXES = [
+    'St', 'Street', 'Ave', 'Avenue', 'Rd', 'Road', 'Dr', 'Drive', 'Blvd',
+    'Boulevard', 'Ln', 'Lane', 'Way', 'Ct', 'Court', 'Pl', 'Place', 'Hwy',
+    'Highway', 'Trl', 'Trail', 'Cir', 'Circle', 'Ter', 'Terrace', 'Pkwy',
+    'Parkway', 'Loop', 'Run', 'Xing', 'Crossing', 'Sq', 'Square', 'Aly',
+    'Alley', 'Pike', 'Row', 'Path', 'Bnd', 'Bend', 'Cv', 'Cove', 'Vis',
+    'Expy', 'Fwy', 'Spur', 'Byp', 'Mnr', 'Manor', 'Rdg', 'Ridge',
+];
+
+/*
+ * ALL-CAPS words that are structural vocabulary rather than somebody's name.
+ * An all-caps run is only redacted when NONE of its words is recognised, so
+ * this list is what keeps "FORT WORTH POLICE DEPARTMENT" and
+ * "MURDER/CAPITAL MURDER" readable while "ESTRADA FERNANDA YAMILET" does not
+ * survive.  It is deliberately a keep-list, not a block-list: an unrecognised
+ * word is treated as a possible name, so the failure mode is over-redaction.
+ */
+const CAPS_KEEP = new Set([
+    // Agency / org / document furniture
+    'POLICE', 'DEPARTMENT', 'DEPT', 'SHERIFF', 'COUNTY', 'STATE', 'CITY',
+    'TOWN', 'VILLAGE', 'OFFICE', 'BUREAU', 'DIVISION', 'DISTRICT', 'PRECINCT',
+    'COURT', 'AGENCY', 'PUBLIC', 'SAFETY', 'PATROL', 'TROOP', 'MARSHAL',
+    'CONSTABLE', 'CORRECTIONS', 'PROBATION', 'PAROLE', 'FEDERAL', 'NATIONAL',
+    'GOVERNMENT', 'OFFICIAL', 'DEPARTMENTAL', 'HEADQUARTERS', 'STATION',
+    // Document / form words
+    'INCIDENT', 'REPORT', 'REPORTS', 'NARRATIVE', 'SUPPLEMENT', 'SUPPLEMENTAL',
+    'CASE', 'OFFENSE', 'OFFENCE', 'ARREST', 'ARRESTEE', 'SUSPECT', 'VICTIM',
+    'WITNESS', 'COMPLAINANT', 'OFFENDER', 'DEFENDANT', 'SUBJECT', 'PERSON',
+    'PERSONS', 'PROPERTY', 'EVIDENCE', 'VEHICLE', 'VEHICLES', 'SUMMARY',
+    'CONTINUED', 'PAGE', 'DATE', 'TIME', 'NAME', 'ADDRESS', 'PHONE', 'TOTAL',
+    'NOTES', 'COMMENTS', 'DETAILS', 'DESCRIPTION', 'STATUS', 'TYPE', 'CODE',
+    'NUMBER', 'LICENSE', 'LICENCE', 'DRIVER', 'RECORD', 'HISTORY', 'INQUIRY',
+    'RESPONSE', 'CONFIDENTIAL', 'RESTRICTED', 'DISSEMINATION', 'USE', 'ONLY',
+    'NOT', 'APPLICABLE', 'NONE', 'UNKNOWN', 'OTHER', 'YES', 'NO', 'N', 'Y',
+    'AND', 'OR', 'OF', 'THE', 'FOR', 'TO', 'IN', 'AT', 'BY', 'ON',
+    // Offence vocabulary
+    'MURDER', 'CAPITAL', 'HOMICIDE', 'NEGLIGENT', 'CRIMINAL', 'MANSLAUGHTER',
+    'ASSAULT', 'AGGRAVATED', 'BATTERY', 'ROBBERY', 'BURGLARY', 'THEFT',
+    'LARCENY', 'FRAUD', 'FORGERY', 'ARSON', 'KIDNAPPING', 'TRAFFICKING',
+    'NARCOTICS', 'DRUG', 'WEAPON', 'WEAPONS', 'FIREARM', 'DEADLY', 'FAMILY',
+    'VIOLENCE', 'DOMESTIC', 'SEXUAL', 'INDECENT', 'ASSAULTIVE', 'ASSAULTED',
+    'ASSAULTS', 'ATTEMPTED', 'COMPLETED', 'FELONY', 'MISDEMEANOR', 'CLASS',
+    'DEGREE', 'ASSAULTING', 'ASSAULTIVE', 'ASSAULTER', 'ASSAULTED',
+    // Descriptors that commonly print in caps and are not identifying
+    'MALE', 'FEMALE', 'WHITE', 'BLACK', 'BROWN', 'BLUE', 'GREEN', 'HAZEL',
+    'GRAY', 'GREY', 'BLOND', 'BLONDE', 'RED', 'BALD', 'ASIAN', 'HISPANIC',
+    'LATINO', 'INDIAN', 'ALASKAN', 'NATIVE', 'ISLANDER', 'PACIFIC',
+    'MEDIUM', 'SMALL', 'LARGE', 'HEAVY', 'THIN', 'SLIM', 'SHORT', 'TALL',
+    'SINGLE', 'MARRIED', 'DIVORCED', 'WIDOWED', 'ADULT', 'JUVENILE',
+    'RESIDENCE', 'HOME', 'APARTMENT', 'BUSINESS', 'SCHOOL', 'STREET',
+    'HIGHWAY', 'PARKING', 'LOT', 'VISIBLE', 'INJURY', 'INJURIES',
+    // State names, so "Cleburne, Texas" is not read as a surname + forename.
+    'ALABAMA', 'ALASKA', 'ARIZONA', 'ARKANSAS', 'CALIFORNIA', 'COLORADO',
+    'CONNECTICUT', 'DELAWARE', 'FLORIDA', 'GEORGIA', 'HAWAII', 'IDAHO',
+    'ILLINOIS', 'INDIANA', 'IOWA', 'KANSAS', 'KENTUCKY', 'LOUISIANA',
+    'MAINE', 'MARYLAND', 'MASSACHUSETTS', 'MICHIGAN', 'MINNESOTA',
+    'MISSISSIPPI', 'MISSOURI', 'MONTANA', 'NEBRASKA', 'NEVADA', 'HAMPSHIRE',
+    'JERSEY', 'MEXICO', 'YORK', 'CAROLINA', 'DAKOTA', 'OHIO', 'OKLAHOMA',
+    'OREGON', 'PENNSYLVANIA', 'RHODE', 'ISLAND', 'TENNESSEE', 'TEXAS',
+    'UTAH', 'VERMONT', 'VIRGINIA', 'WASHINGTON', 'WEST', 'WISCONSIN',
+    'WYOMING', 'COLUMBIA', 'NORTH', 'SOUTH', 'EAST', 'NEW',
+]);
+
+// Longest-first so a multi-word protected phrase wins over its own prefix.
+function _buildProtectIndex(protect) {
+    if (!protect || !protect.size) return null;
+    const phrases = Array.from(protect)
+        .filter(p => typeof p === 'string' && p.length >= 2)
+        .sort((a, b) => b.length - a.length);
+    return phrases.length ? phrases : null;
+}
+
+function _escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+/**
+ * Describe a date's printed layout without keeping the date.
+ *   "04/17/1982" → "<DATE MM/DD/YYYY>"      "4/7/82" → "<DATE M/D/YY>"
+ * The year width is the whole point: on a form that always prints four
+ * digits, a two-digit year means the line was cut in half by a column wrap,
+ * and a parser author has no way to know which they are dealing with when
+ * every date collapses to a bare "<DATE>".
+ */
+function _dateMask(a, b, c, sep) {
+    const w = (part, ch) => ch.repeat(part.length);
+    return '<DATE ' + w(a, 'M') + sep + w(b, 'D') + sep + w(c, 'Y') + '>';
+}
+
+/**
+ * Redact a PDF text excerpt so it is safe to ship in the envelope, keeping
+ * the *shape* of every value it removes.
+ *
+ * Two things changed in 5.3.1, both measured against the two Fort Worth
+ * submissions:
+ *
+ *   1. ALL-CAPS space-separated names used to pass through untouched — the
+ *      old name patterns needed either a comma ("JONES, MARK") or proper
+ *      case ("Mark Jones").  Police and DMV printouts use neither, so real
+ *      names and home addresses were shipped verbatim.
+ *   2. Tokens carried no shape, so "04/17/1982" and "04/17/82" both became
+ *      "<DATE>", and a ZIP and a licence number both became "<NUM>".  The
+ *      shape is exactly what a parser author needs and it identifies nobody.
+ *
+ * @param {string} s        Text to redact.
+ * @param {object} [opts]
+ * @param {Set<string>} [opts.protect]  Phrases proven to be form labels
+ *        (see _protectableLabels) that must survive the name passes.
+ * @param {Set<string>} [opts.safeWords]  Upper-cased words proven to be
+ *        document furniture by repetition (see _safeCapsWords), so that a
+ *        standalone "FORT WORTH" on the City line survives even though
+ *        "WORTH" is not in the built-in keep-list.
+ */
+function _redactExcerpt(s, opts) {
+    const phrases = _buildProtectIndex(opts && opts.protect);
+    const safe = (opts && opts.safeWords) || null;
+    const keep = (w) => CAPS_KEEP.has(w) || !!(safe && safe.has(w));
+    const held = [];
+
+    // Park protected label text behind a sentinel the redactors cannot match,
+    // then restore it at the end.  Without this the proper-case name pass
+    // eats "Hair Color", "Reporting Officer", "Expiration Date" and so on —
+    // 18 of the 60 detected labels were being destroyed this way.
+    if (phrases) {
+        for (const p of phrases) {
+            const re = new RegExp(_escapeRe(p), 'g');
+            s = s.replace(re, () => {
+                held.push(p);
+                return '\u0001' + (held.length - 1) + '\u0001';
+            });
+        }
+    }
+
+    let out = s
         .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '<EMAIL>')
         .replace(/\b\d{3}-\d{2}-\d{4}\b/g, '<SSN>')
-        .replace(/\(\d{3}\)\s*\d{3}-?\d{4}/g, '<PHONE>')
-        .replace(/\b\d{3}-\d{3}-\d{4}\b/g, '<PHONE>')
-        .replace(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g, '<DATE>')
-        .replace(/\b\d{4}-\d{2}-\d{2}\b/g, '<DATE>')
-        // Uppercase comma-separated names: "JONES, MARK ANDREW"
-        .replace(/\b[A-Z]{2,}, [A-Z]{2,}(?: [A-Z]{2,})?\b/g, '<UPPERNAME>')
-        // Proper-case multi-word names: "Mark Andrew Jones"
-        .replace(/\b[A-Z][a-z]+(?: [A-Z][a-z]+){1,3}\b/g, '<NAME>')
-        // Street addresses ending in common suffix
-        .replace(/\b\d{1,5}\s+[A-Za-z][A-Za-z\s]{1,30}\s+(?:St|Ave|Rd|Dr|Blvd|Ln|Way|Ct|Pl|Hwy)\b\.?/g, '<ADDRESS>')
-        // Bare long digit runs (badge nums, case nums, ZIPs).
-        .replace(/\b\d{4,}\b/g, '<NUM>')
-        // Collapse whitespace for compactness.
+        .replace(/\((\d{3})\)\s*(\d{3})-?(\d{4})/g,
+            (m) => '<PHONE ' + m.replace(/\d/g, 'N') + '>')
+        .replace(/\b\d{3}-\d{3}-\d{4}\b/g, '<PHONE NNN-NNN-NNNN>')
+        .replace(/\b(\d{1,2})([\/\-.])(\d{1,2})\2(\d{2,4})\b/g,
+            (m, a, sep, b, c) => _dateMask(a, b, c, sep))
+        .replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, '<DATE YYYY-MM-DD>');
+
+    // Addresses run BEFORE the name passes: "3226 LAS VEGAS TRL" is an
+    // address, and if the all-caps name pass saw it first it would report
+    // "<NAME CAPS x3>" and lose the fact that the line is a street address.
+    const suffixRe = STREET_SUFFIXES.map(_escapeRe).join('|');
+    out = out.replace(
+        new RegExp(
+            '\\b\\d{1,6}\\s+[A-Za-z0-9][A-Za-z0-9\\s.\'-]{1,40}?\\s+(?:' + suffixRe + ')\\b\\.?' +
+            '(?:\\s*,?\\s*(?:Apt|Apt#|Unit|Ste|Suite|#)\\s*[A-Za-z0-9-]{1,8})?' +
+            '(?:\\s*,\\s*[A-Za-z][A-Za-z\\s.\'-]{1,30})?' +
+            '(?:\\s*,\\s*[A-Z]{2})?' +
+            '(?:\\s+\\d{5}(?:-\\d{4})?)?',
+            'gi'
+        ),
+        (m) => {
+            const parts = ['street'];
+            if (/\b(?:Apt|Unit|Ste|Suite|#)\s*[A-Za-z0-9-]/i.test(m)) parts.push('unit');
+            const commas = (m.match(/,/g) || []).length;
+            if (commas >= (parts.indexOf('unit') >= 0 ? 2 : 1)) parts.push('city');
+            if (/,\s*[A-Z]{2}\b/.test(m)) parts.push('state');
+            if (/\b\d{5}(?:-\d{4})?\s*$/.test(m)) parts.push('zip');
+            return '<ADDRESS ' + parts.join('+') + '>';
+        }
+    );
+
+    out = out
+        // "JONES, MARK ANDREW"
+        .replace(/\b[A-Z]{2,}, [A-Z]{2,}(?: [A-Z]{2,})?\b/g, (m) => {
+            const words = m.replace(/,/g, '').split(/\s+/);
+            if (words.some(w => keep(w.replace(/[^A-Z]/g, '')))) return m;
+            return '<NAME LAST, FIRST>';
+        })
+        // ALL-CAPS space-separated runs — the leak this release closes.
+        .replace(/\b[A-Z][A-Z'`-]+(?:\s+[A-Z][A-Z'`-]+){1,3}\b/g, (m) => {
+            const words = m.split(/\s+/);
+            if (words.some(w => keep(w.replace(/[^A-Z]/g, '')))) return m;
+            return '<NAME CAPS x' + words.length + '>';
+        })
+        // "Thornbury, Rowan" — proper case with the comma.  Matches neither
+        // of the two rules above, and it is the layout every "Last, First"
+        // roster column uses.
+        .replace(/\b[A-Z][a-z]{1,}, [A-Z][a-z]{1,}(?: [A-Z][a-z]*\.?)?\b/g, (m) => {
+            const words = m.replace(/,/g, '').split(/\s+/);
+            if (words.some(w => keep(w.replace(/[^A-Za-z]/g, '').toUpperCase()))) return m;
+            return '<NAME Last, First>';
+        })
+        // "Mark Andrew Jones"
+        .replace(/\b[A-Z][a-z]+(?: [A-Z][a-z]+){1,3}\b/g,
+            (m) => '<NAME Caps x' + m.split(/\s+/).length + '>')
+        // Bare digit runs — keep the width, it separates a ZIP from a DL.
+        .replace(/\b\d{4,}\b/g, (m) => '<NUM:' + m.length + '>')
         .replace(/[ \t]+/g, ' ')
         .replace(/\n{3,}/g, '\n\n');
+
+    if (held.length) {
+        out = out.replace(/\u0001(\d+)\u0001/g, (m, i) => held[+i] != null ? held[+i] : m);
+    }
+    return out;
+}
+
+/**
+ * Decide which detected labels are safe to protect from redaction.
+ *
+ * A form label and a person's name can have the identical shape — "Hair
+ * Color" and "Thornbury Rowan" are both two Title-Case words — so shape
+ * alone cannot separate them.  Two signals do:
+ *
+ *   Repetition.  Measured across the Fort Worth incident report, every real
+ *   label occurred 5-11 times (once per person block or once per page) while
+ *   a person's name occurred once or twice.  That is the default rule.
+ *
+ *   A trailing colon.  `label_tokens` is built from "Label: value" lines, so
+ *   the colon is syntactic proof of a label and repetition is not needed.
+ *   This matters because a one-page DMV printout prints every label exactly
+ *   once — a count>=2 rule can never fire there, and all four of that
+ *   document's labels were being destroyed.
+ *
+ * Requiring a lowercase letter additionally excludes the ALL-CAPS values
+ * ("MARTINEZ XAVIEN") that the vertical-label heuristic picks up.
+ *
+ * @param {Array<{label:string,count:number}>} entries
+ * @param {Set<string>} [into]
+ * @param {object} [opts]
+ * @param {number} [opts.minCount=2]  Occurrences required to trust a label.
+ */
+function _protectableLabels(entries, into, opts) {
+    const out = into || new Set();
+    const minCount = (opts && opts.minCount) || 2;
+    for (const e of (entries || [])) {
+        const label = e && e.label;
+        if (!label || typeof label !== 'string') continue;
+        if ((e.count || 0) < minCount) continue;
+        if (!/[a-z]/.test(label)) continue;        // ALL-CAPS entries are values
+        if (label.length > 40) continue;
+        // A repeated mixed-case VALUE can satisfy the rules above: the Fort
+        // Worth report prints "3226 LAS VEGAS TRL, Apt# 173, FORT" twice and
+        // the "Apt#" lowercase let the whole home address be protected —
+        // which parked it behind a sentinel and shipped it verbatim.  No
+        // real form label carries a comma, a long digit run or a street
+        // type, so reject all three outright.
+        if (label.indexOf(',') >= 0) continue;
+        if (/\d{3,}/.test(label)) continue;
+        if (new RegExp('(?:^|\\s)(?:' + STREET_SUFFIXES.map(_escapeRe).join('|') + ')\\b\\.?$', 'i').test(label)) continue;
+        out.add(label);
+    }
+    return out;
+}
+
+/**
+ * Derive ALL-CAPS words that are document furniture rather than names.
+ *
+ * CAPS_KEEP cannot know an agency's own vocabulary — "WORTH" is a surname
+ * in most of the country.  Repetition settles it: measured on the Fort Worth
+ * report, "FORT WORTH POLICE" printed 11 times while every leaked person
+ * name printed once or twice.  The threshold is deliberately higher than the
+ * label threshold (4 vs 2) because an ALL-CAPS run carries no second signal
+ * — there is no lowercase letter to lean on.
+ *
+ * @param {Array<{label?:string,heading?:string,count:number}>} entries
+ * @param {Set<string>} [into]
+ */
+function _safeCapsWords(entries, into) {
+    const out = into || new Set();
+    for (const e of (entries || [])) {
+        const txt = e && (e.heading || e.label);
+        if (!txt || typeof txt !== 'string') continue;
+        if ((e.count || 0) < 4) continue;
+        if (/[a-z]/.test(txt)) continue;           // handled by _protectableLabels
+        for (const w of txt.split(/[^A-Z]+/)) {
+            if (w.length >= 3) out.add(w);
+        }
+    }
+    return out;
 }
 
 /**
@@ -741,12 +1021,127 @@ function _collapseNarratives(text) {
     return out.join('\n');
 }
 
-/**
- * Build a privacy-safe, full-document structural skeleton: narratives
- * collapsed, then PII tokenized via _redactExcerpt.  Capped to budget.
+/*
+ * Labels whose VALUE is a person's name.  A single Title-Case token cannot
+ * be told from a form label by shape alone — "Location", "Division" and
+ * "Harlan" are identical to a regex — so the only reliable signal for a
+ * one-word name is the label sitting above or beside it.  This list drives
+ * _redactNameContextLines, which is what stops a lone officer surname
+ * riding out in the repeating page footer.
  */
-function _redactStructural(text) {
-    return _redactExcerpt(_collapseNarratives(text)).slice(0, PDF_SKELETON_MAX_CHARS);
+const NAME_LABEL_RE = new RegExp(
+    '^(?:' + [
+        'name', 'full name', 'last', 'first', 'middle', 'last name',
+        'first name', 'middle name', 'mi', 'alias', 'aka', 'nickname',
+        'maiden name', 'suffix',
+        'officer', 'reporting officer', 'reporting party', 'rep officer',
+        'investigating officer', 'assigned officer', 'approving officer',
+        'supervisor', 'affiant', 'deputy', 'detective', 'sergeant',
+        'complainant', 'reported by', 'entered by', 'printed by',
+        'generated by', 'requested by', 'submitted by', 'owner',
+        'driver', 'subject', 'suspect', 'victim', 'witness', 'arrestee',
+        'guardian', 'parent', 'next of kin', 'nearest relative',
+        'emergency contact', 'employer', 'business name',
+    ].join('|') + ')\\s*\\d{0,3}\\s*[:#]?\\s*$',
+    'i'
+);
+
+/**
+ * Redact value text that a label identifies as a person's name.
+ *
+ * Operates on whole lines because that is the only place the signal exists.
+ * Handles both layouts:
+ *   inline   "Reporting Officer: Harlan 4471"
+ *   stacked  "Reporting Officer"  /  "Harlan 4471, D 2215"
+ *
+ * Trailing whitespace is preserved so the wrap measurement downstream still
+ * sees the original line endings.
+ *
+ * Also returns every word it masked.  That set is the only way to catch the
+ * SAME surname where it appears a second time with no label near it — a bare
+ * "Thornbury;" in a two-word prose line is shape-identical to a heading, so
+ * nothing but prior knowledge can redact it.
+ *
+ * @param {string[]} lines
+ * @returns {{lines: string[], nameWords: Set<string>}}
+ */
+function _redactNameContextLines(lines) {
+    const out = lines.slice();
+    const nameWords = new Set();
+    const mask = (v) => {
+        // Keep any trailing digits/codes — a badge number is already covered
+        // by <NUM:n> and the digit layout is useful — but drop the words.
+        const words = v.trim().split(/\s+/).filter(w => /[A-Za-z]/.test(w));
+        for (const w of words) {
+            const bare = w.replace(/[^A-Za-z'`-]/g, '');
+            // Two-letter tokens are initials/state codes; they are far too
+            // common to scrub document-wide without wrecking real structure.
+            if (bare.length >= 3 && !CAPS_KEEP.has(bare.toUpperCase())) nameWords.add(bare);
+        }
+        return words.length ? '<NAME value x' + words.length + '>' : v.trim();
+    };
+    for (let i = 0; i < out.length; i++) {
+        const line = out[i];
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        // Inline "Label: value"
+        const c = trimmed.indexOf(':');
+        if (c > 0 && c < 40) {
+            const lab = trimmed.slice(0, c).trim();
+            const val = trimmed.slice(c + 1).trim();
+            if (val && NAME_LABEL_RE.test(lab + ':')) {
+                out[i] = lab + ': ' + mask(val) + (/\s$/.test(line) ? ' ' : '');
+                continue;
+            }
+        }
+
+        // Stacked: this line is a name label, the next non-blank line is its value.
+        if (!NAME_LABEL_RE.test(trimmed)) continue;
+        let j = i + 1;
+        while (j < out.length && !out[j].trim()) j++;
+        if (j >= out.length) continue;
+        const valLine = out[j];
+        const val = valLine.trim();
+        // A label directly under a label is a multi-label cell, not a value.
+        if (_isLabelShape(val) && NAME_LABEL_RE.test(val)) continue;
+        if (!/[A-Za-z]/.test(val)) continue;
+        out[j] = mask(val) + (/\s$/.test(valLine) ? ' ' : '');
+    }
+    return { lines: out, nameWords };
+}
+
+/**
+ * Scrub words already identified as person-name words wherever else they
+ * appear.  Runs on the label-context pass's output, so it only ever removes
+ * a token that a label elsewhere in the same document called a name.
+ *
+ * @param {string} text
+ * @param {Set<string>} nameWords
+ * @returns {string}
+ */
+function _scrubKnownNameWords(text, nameWords) {
+    if (!nameWords || !nameWords.size) return text;
+    const words = Array.from(nameWords)
+        .filter(w => w.length >= 3)
+        .sort((a, b) => b.length - a.length);
+    if (!words.length) return text;
+    const re = new RegExp('\\b(?:' + words.map(_escapeRe).join('|') + ')\\b', 'gi');
+    return text.replace(re, '<NAME word>');
+}
+
+/**
+ * Build a privacy-safe, full-document structural skeleton: name-valued
+ * fields blanked by label context, narratives collapsed, then PII tokenized
+ * via _redactExcerpt.  Capped to budget.
+ *
+ * @param {string} text
+ * @param {object} [opts]  Forwarded to _redactExcerpt (notably `protect`).
+ */
+function _redactStructural(text, opts) {
+    const named = _redactNameContextLines(text.split('\n'));
+    const scrubbed = _scrubKnownNameWords(named.lines.join('\n'), named.nameWords);
+    return _redactExcerpt(_collapseNarratives(scrubbed), opts).slice(0, PDF_SKELETON_MAX_CHARS);
 }
 
 /**
@@ -831,7 +1226,201 @@ async function _extractPdfTextRobust(buf, parsed, onOcrPage) {
 }
 
 /**
- * PDF (async, schema v3) — full text-pass fingerprint.  Runs pdf-parse with
+ * Is this line shaped like a form label (as opposed to a value)?
+ *
+ * Hoisted to module scope in 5.3.1 so the layout-hint pass can reuse exactly
+ * the same judgement the vertical-label pass makes.
+ *   - 2-30 chars, starts with a letter
+ *   - mostly letters (digits <= 30% of length)
+ *   - no colon, no dollar sign
+ *   - ALL-CAPS longer than 15 chars is treated as a value ("FREIGHTLINER
+ *     CORP."), not a label
+ */
+function _isLabelShape(s) {
+    if (!s || s.length < 2 || s.length > 30) return false;
+    if (!/^[A-Za-z]/.test(s)) return false;
+    if (s.includes(':') || s.includes('$')) return false;
+    if (/\d{4,}/.test(s)) return false;
+    const letters = (s.match(/[A-Za-z]/g) || []).length;
+    const digits = (s.match(/\d/g) || []).length;
+    if (letters < 2) return false;
+    if (digits / s.length > 0.3) return false;
+    const upper = (s.match(/[A-Z]/g) || []).length;
+    if (upper / letters > 0.95 && s.length > 15) return false;
+    if (/[!@#%^*]/.test(s)) return false;
+    return true;
+}
+
+// "Page 3 of 11" and also "Page3 of 11" — Reporting Services drops the space
+// after "Page" when the page number is rendered into the same text run, which
+// is exactly how the Fort Worth form prints it.  Requiring whitespace there
+// found zero markers on a document that has one on every page.
+const PAGE_MARKER_RE = /\bPage\s*(\d+)\s*(?:of|\/)\s*(\d+)\b/i;
+
+/**
+ * Measure the page/column layout of a form so a parser author does not have
+ * to reverse-engineer it from the skeleton by eye.
+ *
+ * Every one of these numbers is something that had to be worked out by hand
+ * while writing the Fort Worth reader, and getting any of them wrong
+ * silently mis-files data:
+ *
+ *   - page_markers / page_line_counts — where the page breaks fall.  The
+ *     Fort Worth form prints each page's header AFTER that page's rule line,
+ *     so the last header has no footer under it; that asymmetry has to be
+ *     visible or the footer is never found.
+ *   - repeating_header / repeating_footer — the furniture to strip, measured
+ *     as the longest common run of lines across pages rather than guessed.
+ *   - wrap — whether values wrap mid-word.  The rejoin rule ("a line that
+ *     ends without a space continues mid-token") decides whether a date of
+ *     birth reads 04/17/1982 or 04/17/19.
+ *   - label_run_histogram — how many label lines stack up before a value.
+ *     Runs longer than 1 mean a cell holds several labels and one value, and
+ *     a parser that pairs them 1:1 attributes every field to the wrong name.
+ *   - layout_family — inline "Label: value" vs stacked label/value lines.
+ *
+ * Emits counts, ratios and already-vetted label text only.
+ *
+ * @param {string[]} rawLines   Untrimmed lines (trailing space is signal).
+ * @param {object} [opts]       Forwarded to _redactExcerpt for furniture.
+ */
+function _layoutHints(rawLines, opts) {
+    const hints = {};
+    const n = rawLines.length;
+    if (!n) return hints;
+
+    // ── Page markers & per-page line counts ──
+    const markers = [];
+    for (let i = 0; i < n; i++) {
+        const m = rawLines[i].match(PAGE_MARKER_RE);
+        if (m) markers.push({ line: i, page: +m[1], of: +m[2] });
+    }
+    hints.page_markers_found = markers.length;
+    if (markers.length) {
+        hints.page_marker_example = 'Page N of ' + markers[0].of;
+        hints.pages_declared = markers[0].of;
+        const counts = [];
+        let prev = 0;
+        for (const mk of markers) { counts.push(mk.line - prev + 1); prev = mk.line + 1; }
+        if (prev < n) counts.push(n - prev);
+        hints.page_line_counts = counts;
+        // Content after the final marker has no marker under it — on an SSRS
+        // form that tail is the next page's header, and including it in the
+        // footer comparison stops the footer ever being detected.
+        hints.trailing_lines_after_last_marker = n - (markers[markers.length - 1].line + 1);
+    }
+
+    // ── Repeating header / footer, measured across page chunks ──
+    // Chunks are built from name-masked lines so that a footer differing
+    // only by the reporting officer's name is still recognised as furniture
+    // — and so the furniture we echo back cannot carry that name out.
+    if (markers.length >= 2) {
+        const safeLines = _redactNameContextLines(rawLines).lines;
+        const chunks = [];
+        let start = 0;
+        for (const mk of markers) { chunks.push(safeLines.slice(start, mk.line)); start = mk.line + 1; }
+        const usable = chunks.filter(c => c.length > 2);
+        if (usable.length >= 2) {
+            const norm = (l) => l.replace(/\s+/g, ' ').trim();
+            let pre = 0;
+            outerPre: for (; pre < 12; pre++) {
+                const probe = usable[0][pre];
+                if (probe == null) break;
+                for (const c of usable) { if (c[pre] == null || norm(c[pre]) !== norm(probe)) break outerPre; }
+            }
+            let suf = 0;
+            outerSuf: for (; suf < 12; suf++) {
+                const probe = usable[0][usable[0].length - 1 - suf];
+                if (probe == null) break;
+                for (const c of usable) {
+                    const cand = c[c.length - 1 - suf];
+                    if (cand == null || norm(cand) !== norm(probe)) break outerSuf;
+                }
+            }
+            // No filter() here — a blank furniture line is still a line, and
+            // dropping it would make the array disagree with the count.
+            const red = (arr) => arr.map(l => _redactExcerpt(norm(l), opts));
+            hints.repeating_header_lines = pre;
+            hints.repeating_footer_lines = suf;
+            if (pre) hints.repeating_header = red(usable[0].slice(0, pre));
+            if (suf) hints.repeating_footer = red(usable[0].slice(usable[0].length - suf));
+        }
+    }
+
+    // ── Wrap behaviour ──
+    let endsWithSpace = 0, endsMidToken = 0, considered = 0;
+    for (let i = 0; i < n - 1; i++) {
+        const cur = rawLines[i];
+        if (!cur.trim()) continue;
+        let j = i + 1;
+        while (j < n && !rawLines[j].trim()) j++;
+        if (j >= n) break;
+        const next = rawLines[j];
+        considered++;
+        if (/\s$/.test(cur)) endsWithSpace++;
+        else if (/[A-Za-z0-9]$/.test(cur) && /^[A-Za-z0-9]/.test(next)) endsMidToken++;
+    }
+    if (considered) {
+        hints.wrap = {
+            lines_considered: considered,
+            ends_with_space: endsWithSpace,
+            ends_mid_token: endsMidToken,
+            ends_with_space_ratio: +(endsWithSpace / considered).toFixed(3),
+            ends_mid_token_ratio: +(endsMidToken / considered).toFixed(3),
+        };
+        // Both signals present in quantity means the text layer is preserving
+        // the break: a trailing space is a word break, no trailing space is a
+        // mid-word break, and the two halves rejoin by plain concatenation.
+        if (endsWithSpace >= 10 && endsMidToken >= 5) {
+            hints.wrap.likely_rule =
+                'values wrap across lines; rejoin by plain concatenation ' +
+                '(a trailing space is part of the value, no trailing space means mid-word)';
+        }
+    }
+
+    // ── Label runs: how many labels stack before a value ──
+    const runs = {};
+    let run = 0;
+    for (let i = 0; i < n; i++) {
+        const t = rawLines[i].replace(/\s+/g, ' ').trim();
+        if (!t) continue;
+        if (_isLabelShape(t)) { run++; continue; }
+        if (run) { runs[run] = (runs[run] || 0) + 1; run = 0; }
+    }
+    if (run) runs[run] = (runs[run] || 0) + 1;
+    if (Object.keys(runs).length) {
+        hints.label_run_histogram = runs;
+        const multi = Object.entries(runs)
+            .filter(([k]) => +k >= 2)
+            .reduce((a, [, v]) => a + v, 0);
+        hints.multi_label_cells = multi;
+        if (multi >= 3) {
+            hints.multi_label_warning =
+                'several labels share one value in this layout — pairing labels ' +
+                'to values 1:1 will attribute fields to the wrong record';
+        }
+    }
+
+    // ── Inline vs stacked ──
+    let inline = 0, stacked = 0;
+    for (let i = 0; i < n; i++) {
+        const t = rawLines[i].replace(/\s+/g, ' ').trim();
+        if (!t) continue;
+        const c = t.indexOf(':');
+        if (c > 1 && c < 40 && t.slice(c + 1).trim()) inline++;
+        else if (_isLabelShape(t)) stacked++;
+    }
+    hints.inline_label_value_lines = inline;
+    hints.stacked_label_lines = stacked;
+    hints.layout_family = inline > stacked ? 'inline (Label: value)'
+        : stacked > inline ? 'stacked (label line, then value line)'
+        : 'mixed';
+
+    return hints;
+}
+
+/**
+ * PDF (async, schema v4) — full text-pass fingerprint.  Runs pdf-parse with
  * MuPDF/OCR fallback for broken-font reports, extracts headings / labels /
  * line-shapes / per-page metrics, and emits a full redacted form skeleton.
  * No raw values leave this function: only schema tokens (label text, heading
@@ -877,6 +1466,9 @@ async function inspectPdfTextAsync(buf, syncShape, onOcrPage) {
     }
 
     const lines = text.split('\n').map(l => l.replace(/[ \t]+/g, ' ').trim()).filter(Boolean);
+    // Untrimmed copy — trailing whitespace is the wrap signal and the layout
+    // pass needs it.  Everything else keeps working off `lines`.
+    const rawLines = text.split('\n');
 
     // --- Heading frequency: predominantly-uppercase short lines ---
     const headingCounts = {};
@@ -926,37 +1518,13 @@ async function inspectPdfTextAsync(buf, syncShape, onOcrPage) {
     // --- Vertical labels: line N is label-shaped, line N+1 is value-shaped ---
     // SSRS-style reports (INFORM RMS, Microsoft Reporting Services) lay labels
     // and values on separate lines.  inline-`Label: value` detection misses
-    // every field.  This pass catches them.
-    //
-    // Rules for "label line":
-    //   - 2-30 chars, starts with letter
-    //   - mostly letters (digits ≤ 30% of length)
-    //   - no colon, no period in interior, no dollar sign
-    //   - next non-blank line exists and is NOT itself another label-shaped line
-    //     (so we don't double-count consecutive labels in a form-header row)
-    //   - case: title-case OR mixed-case OK; reject ALL-CAPS unless ≤15 chars
-    //     (ALL-CAPS long lines are usually values like "FREIGHTLINER CORP.")
+    // every field.  This pass catches them.  Shape rules live in
+    // _isLabelShape() at module scope so the layout-hint pass agrees with it.
     const verticalLabelCounts = {};
-    const isLabelShape = (s) => {
-        if (!s || s.length < 2 || s.length > 30) return false;
-        if (!/^[A-Za-z]/.test(s)) return false;
-        if (s.includes(':') || s.includes('$')) return false;
-        if (/\d{4,}/.test(s)) return false;
-        const letters = (s.match(/[A-Za-z]/g) || []).length;
-        const digits = (s.match(/\d/g) || []).length;
-        if (letters < 2) return false;
-        if (digits / s.length > 0.3) return false;
-        // ALL-CAPS long lines = probably values not labels.
-        const upper = (s.match(/[A-Z]/g) || []).length;
-        if (upper / letters > 0.95 && s.length > 15) return false;
-        // Reject pure punctuation-laden strings.
-        if (/[!@#%^*]/.test(s)) return false;
-        return true;
-    };
     for (let i = 0; i < lines.length - 1; i++) {
         const cur = lines[i];
         const next = lines[i + 1];
-        if (!isLabelShape(cur)) continue;
+        if (!_isLabelShape(cur)) continue;
         if (!next || next.length === 0) continue;
         // If next is also label-shaped, this may be a consecutive header row
         // (e.g. "Color(s)\nYear\nMake\n...") — still count cur, those are real labels.
@@ -967,10 +1535,40 @@ async function inspectPdfTextAsync(buf, syncShape, onOcrPage) {
         .slice(0, PDF_TOP_VERTICAL_LABELS)
         .map(([label, count]) => ({ label, count }));
 
+    // --- Phrases that are proven form labels and must survive redaction ---
+    // `headings` is deliberately NOT a protect source.  A heading is only
+    // "a short line", which is exactly the shape a value has, and it is the
+    // channel that leaked both real addresses in the first place.  Labels
+    // come from "Label:" lines (colon = proof, so one occurrence is enough)
+    // and from the vertical-label heuristic (shape only, so repetition is
+    // required).
+    const protect = new Set();
+    _protectableLabels(labels, protect, { minCount: 1 });
+    _protectableLabels(verticalLabels, protect, { minCount: 2 });
+    const safeWords = new Set();
+    _safeCapsWords(headings, safeWords);
+    _safeCapsWords(labels, safeWords);
+    _safeCapsWords(verticalLabels, safeWords);
+    const redOpts = { protect, safeWords };
+
+    // Headings / labels used to ship RAW.  Measured against the two Fort
+    // Worth submissions, that channel alone leaked two real names and two
+    // full home addresses ("YASMINE MEADOW SALACH",
+    // "1600 WOODSIDE LN, CLEBURNE, TX 76033") straight past every other
+    // safeguard, because a one-off ALL-CAPS value is heading-shaped.  Every
+    // emitted channel now goes through the redactor; genuine labels are in
+    // `protect` and come out unchanged.
+    const redactEntries = (arr, key) => arr.map(e => {
+        const red = _redactExcerpt(e[key], redOpts);
+        const o = { [key]: red, count: e.count };
+        if (red !== e[key]) o.redacted = true;
+        return o;
+    });
+
     // --- Redacted excerpt (first PDF_EXCERPT_CHARS chars — kept for back-compat) ---
-    const excerpt = _redactExcerpt(text.slice(0, 2500)).slice(0, PDF_EXCERPT_CHARS);
+    const excerpt = _redactExcerpt(text.slice(0, 2500), redOpts).slice(0, PDF_EXCERPT_CHARS);
     // --- Full-document redacted form skeleton (all pages, narratives collapsed) ---
-    const skeleton = _redactStructural(text);
+    const skeleton = _redactStructural(text, redOpts);
 
     return {
         ...base,
@@ -987,10 +1585,12 @@ async function inspectPdfTextAsync(buf, syncShape, onOcrPage) {
             creator: info.Creator || null,
             producer: info.Producer || null,
         },
-        headings,
-        label_tokens: labels,
-        vertical_labels: verticalLabels,
+        headings: redactEntries(headings, 'heading'),
+        label_tokens: redactEntries(labels, 'label'),
+        vertical_labels: redactEntries(verticalLabels, 'label'),
         line_shapes: shapes,
+        layout_hints: _layoutHints(rawLines, redOpts),
+        skeleton_truncated: _redactExcerpt(_collapseNarratives(text), redOpts).length > PDF_SKELETON_MAX_CHARS,
         page_excerpt_redacted: excerpt,
         structure_skeleton_redacted: skeleton,
     };
@@ -1538,7 +2138,18 @@ module.exports = {
         _collapseNarratives,
         _redactStructural,
         _redactExcerpt,
+        _protectableLabels,
+        _safeCapsWords,
+        _scrubKnownNameWords,
+        _layoutHints,
+        _isLabelShape,
+        _redactNameContextLines,
+        CAPS_KEEP,
+        STREET_SUFFIXES,
         SCHEMA_VERSION,
+        PDF_SKELETON_MAX_CHARS,
+        PDF_TOP_HEADINGS,
+        PDF_TOP_VERTICAL_LABELS,
         MAX_FILES,
         PER_FILE_BUDGET_BYTES,
         ENVELOPE_SOFT_CAP_BYTES,

@@ -45225,7 +45225,12 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             <div id="brTabParser" style="display:none">
                 <div class="space-y-3">
                     <div class="text-xs text-gray-400 leading-relaxed bg-gray-800/40 border border-gray-700 rounded-lg p-3">
-                        Help us add a parser for a new format — warrant returns, RMS reports, DMV printouts, cell-tower dumps, mobile-forensics bundles, anything else. VIPER walks the file/folder/ZIP locally and builds a <span class="text-cyan-400">shape-only</span> envelope (folder layout, file types, key/column names) with all filenames redacted. <strong>No case content, narratives, names, or attachments are uploaded.</strong>
+                        Help us add a parser for a new format — warrant returns, RMS reports, DMV printouts, cell-tower dumps, mobile-forensics bundles, anything else. VIPER reads the file/folder/ZIP on this computer and builds a <span class="text-cyan-400">shape-only</span> envelope: the folder layout, the file types, and the field and column names. Names, dates of birth, addresses, phone numbers, licence and social numbers are replaced with a description of their shape — a date of birth becomes <span class="text-gray-300">&lt;DATE MM/DD/YYYY&gt;</span>, an address becomes <span class="text-gray-300">&lt;ADDRESS street+city+state+zip&gt;</span>. <strong>No case content, narratives, names, or attachments are uploaded.</strong>
+                    </div>
+
+                    <div class="text-xs text-gray-400 leading-relaxed bg-cyan-500/5 border border-cyan-500/30 rounded-lg p-3">
+                        <div class="text-cyan-400 font-medium mb-1">Send 2–3 different records if you can</div>
+                        One sample only shows us one shape. A report with a single suspect never shows us how the form repeats itself for a second one, and a record with nothing in the vehicle or weapon fields never shows us where those go. Two or three <span class="text-gray-300">different</span> records — say an incident with several people on it, a supplement, and an arrest — let us tell a blank field apart from a field that form never prints, which is the difference between a parser that works on your next case and one that only works on this one. Submit them one at a time; each takes a few seconds.
                     </div>
 
                     <div>

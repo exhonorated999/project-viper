@@ -1,0 +1,658 @@
+Case Number
+2024-0092231
+
+Agency
+FORT WORTH POLICE DEPARTMENT
+
+Report No.
+ORIG
+
+CAD Number
+2024268001234
+
+Status
+Nature of Call
+MURDER/CAPITAL MURDER/CRIMINAL NEGLIGENT HOMICIDE
+
+Location
+3226 LAS VEGAS TRL
+
+City
+FORT WORTH
+
+Zip
+76116
+
+Division
+WEST
+
+Property?
+No
+
+# Offenses
+1
+
+Description
+Murder
+
+Complaint 
+AC
+C
+
+Use
+NOT APPLICABLE
+
+Bias
+88
+
+LOC
+20
+
+#PR
+MOE
+ACT
+Weapon/Force
+11
+
+IBRS
+09A
+
+# Offenses
+1
+
+Description
+Agg bodily 
+injury w/Deadly Weapon
+
+Complaint 
+AC
+C
+
+Use
+NOT APPLICABLE
+
+Bias
+88
+
+LOC
+20
+
+#PR
+MOE
+ACT
+Weapon/Force
+12
+
+IBRS
+13A
+
+Invl
+SUS
+
+Invl NO
+1
+
+Type
+I
+
+Name
+FENWICK MARGARET OLIVE
+
+Race
+W
+
+Sex
+F
+
+DOB
+04/17/19
+82
+
+Beat
+L16
+
+Reporting Officer
+Harlan 4471, D 2215
+
+Printed At
+09/25/2024 1:03:15 PM
+Page1 of 4
+
+FORT WORTH POLICE 
+DEPARTMENT
+
+505 W FELIX ST
+FORT WORTH, Texas 76115
+
+(817) 555-0100
+
+2024-0092231
+
+Member#/Dept ID#
+M
+i
+4471 D 2215
+
+Reporting Date
+09/25/2024 12:59:00 Wed
+
+Nature of Call
+MURDER/CAPITAL MURDER/CRIMINAL 
+
+NEGLIGENT HOMICIDE
+
+Invl
+SUS
+
+Invl NO
+2
+
+Type
+I
+
+Name
+ABERNATHY COLE
+
+Race
+W
+
+Sex
+M
+
+DOB
+11/02/1990
+
+Invl
+VIC
+
+Invl NO
+1
+
+Type
+I
+
+Name
+Thornbury Rowan
+
+Race
+B
+
+Sex
+M
+
+DOB
+06/30/1986
+
+Invl
+VIC
+
+Invl NO
+2
+
+Type
+I
+
+Name
+Calloway Imogen
+
+Race
+W
+
+Sex
+F
+
+DOB
+02/09/1997
+
+Narrative Summary
+
+On 09/25/2024 at approximately 0059 hours officers were dispatched to 3226 LAS VEGAS TRL in 
+reference to a shooting call. Officers arrived and located one deceased male inside the front 
+room of the residence. The other listed victims were not injured.
+
+Sgt. Loughman #4532
+
+Reporting Officer
+Harlan 4471, D 2215
+
+Printed At
+09/25/2024 1:03:15 PM
+Page2 of 4
+
+FORT WORTH POLICE 
+DEPARTMENT
+
+505 W FELIX ST
+FORT WORTH, Texas 76115
+
+(817) 555-0100
+
+2024-0092231
+
+Member#/Dept ID#
+M
+i
+4471 D 2215
+
+Reporting Date
+09/25/2024 12:59:00 Wed
+
+Nature of Call
+MURDER/CAPITAL MURDER/CRIMINAL 
+
+NEGLIGENT HOMICIDE
+
+SUSPECT 1: FENWICK MARGARET OLIVE 
+
+Alias
+Sex
+FEMALE
+
+Race
+WHITE
+
+DOB
+04/17/19
+82
+
+Age
+42
+
+Ethnicity
+H
+
+Res Sta.
+R 
+RESID
+ENT
+
+Juvenile?
+N
+
+Height
+510
+
+Weight
+160
+
+Hair Color
+BROWN
+
+Eye Color
+HAZEL
+
+Glasses
+No::No
+
+Arrested
+Written statement
+N::NO
+
+Alias DOB
+
+DL State/DL #
+TX 41238876 
+
+Misc.Id Type
+Misc. ID State/ Misc. ID No.
+
+
+SSN
+SID Number
+FBI Number
+Place of Birth
+Marital Status
+S 
+SINGLE
+
+Build
+Skin Tone
+MEDIUM
+
+Facial Hair
+NONE
+
+Hair Style
+Hair Length
+R/L hand
+Speech
+Teeth
+Demeanor
+
+SMT
+Type SMT
+Description
+Location
+NCICSMT
+Active
+
+Clothing
+Address
+3226 LAS VEGAS TRL FW::FORT WORTH 
+TX::TEXAS 76116::76116
+
+Apartment
+Beat
+L16
+
+Division
+Fort 
+Worth or 
+Unknown
+
+Rep. Area
+Latitude
+Longitude
+
+Phone Type/Phone No
+(817) 555-0142
+
+Email
+margaret.fenwick@example.com
+
+Employed
+Occupation/Employer
+Realtionship
+SIBLING 
+(BROTHER 
+OR 
+SISTER)
+
+Related Offense
+PC 19.02(c) Murder (09A F1) , PC 22.02(a)(2) Agg bodily 
+injury w/Deadly Weapon (13A F2) 
+
+Offense PC 19.02(c) Murder
+
+UCR/NIBRS Code
+09A::09A 
+MURDER & 
+NON-
+NEGLIGENT 
+MANSLAUGHT
+ER
+
+Degree
+F1
+
+NCIC code
+0901
+
+Statute
+PC 19.02(c)
+
+Reportabletrue
+
+Felony/Misdemeanor
+FELONY, 
+1ST DEGREE
+
+Premise/Crime Location
+20 
+RESIDENCE/HO
+ME
+
+Points of Entry
+Method of Entry
+
+Attempted/Complete
+COMPLETED
+
+Weapon Used
+11 FIREARM
+
+Bias
+88::88 NONE 
+(NO BIAS)
+
+Photos
+Comments
+
+UCR/NIBRS Code
+13A::13A 
+AGGRAVATED 
+ASSAULT
+
+Degree
+F2
+
+NCIC code
+1313
+
+Statute
+PC 22.02(a)(2)
+
+Reportabletrue
+
+Felony/Misdemeanor
+FELONY, 
+2ND DEGREE
+
+Premise/Crime Location
+20 
+RESIDENCE/HO
+ME
+
+Attempted/Complete
+COMPLETED
+
+Weapon Used
+12 HANDGUN
+
+Bias
+88::88 NONE 
+(NO BIAS)
+
+Photos
+Comments
+
+Reporting Officer
+Harlan 4471, D 2215
+
+Printed At
+09/25/2024 1:03:15 PM
+Page3 of 4
+
+FORT WORTH POLICE 
+DEPARTMENT
+
+505 W FELIX ST
+FORT WORTH, Texas 76115
+
+(817) 555-0100
+
+2024-0092231
+
+Member#/Dept ID#
+M
+i
+4471 D 2215
+
+Reporting Date
+09/25/2024 12:59:00 Wed
+
+Nature of Call
+MURDER/CAPITAL MURDER/CRIMINAL 
+
+NEGLIGENT HOMICIDE
+
+SUSPECT 2: ABERNATHY COLE 
+
+Alias
+Sex
+MALE
+
+Race
+WHITE
+
+DOB
+11/02/19
+90
+
+Age
+34
+
+Ethnicity
+U 
+UNKNO
+WN
+
+Juvenile?
+N
+
+Height
+602
+
+Weight
+210
+
+Hair Color
+BLACK
+
+Eye Color
+BROWN
+
+Arrested
+NO
+
+Written statement
+N::NO
+
+DL State/DL #
+TX 38812094 
+
+SSN
+555889134
+0
+
+SID Number
+TX19348
+052
+
+FBI Number
+27V245CPP
+
+Place of Birth
+Build
+AVERAGE 
+BUILD
+
+Facial Hair
+FULL BEARD
+
+Address
+306 E SPRINGDALE LN GP::GRAND PRAIRIE 
+TX::TEXAS 75052::75052
+
+Phone Type/Phone No
+
+
+Email
+Employed
+
+Victim 1: Thornbury, Rowan 
+
+Victim Type
+I
+
+Race
+BLACK
+
+Sex
+MALE
+
+DOB
+06/30/19
+86
+
+Alias
+Rowan 
+Thorn; 
+Row 
+Thornbury; 
+
+Age
+38
+
+Ethnicity
+N
+
+Juvenile?
+N
+
+Height
+505
+
+Weight
+210
+
+Hair Color
+BLACK
+
+Eye Color
+BROWN
+
+Sex.Assault
+No
+
+Dom.viol.
+NO
+
+Res Sta.
+R
+
+Means of Attack
+Firearm
+
+Type of Injury
+APPARENT MINOR 
+INJURY
+
+Address
+1419 LAS VEGAS TRL FW::FORT WORTH 
+TX::TEXAS 76116::76116
+
+Phone Type/Phone No
+(817) 555-0188
+
+Related Offense
+PC 19.02(c) Murder (09A F1) 
+
+Narrative
+
+On 09/25/2024 at approximately 0059 hours officers were dispatched to 3226 LAS VEGAS TRL in reference to a 
+shooting call. Officers arrived and located one deceased male inside the front room of the residence. The other 
+listed victims were not injured.
+
+Sgt. Loughman #4532
+
+Reporting Officer
+Harlan 4471, D 2215
+
+Printed At
+09/25/2024 1:03:15 PM
+Page4 of 4
+
+FORT WORTH POLICE 
+DEPARTMENT
+
+505 W FELIX ST
+FORT WORTH, Texas 76115
+
+(817) 555-0100
+
+2024-0092231
+
+Member#/Dept ID#
+M
+i
+4471 D 2215
+
+Reporting Date
+09/25/2024 12:59:00 Wed
+
+Nature of Call
+MURDER/CAPITAL MURDER/CRIMINAL 
+
+NEGLIGENT HOMICIDE
+

@@ -101,6 +101,19 @@ function buildSandbox(state) {
         currentInvolvedPersonView: null,
         currentMissingPersonView: null,
         // --- host helpers ---
+        // The real page routes every note write through _lsSetSafe, which is
+        // backed by the shared storage module. Wire the REAL module in so the
+        // quota contract is exercised here rather than stubbed away.
+        _CS: require('../../_shared/case-storage.js'),
+        _lsSetSafe(key, value, label) {
+            const res = sandbox._CS.setItemSafe(key, value, { store: localStorage, label });
+            if (!res.ok) toasts.push({ m: res.message, k: 'error' });
+            return res.ok;
+        },
+        // Images are moved to disk by the main process, which does not exist
+        // here. Resolving with the HTML unchanged is the honest no-op.
+        _noteImagesToDisk: (html) => Promise.resolve({ html, moved: 0, failed: 0, bytesFreed: 0 }),
+        _noteImagesFromDisk: (html) => Promise.resolve(html),
         _lsParse(key, fallback) {
             try { return JSON.parse(localStorage.getItem(key)) || fallback; }
             catch (_) { return fallback; }

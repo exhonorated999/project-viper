@@ -3390,6 +3390,39 @@
                             <div id="supervisorNotesToggleKnob" class="absolute w-5 h-5 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
                         </button>
                     </div>
+
+                    <!--
+                        Task sharing. A SECOND, independent content opt-in, for the
+                        same reason notes got its own: agreeing to show a supervisor
+                        your court calendar is not the same as agreeing to show them
+                        your case narratives. Covers case-linked tasks AND standalone
+                        dashboard reminders, since "Court on Thursday" is usually the
+                        latter. Default OFF.
+                    -->
+                    <div class="flex items-center justify-between bg-viper-dark rounded-lg p-4 border border-amber-500/30 mt-3">
+                        <div class="flex items-center gap-3">
+                            <div class="w-12 h-12 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                                <span class="text-2xl">🗓️</span>
+                            </div>
+                            <div>
+                                <p class="font-medium" id="supervisorTasksToggleLabel">Task Sharing — Off</p>
+                                <p class="text-gray-400 text-xs max-w-md leading-relaxed">
+                                    Off by default. Turn this on to include your
+                                    <span class="text-amber-300">task list</span> — title, notes, due date and priority — with each
+                                    Case-Status push, so your supervisor can see upcoming court dates, interviews and deadlines.
+                                    Includes reminders not tied to a case. Open tasks plus anything completed in the last 30 days.
+                                    Attached file names are never sent.
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            id="supervisorTasksToggleBtn"
+                            onclick="toggleSupervisorTaskSharing()"
+                            class="relative w-14 h-7 rounded-full transition-colors bg-gray-600"
+                        >
+                            <div id="supervisorTasksToggleKnob" class="absolute w-5 h-5 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
+                        </button>
+                    </div>
                     </div>
                 </div>
 
@@ -6636,9 +6669,49 @@
         updateSupervisorNotesToggleUI(next);
     }
 
+    // ── Task sharing (localStorage: viperSupervisorShareTasks) ───────────
+    // Independent of the notes switch on purpose — see the markup comment.
+    function isSupervisorTaskSharingEnabled() {
+        return localStorage.getItem('viperSupervisorShareTasks') === 'true';
+    }
+
+    function updateSupervisorTasksToggleUI(enabled) {
+        const label = document.getElementById('supervisorTasksToggleLabel');
+        const btn = document.getElementById('supervisorTasksToggleBtn');
+        const knob = document.getElementById('supervisorTasksToggleKnob');
+        if (label) label.textContent = enabled
+            ? 'Task Sharing — On (your task list is included in pushes)'
+            : 'Task Sharing — Off';
+        if (btn) btn.className = 'relative w-14 h-7 rounded-full transition-colors ' + (enabled ? 'bg-amber-500' : 'bg-gray-600');
+        if (knob) knob.className = 'absolute w-5 h-5 bg-white rounded-full top-1 transition-transform ' + (enabled ? 'translate-x-8' : 'translate-x-1');
+    }
+
+    async function toggleSupervisorTaskSharing() {
+        const next = !isSupervisorTaskSharingEnabled();
+        // Confirm only the ON direction, same as notes. The wording calls out
+        // standalone reminders explicitly, because that is the part people do
+        // not expect: a personal "Court — Thursday 0900" entry with no case
+        // attached still goes to the supervisor.
+        if (next) {
+            const ok = typeof viperConfirm === 'function'
+                ? await viperConfirm(
+                    'Include your task list in Supervisor pushes?\n\n' +
+                    'Your supervisor will be able to read the title, notes, due date and priority of your ' +
+                    'open tasks — including reminders that are not attached to any case — plus anything ' +
+                    'you completed in the last 30 days. Attached file names are still never sent. ' +
+                    'You can turn this off at any time.',
+                    { okText: 'Share Tasks' })
+                : confirm('Include your task list in Supervisor pushes?');
+            if (!ok) return;
+        }
+        localStorage.setItem('viperSupervisorShareTasks', String(next));
+        updateSupervisorTasksToggleUI(next);
+    }
+
     // Set initial state on load.
     updateSupervisorToggleUI(isSupervisorLinkEnabled());
     updateSupervisorNotesToggleUI(isSupervisorNotesSharingEnabled());
+    updateSupervisorTasksToggleUI(isSupervisorTaskSharingEnabled());
     </script>
 
     <!-- GenLogs API Service -->

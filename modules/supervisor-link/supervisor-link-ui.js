@@ -158,11 +158,133 @@
     return out.slice(0, NOTES_PER_CASE);
   }
 
-  // Count notes that WOULD be sent — used by the push dialog so the
-  // investigator sees the exposure before sending, not after.
-  function countSharedNotes() {
-    if (!isNotesSharingEnabled()) return 0;
-    return getCases().reduce((sum, c) => sum + ((buildCaseNotes(c) || []).length), 0);
+  // ── Task list (OPT-IN) ──────────────────────────────────────────────────
+  // Second content payload, with its own switch. Deliberately NOT folded into
+  // the notes toggle: an investigator who is willing to show a supervisor
+  // their court calendar has not thereby agreed to show them their case
+  // narratives, and the reverse is just as true. Same === 'true' convention,
+  // so absent/legacy/garbage reads as OFF.
+  function isTaskSharingEnabled() {
+    return lsGet('viperSupervisorShareTasks') === 'true';
+  }
+
+  const TASK_TITLE_MAX = 200;
+  const TASK_NOTES_MAX = 500;
+  const TASKS_PER_CASE = 50;
+  const TASKS_UNASSIGNED_MAX = 100;
+  const TASK_DONE_WINDOW_DAYS = 30;
+
+  // Tasks store a local date ('YYYY-MM-DD') and an optional wall-clock time.
+  // Build a real instant so the supervisor can sort and flag overdue items.
+  // A task with no date is legitimate ("call the DA back sometime") — it rides
+  // along with due:'' and simply sorts last.
+  //
+  // This MUST mirror isOverdue()/_taskDateLocal() in index.html, or the two
+  // apps will disagree about what is late. Three rules carried over verbatim:
+  //  1. Build the date from its PARTS, never `new Date('YYYY-MM-DD')` — that
+  //     parses as UTC midnight and renders as the previous evening anywhere
+  //     behind UTC (the 5.3.3 "due date a day early" bug).
+  //  2. timeUTC means the officer entered the time as UTC, so compare as UTC;
+  //     otherwise it is local wall-clock.
+  //  3. No time means "sometime that day", which is NOT late until the day is
+  //     gone — so an untimed task is stamped end-of-day local, not midnight.
+  //     Stamping midnight would light it up as overdue on the supervisor's
+  //     dashboard from 00:01 while the investigator's own list still showed
+  //     it as simply due today.
+  function _taskDueIso(t) {
+    const raw = String(t.date || '').trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return '';
+    const [y, mo, da] = raw.split('-').map(Number);
+    const time = String(t.time || '').trim();
+    const hasTime = /^([01]\d|2[0-3]):[0-5]\d/.test(time);
+    let d;
+    if (hasTime) {
+      const [hh, mm] = time.slice(0, 5).split(':').map(Number);
+      d = t.timeUTC
+        ? new Date(Date.UTC(y, mo - 1, da, hh, mm))
+        : new Date(y, mo - 1, da, hh, mm);
+    } else {
+      d = new Date(y, mo - 1, da, 23, 59, 59, 999);
+    }
+    return isNaN(d.getTime()) ? '' : d.toISOString();
+  }
+
+  function _clip(s, max) {
+    const t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+    return t.length > max ? t.slice(0, max) + '…' : t;
+  }
+
+  // Open tasks always ride. Completed ones ride only if they closed inside the
+  // window — the supervisor asked "what is coming up", and a year of finished
+  // chores would bury that, but recent completions show follow-through.
+  function _taskInScope(t, cutoffMs) {
+    if (!t || !t.completed) return true;
+    const stamp = t.completedAt || t.updatedAt || t.date || t.createdAt;
+    const ms = Date.parse(stamp);
+    return isNaN(ms) ? false : ms >= cutoffMs;
+  }
+
+  // Shape on the wire. title/notes are the investigator's own words — that is
+  // the whole point of the opt-in. fileName is NOT sent (it routinely contains
+  // a subject's name); only whether an attachment exists.
+  function _mapTask(t) {
+    const title = _clip(t.title, TASK_TITLE_MAX);
+    if (!title) return null;
+    return {
+      title,
+      notes: _clip(t.notes || t.description || '', TASK_NOTES_MAX) || undefined,
+      due: _taskDueIso(t),
+      allDay: !/^([01]\d|2[0-3]):[0-5]\d/.test(String(t.time || '').trim()),
+      priority: String(t.priority || 'medium').toLowerCase(),
+      completed: !!t.completed,
+      completedAt: t.completed ? String(t.completedAt || '') : '',
+      attachments: t.hasFile ? 1 : 0,
+    };
+  }
+
+  function _sortTasks(a, b) {
+    // Open before done; then soonest due first; undated last.
+    if (a.completed !== b.completed) return a.completed ? 1 : -1;
+    if (!a.due && !b.due) return 0;
+    if (!a.due) return 1;
+    if (!b.due) return -1;
+    return a.due.localeCompare(b.due);
+  }
+
+  // One pass over the global store, split into per-case buckets and the
+  // leftovers. Tasks are keyed by caseNumber (task.caseId holds a caseNumber,
+  // not a case id — a naming quirk of the task form). Anything whose caseId is
+  // blank OR points at a case this device no longer has becomes "unassigned",
+  // which is how a dashboard-level "Court" reminder reaches the supervisor.
+  function collectSharedTasks() {
+    if (!isTaskSharingEnabled()) return null;
+    const all = lsJSON('viperTasks', []);
+    if (!Array.isArray(all) || !all.length) return null;
+
+    const cutoff = Date.now() - TASK_DONE_WINDOW_DAYS * 86400000;
+    const known = new Set(getCases().map((c) => c.caseNumber || ('#' + (c.id || ''))));
+    const byCase = {};
+    const unassigned = [];
+
+    all.forEach((t) => {
+      if (!_taskInScope(t, cutoff)) return;
+      const mapped = _mapTask(t);
+      if (!mapped) return;
+      const key = String(t.caseId || '').trim();
+      if (key && known.has(key)) {
+        (byCase[key] = byCase[key] || []).push(mapped);
+      } else {
+        unassigned.push(mapped);
+      }
+    });
+
+    Object.keys(byCase).forEach((k) => {
+      byCase[k].sort(_sortTasks);
+      byCase[k] = byCase[k].slice(0, TASKS_PER_CASE);
+    });
+    unassigned.sort(_sortTasks);
+
+    return { byCase, unassigned: unassigned.slice(0, TASKS_UNASSIGNED_MAX) };
   }
 
   // Productivity snapshot — small headline numbers + breakdowns. No content.
@@ -353,13 +475,19 @@
   }
 
   // Case-status digest — one lightweight row per case. Metadata only, unless
-  // the investigator has opted into Case Notes Sharing (see buildCaseNotes).
+  // the investigator has opted into Case Notes Sharing (see buildCaseNotes)
+  // and/or Task Sharing (see collectSharedTasks). The two opt-ins are
+  // independent and each omits its field entirely when off, so a digest from
+  // a device with both switches down is byte-identical to a pre-feature one.
   function buildCaseDigest() {
     const cases = getCases();
     const sharingNotes = isNotesSharingEnabled();
+    const sharingTasks = isTaskSharingEnabled();
+    const tasks = collectSharedTasks(); // null when the toggle is off
     const rows = cases.map((c) => {
+      const caseNumber = c.caseNumber || ('#' + (c.id || ''));
       const row = {
-        caseNumber: c.caseNumber || ('#' + (c.id || '')),
+        caseNumber,
         label: shortLabel(c.synopsis, 60),
         state: statusLabel(c.status),
         risk: priorityLabel(c.priority),
@@ -369,9 +497,18 @@
       };
       const notes = buildCaseNotes(c);
       if (notes) row.notes = notes;
+      const rowTasks = tasks && tasks.byCase[caseNumber];
+      if (rowTasks && rowTasks.length) row.tasks = rowTasks;
       return row;
     });
     const noteCount = rows.reduce((n, r) => n + ((r.notes || []).length), 0);
+    const taskCount = tasks
+      ? rows.reduce((n, r) => n + ((r.tasks || []).length), 0) + tasks.unassigned.length
+      : 0;
+    const body = { rows };
+    // Dashboard-level reminders ("Court", "Range qualification") belong to no
+    // case, so they travel beside the rows rather than inside one.
+    if (tasks && tasks.unassigned.length) body.unassignedTasks = tasks.unassigned;
     return {
       manifest: {
         title: `Case-Status Digest — ${rows.length} case${rows.length === 1 ? '' : 's'}`,
@@ -381,8 +518,10 @@
         // having to walk every row.
         notesShared: sharingNotes,
         noteCount,
+        tasksShared: sharingTasks,
+        taskCount,
       },
-      body: { rows },
+      body,
     };
   }
 
@@ -619,25 +758,37 @@
       };
       const rowStats = mkCheck(true, 'Stats Snapshot', `${stats.body.headline[0].value} cases · clearance ${stats.body.headline[3].value}`);
       const sharedNotes = digest.manifest.noteCount || 0;
-      const rowDigest = mkCheck(true, 'Case-Status Digest', sharedNotes
-        ? `${digest.body.rows.length} case rows · includes ${sharedNotes} case note${sharedNotes === 1 ? '' : 's'}`
-        : `${digest.body.rows.length} case rows · metadata only, no content`);
+      const sharedTasks = digest.manifest.taskCount || 0;
+      const digestBits = [`${digest.body.rows.length} case rows`];
+      if (sharedNotes) digestBits.push(`${sharedNotes} case note${sharedNotes === 1 ? '' : 's'}`);
+      if (sharedTasks) digestBits.push(`${sharedTasks} task${sharedTasks === 1 ? '' : 's'}`);
+      if (!sharedNotes && !sharedTasks) digestBits.push('metadata only, no content');
+      const rowDigest = mkCheck(true, 'Case-Status Digest', digestBits.join(' · '));
       payloadWrap.appendChild(rowStats);
       payloadWrap.appendChild(rowDigest);
 
-      // Case Notes Sharing is a Settings-level preference, not a per-push
-      // choice, so the dialog's job here is disclosure: make it impossible to
-      // send note text without having seen that you are about to.
+      // Both sharing switches are Settings-level preferences, not per-push
+      // choices, so the dialog's job here is disclosure: make it impossible to
+      // send content without having seen that you are about to. Each switch
+      // gets its own banner — a single merged one would let an investigator
+      // who only meant to share their calendar skim past the notes warning.
+      const mkWarn = (text) => el('div', `margin:-2px 0 8px;padding:10px 12px;border-radius:10px;
+        background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.40);
+        color:#fbbf24;font-size:12px;line-height:1.5;`, { textContent: text });
+
       if (sharedNotes) {
-        const warn = el('div', `margin:-2px 0 8px;padding:10px 12px;border-radius:10px;
-          background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.40);
-          color:#fbbf24;font-size:12px;line-height:1.5;`, {
-          textContent: '📝 Case Notes Sharing is ON — the text of ' + sharedNotes + ' note'
-            + (sharedNotes === 1 ? '' : 's') + ' will be readable by your supervisor. '
-            + 'Attachments and assigned-person names are not sent. '
-            + 'Turn this off in Settings → Supervisor Link.',
-        });
-        payloadWrap.appendChild(warn);
+        payloadWrap.appendChild(mkWarn(
+          '📝 Case Notes Sharing is ON — the text of ' + sharedNotes + ' note'
+          + (sharedNotes === 1 ? '' : 's') + ' will be readable by your supervisor. '
+          + 'Attachments and assigned-person names are not sent. '
+          + 'Turn this off in Settings → Supervisor Link.'));
+      }
+      if (sharedTasks) {
+        payloadWrap.appendChild(mkWarn(
+          '🗓️ Task Sharing is ON — ' + sharedTasks + ' task'
+          + (sharedTasks === 1 ? '' : 's') + ' (title, notes, due date and priority) '
+          + 'will be readable by your supervisor, including reminders not tied to a case. '
+          + 'Attached file names are not sent. Turn this off in Settings → Supervisor Link.'));
       }
 
       getSelectedPushes = async () => {

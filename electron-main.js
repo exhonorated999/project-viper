@@ -2671,6 +2671,122 @@ ipcMain.handle('note-delete-attachment', async (_e, payload) => {
   }
 });
 
+// ── Generic case attachments (cases/{caseNumber}/<subdir>/) ──────────
+// Same contract as the note handlers above, but the destination folder is
+// chosen by the caller from a fixed allow-list. Added because the Consent
+// Search and Vehicles modules were base64-ing whole PDFs and photos into
+// localStorage, which is a ~5MB quota for the WHOLE app — one consent form
+// could fill it, and every subsequent save in every module then failed.
+//
+// The allow-list is the security boundary: `subdir` reaches the filesystem,
+// so it is matched against known-good literals rather than sanitised. A
+// sanitiser can be argued with; a lookup table cannot.
+const CASE_ATTACHMENT_DIRS = Object.freeze({
+  notes:          'Notes',
+  consentSearch:  'Consent Searches',
+  vehicles:       'Vehicles',
+  photos:         'Photos'
+});
+
+function _caseAttachmentDir(caseNumber, kind) {
+  const sub = CASE_ATTACHMENT_DIRS[kind];
+  if (!sub) return null;
+  return path.join(casesDir, caseNumber, sub);
+}
+
+ipcMain.handle('case-attachment-save', async (_e, payload) => {
+  try {
+    const caseNumber = _safeCaseNumber(payload && payload.caseNumber);
+    if (!caseNumber) return { success: false, error: 'Invalid case number' };
+    const dir = _caseAttachmentDir(caseNumber, payload && payload.kind);
+    if (!dir) return { success: false, error: 'Unknown attachment kind' };
+    const rawName = _sanitizeAttachmentName(payload && payload.fileName);
+    if (!rawName) return { success: false, error: 'Invalid file name' };
+    if (!payload || typeof payload.dataBase64 !== 'string' || !payload.dataBase64.length) {
+      return { success: false, error: 'No file data provided' };
+    }
+
+    const buf = Buffer.from(payload.dataBase64, 'base64');
+    fs.mkdirSync(dir, { recursive: true });
+
+    // Encrypt under Field Security when it is on and unlocked, matching
+    // note attachments and evidence. A locked vault must not silently
+    // write plaintext, so refuse instead.
+    if (security && security.isEnabled() && !security.isUnlocked()) {
+      return { success: false, error: 'Field Security is locked — unlock it before attaching files.' };
+    }
+    const bytes = (security && security.isEnabled() && security.isUnlocked())
+      ? security.encryptBuffer(buf)
+      : buf;
+
+    // The name is claimed by the WRITE ('wx' fails with EEXIST rather than
+    // overwriting), so the check and the write are one step and two records
+    // can never quietly share a file.
+    const ext = path.extname(rawName);
+    const stem = rawName.slice(0, rawName.length - ext.length);
+    let finalName = rawName;
+    for (let n = 1; ; n++) {
+      try {
+        fs.writeFileSync(path.join(dir, finalName), bytes, { flag: 'wx' });
+        break;
+      } catch (e) {
+        if (!e || e.code !== 'EEXIST') throw e;
+        if (n > 999) return { success: false, error: 'Too many collisions' };
+        finalName = `${stem} (${n})${ext}`;
+      }
+    }
+    return { success: true, fileName: finalName, size: buf.length };
+  } catch (err) {
+    console.error('case-attachment-save failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('case-attachment-read', async (_e, payload) => {
+  try {
+    const caseNumber = _safeCaseNumber(payload && payload.caseNumber);
+    if (!caseNumber) return { success: false, error: 'Invalid case number' };
+    const dir = _caseAttachmentDir(caseNumber, payload && payload.kind);
+    if (!dir) return { success: false, error: 'Unknown attachment kind' };
+    const fileName = _sanitizeAttachmentName(payload && payload.fileName);
+    if (!fileName) return { success: false, error: 'Invalid file name' };
+    const filePath = path.join(dir, fileName);
+    if (!fs.existsSync(filePath)) return { success: false, error: 'File not found' };
+
+    let raw = fs.readFileSync(filePath);
+    if (security && security.isUnlocked() && security.isEncryptedBuffer && security.isEncryptedBuffer(raw)) {
+      raw = security.decryptBuffer(raw);
+    } else if (security && security.isEnabled() && !security.isUnlocked()) {
+      if (raw.length >= 6 && raw[0] === 0x56 && raw[1] === 0x49 && raw[2] === 0x50
+          && raw[3] === 0x45 && raw[4] === 0x4E && raw[5] === 0x43) {
+        return { success: false, error: 'File is encrypted; unlock Field Security to open.' };
+      }
+    }
+    return { success: true, dataBase64: raw.toString('base64'), size: raw.length };
+  } catch (err) {
+    console.error('case-attachment-read failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('case-attachment-delete', async (_e, payload) => {
+  try {
+    const caseNumber = _safeCaseNumber(payload && payload.caseNumber);
+    if (!caseNumber) return { success: false, error: 'Invalid case number' };
+    const dir = _caseAttachmentDir(caseNumber, payload && payload.kind);
+    if (!dir) return { success: false, error: 'Unknown attachment kind' };
+    const fileName = _sanitizeAttachmentName(payload && payload.fileName);
+    if (!fileName) return { success: false, error: 'Invalid file name' };
+    const filePath = path.join(dir, fileName);
+    if (!fs.existsSync(filePath)) return { success: true, alreadyGone: true };
+    fs.unlinkSync(filePath);
+    return { success: true };
+  } catch (err) {
+    console.error('case-attachment-delete failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
 // ── Area Canvas media (cases/{caseNumber}/Canvas Media/) ─────────────
 // Photos, video and audio captured against a single canvass entry. Same
 // contract as note attachments: the renderer hands over base64, we write
@@ -3613,7 +3729,7 @@ ipcMain.handle('note-get', async (event, caseNumber, noteId) => {
     caseNumber: String(caseNumber),
     noteId: String(noteId)
   }));
-  const js = `(() => {
+  const js = `(async () => {
     const d = JSON.parse(${safePayload});
     const all = JSON.parse(localStorage.getItem('viperCaseNotes') || '{}');
     const list = all[d.caseNumber];
@@ -3621,8 +3737,16 @@ ipcMain.handle('note-get', async (event, caseNumber, noteId) => {
     // Note ids are Date.now() numbers, but they arrive over IPC as strings.
     const note = list.find(n => n && String(n.id) === d.noteId);
     if (!note) return null;
+    let html = note.contentHtml || note.content || '';
+    // Pictures pasted into a note live in the case folder, not in storage.
+    // Read them back so the pop-out shows the note the way the officer
+    // wrote it. If that fails the markup still arrives, just with the
+    // pictures blank, and the references are preserved on save.
+    try {
+      if (typeof _noteImagesFromDisk === 'function') html = await _noteImagesFromDisk(html);
+    } catch (_) {}
     return {
-      contentHtml: note.contentHtml || note.content || '',
+      contentHtml: html,
       createdAt: note.createdAt || null
     };
   })()`;
@@ -3643,6 +3767,15 @@ async function _noteWriteToMain(caseNumber, noteId, contentHtml) {
   }));
   const js = `(() => {
     const d = JSON.parse(${safePayload});
+    // The pop-out was handed its pictures hydrated so it could display
+    // them. Strip them back to case-folder references before this goes
+    // anywhere near storage, or saving from the pop-out would quietly put
+    // every one of those megabytes back and re-fill the quota.
+    try {
+      if (typeof _CS !== 'undefined' && _CS && typeof _CS.blankHydrated === 'function') {
+        d.contentHtml = _CS.blankHydrated(d.contentHtml);
+      }
+    } catch (_) {}
     const all = JSON.parse(localStorage.getItem('viperCaseNotes') || '{}');
     const list = all[d.caseNumber];
     if (!Array.isArray(list)) return false;
@@ -3680,6 +3813,21 @@ async function _noteWriteToMain(caseNumber, noteId, contentHtml) {
             live.contentHtml = d.contentHtml;
             delete live.content;
             live.editHistory = note.editHistory.slice();
+            // The in-memory copy is what the list behind the pop-out paints
+            // from, and it needs the pictures in it. Read them back and
+            // repaint a second time when they land.
+            try {
+              if (typeof _noteImagesFromDisk === 'function' && typeof _CS !== 'undefined'
+                  && _CS && live.contentHtml.indexOf(_CS.IMG_ATTR) !== -1) {
+                _noteImagesFromDisk(live.contentHtml).then((h) => {
+                  live.contentHtml = h;
+                  const f2 = document.getElementById('noteForm');
+                  const open2 = !!(f2 && !f2.classList.contains('hidden'));
+                  if (!open2 && typeof currentTab !== 'undefined' && currentTab === 'notes'
+                      && typeof renderTabContent === 'function') renderTabContent('notes');
+                }).catch(() => {});
+              }
+            } catch (_) {}
           }
         }
       } catch (_) {}

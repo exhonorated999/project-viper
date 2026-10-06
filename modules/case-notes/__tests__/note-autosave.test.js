@@ -137,6 +137,9 @@ function build(o) {
         noteAutosaveStatus: stamp
     };
 
+    // Stands in for cases/<case>/Notes/ on disk.
+    const fakeDisk = {};
+
     const sandbox = {
         console,
         localStorage,
@@ -156,15 +159,33 @@ function build(o) {
         currentTab: 'notes',
 
         // --- host helpers ---
+        // Wire the REAL storage module in. Note bodies with pasted pictures
+        // are exactly what filled an officer's quota, and the offload is now
+        // part of the commit path, so stubbing it out would hide the thing
+        // most worth testing.
+        _CS: require('../../_shared/case-storage.js'),
+        _noteImagesToDisk(html) {
+            return sandbox._CS.dehydrateHtml(html, (f) => {
+                if (o.diskFails) return null;
+                fakeDisk[f.fileName] = f.base64;
+                return f.fileName;
+            }, { kind: 'notes', stem: 'note-image' });
+        },
+        _noteImagesFromDisk(html) {
+            return sandbox._CS.hydrateHtml(html, (r) => (
+                fakeDisk[r.fileName] ? 'data:image/png;base64,' + fakeDisk[r.fileName] : null
+            ));
+        },
         viperToast: (m, k) => toasts.push({ m, k }),
         ensureCaseModule: () => {},
         renderTabContent: t => rendered.push(t),
         renderNoteAttachmentsList: () => {},
         _revealNoteDay: () => {},
         _persistCaseNotes() {
-            localStorage.setItem('viperCaseNotes', JSON.stringify({
+            // Mirrors the page: a real quota-guarded write that reports back.
+            return sandbox._CS.setItemSafe('viperCaseNotes', JSON.stringify({
                 [sandbox.currentCase.caseNumber]: sandbox.caseNotes
-            }));
+            }), { store: localStorage, label: 'this note' }).ok;
         },
         _collectNoteAssignments: () => (o.assignments === undefined ? [] : o.assignments),
         _fileToBase64: async () => 'BASE64',
@@ -187,7 +208,7 @@ function build(o) {
     vm.createContext(sandbox);
     vm.runInContext(BLOCK + HOOK, sandbox, { filename: 'case-notes-autosave.lifted.js' });
 
-    return { sandbox, localStorage, toasts, rendered, attachmentCalls, timers, editor, form, stamp };
+    return { sandbox, localStorage, toasts, rendered, attachmentCalls, timers, editor, form, stamp, fakeDisk };
 }
 
 // -------------------------------------------------------------- basics
@@ -332,6 +353,70 @@ section('THE DUPLICATE TRAP — repeated silent commits update, never insert');
     const imgOnly = await t8.sandbox._noteCommit({ silent: true });
     check('a pasted screenshot with no text still counts as content',
         imgOnly.saved === true);
+
+    // ------------------------------- pasted pictures leave localStorage
+
+    // The reported bug: "I have spent all day adding pictures to my notes
+    // and wont let me save. Says not enough space." Every pasted screenshot
+    // was being base64'd into a ~5MB storage area shared by the whole app.
+    section('pasted pictures are moved to the case folder, not stored');
+
+    const FATPNG = 'data:image/png;base64,' + 'A'.repeat(120000);
+    const t20 = build({ formOpen: true, editorHtml: '<p>at the door</p><img src="' + FATPNG + '"><p>end</p>' });
+    const r20 = await t20.sandbox._noteCommit({ silent: true });
+    check('the note saves', r20.saved === true, r20.reason);
+    const stored20 = t20.sandbox.caseNotes[0].contentHtml;
+    check('  one file was written to the case folder',
+        Object.keys(t20.fakeDisk).length === 1, JSON.stringify(Object.keys(t20.fakeDisk)));
+    check('  the bytes are NOT in the stored note',
+        stored20.indexOf('A'.repeat(1000)) === -1);
+    check('  the stored note is tiny', stored20.length < 500, 'len=' + stored20.length);
+    check('  it keeps a reference to the file',
+        t20.sandbox._CS.diskImages(stored20).length === 1);
+    check('  the officer\'s text is untouched',
+        /<p>at the door<\/p>/.test(stored20) && /<p>end<\/p>/.test(stored20));
+    check('  and what landed on disk is the real image',
+        t20.fakeDisk[t20.sandbox._CS.diskImages(stored20)[0].fileName] === 'A'.repeat(120000));
+    const back20 = await t20.sandbox._noteImagesFromDisk(stored20);
+    check('  reading it back gives the picture again', back20.indexOf(FATPNG) !== -1);
+
+    // A write that fails must keep the picture in the note rather than
+    // silently drop it. A lost screenshot is evidence lost.
+    const t21 = build({ formOpen: true, editorHtml: '<img src="' + FATPNG + '">', diskFails: true });
+    const r21 = await t21.sandbox._noteCommit({ silent: false });
+    check('a failed disk write still saves the note', r21.saved === true, r21.reason);
+    check('  the picture stays in the note rather than vanishing',
+        t21.sandbox.caseNotes[0].contentHtml.indexOf(FATPNG) !== -1);
+    check('  and the officer is told', t21.toasts.some(t => /could not be moved to disk/i.test(t.m)),
+        JSON.stringify(t21.toasts));
+
+    // The close/quit flush cannot await a disk write. It must still not put
+    // the hydrated bytes back, or closing the window would undo the space
+    // the case just freed.
+    const t22 = build({ formOpen: true, editorHtml: '<img src="' + FATPNG + '">' });
+    await t22.sandbox._noteCommit({ silent: true });
+    const lean22 = t22.sandbox.caseNotes[0].contentHtml;
+    const wet22 = await t22.sandbox._noteImagesFromDisk(lean22);
+    t22.sandbox.document.getElementById('noteEditor').innerHTML = wet22;
+    t22.sandbox._noteCommit({ silent: true, sync: true });
+    check('the close flush does not write the picture back into storage',
+        t22.sandbox.caseNotes[0].contentHtml.indexOf('A'.repeat(1000)) === -1);
+    check('  and it keeps the reference',
+        t22.sandbox._CS.diskImages(t22.sandbox.caseNotes[0].contentHtml).length === 1);
+
+    // A note with no pictures must not pay for any of this.
+    const t23 = build({ formOpen: true, editorHtml: '<p>text only</p>' });
+    await t23.sandbox._noteCommit({ silent: true });
+    check('a plain-text note is stored verbatim',
+        t23.sandbox.caseNotes[0].contentHtml === '<p>text only</p>');
+    check('  and nothing was written to disk', Object.keys(t23.fakeDisk).length === 0);
+
+    // Storage really is full: the commit must say so, not claim success.
+    const t24 = build({ formOpen: true, editorHtml: '<p>a note</p>' });
+    t24.sandbox._persistCaseNotes = () => false;
+    const r24 = await t24.sandbox._noteCommit({ silent: true });
+    check('a refused write reports the commit as FAILED', r24.saved === false);
+    check('  with a quota reason', r24.reason === 'quota', r24.reason);
 
     // ------------------------------------- the beforeunload guarantee
 

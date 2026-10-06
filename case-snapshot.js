@@ -229,9 +229,46 @@
         }
     }
 
+    // ── Quota failures must never be silent ──────────────────────────
+    // A browser storage area is a hard ~5 MB ceiling shared by every case.
+    // When it is reached setItem throws, and most callers in the app are
+    // sync handlers that never expected it or async handlers whose rejection
+    // the browser discards. Either way the record vanished with no warning
+    // and the tab kept showing it from memory until the officer navigated
+    // away. We cannot fix 70 call sites from here, but we can guarantee the
+    // officer is told, and we still re-throw so no caller carries on
+    // believing the write landed.
+    let _quotaToastAt = 0;
+    function _isQuota(err) {
+        if (!err) return false;
+        return err.name === 'QuotaExceededError'
+            || err.name === 'NS_ERROR_DOM_QUOTA_REACHED'
+            || err.code === 22 || err.code === 1014;
+    }
+    function _announceQuota() {
+        // Debounced: one failed save often fans out into several writes, and
+        // five identical toasts just bury the message.
+        const now = Date.now();
+        if (now - _quotaToastAt < 4000) return;
+        _quotaToastAt = now;
+        const msg = 'Out of storage \u2014 that change was NOT saved. '
+            + 'Open a case and VIPER will move its photos out to disk automatically, '
+            + 'which frees the space back up.';
+        try {
+            if (typeof window.viperToast === 'function') { window.viperToast(msg, 'error', 15000); return; }
+            if (typeof window.showToast === 'function') { window.showToast(msg, 'error'); return; }
+        } catch (_) { /* fall through */ }
+        try { console.error('[VIPER] ' + msg); } catch (_) {}
+    }
+
     // ── Wrap localStorage.setItem / removeItem ───────────────────────
     localStorage.setItem = function (key, value) {
-        _origSetItem(key, value);
+        try {
+            _origSetItem(key, value);
+        } catch (err) {
+            if (_isQuota(err)) _announceQuota();
+            throw err;
+        }
         try { scheduleFromKey(key); } catch (_) { /* swallow */ }
     };
     localStorage.removeItem = function (key) {

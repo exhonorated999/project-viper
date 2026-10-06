@@ -138,6 +138,8 @@
         <span id="statusRight">Saves automatically every 5 minutes</span>
     </div>
 
+    <!-- Photo downscaling. Must load before the editor script below. -->
+    <script src="modules/_shared/case-storage.js"></script>
     <script>
         // Case Note pop-out.
         //
@@ -265,6 +267,15 @@
                         editor.appendChild(img);
                     }
                     markDirty();
+                    // Downscale in place. A full-resolution screenshot is
+                    // several megabytes of base64, and the whole app shares
+                    // one small storage budget. 1,600px is still larger than
+                    // anything a report or PDF renders at.
+                    if (window.VpCaseStorage && window.VpCaseStorage.shrinkImageDataUrl) {
+                        window.VpCaseStorage.shrinkImageDataUrl(ev.target.result)
+                            .then((small) => { if (small && small !== img.src) { img.src = small; markDirty(); } })
+                            .catch(() => {});
+                    }
                 };
                 reader.readAsDataURL(blob);
                 break;

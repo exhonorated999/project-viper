@@ -22,6 +22,11 @@
          chargeable-offense pickers. -->
     <script src="modules/offense-reference.js"></script>
     <script src="modules/supervisor-link/supervisor-link-ui.js"></script>
+    <!-- Storage safety net. Must load synchronously and BEFORE case-snapshot.js
+         and every module below: it owns the quota-guarded localStorage write
+         and the note-image disk round trip, and the first thing a case does on
+         open is migrate inline images out of storage. -->
+    <script src="modules/_shared/case-storage.js"></script>
     <script src="case-snapshot.js"></script>
 
     <script src="libs/tailwindcss.js"></script>
@@ -1121,6 +1126,160 @@
         // throw SyntaxError during DOMContentLoaded and brick the case page.
         // Returns `fallback` on null/empty/invalid JSON, with a single warning.
         // ---------------------------------------------------------------------
+        // Storage safety net (see modules/_shared/case-storage.js)
+        //
+        // localStorage is a ~5MB quota for the WHOLE app. Three modules were
+        // base64-ing binary into it — pasted note screenshots, consent-search
+        // attachments, and full-resolution person/vehicle photos — and two of
+        // them called setItem with no try/catch from inside an async submit
+        // handler, so the quota error became an unhandled promise rejection
+        // the browser silently dropped. The record looked saved, the toast
+        // said so, and it was gone on the next visit.
+        //
+        // Everything below routes through these four helpers so that can't
+        // happen again: a write either lands or it says so, and binary goes
+        // to disk instead of into storage.
+        // ---------------------------------------------------------------------
+        const _CS = (typeof window !== 'undefined' && window.VpCaseStorage) || null;
+
+        /* Quota-guarded write. Returns true on success. On failure it tells
+           the officer, in plain words, that nothing was saved — callers must
+           check the return and must NOT close a modal or claim success. */
+        function _lsSetSafe(key, value, label) {
+            if (!_CS) {
+                // Degraded path: the module failed to load. Better to attempt
+                // the write than to refuse to save at all.
+                try { localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value)); return true; }
+                catch (e) {
+                    console.error('[VIPER] save failed for', key, e);
+                    try { viperToast('Could not save ' + (label || 'this item') + ' — storage error.', 'error', 9000); } catch (_) {}
+                    return false;
+                }
+            }
+            const res = _CS.setItemSafe(key, value, { label: label });
+            if (!res.ok) {
+                console.error('[VIPER] save failed for', key, res.message);
+                try { viperToast(res.message, 'error', 12000); } catch (_) {}
+            }
+            return res.ok;
+        }
+
+        /* Write bytes into cases/<caseNumber>/<folder>/ and return the final
+           file name, or null. `kind` is one of the allow-listed folders in
+           the main process: notes | consentSearch | vehicles | photos. */
+        async function _caseFileSave(kind, fileName, base64) {
+            try {
+                if (!window.electronAPI || !window.electronAPI.caseAttachmentSave) return null;
+                const res = await window.electronAPI.caseAttachmentSave({
+                    caseNumber: currentCase.caseNumber, kind, fileName, dataBase64: base64
+                });
+                if (!res || !res.success) {
+                    console.warn('[VIPER] case attachment save failed:', fileName, res && res.error);
+                    return null;
+                }
+                return res.fileName;
+            } catch (e) {
+                console.warn('[VIPER] case attachment save threw:', fileName, e && e.message);
+                return null;
+            }
+        }
+
+        /* Read a file back as a data: URL for display, or null. */
+        async function _caseFileRead(kind, fileName) {
+            try {
+                if (!window.electronAPI || !window.electronAPI.caseAttachmentRead) return null;
+                const res = await window.electronAPI.caseAttachmentRead({
+                    caseNumber: currentCase.caseNumber, kind, fileName
+                });
+                if (!res || !res.success || !res.dataBase64) return null;
+                const mime = (_CS && _CS.mimeForFileName(fileName)) || 'application/octet-stream';
+                return 'data:' + mime + ';base64,' + res.dataBase64;
+            } catch (e) {
+                console.warn('[VIPER] case attachment read threw:', fileName, e && e.message);
+                return null;
+            }
+        }
+
+        /* Move every inline image in a block of note HTML out to disk. */
+        function _noteImagesToDisk(html) {
+            if (!_CS) return Promise.resolve({ html, moved: 0, failed: 0 });
+            return _CS.dehydrateHtml(html,
+                (f) => _caseFileSave('notes', f.fileName, f.base64),
+                { kind: 'notes', stem: 'note-image' });
+        }
+
+        /* Put them back for display. */
+        function _noteImagesFromDisk(html) {
+            if (!_CS) return Promise.resolve(html);
+            return _CS.hydrateHtml(html, (r) => _caseFileRead(r.kind || 'notes', r.fileName));
+        }
+
+        /*
+         * Run once per case open, in the background.
+         *
+         * Pass 1 is the migration: any note still carrying pasted image bytes
+         * gets them written out to cases/<case>/Notes/ and the storage copy
+         * rewritten to a reference. This is what gives an officer who already
+         * filled their quota their space back, and it needs no prompt because
+         * nothing is lost — the pictures end up in the case folder, which is
+         * a better place for them than a browser database.
+         *
+         * Pass 2 is hydration: the same images are read back and pushed into
+         * the IN-MEMORY notes only, never persisted. That is what lets every
+         * existing reader — the notes list, the pop-out, both PDF exports —
+         * go on treating a note body as ordinary HTML with inline images.
+         */
+        let _noteStorageMaintenanceRun = false;
+        async function _noteStorageMaintenance() {
+            if (_noteStorageMaintenanceRun || !_CS || !Array.isArray(caseNotes)) return;
+            _noteStorageMaintenanceRun = true;
+
+            let migrated = 0, freed = 0;
+            try {
+                for (const note of caseNotes) {
+                    if (!note || typeof note.contentHtml !== 'string') continue;
+                    if (!_CS.hasInlineImages(note.contentHtml)) continue;
+                    const res = await _noteImagesToDisk(note.contentHtml);
+                    if (res.moved) {
+                        note.contentHtml = res.html;
+                        migrated += res.moved;
+                        freed += res.bytesFreed || 0;
+                    }
+                }
+                // Persist the slimmed-down notes BEFORE hydrating, so what is
+                // in storage is always the lean copy.
+                if (migrated) _persistCaseNotes();
+            } catch (e) {
+                console.error('[VIPER] note image migration failed:', e);
+            }
+
+            try {
+                for (const note of caseNotes) {
+                    if (!note || typeof note.contentHtml !== 'string') continue;
+                    if (note.contentHtml.indexOf(_CS.IMG_ATTR) === -1) continue;
+                    note.contentHtml = await _noteImagesFromDisk(note.contentHtml);
+                }
+            } catch (e) {
+                console.error('[VIPER] note image hydration failed:', e);
+            }
+
+            if (migrated) {
+                console.log(`[VIPER] moved ${migrated} note image(s) to disk, freeing ${_CS.formatBytes(freed)}`);
+                try {
+                    viperToast(`Freed ${_CS.formatBytes(freed)} of storage — ${migrated} note picture${migrated === 1 ? '' : 's'} moved into the case folder.`, 'success', 8000);
+                } catch (_) {}
+            }
+            // Repaint whatever is on screen now that the pictures are back.
+            try { if (typeof currentTab !== 'undefined' && currentTab === 'notes') renderTabContent('notes'); } catch (_) {}
+        }
+
+        // ---------------------------------------------------------------------
+        // Defensive localStorage parse helper (v3.8.3 hotfix)
+        // Wraps JSON.parse(localStorage.getItem(...)) so that corrupted/truncated
+        // values (e.g. from a Chromium LevelDB partial flush after a crash) cannot
+        // throw SyntaxError during DOMContentLoaded and brick the case page.
+        // Returns `fallback` on null/empty/invalid JSON, with a single warning.
+        // ---------------------------------------------------------------------
         function _lsParse(key, fallback) {
             try {
                 const raw = localStorage.getItem(key);
@@ -1316,6 +1475,10 @@
             // Load notes for this case
             const allNotes = _lsParse('viperCaseNotes', {});
             caseNotes = allNotes[currentCase.caseNumber] || [];
+            // Move any pasted pictures out to the case folder and read them
+            // back for display. Deliberately not awaited — loadCase is
+            // synchronous and the whole page depends on it staying that way.
+            setTimeout(() => { _noteStorageMaintenance(); }, 0);
             
             // Load report for this case
             const allReports = _lsParse('viperCaseReports', {});
@@ -3166,6 +3329,14 @@
             // to the PDF in document order.
             async function renderNoteContentHtml(html) {
                 if (!html || typeof html !== 'string' || !html.trim()) return;
+                // Note pictures live in the case folder. The in-memory copy is
+                // normally already hydrated, but an export can start before
+                // that finishes on a big case — and an export with blank
+                // pictures in it is worse than a slow one. Re-reading is
+                // cheap and idempotent when there is nothing to read.
+                try {
+                    if (_CS && html.indexOf(_CS.IMG_ATTR) !== -1) html = await _noteImagesFromDisk(html);
+                } catch (_) {}
                 const root = document.createElement('div');
                 root.innerHTML = html;
                 let buffer = '';
@@ -6669,7 +6840,14 @@
                 }
             });
 
-            // Clipboard image paste — inlined as base64 data URL (matches Reports)
+            // Clipboard image paste. The image goes in at the caret straight
+            // away so typing is never blocked, then gets quietly swapped for a
+            // downscaled copy. A full-resolution screenshot is around 4 MB of
+            // base64 and the whole app only has about 5 MB of browser storage
+            // to share between every case — which is how an officer spent a
+            // day pasting pictures into notes and then could not save them.
+            // On commit these are moved out to disk entirely (see
+            // _noteImagesToDisk), so what stays in storage is just the markup.
             editor.addEventListener('paste', function(e) {
                 const items = e.clipboardData && e.clipboardData.items;
                 if (!items) return;
@@ -6697,6 +6875,11 @@
                                 sel.addRange(range);
                             } else {
                                 editor.appendChild(img);
+                            }
+                            if (_CS && typeof _CS.shrinkImageDataUrl === 'function') {
+                                _CS.shrinkImageDataUrl(ev.target.result)
+                                    .then((small) => { if (small && small !== img.src) img.src = small; })
+                                    .catch(() => { /* keep the original */ });
                             }
                         };
                         reader.readAsDataURL(blob);
@@ -7182,6 +7365,34 @@
                 return { saved: false, reason: 'empty' };
             }
 
+            // Pasted images live in the note body as base64 data URLs, which
+            // is what filled the officer's storage. Move them out to
+            // cases/<case>/Notes/ and leave a reference behind. Every reader
+            // (the list, the pop-out, the PDF exports) sees ordinary inline
+            // images because the note is hydrated again on load, so nothing
+            // downstream has to know about this.
+            //
+            // The sync path is the close/quit flush, which cannot await disk
+            // writes. There we keep the bytes inline: a slightly fatter note
+            // beats a lost one, and the next ordinary save moves them.
+            let storedHtml = contentHtml;
+            if (!sync && _CS && _CS.hasInlineImages(contentHtml)) {
+                try {
+                    const moved = await _noteImagesToDisk(contentHtml);
+                    storedHtml = moved.html;
+                    if (moved.failed) {
+                        notify(`${moved.failed} image${moved.failed === 1 ? '' : 's'} could not be moved to disk and stayed in the note.`, 'info');
+                    }
+                } catch (e) {
+                    console.error('[noteCommit] image offload failed:', e);
+                    storedHtml = contentHtml;
+                }
+            } else if (sync && _CS) {
+                // Images already on disk were hydrated for display. Drop
+                // those bytes again before writing — no await needed.
+                try { storedHtml = _CS.blankHydrated(contentHtml); } catch (_) {}
+            }
+
             // 1. Upload any pending attachments to disk before mutating note JSON
             let finalAttachments = savedNoteAttachments.filter(a => !a.legacy);
             if (!sync && pendingNoteAttachments.length) {
@@ -7227,7 +7438,7 @@
             if (editingNoteId) {
                 const note = caseNotes.find(n => n.id === editingNoteId);
                 if (note) {
-                    note.contentHtml = contentHtml;
+                    note.contentHtml = storedHtml;
                     delete note.content;
                     note.attachments = finalAttachments;
                     delete note.hasAttachment;
@@ -7242,7 +7453,7 @@
                 noteId = Date.now();
                 caseNotes.push({
                     id: noteId,
-                    contentHtml,
+                    contentHtml: storedHtml,
                     createdAt,
                     editHistory: [],
                     attachments: finalAttachments,
@@ -7258,7 +7469,12 @@
             // appears to do nothing because its day happened to be shut.
             try { if (savedNoteCreatedAt) _revealNoteDay(savedNoteCreatedAt); } catch (_) {}
 
-            _persistCaseNotes();
+            // If storage refused the write, say so and report the commit as
+            // failed. Returning {saved:true} here is what used to let the
+            // form close on a note that was never stored.
+            if (_persistCaseNotes() === false) {
+                return { saved: false, reason: 'quota' };
+            }
 
             // Defensive: ensure the 'notes' module stays in the case's
             // module list so the tab survives a reload.
@@ -7404,7 +7620,7 @@
         function _persistCaseNotes() {
             const allNotes = _lsParse('viperCaseNotes', {});
             allNotes[currentCase.caseNumber] = caseNotes;
-            localStorage.setItem('viperCaseNotes', JSON.stringify(allNotes));
+            return _lsSetSafe('viperCaseNotes', JSON.stringify(allNotes), 'this note');
         }
 
         /** A person only gets a uid when something is actually filed against
@@ -7672,7 +7888,7 @@
             _personNoteCtx = null;
         }
 
-        function savePersonNote() {
+        async function savePersonNote() {
             const ctx = _personNoteCtx;
             const ed = document.getElementById('personNoteEditor');
             if (!ctx || !ed) return;
@@ -7684,6 +7900,13 @@
                 return;
             }
 
+            // Same image offload as the main note editor — see _noteCommit.
+            let storedHtml = contentHtml;
+            if (_CS && _CS.hasInlineImages(contentHtml)) {
+                try { storedHtml = (await _noteImagesToDisk(contentHtml)).html; }
+                catch (e) { console.error('[savePersonNote] image offload failed:', e); }
+            }
+
             // Stamping the uid here is what actually creates the link, so it
             // must happen before the note is written.
             const uid = _ensurePersonNoteUid(ctx.role, ctx.index);
@@ -7692,10 +7915,13 @@
             const person = acc ? (acc.get() || [])[ctx.index] : null;
             const link = { uid, role: ctx.role, name: (person && person.name) || '' };
 
+            // Work on a copy so a refused write leaves the editor exactly as
+            // the officer left it, with the text still in front of them.
+            const before = caseNotes.slice();
             if (ctx.noteId) {
                 const note = caseNotes.find(n => n.id === ctx.noteId);
                 if (note) {
-                    note.contentHtml = contentHtml;
+                    note.contentHtml = storedHtml;
                     delete note.content;
                     note.editHistory = note.editHistory || [];
                     note.editHistory.push(new Date().toISOString());
@@ -7706,7 +7932,7 @@
             } else {
                 caseNotes.push({
                     id: Date.now(),
-                    contentHtml,
+                    contentHtml: storedHtml,
                     createdAt: new Date().toISOString(),
                     editHistory: [],
                     attachments: [],
@@ -7714,7 +7940,7 @@
                 });
             }
 
-            _persistCaseNotes();
+            if (_persistCaseNotes() === false) { caseNotes = before; return; }
             try { ensureCaseModule('notes'); } catch (_) {}
 
             const role = ctx.role;
@@ -7824,6 +8050,12 @@
             };
             const renderNoteContentHtml = async (html) => {
                 if (!html || typeof html !== 'string' || !html.trim()) return;
+                // See the DA export's copy of this walker: pictures live in
+                // the case folder, so read them back before drawing rather
+                // than risk exporting blank placeholders.
+                try {
+                    if (_CS && html.indexOf(_CS.IMG_ATTR) !== -1) html = await _noteImagesFromDisk(html);
+                } catch (_) {}
                 const root = document.createElement('div');
                 root.innerHTML = html;
                 let buffer = '';
@@ -16942,16 +17174,34 @@
             renderTabContent('suspects');
         }
 
+        // Photos are stored inside the case record as data URLs, which means a
+        // 6 MB phone photo costs roughly 16 MB of the browser's ~5 MB storage
+        // budget all by itself. Downscale before it ever reaches the field: an
+        // 1,600px long edge is still far more than any report or PDF uses, and
+        // it is the difference between a case that saves and one that does not.
         function handleImageUpload(event, fieldName) {
-            const file = event.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const input = document.querySelector(`input[name="${fieldName}"]`);
-                    if (input) input.value = e.target.result;
-                };
-                reader.readAsDataURL(file);
-            }
+            const file = event.target && event.target.files && event.target.files[0];
+            if (!file) return;
+
+            // Scope the lookup to this upload control's own form when there is
+            // one, so a background form's field is never written by mistake.
+            const scope = (event.target.closest && event.target.closest('form')) || document;
+            const input = scope.querySelector(`input[name="${fieldName}"]`)
+                || document.querySelector(`input[name="${fieldName}"]`);
+            if (!input) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const raw = e.target.result;
+                if (!_CS || typeof _CS.shrinkImageDataUrl !== 'function') { input.value = raw; return; }
+                input.value = 'Processing image\u2026';
+                _CS.shrinkImageDataUrl(raw)
+                    // shrinkImageDataUrl resolves with the ORIGINAL on any
+                    // failure, so the officer never loses the photo to it.
+                    .then((small) => { input.value = small || raw; })
+                    .catch(() => { input.value = raw; });
+            };
+            reader.readAsDataURL(file);
         }
         
         function addFirearm(suspectIndex) {
@@ -21563,8 +21813,13 @@
             recoveredVehicles = _lsParse(`recoveredVehicles_${currentCase.id}`, []);
         }
         
+        // Returns true only if the vehicle list really reached storage. The old
+        // version was a bare setItem: once the case was near the storage ceiling
+        // it threw, the throw was swallowed, the modal closed and the tab
+        // re-rendered happily from the in-memory array. The record looked saved
+        // right up until the officer left the tab and came back.
         function saveRecoveredVehicles() {
-            localStorage.setItem(`recoveredVehicles_${currentCase.id}`, JSON.stringify(recoveredVehicles));
+            return _lsSetSafe(`recoveredVehicles_${currentCase.id}`, JSON.stringify(recoveredVehicles), 'this vehicle');
         }
         
         function renderRecoveredVehiclesTab() {
@@ -21742,8 +21997,11 @@
         
         async function deleteRecoveredVehicle(index) {
             if (await viperConfirm('Are you sure you want to delete this recovered vehicle?', {danger:true, okText:'Delete'})) {
+                const before = recoveredVehicles.slice();
                 recoveredVehicles.splice(index, 1);
-                saveRecoveredVehicles();
+                // Put the row back if the write failed, so the list on screen
+                // always matches the list on disk.
+                if (!saveRecoveredVehicles()) { recoveredVehicles = before; return; }
                 currentRecoveredVehicleView = null;
                 renderTabContent('vehicles');
             }
@@ -21853,14 +22111,24 @@
                     photo: formData.get('photo'),
                     notes: formData.get('notes')
                 };
-                
+
+                // Work on a COPY. If the write fails the officer keeps the
+                // filled-in modal and an explanation, instead of watching it
+                // close on a record that was never stored.
+                const next = recoveredVehicles.slice();
                 if (isEdit) {
-                    recoveredVehicles[editIndex] = vehicleData;
+                    next[editIndex] = vehicleData;
                 } else {
-                    recoveredVehicles.push(vehicleData);
+                    next.push(vehicleData);
                 }
-                
-                saveRecoveredVehicles();
+
+                const before = recoveredVehicles;
+                recoveredVehicles = next;
+                if (!saveRecoveredVehicles()) {
+                    recoveredVehicles = before;
+                    return;
+                }
+
                 modal.remove();
                 renderTabContent('vehicles');
             };
@@ -30297,7 +30565,24 @@
         }
 
         function saveConsentSearches() {
-            localStorage.setItem(`consentSearches_${currentCase.id}`, JSON.stringify(consentSearches));
+            return _lsSetSafe(`consentSearches_${currentCase.id}`, JSON.stringify(consentSearches),
+                'the consent search');
+        }
+
+        /* Read a consent attachment back as a data: URL, whichever way it was
+           stored. Records created before this fix carry the bytes inline in
+           `data`; records created after carry only `fileName` and the bytes
+           live in cases/<caseNumber>/Consent Searches/. Both must keep
+           working — the officer's existing consent forms are evidence. */
+        async function _consentFileDataUrl(f) {
+            if (!f) return null;
+            if (f.data) {
+                return f.data.startsWith('data:')
+                    ? f.data
+                    : 'data:' + (f.type || 'application/octet-stream') + ';base64,' + f.data;
+            }
+            if (f.fileName) return await _caseFileRead('consentSearch', f.fileName);
+            return null;
         }
 
         let editingConsentId = null;
@@ -30377,10 +30662,11 @@
                         <div class="mt-3 pt-3 border-t border-gray-700">
                             <span class="text-gray-500 text-sm">Attached Files:</span>
                             <div class="flex flex-wrap gap-2 mt-1">
-                                ${cs.attachedFiles.map(f => `
-                                    <span class="px-2 py-1 rounded bg-viper-dark/60 border border-gray-600 text-xs text-gray-300 flex items-center gap-1">
+                                ${cs.attachedFiles.map((f, fi) => `
+                                    <button type="button" onclick="openConsentAttachment('${cs.id}', ${fi})" title="Open ${String(f.name || '').replace(/"/g, '&quot;')}"
+                                        class="px-2 py-1 rounded bg-viper-dark/60 border border-gray-600 hover:border-viper-cyan text-xs text-gray-300 hover:text-white flex items-center gap-1 transition">
                                         📎 ${f.name} <span class="text-gray-500">(${(f.size / 1024).toFixed(1)} KB)</span>
-                                    </span>
+                                    </button>
                                 `).join('')}
                             </div>
                         </div>` : ''}
@@ -30473,50 +30759,143 @@
 
             document.getElementById('consentSearchForm').onsubmit = async (e) => {
                 e.preventDefault();
-                const filesInput = document.getElementById('csFiles');
-                const newFiles = [];
-                if (filesInput.files.length > 0) {
-                    for (const f of filesInput.files) {
-                        const buf = await f.arrayBuffer();
-                        const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
-                        newFiles.push({ name: f.name, size: f.size, type: f.type, data: b64 });
-                    }
-                }
-
-                const record = {
-                    id: editingConsentId || ('cs_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)),
-                    consentType: document.getElementById('csConsentType').value,
-                    consentGiven: document.getElementById('csConsentGiven').value === 'true',
-                    dateTime: document.getElementById('csDateTime').value ? new Date(document.getElementById('csDateTime').value).toISOString() : null,
-                    consentingParty: document.getElementById('csConsentingParty').value.trim(),
-                    requestingOfficer: document.getElementById('csRequestingOfficer').value.trim(),
-                    witness: document.getElementById('csWitness').value.trim(),
-                    location: document.getElementById('csLocation').value.trim(),
-                    scopeOfSearch: document.getElementById('csScopeOfSearch').value.trim(),
-                    itemsFound: document.getElementById('csItemsFound').value.trim(),
-                    notes: document.getElementById('csNotes').value.trim(),
-                    attachedFiles: [...(cs?.attachedFiles || []), ...newFiles],
-                    createdAt: cs?.createdAt || new Date().toISOString()
+                const submitBtn = e.target.querySelector('button[type="submit"]');
+                const btnLabel = submitBtn ? submitBtn.textContent : '';
+                if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving…'; }
+                const unwind = () => {
+                    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = btnLabel; }
                 };
 
-                if (editingConsentId) {
-                    const idx = consentSearches.findIndex(c => c.id === editingConsentId);
-                    if (idx >= 0) consentSearches[idx] = record;
-                } else {
-                    consentSearches.push(record);
+                try {
+                    const filesInput = document.getElementById('csFiles');
+                    const newFiles = [];
+                    if (filesInput.files.length > 0) {
+                        for (const f of filesInput.files) {
+                            const buf = await f.arrayBuffer();
+                            // Chunked, because the old
+                            // btoa(String.fromCharCode(...new Uint8Array(buf)))
+                            // spread every byte as a function argument and was
+                            // a RangeError on any real scanned consent form.
+                            const b64 = _CS ? _CS.bufferToBase64(buf) : null;
+                            if (b64 === null) {
+                                viperToast('Could not read ' + f.name + '.', 'error', 9000);
+                                unwind(); return;
+                            }
+                            // To disk, not into localStorage. A consent form is
+                            // a multi-MB scan and localStorage is a ~5MB quota
+                            // for the whole app — one of these used to fill it
+                            // and then every save in every module failed.
+                            const savedName = await _caseFileSave('consentSearch', f.name, b64);
+                            if (!savedName) {
+                                viperToast('Could not save the attachment "' + f.name + '" to the case folder. '
+                                    + 'Nothing was saved. If Field Security is on, unlock it and try again.',
+                                    'error', 12000);
+                                unwind(); return;
+                            }
+                            newFiles.push({ name: f.name, fileName: savedName, size: f.size, type: f.type });
+                        }
+                    }
+
+                    const record = {
+                        id: editingConsentId || ('cs_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)),
+                        consentType: document.getElementById('csConsentType').value,
+                        consentGiven: document.getElementById('csConsentGiven').value === 'true',
+                        dateTime: document.getElementById('csDateTime').value ? new Date(document.getElementById('csDateTime').value).toISOString() : null,
+                        consentingParty: document.getElementById('csConsentingParty').value.trim(),
+                        requestingOfficer: document.getElementById('csRequestingOfficer').value.trim(),
+                        witness: document.getElementById('csWitness').value.trim(),
+                        location: document.getElementById('csLocation').value.trim(),
+                        scopeOfSearch: document.getElementById('csScopeOfSearch').value.trim(),
+                        itemsFound: document.getElementById('csItemsFound').value.trim(),
+                        notes: document.getElementById('csNotes').value.trim(),
+                        attachedFiles: [...(cs?.attachedFiles || []), ...newFiles],
+                        createdAt: cs?.createdAt || new Date().toISOString()
+                    };
+
+                    // Mutate a COPY of the list so a failed write leaves the
+                    // in-memory state exactly as it was. The old code pushed
+                    // first and saved second, so after a quota failure the tab
+                    // re-rendered from the array and showed a record that was
+                    // never written — which is precisely what "it looks like it
+                    // saves but when you leave the tab and come back its gone"
+                    // was describing.
+                    const next = consentSearches.slice();
+                    if (editingConsentId) {
+                        const idx = next.findIndex(c => c.id === editingConsentId);
+                        if (idx >= 0) next[idx] = record; else next.push(record);
+                    } else {
+                        next.push(record);
+                    }
+
+                    const before = consentSearches;
+                    consentSearches = next;
+                    if (!saveConsentSearches()) {
+                        // _lsSetSafe has already told the officer why.
+                        consentSearches = before;
+                        unwind();
+                        return;
+                    }
+
+                    modal.remove();
+                    renderTabContent('consentSearch');
+                    viperToast(editingConsentId ? 'Consent search updated' : 'Consent search added', 'success');
+                    editingConsentId = null;
+                } catch (err) {
+                    // An async submit handler's rejection is silently discarded
+                    // by the browser. Catching here is what turns a mystery
+                    // into a message.
+                    console.error('[ConsentSearch] save failed:', err);
+                    viperToast('Could not save the consent search: ' + (err && err.message ? err.message : err)
+                        + ' — nothing was saved.', 'error', 12000);
+                    unwind();
                 }
-                saveConsentSearches();
-                modal.remove();
-                renderTabContent('consentSearch');
-                viperToast(editingConsentId ? 'Consent search updated' : 'Consent search added', 'success');
-                editingConsentId = null;
             };
+        }
+
+        /* Open a consent attachment. Works for both storage generations:
+           pre-fix records hold the bytes inline, post-fix records name a file
+           in the case folder. */
+        async function openConsentAttachment(csId, index) {
+            try {
+                const rec = consentSearches.find(c => c.id === csId);
+                const f = rec && rec.attachedFiles && rec.attachedFiles[index];
+                if (!f) { viperToast('That attachment is no longer on this record.', 'error'); return; }
+                const url = await _consentFileDataUrl(f);
+                if (!url) {
+                    viperToast('Could not open ' + f.name + '. If Field Security is on, unlock it first.', 'error', 9000);
+                    return;
+                }
+                const res = await fetch(url);
+                const blob = await res.blob();
+                const objUrl = URL.createObjectURL(blob.type ? blob : new Blob([blob], { type: f.type || 'application/octet-stream' }));
+                window.open(objUrl, '_blank');
+                setTimeout(() => URL.revokeObjectURL(objUrl), 60000);
+            } catch (e) {
+                console.error('[ConsentSearch] open attachment failed:', e);
+                viperToast('Could not open that attachment.', 'error');
+            }
         }
 
         async function deleteConsentSearch(id) {
             if (!await viperConfirm('Delete this consent search record?', { danger: true, okText: 'Delete' })) return;
+            const removed = consentSearches.find(c => c.id === id);
+            const before = consentSearches;
             consentSearches = consentSearches.filter(c => c.id !== id);
-            saveConsentSearches();
+            if (!saveConsentSearches()) { consentSearches = before; return; }
+
+            // Only once the record is really gone do we remove its signed
+            // forms from the case folder. Doing it the other way round would
+            // leave a record pointing at a file that no longer exists.
+            try {
+                const files = (removed && Array.isArray(removed.attachedFiles)) ? removed.attachedFiles : [];
+                for (const f of files) {
+                    if (!f || !f.fileName || !window.electronAPI || !window.electronAPI.caseAttachmentDelete) continue;
+                    await window.electronAPI.caseAttachmentDelete({
+                        caseNumber: currentCase.caseNumber, kind: 'consentSearch', fileName: f.fileName
+                    });
+                }
+            } catch (e) { console.warn('[VIPER] consent attachment cleanup failed:', e && e.message); }
+
             renderTabContent('consentSearch');
             viperToast('Consent search deleted', 'success');
         }
@@ -32968,6 +33347,13 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 { id: 'money', label: 'Money Seized', icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
                 { id: 'missingpersons', label: 'Missing Persons', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7' },
                 { id: 'areacanvas', label: 'Area Canvas', icon: 'M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7' },
+                // Consent Search was registered in moduleConfig and wired into
+                // every other site (icons, export, item counts, render, remove)
+                // but was never listed here, so "+ Add Module" could not offer
+                // it. Cases only ever showed the tab because it is auto-detected
+                // from existing consentSearches_<caseId> data — which means a
+                // clean install could never create the first record.
+                { id: 'consentSearch', label: 'Consent Search', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
                 { id: 'opsplan', label: 'OPS Plan', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
             ];
 

@@ -74,6 +74,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   noteSaveAttachment: (data) => ipcRenderer.invoke('note-save-attachment', data),
   noteReadAttachment: (data) => ipcRenderer.invoke('note-read-attachment', data),
   noteDeleteAttachment: (data) => ipcRenderer.invoke('note-delete-attachment', data),
+  // Generic per-case attachment store. `kind` picks the destination folder
+  // from a fixed allow-list in the main process (notes / consentSearch /
+  // vehicles / photos) — modules that used to base64 files into localStorage
+  // keep only the returned fileName.
+  caseAttachmentSave: (data) => ipcRenderer.invoke('case-attachment-save', data),
+  caseAttachmentRead: (data) => ipcRenderer.invoke('case-attachment-read', data),
+  caseAttachmentDelete: (data) => ipcRenderer.invoke('case-attachment-delete', data),
   noteListAttachments: (caseNumber) => ipcRenderer.invoke('note-list-attachments', caseNumber),
   // Area Canvas media — photos/video/audio per canvass entry, saved to
   // cases/{caseNumber}/Canvas Media/ on disk for the same reason note

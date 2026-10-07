@@ -246,6 +246,18 @@
           return bytes;
         });
     }
+    // Field work media. Same by-name read, different case folder.
+    if (m && m.fieldWorkFile) {
+      if (!api.fieldWorkReadMedia) return Promise.reject(new Error('Desktop app required'));
+      return api.fieldWorkReadMedia({ caseNumber: m.caseNumber || '', fileName: m.fieldWorkFile })
+        .then(function (res) {
+          if (!res || !res.success) throw new Error((res && res.error) || 'Could not read file');
+          var bin = atob(res.dataBase64);
+          var bytes = new Uint8Array(bin.length);
+          for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          return bytes;
+        });
+    }
     if (!api.readEvidenceFile || !m || !m.path) return Promise.reject(new Error('File unavailable'));
     return api.readEvidenceFile(m.path).then(function (bytes) { return new Uint8Array(bytes); });
   }
@@ -570,6 +582,9 @@
       });
     });
     put('canvas', lsParse('areacanvas_' + cid, []));
+    // Field work pins are keyed on the entry id, which boardPins() stringifies.
+    // Without this, deleting a field work entry leaves an orphan pin behind.
+    put('auto:fieldwork', lsParse('fieldwork_' + cid, []));
     keys['vehicle'] = {};
     susp.forEach(function (s, sidx) { (s.vehicles || []).forEach(function (v, vidx) { keys['vehicle'][sidx + ':' + vidx] = true; }); });
     keys['evidence'] = {};
@@ -609,7 +624,7 @@
   // Which "Add from case data" imports already have pins on the board, so a sync
   // refreshes exactly the sources the user opted into (not every possible type).
   function _presentDataTypes() {
-    var map = { victim: 'victims', witness: 'witnesses', involved: 'involved', missing: 'missing', lastseen: 'missing', vehicle: 'vehicles', canvas: 'canvas', evidence: 'evidence', crosscase: 'crosscase' };
+    var map = { victim: 'victims', witness: 'witnesses', involved: 'involved', missing: 'missing', lastseen: 'missing', vehicle: 'vehicles', canvas: 'canvas', 'auto:fieldwork': 'fieldwork', evidence: 'evidence', crosscase: 'crosscase' };
     var types = {};
     board.pins.forEach(function (p) { if (p.sourceType && map[p.sourceType]) types[map[p.sourceType]] = true; });
     return Object.keys(types);
@@ -749,6 +764,38 @@
           cPin.lat = c.manualLat; cPin.lng = c.manualLon; cPin.approx = false;
         } else if (cPin.lat == null) {
           jobs.push(geocode(c.address).then(function (g) { if (g) { cPin.lat = g.lat; cPin.lng = g.lng; cPin.approx = !!g.approx; scheduleRefresh(); } }));
+        }
+      });
+    }
+    else if (type === 'fieldwork') {
+      // The pin SHAPE is defined once, in the Field Work module, so the tab
+      // and the board can never disagree about what a field work pin is.
+      // This arm adds the two things only the board can do: geocode the
+      // typed address, and refresh the parts of `data` that upsertAutoPin
+      // only seeds on CREATE (an entry that gained photos after it was
+      // first pinned would otherwise show none).
+      var fwSpecs = [];
+      try {
+        if (window.FieldWorkUI && typeof window.FieldWorkUI.boardPins === 'function') {
+          fwSpecs = window.FieldWorkUI.boardPins(cid, cnum) || [];
+        }
+      } catch (_) { fwSpecs = []; }
+      fwSpecs.forEach(function (spec) {
+        if (!spec || !spec.address) return;
+        var fPin = upsertAutoPin(spec);
+        fPin.data = spec.data || {};
+        added++;
+
+        // A hand-set GPS position beats geocoding a typed address, and it
+        // costs no network call.
+        var fwManual = typeof spec.manualLat === 'number' && typeof spec.manualLon === 'number'
+          && !isNaN(spec.manualLat) && !isNaN(spec.manualLon);
+        if (fwManual && !fPin._posManual) {
+          fPin.lat = spec.manualLat; fPin.lng = spec.manualLon; fPin.approx = false;
+        } else if (fPin.lat == null) {
+          jobs.push(geocode(spec.address).then(function (g) {
+            if (g) { fPin.lat = g.lat; fPin.lng = g.lng; fPin.approx = !!g.approx; scheduleRefresh(); }
+          }));
         }
       });
     }
@@ -1812,9 +1859,10 @@
       wrap.appendChild(name);
 
       function fallback(msg) {
-        // Canvass media has no path of its own, so there is nothing for the
-        // OS to open — say what went wrong instead of offering a dead button.
-        if (m.canvasFile) {
+        // Canvass and field work media have no path of their own, so there
+        // is nothing for the OS to open — say what went wrong instead of
+        // offering a dead button.
+        if (m.canvasFile || m.fieldWorkFile) {
           var s = document.createElement('div');
           s.className = 'cb-media-name';
           s.textContent = msg || 'Unavailable';
@@ -1939,7 +1987,7 @@
   function openAddMenu() {
     var opts = [
       ['victims', 'Victims'], ['witnesses', 'Witnesses'], ['involved', 'Other Involved Persons'], ['missing', 'Missing Persons (last seen)'],
-      ['vehicles', 'Vehicles / Plates'], ['canvas', 'Area Canvas locations'], ['evidence', 'Evidence (with location)'], ['crosscase', 'Related cases (shared suspects)']
+      ['vehicles', 'Vehicles / Plates'], ['canvas', 'Area Canvas locations'], ['fieldwork', 'Field Work locations'], ['evidence', 'Evidence (with location)'], ['crosscase', 'Related cases (shared suspects)']
     ];
     var wrap = document.getElementById('cbAddMenuWrap');
     var existing = document.getElementById('cbAddMenu');

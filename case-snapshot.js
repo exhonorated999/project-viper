@@ -34,7 +34,7 @@
     const PATTERN2_PREFIXES = [
         'suspects_', 'victims_', 'victimBusinesses_', 'cargo_',
         'witnesses_', 'involvedPersons_', 'recoveredVehicles_', 'missingpersons_',
-        'areacanvas_', 'prosecution_', 'narcotics_', 'firearms_',
+        'areacanvas_', 'fieldwork_', 'fieldworkForms_', 'prosecution_', 'narcotics_', 'firearms_',
         'money_', 'opsplan_', 'rmsImports_', 'oversightImport_',
         'canvasForms_', 'cyberTips_', 'timelineEvents_', 'consentSearches_',
         'googleWarrant_', 'metaWarrant_', 'kikWarrant_', 'caseMetrics_',

@@ -1,0 +1,281 @@
+/*
+ * Field Work — tab styling.
+ *
+ * Colour comes from the host's --vp-* skin tokens wherever one exists, so a
+ * detective running a different skin does not get one tab that ignores it.
+ * Where a token is missing the fallback is the stock VIPER palette.
+ */
+
+.fw-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 1rem;
+}
+
+/* ── Entry cards ─────────────────────────────────────────────────────── */
+
+.fw-card {
+    background: rgba(17, 24, 39, 0.5);
+    border: 1px solid rgba(75, 85, 99, 0.5);
+    border-radius: 0.75rem;
+    padding: 1rem;
+    transition: border-color .15s ease, transform .15s ease;
+    cursor: pointer;
+}
+
+.fw-card:hover {
+    border-color: rgba(34, 211, 238, 0.6);
+    transform: translateY(-1px);
+}
+
+/* A left edge in the entry's own status colour. The list is scanned, not
+ * read — follow-ups have to be findable without stopping on each card. */
+.fw-card {
+    border-left-width: 3px;
+    border-left-color: var(--fw-accent, #9ca3af);
+}
+
+.fw-card-title {
+    color: #fff;
+    font-weight: 600;
+    font-size: 0.95rem;
+    line-height: 1.3;
+}
+
+.fw-card-sub {
+    color: #9ca3af;
+    font-size: 0.75rem;
+    margin-top: 0.15rem;
+}
+
+.fw-card-summary {
+    color: #d1d5db;
+    font-size: 0.8rem;
+    margin-top: 0.5rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* ── Chips ───────────────────────────────────────────────────────────── */
+
+.fw-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.1rem 0.45rem;
+    border-radius: 9999px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+
+.fw-chip-preset { background: rgba(34, 211, 238, 0.15); color: #67e8f9; border: 1px solid rgba(34, 211, 238, 0.3); }
+.fw-chip-follow { background: rgba(168, 85, 247, 0.15); color: #d8b4fe; border: 1px solid rgba(168, 85, 247, 0.35); }
+.fw-chip-media  { background: rgba(249, 115, 22, 0.15); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.35); }
+.fw-chip-ev     { background: rgba(34, 197, 94, 0.15);  color: #86efac; border: 1px solid rgba(34, 197, 94, 0.35); }
+.fw-chip-desk   { background: rgba(148, 163, 184, 0.12); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); }
+.fw-chip-hold   { background: rgba(239, 68, 68, 0.12);  color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.35); }
+
+/* ── Preset picker (create-form modal) ───────────────────────────────── */
+
+.fw-preset-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.5rem;
+}
+
+.fw-preset {
+    text-align: left;
+    padding: 0.6rem 0.7rem;
+    border-radius: 0.6rem;
+    border: 1px solid rgba(75, 85, 99, 0.7);
+    background: rgba(17, 24, 39, 0.6);
+    color: #d1d5db;
+    transition: border-color .15s ease, background .15s ease;
+    cursor: pointer;
+}
+
+.fw-preset:hover { border-color: rgba(34, 211, 238, 0.5); }
+
+.fw-preset.is-active {
+    border-color: #22d3ee;
+    background: rgba(34, 211, 238, 0.12);
+    color: #fff;
+}
+
+.fw-preset-name { font-weight: 600; font-size: 0.85rem; display: block; }
+.fw-preset-desc { font-size: 0.68rem; color: #9ca3af; display: block; margin-top: 0.15rem; line-height: 1.25; }
+
+/* ── Field / capture pick lists ──────────────────────────────────────── */
+
+.fw-picks {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 0.35rem 0.75rem;
+}
+
+.fw-pick {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.8rem;
+    color: #d1d5db;
+    cursor: pointer;
+}
+
+.fw-pick input[disabled] + span { color: #6b7280; }
+
+/* ── Media gallery ───────────────────────────────────────────────────── */
+
+.fw-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.75rem;
+}
+
+.fw-tile {
+    background: rgba(17, 24, 39, 0.65);
+    border: 1px solid rgba(75, 85, 99, 0.5);
+    border-radius: 0.6rem;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.fw-tile-thumb {
+    height: 110px;
+    background: #0b0f17;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.fw-tile-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.fw-tile-glyph { font-size: 2rem; opacity: 0.8; }
+
+.fw-tile-body { padding: 0.5rem 0.6rem; }
+
+.fw-tile-name {
+    font-size: 0.7rem;
+    color: #e5e7eb;
+    word-break: break-word;
+    line-height: 1.25;
+}
+
+.fw-tile-meta { font-size: 0.63rem; color: #6b7280; margin-top: 0.2rem; }
+
+/* Actions wrap. A tile is 150px wide at its narrowest and carries up to
+ * four controls; space-between pushes the last one off the tile instead of
+ * moving it to a second row. */
+.fw-tile-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0 0.6rem 0.55rem;
+}
+
+.fw-tile-actions .fw-del { margin-left: auto; }
+
+/* Discovery Status, per file. Deliberately styled the same two ways the
+ * Area Canvas control is: green when it will be handed over, amber when it
+ * is being withheld. The amber state is the one that has to be noticeable
+ * across a room. */
+.fw-disc {
+    font-size: 0.6rem;
+    padding: 0.14rem 0.4rem;
+    border-radius: 0.3rem;
+    cursor: pointer;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+    background: transparent;
+}
+.fw-disc.is-on  { color: #86efac; border: 1px solid rgba(34, 197, 94, 0.4); }
+.fw-disc.is-off { color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.6); background: rgba(245, 158, 11, 0.12); }
+.fw-disc.is-on:hover  { background: rgba(34, 197, 94, 0.14); }
+.fw-disc.is-off:hover { background: rgba(245, 158, 11, 0.22); }
+
+.fw-tile.is-withheld { border-color: rgba(245, 158, 11, 0.45); }
+
+.fw-mini {
+    font-size: 0.65rem;
+    padding: 0.15rem 0.4rem;
+    border-radius: 0.3rem;
+    border: 1px solid rgba(75, 85, 99, 0.7);
+    background: transparent;
+    color: #9ca3af;
+    cursor: pointer;
+}
+
+.fw-mini:hover { color: #fff; border-color: rgba(156, 163, 175, 0.9); }
+.fw-mini.fw-del:hover { color: #fca5a5; border-color: rgba(239, 68, 68, 0.6); }
+
+.fw-pick-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.65rem;
+    color: #9ca3af;
+    cursor: pointer;
+}
+
+/* ── Detail view ─────────────────────────────────────────────────────── */
+
+.fw-kv {
+    display: grid;
+    grid-template-columns: minmax(130px, auto) 1fr;
+    gap: 0.4rem 1rem;
+    font-size: 0.85rem;
+}
+
+.fw-kv dt { color: #9ca3af; }
+.fw-kv dd { color: #e5e7eb; margin: 0; word-break: break-word; }
+
+/* ── Empty state ─────────────────────────────────────────────────────── */
+
+.fw-empty {
+    text-align: center;
+    padding: 2.5rem 1rem;
+    color: #9ca3af;
+}
+
+.fw-empty-glyph { font-size: 2.5rem; display: block; margin-bottom: 0.5rem; opacity: 0.7; }
+
+/* ── Form cards ──────────────────────────────────────────────────────── */
+
+.fw-form-card {
+    background: rgba(17, 24, 39, 0.5);
+    border: 1px solid rgba(75, 85, 99, 0.5);
+    border-radius: 0.6rem;
+    padding: 0.9rem;
+}
+
+.fw-qr {
+    width: 96px;
+    height: 96px;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.fw-url {
+    width: 100%;
+    padding: 0.2rem 0.45rem;
+    background: #0b0f17;
+    border: 1px solid rgba(75, 85, 99, 0.8);
+    border-radius: 0.3rem;
+    color: #67e8f9;
+    font-size: 0.68rem;
+}
+
+.fw-url:focus { outline: none; border-color: #22d3ee; }

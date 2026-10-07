@@ -4389,7 +4389,7 @@ ipcMain.handle('save-case-export', async (event, { fileName, data }) => {
 // work product, and the dialog/PDF names say Assist Package. The DA-export path
 // is left byte-for-byte as it was; it is field-validated and not worth
 // perturbing to save a few lines here.
-ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber, excludeCsam, csamTags, nonDiscoverableTags, nonDiscoverableCanvasFiles, assist }) => {
+ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber, excludeCsam, csamTags, nonDiscoverableTags, nonDiscoverableCanvasFiles, nonDiscoverableFieldWorkFiles, assist }) => {
   const assistInfo = (assist && typeof assist === 'object') ? assist : null;
   const result = await dialog.showSaveDialog(mainWindow, {
     title: assistInfo ? 'Save Assist Package' : 'Save DA Export Package',
@@ -4419,6 +4419,16 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
   // by file name.
   const nonDiscoverableCanvasSet = new Set(
     (Array.isArray(nonDiscoverableCanvasFiles) ? nonDiscoverableCanvasFiles : [])
+      .filter(t => typeof t === 'string' && t.length > 0)
+  );
+
+  // Field Work media is the same idea in a different folder: flat files
+  // carrying their own Discovery Status flag. Kept as a SEPARATE set rather
+  // than merged with the canvass one, because the two folders are walked
+  // separately and a name collision across them would silently withhold the
+  // wrong file.
+  const nonDiscoverableFieldWorkSet = new Set(
+    (Array.isArray(nonDiscoverableFieldWorkFiles) ? nonDiscoverableFieldWorkFiles : [])
       .filter(t => typeof t === 'string' && t.length > 0)
   );
 
@@ -4694,7 +4704,20 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
         }
       );
 
-      // 6. Manifest with per-file outcome — useful for DA-side audit
+      // 6. Field Work media (photos/clips/recordings/documents the
+      //    investigator captured on their own phone or attached at the desk).
+      //    Same flat-file shape as the canvass folder, same per-file withhold.
+      addTreeToArchive(
+        path.join(casesDir, caseNumber, FIELD_WORK_MEDIA_DIR),
+        pfx(FIELD_WORK_MEDIA_DIR),
+        archive,
+        {
+          skipFileNames: nonDiscoverableFieldWorkSet.size ? nonDiscoverableFieldWorkSet : null,
+          manifestModule: 'Field Work'
+        }
+      );
+
+      // 7. Manifest with per-file outcome — useful for DA-side audit
       const manifest = {
         caseNumber,
         generatedAt: new Date().toISOString(),
@@ -8922,15 +8945,26 @@ async function _canvasApiFetch(apiKey, endpoint, options = {}) {
       let body = '';
       res.on('data', chunk => { body += chunk; });
       res.on('end', () => {
+        // The status code is carried on the Error as well as the message.
+        // Callers that only read `.message` are unaffected; the ones that
+        // must tell "the relay says this is gone" apart from "we could not
+        // reach the relay" cannot do that from prose. Getting that
+        // distinction wrong deletes a form record — and with it the only
+        // copy of the media key outside the officer's phone.
+        const fail = (msg) => {
+          const err = new Error(msg);
+          err.statusCode = res.statusCode;
+          reject(err);
+        };
         try {
           const data = JSON.parse(body);
           if (res.statusCode >= 400) {
-            reject(new Error(data.detail || `Server error ${res.statusCode}`));
+            fail(data.detail || `Server error ${res.statusCode}`);
           } else {
             resolve(data);
           }
         } catch {
-          if (res.statusCode >= 400) reject(new Error(`Server error ${res.statusCode}`));
+          if (res.statusCode >= 400) fail(`Server error ${res.statusCode}`);
           else resolve(body);
         }
       });
@@ -9169,8 +9203,28 @@ ipcMain.handle('fieldwork-form-create', async (_e, params) => {
   };
 });
 
+/**
+ * How many entries are waiting on the relay for this form.
+ *
+ * Returns a result object rather than throwing, because the renderer uses
+ * the answer to decide whether to DELETE its local form record — and that
+ * record holds the only copy of the AES key outside the officer's phone.
+ * A laptop with no signal in a car must read as "ask again later", not as
+ * "this form is gone"; `gone` is set only when the relay itself says the
+ * form no longer exists.
+ */
 ipcMain.handle('fieldwork-form-get-info', async (_e, { apiKey, formId }) => {
-  return await _relayApiFetch(apiKey, `/api/fieldwork/${formId}/info`);
+  try {
+    const info = await _relayApiFetch(apiKey, `/api/fieldwork/${formId}/info`);
+    return Object.assign({ success: true, gone: false }, info);
+  } catch (err) {
+    const status = err && err.statusCode;
+    return {
+      success: false,
+      gone: status === 404 || status === 410,
+      error: String((err && err.message) || err)
+    };
+  }
 });
 
 ipcMain.handle('fieldwork-form-download', async (_e, { apiKey, formId }) => {

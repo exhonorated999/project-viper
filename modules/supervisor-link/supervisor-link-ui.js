@@ -414,6 +414,18 @@
     const canvas = lsJSON(`areacanvas_${id}`, []);
     canvas.forEach((cv) => push(cv.timestamp, 'investigation', 'surveillance', 'Area canvass conducted', 'supporting'));
 
+    // Field work — existence and KIND only. The preset label ("Surveillance",
+    // "Interview") says what the investigator was doing, which is the whole
+    // point of the roll-up; the address, the subject, the person interviewed
+    // and the notes are case content and never leave the machine. Same rule
+    // the canvass line above follows.
+    lsJSON(`fieldwork_${id}`, []).forEach((fw) => {
+      if (!fw) return;
+      const kind = String(fw.presetLabel || 'Field work').trim();
+      push(fw.occurredAt || fw.timestamp, 'investigation', 'fieldwork',
+        `${kind} logged in the field`, fw.followUp ? 'major' : 'supporting');
+    });
+
     // TRACE imports — existence only
     const allTrace = lsJSON('viperTraceImports', {});
     (allTrace[caseNumber] || []).forEach((imp) => push(imp._importedAt || imp.export_date, 'incident', 'rms', 'TRACE data imported', 'supporting'));

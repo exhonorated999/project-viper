@@ -1,3 +1,10 @@
 .DS_Store
 Thumbs.db
 *.swp
+
+# Local screenshot-sanitization scratch space. These are the PRE-sanitization
+# source images plus their crop/redact scripts and error logs. This repo is
+# published verbatim as a GitHub Pages site, so anything committed here is
+# served from project-viper.com — un-redacted case screenshots must never
+# land in it, not even transiently via `git add -A`.
+_sanitize/

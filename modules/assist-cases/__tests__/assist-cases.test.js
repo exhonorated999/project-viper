@@ -247,6 +247,7 @@ ok(BLOCK.indexOf('not hashed (over 256 MB)') !== -1,
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'viper-assist-'));
 const CASE = '26-003';
 const CANVAS_MEDIA_DIR = 'Canvas Media';
+const FIELD_WORK_MEDIA_DIR = 'Field Work Media';
 const mk = (rel, body) => {
     const full = path.join(TMP, CASE, rel);
     fs.mkdirSync(path.dirname(full), { recursive: true });
@@ -257,6 +258,8 @@ mk(path.join('Evidence', 'TLO Report', 'tlo.pdf'), 'TLO-BYTES');
 mk(path.join('Warrants', 'sw-001.pdf'), 'WARRANT-BYTES');
 mk(path.join('Notes', 'note-1.png'), 'NOTE-BYTES');
 mk(path.join(CANVAS_MEDIA_DIR, 'canvass-01.jpg'), 'CANVASS-BYTES');
+mk(path.join(FIELD_WORK_MEDIA_DIR, 'Field Work 2026-10-05 3200-Las-Vegas-Trl photo 1.jpg'), 'FIELDWORK-BYTES');
+mk(path.join(FIELD_WORK_MEDIA_DIR, 'Field Work 2026-10-06 Interview signed-statement.pdf'), 'FW-HELD-BYTES');
 
 const HDR = Buffer.from('VIPENC');
 const securityStub = {
@@ -312,6 +315,7 @@ const env = {
     path, fs: fsStub, console,
     casesDir: TMP,
     CANVAS_MEDIA_DIR,
+    FIELD_WORK_MEDIA_DIR,
     security: securityStub,
     app: { getVersion: () => '9.9.9' },
     Buffer, String, Array, Object, Error, Promise, Set, Map, JSON, Date, Number, Math,
@@ -357,6 +361,7 @@ const ASSIST = {
         excludeCsam: false, csamTags: [],
         nonDiscoverableTags: ['TLO Report'],
         nonDiscoverableCanvasFiles: [],
+        nonDiscoverableFieldWorkFiles: ['Field Work 2026-10-06 Interview signed-statement.pdf'],
         assist: ASSIST
     });
     const names = ENTRIES.map(e => e.name);
@@ -381,6 +386,15 @@ const ASSIST = {
     ok(names.indexOf(ROOT + '/Notes/note-1.png') !== -1, 'the note attachment keeps its name');
     ok(names.indexOf(ROOT + '/' + CANVAS_MEDIA_DIR + '/canvass-01.jpg') !== -1,
        'canvass media keeps its name');
+
+    // Field work is the assisting detective's own work product — the whole
+    // reason the package exists — so it ships, and it keeps its name too.
+    ok(names.indexOf(ROOT + '/' + FIELD_WORK_MEDIA_DIR + '/Field Work 2026-10-05 3200-Las-Vegas-Trl photo 1.jpg') !== -1,
+       'field work media is in the package and keeps its name');
+    // Not-Discoverable is withheld from a Field Work file by NAME, the same
+    // way canvass media is — these folders are flat, not tag folders.
+    ok(names.indexOf(ROOT + '/' + FIELD_WORK_MEDIA_DIR + '/Field Work 2026-10-06 Interview signed-statement.pdf') === -1,
+       'a field work file marked Not Discoverable is withheld');
     ok(names.every(n => n.indexOf('Kowalski') === -1 || n === ROOT + '/MANIFEST.csv' || n.indexOf(ROOT) === 0),
        'the officer\'s name is never spliced into a file name');
 

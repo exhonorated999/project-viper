@@ -74,6 +74,15 @@
          building their template strings. -->
     <link rel="stylesheet" href="modules/area-canvas/canvas-media.css" />
     <script src="modules/area-canvas/canvas-media.js"></script>
+    <!-- Field Work. One investigator's own form, shaped to the job: a
+         surveillance sit, an interview, a knock and talk. The schema is the
+         single definition of what a form can contain and the relay renders
+         from the descriptors VIPER sends it, so it MUST load before the UI
+         half, which resolves it at factory time. Neither is deferred — the
+         tab renders synchronously. -->
+    <link rel="stylesheet" href="modules/field-work/field-work.css" />
+    <script src="modules/field-work/field-work-schema.js"></script>
+    <script src="modules/field-work/field-work-ui.js"></script>
     <!-- Analytics CDR Libraries -->
     <script src="libs/papaparse.min.js"></script>
     <script src="libs/d3.v7.min.js"></script>
@@ -1580,6 +1589,7 @@
                     money:           hasArr(caseMoney)           || hasArr(_ls(`money_${caseId}`)),
                     missingpersons:  hasArr(caseMissingPersons)  || hasArr(_ls(`missingpersons_${caseId}`)),
                     areacanvas:      hasArr(caseCanvasEntries)   || hasArr(_ls(`areacanvas_${caseId}`)),
+                    fieldwork:       hasArr(_ls(`fieldwork_${caseId}`)),
                     prosecution:     hasArr(caseProsecution)     || !!_ls(`prosecution_${caseId}`),
                     opsplan:         !!_ls(`opsplan_${caseId}`),
                     involvedPersons: hasArr(_ls(`involvedPersons_${caseId}`)),
@@ -2420,6 +2430,7 @@
                 money: { label: 'Money Seized', icon: '💰' },
                 missingpersons: { label: 'Missing Persons', icon: '🔍' },
                 areacanvas: { label: 'Area Canvas', icon: '🗺️' },
+                fieldwork: { label: 'Field Work', icon: '🧭' },
                 opsplan: { label: 'OPS Plan', icon: '📋' },
                 consentSearch: { label: 'Consent Search', icon: '✅' }
             };
@@ -2524,7 +2535,7 @@
                 witnesses:'Witnesses', involvedPersons:'Involved Persons', vehicles:'Vehicles', cargo:'Cargo / Merchandise',
                 firearms:'Firearms', evidence:'Evidence', warrants:'Warrants', reports:'Reports',
                 notes:'Case Notes', prosecution:'Prosecution', narcotics:'Narcotics Seized',
-                money:'Money Seized', missingpersons:'Missing Persons', areacanvas:'Area Canvas',
+                money:'Money Seized', missingpersons:'Missing Persons', areacanvas:'Area Canvas', fieldwork:'Field Work',
                 opsplan:'OPS Plan', analytics:'CDR', aperture:'Aperture',
                 networkIntelligence:'Network Intel', traceImport:'Trace Import', rmsImport:'RMS Import',
                 oversightImport:'Oversight', cyberTips:'Cyber Tips', consentSearch:'Consent Search',
@@ -2586,6 +2597,7 @@
                 money: { label: 'Money Seized', icon: '💰', type: 'data' },
                 missingpersons: { label: 'Missing Persons', icon: '🔍', type: 'data' },
                 areacanvas: { label: 'Area Canvas', icon: '🗺️', type: 'data' },
+                fieldwork: { label: 'Field Work', icon: '🧭', type: 'data' },
                 opsplan: { label: 'OPS Plan', icon: '📋', type: 'data' },
                 traceImport: { label: 'Trace Import', icon: '📥', type: 'data' },
                 rmsImport: { label: 'RMS Import', icon: '📄', type: 'data' },
@@ -2715,7 +2727,7 @@
             const moduleKeys = [
                 'suspects', 'victims', 'victimBusinesses', 'cargo',
                 'witnesses', 'involvedPersons', 'recoveredVehicles', 'missingpersons',
-                'areacanvas', 'prosecution', 'narcotics', 'firearms',
+                'areacanvas', 'fieldwork', 'fieldworkForms', 'prosecution', 'narcotics', 'firearms',
                 'money', 'opsplan', 'rmsImports', 'oversightImport',
                 'canvasForms', 'cyberTips', 'timelineEvents', 'consentSearches',
                 'googleWarrant', 'metaWarrant', 'kikWarrant', 'snapchatWarrant', 'xWarrant', 'discordWarrant', 'datapilot', 'caseMetrics',
@@ -2823,6 +2835,7 @@
                 case 'money': return _c('money', caseMoney);
                 case 'missingpersons': return _c('missingpersons', caseMissingPersons);
                 case 'areacanvas': return _c('areacanvas', caseCanvasEntries);
+                case 'fieldwork': return (window.FieldWorkUI ? window.FieldWorkUI.entryCount(currentCase.id) : 0);
                 case 'prosecution': return caseProsecution ? caseProsecution.length : 0;
                 case 'victimBusiness': return _c('victimBusinesses', caseVictimBusinesses);
                 case 'cargo': return _c('cargo', caseCargo);
@@ -3899,6 +3912,27 @@
                     });
                     break;
                 }
+                case 'fieldwork': {
+                    // exportRows() is the module's own flat, already-formatted
+                    // shape, so this block never has to know the entry schema.
+                    const items = (window.FieldWorkUI && currentCase)
+                        ? window.FieldWorkUI.exportRows(currentCase.id) : [];
+                    if (!items.length) { emptyMsg('No field work recorded.'); break; }
+                    items.forEach((e, i) => {
+                        itemHeading(`${e.type || 'Field Work'} ${i+1}`);
+                        fieldBold('Location', e.location);
+                        fieldBold('Occurred', e.occurred);
+                        if (e.details) fieldBold('Details', e.details);
+                        if (e.followUp === 'Yes') fieldBold('Follow-up', 'Required');
+                        if (e.attachments) {
+                            fieldBold('Attachments', `${e.attachments} file(s)` +
+                                (e.preserved ? `, ${e.preserved} preserved in Evidence` : ''));
+                        }
+                        if (e.notes) bodyText(e.notes);
+                        gap(3);
+                    });
+                    break;
+                }
                 case 'notes': {
                     const items = caseNotes || [];
                     if (!items.length) { emptyMsg('No case notes.'); break; }
@@ -4329,6 +4363,9 @@
                         // Canvass media is flat files rather than tag
                         // folders, so it is withheld by file name.
                         nonDiscoverableCanvasFiles: _canvasNonDiscoverableFiles(),
+                        // Field work media is the same flat-file shape in a
+                        // different folder, withheld by its own name list.
+                        nonDiscoverableFieldWorkFiles: _fieldWorkNonDiscoverableFiles(),
                         // Null on a normal case — that is what keeps the DA
                         // export path identical to what it has always been.
                         assist: _assist,
@@ -4373,6 +4410,7 @@
                 money: 'Money Seized',
                 missingpersons: 'Missing Persons',
                 areacanvas: 'Area Canvas',
+                fieldwork: 'Field Work',
                 opsplan: 'OPS Plan',
                 traceImport: 'TRACE Import',
                 rmsImport: 'RMS Import',
@@ -4813,6 +4851,53 @@
                     }
                     break;
 
+                case 'fieldwork': {
+                    const fwRows = (window.FieldWorkUI && currentCase)
+                        ? window.FieldWorkUI.exportRows(currentCase.id) : [];
+                    if (fwRows.length > 0) {
+                        fwRows.forEach((entry, index) => {
+                            checkPage();
+                            doc.setFont(undefined, 'bold');
+                            doc.setFontSize(12);
+                            doc.text(`${entry.type || 'Field Work'} ${index + 1}`, margin, yPos);
+                            yPos += 7;
+
+                            doc.setFont(undefined, 'normal');
+                            doc.setFontSize(10);
+                            if (entry.location) {
+                                doc.text(`Location: ${entry.location}`, margin + 5, yPos);
+                                yPos += 5;
+                            }
+                            if (entry.occurred) {
+                                doc.text(`Occurred: ${entry.occurred}`, margin + 5, yPos);
+                                yPos += 5;
+                            }
+                            if (entry.details) {
+                                const dLines = doc.splitTextToSize(entry.details, contentWidth - 10);
+                                doc.text(dLines, margin + 5, yPos);
+                                yPos += (dLines.length * 5);
+                            }
+                            if (entry.attachments) {
+                                doc.text(`Attachments: ${entry.attachments} file(s)`, margin + 5, yPos);
+                                yPos += 5;
+                            }
+                            if (entry.notes) {
+                                doc.setFont(undefined, 'bold');
+                                doc.text(`Notes:`, margin + 5, yPos);
+                                yPos += 5;
+                                doc.setFont(undefined, 'normal');
+                                const nLines = doc.splitTextToSize(entry.notes, contentWidth - 10);
+                                doc.text(nLines, margin + 5, yPos);
+                                yPos += (nLines.length * 5);
+                            }
+                            yPos += 5;
+                        });
+                    } else {
+                        doc.text('No field work recorded', margin, yPos);
+                    }
+                    break;
+                }
+
                 case 'reports':
                     const reportData = _lsParse('viperCaseReports', {});
                     const report = reportData[currentCase.caseNumber];
@@ -4901,6 +4986,7 @@
                     csamTags: Array.isArray(_daExportCsamTags) ? _daExportCsamTags : [],
                     nonDiscoverableTags: Array.isArray(_daExportNonDiscoverableTags) ? _daExportNonDiscoverableTags : [],
                     nonDiscoverableCanvasFiles: _canvasNonDiscoverableFiles(),
+                    nonDiscoverableFieldWorkFiles: _fieldWorkNonDiscoverableFiles(),
                     assist: _assist,
                 });
                 if (savedPath) {
@@ -5069,6 +5155,19 @@
                 setTimeout(() => {
                     if (document.getElementById('canvasMap')) initCanvasMap();
                 }, 200);
+            } else if (tabId === 'fieldwork') {
+                // Everything the module cannot reach on its own is handed
+                // over before every render, because currentCase can change
+                // underneath us and configure() resets its cached arrays.
+                if (_fieldWorkConfigure()) {
+                    contentDiv.innerHTML = window.FieldWorkUI.renderTab();
+                    // Photo thumbnails and the active-forms panel fill in
+                    // after paint — both are async disk/network reads, and
+                    // blocking the tab on them reads as a hang.
+                    try { window.FieldWorkUI.afterRender(contentDiv); } catch (_) {}
+                } else {
+                    contentDiv.innerHTML = '<div class="glass-card rounded-xl p-6 text-gray-400">Field Work could not load.</div>';
+                }
             } else if (tabId === 'prosecution') {
                 contentDiv.innerHTML = renderProsecutionTab();
             } else if (tabId === 'narcotics') {
@@ -25355,6 +25454,113 @@
             } catch (_) { return []; }
         }
 
+        // ─── Field Work host glue ────────────────────────────────────────
+        //
+        // Everything the Field Work module cannot reach on its own. The
+        // stores it needs — currentCase, caseEvidence — are declared with
+        // top-level `let` in this classic <script>, which puts them in the
+        // global LEXICAL environment and NOT on window, so a separate module
+        // file cannot see them at any price. They are handed over as
+        // closures instead.
+        //
+        // Called before every render of the tab, because `currentCase` can
+        // change underneath us (a .vcase import, a case switch) and
+        // configure() resets the module's cached arrays.
+        function _fieldWorkConfigure() {
+            if (!window.FieldWorkUI) return false;
+            window.FieldWorkUI.configure({
+                getCaseId:     () => (currentCase ? currentCase.id : ''),
+                getCaseNumber: () => (currentCase ? currentCase.caseNumber : ''),
+                getCaseRef:    () => (currentCase ? (currentCase.caseNumber || currentCase.title || '') : ''),
+
+                toast: (msg, kind) => viperToast(msg, kind || 'info'),
+
+                // viperConfirm resolves true/false; the module always awaits
+                // it, so a host without one must still resolve rather than
+                // throw.
+                confirm: (msg, opts) => (typeof viperConfirm === 'function'
+                    ? viperConfirm(msg, opts)
+                    : Promise.resolve(window.confirm(msg))),
+
+                // Same key-refresh-and-retry the canvass relay uses. Sharing
+                // it means a licence that was just reactivated works on both
+                // tabs without a restart.
+                apiCall: (fn) => _canvasCallWithKey(fn),
+
+                rerender: () => renderTabContent('fieldwork'),
+
+                // The module builds the evidence record from what actually
+                // landed on disk; writing it is the host's job because
+                // caseEvidence is one of those invisible top-level lets.
+                addEvidence: (record) => {
+                    if (!currentCase) return null;
+                    if (!Array.isArray(caseEvidence)) caseEvidence = [];
+                    caseEvidence.push(record);
+                    const allEvidence = _lsParse('viperCaseEvidence', {});
+                    allEvidence[currentCase.caseNumber] = caseEvidence;
+                    localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
+                    try {
+                        audit('evidence_added', {
+                            case_number: currentCase.caseNumber,
+                            case_id: currentCase.id,
+                            evidence_id: record.id,
+                            type: record.type,
+                            tag: record.tag,
+                            file_count: (record.files || []).length,
+                            source: 'field_work',
+                        });
+                    } catch (_) {}
+                    return record.id;
+                },
+
+                syncBoard: (quiet) => _fieldWorkSyncConnectionBoard(quiet),
+
+                audit: (evt, detail) => {
+                    try {
+                        audit(evt, Object.assign({
+                            case_number: currentCase ? currentCase.caseNumber : '',
+                            case_id: currentCase ? currentCase.id : ''
+                        }, detail || {}));
+                    } catch (_) {}
+                }
+            });
+            return true;
+        }
+
+        // Field work file names the DA export must withhold. Same reasoning
+        // as the canvass version above — read the store, not the tab.
+        function _fieldWorkNonDiscoverableFiles() {
+            try {
+                if (!window.FieldWorkUI || !currentCase) return [];
+                return window.FieldWorkUI.nonDiscoverableFileNames(currentCase.id);
+            } catch (_) { return []; }
+        }
+
+        // Push field work entries onto the Connection Board. Returns whether
+        // anything was actually synced, so the module can decide whether to
+        // claim success in a toast.
+        //
+        // Goes through addFromCaseData rather than addPins because only the
+        // board can geocode the typed address — addPins takes coordinates
+        // and does not look any up. The pin SHAPE still comes from the Field
+        // Work module; the board's 'fieldwork' arm just calls boardPins().
+        function _fieldWorkSyncConnectionBoard(quiet) {
+            try {
+                if (!currentCase) return false;
+                if (localStorage.getItem('viperConnectionBoardEnabled') === 'false') return false;
+                if (!window.ConnectionBoard || typeof window.ConnectionBoard.addFromCaseData !== 'function') {
+                    if (!quiet) viperToast('The Connection Board is not available.', 'error');
+                    return false;
+                }
+                window.ConnectionBoard.addFromCaseData('fieldwork', !!quiet);
+                return true;
+            } catch (e) {
+                console.warn('[fieldwork] connection board sync failed:', e);
+                if (!quiet) viperToast('Could not update the Connection Board: ' + e.message, 'error');
+                return false;
+            }
+        }
+
         // ─── Preserve canvass media for court ────────────────────────────
         //
         // A canvass entry is a record of what an officer was shown at a door.
@@ -32820,6 +33026,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 money: 'Money Seized',
                 missingpersons: 'Missing Persons',
                 areacanvas: 'Area Canvas',
+                fieldwork: 'Field Work',
                 opsplan: 'OPS Plan',
                 networkIntelligence: 'Network Intelligence'
             };
@@ -33353,6 +33560,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 // it. Cases only ever showed the tab because it is auto-detected
                 // from existing consentSearches_<caseId> data — which means a
                 // clean install could never create the first record.
+                { id: 'fieldwork', label: 'Field Work', icon: 'M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7' },
                 { id: 'consentSearch', label: 'Consent Search', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
                 { id: 'opsplan', label: 'OPS Plan', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
             ];
@@ -34445,6 +34653,27 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 }
             }
 
+            // --- Field Work ---
+            // Time-stamped work product the investigator filed from the
+            // scene, so it belongs on the timeline next to warrants and
+            // notes. timelineEvents() is the module's own shape; the lane
+            // and category are the host's call.
+            try {
+                const fwEvents = window.FieldWorkUI
+                    ? window.FieldWorkUI.timelineEvents(currentCase.id) : [];
+                for (const fe of fwEvents) {
+                    auto.push({
+                        id: fe.id,
+                        timestamp: new Date(fe.date).toISOString(),
+                        endTimestamp: null,
+                        title: fe.title,
+                        description: fe.description || '',
+                        lane: 'investigation', category: 'surveillance', significance: 'supporting',
+                        entityLink: '', sourceType: fe.sourceType, sourceId: fe.id, color: null, createdAt: now
+                    });
+                }
+            } catch (_) {}
+
             // --- TRACE Imports ---
             const allTrace = _lsParse('viperTraceImports', {});
             const traceImports = allTrace[currentCase.caseNumber] || [];
@@ -35166,6 +35395,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             else if (evt.sourceType === 'auto:evidence') sourceTab = 'evidence';
             else if (evt.sourceType === 'auto:note') sourceTab = 'notes';
             else if (evt.sourceType === 'auto:canvas') sourceTab = 'areacanvas';
+            else if (evt.sourceType === 'auto:fieldwork') sourceTab = 'fieldwork';
 
             return `
             <div class="mt-4 p-4 rounded-lg border" style="background:${lane.bg}; border-color:${lane.border};">

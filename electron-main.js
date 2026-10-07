@@ -2798,9 +2798,17 @@ ipcMain.handle('case-attachment-delete', async (_e, payload) => {
 // take the rest of the case record with it.
 const CANVAS_MEDIA_DIR = 'Canvas Media';
 
+// Field Work media (cases/{caseNumber}/Field Work Media/). Same contract,
+// its own folder. Field Work is one investigator's own log and Area Canvas
+// is a crew's shared sweep; sharing a folder would mean one module's delete
+// could take the other's files, and a detective would find out by missing
+// evidence rather than by an error.
+const FIELD_WORK_MEDIA_DIR = 'Field Work Media';
+
 /**
- * Write one canvas media file, applying Field Security and claiming the
- * name atomically. Shared by the in-app capture path and the relay import.
+ * Write one case media file, applying Field Security and claiming the
+ * name atomically. Shared by the in-app capture paths and the relay imports
+ * of both Area Canvas and Field Work.
  *
  * Collision handling suffixes until a name is free, like note attachments,
  * but the name is claimed by the WRITE itself: 'wx' fails with EEXIST
@@ -2809,8 +2817,8 @@ const CANVAS_MEDIA_DIR = 'Canvas Media';
  * name and silently destroys the first officer's photo — evidence loss with
  * no error anywhere.
  */
-function _writeCanvasMediaFile(caseNumber, rawName, buf) {
-  const dir = path.join(casesDir, caseNumber, CANVAS_MEDIA_DIR);
+function _writeCaseMediaFile(caseNumber, subdir, rawName, buf) {
+  const dir = path.join(casesDir, caseNumber, subdir);
   fs.mkdirSync(dir, { recursive: true });
 
   const bytes = (security && security.isEnabled() && security.isUnlocked())
@@ -2830,6 +2838,138 @@ function _writeCanvasMediaFile(caseNumber, rawName, buf) {
     }
   }
   return { fileName: finalName, size: buf.length };
+}
+
+function _writeCanvasMediaFile(caseNumber, rawName, buf) {
+  return _writeCaseMediaFile(caseNumber, CANVAS_MEDIA_DIR, rawName, buf);
+}
+
+function _writeFieldWorkMediaFile(caseNumber, rawName, buf) {
+  return _writeCaseMediaFile(caseNumber, FIELD_WORK_MEDIA_DIR, rawName, buf);
+}
+
+/**
+ * Read one media file back out of a case folder, decrypting under Field
+ * Security when it is unlocked. Shared by Area Canvas and Field Work.
+ *
+ * A locked vault refuses with a sentence the officer can act on rather than
+ * handing back ciphertext that would render as a broken image.
+ */
+function _readCaseMediaFile(caseNumber, subdir, fileName) {
+  const filePath = path.join(casesDir, caseNumber, subdir, fileName);
+  if (!fs.existsSync(filePath)) return { success: false, error: 'File not found', missing: true };
+
+  let raw = fs.readFileSync(filePath);
+  if (security && security.isUnlocked() && security.isEncryptedBuffer && security.isEncryptedBuffer(raw)) {
+    raw = security.decryptBuffer(raw);
+  } else if (security && security.isEnabled() && !security.isUnlocked()) {
+    if (raw.length >= 6 && raw[0] === 0x56 && raw[1] === 0x49 && raw[2] === 0x50
+        && raw[3] === 0x45 && raw[4] === 0x4E && raw[5] === 0x43) {
+      return { success: false, error: 'File is encrypted; unlock Field Security to view.' };
+    }
+  }
+  return { success: true, dataBase64: raw.toString('base64'), size: raw.length };
+}
+
+/**
+ * Delete media files out of a case folder. Shared by Area Canvas and Field
+ * Work. A locked or missing file is reported, never allowed to abort the
+ * rest of the cleanup — a half-finished delete leaves the entry disagreeing
+ * with the disk.
+ */
+function _deleteCaseMediaFiles(caseNumber, subdir, names) {
+  const dir = path.join(casesDir, caseNumber, subdir);
+  let removed = 0;
+  const failed = [];
+  for (const n of names) {
+    const fileName = _sanitizeAttachmentName(n);
+    if (!fileName) continue;
+    const filePath = path.join(dir, fileName);
+    try {
+      if (fs.existsSync(filePath)) { fs.unlinkSync(filePath); removed++; }
+    } catch (e) {
+      failed.push(fileName);
+    }
+  }
+  return { success: true, removed, failed };
+}
+
+/**
+ * Copy selected case media into the case's Evidence folder.
+ *
+ * A COPY, not a move. A canvass entry or a field work entry is itself a
+ * record — what an officer saw and was shown at that door, or what they
+ * logged from a surveillance position — and lifting its photos out to build
+ * an evidence item would rewrite that record after the fact. The Evidence
+ * copy is the court copy; the source entry keeps its own and is marked
+ * preserved.
+ *
+ * Bytes are decrypted out of the source folder and re-encrypted into
+ * Evidence, so the copy obeys whatever Field Security is doing NOW rather
+ * than inheriting the state the source file happened to be written under.
+ *
+ * Shared by Area Canvas and Field Work. One implementation on purpose: two
+ * copies of this would eventually disagree about whether a locked vault
+ * refuses, and the way anyone would find out is ciphertext filed as evidence.
+ */
+function _caseMediaToEvidence(subdir, payload) {
+  const caseNumber = _safeCaseNumber(payload && payload.caseNumber);
+  if (!caseNumber) return { success: false, error: 'Invalid case number' };
+
+  const evidenceTag = String((payload && payload.evidenceTag) || '')
+    .replace(/[^a-zA-Z0-9 _.-]/g, '_').trim();
+  if (!evidenceTag) return { success: false, error: 'Invalid evidence tag' };
+
+  const names = Array.isArray(payload && payload.fileNames) ? payload.fileNames : [];
+  if (!names.length) return { success: false, error: 'Nothing selected' };
+
+  const srcDir = path.join(casesDir, caseNumber, subdir);
+  const destDir = path.join(casesDir, caseNumber, 'Evidence', evidenceTag);
+  fs.mkdirSync(destDir, { recursive: true });
+
+  const locked = !!(security && security.isEnabled() && !security.isUnlocked());
+  const files = [];
+  const failed = [];
+
+  for (const rawName of names) {
+    const fileName = _sanitizeAttachmentName(rawName);
+    if (!fileName) { failed.push({ fileName: String(rawName || ''), error: 'Invalid file name' }); continue; }
+    try {
+      const srcPath = path.join(srcDir, fileName);
+      if (!fs.existsSync(srcPath)) throw new Error('File not found in the case folder');
+
+      let buf = fs.readFileSync(srcPath);
+      if (security && security.isEncryptedBuffer && security.isEncryptedBuffer(buf)) {
+        if (locked) throw new Error('File is encrypted; unlock Field Security first.');
+        buf = security.decryptBuffer(buf);
+      }
+      const plainSize = buf.length;
+      const out = (security && security.isEnabled() && security.isUnlocked())
+        ? security.encryptBuffer(buf)
+        : buf;
+
+      // Claim the name with the write itself — a check-then-write window
+      // is how one officer's photo silently overwrites another's.
+      const ext = path.extname(fileName);
+      const stem = fileName.slice(0, fileName.length - ext.length);
+      let finalName = fileName;
+      for (let n = 1; ; n++) {
+        try {
+          fs.writeFileSync(path.join(destDir, finalName), out, { flag: 'wx' });
+          break;
+        } catch (err) {
+          if (!err || err.code !== 'EEXIST') throw err;
+          if (n > 999) throw new Error('Too many collisions');
+          finalName = `${stem} (${n})${ext}`;
+        }
+      }
+      files.push({ name: finalName, path: path.join(destDir, finalName), size: plainSize });
+    } catch (err) {
+      failed.push({ fileName, error: err.message });
+    }
+  }
+
+  return { success: true, files, failed, folder: destDir };
 }
 
 ipcMain.handle('canvas-save-media', async (_e, payload) => {
@@ -2856,19 +2996,7 @@ ipcMain.handle('canvas-read-media', async (_e, payload) => {
     if (!caseNumber) return { success: false, error: 'Invalid case number' };
     const fileName = _sanitizeAttachmentName(payload && payload.fileName);
     if (!fileName) return { success: false, error: 'Invalid file name' };
-    const filePath = path.join(casesDir, caseNumber, CANVAS_MEDIA_DIR, fileName);
-    if (!fs.existsSync(filePath)) return { success: false, error: 'File not found', missing: true };
-
-    let raw = fs.readFileSync(filePath);
-    if (security && security.isUnlocked() && security.isEncryptedBuffer && security.isEncryptedBuffer(raw)) {
-      raw = security.decryptBuffer(raw);
-    } else if (security && security.isEnabled() && !security.isUnlocked()) {
-      if (raw.length >= 6 && raw[0] === 0x56 && raw[1] === 0x49 && raw[2] === 0x50
-          && raw[3] === 0x45 && raw[4] === 0x4E && raw[5] === 0x43) {
-        return { success: false, error: 'File is encrypted; unlock Field Security to view.' };
-      }
-    }
-    return { success: true, dataBase64: raw.toString('base64'), size: raw.length };
+    return _readCaseMediaFile(caseNumber, CANVAS_MEDIA_DIR, fileName);
   } catch (err) {
     console.error('canvas-read-media failed:', err);
     return { success: false, error: err.message };
@@ -2882,23 +3010,67 @@ ipcMain.handle('canvas-delete-media', async (_e, payload) => {
     const names = Array.isArray(payload && payload.fileNames)
       ? payload.fileNames
       : [payload && payload.fileName];
-    const dir = path.join(casesDir, caseNumber, CANVAS_MEDIA_DIR);
-    let removed = 0;
-    const failed = [];
-    for (const n of names) {
-      const fileName = _sanitizeAttachmentName(n);
-      if (!fileName) continue;
-      const filePath = path.join(dir, fileName);
-      try {
-        if (fs.existsSync(filePath)) { fs.unlinkSync(filePath); removed++; }
-      } catch (e) {
-        // A locked file must not abort the rest of the cleanup.
-        failed.push(fileName);
-      }
-    }
-    return { success: true, removed, failed };
+    return _deleteCaseMediaFiles(caseNumber, CANVAS_MEDIA_DIR, names);
   } catch (err) {
     console.error('canvas-delete-media failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+// ── Field Work media (cases/{caseNumber}/Field Work Media/) ──────────
+// Identical contract to the canvass handlers above, pointed at the Field
+// Work folder. Both go through the same shared helpers so a change to how
+// Field Security is applied cannot reach one module and miss the other.
+
+ipcMain.handle('fieldwork-save-media', async (_e, payload) => {
+  try {
+    const caseNumber = _safeCaseNumber(payload && payload.caseNumber);
+    if (!caseNumber) return { success: false, error: 'Invalid case number' };
+    const rawName = _sanitizeAttachmentName(payload && payload.fileName);
+    if (!rawName) return { success: false, error: 'Invalid file name' };
+    if (!payload || typeof payload.dataBase64 !== 'string' || !payload.dataBase64.length) {
+      return { success: false, error: 'No file data provided' };
+    }
+    const written = _writeFieldWorkMediaFile(caseNumber, rawName, Buffer.from(payload.dataBase64, 'base64'));
+    return { success: true, fileName: written.fileName, size: written.size };
+  } catch (err) {
+    console.error('fieldwork-save-media failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('fieldwork-read-media', async (_e, payload) => {
+  try {
+    const caseNumber = _safeCaseNumber(payload && payload.caseNumber);
+    if (!caseNumber) return { success: false, error: 'Invalid case number' };
+    const fileName = _sanitizeAttachmentName(payload && payload.fileName);
+    if (!fileName) return { success: false, error: 'Invalid file name' };
+    return _readCaseMediaFile(caseNumber, FIELD_WORK_MEDIA_DIR, fileName);
+  } catch (err) {
+    console.error('fieldwork-read-media failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('fieldwork-delete-media', async (_e, payload) => {
+  try {
+    const caseNumber = _safeCaseNumber(payload && payload.caseNumber);
+    if (!caseNumber) return { success: false, error: 'Invalid case number' };
+    const names = Array.isArray(payload && payload.fileNames)
+      ? payload.fileNames
+      : [payload && payload.fileName];
+    return _deleteCaseMediaFiles(caseNumber, FIELD_WORK_MEDIA_DIR, names);
+  } catch (err) {
+    console.error('fieldwork-delete-media failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('fieldwork-media-to-evidence', async (_e, payload) => {
+  try {
+    return _caseMediaToEvidence(FIELD_WORK_MEDIA_DIR, payload);
+  } catch (err) {
+    console.error('fieldwork-media-to-evidence failed:', err);
     return { success: false, error: err.message };
   }
 });
@@ -2911,69 +3083,12 @@ ipcMain.handle('canvas-delete-media', async (_e, payload) => {
  * evidence item would rewrite that record after the fact. The Evidence copy
  * is the court copy; the canvass entry keeps its own and is marked preserved.
  *
- * Bytes are decrypted out of Canvas Media and re-encrypted into Evidence, so
- * the copy obeys whatever Field Security is doing NOW rather than inheriting
- * the state the canvass file happened to be written under.
+ * The work is done by _caseMediaToEvidence, shared with Field Work, so both
+ * modules decrypt, re-encrypt and claim names identically.
  */
 ipcMain.handle('canvas-media-to-evidence', async (_e, payload) => {
   try {
-    const caseNumber = _safeCaseNumber(payload && payload.caseNumber);
-    if (!caseNumber) return { success: false, error: 'Invalid case number' };
-
-    const evidenceTag = String((payload && payload.evidenceTag) || '')
-      .replace(/[^a-zA-Z0-9 _.-]/g, '_').trim();
-    if (!evidenceTag) return { success: false, error: 'Invalid evidence tag' };
-
-    const names = Array.isArray(payload && payload.fileNames) ? payload.fileNames : [];
-    if (!names.length) return { success: false, error: 'Nothing selected' };
-
-    const srcDir = path.join(casesDir, caseNumber, CANVAS_MEDIA_DIR);
-    const destDir = path.join(casesDir, caseNumber, 'Evidence', evidenceTag);
-    fs.mkdirSync(destDir, { recursive: true });
-
-    const locked = !!(security && security.isEnabled() && !security.isUnlocked());
-    const files = [];
-    const failed = [];
-
-    for (const rawName of names) {
-      const fileName = _sanitizeAttachmentName(rawName);
-      if (!fileName) { failed.push({ fileName: String(rawName || ''), error: 'Invalid file name' }); continue; }
-      try {
-        const srcPath = path.join(srcDir, fileName);
-        if (!fs.existsSync(srcPath)) throw new Error('File not found in the case folder');
-
-        let buf = fs.readFileSync(srcPath);
-        if (security && security.isEncryptedBuffer && security.isEncryptedBuffer(buf)) {
-          if (locked) throw new Error('File is encrypted; unlock Field Security first.');
-          buf = security.decryptBuffer(buf);
-        }
-        const plainSize = buf.length;
-        const out = (security && security.isEnabled() && security.isUnlocked())
-          ? security.encryptBuffer(buf)
-          : buf;
-
-        // Claim the name with the write itself — a check-then-write window
-        // is how one officer's photo silently overwrites another's.
-        const ext = path.extname(fileName);
-        const stem = fileName.slice(0, fileName.length - ext.length);
-        let finalName = fileName;
-        for (let n = 1; ; n++) {
-          try {
-            fs.writeFileSync(path.join(destDir, finalName), out, { flag: 'wx' });
-            break;
-          } catch (err) {
-            if (!err || err.code !== 'EEXIST') throw err;
-            if (n > 999) throw new Error('Too many collisions');
-            finalName = `${stem} (${n})${ext}`;
-          }
-        }
-        files.push({ name: finalName, path: path.join(destDir, finalName), size: plainSize });
-      } catch (err) {
-        failed.push({ fileName, error: err.message });
-      }
-    }
-
-    return { success: true, files, failed, folder: destDir };
+    return _caseMediaToEvidence(CANVAS_MEDIA_DIR, payload);
   } catch (err) {
     console.error('canvas-media-to-evidence failed:', err);
     return { success: false, error: err.message };
@@ -8986,6 +9101,154 @@ ipcMain.handle('canvas-form-download', async (event, { apiKey, formId }) => {
 
 ipcMain.handle('canvas-form-delete', async (event, { apiKey, formId }) => {
   return await _canvasApiFetch(apiKey, `/api/canvas/${formId}`, { method: 'DELETE' });
+});
+
+// ====== Field Work Forms (Railway-hosted) ======
+// Same relay, same host, same API key. The transport helpers above are not
+// canvas-specific — they only know how to talk to the dashboard — so they
+// are aliased here rather than renamed, which would mean touching every
+// shipped canvass call site for no behavioural gain.
+const _relayApiFetch = _canvasApiFetch;
+const _relayApiFetchBinary = _canvasApiFetchBinary;
+
+/**
+ * Create a Field Work form.
+ *
+ * The difference from canvass is the payload. Area Canvas sends a list of
+ * field NAMES and hopes the server recognises them; Field Work sends the
+ * complete descriptor for every box — key, label, type, placeholder, hint,
+ * required — and the relay renders whatever it is handed, generically, by
+ * type. The server keeps no field list of its own, so adding a field to
+ * modules/field-work/field-work-schema.js ships with the desktop app and
+ * needs no deploy on the other side.
+ */
+ipcMain.handle('fieldwork-form-create', async (_e, params) => {
+  const p = params || {};
+  const result = await _relayApiFetch(p.apiKey, '/api/fieldwork/forms', {
+    method: 'POST',
+    body: {
+      title: p.title || 'Field Work',
+      case_ref: p.caseRef || '',
+      preset: p.preset || 'custom',
+      preset_label: p.presetLabel || '',
+      fields: Array.isArray(p.fields) ? p.fields : [],
+      captures: Array.isArray(p.captures) ? p.captures : []
+    }
+  });
+
+  // The media key for this form. Photos, clips, recordings and documents the
+  // investigator captures are encrypted on their phone with this key before
+  // they are uploaded, so the relay stores ciphertext it has no means of
+  // reading.
+  //
+  // It rides in the URL FRAGMENT. Browsers never put a fragment in an HTTP
+  // request, so scanning the QR hands the key to the phone without ever
+  // sending it to the server. That is the whole basis of the claim we make
+  // to an agency about this feature, and it is why the key must not be
+  // appended as a query string.
+  const mediaKey = require('crypto').randomBytes(32).toString('base64url');
+  const formUrl = String(result.form_url || '') + '#k=' + mediaKey;
+
+  const QRCode = require('qrcode');
+  const qrDataUrl = await QRCode.toDataURL(formUrl, {
+    width: 300, margin: 2,
+    color: { dark: '#22d3ee', light: '#0f1117' }
+  });
+
+  return {
+    formId: result.form_id,
+    formUrl,
+    qrDataUrl,
+    mediaKey,
+    expiresAt: result.expires_at,
+    // What the server actually accepted. It clamps any capture spec that
+    // asks for more than it will carry, so the desktop must show these
+    // numbers rather than the ones it asked for — otherwise the officer is
+    // promised a slot that does not exist.
+    captures: result.captures || []
+  };
+});
+
+ipcMain.handle('fieldwork-form-get-info', async (_e, { apiKey, formId }) => {
+  return await _relayApiFetch(apiKey, `/api/fieldwork/${formId}/info`);
+});
+
+ipcMain.handle('fieldwork-form-download', async (_e, { apiKey, formId }) => {
+  // Fetching the results DELETES the entry rows on the server in the same
+  // request. The attachments deliberately survive that delete — see
+  // fieldwork-fetch-media below — so they can still be pulled down after
+  // the entries that referenced them are gone.
+  return await _relayApiFetch(apiKey, `/api/fieldwork/${formId}/results`);
+});
+
+ipcMain.handle('fieldwork-form-delete', async (_e, { apiKey, formId }) => {
+  return await _relayApiFetch(apiKey, `/api/fieldwork/${formId}`, { method: 'DELETE' });
+});
+
+// Pull one encrypted attachment down, decrypt it, write it into the case
+// folder, and tell the relay to destroy its copy.
+//
+// The delete is deliberately not fatal. Once the bytes are on the
+// investigator's disk the import has succeeded; a failed delete leaves a
+// blob the 48-hour TTL sweep will take anyway, whereas reporting failure
+// here would make them re-import a file they already have.
+ipcMain.handle('fieldwork-fetch-media', async (_e, payload) => {
+  const p = payload || {};
+  try {
+    const caseNumber = _safeCaseNumber(p.caseNumber);
+    if (!caseNumber) return { success: false, error: 'Invalid case number' };
+    const rawName = _sanitizeAttachmentName(p.fileName);
+    if (!rawName) return { success: false, error: 'Invalid file name' };
+    const mediaId = parseInt(p.mediaId, 10);
+    if (!Number.isFinite(mediaId) || mediaId <= 0) return { success: false, error: 'Invalid media id' };
+
+    const nodeCrypto = require('crypto');
+    let key;
+    try {
+      key = Buffer.from(String(p.mediaKey || ''), 'base64url');
+    } catch (_) {
+      key = Buffer.alloc(0);
+    }
+    if (key.length !== 32) {
+      return { success: false, error: 'This form has no usable media key — the attachment cannot be decrypted.' };
+    }
+
+    const cipher = await _relayApiFetchBinary(p.apiKey, `/api/fieldwork/media/${mediaId}`);
+    // 12-byte IV, then AES-GCM ciphertext with its 16-byte tag appended —
+    // exactly what SubtleCrypto's encrypt() produces on the phone.
+    if (!cipher || cipher.length < 12 + 16 + 1) {
+      return { success: false, error: 'Attachment came back empty or truncated.' };
+    }
+    const iv = cipher.subarray(0, 12);
+    const tag = cipher.subarray(cipher.length - 16);
+    const body = cipher.subarray(12, cipher.length - 16);
+    let plain;
+    try {
+      const decipher = nodeCrypto.createDecipheriv('aes-256-gcm', key, iv);
+      decipher.setAuthTag(tag);
+      plain = Buffer.concat([decipher.update(body), decipher.final()]);
+    } catch (err) {
+      // GCM authenticates as well as decrypts, so this means the bytes were
+      // altered in transit or the key does not belong to this form. Either
+      // way the file is not evidence and must not be written.
+      return { success: false, error: 'Attachment failed its integrity check and was not saved.' };
+    }
+
+    const written = _writeFieldWorkMediaFile(caseNumber, rawName, plain);
+
+    let purged = true;
+    try {
+      await _relayApiFetch(p.apiKey, `/api/fieldwork/media/${mediaId}`, { method: 'DELETE' });
+    } catch (err) {
+      purged = false;
+      console.warn('fieldwork-fetch-media: server copy not purged:', err.message);
+    }
+
+    return { success: true, fileName: written.fileName, size: written.size, purged };
+  } catch (err) {
+    console.error('fieldwork-fetch-media failed:', err);
+    return { success: false, error: err.message };
+  }
 });
 
 // ====== Cellebrite Report Integration ======

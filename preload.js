@@ -89,6 +89,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   canvasReadMedia: (data) => ipcRenderer.invoke('canvas-read-media', data),
   canvasDeleteMedia: (data) => ipcRenderer.invoke('canvas-delete-media', data),
   canvasMediaToEvidence: (data) => ipcRenderer.invoke('canvas-media-to-evidence', data),
+  // Field Work media — same contract, its own folder
+  // (cases/{caseNumber}/Field Work Media/). Kept apart from canvass so one
+  // module's delete can never take the other module's files.
+  fieldWorkSaveMedia: (data) => ipcRenderer.invoke('fieldwork-save-media', data),
+  fieldWorkReadMedia: (data) => ipcRenderer.invoke('fieldwork-read-media', data),
+  fieldWorkDeleteMedia: (data) => ipcRenderer.invoke('fieldwork-delete-media', data),
+  fieldWorkMediaToEvidence: (data) => ipcRenderer.invoke('fieldwork-media-to-evidence', data),
   notesExportMergeAttachments: (data) => ipcRenderer.invoke('notes-export-merge-attachments', data),
 
   // Backup & Restore
@@ -467,6 +474,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   canvasFormDownload: (params) => ipcRenderer.invoke('canvas-form-download', params),
   canvasFormDelete: (params) => ipcRenderer.invoke('canvas-form-delete', params),
   canvasFetchMedia: (params) => ipcRenderer.invoke('canvas-fetch-media', params),
+
+  // Field Work relay — one investigator's own form, shaped to the job.
+  // Unlike canvass, the desktop sends the complete field descriptors and the
+  // relay renders them generically, so a new field needs no server deploy.
+  fieldWorkFormCreate: (params) => ipcRenderer.invoke('fieldwork-form-create', params),
+  fieldWorkFormGetInfo: (params) => ipcRenderer.invoke('fieldwork-form-get-info', params),
+  fieldWorkFormDownload: (params) => ipcRenderer.invoke('fieldwork-form-download', params),
+  fieldWorkFormDelete: (params) => ipcRenderer.invoke('fieldwork-form-delete', params),
+  fieldWorkFetchMedia: (params) => ipcRenderer.invoke('fieldwork-fetch-media', params),
 
   // Cellebrite Report Integration
   selectCellebriteFolder: () => ipcRenderer.invoke('select-cellebrite-folder'),

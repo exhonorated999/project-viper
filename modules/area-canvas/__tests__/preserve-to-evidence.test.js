@@ -187,19 +187,39 @@ eq(handed.items[0].fileName, 'b.mp4', 'the other entry\'s tick is ignored');
 console.log('\n3. canvas-media-to-evidence (lifted from electron-main.js)');
 
 const MAIN = fs.readFileSync(path.join(REPO, 'electron-main.js'), 'utf8').replace(/\r\n/g, '\n');
+
+// The copy itself lives in _caseMediaToEvidence, shared with the Field Work
+// module. Both are lifted: the helper is where the bytes actually move, and
+// the handler is what the renderer calls, so running only one of them would
+// prove nothing about the path that ships.
+const HELPER_START = 'function _caseMediaToEvidence(';
+const h0 = MAIN.indexOf(HELPER_START);
+ok(h0 !== -1, '_caseMediaToEvidence is still in electron-main.js');
+const h1 = MAIN.indexOf('\n}', MAIN.indexOf('return { success: true, files, failed, folder: destDir };', h0));
+const HELPER = MAIN.slice(h0, h1 + 2);
+
 const START = "ipcMain.handle('canvas-media-to-evidence'";
 const s0 = MAIN.indexOf(START);
 ok(s0 !== -1, 'the canvas-media-to-evidence handler is still in electron-main.js');
 const s1 = MAIN.indexOf("\n});", s0);
 const BLOCK = MAIN.slice(s0, s1 + 4);
-ok(BLOCK.indexOf("flag: 'wx'") !== -1,
+ok(BLOCK.indexOf('_caseMediaToEvidence(CANVAS_MEDIA_DIR') !== -1,
+   'the handler copies out of the Canvas Media folder, not some other one');
+ok(HELPER.indexOf("flag: 'wx'") !== -1,
    'the copy claims its name with an exclusive-create write');
-ok(BLOCK.indexOf('security.encryptBuffer') !== -1,
+ok(HELPER.indexOf('security.encryptBuffer') !== -1,
    'the Evidence copy is re-encrypted under current Field Security');
-ok(BLOCK.indexOf('unlock Field Security') !== -1,
+ok(HELPER.indexOf('unlock Field Security') !== -1,
    'a locked vault refuses rather than copying ciphertext into Evidence');
 ok(MAIN.indexOf('A COPY, not a move.') !== -1,
    'the handler documents that it copies rather than moves');
+// Field Work must reach the same code. Two copies of this would eventually
+// disagree about whether a locked vault refuses, and the way anyone would
+// find out is ciphertext filed as evidence.
+ok(MAIN.indexOf('_caseMediaToEvidence(FIELD_WORK_MEDIA_DIR') !== -1,
+   'Field Work preserves through the same shared copy, not a second one');
+ok(MAIN.indexOf("FIELD_WORK_MEDIA_DIR = 'Field Work Media'") !== -1,
+   'Field Work keeps its own folder so neither module can delete the other\'s files');
 
 // Run the lifted handler against a real temp case folder.
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'viper-preserve-'));
@@ -239,6 +259,7 @@ const env = {
 };
 env.globalThis = env;
 vm.createContext(env);
+vm.runInContext(HELPER, env);
 vm.runInContext(BLOCK, env);
 const copy = HANDLERS['canvas-media-to-evidence'];
 ok(typeof copy === 'function', 'the lifted handler registered');

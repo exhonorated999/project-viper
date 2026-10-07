@@ -78,8 +78,21 @@
         Object.keys(h || {}).forEach(function (k) {
             if (h[k] != null) host[k] = h[k];
         });
-        // The case changed under us — anything cached belongs to the old one.
-        reset();
+        /*
+         * Reset ONLY when the case actually changed.
+         *
+         * The host calls configure() on every single tab render, so an
+         * unconditional reset here threw away viewIndex before renderTab()
+         * could read it: clicking an entry set the index, asked for a
+         * repaint, and the repaint cleared it again. The detail view was
+         * unreachable and the symptom looked like a dead card rather than
+         * state being wiped. It also re-read localStorage every paint.
+         *
+         * loadedFor is null before the first load, when there is nothing to
+         * throw away.
+         */
+        var id = host.getCaseId();
+        if (loadedFor !== null && loadedFor !== id) reset();
     }
 
     /* ── State ───────────────────────────────────────────────────────── */

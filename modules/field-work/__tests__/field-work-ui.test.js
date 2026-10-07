@@ -101,6 +101,12 @@ function seed(entries, forms) {
     STORE['fieldwork_' + CID] = JSON.stringify(entries || []);
     STORE['fieldworkForms_' + CID] = JSON.stringify(forms || []);
     wireHost();
+    // configure() only resets when the case id changes, because the host
+    // calls it on every tab render and wiping state each time made the
+    // detail view unreachable. In the app a fresh page load is what gets
+    // you a fresh read; this suite reseeds the same case over and over, so
+    // it has to invalidate the marker itself.
+    UI._setState({ loadedFor: null });
 }
 
 /* ====================================================================== *
@@ -447,6 +453,43 @@ function relayStub(answers) {
     UI.renderTab();
     ok('  — and the old case\'s data is still on disk, not destroyed',
         JSON.parse(STORE['fieldwork_' + CID]).length === 1);
+
+    /* ---- the detail view has to survive the repaint that opens it ---- */
+    console.log('\n[opening an entry]');
+    // The reported case: a surveillance entry carrying BOTH an identity
+    // field and notes. summaryLine prefers the vehicle, so the card shows
+    // that and the notes exist only in the detail view.
+    seed([S.makeEntry({
+        id: 'e-open', preset: 'surveillance', timestamp: D,
+        fields: {
+            location: { street: '17005 Upland Ave', city: 'Fontana', state: 'CA', zip: '92336' },
+            vehicle: 'Black Toyota 4Runner',
+            notes: 'Watched the driveway for two hours.'
+        }
+    })]);
+    const listed = UI.renderTab();
+    ok('the card shows the identity field, not the notes',
+        listed.indexOf('Black Toyota 4Runner') !== -1 &&
+        listed.indexOf('Watched the driveway') === -1);
+    UI.openEntry(0);
+    // What the host actually does on rerender: configure() first, THEN
+    // renderTab(). An unconditional reset inside configure() wiped
+    // viewIndex here, so the click appeared to do nothing at all and the
+    // notes — which only the detail view renders — were unreachable.
+    wireHost();
+    const detail = UI.renderTab();
+    ok('clicking an entry opens the detail view',
+        detail.indexOf('All field work') !== -1);
+    ok('  — configure() on every repaint must not throw viewIndex away',
+        UI._state().viewIndex === 0, UI._state().viewIndex);
+    ok('THE DETAIL VIEW SHOWS THE NOTES THE CARD HAS NO ROOM FOR',
+        detail.indexOf('Watched the driveway for two hours.') !== -1);
+    ok('  — once, not also repeated as a field row',
+        detail.split('Watched the driveway').length - 1 === 1);
+    UI.backToList();
+    wireHost();
+    ok('going back returns to the list',
+        UI.renderTab().indexOf('All field work') === -1);
 
     /* ---- rendering does not throw on anything it might be handed ---- */
     console.log('\n[rendering survives bad data]');

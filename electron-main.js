@@ -4364,7 +4364,56 @@ ipcMain.handle('pdf-page-rows', async (event, filePath) => {
 });
 
 // --- Case Export / Import ---
-ipcMain.handle('save-case-export', async (event, { fileName, data }) => {
+
+const VcasePackage = require('./modules/_shared/vcase-package.js');
+
+/** Total size and file count of one case folder, for the export dialog.
+ *  The officer should know whether they are about to make a 4 MB file or a
+ *  6 GB one BEFORE they click, not after a ten-minute wait. */
+ipcMain.handle('case-files-summary', async (_e, caseNumber) => {
+  const root = path.join(casesDir, String(caseNumber || ''));
+  let files = 0, bytes = 0;
+  const walk = (dir) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) { walk(full); continue; }
+      if (!e.isFile()) continue;
+      try { bytes += fs.statSync(full).size; files++; } catch (_) { /* unreadable; not counted */ }
+    }
+  };
+  if (!caseNumber || !fs.existsSync(root)) return { exists: false, files: 0, bytes: 0 };
+  walk(root);
+  return { exists: true, files, bytes };
+});
+
+/**
+ * Export a case package.
+ *
+ * Three shapes come out of here, and which one you get depends only on what
+ * the officer asked for:
+ *
+ *   data only, no password  → a bare .vcase JSON file, byte-compatible with
+ *                             every VIPER that has ever shipped
+ *   files and/or password   → a .vcase v2 ZIP, sealed if a password was set
+ *
+ * Keeping the plain-JSON shape for the simplest case is deliberate. It means
+ * handing a data-only case to a colleague who has not updated yet still
+ * works. A package with files in it could never have been read by an older
+ * version anyway, so there is nothing to preserve there.
+ *
+ * WHAT CHANGED, AND WHY IT MATTERS: this used to seal every export with the
+ * EXPORTING machine's Field Security key. That key is derived from that one
+ * officer's vault password and a salt that never leaves their computer, so
+ * the resulting file could not be opened by the detective it was sent to —
+ * or by the sender themselves after a security reset. Exports are no longer
+ * sealed with the vault key. If the officer wants the file protected in
+ * transit they set an export password, which is derived from what they type
+ * and travels with nothing.
+ */
+ipcMain.handle('save-case-export', async (event, opts) => {
+  const { fileName, data, caseNumber, includeFiles, password, officer, manifestNote } = (opts || {});
   const result = await dialog.showSaveDialog(mainWindow, {
     title: 'Export Case Package',
     defaultPath: fileName,
@@ -4372,13 +4421,300 @@ ipcMain.handle('save-case-export', async (event, { fileName, data }) => {
   });
   restoreFocus();
   if (result.canceled || !result.filePath) return null;
-  const buf = Buffer.from(data, 'utf-8');
-  if (security && security.isEnabled() && security.isUnlocked()) {
-    fs.writeFileSync(result.filePath, security.encryptBuffer(buf));
-  } else {
-    fs.writeFileSync(result.filePath, buf, 'utf-8');
+
+  const filePath = result.filePath;
+  const pw = (typeof password === 'string' && password.length) ? password : null;
+  const wantFiles = includeFiles === true && !!caseNumber;
+
+  // ── the simple shape ────────────────────────────────────────────────
+  if (!wantFiles && !pw) {
+    fs.writeFileSync(filePath, Buffer.from(data, 'utf-8'));
+    return { filePath, format: 'json', sealed: false, files: 0, bytes: 0, skipped: [] };
   }
-  return result.filePath;
+
+  // ── the v2 ZIP ──────────────────────────────────────────────────────
+  // Case files go in DECRYPTED, for the same reason the .vbak backup does:
+  // the key that would unwrap them does not travel with the package. If
+  // Field Security is on and locked we cannot decrypt them, so we refuse
+  // rather than ship unreadable bytes labelled as evidence.
+  if (wantFiles && security && security.isEnabled() && !security.isUnlocked()) {
+    throw new Error('Field Security is locked — unlock it before exporting a case with its files, '
+      + 'otherwise the files cannot be read by whoever you send them to.');
+  }
+  const canDecryptInner = !!(security && security.isUnlocked());
+
+  const archiver = (() => { try { return require('archiver'); } catch { return null; } })();
+  if (!archiver) throw new Error('Cannot build the package — the archive library is unavailable.');
+
+  const HASH_MAX_BYTES = 256 * 1024 * 1024;
+  const manifestRows = [];
+  const skipped = [];
+  let fileCount = 0, logicalBytes = 0;
+
+  const sha256Of = (full, size) => {
+    if (size != null && size > HASH_MAX_BYTES) return { hash: '', note: 'not hashed (over 256 MB)' };
+    let fd = null;
+    try {
+      fd = fs.openSync(full, 'r');
+      const h = crypto.createHash('sha256');
+      const buf = Buffer.alloc(1024 * 1024);
+      for (;;) {
+        const n = fs.readSync(fd, buf, 0, buf.length, null);
+        if (n <= 0) break;
+        h.update(buf.subarray(0, n));
+      }
+      return { hash: h.digest('hex'), note: '' };
+    } catch (e) {
+      return { hash: '', note: 'not hashed (' + e.message + ')' };
+    } finally {
+      if (fd !== null) { try { fs.closeSync(fd); } catch (_) {} }
+    }
+  };
+
+  return await new Promise((resolve, reject) => {
+    const output = fs.createWriteStream(filePath);
+    const archive = archiver('zip', { zlib: { level: 6 } }); // 9 wedges on multi-GB
+
+    let seal = null;
+    let settled = false;
+    const settle = (fn, val) => { if (!settled) { settled = true; fn(val); } };
+
+    output.on('close', () => {
+      try {
+        // The GCM tag is only available once the cipher has finished, so it
+        // is appended after the stream closes. That is why the sealed layout
+        // puts the tag at the END of the file rather than in the header.
+        if (seal) fs.appendFileSync(filePath, seal.tag());
+      } catch (e) {
+        return settle(reject, new Error('Export sealed but could not be finished: ' + e.message));
+      }
+      let bytes = 0;
+      try { bytes = fs.statSync(filePath).size; } catch (_) {}
+      console.log(`[save-case-export] wrote ${bytes} bytes; files=${fileCount} skipped=${skipped.length} sealed=${!!seal}`);
+      settle(resolve, {
+        filePath, format: 'zip', sealed: !!seal,
+        files: fileCount, bytes, logicalBytes, skipped
+      });
+    });
+    output.on('error', (e) => settle(reject, e));
+    archive.on('error', (e) => { try { output.destroy(); } catch (_) {} settle(reject, e); });
+    archive.on('warning', (e) => console.warn('[save-case-export] archive warning:', e && e.message));
+
+    try {
+      if (pw) {
+        seal = VcasePackage.createSeal(pw);
+        output.write(seal.header);
+        archive.pipe(seal.cipher).pipe(output);
+      } else {
+        archive.pipe(output);
+      }
+    } catch (e) {
+      return settle(reject, e);
+    }
+
+    try {
+      archive.append(Buffer.from(data, 'utf-8'), { name: VcasePackage.DATA_ENTRY });
+
+      if (wantFiles) {
+        const root = path.join(casesDir, String(caseNumber));
+        const walk = (dir, rel) => {
+          let entries;
+          try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+          catch (e) { skipped.push({ path: rel || '.', reason: e.message }); return; }
+          for (const entry of entries) {
+            const full = path.join(dir, entry.name);
+            const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+            if (entry.isDirectory()) { walk(full, relPath); continue; }
+            if (!entry.isFile()) continue;
+            const archiveName = `${VcasePackage.FILES_PREFIX}${caseNumber}/${relPath}`;
+            try {
+              let stat = null;
+              try { stat = fs.statSync(full); } catch (_) {}
+              // Cheap 8-byte sniff rather than reading a multi-GB file to
+              // find out whether it is encrypted.
+              const fd = fs.openSync(full, 'r');
+              const head = Buffer.alloc(8);
+              const readN = fs.readSync(fd, head, 0, 8, 0);
+              fs.closeSync(fd);
+              const encrypted = readN >= 6 && isVipencBuffer(head);
+
+              if (encrypted) {
+                if (!canDecryptInner) { skipped.push({ path: relPath, reason: 'locked' }); continue; }
+                const plain = security.decryptBuffer(fs.readFileSync(full));
+                archive.append(plain, { name: archiveName });
+                manifestRows.push({
+                  archived: archiveName, original: relPath, module: relPath.split('/')[0] || 'Case',
+                  bytes: plain.length,
+                  sha256: crypto.createHash('sha256').update(plain).digest('hex'),
+                  note: 'decrypted from VIPER Field Security on export'
+                });
+                fileCount++; logicalBytes += plain.length;
+              } else {
+                // Streamed from disk — no JS-heap cost for large media.
+                archive.file(full, { name: archiveName });
+                const h = sha256Of(full, stat ? stat.size : null);
+                manifestRows.push({
+                  archived: archiveName, original: relPath, module: relPath.split('/')[0] || 'Case',
+                  bytes: stat ? stat.size : '', sha256: h.hash, note: h.note
+                });
+                fileCount++; logicalBytes += stat ? stat.size : 0;
+              }
+            } catch (e) {
+              skipped.push({ path: relPath, reason: e.message });
+            }
+          }
+        };
+        if (fs.existsSync(root)) walk(root, '');
+
+        archive.append(
+          VcasePackage.manifestCsv(manifestRows, officer || {}, caseNumber),
+          { name: VcasePackage.MANIFEST_ENTRY }
+        );
+      }
+
+      if (manifestNote) archive.append(String(manifestNote), { name: 'READ ME FIRST.txt' });
+
+      archive.finalize();
+    } catch (e) {
+      settle(reject, e);
+    }
+  });
+});
+
+/**
+ * Read the data half of a v2 package, prompting-free. Called a second time
+ * with a password once the renderer has asked for one.
+ *
+ * Returns { ok: true, package, sealed, hasFiles, fileCount } or
+ * { ok: false, reason } with a machine-readable reason, so the renderer can
+ * tell "wrong password" from "this was made by a newer VIPER" and say the
+ * right thing instead of a generic failure.
+ */
+ipcMain.handle('vcase-read', async (_e, { filePath, password }) => {
+  const AdmZip = require('adm-zip');
+  let raw;
+  let wasSealed = false;
+  try { raw = fs.readFileSync(filePath); }
+  catch (e) { return { ok: false, reason: 'unreadable', detail: e.message }; }
+
+  if (VcasePackage.isSealed(raw)) {
+    wasSealed = true;
+    if (typeof password !== 'string' || !password.length) {
+      return { ok: false, reason: VcasePackage.ERR_PASSWORD, sealed: true };
+    }
+    const opened = VcasePackage.openBuffer(raw, password);
+    if (!opened.ok) return { ok: false, reason: opened.reason, sealed: true, version: opened.version };
+    raw = opened.data;
+  }
+
+  if (!VcasePackage.looksLikeZip(raw)) {
+    // An unsealed, non-ZIP .vcase is a v1 JSON file. Hand it back as-is.
+    try {
+      return { ok: true, sealed: wasSealed, hasFiles: false, fileCount: 0,
+        package: JSON.parse(raw.toString('utf-8')) };
+    } catch (e) { return { ok: false, reason: 'not_a_package', detail: e.message }; }
+  }
+
+  let zip;
+  try { zip = new AdmZip(raw); } catch (e) { return { ok: false, reason: 'damaged', detail: e.message }; }
+  const entry = zip.getEntries().find(x => x.entryName === VcasePackage.DATA_ENTRY);
+  if (!entry) return { ok: false, reason: 'missing_data' };
+  let pkg;
+  try { pkg = JSON.parse(entry.getData().toString('utf-8')); }
+  catch (e) { return { ok: false, reason: 'damaged', detail: e.message }; }
+
+  const fileCount = zip.getEntries()
+    .filter(x => !x.isDirectory && x.entryName.indexOf(VcasePackage.FILES_PREFIX) === 0).length;
+  return { ok: true, sealed: wasSealed, hasFiles: fileCount > 0, fileCount, package: pkg };
+});
+
+/**
+ * Land the case files from a v2 package into this machine's case folder.
+ *
+ * Deliberately NEVER overwrites. A package being imported into an existing
+ * case can carry a file with the same name as one the host detective already
+ * has, and silently replacing their copy with somebody else's is how evidence
+ * stops matching the report that describes it. An identical file (same
+ * SHA-256) is skipped; a different one is written alongside under a suffixed
+ * name and reported back, so the caller can point the imported record at the
+ * name that was actually used.
+ */
+ipcMain.handle('vcase-extract-files', async (_e, { filePath, password, caseNumber }) => {
+  const AdmZip = require('adm-zip');
+  if (!caseNumber) return { ok: false, reason: 'no_case_number' };
+
+  let raw;
+  try { raw = fs.readFileSync(filePath); }
+  catch (e) { return { ok: false, reason: 'unreadable', detail: e.message }; }
+
+  if (VcasePackage.isSealed(raw)) {
+    const opened = VcasePackage.openBuffer(raw, password || '');
+    if (!opened.ok) return { ok: false, reason: opened.reason };
+    raw = opened.data;
+  }
+  if (!VcasePackage.looksLikeZip(raw)) return { ok: true, written: 0, identical: 0, renamed: [], failed: [] };
+
+  let zip;
+  try { zip = new AdmZip(raw); } catch (e) { return { ok: false, reason: 'damaged', detail: e.message }; }
+
+  // Re-encrypt on the way to disk if THIS machine's Field Security is on,
+  // so imported files land in the same shape as everything else here.
+  const reEncrypt = !!(security && security.isEnabled() && security.isUnlocked());
+  const root = path.join(casesDir, String(caseNumber));
+
+  let written = 0, identical = 0;
+  const renamed = [], failed = [];
+
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory) continue;
+    const rel = VcasePackage.caseFileRelPath(entry.entryName);
+    if (!rel) {
+      // Either not a case file (supplement.json, MANIFEST.csv) or a path
+      // that tried to climb out of the case folder. Both are skipped; the
+      // second is worth saying out loud.
+      if (entry.entryName.indexOf(VcasePackage.FILES_PREFIX) === 0) {
+        failed.push({ path: entry.entryName, reason: 'unsafe path — not written' });
+      }
+      continue;
+    }
+    let data;
+    try { data = entry.getData(); } catch (e) { failed.push({ path: rel, reason: e.message }); continue; }
+
+    const dest = path.join(root, rel);
+    try { fs.mkdirSync(path.dirname(dest), { recursive: true }); }
+    catch (e) { failed.push({ path: rel, reason: e.message }); continue; }
+
+    let target = dest;
+    if (fs.existsSync(dest)) {
+      let existingPlain = null;
+      try {
+        const cur = fs.readFileSync(dest);
+        existingPlain = (security && security.isUnlocked() && security.isEncryptedBuffer(cur))
+          ? security.decryptBuffer(cur) : cur;
+      } catch (_) { existingPlain = null; }
+      if (existingPlain && existingPlain.equals(data)) { identical++; continue; }
+      const ext = path.extname(rel);
+      const stem = rel.slice(0, rel.length - ext.length);
+      let n = 2;
+      let candidate = path.join(root, stem + ' (' + n + ')' + ext);
+      while (fs.existsSync(candidate) && n < 1000) {
+        n++;
+        candidate = path.join(root, stem + ' (' + n + ')' + ext);
+      }
+      target = candidate;
+      renamed.push({ from: rel, to: path.relative(root, candidate).replace(/\\/g, '/') });
+    }
+
+    try {
+      fs.writeFileSync(target, reEncrypt ? security.encryptBuffer(data) : data);
+      written++;
+    } catch (e) {
+      failed.push({ path: rel, reason: e.message });
+    }
+  }
+
+  console.log(`[vcase-extract-files] case ${caseNumber}: written=${written} identical=${identical} renamed=${renamed.length} failed=${failed.length}`);
+  return { ok: true, written, identical, renamed, failed, reEncrypted: reEncrypt };
 });
 
 // --- Export DA Package (ZIP with PDF + evidence files) ---
@@ -4888,8 +5224,39 @@ ipcMain.handle('open-case-import', async () => {
 
   // .vcase or .json — read as text
   const raw = fs.readFileSync(filePath);
+
+  // v2 packages are ZIPs, sealed or not. Hand the renderer a sentinel with
+  // the path rather than the contents: a package with a phone extraction in
+  // it can be gigabytes, and a sealed one cannot be read at all until the
+  // officer has typed the password. The renderer calls vcase-read next.
+  if (VcasePackage.isSealed(raw)) {
+    return JSON.stringify({
+      _vcase2: true, sealed: true, filePath,
+      fileName: path.basename(filePath)
+    });
+  }
+  if (VcasePackage.looksLikeZip(raw)) {
+    return JSON.stringify({
+      _vcase2: true, sealed: false, filePath,
+      fileName: path.basename(filePath)
+    });
+  }
+
+  // v1 and older: a bare JSON file, which on a vault-enabled machine may
+  // have been sealed with THAT machine's Field Security key. Packages are
+  // no longer written that way — it is the bug that made a handoff
+  // unreadable anywhere but the sender's computer — but files already in
+  // the field still have to open on the machine that made them.
   if (security && security.isUnlocked() && security.isEncryptedBuffer(raw)) {
     return security.decryptBuffer(raw).toString('utf-8');
+  }
+  if (security && security.isEncryptedBuffer(raw)) {
+    throw new Error(
+      'This case package was sealed with the Field Security key of the VIPER '
+      + 'that created it. Unlock Field Security on that machine and export it '
+      + 'again — newer exports are portable, and can be password protected '
+      + 'instead.'
+    );
   }
   return raw.toString('utf-8');
 });

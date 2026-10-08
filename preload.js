@@ -153,6 +153,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Case Export / Import
   saveCaseExport: (data) => ipcRenderer.invoke('save-case-export', data),
   openCaseImport: () => ipcRenderer.invoke('open-case-import'),
+  // .vcase v2 — the package is a ZIP that may carry the case files and may
+  // be password sealed, so reading it is two steps: read the data half
+  // (prompting for a password if it is sealed), then land the files once the
+  // officer has said where they are going.
+  vcaseRead: (data) => ipcRenderer.invoke('vcase-read', data),
+  vcaseExtractFiles: (data) => ipcRenderer.invoke('vcase-extract-files', data),
+  caseFilesSummary: (caseNumber) => ipcRenderer.invoke('case-files-summary', caseNumber),
   saveDAExport: (data) => ipcRenderer.invoke('save-da-export', data),
 
   // Offense Reference Export / Import

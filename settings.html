@@ -15,6 +15,9 @@
     <script src="modules/warrant-author/provider-directory.js"></script>
     <script src="modules/warrant-author/items-taxonomy.js"></script>
     <script src="modules/warrant-author/boilerplate-library.js"></script>
+    <!-- The one authoritative list of where a case's data lives. Must load
+         BEFORE case-snapshot.js and before the backup collector below. -->
+    <script src="modules/_shared/case-stores.js"></script>
     <script src="case-snapshot.js"></script>
     <script src="libs/tailwindcss.js"></script>
     <link rel="stylesheet" href="modules/viper-skins.css">
@@ -5657,16 +5660,13 @@
                 // Show progress bar
                 document.getElementById('backupProgress').classList.remove('hidden');
 
-                // Collect all localStorage data (Pattern 1 viper* keys + Pattern 2 per-case keys)
+                // Collect all localStorage data (Pattern 1 viper* keys + Pattern 2 per-case keys).
+                // The pattern-2 prefixes come from the registry. This list was
+                // hand-maintained and had fallen six stores behind: Field Work,
+                // X, Discord, DataPilot, Cellebrite and Flock were all missing,
+                // so a full backup silently did not contain them.
                 const backupData = {};
-                const pattern2Prefixes = [
-                    'suspects_', 'victims_', 'victimBusinesses_', 'cargo_',
-                    'witnesses_', 'involvedPersons_', 'recoveredVehicles_', 'missingpersons_',
-                    'areacanvas_', 'prosecution_', 'narcotics_', 'firearms_',
-                    'money_', 'opsplan_', 'rmsImports_', 'oversightImport_',
-                    'canvasForms_', 'cyberTips_', 'timelineEvents_', 'consentSearches_',
-                    'googleWarrant_', 'metaWarrant_', 'kikWarrant_', 'snapchatWarrant_', 'caseMetrics_', 'connectionBoard_'
-                ];
+                const pattern2Prefixes = window.CaseStores.prefixes2();
                 for (let i = 0; i < localStorage.length; i++) {
                     const key = localStorage.key(i);
                     if (key.startsWith('viper') || pattern2Prefixes.some(p => key.startsWith(p))) {

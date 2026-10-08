@@ -2576,6 +2576,17 @@
                     return;
                 }
 
+                // Detect format: .vcase v2 — a ZIP that may carry the case
+                // files and may be password sealed. Main handed us a path,
+                // not the contents, because the package can be gigabytes and
+                // a sealed one cannot be read at all until we have asked for
+                // the password.
+                if (pkg._vcase2 && pkg.filePath) {
+                    await importVcase2(pkg);
+                    updateDashboardCaseData();
+                    return;
+                }
+
                 // Detect format: .vcase export vs full backup .json
                 if (pkg._viperExport && pkg.caseMetadata) {
                     // --- Format 1: .vcase single-case export ---
@@ -2766,6 +2777,143 @@
             }
 
             showNotification(`Case ${meta.caseNumber} imported successfully${pkg._exportedBy ? ` (from ${pkg._exportedBy})` : ''}.`, 'success');
+            // Reported back so the v2 flow knows where to land the case
+            // files. A cancelled or refused import returns undefined, and the
+            // caller writes nothing to disk.
+            return { caseNumber: meta.caseNumber, caseId: newId };
+        }
+
+        /* ---- .vcase v2 (ZIP, optionally password sealed) ---- */
+
+        function promptVcasePassword(fileName, retry) {
+            return new Promise(resolve => {
+                const backdrop = document.createElement('div');
+                backdrop.className = 'viper-confirm-backdrop';
+                backdrop.innerHTML = `
+                    <div class="viper-confirm-box" style="max-width:440px;text-align:left;">
+                        <p style="margin-bottom:6px;font-weight:600;">This case package is password protected</p>
+                        <p style="margin-bottom:10px;font-size:12px;color:#9ca3af;word-break:break-all;">${fileName}</p>
+                        ${retry ? '<p style="margin-bottom:8px;font-size:12px;color:#ef4444;">That password did not open the file. Check it with whoever sent it — if the file was damaged in transit it will fail the same way.</p>' : ''}
+                        <p style="margin-bottom:6px;font-size:13px;">Enter the password the sending investigator set when they exported it.</p>
+                        <input type="password" id="vcaseePwInput" autocomplete="off"
+                               style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:6px;border:1px solid #374151;background:#0f1115;color:#fff;margin-bottom:12px;"
+                               placeholder="Export password">
+                        <div class="viper-confirm-btns">
+                            <button class="vc-cancel">Cancel</button>
+                            <button class="vc-ok">Open</button>
+                        </div>
+                    </div>`;
+                const input = backdrop.querySelector('#vcaseePwInput');
+                const [cancelBtn, okBtn] = backdrop.querySelectorAll('.viper-confirm-btns button');
+                function close(val) {
+                    backdrop.style.opacity = '0';
+                    setTimeout(() => { if (backdrop.parentNode) backdrop.remove(); }, 150);
+                    resolve(val);
+                }
+                cancelBtn.onclick = () => close(null);
+                okBtn.onclick = () => close(input.value || '');
+                backdrop.onclick = (e) => { if (e.target === backdrop) close(null); };
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); close(input.value || ''); }
+                    if (e.key === 'Escape') { e.preventDefault(); close(null); }
+                });
+                document.body.appendChild(backdrop);
+                input.focus();
+            });
+        }
+
+        /** Why an open failed, in words an investigator can act on. The main
+         *  process returns a stable reason code rather than prose precisely so
+         *  this stays in one place. */
+        function _vcaseFailureMessage(reason, detail) {
+            switch (reason) {
+                case 'bad_password':
+                    return 'That password did not open the package. If the password is right, the file may have been damaged in transit — ask for it again.';
+                case 'unsupported_version':
+                    return 'This package was made by a newer version of VIPER. Update VIPER and try again.';
+                case 'truncated':
+                    return 'This package is incomplete — the file was cut short. Ask the sender for it again.';
+                case 'damaged':
+                    return 'This package could not be read. It appears to be damaged.';
+                case 'missing_data':
+                    return 'This file is a ZIP but does not contain a VIPER case.';
+                case 'not_a_package':
+                    return 'This is not a VIPER case package.';
+                case 'unreadable':
+                    return 'Could not read that file' + (detail ? ' — ' + detail : '.');
+                default:
+                    return 'Could not open that case package' + (detail ? ' — ' + detail : '.');
+            }
+        }
+
+        async function importVcase2(sentinel) {
+            const fileName = sentinel.fileName || (sentinel.filePath || '').split(/[\\/]/).pop();
+            let password = null;
+
+            // Three attempts, then stop. Past that the officer is guessing,
+            // and the package may simply be damaged — which fails identically.
+            let read = null;
+            for (let attempt = 0; attempt < 3; attempt++) {
+                if (sentinel.sealed) {
+                    password = await promptVcasePassword(fileName, attempt > 0);
+                    if (password === null) return;   // cancelled
+                }
+                read = await window.electronAPI.vcaseRead({ filePath: sentinel.filePath, password });
+                if (read && read.ok) break;
+                if (!sentinel.sealed || !read || read.reason !== 'bad_password') break;
+            }
+            if (!read || !read.ok) {
+                showNotification(_vcaseFailureMessage(read && read.reason, read && read.detail), 'error');
+                return;
+            }
+
+            const pkg = read.package;
+            if (!pkg || !pkg._viperExport || !pkg.caseMetadata) {
+                showNotification('This file is not a VIPER case export.', 'error');
+                return;
+            }
+
+            const landed = await importVcasePackage(pkg);
+            if (!landed) return;   // user declined the replace, nothing written
+
+            if (!read.hasFiles) return;
+
+            showNotification(`Restoring ${read.fileCount} case file${read.fileCount === 1 ? '' : 's'}…`, 'info');
+            try {
+                const ex = await window.electronAPI.vcaseExtractFiles({
+                    filePath: sentinel.filePath,
+                    password,
+                    caseNumber: landed.caseNumber,
+                });
+                if (!ex || !ex.ok) {
+                    showNotification(
+                        'The case record imported, but its files did not: '
+                        + _vcaseFailureMessage(ex && ex.reason, ex && ex.detail),
+                        'error'
+                    );
+                    return;
+                }
+                const bits = [];
+                if (ex.written) bits.push(`${ex.written} written`);
+                if (ex.identical) bits.push(`${ex.identical} already here`);
+                if (ex.renamed && ex.renamed.length) bits.push(`${ex.renamed.length} renamed to avoid overwriting yours`);
+                showNotification(`Case files restored — ${bits.join(', ') || 'nothing to do'}.`, 'success');
+                // A file that did not land is a gap in the case. Never let
+                // that pass as a success.
+                if (ex.failed && ex.failed.length) {
+                    console.warn('[VIPER] vcase file import failures:', ex.failed);
+                    showNotification(
+                        `${ex.failed.length} file${ex.failed.length === 1 ? ' was' : 's were'} not restored — see the log. Ask the sender to re-send.`,
+                        'error'
+                    );
+                }
+                if (ex.renamed && ex.renamed.length) {
+                    console.warn('[VIPER] vcase files renamed to avoid overwriting existing ones:', ex.renamed);
+                }
+            } catch (e) {
+                console.error('[VIPER] vcase file extract failed:', e);
+                showNotification('The case record imported, but its files did not: ' + (e && e.message ? e.message : e), 'error');
+            }
         }
 
         async function importBackupFile(backupData) {

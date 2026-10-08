@@ -2723,10 +2723,191 @@
         }
 
         /* ========== Export / Import Case Package (.vcase) ========== */
+
+        /**
+         * Give every person on the case a durable uid before the case leaves
+         * this machine.
+         *
+         * Notes point at people by uid, and a uid is normally minted lazily —
+         * only when something is actually filed against that person. That is
+         * right while the case lives here, but it is wrong the moment the case
+         * is handed to another detective and merged into their copy: a person
+         * with no uid can only be identified by their POSITION in the list,
+         * and the two officers' lists are not in the same order. Minting
+         * up front is what keeps "this note is about Mr Alvarez" true after
+         * the merge instead of attaching it to whoever happens to be third.
+         *
+         * Returns how many were minted, which is zero on a case that has been
+         * exported before.
+         */
+        function _mintAllPersonNoteUids() {
+            let minted = 0;
+            for (const def of NOTE_PERSON_ROLES) {
+                const acc = _notePersonAccess(def.role);
+                if (!acc) continue;
+                try { acc.load(); } catch (_) { continue; }
+                const list = acc.get() || [];
+                let dirty = false;
+                list.forEach(p => {
+                    if (p && !p.noteUid) {
+                        p.noteUid = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+                        dirty = true; minted++;
+                    }
+                });
+                if (dirty) { try { acc.save(); } catch (_) {} }
+            }
+            return minted;
+        }
+
+        function _fmtBytes(n) {
+            const b = Number(n) || 0;
+            if (b < 1024) return b + ' B';
+            if (b < 1024 * 1024) return (b / 1024).toFixed(0) + ' KB';
+            if (b < 1024 * 1024 * 1024) return (b / (1024 * 1024)).toFixed(1) + ' MB';
+            return (b / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+        }
+
+        /**
+         * The export options dialog.
+         *
+         * Two choices, both of which have consequences the officer should see
+         * before they commit rather than discover afterwards:
+         *
+         *   Include case files — on by default, because an export without the
+         *     photographs, recordings and extractions is a list of records
+         *     pointing at things the recipient does not have. Shows the real
+         *     size, because the honest answer to "why is this taking so long"
+         *     is usually "because it is 4 GB".
+         *
+         *   Password protect — off by default. The file is NOT encrypted
+         *     unless this is set, and the dialog says so in as many words.
+         *     Previously an export was sealed with this machine's Field
+         *     Security key, which looked like protection but actually meant
+         *     nobody else could ever open it.
+         *
+         * Resolves { includeFiles, password } or null if cancelled.
+         */
+        function _promptCaseExportOptions(caseNum, filesInfo) {
+            return new Promise(resolve => {
+                const hasFiles = !!(filesInfo && filesInfo.exists && filesInfo.files > 0);
+                const sizeLine = hasFiles
+                    ? `${filesInfo.files} file${filesInfo.files === 1 ? '' : 's'} · ${_fmtBytes(filesInfo.bytes)}`
+                    : 'No files are stored on disk for this case.';
+                const backdrop = document.createElement('div');
+                backdrop.className = 'viper-confirm-backdrop';
+                backdrop.innerHTML = `
+                    <div class="viper-confirm-box" style="max-width:520px;text-align:left;">
+                        <p style="margin-bottom:4px;font-weight:600;font-size:15px;">Export case ${caseNum}</p>
+                        <p style="margin-bottom:14px;font-size:12px;color:#9ca3af;">
+                            Creates a <code>.vcase</code> package another investigator can import.
+                        </p>
+
+                        <label style="display:flex;gap:10px;align-items:flex-start;margin-bottom:12px;cursor:${hasFiles ? 'pointer' : 'not-allowed'};opacity:${hasFiles ? '1' : '0.5'};">
+                            <input type="checkbox" id="vcxFiles" ${hasFiles ? 'checked' : 'disabled'} style="margin-top:3px;">
+                            <span>
+                                <span style="font-weight:600;">Include case files</span><br>
+                                <span style="font-size:12px;color:#9ca3af;">${sizeLine}</span>
+                            </span>
+                        </label>
+
+                        <label style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px;cursor:pointer;">
+                            <input type="checkbox" id="vcxPwOn" style="margin-top:3px;">
+                            <span>
+                                <span style="font-weight:600;">Password protect this package</span><br>
+                                <span style="font-size:12px;color:#9ca3af;">
+                                    Recommended if the file will be emailed, put on a thumb drive
+                                    or uploaded anywhere. You will have to tell the recipient the
+                                    password separately.
+                                </span>
+                            </span>
+                        </label>
+
+                        <div id="vcxPwFields" style="display:none;margin:0 0 10px 28px;">
+                            <input type="password" id="vcxPw1" autocomplete="new-password" placeholder="Export password"
+                                   style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:6px;border:1px solid #374151;background:#0f1115;color:#fff;margin-bottom:6px;">
+                            <input type="password" id="vcxPw2" autocomplete="new-password" placeholder="Confirm password"
+                                   style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:6px;border:1px solid #374151;background:#0f1115;color:#fff;">
+                            <p style="margin-top:6px;font-size:11px;color:#f59e0b;">
+                                There is no way to recover this password. If it is lost the package
+                                cannot be opened by anyone, including you.
+                            </p>
+                        </div>
+
+                        <p id="vcxPlainWarn" style="margin:0 0 12px 0;font-size:12px;color:#9ca3af;border-left:2px solid #4b5563;padding-left:8px;">
+                            Without a password this file is not encrypted. Anyone who can open the
+                            file can read the case.
+                        </p>
+
+                        <p id="vcxErr" style="display:none;margin:0 0 10px 0;font-size:12px;color:#ef4444;"></p>
+
+                        <div class="viper-confirm-btns">
+                            <button class="vc-cancel">Cancel</button>
+                            <button class="vc-ok">Export</button>
+                        </div>
+                    </div>`;
+                const $ = (id) => backdrop.querySelector('#' + id);
+                const pwOn = $('vcxPwOn');
+                const pwFields = $('vcxPwFields');
+                const plainWarn = $('vcxPlainWarn');
+                const err = $('vcxErr');
+                pwOn.addEventListener('change', () => {
+                    pwFields.style.display = pwOn.checked ? 'block' : 'none';
+                    plainWarn.style.display = pwOn.checked ? 'none' : 'block';
+                    if (pwOn.checked) $('vcxPw1').focus();
+                });
+                const [cancelBtn, okBtn] = backdrop.querySelectorAll('.viper-confirm-btns button');
+                function close(val) {
+                    backdrop.style.opacity = '0';
+                    setTimeout(() => { if (backdrop.parentNode) backdrop.remove(); }, 150);
+                    resolve(val);
+                }
+                cancelBtn.onclick = () => close(null);
+                okBtn.onclick = () => {
+                    let password = null;
+                    if (pwOn.checked) {
+                        const a = $('vcxPw1').value || '';
+                        const b = $('vcxPw2').value || '';
+                        if (a.length < 8) {
+                            err.textContent = 'Use at least 8 characters.';
+                            err.style.display = 'block'; return;
+                        }
+                        if (a !== b) {
+                            err.textContent = 'The two passwords do not match.';
+                            err.style.display = 'block'; return;
+                        }
+                        password = a;
+                    }
+                    close({ includeFiles: hasFiles && $('vcxFiles').checked, password });
+                };
+                backdrop.onclick = (e) => { if (e.target === backdrop) close(null); };
+                backdrop.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape') { e.preventDefault(); close(null); }
+                });
+                document.body.appendChild(backdrop);
+            });
+        }
+
         async function exportCasePackage() {
             if (!currentCase) return;
             const caseId = currentCase.id;
             const caseNum = currentCase.caseNumber;
+
+            let filesInfo = { exists: false, files: 0, bytes: 0 };
+            try {
+                if (window.electronAPI && window.electronAPI.caseFilesSummary) {
+                    filesInfo = await window.electronAPI.caseFilesSummary(caseNum) || filesInfo;
+                }
+            } catch (e) {
+                console.warn('[VIPER] case file size unavailable:', e);
+            }
+
+            const choice = await _promptCaseExportOptions(caseNum, filesInfo);
+            if (!choice) return;
+
+            // Every person gets a durable id before anything is serialised, so
+            // the notes filed against them survive being merged into another
+            // detective's case where the list order is different.
+            try { _mintAllPersonNoteUids(); } catch (e) { console.warn('[VIPER] noteUid minting:', e); }
 
             // Collect per-ID module data (Pattern 2).
             // The key list comes from modules/_shared/case-stores.js so the
@@ -2760,11 +2941,34 @@
             const allTasks = _lsParse('viperTasks', []);
             const caseTasks = allTasks.filter(t => t.caseId === caseNum);
 
+            const officer = _officerIdentity();
             const pkg = {
                 _viperExport: true,
-                _version: '1.0',
+                // 2.0 when the package is a ZIP carrying files. A data-only
+                // export keeps the 1.0 shape AND the 1.0 file format, so it
+                // still opens in a VIPER that has not been updated.
+                _version: choice.includeFiles ? '2.0' : '1.0',
                 _exportedAt: new Date().toISOString(),
-                _exportedBy: localStorage.getItem('viper_customer_name') || 'Unknown',
+                _exportedBy: officer.officerName || localStorage.getItem('viper_customer_name') || 'Unknown',
+                // Who sent this, so the receiving case can say where each
+                // record came from instead of just "imported".
+                _source: {
+                    officerName: officer.officerName,
+                    officerRank: officer.officerRank,
+                    officerBadge: officer.officerBadge,
+                    agencyName: officer.agencyName,
+                    caseNumber: caseNum,
+                    // Which VIPER built this, read off the version the page
+                    // already shows. Lets a future importer say "this came
+                    // from an older build" rather than guessing.
+                    appVersion: (function () {
+                        try {
+                            const el = document.getElementById('appVersion');
+                            return el && el.textContent ? el.textContent.replace(/^v/i, '').trim() : '';
+                        } catch (_) { return ''; }
+                    }()),
+                },
+                _includesFiles: !!choice.includeFiles,
                 caseMetadata: { ...currentCase },
                 moduleData,
                 sharedData,
@@ -2772,20 +2976,44 @@
             };
 
             const fileName = `VIPER_Case_${caseNum.replace(/[^a-zA-Z0-9-]/g, '_')}_${new Date().toISOString().slice(0,10)}.vcase`;
+            if (choice.includeFiles) showToast('Building case package…', 'info');
             try {
-                const savedPath = await window.electronAPI.saveCaseExport({
+                const res = await window.electronAPI.saveCaseExport({
                     fileName,
-                    data: JSON.stringify(pkg, null, 2)
+                    data: JSON.stringify(pkg, null, 2),
+                    caseNumber: caseNum,
+                    includeFiles: !!choice.includeFiles,
+                    password: choice.password || null,
+                    officer,
                 });
-                if (savedPath) {
-                    showToast(`Case exported to ${savedPath.split('\\').pop()}`, 'success');
-                    audit('case_exported', {
-                        case_number: caseNum,
-                        case_id: caseId,
-                        path: savedPath,
-                        modules: Object.keys(moduleData),
-                    });
+                if (!res) return;   // cancelled at the save dialog
+                // Older main processes returned the path as a bare string.
+                const savedPath = (typeof res === 'string') ? res : res.filePath;
+                const bits = [];
+                if (res && res.files) bits.push(`${res.files} file${res.files === 1 ? '' : 's'}`);
+                if (res && res.bytes) bits.push(_fmtBytes(res.bytes));
+                if (res && res.sealed) bits.push('password protected');
+                showToast(
+                    `Case exported to ${savedPath.split(/[\\/]/).pop()}${bits.length ? ' — ' + bits.join(', ') : ''}`,
+                    'success'
+                );
+                // A file we could not read is not a file the recipient gets.
+                // Say which ones rather than letting them find the gap.
+                if (res && res.skipped && res.skipped.length) {
+                    console.warn('[VIPER] export skipped files:', res.skipped);
+                    showToast(
+                        `${res.skipped.length} file${res.skipped.length === 1 ? ' was' : 's were'} not included — see the log.`,
+                        'warning'
+                    );
                 }
+                audit('case_exported', {
+                    case_number: caseNum,
+                    case_id: caseId,
+                    path: savedPath,
+                    modules: Object.keys(moduleData),
+                    included_files: (res && res.files) || 0,
+                    password_protected: !!(res && res.sealed),
+                });
             } catch (err) {
                 console.error('Case export failed:', err);
                 showToast('Failed to export case: ' + err.message, 'error');
@@ -2977,6 +3205,32 @@
         // so its export is not a DA package — it is a hand-off. Returns null
         // for a normal case, which is what keeps the DA export path unchanged.
         //
+        /**
+         * Who this officer is, for anything that has to say where a piece of
+         * work came from.
+         *
+         * The Warrant Author agency profile is the source because that is the
+         * one place they have already typed their rank, name, badge and
+         * agency. Falls back to the case's Created By and then the licensed
+         * customer name. If all three are empty the caller still works — it
+         * just says the source is unknown rather than inventing a name, which
+         * on a case file is the difference between a gap and a false record.
+         */
+        function _officerIdentity() {
+            let ag = {};
+            try { ag = JSON.parse(localStorage.getItem('viperAgencyProfile')) || {}; } catch (_) { ag = {}; }
+            let createdBy = '';
+            try { createdBy = (currentCase && currentCase.createdBy) || ''; } catch (_) { createdBy = ''; }
+            const officerName = String(ag.affiantName || createdBy
+                || localStorage.getItem('viper_customer_name') || '').trim();
+            const officerRank = String(ag.affiantRank || '').trim();
+            const officerBadge = String(ag.affiantBadge || '').trim();
+            const agencyName = String(ag.agencyName || '').trim();
+            const who = [officerRank, officerName].filter(Boolean).join(' ').trim()
+                + (officerBadge ? ` ${officerBadge}` : '');
+            return { officerName, officerRank, officerBadge, agencyName, who: who || '' };
+        }
+
         // The officer's identity comes from the Warrant Author agency profile
         // because that is the one place they have already typed their rank,
         // name, badge and agency. If it is blank we fall back to the case's
@@ -2987,15 +3241,12 @@
             try {
                 if (!currentCase || currentCase.caseRole !== 'assist') return null;
             } catch (_) { return null; }
-            let ag = {};
-            try { ag = JSON.parse(localStorage.getItem('viperAgencyProfile')) || {}; } catch (_) { ag = {}; }
-            const officerName = String(ag.affiantName || currentCase.createdBy
-                || localStorage.getItem('viper_customer_name') || '').trim();
-            const officerRank = String(ag.affiantRank || '').trim();
-            const officerBadge = String(ag.affiantBadge || '').trim();
-            const agencyName = String(ag.agencyName || '').trim();
-            const who = [officerRank, officerName].filter(Boolean).join(' ').trim()
-                + (officerBadge ? ` ${officerBadge}` : '');
+            const id = _officerIdentity();
+            const officerName = id.officerName;
+            const officerRank = id.officerRank;
+            const officerBadge = id.officerBadge;
+            const agencyName = id.agencyName;
+            const who = id.who;
             const dateStr = new Date().toISOString().split('T')[0];
             // The root folder name is read by a human in Explorer before any
             // file is opened, so it leads with what it is and whose it is.

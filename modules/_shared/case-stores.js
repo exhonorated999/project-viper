@@ -275,7 +275,12 @@
           identity: null, merge: 'mirror', mirrorOf: 'narcotics' },
         { key: 'viperCaseMoney', pattern: 1, label: 'Money (shared)', shape: 'array',
           identity: null, merge: 'mirror', mirrorOf: 'money' },
-        { key: 'viperCaseProsecution', pattern: 1, label: 'Prosecution (shared)', shape: 'array',
+        /* Measured, not assumed: saveProsecutionData() writes the whole
+         * prosecution OBJECT under the case number, where the three above
+         * write an ARRAY. A mirror copies its source verbatim, so getting
+         * this wrong would have written an array where the tab reads an
+         * object and the Prosecution tab would have come back empty. */
+        { key: 'viperCaseProsecution', pattern: 1, label: 'Prosecution (shared)', shape: 'object',
           identity: null, merge: 'mirror', mirrorOf: 'prosecution' },
 
         /* ── pattern 1: legacy mirrors ───────────────────────────────────

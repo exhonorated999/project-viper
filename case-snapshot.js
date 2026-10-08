@@ -23,23 +23,21 @@
     if (typeof window === 'undefined') return;
     if (window.viperSnapshot) return; // already installed (script loaded twice)
 
-    // ── Tracked storage keys (mirrors .vcase export schema) ──────────
-    const PATTERN1_KEYS = [
-        'viperCaseNotes', 'viperCaseReports', 'viperCaseEvidence',
-        'viperCaseWarrants', 'viperCaseSuspects', 'viperCaseVictims',
-        'viperCaseWitnesses', 'viperCaseVehicles', 'viperCaseFirearms',
-        'viperCaseNarcotics', 'viperCaseMoney', 'viperCaseMissingPersons',
-        'viperCaseCanvas', 'viperCaseProsecution', 'viperTraceImports'
-    ];
-    const PATTERN2_PREFIXES = [
-        'suspects_', 'victims_', 'victimBusinesses_', 'cargo_',
-        'witnesses_', 'involvedPersons_', 'recoveredVehicles_', 'missingpersons_',
-        'areacanvas_', 'fieldwork_', 'fieldworkForms_', 'prosecution_', 'narcotics_', 'firearms_',
-        'money_', 'opsplan_', 'rmsImports_', 'oversightImport_',
-        'canvasForms_', 'cyberTips_', 'timelineEvents_', 'consentSearches_',
-        'googleWarrant_', 'metaWarrant_', 'kikWarrant_', 'caseMetrics_',
-        'connectionBoard_', 'flock_'
-    ];
+    // ── Tracked storage keys ─────────────────────────────────────────
+    // Read from modules/_shared/case-stores.js, which is the single
+    // authoritative table. This list used to be hand-maintained and had
+    // drifted from the .vcase exporter in both directions — several
+    // warrant-return stores were exported but never snapshotted, and
+    // warrant drafts were in neither list.
+    if (!window.CaseStores) {
+        // Load order is enforced by the <script> tags in index.html and
+        // case-detail-with-analytics.html. Fail loudly rather than
+        // silently snapshotting nothing.
+        console.error('[VIPER] case-snapshot.js: case-stores.js must load first; snapshots disabled.');
+        return;
+    }
+    const PATTERN1_KEYS = window.CaseStores.keys1();
+    const PATTERN2_PREFIXES = window.CaseStores.prefixes2();
     const PATTERN1_SET = new Set(PATTERN1_KEYS);
     const TASK_KEY = 'viperTasks';
     const CASES_KEY = 'viperCases';

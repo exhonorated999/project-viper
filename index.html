@@ -38,6 +38,10 @@
          arithmetic, no dependencies. -->
     <script src="modules/rms/pdf-rows.js"></script>
     <script src="modules/supervisor-link/supervisor-link-ui.js"></script>
+    <!-- The one authoritative list of where a case's data lives. Must load
+         BEFORE case-snapshot.js and before the .vcase importer: both read
+         their key lists from it instead of carrying their own copies. -->
+    <script src="modules/_shared/case-stores.js"></script>
     <script src="case-snapshot.js"></script>
     <script src="libs/tailwindcss.js"></script>
     <link rel="stylesheet" href="modules/viper-skins.css">
@@ -2804,14 +2808,7 @@
                 }
 
                 // Restore per-ID module data (Pattern 2) — keys like suspects_12345
-                const pattern2Keys = [
-                    'suspects', 'victims', 'victimBusinesses', 'cargo',
-                    'witnesses', 'involvedPersons', 'recoveredVehicles', 'missingpersons',
-                    'areacanvas', 'fieldwork', 'fieldworkForms', 'prosecution', 'narcotics', 'firearms',
-                    'money', 'opsplan', 'rmsImports', 'oversightImport',
-                    'canvasForms', 'cyberTips', 'timelineEvents', 'consentSearches',
-                    'googleWarrant', 'metaWarrant', 'kikWarrant', 'snapchatWarrant', 'discordWarrant', 'datapilot', 'cellebriteImport', 'connectionBoard'
-                ];
+                const pattern2Keys = window.CaseStores.keys2();
                 pattern2Keys.forEach(k => {
                     const val = backupData[`${k}_${oldId}`];
                     if (val) localStorage.setItem(`${k}_${newId}`, val);
@@ -2823,13 +2820,7 @@
             localStorage.setItem('viperCases', JSON.stringify(cases));
 
             // Restore shared-object data (Pattern 1) — merge entire objects
-            const pattern1Keys = [
-                'viperCaseNotes', 'viperCaseReports', 'viperCaseEvidence',
-                'viperCaseWarrants', 'viperCaseSuspects', 'viperCaseVictims',
-                'viperCaseWitnesses', 'viperCaseVehicles', 'viperCaseFirearms',
-                'viperCaseNarcotics', 'viperCaseMoney', 'viperCaseMissingPersons',
-                'viperCaseCanvas', 'viperCaseProsecution', 'viperTraceImports'
-            ];
+            const pattern1Keys = window.CaseStores.keys1();
             pattern1Keys.forEach(storeKey => {
                 if (backupData[storeKey]) {
                     const backupObj = JSON.parse(backupData[storeKey]);
@@ -8380,10 +8371,7 @@
                     }
 
                     // 2. Clean localStorage — Pattern 1 (shared objects keyed by caseNumber)
-                    const p1Keys = ['viperCaseNotes','viperCaseReports','viperCaseEvidence','viperCaseWarrants',
-                        'viperCaseSuspects','viperCaseVictims','viperCaseWitnesses','viperCaseVehicles',
-                        'viperCaseFirearms','viperCaseNarcotics','viperCaseMoney','viperCaseMissingPersons',
-                        'viperCaseCanvas','viperCaseProsecution','viperTraceImports'];
+                    const p1Keys = window.CaseStores.keys1();
                     for (const key of p1Keys) {
                         const obj = JSON.parse(localStorage.getItem(key) || '{}');
                         if (obj[c.caseNumber]) {
@@ -8393,9 +8381,11 @@
                     }
 
                     // 3. Clean localStorage — Pattern 2 (per-case keys by case.id)
-                    const p2Prefixes = ['suspects_','victims_','victimBusinesses_','cargo_','witnesses_',
-                        'involvedPersons_','recoveredVehicles_','missingpersons_','areacanvas_','fieldwork_','fieldworkForms_','prosecution_','narcotics_',
-                        'firearms_','money_','opsplan_','rmsImports_','oversightImport_','canvasForms_','cyberTips_','timelineEvents_','consentSearches_','googleWarrant_','metaWarrant_','kikWarrant_','snapchatWarrant_','discordWarrant_','datapilot_','cellebriteImport_','connectionBoard_'];
+                    //    Registry-driven, so a module added later is cleaned up
+                    //    without anyone remembering to edit this line. Warrant
+                    //    drafts and case probable cause were previously left
+                    //    behind here forever.
+                    const p2Prefixes = window.CaseStores.prefixes2();
                     for (const prefix of p2Prefixes) {
                         localStorage.removeItem(prefix + c.id);
                     }

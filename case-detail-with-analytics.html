@@ -3883,6 +3883,116 @@
                 }
                 flush();
             }
+            // Render the report editor's rich HTML into the PDF with its block
+            // structure intact.
+            //
+            // This used to be `div.textContent`, which is why narratives arrived
+            // at the supervisor as one unbroken run-on paragraph: textContent
+            // emits NO newline for a block boundary, so "ASSIGNMENT:" and the
+            // sentence under it were concatenated with nothing between them.
+            // innerText would insert the breaks, but only for an element that is
+            // in the document and laid out — on the detached <div> we build here
+            // Chromium falls back to textContent, so that is not a fix either.
+            // The only reliable route is to walk the tree ourselves.
+            //
+            // Bold/underline are carried through because officers use them as
+            // section headings (ASSIGNMENT / DETAILS / V/1'S STATEMENT); dropping
+            // them turns a structured narrative into a wall of text.
+            async function renderReportHtml(html) {
+                if (!html || typeof html !== 'string' || !html.trim()) return;
+                const root = document.createElement('div');
+                root.innerHTML = html;
+
+                const BLOCK = new Set(['P', 'DIV', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+                                       'TR', 'BLOCKQUOTE', 'PRE', 'SECTION', 'ARTICLE',
+                                       'UL', 'OL', 'TABLE']);
+                const blocks = [];
+                let cur = null;
+                const start = () => { if (!cur) cur = { text: '', bold: true, under: true, seen: false }; };
+                const flush = () => {
+                    if (!cur) return;
+                    const text = cur.text.replace(/\u00a0/g, ' ').replace(/[ \t]+/g, ' ').trim();
+                    blocks.push(text
+                        ? { text, bold: cur.seen && cur.bold, under: cur.seen && cur.under }
+                        : { text: '' });
+                    cur = null;
+                };
+                const walk = async (node, bold, under) => {
+                    for (const n of Array.from(node.childNodes)) {
+                        if (n.nodeType === Node.TEXT_NODE) {
+                            const t = n.nodeValue || '';
+                            // Whitespace-only nodes must not clear the bold/underline
+                            // flags — contenteditable sprinkles them between spans.
+                            if (t.trim()) {
+                                start();
+                                cur.seen = true;
+                                if (!bold) cur.bold = false;
+                                if (!under) cur.under = false;
+                            }
+                            if (cur) cur.text += t;
+                            continue;
+                        }
+                        if (n.nodeType !== Node.ELEMENT_NODE) continue;
+                        const tag = n.tagName;
+                        if (tag === 'IMG') {
+                            flush();
+                            const src = n.getAttribute('src');
+                            if (src && /^data:image\//i.test(src)) blocks.push({ img: src });
+                            else if (src && /^https?:/i.test(src)) blocks.push({ text: `[image: ${src}]` });
+                            continue;
+                        }
+                        if (tag === 'BR') { flush(); continue; }
+                        const style = n.getAttribute('style') || '';
+                        const nb = bold || tag === 'B' || tag === 'STRONG' || /^H[1-6]$/.test(tag)
+                            || /font-weight\s*:\s*(bold|[6-9]00)/i.test(style);
+                        const nu = under || tag === 'U' || /text-decoration[^;]*underline/i.test(style);
+                        const isBlock = BLOCK.has(tag);
+                        if (isBlock) flush();
+                        if (tag === 'LI') { start(); cur.text += '\u2022 '; }
+                        await walk(n, nb, nu);
+                        if (isBlock) flush();
+                    }
+                };
+                await walk(root, false, false);
+                flush();
+
+                // Collapse runs of blank blocks to a single spacer, and drop
+                // trailing ones — editors leave a lot of empty <div>s behind.
+                const out = [];
+                for (const b of blocks) {
+                    if (b.img) { out.push(b); continue; }
+                    if (!b.text) {
+                        const prev = out[out.length - 1];
+                        if (prev && (prev.text || prev.img)) out.push(b);
+                        continue;
+                    }
+                    out.push(b);
+                }
+                while (out.length && !out[out.length - 1].text && !out[out.length - 1].img) out.pop();
+
+                for (const b of out) {
+                    if (b.img) { await embedImageDataUrl(b.img); continue; }
+                    if (!b.text) { y += 3; continue; }
+                    doc.setFontSize(10); doc.setTextColor(...BLACK);
+                    const lines = doc.splitTextToSize(b.text, CW - 4);
+                    for (const line of lines) {
+                        // need() can start a new page, and newPage() resets the
+                        // font to 10pt/normal/black — so re-apply AFTER it.
+                        need(6);
+                        doc.setFontSize(10); doc.setTextColor(...BLACK);
+                        doc.setFont(undefined, b.bold ? 'bold' : 'normal');
+                        doc.text(line, M + 2, y);
+                        if (b.under) {
+                            const w = doc.getTextWidth(line);
+                            doc.setDrawColor(...BLACK); doc.setLineWidth(0.3);
+                            doc.line(M + 2, y + 1, M + 2 + w, y + 1);
+                        }
+                        y += 5;
+                    }
+                    y += 1.5;
+                }
+                doc.setFont(undefined, 'normal'); doc.setTextColor(...BLACK);
+            }
             // Fetch a Notes/ attachment by name (honors Field Security via main process)
             // and return a data: URL suitable for embedImageDataUrl().
             async function _readNoteImageAttachment(fileName, caseNumber) {
@@ -4507,8 +4617,7 @@
                     const rd = _lsParse('viperCaseReports', {});
                     const rpt = rd[caseNum];
                     if (rpt && rpt.content) {
-                        const div = document.createElement('div'); div.innerHTML = rpt.content;
-                        bodyText(div.textContent || div.innerText);
+                        await renderReportHtml(rpt.content);
                     } else emptyMsg('No report content.');
                     break;
                 }

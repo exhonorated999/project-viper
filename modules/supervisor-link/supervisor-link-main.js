@@ -620,6 +620,22 @@ function registerIpc(ipcMain) {
     }
   });
 
+  // Pull the decision state of THIS investigator's own pushes (case review
+  // approvals / returns). Bodies are stripped node-side — we already have the
+  // source material locally, and a reconcile that dragged every PDF back
+  // across the wire on each paint would be unusable.
+  ipcMain.handle('supervisor-link:my-deliveries', async (_e, opts = {}) => {
+    try {
+      const identity = opts.identity || listenIdentity;
+      const url = await resolveListenUrl(opts.url);
+      const c = await ensureClient({ url, identity });
+      const list = await c.rpc('get:my:deliveries');
+      return { ok: true, deliveries: list || [] };
+    } catch (e) {
+      return { ok: false, error: String(e && e.message || e), deliveries: [] };
+    }
+  });
+
   // Forget the pinned node key for the current/given URL (re-TOFU next time).
   ipcMain.handle('supervisor-link:reset-pin', async (_e, opts = {}) => {
     const s = loadStore();

@@ -942,6 +942,12 @@
                             </svg>
                             Export for DA
                         </button>
+                        <button onclick="openCaseReviewModal()" class="px-4 py-2 bg-viper-purple/20 hover:bg-viper-purple/30 border border-viper-purple rounded-lg text-viper-purple transition flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m-6 8H7a2 2 0 01-2-2V6a2 2 0 012-2h2m0 16h8a2 2 0 002-2V6a2 2 0 00-2-2h-2M9 4v2h6V4"/>
+                            </svg>
+                            Send for Review
+                        </button>
                         <button onclick="exportCasePackage()" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition flex items-center gap-2">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
@@ -2031,6 +2037,39 @@
             return out;
         }
 
+        // Union-merge supervisor review decisions, keyed on deliveryId.
+        // Stored wins on conflict: the on-disk copy is the one the receiver
+        // module just wrote, and this page's copy is by definition older.
+        // Decisions are never deleted here — a decision is a record of what a
+        // supervisor said, not mutable case data.
+        function _mergeSupervisorReviews(storedList, liveList) {
+            const byId = new Map();
+            (Array.isArray(liveList) ? liveList : []).forEach(r => { if (r && r.deliveryId) byId.set(r.deliveryId, r); });
+            (Array.isArray(storedList) ? storedList : []).forEach(r => {
+                if (!r || !r.deliveryId) return;
+                byId.set(r.deliveryId, { ...(byId.get(r.deliveryId) || {}), ...r });
+            });
+            return [...byId.values()].sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+        }
+
+        // A supervisor decision can land while this page is open. The
+        // supervisor-link module has already written it to viperCases; fold it
+        // into the in-memory copy too, otherwise the next saveCase() would
+        // overwrite the record and the officer would watch the decision
+        // disappear. Repaint Overview if that is the visible tab.
+        window.addEventListener('viper-supervisor-review', (e) => {
+            try {
+                const d = (e && e.detail) || {};
+                if (!currentCase || !d.entry) return;
+                const norm = (v) => String(v == null ? '' : v).trim().replace(/\s+/g, ' ').toUpperCase();
+                if (norm(d.caseNumber) !== norm(currentCase.caseNumber)) return;
+                currentCase.supervisorReviews = _mergeSupervisorReviews(
+                    [d.entry], currentCase.supervisorReviews);
+                if (typeof currentTab !== 'undefined' && currentTab === 'overview'
+                    && typeof renderTabContent === 'function') renderTabContent('overview');
+            } catch (_) {}
+        });
+
         // Ensure a module is active on the case (used by importers that add a
         // tab automatically). Persists through the merge-safe path.
         function ensureCaseModule(moduleId) {
@@ -2063,6 +2102,14 @@
 
                 currentCase.modules = _mergeModuleList(stored && stored.modules, currentCase.modules);
                 currentCase.tabOrder = _mergeTabOrder(stored && stored.tabOrder, currentCase.tabOrder, currentCase.modules);
+                // Supervisor review decisions are written by the always-loaded
+                // supervisor-link module, straight into viperCases, while this
+                // page may already be open with a stale in-memory copy. Same
+                // hazard as modules/tabOrder above: without a union merge the
+                // next save here would silently delete a decision the officer
+                // was told they had received.
+                currentCase.supervisorReviews = _mergeSupervisorReviews(
+                    stored && stored.supervisorReviews, currentCase.supervisorReviews);
 
                 if (caseIndex !== -1) {
                     cases[caseIndex] = currentCase;
@@ -3303,11 +3350,190 @@
             if (modal) modal.remove();
         }
 
-        async function generateCaseReportPDF(dataTabs, includeFilesList) {
+        /* ========== Send Case to Supervisor for Review ==========
+         *
+         * A deliberately NARROW sibling of the DA export. The supervisor gets
+         * a single PDF built from text sections only — no evidence, no media,
+         * no warrant attachments. Two reasons, and both matter:
+         *
+         *  1. Size. The LAN node holds every delivery body inline in one JSON
+         *     file that is rewritten on every push and shipped to the
+         *     supervisor's renderer on every dashboard paint. Attaching
+         *     production files (a Google return can be gigabytes) would make
+         *     the supervisor dashboard unusable.
+         *  2. Custody. Evidence does not leave this machine. The supervisor is
+         *     reviewing the officer's WRITTEN WORK — overview, reports, notes —
+         *     which is exactly what a supervisor reviews on paper today.
+         *
+         * Warrants and attachments are a later phase and need an out-of-band
+         * blob store on the node first.
+         */
+        const CASE_REVIEW_SECTIONS = [
+            { id: 'overview', label: 'Case Overview', icon: '📋' },
+            { id: 'reports',  label: 'Reports',       icon: '📝' },
+            { id: 'notes',    label: 'Case Notes',    icon: '🗒️' },
+        ];
+
+        function closeCaseReviewModal() {
+            const m = document.getElementById('caseReviewModal');
+            if (m) m.remove();
+        }
+
+        function openCaseReviewModal() {
+            if (!window.SupervisorLink) {
+                alert('Supervisor Link is only available in the desktop app.');
+                return;
+            }
+            closeCaseReviewModal();
+
+            const rows = CASE_REVIEW_SECTIONS.map(s => {
+                let count = 0;
+                try { count = getTabItemCount(s.id) || 0; } catch (e) { count = 0; }
+                return `
+                    <label class="flex items-center space-x-3 p-3 rounded-lg cursor-pointer hover:bg-viper-card/30 transition-colors border border-gray-700 hover:border-viper-purple/40">
+                        <input type="checkbox" value="${s.id}" data-label="${_esc(s.label)}" class="case-review-checkbox w-5 h-5 rounded border-gray-600 text-viper-purple focus:ring-viper-purple" checked>
+                        <div class="flex items-center justify-between flex-1">
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xl">${s.icon}</span>
+                                <span class="text-sm font-medium text-white">${_esc(s.label)}</span>
+                            </div>
+                            ${count > 0 ? `<span class="text-xs text-gray-400">${count} ${count === 1 ? 'item' : 'items'}</span>` : ''}
+                        </div>
+                    </label>`;
+            }).join('');
+
+            const modalHTML = `
+                <div id="caseReviewModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id === 'caseReviewModal') closeCaseReviewModal()">
+                    <div class="glass-card rounded-xl p-6 max-w-2xl w-full max-h-[85vh] overflow-y-auto">
+                        <h3 class="text-2xl font-bold text-white mb-2">Send Case for Supervisor Review</h3>
+                        <p class="text-gray-400 mb-6">Your supervisor receives a single PDF and can approve it or send it back with corrections.</p>
+
+                        <div class="mb-5">
+                            <h4 class="text-sm font-semibold text-viper-purple mb-3">Sections to Include</h4>
+                            <div class="grid grid-cols-1 gap-2">${rows}</div>
+                        </div>
+
+                        <div class="mb-5">
+                            <label class="block text-sm font-semibold text-viper-purple mb-2">Note to Supervisor <span class="text-gray-500 font-normal">(optional)</span></label>
+                            <textarea id="caseReviewNote" rows="3" placeholder="Anything you want your supervisor to look at specifically…"
+                                class="w-full px-3 py-2 bg-viper-card/50 border border-gray-600 rounded-lg text-white text-sm focus:border-viper-purple focus:ring-1 focus:ring-viper-purple outline-none"></textarea>
+                        </div>
+
+                        <div class="bg-viper-card/30 border border-viper-cyan/20 rounded-lg p-4 text-sm text-gray-300">
+                            <p class="font-semibold text-white mb-1">What is sent:</p>
+                            <ul class="list-disc list-inside space-y-1 text-xs">
+                                <li>One PDF containing only the sections you tick above</li>
+                                <li><strong class="text-white">No evidence files, media, or warrant attachments are sent</strong> — they never leave this machine</li>
+                                <li>Items you marked Not Discoverable are withheld here too</li>
+                                <li>The supervisor's decision and any corrections come back to your dashboard and are logged on this case</li>
+                            </ul>
+                        </div>
+
+                        <div class="flex gap-3 justify-end pt-5 mt-5 border-t border-gray-700">
+                            <button onclick="closeCaseReviewModal()" class="px-6 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white transition">Cancel</button>
+                            <button onclick="sendCaseForReview()" class="px-6 py-2 bg-viper-purple hover:bg-viper-purple/80 rounded-lg text-white font-semibold transition flex items-center gap-2">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m0 0l-6-6m6 6l-6 6"/>
+                                </svg>
+                                Build &amp; Send
+                            </button>
+                        </div>
+                    </div>
+                </div>`;
+            document.body.insertAdjacentHTML('beforeend', modalHTML);
+        }
+
+        async function sendCaseForReview() {
+            const checked = Array.from(document.querySelectorAll('.case-review-checkbox:checked'));
+            if (!checked.length) {
+                viperToast('Select at least one section to send', 'error');
+                return;
+            }
+            const dataTabs = checked.map(cb => ({ id: cb.value, type: 'data' }));
+            const sectionLabels = checked.map(cb => cb.dataset.label || cb.value);
+            const note = (document.getElementById('caseReviewNote')?.value || '').trim();
+
+            // Honour the SAME discovery withholding the DA export applies.
+            // These three sections carry no evidence files today, but that is a
+            // property of the current tab set, not a rule — if the rule lived
+            // only in exportSelectedTabs it would silently stop applying the
+            // day a section starts listing evidence.
+            _daExportExcludeCsam = false;
+            _daExportCsamTags = (caseEvidence || []).filter(e => e && e.csamSensitive).map(e => e.tag).filter(Boolean);
+            _daExportNonDiscoverableTags = (caseEvidence || [])
+                .filter(e => e && e.discoverable === false)
+                .map(e => e.tag)
+                .filter(Boolean);
+
+            closeCaseReviewModal();
+            showExportProgress();
+
+            let built;
+            try {
+                built = await generateCaseReportPDF(dataTabs, false, {
+                    returnPdf: true,
+                    label: 'Supervisor Review',
+                });
+            } catch (e) {
+                hideExportProgress();
+                viperToast('Could not build the review PDF: ' + (e && e.message || e), 'error');
+                return;
+            }
+            hideExportProgress();
+
+            if (!built || !built.success || !built.base64) {
+                viperToast('Could not build the review PDF (' + ((built && built.error) || 'unknown') + ')', 'error');
+                return;
+            }
+
+            // Fail here, with a sentence the officer can act on, rather than at
+            // the node's size guard or the websocket frame cap.
+            const MAX_B64 = 24 * 1024 * 1024;
+            if (built.base64.length > MAX_B64) {
+                viperToast('This package is too large to send over the LAN ('
+                    + Math.round(built.base64.length / 1048576) + 'MB). Untick a section and try again.', 'error');
+                return;
+            }
+
+            const caseNumber = (currentCase && currentCase.caseNumber) || '';
+            const ident = _officerIdentity();
+            window.SupervisorLink.openPushDialog({
+                mode: 'caseReview',
+                review: {
+                    caseNumber,
+                    title: 'Case Review' + (caseNumber ? ' — ' + caseNumber : ''),
+                    officer: ident.who || ident.officerName
+                        || localStorage.getItem('viper_customer_name') || '',
+                    note,
+                    sections: sectionLabels,
+                    fileName: built.fileName,
+                    pdfBase64: built.base64,
+                },
+            });
+        }
+
+        /**
+         * Build the case report PDF.
+         *
+         * opts.returnPdf  — resolve with { success, base64, fileName } instead of
+         *                   writing a ZIP / downloading. Used by Supervisor Link's
+         *                   "Send for Review", which has to hand the bytes to the
+         *                   push dialog rather than to the filesystem. Mirrors the
+         *                   contract generateOpsPlanReport({returnPdf:true}) already
+         *                   uses, so both push paths look the same from outside.
+         * opts.label      — the per-page header stamp. A package sent to a
+         *                   supervisor for internal review is NOT a DA report and
+         *                   must not be stamped as one; mislabelling a document
+         *                   that may later be discovered is a real problem, not a
+         *                   cosmetic one.
+         */
+        async function generateCaseReportPDF(dataTabs, includeFilesList, opts = {}) {
+            const _returnPdf = !!opts.returnPdf;
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
             // Resolved once — every page stamp and the cover read from it.
             const _assist = _assistPackageInfo();
+            const _docLabel = opts.label || (_assist ? 'Assist Package' : 'DA Report');
             const PH = doc.internal.pageSize.height;
             const PW = doc.internal.pageSize.width;
             const M = 20;           // margin
@@ -3326,7 +3552,7 @@
             function need(h) { if (y + h > PH - 25) newPage(); }
             function addHeader() {
                 doc.setFontSize(7); doc.setTextColor(...LGRAY);
-                doc.text(`Case ${currentCase.caseNumber} — ${_assist ? 'Assist Package' : 'DA Report'}`, M, 10);
+                doc.text(`Case ${currentCase.caseNumber} — ${_docLabel}`, M, 10);
                 doc.text(`Page ${doc.getNumberOfPages()}`, PW - M, 10, { align: 'right' });
                 doc.setDrawColor(...LGRAY); doc.setLineWidth(0.2);
                 doc.line(M, 12, PW - M, 12);
@@ -4645,6 +4871,28 @@
 
             // ========== SAVE VIA IPC (ZIP with evidence) ==========
             const pdfBytes = doc.output('arraybuffer');
+
+            // Supervisor Link path: hand the bytes back instead of writing a
+            // file. Deliberately placed AFTER the whole document is built so
+            // the reviewed PDF is byte-for-byte the document the officer would
+            // have exported — a supervisor must not be reviewing a different
+            // rendering from the one that reaches the DA.
+            if (_returnPdf) {
+                let base64 = '';
+                try {
+                    base64 = doc.output('datauristring').split(',')[1] || '';
+                } catch (e) {
+                    return { success: false, error: 'PDF_ENCODE_FAILED: ' + (e && e.message || e) };
+                }
+                if (!base64) return { success: false, error: 'PDF_ENCODE_EMPTY' };
+                return {
+                    success: true,
+                    base64,
+                    fileName: `${currentCase.caseNumber}_Case_Review_${new Date().toISOString().split('T')[0]}.pdf`,
+                    byteLength: pdfBytes.byteLength,
+                };
+            }
+
             const fileName = _assist
                 ? `${currentCase.caseNumber}_Assist_Package_${new Date().toISOString().split('T')[0]}.zip`
                 : `${currentCase.caseNumber}_DA_Export_${new Date().toISOString().split('T')[0]}.zip`;
@@ -6351,6 +6599,7 @@
             
             return `
                 <div class="space-y-6">
+                    ${renderSupervisorReviewPanel()}
                     ${renderContributionsPanel()}
                     <!-- Case Information -->
                     <div class="glass-card rounded-xl p-6">
@@ -15087,6 +15336,57 @@
             const P = window.Provenance;
             if (!P) return [];
             return P.sources(_provCollectRows());
+        }
+
+        /**
+         * Supervisor review decisions recorded against this case.
+         *
+         * Written by the always-loaded supervisor-link module (it appends to
+         * the case's supervisorReviews when a decision arrives, which is
+         * usually while this page is closed), so this function only READS.
+         *
+         * Returns '' when there are none. An "awaiting review" placeholder
+         * would be a lie on the overwhelming majority of cases, which are
+         * never sent for review at all.
+         *
+         * Advisory only — nothing here changes case status or workflow. The
+         * supervisor's words are reproduced verbatim because "returned with
+         * corrections" is worthless without the corrections.
+         */
+        function renderSupervisorReviewPanel() {
+            if (!currentCase) return '';
+            const list = Array.isArray(currentCase.supervisorReviews) ? currentCase.supervisorReviews : [];
+            if (!list.length) return '';
+
+            const rows = list.slice().sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).map(r => {
+                const ok = r.decision === 'approved';
+                const rgb = ok ? '16,185,129' : '245,158,11';
+                const when = r.at ? new Date(r.at).toLocaleString() : '';
+                return '<div class="rounded-lg p-3 mb-2" style="background:rgba(255,255,255,.03);border:1px solid rgba(' + rgb + ',.35);">'
+                    + '<div class="flex items-center gap-2 flex-wrap">'
+                    + '<span class="text-xs px-2 py-0.5 rounded" style="border:1px solid rgba(' + rgb + ',.7);color:rgb(' + rgb + ');">'
+                    + (ok ? 'Approved' : 'Returned for corrections') + '</span>'
+                    + '<span class="text-sm text-gray-300">' + _esc(r.by || 'Supervisor') + '</span>'
+                    + '<span class="text-xs text-gray-500 ml-auto">' + _esc(when) + '</span>'
+                    + '</div>'
+                    + (r.comments
+                        ? '<div class="text-sm text-gray-200 mt-2 whitespace-pre-wrap">' + _esc(r.comments) + '</div>'
+                        : '<div class="text-sm text-gray-500 mt-2">No comments provided.</div>')
+                    + (Array.isArray(r.sections) && r.sections.length
+                        ? '<div class="text-xs text-gray-500 mt-2">Package: ' + _esc(r.sections.join(' \u00b7 ')) + '</div>'
+                        : '')
+                    + '</div>';
+            }).join('');
+
+            return '<div class="glass-card rounded-xl p-6">'
+                + '<div class="flex items-center justify-between mb-4">'
+                + '<h3 class="text-xl font-bold flex items-center">'
+                + '<svg class="w-5 h-5 mr-2 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
+                + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" '
+                + 'd="M9 12l2 2 4-4m1-5H8a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2z"/></svg>'
+                + 'Supervisor Review</h3>'
+                + '<span class="text-xs text-gray-500">' + list.length + ' decision' + (list.length === 1 ? '' : 's') + '</span>'
+                + '</div>' + rows + '</div>';
         }
 
         /**

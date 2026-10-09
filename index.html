@@ -7841,7 +7841,7 @@
             const overdue = getOverdueWarrantsList();
             const counts = (window.SupervisorLink && SupervisorLink.getInboxCounts)
                 ? SupervisorLink.getInboxCounts()
-                : { cyberTotal: 0, caseTotal: 0 };
+                : { cyberTotal: 0, caseTotal: 0, reviewTotal: 0 };
 
             let anything = false;
 
@@ -7889,6 +7889,20 @@
                 const c = document.createElement('div');
                 body.appendChild(c);
                 try { SupervisorLink.renderCaseInboxInto(c); } catch (_) {}
+            }
+
+            // Supervisor — Case review decisions (approved / returned).
+            // Listed FIRST-class alongside assignments rather than folded in:
+            // a returned review is work coming back to the officer, and
+            // burying it under "Case Assignments" would read as someone
+            // else's task.
+            if (counts.reviewTotal && window.SupervisorLink && SupervisorLink.renderReviewInboxInto) {
+                anything = true;
+                body.appendChild(_bellSectionTitle('Case Review Decisions'
+                    + (counts.reviewPending ? ' (' + counts.reviewPending + ' new)' : '')));
+                const c = document.createElement('div');
+                body.appendChild(c);
+                try { SupervisorLink.renderReviewInboxInto(c); } catch (_) {}
             }
 
             if (!anything) {

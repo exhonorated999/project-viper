@@ -396,6 +396,19 @@
         '</div>';
     }
 
+    /**
+     * "From Det. X" when this entry arrived in a supplemental import.
+     *
+     * Resolved on every call rather than once at load. A sibling module
+     * captured at factory time is permanently null when the script tags
+     * happen to be ordered the other way round, and the symptom is a chip
+     * that silently never appears.
+     */
+    function provChip(entry) {
+        var P = (typeof globalThis !== 'undefined') ? globalThis.Provenance : null;
+        return (P && P.chipHtml) ? P.chipHtml(entry, { compact: true }) : '';
+    }
+
     function entryCard(entry) {
         var i = entries.indexOf(entry);
         var color = SCHEMA ? SCHEMA.markerColor(entry) : '#9ca3af';
@@ -419,6 +432,7 @@
                 (inEvidence ? '<span class="fw-chip fw-chip-ev">' + inEvidence + ' in evidence</span>' : '') +
                 ((entry.relayPending || []).length ? '<span class="fw-chip fw-chip-hold">' + entry.relayPending.length + ' not downloaded</span>' : '') +
                 (entry.source === 'desk' ? '<span class="fw-chip fw-chip-desk">LOGGED AT DESK</span>' : '') +
+                provChip(entry) +
             '</div>' +
         '</div>';
     }

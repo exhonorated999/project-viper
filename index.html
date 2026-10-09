@@ -8193,6 +8193,14 @@
             if (d == null) return '';
             return '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-viper-cyan/15 text-viper-cyan border border-viper-cyan/40 text-[10px] font-medium whitespace-nowrap" title="No case activity in ' + d + ' days">\u23F1 ' + d + 'd idle</span>';
         }
+        // index.html has no shared HTML escaper at this scope, and a metric
+        // name or emoji is free text the user typed, so it is escaped here
+        // before it goes into a title attribute or the cell body.
+        function _cmEsc(v) {
+            return String(v == null ? '' : v)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
         function renderFlagsCell(c) {
             const defs = getCustomMetricDefs();
             if (defs.length === 0) return '';
@@ -8204,11 +8212,18 @@
                 return false;
             });
             if (activeDefs.length === 0) return '<span class="text-gray-600">—</span>';
-            return activeDefs.map(m => {
+            // A metric that was given an emoji shows the emoji, tinted with the
+            // metric's colour so the two readings agree. A metric without one
+            // keeps the plain dot, so a mixed set still lines up in the row.
+            // Both carry the full name as a tooltip for anything ambiguous.
+            return '<span class="inline-flex items-center gap-1 flex-wrap align-middle">' + activeDefs.map(m => {
                 const color = cmColorMapIdx[m.color] || cmColorMapIdx.cyan;
-                const label = (m.icon ? m.icon + ' ' : '') + m.name;
-                return `<span class="inline-block w-3 h-3 rounded-full mr-1 cursor-default" style="background:${color}" title="${label}"></span>`;
-            }).join('');
+                const label = _cmEsc((m.icon ? m.icon + ' ' : '') + m.name);
+                if (m.icon) {
+                    return `<span class="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full text-[11px] leading-none cursor-default" style="background:${color}22;border:1px solid ${color}" title="${label}">${_cmEsc(m.icon)}</span>`;
+                }
+                return `<span class="inline-block w-3 h-3 rounded-full cursor-default" style="background:${color}" title="${label}"></span>`;
+            }).join('') + '</span>';
         }
 
         function getCaseExtras(c) {

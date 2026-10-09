@@ -553,8 +553,9 @@
   }
 
   // opts:
-  //   mode: 'dashboard' | 'opsplan'
+  //   mode: 'dashboard' | 'opsplan' | 'caseReview'
   //   ops?: { caseNumber, title, date, location, risk, summary, officer } (opsplan)
+  //   review?: { caseNumber, title, officer, note, sections[], fileName, pdfBase64 } (caseReview)
   function openPushDialog(opts) {
     opts = opts || {};
     const mode = opts.mode || 'dashboard';
@@ -578,7 +579,9 @@
     const htext = el('div', 'flex:1');
     htext.appendChild(el('div', `font-size:16px;font-weight:700;color:#fff;`, { textContent: 'Push to Supervisor' }));
     htext.appendChild(el('div', `font-size:12px;color:${C.dim};margin-top:2px;`, {
-      textContent: mode === 'opsplan' ? 'Send this operations plan for digital approval' : 'Share stats & case status over the LAN',
+      textContent: mode === 'opsplan' ? 'Send this operations plan for digital approval'
+        : mode === 'caseReview' ? 'Send this case package for supervisor review'
+        : 'Share stats & case status over the LAN',
     }));
     head.appendChild(htext);
     const x = el('button', `background:none;border:none;color:${C.dim};font-size:18px;cursor:pointer;`, { textContent: '✕' });
@@ -751,6 +754,63 @@
             date: ops.date || '', location: ops.location || '',
           },
           body: { fileName, pdfBase64: pdf },
+        }];
+      };
+    } else if (mode === 'caseReview') {
+      // Case Review package. Unlike the OPS-plan branch there is NO fallback
+      // builder here: the PDF is rendered by the case-detail view (which owns
+      // the section data) and handed in already encoded. If it is missing the
+      // push must fail loudly rather than quietly send an empty shell that a
+      // supervisor would then "approve".
+      const rv = opts.review || {};
+      const sections = Array.isArray(rv.sections) ? rv.sections.filter(Boolean) : [];
+      const approxKb = Math.max(1, Math.round(((rv.pdfBase64 || '').length * 0.75) / 1024));
+
+      payloadWrap.appendChild(el('div', `font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:${C.faint};margin-bottom:8px;`, { textContent: 'Case Review Package' }));
+      const tile = el('div', `display:flex;gap:12px;align-items:center;padding:13px;border-radius:10px;
+        background:${C.bg};border:1px solid ${C.borderSoft};`);
+      tile.appendChild(el('div', `width:42px;height:50px;border-radius:6px;display:grid;place-items:center;
+        background:rgba(239,83,80,.14);border:1px solid rgba(239,83,80,.45);color:#ef7a78;font-weight:800;font-size:11px;`, { textContent: 'PDF' }));
+      const ti = el('div', 'flex:1;min-width:0;');
+      ti.appendChild(el('div', `color:#fff;font-size:14px;font-weight:600;`, {
+        textContent: rv.title || ('Case Review — ' + (rv.caseNumber || '')),
+      }));
+      ti.appendChild(el('div', `color:${C.dim};font-size:12px;margin-top:2px;`, {
+        textContent: [rv.caseNumber, sections.join(' · '), approxKb + ' KB'].filter(Boolean).join('  ·  '),
+      }));
+      tile.appendChild(ti);
+      payloadWrap.appendChild(tile);
+
+      if (rv.note) {
+        payloadWrap.appendChild(el('div', `margin-top:10px;padding:10px 12px;border-radius:10px;
+          background:${C.bg};border:1px solid ${C.borderSoft};color:${C.text};font-size:12px;line-height:1.55;
+          white-space:pre-wrap;word-break:break-word;max-height:120px;overflow:auto;`, {
+          textContent: 'Note to supervisor: ' + rv.note,
+        }));
+      }
+
+      payloadWrap.appendChild(el('div', `font-size:12px;color:${C.faint};margin-top:8px;line-height:1.5;`, {
+        textContent: 'A single PDF of the selected sections is sent. No evidence files, media or '
+          + 'attachments are included. Your supervisor can approve it or return it with corrections; '
+          + 'either way you will be notified here.',
+      }));
+
+      getSelectedPushes = async () => {
+        if (!rv.pdfBase64) throw new Error('NO_PDF: the review package did not build');
+        return [{
+          dtype: 'caseReview',
+          manifest: {
+            title: rv.title || ('Case Review — ' + (rv.caseNumber || '')),
+            // Required. The node echoes caseNumber back in delivery:decision
+            // and the investigator files the result against this case in its
+            // Overview log — title is free text and cannot be matched on.
+            caseNumber: rv.caseNumber || '',
+            officer: rv.officer || '',
+            sections,
+            note: rv.note || '',
+            sentAt: new Date().toISOString(),
+          },
+          body: { fileName: rv.fileName || ((rv.caseNumber ? rv.caseNumber + '-' : '') + 'case-review.pdf'), pdfBase64: rv.pdfBase64 },
         }];
       };
     } else {
@@ -959,7 +1019,9 @@
       cyberTotal: inboxGet().length,
       casePending: casePendingCount(),
       caseTotal: caseInboxGet().length,
-      totalPending: pendingCount() + casePendingCount(),
+      reviewPending: reviewPendingCount(),
+      reviewTotal: reviewGet().length,
+      totalPending: pendingCount() + casePendingCount() + reviewPendingCount(),
     };
   }
 
@@ -1263,6 +1325,157 @@
     }
   }
 
+  // ── Case review decision receiver ───────────────────────────────────────
+  // Investigator -> supervisor -> investigator. The officer pushes a case
+  // review package (dtype 'caseReview'); the supervisor approves it or
+  // returns it with corrections; the node routes `delivery:decision` back
+  // here. Two things have to happen with that decision, and they are NOT the
+  // same thing:
+  //   1. Notify  — a dashboard toast + a bell entry, so it is seen now.
+  //   2. Record  — append it to the CASE itself, so it is still there in six
+  //                months when someone asks who signed off and what they
+  //                said. A toast is not a record.
+  // This lives in the always-loaded module rather than the case-detail page
+  // because the decision almost always lands while the case page is closed —
+  // the officer pushed it and moved on.
+  const REVIEW_KEY = 'viperSupervisorReviews';
+  function reviewGet() { return lsJSON(REVIEW_KEY, []); }
+  function reviewSave(list) { try { localStorage.setItem(REVIEW_KEY, JSON.stringify(list)); } catch (_) {} }
+  // "Pending" here means UNREAD, not undecided: by the time a decision
+  // reaches the investigator it is already final. What is outstanding is the
+  // officer's attention, which is exactly what a bell badge should count.
+  function reviewPendingCount() { return reviewGet().filter((r) => !r.seen).length; }
+
+  function normCase(v) {
+    if (window.viperSnapshot && window.viperSnapshot.normCaseNumber) {
+      try { return window.viperSnapshot.normCaseNumber(v); } catch (_) {}
+    }
+    return String(v == null ? '' : v).trim().replace(/\s+/g, ' ').toUpperCase();
+  }
+
+  // Append the decision to the case record so the Overview tab can show it.
+  // Deliberately does NOT touch status, priority or workflow: the user was
+  // explicit that supervisor review is advisory. It also does not bump
+  // lastModified — the investigator did not modify the case, and silently
+  // reshuffling their dashboard sort order because a supervisor clicked a
+  // button would be a surprising side effect.
+  function writeReviewToCase(r) {
+    if (!r || !r.caseNumber) return false;
+    const cases = lsJSON('viperCases', []);
+    const c = cases.find((x) => x && normCase(x.caseNumber) === normCase(r.caseNumber));
+    if (!c) return false;
+    if (!Array.isArray(c.supervisorReviews)) c.supervisorReviews = [];
+    const entry = {
+      deliveryId: r.deliveryId, decision: r.decision, comments: r.comments || '',
+      by: r.by || 'Supervisor', at: r.at || new Date().toISOString(),
+      title: r.title || '', sections: r.sections || [],
+    };
+    const i = c.supervisorReviews.findIndex((x) => x && x.deliveryId === entry.deliveryId);
+    if (i >= 0) c.supervisorReviews[i] = { ...c.supervisorReviews[i], ...entry };
+    else c.supervisorReviews.unshift(entry);
+    try { localStorage.setItem('viperCases', JSON.stringify(cases)); } catch (_) { return false; }
+    // The case-detail page may be open right now with its own in-memory copy
+    // of this case; tell it so the Overview panel updates without a reload.
+    // It is also the page's cue to fold the entry into currentCase before its
+    // next save overwrites the record we just wrote.
+    try {
+      window.dispatchEvent(new CustomEvent('viper-supervisor-review', {
+        detail: { caseNumber: r.caseNumber, entry },
+      }));
+    } catch (_) {}
+    return true;
+  }
+
+  function upsertReview(r, opts) {
+    opts = opts || {};
+    const list = reviewGet();
+    const i = list.findIndex((x) => x && x.deliveryId === r.deliveryId);
+    const isNew = i < 0;
+    if (isNew) list.unshift(r);
+    else list[i] = { ...list[i], ...r, seen: list[i].seen };
+    reviewSave(list);
+    writeReviewToCase(r);
+    emitInboxUpdate();
+    if (isNew && opts.announce) {
+      const ok = r.decision === 'approved';
+      toast(
+        (ok ? '✓ Case review APPROVED' : '↩ Case review RETURNED for corrections')
+        + (r.caseNumber ? ' — ' + r.caseNumber : '')
+        + (r.comments ? ': ' + r.comments : ''),
+        ok ? 'success' : 'warning');
+    }
+    return isNew;
+  }
+
+  function markReviewSeen(deliveryId) {
+    const list = reviewGet();
+    const r = list.find((x) => x && x.deliveryId === deliveryId);
+    if (!r || r.seen) return;
+    r.seen = true;
+    reviewSave(list);
+    emitInboxUpdate();
+  }
+
+  function renderReviewInboxInto(container) {
+    if (!container) return;
+    const list = reviewGet();
+    if (!list.length) {
+      container.innerHTML = `<div style="color:${C.dim};font-size:13px;padding:16px 4px;">No supervisor decisions yet.</div>`;
+      return;
+    }
+    container.innerHTML = '';
+    for (const r of list) {
+      const ok = r.decision === 'approved';
+      const tone = ok ? C.green : C.amber;
+      const row = el('div', `border:1px solid ${C.border};border-radius:10px;padding:12px 14px;
+        margin-bottom:10px;background:${C.panel2};${r.seen ? 'opacity:.62;' : ''}`);
+      row.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-family:ui-monospace,Consolas,monospace;color:#fff;font-size:15px;">${escapeHtml(r.caseNumber || '—')}</span>
+          <span style="border:1px solid ${tone};color:${tone};border-radius:6px;padding:1px 7px;font-size:11px;">${ok ? 'Approved' : 'Returned'}</span>
+          ${r.seen ? '' : `<span style="margin-left:auto;color:${C.cyan};font-size:11px;">NEW</span>`}
+        </div>
+        <div style="color:${C.dim};font-size:12px;margin-top:6px;">${escapeHtml(r.by || 'Supervisor')} · ${r.at ? new Date(r.at).toLocaleString() : ''}</div>
+        ${r.comments ? `<div style="color:${C.text};font-size:12.5px;margin-top:6px;white-space:pre-wrap;">${escapeHtml(r.comments)}</div>`
+          : `<div style="color:${C.faint};font-size:12px;margin-top:6px;">No comments.</div>`}
+      `;
+      const actions = el('div', 'display:flex;gap:8px;margin-top:10px;');
+      if (r.caseNumber) {
+        const open = el('button', `flex:1;padding:7px;border-radius:8px;border:1px solid ${C.cyan};
+          background:rgba(0,183,195,.16);color:${C.cyan};cursor:pointer;font-size:12.5px;`, { textContent: 'Open Case' });
+        open.addEventListener('click', () => {
+          markReviewSeen(r.deliveryId);
+          const c = lsJSON('viperCases', []).find((x) => x && normCase(x.caseNumber) === normCase(r.caseNumber));
+          if (c && typeof window.openCaseDetail === 'function') { try { window.openCaseDetail(c.id); } catch (_) {} }
+          else toast('Case ' + r.caseNumber + ' is not on this machine.', 'warning');
+        });
+        actions.appendChild(open);
+      }
+      if (!r.seen) {
+        const seen = el('button', `padding:7px 12px;border-radius:8px;border:1px solid ${C.border};
+          background:transparent;color:${C.dim};cursor:pointer;font-size:12.5px;`, { textContent: 'Mark read' });
+        seen.addEventListener('click', () => { markReviewSeen(r.deliveryId); renderReviewInboxInto(container); });
+        actions.appendChild(seen);
+      }
+      if (actions.children.length) row.appendChild(actions);
+      container.appendChild(row);
+    }
+  }
+
+  // Shape a node decision event / reconcile row into a stored review.
+  function reviewFromEvent(p) {
+    return {
+      deliveryId: p.deliveryId,
+      caseNumber: p.caseNumber || '',
+      title: p.title || '',
+      decision: p.decision === 'approved' ? 'approved' : 'returned',
+      comments: p.comments || '',
+      by: p.by || 'Supervisor',
+      at: p.at || new Date().toISOString(),
+      seen: false,
+    };
+  }
+
   let receiverStarted = false;
   function initAssignmentReceiver() {
     // Receiving supervisor assignments is ON by default in the desktop app;
@@ -1309,6 +1522,17 @@
         toast('New case assigned: ' + (p.caseNumber || ''), 'info');
         return;
       }
+      if (evt.kind === 'delivery:decision') {
+        const p = evt.payload || {};
+        // The node routes a decision for EVERY delivery type (stats and
+        // case-status digests included). Only case-review packages are a
+        // review loop the officer is waiting on; approving a stats snapshot
+        // is not news.
+        if (p.dtype && p.dtype !== 'caseReview') return;
+        if (!p.deliveryId) return;
+        upsertReview(reviewFromEvent(p), { announce: true });
+        return;
+      }
     });
 
     // Reconcile with the node on paint (offline-queued assignments, etc.).
@@ -1350,8 +1574,33 @@
       })
       .catch(() => {});
 
+    // Reconcile case-review DECISIONS the node queued while this machine was
+    // offline. This is the common case, not the edge case: the officer pushes
+    // a package and closes the laptop, and the supervisor reviews it later.
+    // Without this the decision would only ever arrive if both sides happened
+    // to be online at the same moment.
+    api().myDeliveries({ identity: getIdentity(), url: getNodeUrl() || undefined })
+      .then((r) => {
+        if (!r || !r.ok) return;
+        for (const d of r.deliveries || []) {
+          if (d.dtype !== 'caseReview' || !d.decision) continue;
+          upsertReview({
+            deliveryId: d.id,
+            caseNumber: (d.manifest && d.manifest.caseNumber) || '',
+            title: (d.manifest && d.manifest.title) || '',
+            decision: d.decision.decision === 'approved' ? 'approved' : 'returned',
+            comments: d.decision.comments || '',
+            by: d.decision.by || 'Supervisor',
+            at: d.decision.at || d.sentAt,
+            seen: false,
+          }, { announce: false });
+        }
+      })
+      .catch(() => {});
+
     renderInboxBadge();
     renderCaseInboxBadge();
+    emitInboxUpdate();
   }
 
   // Boot the receiver once the DOM is ready, and react to the feature toggle.
@@ -1374,5 +1623,6 @@
     getIdentity, openPushDialog, buildStatsSnapshot, buildCaseDigest,
     openInbox, openCaseInbox,
     getInboxCounts, renderInboxInto, renderCaseInboxInto,
+    renderReviewInboxInto, getCaseReviews: reviewGet, markReviewSeen,
   };
 })();

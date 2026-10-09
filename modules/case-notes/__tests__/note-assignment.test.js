@@ -39,6 +39,26 @@ if (a < 0 || b < 0 || b <= a) {
 }
 const BLOCK = SRC.slice(a, b);
 
+// `_persistCaseNotes` now stamps "edited here" on imported notes the officer
+// changes. That helper lives elsewhere in the page, so lift it too rather
+// than stubbing it out — a stub here would hide a break in the real thing.
+const STAMP_START = SRC.indexOf('function _provStampEdits(');
+if (STAMP_START < 0) {
+    console.error('Could not locate _provStampEdits in the page. Anchor moved?');
+    process.exit(1);
+}
+const STAMP = (() => {
+    const lines = SRC.slice(STAMP_START).split('\n');
+    let depth = 0, opened = false;
+    for (let i = 0; i < lines.length; i++) {
+        depth += (lines[i].match(/\{/g) || []).length;
+        depth -= (lines[i].match(/\}/g) || []).length;
+        if (lines[i].indexOf('{') >= 0) opened = true;
+        if (opened && depth <= 0) return lines.slice(0, i + 1).join('\n');
+    }
+    throw new Error('unbalanced braces lifting _provStampEdits');
+})();
+
 // `const NOTE_PERSON_ROLES` is lexical, so it never lands on the sandbox
 // global the way a function declaration does. Append a test-only hook that
 // republishes the block's API rather than restructuring shipping code.
@@ -105,6 +125,10 @@ function buildSandbox(state) {
         // backed by the shared storage module. Wire the REAL module in so the
         // quota contract is exercised here rather than stubbed away.
         _CS: require('../../_shared/case-storage.js'),
+        // Real provenance + store registry: a note that came from another
+        // detective and is then edited here must say so.
+        Provenance: require('../../_shared/provenance.js'),
+        CaseStores: require('../../_shared/case-stores.js'),
         _lsSetSafe(key, value, label) {
             const res = sandbox._CS.setItemSafe(key, value, { store: localStorage, label });
             if (!res.ok) toasts.push({ m: res.message, k: 'error' });
@@ -165,7 +189,7 @@ function buildSandbox(state) {
     sandbox.saveWitnesses();
     sandbox.saveInvolvedPersons();
     sandbox.saveMissingPersons();
-    vm.runInContext(BLOCK + HOOK, sandbox);
+    vm.runInContext(STAMP + '\n' + BLOCK + HOOK, sandbox);
     return sandbox;
 }
 
@@ -331,6 +355,38 @@ check('a missing person index renders nothing',
     s6.renderPersonNotesCard('suspects', 42) === '');
 check('an unknown role renders nothing',
     s6.renderPersonNotesCard('aliens', 0) === '');
+
+section('a note from another detective that is then edited here');
+{
+    const s6b = buildSandbox({ caseNotes: [], suspects: [{ name: 'Jane Roe' }] });
+    const stamp = { by: 'Det. M. Alvarez', badge: '4471', pkg: 'imp-aaa', at: '2026-10-02T14:00:00Z' };
+    s6b.caseNotes.push({ id: 71, contentHtml: '<p>Their interview</p>',
+        createdAt: '2026-10-01T10:00:00.000Z', assignedTo: [], _prov: Object.assign({}, stamp) });
+    s6b._persistCaseNotes();          // first write: nothing on disk to compare against
+
+    check('an imported note is not flagged as edited just by being saved',
+        s6b.Provenance.isEditedHere(s6b.caseNotes[0]) === false);
+
+    s6b.caseNotes[0].contentHtml = '<p>Their interview, corrected</p>';
+    s6b._persistCaseNotes();
+    check('editing an imported note marks it as changed on this machine',
+        s6b.Provenance.isEditedHere(s6b.caseNotes[0]) === true);
+    check('it still names the detective who wrote it',
+        s6b.Provenance.sourceName(s6b.caseNotes[0]) === 'Det. M. Alvarez #4471');
+    check('and still belongs to the import, so that import can still be undone',
+        s6b.Provenance.batchId(s6b.caseNotes[0]) === 'imp-aaa');
+    check('the stamp is written to disk, not just held in memory',
+        JSON.parse(s6b.localStorage.getItem('viperCaseNotes'))['25-55555'][0]._prov.editedHere === true);
+
+    const s6c = buildSandbox({ caseNotes: [], suspects: [{ name: 'Jane Roe' }] });
+    s6c.caseNotes.push({ id: 72, contentHtml: '<p>My own note</p>',
+        createdAt: '2026-10-01T10:00:00.000Z', assignedTo: [] });
+    s6c._persistCaseNotes();
+    s6c.caseNotes[0].contentHtml = '<p>My own note, longer</p>';
+    s6c._persistCaseNotes();
+    check('a note written here is never labelled as someone else\'s work',
+        s6c.caseNotes[0]._prov === undefined);
+}
 
 section('unassign detaches without deleting');
 const s7 = buildSandbox({ caseNotes: [], suspects: [{ name: 'Jane Roe' }], victims: [{ name: 'Pat' }] });

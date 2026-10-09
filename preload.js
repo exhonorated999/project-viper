@@ -662,6 +662,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Case assignment loop (supervisor -> investigator receive/acknowledge).
     caseAck: (opts) => ipcRenderer.invoke('supervisor-link:case-ack', opts || {}),
     caseAssignments: (opts) => ipcRenderer.invoke('supervisor-link:case-assignments', opts || {}),
+    // Case review loop (investigator -> supervisor push, decision comes back).
+    myDeliveries: (opts) => ipcRenderer.invoke('supervisor-link:my-deliveries', opts || {}),
     onEvent: (cb) => {
       const handler = (_e, evt) => { try { cb(evt); } catch (_) {} };
       ipcRenderer.on('supervisor-link:event', handler);

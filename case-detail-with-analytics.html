@@ -74,6 +74,10 @@
          own reader because the general-purpose one filled the name and the
          licence number with the wrong text. -->
     <script src="modules/dmv/tx-dps-parser.js"></script>
+    <!-- Colorado VEHICLE query printouts (the "RESPONSE FROM DMV" page out
+         of the Central Square records window). Separate from the driver
+         readers above: it fills a vehicle form, not a person. -->
+    <script src="modules/dmv/co-vehicle-parser.js"></script>
     <script src="modules/flock/flock-module.js" defer></script>
     <script src="modules/flock/flock-ui.js" defer></script>
     <!-- Area Canvas media: photos attached from disk, video/audio recorded
@@ -2653,7 +2657,7 @@
                         <p class="text-gray-400 mb-6">${_asx
                             ? 'Select what to hand to ' + (_asx.leadDetective ? _esc(_asx.leadDetective) : 'the lead detective')
                               + '. Everything lands in one named folder with a manifest identifying it as your work.'
-                            : 'Select which tabs to include in the export package for the District Attorney'}</p>
+                            : 'Select which tabs to include in the export package'}</p>
                         
                         <div class="mb-6">
                             <div class="flex items-center justify-between mb-3">
@@ -3244,6 +3248,17 @@
         // Created By and then the licensed customer name, and if all three are
         // empty the package still generates — it just says so rather than
         // inventing a name.
+        // The office a case report is filed with is not the same everywhere.
+        // Arkansas files with a Circuit Court, Virginia with a Commonwealth's
+        // Attorney, Maryland with a State's Attorney.  Settings holds whatever
+        // the agency wrote; an empty string is a real choice meaning "no line".
+        function _reportRecipientLine() {
+            try {
+                const v = localStorage.getItem('viperReportRecipientLine');
+                return (v === null ? 'Prepared for the District Attorney' : v).trim();
+            } catch (_) { return 'Prepared for the District Attorney'; }
+        }
+
         function _assistPackageInfo() {
             try {
                 if (!currentCase || currentCase.caseRole !== 'assist') return null;
@@ -3677,14 +3692,21 @@
             // Case Number
             doc.setFontSize(26); doc.setTextColor(...BLACK);
             doc.text(currentCase.caseNumber, PW / 2, 90, { align: 'center' });
-            // Subtitle
+            // Subtitle. An assist package always says the same thing — it
+            // goes to another detective, not to a prosecutor. A case report
+            // names whichever office the agency actually files with, which
+            // is a District Attorney in some states and a Circuit Court, a
+            // Commonwealth's Attorney or a State's Attorney in others. An
+            // agency that cleared the box gets no line, and the date moves
+            // up to close the gap rather than leaving a hole on the cover.
             doc.setFontSize(14); doc.setFont(undefined, 'normal'); doc.setTextColor(...GRAY);
-            doc.text(_assist
+            const _subtitle = _assist
                 ? 'Supplemental work provided to the lead detective'
-                : 'Prepared for the District Attorney', PW / 2, 110, { align: 'center' });
+                : _reportRecipientLine();
+            if (_subtitle) doc.text(_subtitle, PW / 2, 110, { align: 'center' });
             // Date
             const exportDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-            doc.text(exportDate, PW / 2, 122, { align: 'center' });
+            doc.text(exportDate, PW / 2, _subtitle ? 122 : 112, { align: 'center' });
             // Case info box
             doc.setDrawColor(...ACCENT); doc.setLineWidth(0.4);
             doc.roundedRect(M + 20, 140, CW - 40, _assist ? 56 : 40, 3, 3, 'S');
@@ -16245,6 +16267,273 @@
             return result;
         }
 
+        /* ══════════════════════════════════════════════════════════════
+         * COLORADO VEHICLE PRINTOUT IMPORT
+         *
+         * An officer who runs a plate prints a "RESPONSE FROM DMV" page out
+         * of the records window and then retypes a seventeen-character VIN
+         * into a vehicle form. This reads the page instead.
+         *
+         * It is offered on every form that has a vehicle in it — the
+         * suspect and victim vehicle modals and the Recovered Vehicles
+         * module. Those three forms do not agree on what their fields are
+         * called (the plate is "plateNumber" on two of them and
+         * "licensePlate" on the third) and only one of them has boxes for
+         * the VIN and the year at all. Rather than teach the importer three
+         * layouts, it fills BY FIELD NAME and silently skips any box the
+         * form in front of it does not have.
+         *
+         * It never overwrites a box the officer has already typed in.
+         *
+         * The printout itself is copied into Evidence on the way through,
+         * which is where the owner's name and address end up — the vehicle
+         * forms have nowhere to put them, and they are the reason the
+         * officer ran the plate.
+         * ══════════════════════════════════════════════════════════════ */
+
+        function _coVeh() {
+            try { return (typeof CoVehicleParser !== 'undefined' && CoVehicleParser) ? CoVehicleParser : (window.CoVehicleParser || null); }
+            catch (_) { return (typeof window !== 'undefined' && window.CoVehicleParser) || null; }
+        }
+
+        // formId -> what that form calls its plate box, and which tab to
+        // repaint afterwards. Anything not listed here is not offered the
+        // button.
+        const CO_VEH_FORMS = {
+            vehicleForm:          { plate: 'plateNumber' },
+            victimVehicleForm:    { plate: 'plateNumber' },
+            recoveredVehicleForm: { plate: 'licensePlate' }
+        };
+
+        // Fill one box, if the form has it and the officer has not already
+        // typed in it. Returns the label of the box that was filled so the
+        // officer can be told exactly what changed.
+        function _coVehFill(form, name, value, label) {
+            if (!form || !value) return null;
+            const el = form.querySelector('[name="' + name + '"]');
+            if (!el) return null;
+            if (String(el.value || '').trim()) return null;
+            el.value = value;
+            try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+            try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch (_) {}
+            return label || name;
+        }
+
+        // Copy the printout into Evidence under its own tag. A second run of
+        // the same plate gets its own folder rather than landing on top of
+        // the first, because two queries weeks apart are two different
+        // records of what the state held on two different days.
+        async function _coVehSaveToEvidence(filePath, parsed, fileInfo) {
+            if (!currentCase || !currentCase.caseNumber) return null;
+            if (!window.electronAPI || typeof window.electronAPI.copyEvidenceFile !== 'function') return null;
+
+            if (!Array.isArray(caseEvidence)) caseEvidence = [];
+            const base = ('DMV Vehicle ' + (parsed.plate || parsed.vin || 'Query'))
+                .replace(/[^a-zA-Z0-9 _.-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+            const taken = new Set(caseEvidence.map(e => e && e.tag).filter(Boolean));
+            let tag = base;
+            let n = 2;
+            while (taken.has(tag)) { tag = base + ' (' + n + ')'; n++; }
+
+            const savedPath = await window.electronAPI.copyEvidenceFile({
+                caseNumber: currentCase.caseNumber,
+                evidenceTag: tag,
+                sourcePath: filePath
+            });
+            if (!savedPath) return null;
+
+            const bits = [];
+            if (parsed.plate) bits.push('plate ' + parsed.plate + (parsed.plateState ? ' (' + parsed.plateState + ')' : ''));
+            const ymm = [parsed.year, parsed.make, parsed.model].filter(Boolean).join(' ');
+            if (ymm) bits.push(ymm);
+            if (parsed.colorLabel) bits.push(parsed.colorLabel);
+            if (parsed.vin) bits.push('VIN ' + parsed.vin);
+            if (parsed.registeredOwner && parsed.registeredOwner.name) bits.push('registered to ' + parsed.registeredOwner.name);
+            if (parsed.titleOwner && parsed.titleOwner.name && parsed.titleOwner.name !== (parsed.registeredOwner || {}).name) {
+                bits.push('titled to ' + parsed.titleOwner.name);
+            }
+            if (parsed.query && parsed.query.responseDateTime) bits.push('queried ' + parsed.query.responseDateTime);
+
+            const fileName = (fileInfo && fileInfo.fileName) || String(filePath).split(/[\\/]/).pop();
+            const fileSize = (fileInfo && Number(fileInfo.fileSize)) || 0;
+
+            const record = {
+                id: Date.now(),
+                type: 'document',
+                tag: tag,
+                discoverable: true,
+                description: 'Colorado DMV vehicle query — ' + (bits.join(', ') || 'see printout') + '.',
+                location: '',
+                fileCount: 1,
+                totalSize: fileSize,
+                files: [{ name: fileName, path: savedPath, size: fileSize, type: 'application/pdf', lastModified: Date.now() }],
+                source: 'dmv-vehicle-printout',
+                createdAt: new Date().toISOString()
+            };
+
+            caseEvidence.push(record);
+            const allEvidence = _lsParse('viperCaseEvidence', {});
+            _provStampEdits('viperCaseEvidence', caseEvidence);
+            allEvidence[currentCase.caseNumber] = caseEvidence;
+            localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
+
+            try {
+                audit('evidence_added', {
+                    case_number: currentCase.caseNumber,
+                    case_id: currentCase.id,
+                    evidence_id: record.id,
+                    type: record.type,
+                    tag: tag,
+                    file_count: 1,
+                    source: 'dmv_vehicle_printout'
+                });
+            } catch (_) {}
+
+            return record;
+        }
+
+        async function importCoVehiclePrintout(formId) {
+            const CO = _coVeh();
+            if (!CO) { showToast('The Colorado vehicle reader did not load. Restart VIPER and try again.', 'error'); return; }
+
+            const shape = CO_VEH_FORMS[formId];
+            const form = document.getElementById(formId);
+            if (!shape || !form) { showToast('No vehicle form is open.', 'error'); return; }
+
+            try {
+                const filePath = await window.electronAPI.selectDmvFile();
+                if (!filePath) return;
+
+                showToast('Reading the printout…', 'info');
+                const pdfResult = await window.electronAPI.extractPdfText(filePath);
+                if (!pdfResult || !pdfResult.text) {
+                    showToast('No text could be read out of that PDF.', 'error');
+                    return;
+                }
+
+                // A page that does not look like a Colorado vehicle query is
+                // still offered, because a poor scan can lose the two lines
+                // the detector keys on — but the officer is told first.
+                if (!CO.detect(pdfResult.text)) {
+                    const go = await viperConfirm(
+                        'This does not look like a Colorado vehicle query printout. Read it anyway? Anything that comes back will still be shown to you before it is used.',
+                        { okText: 'Read it anyway' }
+                    );
+                    if (!go) return;
+                }
+
+                const parsed = CO.parse(pdfResult.text);
+                if (!CO.hasVehicle(parsed)) {
+                    showToast('No plate, VIN or make could be read from that page.', 'error');
+                    return;
+                }
+
+                // Only show the officer the boxes this form actually has.
+                const plan = [
+                    { name: 'makeModel', value: parsed.makeModel, label: 'Make/Model' },
+                    { name: shape.plate, value: parsed.plate, label: 'Plate' },
+                    { name: 'plateState', value: parsed.plateState, label: 'Plate State' },
+                    { name: 'vin', value: parsed.vin, label: 'VIN' },
+                    { name: 'year', value: parsed.year, label: 'Year' },
+                    { name: 'color', value: parsed.colorLabel, label: 'Color' }
+                ].filter(p => p.value && form.querySelector('[name="' + p.name + '"]'));
+
+                const esc = (v) => String(v == null ? '' : v)
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;');
+
+                const rows = plan.map(p => {
+                    const el = form.querySelector('[name="' + p.name + '"]');
+                    const occupied = String((el && el.value) || '').trim();
+                    return '<div><b>' + esc(p.label) + ':</b> ' + esc(p.value) +
+                        (occupied ? ' <span style="color:#9ca3af;">(kept your "' + esc(occupied) + '")</span>' : '') +
+                        '</div>';
+                }).join('');
+
+                const extra = [];
+                if (parsed.registeredOwner.name) extra.push('<div><b>Registered to:</b> ' + esc(parsed.registeredOwner.name) + '</div>');
+                if (parsed.registeredOwner.address) extra.push('<div><b>Address:</b> ' + esc(parsed.registeredOwner.address) + '</div>');
+                if (parsed.titleOwner.name && parsed.titleOwner.name !== parsed.registeredOwner.name) {
+                    extra.push('<div><b>Titled to:</b> ' + esc(parsed.titleOwner.name) + '</div>');
+                }
+                if (parsed.registrationStatus) extra.push('<div><b>Registration:</b> ' + esc(parsed.registrationStatus) +
+                    (parsed.expirationDisplay ? ', expires ' + esc(parsed.expirationDisplay) : '') + '</div>');
+
+                const warn = parsed.warnings.length
+                    ? '<p style="color:#fbbf24;font-size:12px;margin-top:8px;">' +
+                      parsed.warnings.map(w => '⚠ ' + esc(w)).join('<br>') + '</p>'
+                    : '';
+
+                const previewHtml =
+                    '<div style="text-align:left;margin:12px 0;">' +
+                        '<p style="color:#facc15;font-weight:600;margin-bottom:8px;">Read from: ' + esc(pdfResult.fileName || 'the printout') + '</p>' +
+                        '<div style="font-size:14px;line-height:1.6;">' + (rows || '<div>Nothing this form has a box for.</div>') + '</div>' +
+                        (extra.length
+                            ? '<div style="margin-top:10px;padding-top:8px;border-top:1px solid #374151;font-size:13px;line-height:1.6;color:#d1d5db;">' +
+                              extra.join('') +
+                              '<p style="color:#9ca3af;font-size:12px;margin-top:6px;">This form has nowhere to put the owner — the printout is saved to Evidence so it is not lost.</p></div>'
+                            : '') +
+                        warn +
+                    '</div>';
+
+                const confirmed = await viperConfirm(
+                    'Fill this vehicle form from the printout? Boxes you have already typed in are left alone.' + previewHtml,
+                    { okText: 'Fill the form', html: true }
+                );
+                if (!confirmed) return;
+
+                const filled = plan.map(p => _coVehFill(form, p.name, p.value, p.label)).filter(Boolean);
+
+                // The recovered-vehicle form is the only one with a notes
+                // box, so it is the only one that can keep the owner on the
+                // record itself.
+                const notesEl = form.querySelector('[name="notes"]');
+                if (notesEl && !String(notesEl.value || '').trim()) {
+                    const lines = [];
+                    if (parsed.registeredOwner.name) lines.push('Registered owner: ' + parsed.registeredOwner.name);
+                    if (parsed.registeredOwner.address) lines.push('Address: ' + parsed.registeredOwner.address);
+                    if (parsed.titleOwner.name && parsed.titleOwner.name !== parsed.registeredOwner.name) {
+                        lines.push('Titled owner: ' + parsed.titleOwner.name);
+                        if (parsed.titleOwner.address) lines.push('Title address: ' + parsed.titleOwner.address);
+                    }
+                    if (parsed.registrationStatus) lines.push('Registration: ' + parsed.registrationStatus +
+                        (parsed.expirationDisplay ? ' (expires ' + parsed.expirationDisplay + ')' : ''));
+                    if (parsed.style) lines.push('Style: ' + parsed.style);
+                    if (parsed.county) lines.push('County: ' + parsed.county);
+                    if (parsed.query.responseDateTime) lines.push('Queried: ' + parsed.query.responseDateTime);
+                    if (lines.length) {
+                        notesEl.value = 'From the Colorado DMV vehicle query:\n' + lines.join('\n');
+                        try { notesEl.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+                    }
+                }
+
+                // Evidence last. A failure here must not undo the fields the
+                // officer can already see in front of them, so it is reported
+                // on its own rather than thrown away or allowed to look like
+                // the whole import failed.
+                let evidence = null, evidenceError = '';
+                try {
+                    const fileInfo = await _readDmvFileAsDataUrl(filePath);
+                    evidence = await _coVehSaveToEvidence(filePath, parsed, fileInfo);
+                } catch (err) {
+                    evidenceError = (err && err.message) || String(err);
+                    console.error('[CO vehicle] evidence copy failed:', err);
+                }
+
+                const what = filled.length ? 'Filled ' + filled.join(', ') : 'Nothing was filled — every box already had something in it';
+                if (evidence) {
+                    showToast('✓ ' + what + '. Printout saved to Evidence as "' + evidence.tag + '".', 'success');
+                } else if (evidenceError) {
+                    showToast(what + ', but the printout could NOT be saved to Evidence: ' + evidenceError, 'error');
+                } else {
+                    showToast(what + '. The printout was not saved to Evidence.', 'warning');
+                }
+            } catch (err) {
+                console.error('CO vehicle import error:', err);
+                showToast('Could not read that printout: ' + ((err && err.message) || err), 'error');
+            }
+        }
+
         async function importDmvPrintout(existingSuspectIndex, presetPath) {
             try {
                 const filePath = presetPath || await window.electronAPI.selectDmvFile();
@@ -16254,6 +16543,15 @@
                 const pdfResult = await window.electronAPI.extractPdfText(filePath);
                 if (!pdfResult || !pdfResult.text) {
                     showToast('Could not extract text from the PDF. The file may be image-only.', 'error');
+                    return;
+                }
+
+                // A Colorado VEHICLE query prints out of the same records
+                // window as a driver record and looks identical at a glance.
+                // Dropped here it reads as an unsupported format, which sends
+                // the officer looking for a bug. Say what it actually is.
+                if (_coVeh() && _coVeh().detect(pdfResult.text)) {
+                    showToast('That is a Colorado VEHICLE query, not a driver record. Open a vehicle and use Import DMV Printout there.', 'error');
                     return;
                 }
 
@@ -16404,6 +16702,15 @@
                     return;
                 }
 
+                // A Colorado VEHICLE query prints out of the same records
+                // window as a driver record and looks identical at a glance.
+                // Dropped here it reads as an unsupported format, which sends
+                // the officer looking for a bug. Say what it actually is.
+                if (_coVeh() && _coVeh().detect(pdfResult.text)) {
+                    showToast('That is a Colorado VEHICLE query, not a driver record. Open a vehicle and use Import DMV Printout there.', 'error');
+                    return;
+                }
+
                 const parsed = parseDmvText(pdfResult.text);
                 if (!parsed.name && !parsed.dlNumber && !parsed.dob) {
                     showToast('Could not identify DMV fields in this document.', 'error');
@@ -16498,6 +16805,15 @@
                     return;
                 }
 
+                // A Colorado VEHICLE query prints out of the same records
+                // window as a driver record and looks identical at a glance.
+                // Dropped here it reads as an unsupported format, which sends
+                // the officer looking for a bug. Say what it actually is.
+                if (_coVeh() && _coVeh().detect(pdfResult.text)) {
+                    showToast('That is a Colorado VEHICLE query, not a driver record. Open a vehicle and use Import DMV Printout there.', 'error');
+                    return;
+                }
+
                 const parsed = parseDmvText(pdfResult.text);
                 if (!parsed.name && !parsed.dlNumber && !parsed.dob) {
                     showToast('Could not identify DMV fields in this document.', 'error');
@@ -16587,6 +16903,15 @@
                 const pdfResult = await window.electronAPI.extractPdfText(filePath);
                 if (!pdfResult || !pdfResult.text) {
                     showToast('Could not extract text from the PDF. The file may be image-only.', 'error');
+                    return;
+                }
+
+                // A Colorado VEHICLE query prints out of the same records
+                // window as a driver record and looks identical at a glance.
+                // Dropped here it reads as an unsupported format, which sends
+                // the officer looking for a bug. Say what it actually is.
+                if (_coVeh() && _coVeh().detect(pdfResult.text)) {
+                    showToast('That is a Colorado VEHICLE query, not a driver record. Open a vehicle and use Import DMV Printout there.', 'error');
                     return;
                 }
 
@@ -18234,6 +18559,13 @@
             modal.innerHTML = `
                 <div class="glass-card rounded-xl p-6 max-w-md w-full" onclick="event.stopPropagation()">
                     <h3 class="text-xl font-bold text-white mb-4">Add Vehicle</h3>
+                    <!-- Reads a Colorado "RESPONSE FROM DMV" vehicle query page into the
+                         blanks below and copies the page itself into Evidence. -->
+                    <button type="button" onclick="importCoVehiclePrintout('vehicleForm')" class="w-full mb-3 px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500 rounded-lg text-amber-400 text-sm transition flex items-center justify-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        Import DMV Printout
+                    </button>
+                    <p class="text-xs text-gray-500 -mt-2 mb-4 text-center">Colorado vehicle query PDF. Fills blank boxes only, and saves the page to Evidence.</p>
                     <form id="vehicleForm" class="space-y-4">
                         <input type="text" name="makeModel" placeholder="Make/Model" required class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                         <input type="text" name="color" placeholder="Color" required class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
@@ -19439,6 +19771,13 @@
             modal.innerHTML = `
                 <div class="glass-card rounded-xl p-6 max-w-md w-full" onclick="event.stopPropagation()">
                     <h3 class="text-xl font-bold text-white mb-4">Add Vehicle</h3>
+                    <!-- Reads a Colorado "RESPONSE FROM DMV" vehicle query page into the
+                         blanks below and copies the page itself into Evidence. -->
+                    <button type="button" onclick="importCoVehiclePrintout('victimVehicleForm')" class="w-full mb-3 px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500 rounded-lg text-amber-400 text-sm transition flex items-center justify-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        Import DMV Printout
+                    </button>
+                    <p class="text-xs text-gray-500 -mt-2 mb-4 text-center">Colorado vehicle query PDF. Fills blank boxes only, and saves the page to Evidence.</p>
                     <form id="victimVehicleForm" class="space-y-4">
                         <input type="text" name="makeModel" placeholder="Make/Model" required class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                         <input type="text" name="color" placeholder="Color" required class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
@@ -22818,6 +23157,13 @@
                         </button>
                     </div>
                     
+                    <!-- Reads a Colorado "RESPONSE FROM DMV" vehicle query page into the
+                         blanks below and copies the page itself into Evidence. -->
+                    <button type="button" onclick="importCoVehiclePrintout('recoveredVehicleForm')" class="w-full mb-3 px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500 rounded-lg text-amber-400 text-sm transition flex items-center justify-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        Import DMV Printout
+                    </button>
+                    <p class="text-xs text-gray-500 -mt-2 mb-4 text-center">Colorado vehicle query PDF. Fills blank boxes only, and saves the page to Evidence.</p>
                     <form id="recoveredVehicleForm" class="space-y-6">
                         <!-- Vehicle Information -->
                         <div>

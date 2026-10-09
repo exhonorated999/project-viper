@@ -42,6 +42,14 @@
          BEFORE case-snapshot.js and before the .vcase importer: both read
          their key lists from it instead of carrying their own copies. -->
     <script src="modules/_shared/case-stores.js"></script>
+    <!-- Combining two detectives' work on one case. Resolves case-stores.js
+         on every call rather than at load, but the import wizard reads
+         CaseStores directly, so keep this below it regardless. -->
+    <script src="modules/case-merge/case-merge.js"></script>
+    <!-- Quota-guarded writes. A merge writes dozens of keys at once; without
+         this a full storage quota would let the summary report a success it
+         did not achieve. -->
+    <script src="modules/_shared/case-storage.js"></script>
     <script src="case-snapshot.js"></script>
     <script src="libs/tailwindcss.js"></script>
     <link rel="stylesheet" href="modules/viper-skins.css">
@@ -2590,7 +2598,9 @@
                 // Detect format: .vcase export vs full backup .json
                 if (pkg._viperExport && pkg.caseMetadata) {
                     // --- Format 1: .vcase single-case export ---
-                    await importVcasePackage(pkg);
+                    // A data-only package carries no files, so there is
+                    // nothing to extract and nothing to rename.
+                    await routeVcaseImport(pkg, null);
                 } else if (pkg.viperCases) {
                     // --- Format 2: Full backup .json (flat localStorage dump) ---
                     await importBackupFile(pkg);
@@ -2704,6 +2714,625 @@
                 console.error('PULSE import failed:', err);
                 showNotification('PULSE import error: ' + (err && err.message ? err.message : err), 'error');
             }
+        }
+
+        /* ========== Import wizard — new case, or add to one already here ==========
+         *
+         * Several officers work one case: one writes the warrants, one takes
+         * the interview, one logs the extraction, one canvasses the street.
+         * Each exports their half and hands it to the primary detective, who
+         * imports it ON TOP of the case they already have.
+         *
+         * The engine that decides what is new and what is a duplicate lives in
+         * modules/case-merge/case-merge.js and is pure, with no idea a screen
+         * exists. Everything below is the screen: who sent this, where is it
+         * going, exactly what will change, and an undo if it was the wrong case.
+         */
+
+        /** The undo for the most recent merge, held for the life of the window. */
+        let _lastImportUndo = null;
+
+        function _impEsc(v) {
+            return String(v == null ? '' : v)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function _impBytes(n) {
+            n = Number(n) || 0;
+            if (n < 1024) return n + ' B';
+            if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
+            if (n < 1024 * 1024 * 1024) return (n / 1048576).toFixed(1) + ' MB';
+            return (n / 1073741824).toFixed(2) + ' GB';
+        }
+
+        /**
+         * Quota-guarded write — the dashboard's half of the case page's
+         * _lsSetSafe. A merge writes dozens of keys in a row, and localStorage
+         * is one ~5 MB quota for the whole app. Without this, a full quota
+         * would let the summary claim records were imported that are not
+         * there. Returns true only when the value actually landed.
+         */
+        function _lsSetSafe(key, value, label) {
+            const str = (typeof value === 'string') ? value : JSON.stringify(value);
+            const cs = window.VpCaseStorage;
+            if (cs && cs.setItemSafe) {
+                const res = cs.setItemSafe(key, str, { label: label });
+                if (!res.ok) console.error('[VIPER] save failed for', key, '-', res.message);
+                return !!res.ok;
+            }
+            try { localStorage.setItem(key, str); return true; }
+            catch (e) { console.error('[VIPER] save failed for', key, e); return false; }
+        }
+
+        /** Who sent this package, in the shape case-merge.js wants. */
+        function _packageOfficer(pkg) {
+            const s = (pkg && pkg._source) || {};
+            const meta = (pkg && pkg.caseMetadata) || {};
+            return {
+                who: s.officerName || pkg._exportedBy || '',
+                officerRank: s.officerRank || '',
+                officerBadge: s.officerBadge || '',
+                agencyName: s.agencyName || '',
+                caseNumber: s.caseNumber || meta.caseNumber || '',
+            };
+        }
+
+        /** One line naming the sender, for the top of the wizard. */
+        function _senderLine(pkg) {
+            const o = _packageOfficer(pkg);
+            const name = [o.officerRank, o.who].filter(Boolean).join(' ').trim();
+            const bits = [];
+            if (name) bits.push(name);
+            if (o.officerBadge) bits.push('Badge ' + o.officerBadge);
+            if (o.agencyName) bits.push(o.agencyName);
+            return bits.length ? bits.join(' · ') : 'Sender not recorded';
+        }
+
+        /** The package's per-store values, keyed the way case-merge wants. */
+        function _packageStores(pkg) {
+            const reg = window.CaseStores;
+            const out = {};
+            reg.all().forEach(s => {
+                if (s.transient) return;
+                const src = (s.pattern === 2) ? (pkg.moduleData || {}) : (pkg.sharedData || {});
+                if (src[s.key] !== undefined) out[s.key] = src[s.key];
+            });
+            return out;
+        }
+
+        /** How many records of each kind are in the package. Mirrors are
+         *  skipped — they are a second copy of a store already counted, and
+         *  listing both would tell the officer there is twice as much here. */
+        function _packageContents(pkg) {
+            const reg = window.CaseStores;
+            const stores = _packageStores(pkg);
+            const rows = [];
+            reg.all().forEach(s => {
+                if (s.transient || s.merge === 'mirror') return;
+                const v = stores[s.key];
+                if (v === undefined || v === null) return;
+                let n;
+                if (s.shape === 'array' || s.shape === 'wrapped') n = reg.listOf(s, v).length;
+                else if (s.shape === 'map') n = Object.keys(v).length;
+                else n = (typeof v === 'object') ? (Object.keys(v).length ? 1 : 0) : 1;
+                if (n) rows.push({ label: s.label, n: n });
+            });
+            const t = Array.isArray(pkg.tasks) ? pkg.tasks.length : 0;
+            if (t) rows.push({ label: 'Tasks and reminders', n: t });
+            return rows;
+        }
+
+        /**
+         * The host's own data for `target`, read store by store.
+         *
+         * A key we cannot parse is reported, never silently treated as empty:
+         * an empty local value makes the merge write the sender's copy
+         * straight over the top, and the host detective's work — which may
+         * well be recoverable — would be gone.
+         */
+        function _readCaseStores(target) {
+            const reg = window.CaseStores;
+            const values = {};
+            const unreadable = [];
+            reg.all().forEach(s => {
+                if (s.transient) return;
+                try {
+                    if (s.pattern === 2) {
+                        const raw = localStorage.getItem(`${s.key}_${target.id}`);
+                        if (raw) values[s.key] = JSON.parse(raw);
+                    } else {
+                        const all = JSON.parse(localStorage.getItem(s.key) || '{}');
+                        if (all && all[target.caseNumber] !== undefined) values[s.key] = all[target.caseNumber];
+                    }
+                } catch (e) {
+                    console.error('[VIPER] merge: cannot read local store', s.key, e);
+                    unreadable.push(s);
+                }
+            });
+            return { values, unreadable };
+        }
+
+        /** Write the merged values. Stops at the first failure — a merge that
+         *  is half written is worse than one that is reported as failed. */
+        function _writeCaseStores(target, writes) {
+            const reg = window.CaseStores;
+            const done = [];
+            let failedKey = null;
+            Object.keys(writes).forEach(k => {
+                if (failedKey) return;
+                const s = reg.byKey(k);
+                if (!s) return;
+                let ok;
+                if (s.pattern === 2) {
+                    ok = _lsSetSafe(`${s.key}_${target.id}`, JSON.stringify(writes[k]), s.label);
+                } else {
+                    let all = {};
+                    try { all = JSON.parse(localStorage.getItem(s.key) || '{}') || {}; } catch (_) { all = {}; }
+                    all[target.caseNumber] = writes[k];
+                    ok = _lsSetSafe(s.key, JSON.stringify(all), s.label);
+                }
+                if (ok) done.push(k); else failedKey = k;
+            });
+            return { done, failedKey };
+        }
+
+        /** Put the stores back exactly as they were. `undefined` in `before`
+         *  means the key did not exist and must be removed, not blanked. */
+        function _restoreCaseStores(target, before, keys) {
+            const reg = window.CaseStores;
+            let failed = 0;
+            keys.forEach(k => {
+                const s = reg.byKey(k);
+                if (!s) return;
+                const v = before[k];
+                try {
+                    if (s.pattern === 2) {
+                        const lsKey = `${s.key}_${target.id}`;
+                        if (v === undefined) localStorage.removeItem(lsKey);
+                        else localStorage.setItem(lsKey, JSON.stringify(v));
+                    } else {
+                        let all = {};
+                        try { all = JSON.parse(localStorage.getItem(s.key) || '{}') || {}; } catch (_) { all = {}; }
+                        if (v === undefined) delete all[target.caseNumber];
+                        else all[target.caseNumber] = v;
+                        localStorage.setItem(s.key, JSON.stringify(all));
+                    }
+                } catch (e) {
+                    failed++;
+                    console.error('[VIPER] merge undo failed for', k, e);
+                }
+            });
+            return failed;
+        }
+
+        /**
+         * Tasks live in the global viperTasks list, not in the case record, so
+         * they are outside the store registry and planned here. Same three
+         * modes. A task is the same task when the wording and the date match.
+         */
+        function _planTaskMerge(pkg, target, mode, prov) {
+            const incoming = Array.isArray(pkg.tasks) ? pkg.tasks.filter(Boolean) : [];
+            if (!incoming.length) return null;
+
+            let all = [];
+            try { all = JSON.parse(localStorage.getItem('viperTasks') || '[]') || []; } catch (_) { all = []; }
+            if (!Array.isArray(all)) all = [];
+
+            const sig = t => [
+                String((t && t.title) || '').trim().toLowerCase().replace(/\s+/g, ' '),
+                String((t && t.date) || '').slice(0, 10),
+                String((t && t.time) || '')
+            ].join('|');
+
+            const mine = {};
+            const usedIds = {};
+            all.forEach(t => {
+                if (!t) return;
+                if (t.id !== undefined && t.id !== null) usedIds[String(t.id)] = 1;
+                if (t.caseId === target.caseNumber) mine[sig(t)] = 1;
+            });
+
+            const out = all.slice();
+            let added = 0, skipped = 0, seq = 0;
+            incoming.forEach(t => {
+                const copy = Object.assign({}, t, { caseId: target.caseNumber });
+                if (!copy._prov) copy._prov = prov;
+                if (mode !== window.CaseMerge.MODE_ALL && mine[sig(copy)]) { skipped++; return; }
+                // Two machines both mint ids from Date.now(); a collision here
+                // would make editing one reminder edit the other.
+                let id = (copy.id === undefined || copy.id === null) ? '' : String(copy.id);
+                if (!id || usedIds[id]) { copy.id = Date.now() + (++seq); id = String(copy.id); }
+                usedIds[id] = 1;
+                out.push(copy);
+                added++;
+            });
+
+            if (!added && !skipped) return null;
+            return { before: all, after: out, added: added, skipped: skipped };
+        }
+
+        /* ---- screen 1: where is this going ---- */
+
+        function _promptImportDestination(pkg, filesInfo) {
+            const meta = pkg.caseMetadata || {};
+            const contents = _packageContents(pkg);
+            const list = (cases || [])
+                .filter(c => c && c.caseNumber)
+                .slice()
+                .sort((a, b) => String(a.caseNumber).localeCompare(String(b.caseNumber)));
+            const match = list.find(c => _normCaseNumber(c.caseNumber) === _normCaseNumber(meta.caseNumber));
+
+            const contentsHtml = contents.length
+                ? contents.map(r => `<li>${_impEsc(r.label)} — <strong>${r.n}</strong></li>`).join('')
+                : '<li class="text-gray-500">No case records in this package.</li>';
+            const filesHtml = (filesInfo && filesInfo.fileCount)
+                ? `<li>Case files — <strong>${filesInfo.fileCount}</strong>${filesInfo.fileBytes ? ' (' + _impBytes(filesInfo.fileBytes) + ')' : ''}</li>`
+                : '';
+
+            const optsHtml = list.map(c =>
+                `<option value="${_impEsc(c.id)}"${match && c.id === match.id ? ' selected' : ''}>${_impEsc(c.caseNumber)}${c.title ? ' — ' + _impEsc(c.title) : ''}</option>`
+            ).join('');
+
+            return new Promise(resolve => {
+                const backdrop = document.createElement('div');
+                backdrop.className = 'viper-confirm-backdrop';
+                backdrop.innerHTML = `
+                    <div class="viper-confirm-box" style="max-width:620px;text-align:left;max-height:84vh;overflow:auto;">
+                        <p style="margin-bottom:4px;font-weight:600;font-size:15px;">Import case ${_impEsc(meta.caseNumber || '')}</p>
+                        <p style="margin-bottom:12px;font-size:12px;color:#9ca3af;">From ${_impEsc(_senderLine(pkg))}${pkg._exportedAt ? ' · exported ' + _impEsc(new Date(pkg._exportedAt).toLocaleString()) : ''}</p>
+
+                        <p style="font-size:12px;color:#9ca3af;margin-bottom:4px;">This package contains</p>
+                        <ul style="font-size:12px;color:#d1d5db;margin:0 0 14px 16px;list-style:disc;max-height:150px;overflow:auto;">${contentsHtml}${filesHtml}</ul>
+
+                        <label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;cursor:pointer;">
+                            <input type="radio" name="impDest" value="new" style="margin-top:3px;"${list.length ? '' : ' checked'}>
+                            <span><strong style="font-size:13px;">Create a new case</strong><br>
+                            <span style="font-size:12px;color:#9ca3af;">Adds ${_impEsc(meta.caseNumber || 'the case')} to your case list as its own case.</span></span>
+                        </label>
+
+                        <label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;cursor:${list.length ? 'pointer' : 'not-allowed'};opacity:${list.length ? 1 : 0.5};">
+                            <input type="radio" name="impDest" value="merge" style="margin-top:3px;"${list.length ? ' checked' : ' disabled'}>
+                            <span><strong style="font-size:13px;">Add to a case I already have</strong><br>
+                            <span style="font-size:12px;color:#9ca3af;">For a supplemental report from another officer on the same case.</span></span>
+                        </label>
+
+                        <div id="impMergePanel" style="margin:0 0 6px 26px;${list.length ? '' : 'display:none;'}">
+                            <select id="impTargetCase" style="width:100%;box-sizing:border-box;padding:7px 9px;border-radius:6px;border:1px solid #374151;background:#0f1115;color:#fff;font-size:13px;margin-bottom:10px;">${optsHtml}</select>
+                            ${match ? '' : '<p style="font-size:12px;color:#f59e0b;margin:-6px 0 10px;">No case here has that number — check you are adding this to the right one.</p>'}
+
+                            <p style="font-size:12px;color:#9ca3af;margin-bottom:6px;">What should happen to records you both have?</p>
+                            <label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;cursor:pointer;">
+                                <input type="radio" name="impMode" value="new" checked style="margin-top:3px;">
+                                <span style="font-size:12px;">Add only what I don't already have<br><span style="color:#6b7280;">Recommended. Duplicates are left out.</span></span>
+                            </label>
+                            <label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;cursor:pointer;">
+                                <input type="radio" name="impMode" value="all" style="margin-top:3px;">
+                                <span style="font-size:12px;">Add everything, including duplicates<br><span style="color:#6b7280;">You will have two copies of anything you both recorded.</span></span>
+                            </label>
+                            <label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:4px;cursor:pointer;">
+                                <input type="radio" name="impMode" value="overwrite" style="margin-top:3px;">
+                                <span style="font-size:12px;">Replace mine where they clash<br><span style="color:#f87171;">Their version wins. Your own entry for that record is overwritten.</span></span>
+                            </label>
+                        </div>
+
+                        <p style="font-size:11px;color:#6b7280;margin:10px 0 0;">You will see exactly what changes before anything is written.</p>
+                        <div class="viper-confirm-btns" style="margin-top:14px;">
+                            <button class="vc-cancel">Cancel</button>
+                            <button class="vc-ok">Continue</button>
+                        </div>
+                    </div>`;
+
+                const panel = backdrop.querySelector('#impMergePanel');
+                const dests = backdrop.querySelectorAll('input[name="impDest"]');
+                dests.forEach(r => r.addEventListener('change', () => {
+                    panel.style.display = (r.value === 'merge' && r.checked) ? '' : 'none';
+                }));
+
+                const [cancelBtn, okBtn] = backdrop.querySelectorAll('.viper-confirm-btns button');
+                function close(val) {
+                    backdrop.style.opacity = '0';
+                    setTimeout(() => { if (backdrop.parentNode) backdrop.remove(); }, 150);
+                    resolve(val);
+                }
+                cancelBtn.onclick = () => close(null);
+                okBtn.onclick = () => {
+                    const picked = Array.prototype.find.call(dests, r => r.checked);
+                    if (!picked || picked.value === 'new') { close({ kind: 'new' }); return; }
+                    const sel = backdrop.querySelector('#impTargetCase');
+                    const target = list.find(c => String(c.id) === String(sel && sel.value));
+                    if (!target) { close(null); return; }
+                    const modeEl = Array.prototype.find.call(
+                        backdrop.querySelectorAll('input[name="impMode"]'), r => r.checked);
+                    close({ kind: 'merge', target: target, mergeMode: (modeEl && modeEl.value) || 'new' });
+                };
+                backdrop.onclick = (e) => { if (e.target === backdrop) close(null); };
+                document.body.appendChild(backdrop);
+            });
+        }
+
+        /* ---- screen 2: exactly what will change ---- */
+
+        function _promptMergeSummary(plan, taskPlan, target, pkg, extra) {
+            const MODE_WORDS = {
+                new: 'adding only what you do not already have',
+                all: 'adding everything, duplicates included',
+                overwrite: 'replacing yours where they clash'
+            };
+            const rows = plan.perStore.filter(p => p.added || p.updated || p.skipped);
+            const rowsHtml = rows.length ? rows.map(p => {
+                const bits = [];
+                if (p.added) bits.push(`<span style="color:#34d399;">${p.added} new</span>`);
+                if (p.updated) bits.push(`<span style="color:#f59e0b;">${p.updated} replaced</span>`);
+                if (p.skipped) bits.push(`<span style="color:#6b7280;">${p.skipped} already here</span>`);
+                return `<tr><td style="padding:3px 10px 3px 0;color:#d1d5db;">${_impEsc(p.label)}</td><td style="padding:3px 0;white-space:nowrap;">${bits.join(' · ')}</td></tr>`;
+            }).join('') : '';
+
+            const taskRow = taskPlan
+                ? `<tr><td style="padding:3px 10px 3px 0;color:#d1d5db;">Tasks and reminders</td><td style="padding:3px 0;white-space:nowrap;">${taskPlan.added ? `<span style="color:#34d399;">${taskPlan.added} new</span>` : ''}${taskPlan.added && taskPlan.skipped ? ' · ' : ''}${taskPlan.skipped ? `<span style="color:#6b7280;">${taskPlan.skipped} already here</span>` : ''}</td></tr>`
+                : '';
+
+            const total = plan.totals.added + plan.totals.updated + (taskPlan ? taskPlan.added : 0);
+            const blocked = (extra && extra.unreadable) || [];
+            const blockedHtml = blocked.length
+                ? `<p style="font-size:12px;color:#f87171;margin:10px 0 0;">Left untouched because your own copy could not be read: ${_impEsc(blocked.map(s => s.label).join(', '))}. Nothing will be written over it.</p>`
+                : '';
+            const filesHtml = (extra && extra.filesLine) ? `<p style="font-size:12px;color:#9ca3af;margin:8px 0 0;">${_impEsc(extra.filesLine)}</p>` : '';
+
+            return new Promise(resolve => {
+                const backdrop = document.createElement('div');
+                backdrop.className = 'viper-confirm-backdrop';
+                backdrop.innerHTML = `
+                    <div class="viper-confirm-box" style="max-width:620px;text-align:left;max-height:84vh;overflow:auto;">
+                        <p style="margin-bottom:4px;font-weight:600;font-size:15px;">Adding to case ${_impEsc(target.caseNumber)}</p>
+                        <p style="margin-bottom:12px;font-size:12px;color:#9ca3af;">From ${_impEsc(_senderLine(pkg))} · ${_impEsc(MODE_WORDS[plan.mode] || plan.mode)}</p>
+                        ${total
+                            ? `<table style="font-size:12px;border-collapse:collapse;width:100%;">${rowsHtml}${taskRow}</table>`
+                            : `<p style="font-size:13px;color:#d1d5db;">Nothing in this package is new to your case. ${rows.length ? 'Everything in it you already have.' : ''}</p>`}
+                        ${total ? '<p style="font-size:12px;color:#9ca3af;margin:12px 0 0;">Everything added is marked with who it came from, and can be undone straight afterwards.</p>' : ''}
+                        ${filesHtml}
+                        ${blockedHtml}
+                        <div class="viper-confirm-btns" style="margin-top:14px;">
+                            <button class="vc-cancel">Cancel</button>
+                            <button class="vc-ok"${total ? '' : ' disabled style="opacity:.5;cursor:not-allowed;"'}>Add to this case</button>
+                        </div>
+                    </div>`;
+                const [cancelBtn, okBtn] = backdrop.querySelectorAll('.viper-confirm-btns button');
+                function close(val) {
+                    backdrop.style.opacity = '0';
+                    setTimeout(() => { if (backdrop.parentNode) backdrop.remove(); }, 150);
+                    resolve(val);
+                }
+                cancelBtn.onclick = () => close(false);
+                okBtn.onclick = () => { if (total) close(true); };
+                backdrop.onclick = (e) => { if (e.target === backdrop) close(false); };
+                document.body.appendChild(backdrop);
+            });
+        }
+
+        /* ---- screen 3: what landed, and the way back ---- */
+
+        function _showMergeResult(summary) {
+            const backdrop = document.createElement('div');
+            backdrop.className = 'viper-confirm-backdrop';
+            backdrop.innerHTML = `
+                <div class="viper-confirm-box" style="max-width:520px;text-align:left;">
+                    <p style="margin-bottom:8px;font-weight:600;font-size:15px;">${_impEsc(summary.title)}</p>
+                    <p style="margin-bottom:12px;font-size:13px;color:#d1d5db;white-space:pre-line;">${_impEsc(summary.body)}</p>
+                    <div class="viper-confirm-btns">
+                        <button class="vc-cancel">Undo this import</button>
+                        <button class="vc-ok">Done</button>
+                    </div>
+                </div>`;
+            const [undoBtn, okBtn] = backdrop.querySelectorAll('.viper-confirm-btns button');
+            function close() {
+                backdrop.style.opacity = '0';
+                setTimeout(() => { if (backdrop.parentNode) backdrop.remove(); }, 150);
+            }
+            undoBtn.onclick = () => { close(); undoLastImport(); };
+            okBtn.onclick = () => close();
+            document.body.appendChild(backdrop);
+        }
+
+        /**
+         * Put the case back the way it was before the last merge.
+         *
+         * Case FILES are deliberately not removed. They were written to the
+         * case folder, they may already have been opened or referenced, and
+         * deleting a detective's evidence folder to undo a mistake is a worse
+         * mistake. The records are rolled back; the files are reported.
+         */
+        function undoLastImport() {
+            const u = _lastImportUndo;
+            if (!u) { showNotification('There is nothing to undo.', 'info'); return; }
+            _lastImportUndo = null;
+
+            const failed = _restoreCaseStores(u.target, u.before, u.keys);
+            if (u.tasksBefore) {
+                try { localStorage.setItem('viperTasks', JSON.stringify(u.tasksBefore)); }
+                catch (e) { console.error('[VIPER] merge undo: tasks', e); }
+            }
+            if (u.caseRecordBefore !== undefined) {
+                try {
+                    _reloadCases();
+                    const i = cases.findIndex(c => c && String(c.id) === String(u.target.id));
+                    if (i !== -1) { cases[i] = u.caseRecordBefore; localStorage.setItem('viperCases', JSON.stringify(cases)); }
+                } catch (e) { console.error('[VIPER] merge undo: case record', e); }
+            }
+
+            audit('case_import_undone', { case_number: u.target.caseNumber, package: u.packageId });
+            if (failed) {
+                showNotification(`Undo finished, but ${failed} part${failed === 1 ? '' : 's'} could not be put back — check the case before working it.`, 'error');
+            } else {
+                showNotification(
+                    `Import undone. Case ${u.target.caseNumber} is back as it was.`
+                    + (u.fileCount ? ` The ${u.fileCount} file${u.fileCount === 1 ? '' : 's'} already copied into the case folder were left in place.` : ''),
+                    'success');
+            }
+            updateDashboardCaseData();
+        }
+
+        /* ---- the merge itself ---- */
+
+        async function mergeVcaseIntoCase(pkg, target, mergeMode, renamed, fileCount) {
+            if (!window.CaseMerge) {
+                showNotification('The merge engine did not load. Restart VIPER and try again.', 'error');
+                return;
+            }
+
+            const read = _readCaseStores(target);
+            const incoming = _packageStores(pkg);
+            // A store whose local copy we could not parse is removed from the
+            // sender's side too, so the merge cannot write over something we
+            // were unable to see.
+            read.unreadable.forEach(s => { delete incoming[s.key]; });
+
+            let plan;
+            try {
+                plan = window.CaseMerge.planMerge(read.values, incoming, mergeMode, {
+                    officer: _packageOfficer(pkg),
+                    renamed: renamed || []
+                });
+            } catch (e) {
+                console.error('[VIPER] merge plan failed:', e);
+                showNotification('Could not work out what to add: ' + (e && e.message ? e.message : e), 'error');
+                return;
+            }
+
+            const taskPlan = _planTaskMerge(pkg, target, mergeMode, plan.prov);
+            const filesLine = fileCount
+                ? `${fileCount} case file${fileCount === 1 ? '' : 's'} have already been copied into ${target.caseNumber}.`
+                : '';
+
+            const go = await _promptMergeSummary(plan, taskPlan, target, pkg, {
+                unreadable: read.unreadable, filesLine
+            });
+            if (!go) return;
+
+            const writes = window.CaseMerge.applyMerge(plan);
+            const res = _writeCaseStores(target, writes);
+
+            if (res.failedKey) {
+                // _lsSetSafe has already said why. Roll back what did land so
+                // the case is not left half merged, and never report success.
+                const back = _restoreCaseStores(target, plan.before, res.done);
+                showNotification(
+                    'Nothing was imported — there was not enough room to store it'
+                    + (back ? ', and part of the rollback failed. Check the case before working it.' : '. Your case is unchanged.'),
+                    'error');
+                return;
+            }
+
+            let tasksBefore = null;
+            if (taskPlan && taskPlan.added) {
+                tasksBefore = taskPlan.before;
+                if (!_lsSetSafe('viperTasks', JSON.stringify(taskPlan.after), 'the imported tasks')) {
+                    tasksBefore = null;
+                    showNotification('The case records imported, but the tasks did not — there was no room for them.', 'error');
+                }
+            }
+
+            // Record the handoff on the case itself so the case page can say
+            // who contributed what without re-reading every record.
+            let caseRecordBefore;
+            try {
+                _reloadCases();
+                const i = cases.findIndex(c => c && String(c.id) === String(target.id));
+                if (i !== -1) {
+                    caseRecordBefore = JSON.parse(JSON.stringify(cases[i]));
+                    const rec = Object.assign({}, cases[i]);
+                    const log = Array.isArray(rec.importedSupplements) ? rec.importedSupplements.slice() : [];
+                    log.push({
+                        pkg: plan.packageId,
+                        by: plan.prov.by,
+                        badge: plan.prov.badge || '',
+                        agency: plan.prov.agency || '',
+                        fromCase: plan.prov.case || '',
+                        at: plan.prov.at,
+                        mode: plan.mode,
+                        added: plan.totals.added + (taskPlan ? taskPlan.added : 0),
+                        updated: plan.totals.updated,
+                        files: fileCount || 0
+                    });
+                    rec.importedSupplements = log;
+                    rec.lastModified = new Date().toISOString();
+                    cases[i] = rec;
+                    if (!_lsSetSafe('viperCases', JSON.stringify(cases), 'the case record')) caseRecordBefore = undefined;
+                }
+            } catch (e) {
+                console.error('[VIPER] merge: could not record the handoff on the case', e);
+                caseRecordBefore = undefined;
+            }
+
+            _lastImportUndo = {
+                target: target,
+                before: plan.before,
+                keys: res.done,
+                tasksBefore: tasksBefore,
+                caseRecordBefore: caseRecordBefore,
+                packageId: plan.packageId,
+                fileCount: fileCount || 0
+            };
+
+            audit('case_supplement_imported', {
+                case_number: target.caseNumber,
+                case_id: target.id,
+                from: plan.prov.by,
+                mode: plan.mode,
+                added: plan.totals.added,
+                updated: plan.totals.updated,
+                files: fileCount || 0
+            });
+
+            const lines = plan.changed.map(p => {
+                const bits = [];
+                if (p.added) bits.push(p.added + ' new');
+                if (p.updated) bits.push(p.updated + ' replaced');
+                return `${p.label}: ${bits.join(', ')}`;
+            });
+            if (taskPlan && taskPlan.added) lines.push(`Tasks and reminders: ${taskPlan.added} new`);
+            if (fileCount) lines.push(`Case files: ${fileCount} copied in`);
+
+            _showMergeResult({
+                title: `Added to case ${target.caseNumber}`,
+                body: lines.join('\n') + `\n\nEverything above is marked as coming from ${plan.prov.by}.`
+            });
+            updateDashboardCaseData();
+            return { caseNumber: target.caseNumber, caseId: target.id, merged: true };
+        }
+
+        /**
+         * The one way into a .vcase import, for both the plain data package
+         * and the v2 ZIP.
+         *
+         * `fileCtx.restore(caseNumber)` extracts the package's case files into
+         * that case's folder and resolves with the extraction result, or false
+         * if it failed. It is called BEFORE the merge is planned, and that
+         * order matters: a file the sender sent may have had to be renamed to
+         * avoid overwriting one of the host's, and every record that names
+         * that file has to be repointed at the new name.
+         */
+        async function routeVcaseImport(pkg, fileCtx) {
+            _reloadCases();
+            const dest = await _promptImportDestination(pkg, fileCtx);
+            if (!dest) return;
+
+            if (dest.kind === 'new') {
+                const landed = await importVcasePackage(pkg);
+                if (!landed) return;
+                if (fileCtx && fileCtx.restore) await fileCtx.restore(landed.caseNumber);
+                return landed;
+            }
+
+            let renamed = [];
+            let fileCount = 0;
+            if (fileCtx && fileCtx.restore) {
+                const r = await fileCtx.restore(dest.target.caseNumber);
+                if (r === false) return;   // the files failed; merge nothing
+                renamed = (r && r.renamed) || [];
+                fileCount = (r && r.written) || 0;
+            }
+            return await mergeVcaseIntoCase(pkg, dest.target, dest.mergeMode, renamed, fileCount);
         }
 
         async function importVcasePackage(pkg) {
@@ -2873,47 +3502,55 @@
                 return;
             }
 
-            const landed = await importVcasePackage(pkg);
-            if (!landed) return;   // user declined the replace, nothing written
+            // Handed to the wizard rather than run here, because when the
+            // package is being merged into an existing case the files must be
+            // on disk — and their final names known — before the merge is
+            // planned. See routeVcaseImport.
+            const fileCtx = read.hasFiles ? {
+                fileCount: read.fileCount,
+                restore: async function (caseNumber) {
+                    showNotification(`Restoring ${read.fileCount} case file${read.fileCount === 1 ? '' : 's'}…`, 'info');
+                    try {
+                        const ex = await window.electronAPI.vcaseExtractFiles({
+                            filePath: sentinel.filePath,
+                            password,
+                            caseNumber,
+                        });
+                        if (!ex || !ex.ok) {
+                            showNotification(
+                                'The case files did not import: '
+                                + _vcaseFailureMessage(ex && ex.reason, ex && ex.detail),
+                                'error'
+                            );
+                            return false;
+                        }
+                        const bits = [];
+                        if (ex.written) bits.push(`${ex.written} written`);
+                        if (ex.identical) bits.push(`${ex.identical} already here`);
+                        if (ex.renamed && ex.renamed.length) bits.push(`${ex.renamed.length} renamed to avoid overwriting yours`);
+                        showNotification(`Case files restored — ${bits.join(', ') || 'nothing to do'}.`, 'success');
+                        // A file that did not land is a gap in the case. Never
+                        // let that pass as a success.
+                        if (ex.failed && ex.failed.length) {
+                            console.warn('[VIPER] vcase file import failures:', ex.failed);
+                            showNotification(
+                                `${ex.failed.length} file${ex.failed.length === 1 ? ' was' : 's were'} not restored — see the log. Ask the sender to re-send.`,
+                                'error'
+                            );
+                        }
+                        if (ex.renamed && ex.renamed.length) {
+                            console.warn('[VIPER] vcase files renamed to avoid overwriting existing ones:', ex.renamed);
+                        }
+                        return ex;
+                    } catch (e) {
+                        console.error('[VIPER] vcase file extract failed:', e);
+                        showNotification('The case files did not import: ' + (e && e.message ? e.message : e), 'error');
+                        return false;
+                    }
+                }
+            } : null;
 
-            if (!read.hasFiles) return;
-
-            showNotification(`Restoring ${read.fileCount} case file${read.fileCount === 1 ? '' : 's'}…`, 'info');
-            try {
-                const ex = await window.electronAPI.vcaseExtractFiles({
-                    filePath: sentinel.filePath,
-                    password,
-                    caseNumber: landed.caseNumber,
-                });
-                if (!ex || !ex.ok) {
-                    showNotification(
-                        'The case record imported, but its files did not: '
-                        + _vcaseFailureMessage(ex && ex.reason, ex && ex.detail),
-                        'error'
-                    );
-                    return;
-                }
-                const bits = [];
-                if (ex.written) bits.push(`${ex.written} written`);
-                if (ex.identical) bits.push(`${ex.identical} already here`);
-                if (ex.renamed && ex.renamed.length) bits.push(`${ex.renamed.length} renamed to avoid overwriting yours`);
-                showNotification(`Case files restored — ${bits.join(', ') || 'nothing to do'}.`, 'success');
-                // A file that did not land is a gap in the case. Never let
-                // that pass as a success.
-                if (ex.failed && ex.failed.length) {
-                    console.warn('[VIPER] vcase file import failures:', ex.failed);
-                    showNotification(
-                        `${ex.failed.length} file${ex.failed.length === 1 ? ' was' : 's were'} not restored — see the log. Ask the sender to re-send.`,
-                        'error'
-                    );
-                }
-                if (ex.renamed && ex.renamed.length) {
-                    console.warn('[VIPER] vcase files renamed to avoid overwriting existing ones:', ex.renamed);
-                }
-            } catch (e) {
-                console.error('[VIPER] vcase file extract failed:', e);
-                showNotification('The case record imported, but its files did not: ' + (e && e.message ? e.message : e), 'error');
-            }
+            await routeVcaseImport(pkg, fileCtx);
         }
 
         async function importBackupFile(backupData) {

@@ -4725,7 +4725,7 @@ ipcMain.handle('vcase-extract-files', async (_e, { filePath, password, caseNumbe
 // work product, and the dialog/PDF names say Assist Package. The DA-export path
 // is left byte-for-byte as it was; it is field-validated and not worth
 // perturbing to save a few lines here.
-ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber, excludeCsam, csamTags, nonDiscoverableTags, nonDiscoverableCanvasFiles, nonDiscoverableFieldWorkFiles, assist }) => {
+ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber, excludeCsam, csamTags, nonDiscoverableTags, nonDiscoverableCanvasFiles, nonDiscoverableFieldWorkFiles, assist, folders }) => {
   const assistInfo = (assist && typeof assist === 'object') ? assist : null;
   const result = await dialog.showSaveDialog(mainWindow, {
     title: assistInfo ? 'Save Assist Package' : 'Save DA Export Package',
@@ -4830,6 +4830,33 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
     : '';
   const pfx = (p) => (assistRoot ? `${assistRoot}/${p}` : p);
 
+  // WHICH CASE FOLDERS GO IN THE ZIP.
+  // The export dialog lets the officer tick tabs, but until 5.3.5 this
+  // handler was never told which ones: every export walked Evidence,
+  // Warrants, Notes, Canvas Media and Field Work regardless. A report of
+  // just the Overview and Reports on a case holding a 34 GB phone extraction
+  // spent 15+ minutes compressing evidence nobody asked for.
+  // `folders` is a list of logical keys from the renderer. Absent (an older
+  // caller) means every folder, exactly as before.
+  const EXPORT_FOLDER_KEYS = ['evidence', 'warrants', 'notes', 'canvas', 'fieldwork'];
+  const wantFolders = new Set(Array.isArray(folders)
+    ? folders.filter(k => EXPORT_FOLDER_KEYS.includes(k))
+    : EXPORT_FOLDER_KEYS);
+  const wants = (k) => wantFolders.has(k);
+
+  // Files that are already compressed gain nothing from a second pass and
+  // cost minutes on a large phone extraction, so they are STORED in the ZIP
+  // rather than deflated. The content is byte-identical either way.
+  const STORE_EXTS = new Set([
+    '.ufdr', '.ufd', '.ufdx', '.zip', '.7z', '.rar', '.gz', '.tgz', '.bz2', '.xz',
+    '.mp4', '.m4v', '.mov', '.avi', '.mkv', '.webm', '.wmv', '.3gp',
+    '.mp3', '.m4a', '.aac', '.ogg', '.opus', '.weba', '.wma', '.flac',
+    '.jpg', '.jpeg', '.png', '.gif', '.heic', '.heif', '.webp',
+    '.pdf', '.docx', '.xlsx', '.pptx', '.exe', '.dll', '.msi', '.apk', '.ipa',
+    '.e01', '.ex01', '.dd', '.img', '.vmdk', '.vhd', '.vhdx', '.dmg', '.iso'
+  ]);
+  const storeFor = (name) => STORE_EXTS.has(path.extname(name).toLowerCase());
+
   // Provenance rows for MANIFEST.csv. Only collected for an assist package.
   const manifestRows = assistInfo ? [] : null;
 
@@ -4906,7 +4933,7 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
               // Small enough to decrypt in memory — these are typically <100MB per file
               const cipher = fs.readFileSync(full);
               const plain = security.decryptBuffer(cipher);
-              archive.append(plain, { name: archiveName });
+              archive.append(plain, { name: archiveName, store: storeFor(entry.name) });
               okCount++;
               totalBytes += plain.length;
               if (manifestRows) {
@@ -4925,7 +4952,7 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
             }
           } else {
             // Stream directly from disk — zero JS-heap overhead for media files.
-            archive.file(full, { name: archiveName });
+            archive.file(full, { name: archiveName, store: storeFor(entry.name) });
             okCount++;
             if (stat) totalBytes += stat.size;
             if (manifestRows) {
@@ -5010,7 +5037,7 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
       const evidenceSkipSet = new Set();
       if (csamExclude) for (const t of csamSkipSet) evidenceSkipSet.add(t);
       for (const t of nonDiscoverableSkipSet) evidenceSkipSet.add(t);
-      addTreeToArchive(
+      if (wants('evidence')) addTreeToArchive(
         path.join(casesDir, caseNumber, 'Evidence'),
         pfx('Evidence'),
         archive,
@@ -5021,16 +5048,16 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
       );
 
       // 3. Warrants (streamed from disk)
-      addTreeToArchive(path.join(casesDir, caseNumber, 'Warrants'), pfx('Warrants'), archive,
+      if (wants('warrants')) addTreeToArchive(path.join(casesDir, caseNumber, 'Warrants'), pfx('Warrants'), archive,
         { manifestModule: 'Warrants' });
 
       // 4. Note attachments (PDFs, pasted images stored from the Notes tab)
-      addTreeToArchive(path.join(casesDir, caseNumber, 'Notes'), pfx('Notes'), archive,
+      if (wants('notes')) addTreeToArchive(path.join(casesDir, caseNumber, 'Notes'), pfx('Notes'), archive,
         { manifestModule: 'Case Notes' });
 
       // 5. Area Canvas media (photos/video/audio captured per canvass entry).
       //    Flat files, so Not-Discoverable items are withheld by file name.
-      addTreeToArchive(
+      if (wants('canvas')) addTreeToArchive(
         path.join(casesDir, caseNumber, CANVAS_MEDIA_DIR),
         pfx(CANVAS_MEDIA_DIR),
         archive,
@@ -5043,7 +5070,7 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
       // 6. Field Work media (photos/clips/recordings/documents the
       //    investigator captured on their own phone or attached at the desk).
       //    Same flat-file shape as the canvass folder, same per-file withhold.
-      addTreeToArchive(
+      if (wants('fieldwork')) addTreeToArchive(
         path.join(casesDir, caseNumber, FIELD_WORK_MEDIA_DIR),
         pfx(FIELD_WORK_MEDIA_DIR),
         archive,
@@ -5061,6 +5088,10 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
         securityUnlocked: !!(security && security.isUnlocked()),
         counts: { added: okCount, skipped: skipCount, errors: errCount, renamed: renameLog.length, evidenceFoldersSkipped: csamSkippedLog.length },
         logicalBytes: totalBytes,
+        // The case folders this package was asked to carry. A folder absent
+        // here was left out because its tab was not ticked, not because it
+        // was empty or withheld.
+        foldersIncluded: EXPORT_FOLDER_KEYS.filter(wants),
         csamPolicy: {
           csamItemTags: Array.from(csamSkipSet),
           csamWithheld: Array.from(csamSkipSet).filter(t => nonDiscoverableSkipSet.has(t)),

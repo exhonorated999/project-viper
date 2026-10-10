@@ -282,11 +282,12 @@ function fakeArchiver() {
             ENTRIES.push({
                 name: opts.name,
                 body: Buffer.isBuffer(data) ? data : Buffer.from(String(data)),
-                streamed: false
+                streamed: false,
+                store: !!(opts && opts.store)
             });
         },
         file: (full, opts) => {
-            ENTRIES.push({ name: opts.name, body: fs.readFileSync(full), streamed: true });
+            ENTRIES.push({ name: opts.name, body: fs.readFileSync(full), streamed: true, store: !!(opts && opts.store) });
         },
         pointer: () => 1234,
         finalize: () => { setImmediate(() => handlers.__close && handlers.__close()); return Promise.resolve(); },
@@ -548,7 +549,90 @@ const ASSIST = {
     // only on page 1 is useless once a page is photocopied out.
     const hdr = slice(DETAIL, 'function addHeader() {', '\n            }', 'addHeader');
     ok(hdr.indexOf('Work product of') !== -1, 'the stamp lives in addHeader, so it lands on every page');
-    ok(hdr.indexOf('Assist Package') !== -1, 'and the running header says Assist Package');
+    // Since 5.3.6 the running header prints _docLabel, which resolves to
+    // 'Assist Package' on an assist case (the review export passes its own).
+    ok(hdr.indexOf('Assist Package') !== -1 ||
+       (hdr.indexOf('${_docLabel}') !== -1 &&
+        /const _docLabel = opts\.label \|\| \(_assist \? 'Assist Package' : 'DA Report'\);/.test(DETAIL)),
+       'and the running header says Assist Package');
+
+    // ═════════════════════════════════════════════════════════════════════
+    //  6. ONLY THE TICKED TABS' FILES GO IN THE ZIP  (5.3.5)
+    //     A report with only Overview + Reports ticked used to walk every
+    //     evidence folder anyway — 69 GB on one real case, 10-15 minutes.
+    // ═════════════════════════════════════════════════════════════════════
+    console.log('\n6. Export folders follow the ticked tabs');
+
+    const BASE = { pdfBytes: PDF, caseNumber: CASE, excludeCsam: false, csamTags: [],
+                   nonDiscoverableTags: [], nonDiscoverableCanvasFiles: [] };
+    const manifestOf = () => JSON.parse(ENTRIES.find(e => /EXPORT_MANIFEST\.json$/.test(e.name)).body.toString('utf8'));
+
+    // No tabs that own files -> PDF + manifest and nothing else.
+    ENTRIES = [];
+    await exportZip(null, Object.assign({ fileName: 'f0.zip', folders: [] }, BASE));
+    const f0 = ENTRIES.map(e => e.name).sort();
+    eq(JSON.stringify(f0), JSON.stringify(['EXPORT_MANIFEST.json', CASE + '_DA_Report.pdf'].sort()),
+       'an Overview-only report ships just the PDF and the manifest');
+    eq(JSON.stringify(manifestOf().foldersIncluded), '[]', 'and the manifest records that no folders were included');
+
+    // Evidence only.
+    ENTRIES = [];
+    await exportZip(null, Object.assign({ fileName: 'f1.zip', folders: ['evidence'] }, BASE));
+    const f1 = ENTRIES.map(e => e.name);
+    ok(f1.indexOf('Evidence/Canvass Main St/door.jpg') !== -1, 'Evidence ticked -> evidence files ship');
+    ok(f1.every(n => n.indexOf('Warrants/') !== 0), 'but not warrants');
+    ok(f1.every(n => n.indexOf('Notes/') !== 0), 'or note attachments');
+    ok(f1.every(n => n.indexOf(CANVAS_MEDIA_DIR + '/') !== 0), 'or canvass media');
+    ok(f1.every(n => n.indexOf(FIELD_WORK_MEDIA_DIR + '/') !== 0), 'or field work media');
+    eq(JSON.stringify(manifestOf().foldersIncluded), '["evidence"]', 'the manifest names the one folder');
+
+    // Warrants + field work, evidence NOT ticked.
+    ENTRIES = [];
+    await exportZip(null, Object.assign({ fileName: 'f2.zip', folders: ['warrants', 'fieldwork'] }, BASE));
+    const f2 = ENTRIES.map(e => e.name);
+    ok(f2.indexOf('Warrants/sw-001.pdf') !== -1, 'Warrants ticked -> warrant files ship');
+    ok(f2.some(n => n.indexOf(FIELD_WORK_MEDIA_DIR + '/') === 0), 'Field Work ticked -> field work media ships');
+    ok(f2.every(n => n.indexOf('Evidence/') !== 0), 'Evidence NOT ticked -> no evidence walked');
+
+    // An unknown key is ignored, never treated as "everything".
+    ENTRIES = [];
+    await exportZip(null, Object.assign({ fileName: 'f3.zip', folders: ['bogus'] }, BASE));
+    eq(ENTRIES.length, 2, 'an unrecognised folder key adds nothing');
+
+    // Older callers that send no list keep the old behaviour.
+    ENTRIES = [];
+    await exportZip(null, Object.assign({ fileName: 'f4.zip' }, BASE));
+    const f4 = ENTRIES.map(e => e.name);
+    ok(f4.indexOf('Evidence/Canvass Main St/door.jpg') !== -1 && f4.indexOf('Warrants/sw-001.pdf') !== -1 &&
+       f4.indexOf('Notes/note-1.png') !== -1 && f4.indexOf(CANVAS_MEDIA_DIR + '/canvass-01.jpg') !== -1,
+       'no folder list at all -> every folder, as before');
+    eq(JSON.stringify(manifestOf().foldersIncluded), '["evidence","warrants","notes","canvas","fieldwork"]',
+       'and the manifest says so');
+
+    // Already-compressed files are stored, not re-deflated.
+    const byName = (n) => ENTRIES.find(e => e.name === n);
+    ok(byName('Evidence/Canvass Main St/door.jpg').store === true, 'a .jpg is stored without recompression');
+    ok(byName('Warrants/sw-001.pdf').store === true, 'a .pdf is stored without recompression');
+    ok(byName('Evidence/Canvass Main St/sealed.bin').store === false, 'an unknown type is still compressed');
+
+    // The assist package honours the same list.
+    ENTRIES = [];
+    await exportZip(null, Object.assign({ fileName: 'f5.zip', folders: ['notes'], assist: ASSIST }, BASE));
+    const f5 = ENTRIES.map(e => e.name);
+    ok(f5.indexOf(ROOT + '/Notes/note-1.png') !== -1, 'assist package: Notes ticked -> notes ship');
+    ok(f5.every(n => n.indexOf(ROOT + '/Evidence/') !== 0), 'assist package: Evidence not ticked -> withheld');
+    ok(f5.every(n => n.indexOf(ROOT + '/') === 0), 'and everything still sits under the one root');
+
+    // Renderer half: the tick list actually reaches the IPC call, and the
+    // toast no longer claims "all evidence files" when it didn't ship them.
+    ok(/folders: Array\.isArray\(_daExportFolders\) \? _daExportFolders : undefined,/.test(DETAIL),
+       'the PDF export sends the ticked folders');
+    ok(/folders: _exportFoldersForTabs\(\(fileTabs \|\| \[\]\)\.map\(t => t\.id\)\),/.test(DETAIL),
+       'the files-only bundle sends them too');
+    ok(/_daExportFolders = _exportFoldersForTabs\(selectedTabs\.map\(t => t\.id\)\);/.test(DETAIL),
+       'the list is built from the tabs the officer ticked');
+    ok(/Array\.isArray\(_daExportFolders\) \? _exportContentsLine\(_daExportFolders\) : 'Includes PDF report and all evidence files\.'/.test(DETAIL),
+       'the success toast describes what was actually included');
 
     // ── done ──
     try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (_) {}

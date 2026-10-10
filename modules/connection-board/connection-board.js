@@ -188,6 +188,8 @@
   // Collect viewable (image/video/audio) files off an evidence record.
   function evidenceMedia(ev) {
     var out = [];
+    // Files removed from case files after export no longer exist on disk.
+    if (ev && ev.released) return out;
     var files = (ev && ev.files) || [];
     files.forEach(function (f) {
       if (!f || !f.path) return;

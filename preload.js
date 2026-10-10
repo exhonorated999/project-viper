@@ -311,6 +311,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Evidence file storage
   selectEvidenceFiles: (data) => ipcRenderer.invoke('select-evidence-files', data),
   copyEvidenceFile: (data) => ipcRenderer.invoke('copy-evidence-file', data),
+  evidenceListFolder: (folderPath) => ipcRenderer.invoke('evidence-list-folder', folderPath),
+  evidenceReleaseFiles: (data) => ipcRenderer.invoke('evidence-release-files', data),
   saveEvidenceFile: (data) => ipcRenderer.invoke('save-evidence-file', data),
   saveAppDataFile: (data) => ipcRenderer.invoke('save-appdata-file', data),
   deleteAppDataFile: (filePath) => ipcRenderer.invoke('delete-appdata-file', filePath),

@@ -3624,9 +3624,15 @@ class CellebriteUI {
     }
 
     // ─── Phase 1.2: Full import flow ────────────────────────────────────
-    async onImportClick() {
-        const picked = await this.module.pickBundle();
-        if (!picked) return;
+    // `preset` (optional) comes from the Evidence form's "Cellebrite
+    // Extraction" handoff: { picked, sourceMode, evidenceTag }. With a
+    // preset the file picker is skipped and the confirm modal opens with
+    // the officer's choices already selected. The result is returned so
+    // that caller files an Evidence record only for a completed import.
+    async onImportClick(preset) {
+        const pre = (preset && typeof preset === 'object' && preset.picked) ? preset : null;
+        const picked = pre ? pre.picked : await this.module.pickBundle();
+        if (!picked) return { success: false, cancelled: true };
 
         // Show scanning indicator.
         this._showProgressOverlay({ stage: 'scanning', label: 'Scanning bundle...', current: 0, total: 1 });
@@ -3636,12 +3642,12 @@ class CellebriteUI {
             if (typeof viperToast === 'function') {
                 viperToast('Scan failed: ' + (scan?.error || 'unknown'), 'error');
             }
-            return;
+            return { success: false, error: (scan && scan.error) || 'scan failed' };
         }
 
         // Confirm modal: show what was found.
-        const ok = await this._confirmImport(picked, scan);
-        if (!ok) return;
+        const ok = await this._confirmImport(picked, scan, pre);
+        if (!ok) return { success: false, cancelled: true };
         const sourceMode = ok.sourceMode;
         const evidenceTag = ok.evidenceTag;
 
@@ -3667,7 +3673,7 @@ class CellebriteUI {
                 }
             }
             this.module.render();
-            return;
+            return r || { success: false, error: 'unknown' };
         }
 
         const c = r.counts || {};
@@ -3675,10 +3681,13 @@ class CellebriteUI {
             viperToast(`Cellebrite import complete — ${c.apps || 0} apps, ${c.contacts || 0} contacts`, 'success');
         }
         this.module.render();
+        return r;
     }
 
     // ─── Confirm modal ──────────────────────────────────────────────────
-    _confirmImport(picked, scan) {
+    _confirmImport(picked, scan, pre) {
+        const preMode = (pre && pre.sourceMode === 'imported') ? 'imported' : 'referenced';
+        const preTag = (pre && pre.evidenceTag) ? String(pre.evidenceTag) : '';
         return new Promise((resolve) => {
             const overlay = document.createElement('div');
             overlay.className = 'fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50';
@@ -3707,7 +3716,7 @@ class CellebriteUI {
 
                     <label class="block mb-3">
                         <div class="text-xs text-gray-400 mb-1">Evidence tag (optional)</div>
-                        <input id="cbConfirmEvidenceTag" type="text" placeholder="e.g. EVID-CELL-001"
+                        <input id="cbConfirmEvidenceTag" type="text" placeholder="e.g. EVID-CELL-001" value="${this.escape(preTag)}"
                                class="w-full px-3 py-2 bg-viper-card/40 border border-gray-700 rounded text-sm text-white" />
                     </label>
 
@@ -3715,14 +3724,14 @@ class CellebriteUI {
                         <div class="text-xs text-gray-400 mb-2">Source mode</div>
                         <div class="space-y-2">
                             <label class="flex items-start gap-2 cursor-pointer p-2 rounded hover:bg-viper-card/30">
-                                <input type="radio" name="cbSourceMode" value="referenced" checked class="mt-1" />
+                                <input type="radio" name="cbSourceMode" value="referenced" ${preMode === 'referenced' ? 'checked' : ''} class="mt-1" />
                                 <div>
                                     <div class="text-sm text-white">Reference in place</div>
                                     <div class="text-xs text-gray-400">Read the bundle from its current location. Smaller case folder, but the bundle must remain accessible.</div>
                                 </div>
                             </label>
                             <label class="flex items-start gap-2 cursor-pointer p-2 rounded hover:bg-viper-card/30">
-                                <input type="radio" name="cbSourceMode" value="imported" class="mt-1" />
+                                <input type="radio" name="cbSourceMode" value="imported" ${preMode === 'imported' ? 'checked' : ''} class="mt-1" />
                                 <div>
                                     <div class="text-sm text-white">Import into case folder</div>
                                     <div class="text-xs text-gray-400">Copy the full bundle (${this.fmtBytes(picked.bundleSize)}) into the case folder. Recommended for chain of custody.</div>

@@ -4742,7 +4742,7 @@ ipcMain.handle('vcase-extract-files', async (_e, { filePath, password, caseNumbe
 // work product, and the dialog/PDF names say Assist Package. The DA-export path
 // is left byte-for-byte as it was; it is field-validated and not worth
 // perturbing to save a few lines here.
-ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber, excludeCsam, csamTags, nonDiscoverableTags, nonDiscoverableCanvasFiles, nonDiscoverableFieldWorkFiles, assist, folders }) => {
+ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber, excludeCsam, csamTags, nonDiscoverableTags, nonDiscoverableCanvasFiles, nonDiscoverableFieldWorkFiles, assist, folders, report }) => {
   const assistInfo = (assist && typeof assist === 'object') ? assist : null;
   const result = await dialog.showSaveDialog(mainWindow, {
     title: assistInfo ? 'Save Assist Package' : 'Save DA Export Package',
@@ -4800,6 +4800,20 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
   const log = [];
   let okCount = 0, skipCount = 0, errCount = 0, totalBytes = 0;
 
+  // PER-ITEM EXPORT RECORD. With `report: true` the handler resolves with
+  // what actually went into the ZIP for each evidence folder (one folder per
+  // evidence tag), not just the ZIP path. The renderer stamps that onto each
+  // evidence item, and it is what later allows the officer to remove the
+  // original files from the case folder: only an item whose every file made
+  // it into a completed export counts as backed up. Older callers omit the
+  // flag and still receive the plain path.
+  const wantReport = report === true;
+  const evidenceFolderStats = {};
+  const evidenceQueued = new Map(); // resolved path -> evidence folder
+  let unattributedWarnings = 0;
+  const folderStat = (top) => evidenceFolderStats[top]
+    || (evidenceFolderStats[top] = { added: 0, skipped: 0, errors: 0, bytes: 0 });
+
   const isVipencBuffer = (buf) => {
     if (!buf || buf.length < 6) return false;
     return buf[0] === 0x56 && buf[1] === 0x49 && buf[2] === 0x50
@@ -4855,10 +4869,14 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
   // spent 15+ minutes compressing evidence nobody asked for.
   // `folders` is a list of logical keys from the renderer. Absent (an older
   // caller) means every folder, exactly as before.
-  const EXPORT_FOLDER_KEYS = ['evidence', 'warrants', 'notes', 'canvas', 'fieldwork'];
+  // `forensics` (Device Exams reports) and `warrantDrafts` (Warrant Author
+  // PDF/DOCX output) are only carried when asked for by name, so an older
+  // caller that sends no list gets exactly the five folders it always got.
+  const LEGACY_FOLDER_KEYS = ['evidence', 'warrants', 'notes', 'canvas', 'fieldwork'];
+  const EXPORT_FOLDER_KEYS = [...LEGACY_FOLDER_KEYS, 'forensics', 'warrantDrafts'];
   const wantFolders = new Set(Array.isArray(folders)
     ? folders.filter(k => EXPORT_FOLDER_KEYS.includes(k))
-    : EXPORT_FOLDER_KEYS);
+    : LEGACY_FOLDER_KEYS);
   const wants = (k) => wantFolders.has(k);
 
   // Files that are already compressed gain nothing from a second pass and
@@ -4909,23 +4927,32 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
     // opts.skipFileNames: Set<string> — basenames omitted entirely. Canvas
     //   media is flat files rather than tag folders, so its Not-Discoverable
     //   items are withheld by file name instead of directory name.
+    // opts.onlyExts: Set<string> — when present, only files with one of
+    //   these extensions are carried (Warrant Author: the PDF/DOCX, not the
+    //   working manifest).
+    // opts.trackFolders: true — count per top-level folder into
+    //   evidenceFolderStats (the per-item export record).
     const skipTopLevelDirs = opts.skipTopLevelDirs instanceof Set ? opts.skipTopLevelDirs : null;
     const skipFileNames = opts.skipFileNames instanceof Set ? opts.skipFileNames : null;
+    const onlyExts = opts.onlyExts instanceof Set ? opts.onlyExts : null;
+    const track = opts.trackFolders === true;
+    const bump = (top, k, n = 1) => { if (track) folderStat(top)[k] += n; };
     if (!fs.existsSync(baseDir)) return;
-    const walk = (dir, rel) => {
+    const walk = (dir, rel, top) => {
       let entries;
       try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
-      catch (e) { log.push(`[readdir-fail] ${dir}: ${e.message}`); errCount++; return; }
+      catch (e) { log.push(`[readdir-fail] ${dir}: ${e.message}`); errCount++; bump(top, 'errors'); return; }
       for (const entry of entries) {
         const full = path.join(dir, entry.name);
         const relPath = rel ? `${rel}/${entry.name}` : entry.name;
         // Top-level CSAM exclusion — drop the whole evidence-tag subfolder.
         if (entry.isDirectory() && !rel && skipTopLevelDirs && skipTopLevelDirs.has(entry.name)) {
           csamSkippedLog.push(`${archivePrefix}/${entry.name}/`);
+          if (track) folderStat(entry.name).withheld = true;
           continue;
         }
         if (entry.isDirectory()) {
-          walk(full, relPath);
+          walk(full, relPath, rel ? top : entry.name);
           continue;
         }
         // Per-file Discovery Status exclusion (Area Canvas media).
@@ -4933,6 +4960,7 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
           csamSkippedLog.push(`${archivePrefix}/${entry.name}`);
           continue;
         }
+        if (onlyExts && !onlyExts.has(path.extname(entry.name).toLowerCase())) continue;
         const archiveName = `${archivePrefix}/${sanitizeArchiveRel(relPath)}`;
         try {
           // Cheap header sniff to decide encrypted vs plain (read first 8 bytes only)
@@ -4953,6 +4981,7 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
               archive.append(plain, { name: archiveName, store: storeFor(entry.name) });
               okCount++;
               totalBytes += plain.length;
+              bump(top, 'added'); bump(top, 'bytes', plain.length);
               if (manifestRows) {
                 // Hash the PLAINTEXT — that is what goes in the ZIP and what
                 // the lead detective will be holding.
@@ -4966,12 +4995,17 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
             } else {
               log.push(`[skip-encrypted-locked] ${archiveName}`);
               skipCount++;
+              bump(top, 'skipped');
             }
           } else {
             // Stream directly from disk — zero JS-heap overhead for media files.
             archive.file(full, { name: archiveName, store: storeFor(entry.name) });
             okCount++;
             if (stat) totalBytes += stat.size;
+            bump(top, 'added'); if (stat) bump(top, 'bytes', stat.size);
+            // archive.file() only QUEUES the file; a read failure surfaces
+            // later as an archiver warning, which is attributed back here.
+            if (track) evidenceQueued.set(path.resolve(full), top);
             if (manifestRows) {
               const h = _sha256FileSync(full, stat ? stat.size : null);
               manifestRows.push({
@@ -4983,10 +5017,11 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
         } catch (e) {
           log.push(`[file-fail] ${archiveName}: ${e.message}`);
           errCount++;
+          bump(top, 'errors');
         }
       }
     };
-    walk(baseDir, '');
+    walk(baseDir, '', '');
   };
 
   if (!archiver) {
@@ -5002,7 +5037,10 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
       throw new Error('Could not write export sidecar: ' + e.message);
     }
     console.warn('[save-da-export] archiver package not installed; wrote sidecar dir at', exportDir);
-    return exportDir;
+    // No files were packaged, so nothing in the case counts as backed up.
+    return wantReport
+      ? { filePath: exportDir, completedAt: new Date().toISOString(), foldersIncluded: [], evidenceFolders: null, unattributedWarnings: 0 }
+      : exportDir;
   }
 
   console.log('[save-da-export] starting ZIP at', result.filePath, 'for case', caseNumber);
@@ -5018,7 +5056,13 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
       console.log(`[save-da-export] DONE — wrote ${archive.pointer()} bytes; files ok=${okCount} skipped=${skipCount} errors=${errCount}; csam-folders-skipped=${csamSkippedLog.length}; logical input bytes=${totalBytes}`);
       if (log.length) console.log('[save-da-export] log:\n' + log.slice(0, 40).join('\n'));
       if (csamSkippedLog.length) console.log('[save-da-export] CSAM-excluded folders:\n' + csamSkippedLog.join('\n'));
-      settle(resolve, result.filePath);
+      settle(resolve, wantReport ? {
+        filePath: result.filePath,
+        completedAt: new Date().toISOString(),
+        foldersIncluded: EXPORT_FOLDER_KEYS.filter(wants),
+        evidenceFolders: wants('evidence') ? evidenceFolderStats : null,
+        unattributedWarnings
+      } : result.filePath);
     });
     output.on('error', (err) => {
       console.error('[save-da-export] output stream error:', err);
@@ -5031,6 +5075,19 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
     });
     archive.on('warning', (err) => {
       console.warn('[save-da-export] archive warning:', err && err.message);
+      // A queued evidence file that could not be read after all: move it
+      // from "added" to "errors" for its folder, so it can never be counted
+      // as backed up. A warning we cannot place taints the whole report.
+      const p = err && (err.path || (err.data && (err.data.filepath || err.data.sourcePath)));
+      const top = p ? evidenceQueued.get(path.resolve(String(p))) : undefined;
+      if (top !== undefined) {
+        const s = folderStat(top);
+        s.added = Math.max(0, s.added - 1);
+        s.errors++;
+        evidenceQueued.delete(path.resolve(String(p)));
+      } else if (wants('evidence')) {
+        unattributedWarnings++;
+      }
     });
 
     archive.pipe(output);
@@ -5060,7 +5117,8 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
         archive,
         {
           skipTopLevelDirs: evidenceSkipSet.size ? evidenceSkipSet : null,
-          manifestModule: 'Evidence'
+          manifestModule: 'Evidence',
+          trackFolders: true
         }
       );
 
@@ -5097,7 +5155,26 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
         }
       );
 
-      // 7. Manifest with per-file outcome — useful for DA-side audit
+      // 7. Device Exams — the examination reports attached to each device
+      //    (cases/<cn>/Forensics/<deviceId>/). Only when the tab was ticked.
+      if (wants('forensics')) addTreeToArchive(
+        path.join(casesDir, caseNumber, 'Forensics'),
+        pfx('Device Exams'),
+        archive,
+        { manifestModule: 'Device Exams' }
+      );
+
+      // 8. Warrant Author — the generated warrant PDFs/Word files. They live
+      //    under Warrants/Drafts, so when the Warrants folder is already in
+      //    the package they are in it once already; never twice.
+      if (wants('warrantDrafts') && !wants('warrants')) addTreeToArchive(
+        path.join(casesDir, caseNumber, 'Warrants', 'Drafts'),
+        pfx('Warrant Author'),
+        archive,
+        { manifestModule: 'Warrant Author', onlyExts: new Set(['.pdf', '.docx']) }
+      );
+
+      // 9. Manifest with per-file outcome — useful for DA-side audit
       const manifest = {
         caseNumber,
         generatedAt: new Date().toISOString(),
@@ -6349,6 +6426,45 @@ ipcMain.handle('audit-log-write', async (event, payload) => {
   }
 });
 // --- Select evidence files or folder via native dialog ---
+// Recursively list a folder for the Evidence form. Shared by the folder
+// picker and by "Point to where it's stored", which needs the listing of a
+// folder the officer has already chosen (e.g. a Cellebrite Reader package).
+// An unreadable sub-folder is reported, not fatal.
+function _listEvidenceFolder(dirPath) {
+  const files = [];
+  const unreadable = [];
+  const walk = (dir, rel) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+    catch (e) { unreadable.push(rel || '.'); return; }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        walk(full, relPath);
+      } else {
+        let size = 0;
+        try { size = fs.statSync(full).size; } catch (_) { unreadable.push(relPath); continue; }
+        files.push({ name: entry.name, path: full, relativePath: relPath, size });
+      }
+    }
+  };
+  walk(dirPath, '');
+  return { folderName: path.basename(dirPath), folderPath: dirPath, files, unreadable };
+}
+
+ipcMain.handle('evidence-list-folder', async (event, folderPath) => {
+  try {
+    const p = String(folderPath || '');
+    if (!p || !fs.existsSync(p) || !fs.statSync(p).isDirectory()) {
+      return { success: false, error: 'That folder could not be found.' };
+    }
+    return { success: true, ..._listEvidenceFolder(p) };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('select-evidence-files', async (event, { mode, filters: customFilters, title: customTitle } = {}) => {
   // mode: 'files' or 'folder'
   const props = mode === 'folder'
@@ -6369,22 +6485,7 @@ ipcMain.handle('select-evidence-files', async (event, { mode, filters: customFil
 
   if (mode === 'folder') {
     // Recursively collect all files in folder
-    const dirPath = result.filePaths[0];
-    const files = [];
-    function walk(dir, rel) {
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const full = path.join(dir, entry.name);
-        const relPath = rel ? `${rel}/${entry.name}` : entry.name;
-        if (entry.isDirectory()) {
-          walk(full, relPath);
-        } else {
-          const stat = fs.statSync(full);
-          files.push({ name: entry.name, path: full, relativePath: relPath, size: stat.size });
-        }
-      }
-    }
-    walk(dirPath, '');
-    return { folderName: path.basename(dirPath), files };
+    return _listEvidenceFolder(result.filePaths[0]);
   }
 
   // files mode — return list of selected files
@@ -6396,6 +6497,14 @@ ipcMain.handle('select-evidence-files', async (event, { mode, filters: customFil
 });
 
 // --- Copy an evidence file from source path to case Evidence dir ---
+// Measured: the Node runtime inside Electron refuses readFileSync on anything
+// over 2 GiB (ERR_FS_FILE_TOO_LARGE), so this handler used to fail on every
+// long surveillance video and every phone or computer extraction. An
+// unencrypted copy is now a plain OS file copy — no size limit and no memory
+// cost. Field Security encrypts whole files in memory, so an ENCRYPTED copy
+// still has a ceiling; past it we refuse with a message that points the
+// officer at "Point to where it's stored" instead of failing obscurely.
+const EVIDENCE_ENCRYPT_MAX_BYTES = 1900 * 1024 * 1024;
 ipcMain.handle('copy-evidence-file', async (event, { caseNumber, evidenceTag, sourcePath, relativePath }) => {
   try {
     const fileName = relativePath || path.basename(sourcePath);
@@ -6407,19 +6516,99 @@ ipcMain.handle('copy-evidence-file', async (event, { caseNumber, evidenceTag, so
     const destDir = path.dirname(destPath);
     fs.mkdirSync(destDir, { recursive: true });
 
-    const buffer = fs.readFileSync(sourcePath);
-
-    if (security && security.isEnabled() && security.isUnlocked()) {
-      fs.writeFileSync(destPath, security.encryptBuffer(buffer));
-    } else {
-      fs.writeFileSync(destPath, buffer);
+    const encrypting = !!(security && security.isEnabled() && security.isUnlocked());
+    if (!encrypting) {
+      await fs.promises.copyFile(sourcePath, destPath);
+      return destPath;
     }
 
+    const size = (await fs.promises.stat(sourcePath)).size;
+    if (size > EVIDENCE_ENCRYPT_MAX_BYTES) {
+      const gb = (size / (1024 * 1024 * 1024)).toFixed(1);
+      throw new Error(`TOO_LARGE_TO_ENCRYPT: "${path.basename(sourcePath)}" is ${gb} GB, too large to encrypt into the case folder while Field Security is on. Choose "Point to where it's stored" for this evidence instead.`);
+    }
+    const buffer = await fs.promises.readFile(sourcePath);
+    await fs.promises.writeFile(destPath, security.encryptBuffer(buffer));
     return destPath;
   } catch (error) {
     console.error('Failed to copy evidence file:', error);
     throw error;
   }
+});
+
+// --- Remove an evidence item's files from the case folder (after a DA export) ---
+// The record, its stats and its listing stay in VIPER; only the bytes on disk
+// go. This is the one place VIPER deletes evidence files, so it is narrow on
+// purpose:
+//   - every path must sit strictly INSIDE cases/<caseNumber>/Evidence/
+//     (the Evidence folder itself is never a target);
+//   - only regular files are removed — never a directory, never a link;
+//   - `keep` lists files another evidence item still points at (two items can
+//     share a tag folder), and those are left alone;
+//   - empty folders left behind are pruned, stopping at Evidence/.
+// Two roots are accepted because the Cellebrite folder copy has historically
+// written under userData/cases even when the case folder lives elsewhere.
+ipcMain.handle('evidence-release-files', async (event, { caseNumber, paths, keep } = {}) => {
+  const out = { success: false, removed: 0, freedBytes: 0, missing: 0, kept: 0, failed: [], refused: [] };
+  const cn = String(caseNumber || '');
+  if (!cn || /[\\/]/.test(cn) || cn === '.' || cn === '..') {
+    out.error = 'No case number.';
+    return out;
+  }
+  const roots = [];
+  for (const base of [casesDir, path.join(app.getPath('userData'), 'cases')]) {
+    const r = path.resolve(base, cn, 'Evidence');
+    if (!roots.some(x => path.relative(x, r) === '')) roots.push(r);
+  }
+  const rootOf = (abs) => roots.find(r => {
+    const rel = path.relative(r, abs);
+    return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+  });
+  const key = (p) => {
+    const a = path.resolve(String(p));
+    return process.platform === 'win32' ? a.toLowerCase() : a;
+  };
+  const keepSet = new Set((Array.isArray(keep) ? keep : []).filter(p => typeof p === 'string' && p).map(key));
+
+  const touched = new Map(); // dir -> root
+  for (const p of (Array.isArray(paths) ? paths : [])) {
+    if (typeof p !== 'string' || !p) { out.refused.push(String(p)); continue; }
+    const abs = path.resolve(p);
+    const root = rootOf(abs);
+    if (!root) { out.refused.push(p); continue; }
+    if (keepSet.has(key(abs))) { out.kept++; continue; }
+    let st;
+    try { st = await fs.promises.lstat(abs); }
+    catch (e) {
+      if (e.code === 'ENOENT') out.missing++;
+      else out.failed.push({ path: p, error: e.message });
+      continue;
+    }
+    if (!st.isFile()) { out.refused.push(p); continue; }
+    try {
+      await fs.promises.unlink(abs);
+      out.removed++;
+      out.freedBytes += st.size;
+      touched.set(path.dirname(abs), root);
+    } catch (e) {
+      out.failed.push({ path: p, error: e.message });
+    }
+  }
+
+  // Prune folders the removal emptied, deepest first, never past Evidence/.
+  const dirs = Array.from(touched.keys()).sort((a, b) => b.length - a.length);
+  for (const d0 of dirs) {
+    const root = touched.get(d0);
+    let d = d0;
+    while (rootOf(d) === root) {
+      try { fs.rmdirSync(d); } catch (_) { break; } // not empty, or in use
+      d = path.dirname(d);
+    }
+  }
+
+  out.success = out.failed.length === 0 && out.refused.length === 0;
+  console.log(`[evidence-release-files] case=${cn} removed=${out.removed} freed=${out.freedBytes} missing=${out.missing} kept=${out.kept} failed=${out.failed.length} refused=${out.refused.length}`);
+  return out;
 });
 
 // --- Evidence file storage (replaces Tauri save_evidence_file) ---
@@ -10163,7 +10352,9 @@ ipcMain.handle('cellebrite-close', async () => {
 
 ipcMain.handle('copy-cellebrite-folder', async (event, { sourcePath, caseNumber, evidenceTag }) => {
   try {
-    const casesDir = path.join(app.getPath('userData'), 'cases');
+    // Uses the real case-data root. This used to re-declare casesDir as
+    // userData/cases, so on a portable install or a moved case folder the
+    // copy landed somewhere the DA export never looks.
     const destDir = path.join(casesDir, caseNumber, 'Evidence', evidenceTag);
     fs.mkdirSync(destDir, { recursive: true });
 

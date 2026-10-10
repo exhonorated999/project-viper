@@ -3201,7 +3201,10 @@
                 type: cb.dataset.type
             }));
 
-            const dataTabs = selectedTabs.filter(tab => tab.type === 'data');
+            // A 'mixed' tab (Device Exams, Warrant Author) has both a report
+            // section and files on disk: it is rendered in the PDF here, and its
+            // folder rides in the ZIP via _exportFoldersForTabs below.
+            const dataTabs = selectedTabs.filter(tab => tab.type === 'data' || tab.type === 'mixed');
             const fileTabs = selectedTabs.filter(tab => tab.type === 'files');
 
             // ── CSAM-sensitive evidence ──
@@ -3263,11 +3266,14 @@
             warrants:   'warrants',
             notes:      'notes',
             areacanvas: 'canvas',
-            fieldwork:  'fieldwork'
+            fieldwork:  'fieldwork',
+            forensics:  'forensics',
+            warrantAuthor: 'warrantDrafts'
         };
         const EXPORT_FOLDER_LABELS = {
             evidence: 'evidence files', warrants: 'warrant files', notes: 'note attachments',
-            canvas: 'area canvas media', fieldwork: 'field work media'
+            canvas: 'area canvas media', fieldwork: 'field work media',
+            forensics: 'device exam reports', warrantDrafts: 'warrant author documents'
         };
         function _exportFoldersForTabs(tabIds) {
             const out = [];
@@ -4803,6 +4809,76 @@
                     });
                     break;
                 }
+                case 'forensics': {
+                    // Device Exams: one entry per examined device. The attached
+                    // exam reports themselves ride in the ZIP's Device Exams folder.
+                    const items = Array.isArray(caseForensicDevices) ? caseForensicDevices.filter(Boolean) : [];
+                    if (!items.length) { emptyMsg('No device exams recorded.'); break; }
+                    items.forEach((d, i) => {
+                        const title = [d.deviceCategory, d.makeModel].filter(Boolean).join(' — ') || 'Device';
+                        itemHeading(`${i + 1}. ${title}`);
+                        if (d.modelNumber) fieldBold('Model Number', d.modelNumber);
+                        if (d.imei) fieldBold('IMEI', d.imei);
+                        if (d.serialNumber) fieldBold('Serial Number', d.serialNumber);
+                        if (d.storageSize) fieldBold('Storage', d.storageSize);
+                        if (d.carrier) fieldBold('Carrier', d.carrier);
+                        if (d.osVersion) fieldBold('OS Version', d.osVersion);
+                        if (d.subjectName) fieldBold('Subject', d.subjectRole ? `${d.subjectName} (${d.subjectRole})` : d.subjectName);
+                        if (d.crimeType) fieldBold('Offense Type', d.crimeType);
+                        if (d.acquisitionType) fieldBold('Acquired By', d.acquisitionType);
+                        if (d.acquisitionDate) fieldBold('Acquisition Date', formatDate(d.acquisitionDate));
+                        if (d.tool) fieldBold('Forensic Tool', d.tool);
+                        if (d.extractionType) fieldBold('Extraction Type', d.extractionType);
+                        if (d.examinerName) fieldBold('Examiner', d.examinerRole ? `${d.examinerName} (${d.examinerRole})` : d.examinerName);
+                        if (d.linkedImportRef) fieldBold('Linked Import', d.linkedImportRef);
+                        fieldBold('Reviewed', d.reviewed
+                            ? ('Yes' + (d.reviewedAt ? ' — ' + formatDate(String(d.reviewedAt).split('T')[0]) : '') + (d.reviewedBy ? ' by ' + d.reviewedBy : ''))
+                            : 'No');
+                        if (d.hasReportFile && d.reportFileName) fieldBold('Exam Report', d.reportFileName);
+                        if (d.notes) { fieldBold('Notes', ''); bodyText(d.notes); }
+                        gap(3);
+                    });
+                    break;
+                }
+                case 'warrantAuthor': {
+                    // Warrant Author keeps an index in localStorage; the generated
+                    // PDF / Word documents ride in the ZIP's Warrant Author folder.
+                    const wa = _lsParse(`warrantAuthor_${caseId}`, { drafts: [] });
+                    const drafts = (wa && Array.isArray(wa.drafts)) ? wa.drafts.filter(Boolean) : [];
+                    if (!drafts.length) { emptyMsg('No warrants written in Warrant Author.'); break; }
+                    const typeLabel = (t) => t === 'residential' ? 'Residential search warrant'
+                        : t === 'multi-business-esp' ? 'Electronic service provider warrant' : (t || 'Warrant');
+                    const acct = (a) => (a && typeof a === 'object')
+                        ? String(a.value || a.identifier || a.account || a.handle || a.label || '').trim()
+                        : String(a || '').trim();
+                    drafts.forEach((d, i) => {
+                        itemHeading(`${i + 1}. ${typeLabel(d.type)}${d.jurisdiction ? ' (' + d.jurisdiction + ')' : ''}`);
+                        if (d.status) fieldBold('Status', String(d.status).charAt(0).toUpperCase() + String(d.status).slice(1));
+                        if (d.swNumber) fieldBold('Warrant Number', d.swNumber);
+                        if (d.courtName) fieldBold('Court', d.courtName);
+                        if (d.county) fieldBold('County', d.county);
+                        if (d.judgeName) fieldBold('Judge', d.judgeName);
+                        if (d.premises && d.premises.address) fieldBold('Premises', d.premises.address);
+                        if (Array.isArray(d.offenses) && d.offenses.length) {
+                            fieldBold('Offenses', d.offenses.map(o => (o && typeof o === 'object') ? [o.code, o.label].filter(Boolean).join(' ') : String(o || '')).filter(Boolean).join('; '));
+                        }
+                        const ads = Array.isArray(d.addendums) ? d.addendums.filter(Boolean) : [];
+                        ads.forEach((ad, j) => {
+                            const name = ad.businessNameSnapshot || ad.providerNameOverride || ad.providerKey || 'Provider';
+                            fieldBold(`   Addendum ${ad.pageLabel || (j + 1)}`, name);
+                            const accts = (Array.isArray(ad.targetAccounts) ? ad.targetAccounts : []).map(acct).filter(Boolean);
+                            if (accts.length) fieldBold('      Target Accounts', accts.join(', '));
+                            if (ad.dateRangeFrom || ad.dateRangeTo) fieldBold('      Date Range', `${ad.dateRangeFrom ? formatDate(ad.dateRangeFrom) : '…'} to ${ad.dateRangeTo ? formatDate(ad.dateRangeTo) : '…'}`);
+                            if (ad.servedAt) fieldBold('      Served', formatDate(String(ad.servedAt).split('T')[0]));
+                            if (ad.returnedAt) fieldBold('      Returned', formatDate(String(ad.returnedAt).split('T')[0]));
+                        });
+                        const docs = [d.pdfPath ? 'PDF' : '', d.docxPath ? 'Word' : ''].filter(Boolean);
+                        if (docs.length) fieldBold('Documents', docs.join(' and ') + ' generated');
+                        if (d.updatedAt || d.createdAt) fieldBold('Last Updated', formatDate(String(d.updatedAt || d.createdAt).split('T')[0]));
+                        gap(3);
+                    });
+                    break;
+                }
                 default:
                     emptyMsg(`Content for ${getTabLabel(tabId)} not available.`);
                 }
@@ -4897,6 +4973,12 @@
                         if (_evCollected) fieldBold('   Collected', _evCollected);
                         if (ev.location) fieldBold('   Location', ev.location);
                         if (ev.fileCount) fieldBold('   Files', `${ev.fileCount} file${ev.fileCount !== 1 ? 's' : ''}`);
+                        // Files that are not in this package, said plainly.
+                        if (ev.released) {
+                            fieldBold('   Files Status', `Delivered in an earlier export${ev.released.exportedAt ? ' (' + _evWhen(ev.released.exportedAt) + ')' : ''}; original files removed from VIPER case storage on ${_evWhen(ev.released.at)}. Not included in this package.`);
+                        } else if (ev.referenceOnly && ev.type !== 'datapilot') {
+                            fieldBold('   Files Status', `Not copied into VIPER — held at ${ev.sourcePath || 'the original storage location'}. Not included in this package.`);
+                        }
                         // CSAM items reaching this point are marked Discoverable
                         // (Not-Discoverable items were filtered out above), so
                         // their media is INCLUDED in this package.
@@ -5048,7 +5130,7 @@
 
             if (window.electronAPI && window.electronAPI.saveDAExport) {
                 try {
-                    const savedPath = await window.electronAPI.saveDAExport({
+                    const savedPath = await _daExportSave({
                         fileName,
                         pdfBytes: Array.from(new Uint8Array(pdfBytes)),
                         caseNumber: currentCase.caseNumber,
@@ -5066,7 +5148,7 @@
                         assist: _assist,
                         // Only the folders behind the ticked tabs.
                         folders: Array.isArray(_daExportFolders) ? _daExportFolders : undefined,
-                    });
+                    }, false);
                     if (savedPath) {
                         const withheldTags = Array.isArray(_daExportNonDiscoverableTags) ? _daExportNonDiscoverableTags : [];
                         const csamNote = withheldTags.length
@@ -5112,7 +5194,9 @@
                 traceImport: 'TRACE Import',
                 rmsImport: 'RMS Import',
                 cyberTips: 'Cyber Tips',
-                oversightImport: 'Oversight'
+                oversightImport: 'Oversight',
+                forensics: 'Device Exams',
+                warrantAuthor: 'Warrant Author'
             };
             return labels[tabId] || tabId;
         }
@@ -5673,7 +5757,7 @@
             }
             try {
                 const _assist = _assistPackageInfo();
-                const savedPath = await window.electronAPI.saveDAExport({
+                const savedPath = await _daExportSave({
                     fileName: _assist
                         ? `${currentCase.caseNumber}_Assist_Files_${new Date().toISOString().split('T')[0]}.zip`
                         : `${currentCase.caseNumber}_Evidence_${new Date().toISOString().split('T')[0]}.zip`,
@@ -5686,7 +5770,7 @@
                     nonDiscoverableFieldWorkFiles: _fieldWorkNonDiscoverableFiles(),
                     assist: _assist,
                     folders: _exportFoldersForTabs((fileTabs || []).map(t => t.id)),
-                });
+                }, true);
                 if (savedPath) {
                     const withheldTags = Array.isArray(_daExportNonDiscoverableTags) ? _daExportNonDiscoverableTags : [];
                     const csamNote = withheldTags.length
@@ -9585,6 +9669,12 @@
                                                 </svg>
                                                 <span>Upload Files</span>
                                             </button>
+                                            <button type="button" onclick="selectEvidenceViaDialog('folder')" class="flex-1 px-4 py-3 bg-viper-card/50 border-2 border-dashed border-gray-600 rounded-lg hover:border-viper-cyan transition-colors flex items-center justify-center space-x-2 text-gray-400 hover:text-viper-cyan">
+                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                                                </svg>
+                                                <span>Upload Folder</span>
+                                            </button>
                                         </div>
                                     </div>
                                     <!-- Cellebrite folder picker (shown when Cellebrite selected) -->
@@ -9699,6 +9789,39 @@
                                             </button>
                                         </div>
                                         <div id="evidenceFilesList" class="text-xs text-gray-400 max-h-32 overflow-y-auto space-y-1"></div>
+                                    </div>
+                                    <!-- Copy vs Point-to (shown after a standard, Cellebrite Reader or .ufdx pick) -->
+                                    <div id="evidenceStorageModeBlock" class="hidden mt-4">
+                                        <label class="block text-xs font-semibold text-gray-300 mb-2">Where should VIPER keep this evidence? <span id="evidenceStorageSizeLabel" class="font-normal text-viper-cyan/80 ml-1"></span></label>
+                                        <div class="space-y-2">
+                                            <label class="flex items-start gap-2 p-3 bg-viper-card/50 border border-viper-cyan/30 rounded-lg cursor-pointer hover:border-viper-cyan transition-colors">
+                                                <input type="radio" name="evidenceStorageMode" value="copy" checked onchange="onEvidenceStorageModeChange('copy')" class="mt-0.5 accent-viper-cyan">
+                                                <div class="flex-1">
+                                                    <div class="text-sm font-medium text-viper-cyan">📦 Copy into the case folder</div>
+                                                    <div class="text-xs text-gray-400 mt-1">A copy is stored with the case. Included in the Export to DA. Protected by Field Security when it is on. Large items take time and drive space.</div>
+                                                </div>
+                                            </label>
+                                            <label class="flex items-start gap-2 p-3 bg-viper-card/50 border border-gray-600 rounded-lg cursor-pointer hover:border-yellow-400/60 transition-colors">
+                                                <input type="radio" name="evidenceStorageMode" value="reference" onchange="onEvidenceStorageModeChange('reference')" class="mt-0.5 accent-yellow-400">
+                                                <div class="flex-1">
+                                                    <div class="text-sm font-medium text-gray-200">🔗 Point to where it's stored — don't copy</div>
+                                                    <div class="text-xs text-gray-400 mt-1">VIPER remembers where the files are and reads them from there. Instant, and uses no space on the case drive. The drive holding them must stay connected, and the files are not placed in the Export to DA.</div>
+                                                </div>
+                                            </label>
+                                        </div>
+                                        <div id="evidenceStorageLargeNote" class="hidden mt-3 p-3 bg-viper-orange/10 border border-viper-orange/40 rounded-lg text-xs text-orange-200"></div>
+                                        <div id="evidenceStorageEncryptNote" class="hidden mt-3 p-3 bg-red-500/10 border border-red-500/40 rounded-lg text-xs text-red-200"></div>
+                                        <div id="evidenceStorageRefWarning" class="hidden mt-3 p-3 bg-yellow-500/10 border border-yellow-500/40 rounded-lg">
+                                            <div class="flex items-start gap-2">
+                                                <svg class="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0L3.16 16.25A2 2 0 005 19z"/>
+                                                </svg>
+                                                <div class="text-xs text-yellow-200">
+                                                    <strong class="text-yellow-300">VIPER will not keep a copy of this evidence.</strong><br>
+                                                    It stays at <code id="evidenceStorageRefPath" class="break-all"></code>. If that drive is unplugged, moved or wiped, VIPER can no longer open it. Preserve the original yourself and deliver it to the DA separately.
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                     <p id="standardUploadHint" class="text-xs text-gray-500 mt-2">✓ All formats supported: MP4, MOV, AVI • JPG, PNG, HEIC • PDF, DOC • Forensic data preserved in original format</p>
                                 </div>
@@ -9836,6 +9959,7 @@
                 toxicology: '🧪',
                 phone: '📱',
                 cellebrite: '📱',
+                cellebriteExtraction: '📱',
                 datapilot: '📲',
                 ncmecCybertip: '⚠️',
                 other: '📎'
@@ -9843,6 +9967,7 @@
 
             const typeLabels = {
                 ncmecCybertip: 'NCMEC CyberTip',
+                cellebriteExtraction: 'Cellebrite Extraction',
             };
 
             return caseEvidence.filter(item => _provShow(item)).map(item => {
@@ -9888,6 +10013,7 @@
                             ⚠️ Reference only — files not in VIPER
                         </div>
                     ` : ''}
+                    ${_evidenceCardChips(item)}
                 </div>
             `;
             }).join('');
@@ -9960,13 +10086,13 @@
                 if (dpUI) dpUI.classList.add('hidden');
                 if (ncUI) ncUI.classList.add('hidden');
             }
+            _syncEvidenceStorageBlockForType(val);
         }
 
-        // Cellebrite Extraction (.ufdx) — opens picker, stashes for the
-        // evidence-add submit handler. Phase 1.1 stub: just stores the path
-        // on a hidden field; real import flow (copy + extract + parse)
-        // lands in Phase 1.2 — for now users use the in-tab "Import Bundle"
-        // button on the Cellebrite (Mobile Forensics) tab instead.
+        // Cellebrite Extraction (.ufdx). The pick is held until Save. Save then
+        // opens the Cellebrite tab and runs its import with the officer's
+        // Copy / Point-to choice already selected (see _fileCellebriteExtraction).
+        // Point-to is the default: these extractions run to hundreds of GB.
         async function selectCellebriteExtraction() {
             if (!window.electronAPI || !window.electronAPI.cellebritePickBundle) {
                 viperToast('Cellebrite IPC unavailable — restart VIPER', 'error');
@@ -9977,14 +10103,27 @@
                 if (r && r.error) viperToast('Pick failed: ' + r.error, 'error');
                 return;
             }
-            viperToast(
-                `Picked Cellebrite extraction (${(r.bundleSize / (1024*1024*1024)).toFixed(1)} GB). ` +
-                `For Phase 1.1, use the Cellebrite tab's "Import Bundle" button — evidence-dropdown import lands in Phase 1.2.`,
-                'info'
-            );
-            console.log('[Cellebrite] picked from evidence dropdown:', r);
-            // Phase 1.2 will: create an evidence row + auto-add Cellebrite
-            // module to case + auto-trigger the import on that ufdxPath.
+            cellebriteExtractionPick = r;
+
+            const infoDiv = document.getElementById('evidenceFilesInfo');
+            const countEl = document.getElementById('evidenceFileCount');
+            const listEl = document.getElementById('evidenceFilesList');
+            const name = String(r.ufdxPath || '').split(/[\\/]/).pop() || 'Extraction';
+            countEl.textContent = `📱 ${name} — ${formatFileSize(r.bundleSize || 0)}`;
+            countEl.className = 'text-sm font-medium text-viper-orange';
+            listEl.innerHTML =
+                `<div class="text-viper-orange/80 break-all">✓ ${_evEsc(r.ufdxPath)}</div>` +
+                `<div class="text-viper-orange/80">✓ Press Save — VIPER opens the Cellebrite tab and reads the extraction there.</div>`;
+            infoDiv.className = 'mt-3 p-4 bg-viper-orange/10 border border-viper-orange/30 rounded-lg';
+            infoDiv.classList.remove('hidden');
+
+            _showEvidenceStorageBlock({
+                kind: 'ufdx',
+                sourcePath: r.ufdxPath,
+                totalBytes: r.bundleSize || 0,
+                fileCount: 0,
+                defaultMode: 'reference',
+            });
         }
 
         async function selectCellebriteFolder() {
@@ -10034,6 +10173,24 @@
                 if (result.deviceInfo.os) desc += `, OS ${result.deviceInfo.os}`;
                 if (result.caseInfo.examinerName) desc += `. Examiner: ${result.caseInfo.examinerName}`;
                 descEl.value = desc;
+            }
+
+            // Measure the folder so the Copy / Point-to choice shows its size.
+            cellebriteExtractionPick = null;
+            let listed = null;
+            if (window.electronAPI.evidenceListFolder) {
+                try { listed = await window.electronAPI.evidenceListFolder(folderPath); } catch (_) { listed = null; }
+            }
+            const lfiles = (listed && listed.success && Array.isArray(listed.files)) ? listed.files : [];
+            if (cellebriteFolderPath === folderPath) {
+                _showEvidenceStorageBlock({
+                    kind: 'cellebriteReader',
+                    sourcePath: folderPath,
+                    totalBytes: lfiles.reduce((t, f) => t + (f.size || 0), 0),
+                    maxFileBytes: lfiles.reduce((m, f) => Math.max(m, f.size || 0), 0),
+                    fileCount: lfiles.length,
+                    checkEncryption: false, // the Reader folder copy streams and is not encrypted
+                });
             }
 
             viperToast(`✓ Found Cellebrite Reader — ${deviceLabel}`, 'success');
@@ -10295,6 +10452,9 @@
             nativeEvidenceFiles = result.files;
             evidenceFiles = [];
             ncmecUploadMode = mode;
+            nativeEvidenceSource = null;
+            evidenceStorageInfo = null;
+            _hideEvidenceStorageBlock();
             ncmecSourceName = result.folderName || (result.files[0] && result.files[0].name) || `cybertip_${Date.now()}`;
 
             const count = result.files.length;
@@ -10325,9 +10485,629 @@
         let ncmecUploadMode = null;       // 'zip' | 'folder' | 'pdf'
         let ncmecSourceName = null;       // e.g. "CT_98765.zip"
 
+        // ====== Evidence storage: Copy into the case vs Point to where it's stored ======
+        // Offered after a standard Upload Files / Upload Folder pick, a Cellebrite
+        // Reader folder, or a Cellebrite Extraction (.ufdx). NCMEC CyberTips are
+        // always copied; Datapilot keeps its own control.
+        let nativeEvidenceSource = null;     // the picked folder, or the folder holding the picked files
+        let evidenceStorageInfo = null;      // { kind, sourcePath, totalBytes, maxFileBytes, fileCount, encryptBlocked }
+        let cellebriteExtractionPick = null; // cellebritePickBundle() result, held until Save
+        let _evidenceStorageToken = 0;
+        // Mirrors EVIDENCE_ENCRYPT_MAX_BYTES in electron-main.js copy-evidence-file:
+        // Field Security encrypts a whole file in memory, so it has a ceiling.
+        const EVIDENCE_ENCRYPT_MAX_BYTES = 1900 * 1024 * 1024;
+        const EVIDENCE_SUGGEST_POINT_BYTES = 2 * 1024 * 1024 * 1024;
+        const EVIDENCE_DEFAULT_POINT_BYTES = 10 * 1024 * 1024 * 1024;
+
+        function _evEsc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        function _evidenceParentDir(p) {
+            const str = String(p || '');
+            const i = Math.max(str.lastIndexOf('\\'), str.lastIndexOf('/'));
+            return i > 0 ? str.slice(0, i) : str;
+        }
+
+        // The officer's choice. When the block is not showing there is no
+        // choice on screen, so the caller's fallback applies.
+        function _evidenceStorageMode(fallback) {
+            const fb = fallback === 'reference' ? 'reference' : 'copy';
+            const blk = document.getElementById('evidenceStorageModeBlock');
+            if (!blk || blk.classList.contains('hidden') || !evidenceStorageInfo) return fb;
+            const r = document.querySelector('input[name="evidenceStorageMode"]:checked');
+            if (!r) return fb;
+            return r.value === 'reference' ? 'reference' : 'copy';
+        }
+
+        function onEvidenceStorageModeChange(mode) {
+            const warn = document.getElementById('evidenceStorageRefWarning');
+            if (warn) warn.classList.toggle('hidden', mode !== 'reference');
+            _refreshEvidenceStorageNotes();
+        }
+
+        function _refreshEvidenceStorageNotes() {
+            const info = evidenceStorageInfo || {};
+            const mode = _evidenceStorageMode();
+            const large = document.getElementById('evidenceStorageLargeNote');
+            if (large) {
+                const show = mode === 'copy' && (info.totalBytes || 0) >= EVIDENCE_SUGGEST_POINT_BYTES;
+                large.classList.toggle('hidden', !show);
+                if (show) large.textContent = `This is ${formatFileSize(info.totalBytes)}. Copying it will take a while and use that much space on the case drive. For an item this size, pointing to it is recommended.`;
+            }
+            const enc = document.getElementById('evidenceStorageEncryptNote');
+            if (enc) {
+                const show = mode === 'copy' && !!info.encryptBlocked;
+                enc.classList.toggle('hidden', !show);
+                if (show) enc.textContent = `Field Security is on, and at least one file here is larger than ${formatFileSize(EVIDENCE_ENCRYPT_MAX_BYTES)}. VIPER cannot protect a file that size inside the case folder, so it cannot be copied. Choose "Point to where it's stored".`;
+            }
+        }
+
+        async function _showEvidenceStorageBlock(info) {
+            const blk = document.getElementById('evidenceStorageModeBlock');
+            if (!blk) return;
+            const token = ++_evidenceStorageToken;
+            const i = Object.assign({ totalBytes: 0, maxFileBytes: 0, fileCount: 0 }, info || {});
+            i.encryptBlocked = false;
+            if (i.checkEncryption && i.maxFileBytes > EVIDENCE_ENCRYPT_MAX_BYTES && window.electronAPI && window.electronAPI.securityCheck) {
+                try {
+                    const sec = await window.electronAPI.securityCheck();
+                    i.encryptBlocked = !!(sec && sec.enabled && sec.unlocked);
+                } catch (_) {}
+            }
+            if (token !== _evidenceStorageToken) return; // the pick was cleared or replaced meanwhile
+            evidenceStorageInfo = i;
+            const mode = i.defaultMode
+                || ((i.encryptBlocked || i.totalBytes >= EVIDENCE_DEFAULT_POINT_BYTES) ? 'reference' : 'copy');
+            const radio = document.querySelector(`input[name="evidenceStorageMode"][value="${mode}"]`);
+            if (radio) radio.checked = true;
+            const sizeLbl = document.getElementById('evidenceStorageSizeLabel');
+            if (sizeLbl) {
+                const countPart = i.fileCount ? `${i.fileCount.toLocaleString()} file${i.fileCount !== 1 ? 's' : ''}, ` : '';
+                sizeLbl.textContent = i.totalBytes ? `— ${countPart}${formatFileSize(i.totalBytes)}` : '';
+            }
+            const pathEl = document.getElementById('evidenceStorageRefPath');
+            if (pathEl) pathEl.textContent = i.sourcePath || '';
+            blk.classList.remove('hidden');
+            onEvidenceStorageModeChange(mode);
+        }
+
+        function _hideEvidenceStorageBlock() {
+            _evidenceStorageToken++;
+            const blk = document.getElementById('evidenceStorageModeBlock');
+            if (blk) blk.classList.add('hidden');
+            const copyRadio = document.querySelector('input[name="evidenceStorageMode"][value="copy"]');
+            if (copyRadio) copyRadio.checked = true;
+            ['evidenceStorageRefWarning', 'evidenceStorageLargeNote', 'evidenceStorageEncryptNote'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.add('hidden');
+            });
+            const sizeLbl = document.getElementById('evidenceStorageSizeLabel');
+            if (sizeLbl) sizeLbl.textContent = '';
+        }
+
+        // A pick only offers Copy / Point-to under the Type it was made for.
+        function _syncEvidenceStorageBlockForType(val) {
+            const blk = document.getElementById('evidenceStorageModeBlock');
+            if (!blk) return;
+            if (!evidenceStorageInfo) { blk.classList.add('hidden'); return; }
+            const kind = evidenceStorageInfo.kind;
+            const fits = (val === 'cellebrite') ? (kind === 'cellebriteReader' && !!cellebriteScanResult)
+                : (val === 'cellebriteExtraction') ? (kind === 'ufdx' && !!cellebriteExtractionPick)
+                : (val === 'datapilot' || val === 'ncmecCybertip') ? false
+                : (kind === 'standard' && !!(nativeEvidenceFiles && nativeEvidenceFiles.length));
+            blk.classList.toggle('hidden', !fits);
+        }
+
+        // Push + persist + audit a new evidence record. Throws (after undoing
+        // the in-memory push) when the store refuses the write, so no caller
+        // can report a save that did not happen.
+        function _commitNewEvidence(newEvidence, auditExtra) {
+            caseEvidence.push(newEvidence);
+            try {
+                const allEvidence = _lsParse('viperCaseEvidence', {});
+                _provStampEdits('viperCaseEvidence', caseEvidence);
+                allEvidence[currentCase.caseNumber] = caseEvidence;
+                localStorage.setItem('viperCaseEvidence', JSON.stringify(allEvidence));
+            } catch (e) {
+                const at = caseEvidence.indexOf(newEvidence);
+                if (at !== -1) caseEvidence.splice(at, 1);
+                throw e;
+            }
+            audit('evidence_added', Object.assign({
+                case_number: currentCase.caseNumber,
+                case_id: currentCase.id,
+                evidence_id: newEvidence.id,
+                type: newEvidence.type,
+                tag: newEvidence.tag,
+            }, auditExtra || {}));
+        }
+
+        // ── Removing heavy files from case files after Export to DA ─────────
+        // Every Export to DA reports, per Evidence folder, how many files
+        // actually went into the ZIP. Each evidence item is stamped with that
+        // record. Strict rule: an item's original files may be removed from
+        // the case folder only once a completed DA export carried every one of
+        // them. Anything short of that needs a typed reason, which goes to the
+        // audit log. The listing, description, file names, counts and sizes
+        // all stay — only the files on disk go.
+        const EVIDENCE_EXPORT_HISTORY_MAX = 10;
+
+        function _evIdLit(id) {
+            return (typeof id === 'number' && Number.isFinite(id))
+                ? String(id)
+                : "'" + String(id).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
+        }
+
+        function _evWhen(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return String(iso);
+            // Chromium puts a narrow no-break space before AM/PM; the PDF
+            // fonts cannot draw it, so normalise to a plain space.
+            let out;
+            try { out = d.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }); }
+            catch (_) { out = d.toLocaleString(); }
+            return out.replace(/[\u202F\u00A0]/g, ' ');
+        }
+
+        // The top-level folder under <case>/Evidence that holds this file
+        // ('' for a file sitting directly in Evidence), or null when the file
+        // is not stored in this case's Evidence folder at all (Point-to items).
+        function _evidenceFolderOfPath(p, caseNumber) {
+            const raw = String(p || '').replace(/\\/g, '/').split('/');
+            const low = raw.map(x => x.toLowerCase());
+            const cn = String(caseNumber || '').toLowerCase();
+            if (!cn) return null;
+            for (let i = low.length - 3; i >= 0; i--) {
+                if (low[i] === cn && low[i + 1] === 'evidence') {
+                    return (i + 3 < low.length) ? raw[i + 2] : '';
+                }
+            }
+            return null;
+        }
+
+        // The item's files that live inside the case's Evidence folder.
+        function _evidenceCaseFiles(ev, caseNumber) {
+            if (!ev || ev.referenceOnly || !Array.isArray(ev.files)) return [];
+            const out = [];
+            ev.files.forEach(f => {
+                if (!f || !f.path || /^(https?|data|blob):/i.test(String(f.path))) return;
+                const folder = _evidenceFolderOfPath(f.path, caseNumber);
+                if (folder === null) return;
+                out.push({ path: String(f.path), folder, size: Number(f.size) || 0, name: f.name || '' });
+            });
+            return out;
+        }
+
+        function _persistCaseEvidence(label) {
+            _provStampEdits('viperCaseEvidence', caseEvidence);
+            const all = _lsParse('viperCaseEvidence', {});
+            all[currentCase.caseNumber] = caseEvidence;
+            return _lsSetSafe('viperCaseEvidence', JSON.stringify(all), label || 'this evidence record');
+        }
+
+        // Stamp the per-folder export report onto every item it covers.
+        // Returns {stamped, clean, cleanBytes} — clean counts items that this
+        // export made eligible for removal under the strict rule.
+        function _stampEvidenceExports(res, kind, filesOnly) {
+            const out = { stamped: 0, clean: 0, cleanBytes: 0 };
+            if (!res || typeof res !== 'object' || !res.evidenceFolders || !currentCase) return out;
+            const cn = currentCase.caseNumber;
+            const stats = {};
+            Object.keys(res.evidenceFolders).forEach(k => { stats[k.toLowerCase()] = res.evidenceFolders[k] || {}; });
+
+            // Files expected per folder, across every item still holding files
+            // there (several items can share one tag folder).
+            const expected = {};
+            const seen = new Set();
+            caseEvidence.forEach(ev => {
+                if (!ev || ev.released) return;
+                _evidenceCaseFiles(ev, cn).forEach(f => {
+                    const key = f.path.replace(/\\/g, '/').toLowerCase();
+                    if (seen.has(key)) return;
+                    seen.add(key);
+                    const fk = f.folder.toLowerCase();
+                    expected[fk] = (expected[fk] || 0) + 1;
+                });
+            });
+
+            const at = res.completedAt || new Date().toISOString();
+            const warnings = Number(res.unattributedWarnings) || 0;
+            const counted = new Set(); // a file two items share frees its space once
+            caseEvidence.forEach(ev => {
+                if (!ev || ev.released) return;
+                const mine = _evidenceCaseFiles(ev, cn);
+                if (!mine.length) return;
+                const folders = Array.from(new Set(mine.map(f => f.folder)));
+                let added = 0, skipped = 0, errors = 0, withheld = false, missing = false, short = false;
+                folders.forEach(f => {
+                    const st = stats[f.toLowerCase()];
+                    if (!st) { missing = true; return; }
+                    added += Number(st.added) || 0;
+                    skipped += Number(st.skipped) || 0;
+                    errors += Number(st.errors) || 0;
+                    if (st.withheld) withheld = true;
+                    if ((Number(st.added) || 0) < (expected[f.toLowerCase()] || 0)) short = true;
+                });
+                const reason = withheld ? 'withheld'
+                    : missing ? 'missing'
+                    : errors ? 'errors'
+                    : skipped ? 'skipped'
+                    : short ? 'short'
+                    : warnings ? 'warnings'
+                    : '';
+                const rec = {
+                    at, kind, filesOnly: !!filesOnly,
+                    file: res.filePath ? String(res.filePath) : '',
+                    folders, added, skipped, errors, withheld,
+                    clean: !reason, reason
+                };
+                ev.exports = (Array.isArray(ev.exports) ? ev.exports : []).concat([rec]).slice(-EVIDENCE_EXPORT_HISTORY_MAX);
+                out.stamped++;
+                if (!reason && kind === 'da') {
+                    out.clean++;
+                    mine.forEach(f => {
+                        const key = f.path.replace(/\\/g, '/').toLowerCase();
+                        if (counted.has(key)) return;
+                        counted.add(key);
+                        out.cleanBytes += f.size;
+                    });
+                }
+            });
+            if (out.stamped) _persistCaseEvidence('the export record on your evidence');
+            return out;
+        }
+
+        // Plain-words reason an export did not fully cover an item.
+        function _evidenceExportShortfall(rec) {
+            if (!rec) return 'This item has not been included in an Export to DA yet.';
+            if (rec.kind !== 'da') return 'Its last export was an Assist Package, not an Export to DA.';
+            switch (rec.reason) {
+                case 'withheld': return 'It is marked Not Discoverable, so its files were withheld from the export.';
+                case 'missing':  return 'Its files were not found in the case folder when the export ran.';
+                case 'errors':   return 'Some of its files could not be read during the export.';
+                case 'skipped':  return 'Some of its files are encrypted and Field Security was locked during the export.';
+                case 'short':    return 'Not every file in its folder made it into the export.';
+                case 'warnings': return 'The export reported a file problem it could not tie to one item.';
+                default:         return 'The export did not confirm every file.';
+            }
+        }
+
+        // The most recent complete Export to DA that carried every file.
+        function _evidenceCleanExport(ev) {
+            const list = (ev && Array.isArray(ev.exports)) ? ev.exports : [];
+            for (let i = list.length - 1; i >= 0; i--) {
+                const r = list[i];
+                if (r && r.clean && r.kind === 'da') return r;
+            }
+            return null;
+        }
+
+        // The wrapper every Export to DA / Assist Package save goes through.
+        // Always resolves to the saved path (or null when the save dialog was
+        // cancelled), so the callers' toasts are unchanged.
+        async function _daExportSave(args, filesOnly) {
+            const res = await window.electronAPI.saveDAExport(Object.assign({}, args, { report: true }));
+            if (!res) return null;
+            if (typeof res === 'string') return res; // older main process: no report
+            try {
+                const kind = (args && args.assist) ? 'assist' : 'da';
+                const st = _stampEvidenceExports(res, kind, filesOnly);
+                if (currentTab === 'evidence') renderTabContent('evidence');
+                if (st.clean > 0) {
+                    setTimeout(() => viperToast(`📦 ${st.clean} evidence item${st.clean !== 1 ? 's are' : ' is'} now fully backed up in this export`
+                        + (st.cleanBytes ? ` (${formatFileSize(st.cleanBytes)})` : '')
+                        + '. Once the export is stored safely, you can remove the originals from the case folder — open the item in Evidence and choose Remove from case files.', 'info', 12000), 700);
+                }
+            } catch (e) {
+                console.warn('[evidence] could not stamp the export record:', e);
+            }
+            return res.filePath || null;
+        }
+
+        // Ask the officer to confirm. Resolves {reason} (reason '' when the
+        // strict rule is met) or null when cancelled.
+        function _evidenceReleaseDialog(ev, files, clean, lastExport) {
+            return new Promise(resolve => {
+                const bytes = files.reduce((n, f) => n + f.size, 0);
+                const wrap = document.createElement('div');
+                wrap.className = 'fixed inset-0 z-[99990] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4';
+                wrap.innerHTML = `
+                    <div class="glass-card rounded-xl max-w-lg w-full p-5 border border-amber-500/40 shadow-2xl" role="dialog" aria-modal="true">
+                        <h3 class="text-lg font-bold text-amber-300 mb-1">Remove files from case folder</h3>
+                        <p class="text-sm text-gray-300 mb-3"><span class="font-semibold text-white">${_evEsc(ev.tag || 'Evidence item')}</span> — ${files.length} file${files.length !== 1 ? 's' : ''}, ${formatFileSize(bytes)}</p>
+                        ${clean ? `
+                        <div class="rounded-lg p-3 mb-3 bg-green-500/10 border border-green-500/40 text-sm text-green-200">
+                            ✓ Every file was included in the Export to DA on <b>${_evEsc(_evWhen(clean.at))}</b>.
+                            ${clean.file ? `<div class="mt-1 text-xs font-mono text-green-300/80 break-all">${_evEsc(clean.file)}</div>` : ''}
+                        </div>` : `
+                        <div class="rounded-lg p-3 mb-3 bg-amber-500/10 border border-amber-500/40 text-sm text-amber-200">
+                            ⚠ No completed Export to DA contains every file of this item. ${_evEsc(_evidenceExportShortfall(lastExport))}
+                        </div>
+                        <label class="block text-xs font-semibold text-gray-300 mb-1" for="evRelReason">To remove the files anyway, give the reason. It is written to the audit log.</label>
+                        <textarea id="evRelReason" rows="2" class="w-full rounded bg-viper-dark border border-gray-600 text-sm text-white p-2 mb-3" placeholder="e.g. Original video retained on the agency evidence server, case 24-1187"></textarea>`}
+                        <div class="text-xs text-gray-400 mb-3 space-y-1">
+                            <p><b class="text-gray-200">Stays in VIPER:</b> this evidence listing, its description, file names, counts and sizes, and the case statistics.</p>
+                            <p><b class="text-gray-200">Removed:</b> the original files in this case's folder${bytes ? ` (frees ${formatFileSize(bytes)})` : ''}. VIPER cannot open or export them again afterwards.</p>
+                        </div>
+                        <label class="flex items-start gap-2 text-sm text-gray-200 mb-4 cursor-pointer">
+                            <input type="checkbox" id="evRelConfirm" class="mt-1">
+                            <span>${clean ? 'I have confirmed the export is stored safely outside this computer (external drive, DA\u2019s office or evidence server).' : 'I have confirmed these files are preserved somewhere other than this computer.'}</span>
+                        </label>
+                        <div class="flex justify-end gap-2">
+                            <button type="button" data-act="cancel" class="px-4 py-2 rounded text-sm bg-gray-700 text-gray-200 hover:bg-gray-600">Cancel</button>
+                            <button type="button" data-act="ok" disabled class="px-4 py-2 rounded text-sm font-semibold bg-red-600 text-white hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed">Remove files</button>
+                        </div>
+                    </div>`;
+                const okBtn = wrap.querySelector('[data-act="ok"]');
+                const cancelBtn = wrap.querySelector('[data-act="cancel"]');
+                const box = wrap.querySelector('#evRelConfirm');
+                const reasonEl = wrap.querySelector('#evRelReason');
+                const reasonOk = () => clean || (reasonEl && reasonEl.value.trim().length >= 5);
+                const sync = () => { okBtn.disabled = !(box.checked && reasonOk()); };
+                box.addEventListener('change', sync);
+                if (reasonEl) reasonEl.addEventListener('input', sync);
+                const onKey = (e) => { if (e.key === 'Escape') done(null); };
+                const done = (val) => {
+                    document.removeEventListener('keydown', onKey);
+                    if (wrap.parentNode) wrap.remove();
+                    resolve(val);
+                };
+                cancelBtn.onclick = () => done(null);
+                okBtn.onclick = () => { if (!okBtn.disabled) done({ reason: clean ? '' : reasonEl.value.trim() }); };
+                wrap.addEventListener('click', (e) => { if (e.target === wrap) done(null); });
+                document.addEventListener('keydown', onKey);
+                document.body.appendChild(wrap);
+                (reasonEl || box).focus();
+            });
+        }
+
+        async function openReleaseEvidenceModal(evidenceId) {
+            const ev = caseEvidence.find(e => e && e.id === evidenceId);
+            if (!ev || !currentCase) return;
+            if (ev.released) { viperToast('These files were already removed from the case folder on ' + _evWhen(ev.released.at) + '.', 'info'); return; }
+            if (!window.electronAPI || !window.electronAPI.evidenceReleaseFiles) { viperToast('Removing files requires the VIPER desktop app.', 'info'); return; }
+            if (ev.referenceOnly) { viperToast('This item was never copied into the case folder — VIPER only points to where it is stored, so there is nothing to remove.', 'info', 8000); return; }
+            const cn = currentCase.caseNumber;
+            const files = _evidenceCaseFiles(ev, cn);
+            if (!files.length) { viperToast('None of this item\u2019s files are stored in the case folder.', 'info'); return; }
+
+            const clean = _evidenceCleanExport(ev);
+            const list = Array.isArray(ev.exports) ? ev.exports : [];
+            const lastExport = list.length ? list[list.length - 1] : null;
+            const answer = await _evidenceReleaseDialog(ev, files, clean, lastExport);
+            if (!answer) return;
+
+            // Never remove a file another (still-held) item points at.
+            const keep = [];
+            caseEvidence.forEach(o => {
+                if (!o || o === ev || o.released || !Array.isArray(o.files)) return;
+                o.files.forEach(f => { if (f && f.path) keep.push(String(f.path)); });
+            });
+
+            let r;
+            try {
+                r = await window.electronAPI.evidenceReleaseFiles({ caseNumber: cn, paths: files.map(f => f.path), keep });
+            } catch (e) {
+                viperToast('Could not remove the files: ' + String(e && e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '') + ' Nothing was changed.', 'error', 10000);
+                return;
+            }
+            if (!r) { viperToast('Could not remove the files. Nothing was changed.', 'error'); return; }
+
+            // A retry adds to what an earlier, partial attempt already removed.
+            const prev = ev.releaseAttempt || { filesRemoved: 0, bytesFreed: 0 };
+            const removed = (prev.filesRemoved || 0) + (r.removed || 0);
+            const freed = (prev.bytesFreed || 0) + (r.freedBytes || 0);
+            const auditBase = {
+                case_number: cn, case_id: currentCase.id, evidence_id: ev.id, type: ev.type, tag: ev.tag,
+                files_removed: r.removed || 0, files_missing: r.missing || 0, files_kept: r.kept || 0,
+                bytes_freed: r.freedBytes || 0,
+                export_at: clean ? clean.at : null, export_kind: clean ? clean.kind : null, export_file: clean ? clean.file : null,
+                strict: !!clean, override_reason: answer.reason || null,
+            };
+
+            if (r.success) {
+                ev.released = {
+                    at: new Date().toISOString(),
+                    exportedAt: clean ? clean.at : (lastExport ? lastExport.at : null),
+                    exportKind: clean ? clean.kind : (lastExport ? lastExport.kind : null),
+                    exportFile: clean ? clean.file : (lastExport ? lastExport.file : null),
+                    overrideReason: answer.reason || null,
+                    filesRemoved: removed,
+                    filesMissing: r.missing || 0,
+                    filesKept: r.kept || 0,
+                    bytesFreed: freed,
+                };
+                delete ev.releaseAttempt;
+                const saved = _persistCaseEvidence('the removal record');
+                audit('evidence_files_released', auditBase);
+                if (currentEvidenceView === ev.id) viewEvidenceInline(ev.id);
+                renderTabContent('evidence');
+                if (saved) viperToast(`✓ ${removed} file${removed !== 1 ? 's' : ''} removed from the case folder${freed ? ` — ${formatFileSize(freed)} freed` : ''}. The evidence listing is kept.`, 'success', 8000);
+                else viperToast('The files were removed, but VIPER could not save the note saying so. Do not delete this evidence listing.', 'error', 15000);
+            } else {
+                ev.releaseAttempt = { at: new Date().toISOString(), filesRemoved: removed, bytesFreed: freed,
+                    failed: (r.failed || []).length + (r.refused || []).length };
+                _persistCaseEvidence('the removal record');
+                audit('evidence_files_release_failed', Object.assign({}, auditBase, {
+                    failed: (r.failed || []).map(f => f && f.error).slice(0, 10),
+                    refused: (r.refused || []).length,
+                }));
+                renderTabContent('evidence');
+                viperToast(`${(r.failed || []).length + (r.refused || []).length} file(s) could not be removed — they may be open in another program. `
+                    + `${removed} removed so far. Close any program using them and choose Remove from case files again.`, 'error', 12000);
+            }
+        }
+
+        // Viewer for an item whose files were removed after export.
+        function _renderReleasedEvidence(ev) {
+            const rel = ev.released || {};
+            const files = Array.isArray(ev.files) ? ev.files : [];
+            const exported = rel.exportedAt
+                ? `${rel.exportKind === 'assist' ? 'Included in an Assist Package' : 'Exported to DA'} on <b>${_evEsc(_evWhen(rel.exportedAt))}</b>.`
+                : 'No export was recorded for this item.';
+            return `
+                <div class="space-y-4">
+                    <div class="rounded-lg p-4 bg-amber-500/10 border border-amber-500/50">
+                        <h4 class="text-sm font-bold text-amber-300 mb-1">📦 Exported — original files no longer in case files</h4>
+                        <p class="text-sm text-amber-100">${exported} The original files were removed from this case's folder on <b>${_evEsc(_evWhen(rel.at))}</b>${rel.bytesFreed ? `, freeing ${formatFileSize(rel.bytesFreed)}` : ''}.</p>
+                        ${rel.exportFile ? `<p class="mt-1 text-xs font-mono text-amber-200/70 break-all">${_evEsc(rel.exportFile)}</p>` : ''}
+                        ${rel.overrideReason ? `<p class="mt-2 text-xs text-amber-200">Removed without a complete Export to DA. Reason given: “${_evEsc(rel.overrideReason)}”</p>` : ''}
+                        ${rel.filesKept ? `<p class="mt-1 text-xs text-amber-200/80">${rel.filesKept} file(s) were kept because another evidence item uses them.</p>` : ''}
+                        <p class="mt-2 text-xs text-gray-400">The listing below is kept for the record. To work with these files again, retrieve them from the export.</p>
+                    </div>
+                    <div class="bg-viper-card/30 rounded-lg p-4">
+                        <h4 class="text-sm font-semibold text-gray-400 mb-2">Description</h4>
+                        <p class="text-white">${_evEsc(ev.description || '')}</p>
+                        <div class="mt-3 flex items-center space-x-4 text-sm text-gray-400">
+                            <span>📁 ${ev.fileCount || files.length} file${(ev.fileCount || files.length) !== 1 ? 's' : ''}</span>
+                            ${ev.totalSize ? `<span>💾 ${formatFileSize(ev.totalSize)}</span>` : ''}
+                            ${ev.createdAt ? `<span>📅 Added ${formatDate(String(ev.createdAt).split('T')[0])}</span>` : ''}
+                        </div>
+                    </div>
+                    ${files.length ? `
+                    <div class="glass-card rounded-lg p-4">
+                        <h4 class="text-sm font-semibold text-gray-400 mb-2">Files (listing only)</h4>
+                        <ul class="text-sm text-gray-300 space-y-1 max-h-[50vh] overflow-auto">
+                            ${files.map(f => `<li class="flex justify-between gap-3"><span class="truncate">📄 ${_evEsc((f && f.name) || '')}</span><span class="text-xs text-gray-500 shrink-0">${f && f.size ? formatFileSize(f.size) : ''}</span></li>`).join('')}
+                        </ul>
+                    </div>` : ''}
+                </div>`;
+        }
+
+        // Status line + Remove button shown in the normal viewer.
+        function _evidenceReleaseControls(ev) {
+            if (!ev || ev.released || !currentCase) return '';
+            const files = _evidenceCaseFiles(ev, currentCase.caseNumber);
+            if (!files.length) return '';
+            const clean = _evidenceCleanExport(ev);
+            const list = Array.isArray(ev.exports) ? ev.exports : [];
+            const last = list.length ? list[list.length - 1] : null;
+            const status = clean
+                ? `<span class="text-green-300">✓ Fully included in the Export to DA on ${_evEsc(_evWhen(clean.at))}</span>`
+                : `<span class="text-gray-400">${_evEsc(_evidenceExportShortfall(last))}</span>`;
+            const pending = ev.releaseAttempt
+                ? `<div class="mt-1 text-amber-300">A removal was started on ${_evEsc(_evWhen(ev.releaseAttempt.at))} but ${ev.releaseAttempt.failed} file(s) could not be removed.</div>`
+                : '';
+            return `
+                <div class="mt-3 p-2 rounded bg-viper-dark/60 border border-gray-700 text-xs flex flex-wrap items-center gap-2 justify-between">
+                    <div class="min-w-0">${status}${pending}</div>
+                    <button onclick="openReleaseEvidenceModal(${_evIdLit(ev.id)})" class="px-3 py-1 rounded text-xs font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/40 hover:bg-amber-500/25 transition-colors shrink-0" title="Free disk space by removing this item's files from the case folder after export. The listing is kept.">
+                        📦 Remove from case files
+                    </button>
+                </div>`;
+        }
+
+        // Storage / export status chips on an evidence card.
+        function _evidenceCardChips(item) {
+            const chips = [];
+            if (item.released) {
+                chips.push(`<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/40" title="Exported${item.released.exportedAt ? ' ' + _evEsc(_evWhen(item.released.exportedAt)) : ''}; original files removed from case files ${_evEsc(_evWhen(item.released.at))}. Listing kept.">📦 Exported — removed from case files ${_evEsc(_evWhen(item.released.at))}</span>`);
+            } else {
+                const clean = _evidenceCleanExport(item);
+                if (clean) chips.push(`<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-green-500/15 text-green-300 border border-green-500/40" title="Every file was included in this Export to DA. Open the item to remove the originals from the case folder.">✓ In DA export ${_evEsc(_evWhen(clean.at))}</span>`);
+                if (item.releaseAttempt) chips.push(`<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-red-500/15 text-red-300 border border-red-500/40">⚠ Removal incomplete</span>`);
+            }
+            if (item.referenceOnly && item.type !== 'datapilot') {
+                chips.push(`<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-sky-500/15 text-sky-300 border border-sky-500/40" title="VIPER reads these files from ${_evEsc(item.sourcePath || 'their original location')}. They are not copied into the case and are not placed in the Export to DA.">🔗 Point-to — files not in VIPER</span>`);
+            }
+            return chips.length ? `<div class="mt-2 flex flex-wrap gap-1">${chips.join('')}</div>` : '';
+        }
+
+        function _evWaitFor(predicate, timeoutMs, intervalMs) {
+            const limit = timeoutMs || 10000, step = intervalMs || 75;
+            return new Promise((resolve, reject) => {
+                const t0 = Date.now();
+                const tick = () => {
+                    try { if (predicate()) return resolve(true); } catch (_) {}
+                    if (Date.now() - t0 > limit) return reject(new Error('timed out'));
+                    setTimeout(tick, step);
+                };
+                tick();
+            });
+        }
+
+        // Cellebrite Extraction from the Evidence form. Opens the Cellebrite
+        // tab and runs its own import with the officer's choice already
+        // selected, then files the Evidence record ONLY if the import
+        // completed. Flagged items are pushed to Evidence from that tab.
+        async function _fileCellebriteExtraction(opts) {
+            const { pick, mode, tag, description, location, discoverable } = opts;
+            const sourceMode = mode === 'copy' ? 'imported' : 'referenced';
+            const caseNumberAtStart = currentCase && currentCase.caseNumber;
+
+            cancelEvidenceForm();
+            ensureCaseModule('cellebrite');
+            if (typeof renderTabs === 'function') renderTabs();
+            window.cellebriteModule = null;
+            renderTabContent('cellebrite');
+
+            let ui = null;
+            try {
+                await _evWaitFor(() => window.cellebriteModule && window.cellebriteModule.ui
+                    && typeof window.cellebriteModule.ui.onImportClick === 'function', 10000);
+                ui = window.cellebriteModule.ui;
+            } catch (_) {
+                viperToast('The Cellebrite tab did not open in time. Nothing was added to Evidence — use Import on the Cellebrite tab instead.', 'error');
+                return;
+            }
+
+            let r;
+            try {
+                r = await ui.onImportClick({ picked: pick, sourceMode, evidenceTag: tag || null });
+            } catch (e) {
+                r = { success: false, error: e.message };
+            }
+            if (!r || !r.success) {
+                if (r && r.cancelled) viperToast('Import cancelled — nothing was added to Evidence.', 'info');
+                else viperToast('The extraction was not imported, so nothing was added to Evidence.', 'error');
+                return;
+            }
+            if (!currentCase || currentCase.caseNumber !== caseNumberAtStart) return;
+
+            const manifest = r.manifest || {};
+            const mod = window.cellebriteModule;
+            const imp = (mod && mod.data && Array.isArray(mod.data.imports)
+                ? mod.data.imports.find(i => i && i.id === r.importId) : null) || {};
+            const deviceLabel = imp.deviceLabel || manifest.deviceLabel || 'Cellebrite extraction';
+            const newEvidence = {
+                id: Date.now(),
+                type: 'cellebriteExtraction',
+                tag: tag || imp.evidenceTag || deviceLabel,
+                discoverable: discoverable,
+                description: description || `Cellebrite extraction — ${deviceLabel}`,
+                location: location,
+                fileCount: 1,
+                totalSize: pick.bundleSize || 0,
+                files: [],
+                storageMode: mode === 'copy' ? 'copy' : 'reference',
+                referenceOnly: mode !== 'copy',
+                sourcePath: pick.ufdxPath,
+                cellebriteImport: {
+                    importId: r.importId,
+                    ufdxPath: manifest.ufdxPath || pick.ufdxPath,
+                    originalUfdxPath: pick.ufdxPath,
+                    sourceMode: sourceMode,
+                    deviceLabel: deviceLabel,
+                },
+                createdAt: new Date().toISOString()
+            };
+            try {
+                _commitNewEvidence(newEvidence, { storage_mode: newEvidence.storageMode, import_id: r.importId });
+                viperToast(`✓ ${deviceLabel} added to Evidence. Flag items here on the Cellebrite tab to build the report.`, 'success');
+            } catch (e) {
+                viperToast('The extraction was imported, but its Evidence entry could not be saved: ' + e.message, 'error');
+            }
+        }
+
         async function selectEvidenceViaDialog(mode) {
             const result = await window.electronAPI.selectEvidenceFiles({ mode });
             if (!result) return;
+            if (!Array.isArray(result.files) || !result.files.length) {
+                viperToast('That folder has no files in it — nothing was selected.', 'warning');
+                return;
+            }
 
             nativeEvidenceFiles = result.files;
             evidenceFiles = []; // clear any browser-selected files
@@ -10342,10 +11122,26 @@
 
             const filesList = document.getElementById('evidenceFilesList');
             filesList.innerHTML = result.files.slice(0, 50).map(f =>
-                `<div class="truncate">📄 ${f.relativePath}</div>`
+                `<div class="truncate">📄 ${_evEsc(f.relativePath)}</div>`
             ).join('') + (count > 50 ? `<div class="text-gray-500">… and ${count - 50} more</div>` : '');
 
-            document.getElementById('evidenceFilesInfo').classList.remove('hidden');
+            const infoDiv = document.getElementById('evidenceFilesInfo');
+            infoDiv.className = 'mt-3 p-4 bg-viper-cyan/10 border border-viper-cyan/30 rounded-lg';
+            document.getElementById('evidenceFileCount').className = 'text-sm font-medium text-viper-cyan';
+            infoDiv.classList.remove('hidden');
+            if (Array.isArray(result.unreadable) && result.unreadable.length) {
+                viperToast(`${result.unreadable.length} sub-folder${result.unreadable.length !== 1 ? 's' : ''} could not be read and will be left out.`, 'warning');
+            }
+
+            nativeEvidenceSource = result.folderPath || _evidenceParentDir(result.files[0].path);
+            _showEvidenceStorageBlock({
+                kind: 'standard',
+                sourcePath: nativeEvidenceSource,
+                totalBytes: totalSize,
+                maxFileBytes: result.files.reduce((m, f) => Math.max(m, f.size || 0), 0),
+                fileCount: count,
+                checkEncryption: true,
+            });
         }
 
         function clearEvidenceFiles() {
@@ -10357,6 +11153,10 @@
             datapilotScanResult = null;
             ncmecUploadMode = null;
             ncmecSourceName = null;
+            nativeEvidenceSource = null;
+            evidenceStorageInfo = null;
+            cellebriteExtractionPick = null;
+            _hideEvidenceStorageBlock();
             document.getElementById('evidenceFilesInfo').classList.add('hidden');
             // Reset info styling
             const infoDiv = document.getElementById('evidenceFilesInfo');
@@ -10376,6 +11176,10 @@
 
         async function openCellebriteReader(evidenceId) {
             const evidence = caseEvidence.find(e => e.id === evidenceId);
+            if (evidence && evidence.released) {
+                viperToast('This extraction was removed from the case folder on ' + _evWhen(evidence.released.at) + ' after export. Retrieve it from the export to open it in the Reader.', 'info', 9000);
+                return;
+            }
             if (!evidence || !evidence.cellebrite || !evidence.cellebrite.readerExePath) {
                 viperToast('Cellebrite Reader path not found in this evidence', 'error');
                 return;
@@ -10524,6 +11328,48 @@
             } else {
                 // ===== Cellebrite Report: native folder copy =====
                 if (type === 'cellebrite' && cellebriteFolderPath && cellebriteScanResult) {
+                    // Point-to: record where the report lives; copy nothing.
+                    if (_evidenceStorageMode() === 'reference') {
+                        try {
+                            const srcFolder = cellebriteFolderPath;
+                            const listed = await window.electronAPI.evidenceListFolder(srcFolder);
+                            if (!listed || !listed.success) throw new Error((listed && listed.error) || 'The folder could not be read');
+                            const files = (listed.files || []).map(f => ({ name: f.name, path: f.path, size: f.size, type: '', lastModified: null }));
+                            const newEvidence = {
+                                id: Date.now(),
+                                type: 'cellebrite',
+                                tag: tag,
+                                discoverable: discoverable,
+                                description: description,
+                                location: location,
+                                fileCount: files.length,
+                                totalSize: files.reduce((t, f) => t + (f.size || 0), 0),
+                                files: files,
+                                storageMode: 'reference',
+                                referenceOnly: true,
+                                sourcePath: srcFolder,
+                                cellebrite: {
+                                    readerExePath: cellebriteScanResult.readerExePath || null,
+                                    ufdrPath: cellebriteScanResult.ufdrPath || null,
+                                    deviceInfo: cellebriteScanResult.deviceInfo || {},
+                                    caseInfo: cellebriteScanResult.caseInfo || {}
+                                },
+                                createdAt: new Date().toISOString()
+                            };
+                            _commitNewEvidence(newEvidence, { file_count: files.length, storage_mode: 'reference' });
+                            cellebriteFolderPath = null;
+                            cellebriteScanResult = null;
+                            evidenceFiles = [];
+                            cancelEvidenceForm();
+                            renderTabContent('evidence');
+                            viperToast(`✓ Cellebrite report added — VIPER reads it from ${srcFolder}`, 'success');
+                        } catch (error) {
+                            console.error('Cellebrite point-to failed:', error);
+                            viperToast('Could not add the Cellebrite report: ' + error.message, 'error');
+                        }
+                        return;
+                    }
+
                     const progressModal = document.getElementById('uploadProgressModal');
                     if (progressModal) {
                         progressModal.classList.add('show');
@@ -10553,6 +11399,7 @@
                             fileCount: result.fileCount,
                             totalSize: result.totalSize,
                             files: result.files,
+                            storageMode: 'copy',
                             cellebrite: {
                                 readerExePath: result.readerExePath || null,
                                 ufdrPath: result.ufdrPath || null,
@@ -10713,10 +11560,76 @@
                     return;
                 }
 
+                // ===== Cellebrite Extraction (.ufdx): hand off to the Cellebrite tab =====
+                if (type === 'cellebriteExtraction') {
+                    if (!cellebriteExtractionPick) {
+                        viperToast('Choose the extraction (.ufdx) first.', 'warning');
+                        return;
+                    }
+                    await _fileCellebriteExtraction({
+                        pick: cellebriteExtractionPick,
+                        mode: _evidenceStorageMode('reference'),
+                        tag, description, location, discoverable
+                    });
+                    return;
+                }
+
                 // ===== Native dialog file upload (via Electron IPC copy) =====
                 if (nativeEvidenceFiles && nativeEvidenceFiles.length > 0) {
                     const fileCount = nativeEvidenceFiles.length;
                     const totalSize = nativeEvidenceFiles.reduce((s, f) => s + f.size, 0);
+                    const storageMode = (type === 'ncmecCybertip') ? 'copy' : _evidenceStorageMode();
+
+                    // Point-to: record the files where they are; copy nothing.
+                    if (storageMode === 'reference') {
+                        try {
+                            const files = nativeEvidenceFiles.map(nf => ({
+                                name: nf.name, path: nf.path, size: nf.size, type: '',
+                                lastModified: null, relativePath: nf.relativePath
+                            }));
+                            const srcPath = nativeEvidenceSource || _evidenceParentDir(files[0].path);
+                            const newEvidence = {
+                                id: Date.now(),
+                                type: type,
+                                tag: tag,
+                                discoverable: discoverable,
+                                description: description,
+                                location: location,
+                                fileCount: files.length,
+                                totalSize: totalSize,
+                                files: files,
+                                storageMode: 'reference',
+                                referenceOnly: true,
+                                sourcePath: srcPath,
+                                createdAt: new Date().toISOString()
+                            };
+                            _commitNewEvidence(newEvidence, { file_count: files.length, source: 'native_reference', storage_mode: 'reference' });
+                            evidenceFiles = [];
+                            nativeEvidenceFiles = null;
+                            cancelEvidenceForm();
+                            renderTabContent('evidence');
+                            viperToast(`✓ Evidence added — VIPER reads ${files.length} file${files.length !== 1 ? 's' : ''} from ${srcPath}`, 'success');
+                        } catch (error) {
+                            console.error('Point-to evidence save failed:', error);
+                            viperToast('Could not save this evidence: ' + error.message, 'error');
+                        }
+                        return;
+                    }
+
+                    // Copy pre-flight: Field Security cannot encrypt a file over
+                    // the ceiling, so refuse BEFORE copying anything rather than
+                    // failing half way through.
+                    const biggest = nativeEvidenceFiles.reduce((m, f) => Math.max(m, f.size || 0), 0);
+                    if (biggest > EVIDENCE_ENCRYPT_MAX_BYTES && window.electronAPI.securityCheck) {
+                        let sec = null;
+                        try { sec = await window.electronAPI.securityCheck(); } catch (_) {}
+                        if (sec && sec.enabled && sec.unlocked) {
+                            viperToast(type === 'ncmecCybertip'
+                                ? `A file in this CyberTip is ${formatFileSize(biggest)}. Field Security cannot protect a file over ${formatFileSize(EVIDENCE_ENCRYPT_MAX_BYTES)}, so it was not added. Nothing was copied.`
+                                : `A file here is ${formatFileSize(biggest)}. Field Security cannot protect a file over ${formatFileSize(EVIDENCE_ENCRYPT_MAX_BYTES)}, so it cannot be copied. Choose "Point to where it's stored". Nothing was copied.`, 'error');
+                            return;
+                        }
+                    }
                     const progressModal = document.getElementById('uploadProgressModal');
                     if (progressModal) {
                         progressModal.classList.add('show');
@@ -10756,6 +11669,7 @@
                             fileCount: files.length,
                             totalSize: totalSize,
                             files: files,
+                            storageMode: 'copy',
                             createdAt: new Date().toISOString()
                         };
                         // Stamp CSAM-sensitive metadata for NCMEC CyberTip uploads
@@ -10792,7 +11706,19 @@
                     } catch (error) {
                         console.error('Native copy failed:', error);
                         if (progressModal) progressModal.classList.remove('show');
-                        viperToast('Failed to copy files: ' + error.message, 'error');
+                        // Nothing was filed, so remove the partial copy — but never a
+                        // file another evidence item already points at.
+                        let cleaned = '';
+                        if (files.length && window.electronAPI.evidenceReleaseFiles) {
+                            try {
+                                const keep = [];
+                                caseEvidence.forEach(ev => (ev && Array.isArray(ev.files) ? ev.files : []).forEach(f => { if (f && f.path) keep.push(f.path); }));
+                                const rr = await window.electronAPI.evidenceReleaseFiles({ caseNumber: currentCase.caseNumber, paths: files.map(f => f.path), keep });
+                                cleaned = (rr && rr.success) ? ' The partial copy was removed.' : ' Part of the copy may remain in the case folder.';
+                            } catch (_) { cleaned = ' Part of the copy may remain in the case folder.'; }
+                        }
+                        const msg = String(error && error.message || error).replace(/^Error invoking remote method '[^']+': (Error: )?/, '').replace(/^TOO_LARGE_TO_ENCRYPT:\s*/, '');
+                        viperToast('Failed to copy files: ' + msg + ' Nothing was added to Evidence.' + cleaned, 'error');
                     }
                     return;
                 }
@@ -10991,6 +11917,19 @@
             const evidence = caseEvidence.find(e => e.id === evidenceId);
             if (!evidence) { _persistOpenEvidence(null); return; }
 
+            // Files removed from case files after export: show the record
+            // only — there is nothing on disk to read, preview or open.
+            if (evidence.released) {
+                _persistOpenEvidence(evidenceId);
+                const vt = document.getElementById('viewerTitle');
+                const vc = document.getElementById('viewerContent');
+                const lo = document.getElementById('evidenceLoadingOverlay');
+                if (vt) vt.textContent = evidence.tag || 'Evidence Files';
+                if (vc) vc.innerHTML = _renderReleasedEvidence(evidence);
+                if (lo) lo.classList.add('hidden');
+                return;
+            }
+
             // Datapilot bundle entries get a dedicated tabbed viewer
             // (Messages / Media / Calls / Contacts) instead of the
             // generic file-list panel. Legacy entries (pre-bundle, only
@@ -11016,6 +11955,13 @@
             if (evidence.type === 'datapilot' && evidence.datapilot && evidence.datapilot.folderPath) {
                 _persistOpenEvidence(null);
                 return openDatapilotEvidenceInTab(evidence);
+            }
+
+            // Cellebrite Extraction filed from the Evidence form: its parse
+            // lives on the Cellebrite tab, so open that import there.
+            if (evidence.type === 'cellebriteExtraction' && evidence.cellebriteImport && evidence.cellebriteImport.importId) {
+                _persistOpenEvidence(null);
+                return openCellebriteExtractionInTab(evidence);
             }
 
             // Remember this as the open evidence so the panel is restored on
@@ -11102,6 +12048,28 @@
             
             // Hide loading overlay after content is rendered
             loadingOverlay.classList.add('hidden');
+        }
+
+        async function openCellebriteExtractionInTab(evidence) {
+            const importId = evidence.cellebriteImport && evidence.cellebriteImport.importId;
+            ensureCaseModule('cellebrite');
+            if (typeof renderTabs === 'function') renderTabs();
+            window.cellebriteModule = null;
+            renderTabContent('cellebrite');
+            try {
+                await _evWaitFor(() => window.cellebriteModule && window.cellebriteModule.ui
+                    && window.cellebriteModule.data && Array.isArray(window.cellebriteModule.data.imports), 10000);
+            } catch (_) {
+                viperToast('The Cellebrite tab did not open in time.', 'error');
+                return;
+            }
+            const mod = window.cellebriteModule;
+            if (!mod.data.imports.some(i => i && i.id === importId)) {
+                viperToast('This extraction is no longer loaded on the Cellebrite tab. Use Import there to read it again from '
+                    + (evidence.sourcePath || 'its original location') + '.', 'warning');
+                return;
+            }
+            mod.setActiveImport(importId);
         }
 
         // ──────────────────────────────────────────────────────────────────
@@ -12818,6 +13786,7 @@
                                 📂 ${evidence.files[0].path.split('/').slice(0, -1).join('/')}
                             </div>
                         ` : ''}
+                        ${_evidenceReleaseControls(evidence)}
                         ${evidence.cellebrite && evidence.cellebrite.readerExePath ? `
                             <div class="mt-4 space-y-3">
                                 ${evidence.cellebrite.deviceInfo ? `
@@ -44353,7 +45322,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const out = [];
             const seen = new Set();
             (caseEvidence || []).forEach(ev => {
-                if (!ev || !Array.isArray(ev.files)) return;
+                if (!ev || ev.released || !Array.isArray(ev.files)) return;
                 const isNcmec = ev.type === 'ncmecCybertip' || !!ev.csamSensitive;
                 ev.files.forEach(f => {
                     if (!f || !f.path) return;

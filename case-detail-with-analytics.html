@@ -44290,41 +44290,122 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             try {
                 const filePaths = await window.electronAPI.selectRmsFiles();
                 if (!filePaths || filePaths.length === 0) return;
-                showLoadingIndicator('Parsing CyberTip reports...');
-                const tips = getCyberTips();
-                let added = 0;
-                for (const filePath of filePaths) {
+                await _importCyberTipFiles(filePaths.map(p => ({ path: p })));
+            } catch (err) {
+                hideLoadingIndicator();
+                console.error('CyberTip import error:', err);
+                viperToast('Failed to import CyberTip PDFs', 'error');
+            }
+        }
+
+        // The one import loop, shared by the file browser and Find in
+        // Evidence so the two can never disagree about what a CyberTip is
+        // or what counts as a duplicate. `items` are { path, evidenceTag? }.
+        // Returns { added, notTips, dupes, failed }.
+        async function _importCyberTipFiles(items) {
+            const tally = { added: 0, notTips: 0, dupes: 0, failed: 0 };
+            showLoadingIndicator('Parsing CyberTip reports...');
+            const tips = getCyberTips();
+            try {
+                for (const it of items) {
                     try {
-                        const result = await window.electronAPI.extractPdfText(filePath);
-                        if (!result.text) continue;
+                        const result = await window.electronAPI.extractPdfText(it.path);
+                        if (!result || !result.text) { tally.notTips++; continue; }
                         // Check if it's a CyberTip PDF
                         if (!/CyberTipline Report/i.test(result.text)) {
-                            viperToast(`${result.fileName} does not appear to be a CyberTip PDF`, 'error');
+                            tally.notTips++;
+                            viperToast(`${_esc(result.fileName)} does not appear to be a CyberTip PDF`, 'error');
                             continue;
                         }
                         const parsed = parseCyberTip(result.text, result.fileName);
                         // Skip duplicates by report number
                         if (parsed.reportNumber && tips.some(t => t.reportNumber === parsed.reportNumber)) {
-                            viperToast(`CT# ${parsed.reportNumber} already imported`, 'info');
+                            tally.dupes++;
+                            viperToast(`CT# ${_esc(parsed.reportNumber)} already imported`, 'info');
                             continue;
                         }
+                        // Where it came from, so the tip can be traced back to
+                        // the evidence item that holds the original PDF.
+                        if (it.evidenceTag) parsed.sourceEvidenceTag = it.evidenceTag;
                         tips.push(parsed);
-                        added++;
+                        tally.added++;
                     } catch (err) {
+                        tally.failed++;
                         console.error('CyberTip parse error:', err);
-                        viperToast(`Error parsing PDF: ${err.message}`, 'error');
+                        viperToast(`Error parsing PDF: ${_esc(err && err.message || err)}`, 'error');
                     }
                 }
+            } finally {
                 hideLoadingIndicator();
-                if (added) {
-                    saveCyberTips(tips);
-                    viperToast(`Imported ${added} CyberTip${added > 1 ? 's' : ''}`, 'success');
-                    renderTabContent('cyberTips');
-                }
-            } catch (err) {
-                hideLoadingIndicator();
-                console.error('CyberTip import error:', err);
-                viperToast('Failed to import CyberTip PDFs', 'error');
+            }
+            if (tally.added) {
+                saveCyberTips(tips);
+                viperToast(`Imported ${tally.added} CyberTip${tally.added > 1 ? 's' : ''}`, 'success');
+                renderTabContent('cyberTips');
+            }
+            return tally;
+        }
+
+        // Every PDF already filed in this case's Evidence, NCMEC CyberTip
+        // items first. Nothing is read here — reading a scanned PDF can mean
+        // OCR, so the officer chooses which ones to open.
+        function _cyberTipEvidenceCandidates() {
+            const out = [];
+            const seen = new Set();
+            (caseEvidence || []).forEach(ev => {
+                if (!ev || !Array.isArray(ev.files)) return;
+                const isNcmec = ev.type === 'ncmecCybertip' || !!ev.csamSensitive;
+                ev.files.forEach(f => {
+                    if (!f || !f.path) return;
+                    const name = String(f.name || String(f.path).split(/[\\/]/).pop() || '');
+                    if (!/\.pdf$/i.test(name) && !/\.pdf$/i.test(String(f.path))) return;
+                    if (seen.has(f.path)) return;
+                    seen.add(f.path);
+                    out.push({ path: f.path, name, evidenceTag: ev.tag || '', ncmec: isNcmec,
+                               looksLikeTip: isNcmec || /cyber\s*tip|ncmec|\bCT[\s#_-]*\d{6,}/i.test(name) });
+                });
+            });
+            out.sort((a, b) => (b.looksLikeTip - a.looksLikeTip) || (b.ncmec - a.ncmec) || a.name.localeCompare(b.name));
+            return out;
+        }
+
+        async function findCyberTipsInEvidence() {
+            const cands = _cyberTipEvidenceCandidates();
+            if (!cands.length) {
+                viperToast('There are no PDFs in this case\'s Evidence. Add the CyberTip PDF to Evidence first, or use Import CyberTip PDF.', 'info', 7000);
+                return;
+            }
+            // A PDF whose file name matches a tip already on this tab is shown
+            // but not pre-ticked. The report-number check during import is the
+            // real duplicate guard; this just saves an unnecessary read.
+            const have = new Set(getCyberTips().map(t => String(t.fileName || '').toLowerCase()));
+            const rows = cands.map((c, i) => {
+                const already = have.has(c.name.toLowerCase());
+                const tick = c.looksLikeTip && !already;
+                return `<label style="display:flex;gap:8px;align-items:flex-start;padding:6px 4px;border-bottom:1px solid rgba(255,255,255,.06);cursor:pointer;text-align:left">
+                    <input type="checkbox" class="ct-ev-pick" data-i="${i}" ${tick ? 'checked' : ''} style="margin-top:3px">
+                    <span style="flex:1;min-width:0">
+                        <span style="display:block;word-break:break-all">${_esc(c.name)}</span>
+                        <span style="display:block;font-size:11px;opacity:.65">${_esc(c.evidenceTag || 'Evidence')}${c.ncmec ? ' · NCMEC CyberTip item' : ''}${already ? ' · already on this tab' : ''}</span>
+                    </span>
+                </label>`;
+            }).join('');
+            const ok = await viperConfirm(
+                `<strong>CyberTip PDFs in Evidence</strong><br>
+                 <span style="font-size:12px;opacity:.75">Tick the PDFs to read. Likely CyberTip reports are ticked for you. Anything that is not a CyberTipline report is skipped.</span>
+                 <span style="display:block;max-height:320px;overflow-y:auto;margin-top:10px">${rows}</span>`,
+                { okText: 'Import selected' });
+            // viperConfirm removes its box ~150 ms after resolving, so the
+            // ticks are read straight away.
+            const picked = Array.from(document.querySelectorAll('.ct-ev-pick'))
+                .filter(cb => cb.checked)
+                .map(cb => cands[Number(cb.dataset.i)])
+                .filter(Boolean);
+            if (!ok) return;
+            if (!picked.length) { viperToast('No PDFs were ticked.', 'info'); return; }
+            const t = await _importCyberTipFiles(picked.map(c => ({ path: c.path, evidenceTag: c.evidenceTag })));
+            if (!t.added && !t.failed) {
+                viperToast(t.dupes ? 'Those CyberTips are already on this tab.' : 'None of the ticked PDFs were CyberTipline reports.', 'info');
             }
         }
 
@@ -44359,10 +44440,16 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             </svg>
                             Cyber Tips
                         </h2>
+                        <div class="flex items-center gap-2">
+                        <button onclick="findCyberTipsInEvidence()" class="px-4 py-2 bg-viper-cyan/10 hover:bg-viper-cyan/20 text-viper-cyan rounded-lg border border-viper-cyan/40 flex items-center gap-2 transition-colors" title="Read a CyberTip PDF that is already filed in this case's Evidence">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z"/></svg>
+                            Find in Evidence
+                        </button>
                         <button onclick="importCyberTipPdf()" class="px-4 py-2 bg-viper-orange/20 hover:bg-viper-orange/30 text-viper-orange rounded-lg border border-viper-orange/50 flex items-center gap-2 transition-colors">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
                             Import CyberTip PDF
                         </button>
+                        </div>
                     </div>
                     <div class="text-center py-16 glass-card rounded-xl">
                         <svg class="w-16 h-16 mx-auto text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -44370,9 +44457,14 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         </svg>
                         <p class="text-gray-400 text-lg mb-2">No CyberTip reports imported</p>
                         <p class="text-gray-500 text-sm mb-6">Import NCMEC CyberTipline report PDFs to parse and display case data</p>
+                        <div class="flex items-center justify-center gap-3 flex-wrap">
                         <button onclick="importCyberTipPdf()" class="px-6 py-3 bg-viper-orange hover:bg-viper-orange/80 text-black font-semibold rounded-lg transition-colors">
                             Import CyberTip PDF
                         </button>
+                        <button onclick="findCyberTipsInEvidence()" class="px-6 py-3 bg-viper-cyan/10 hover:bg-viper-cyan/20 text-viper-cyan font-semibold rounded-lg border border-viper-cyan/40 transition-colors">
+                            Find in Evidence
+                        </button>
+                        </div>
                     </div>
                 </div>`;
             }
@@ -44387,10 +44479,16 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         </svg>
                         Cyber Tips <span class="text-sm font-normal text-gray-400 ml-2">${tips.length} report${tips.length !== 1 ? 's' : ''}</span>
                     </h2>
+                    <div class="flex items-center gap-2">
+                    <button onclick="findCyberTipsInEvidence()" class="px-4 py-2 bg-viper-cyan/10 hover:bg-viper-cyan/20 text-viper-cyan rounded-lg border border-viper-cyan/40 flex items-center gap-2 transition-colors" title="Read a CyberTip PDF that is already filed in this case's Evidence">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z"/></svg>
+                        Find in Evidence
+                    </button>
                     <button onclick="importCyberTipPdf()" class="px-4 py-2 bg-viper-orange/20 hover:bg-viper-orange/30 text-viper-orange rounded-lg border border-viper-orange/50 flex items-center gap-2 transition-colors">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z"/></svg>
                         Import More
                     </button>
+                    </div>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     ${tips.map((t, i) => {

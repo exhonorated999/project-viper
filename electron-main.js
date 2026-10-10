@@ -4091,10 +4091,27 @@ ipcMain.handle('read-file-as-data-url', async (event, filePath) => {
   }
 });
 
+// A PDF that already lives in a case's Evidence folder is stored ENCRYPTED
+// when Field Security is on. Handing those bytes to a PDF reader gives
+// garbage and the importer reports "not a CyberTip PDF" (or worse, nothing).
+// Plain files come back unchanged, byte for byte.
+function _readPdfBytesForImport(filePath) {
+  const raw = fs.readFileSync(filePath);
+  const isEnc = raw.length >= 6 && raw[0] === 0x56 && raw[1] === 0x49 && raw[2] === 0x50
+             && raw[3] === 0x45 && raw[4] === 0x4E && raw[5] === 0x43;           // "VIPENC"
+  if (!isEnc) return raw;
+  if (!security || !security.isUnlocked()) {
+    const e = new Error('This file is protected by Field Security. Unlock VIPER and try again.');
+    e.code = 'VIPER_LOCKED';
+    throw e;
+  }
+  return security.decryptBuffer(raw);
+}
+
 ipcMain.handle('extract-pdf-text', async (event, filePath) => {
   try {
     const pdfParse = require('pdf-parse');
-    const dataBuffer = fs.readFileSync(filePath);
+    const dataBuffer = _readPdfBytesForImport(filePath);
     const data = await pdfParse(dataBuffer);
 
     // Check if text looks garbled (Type3 custom fonts) — test for common readable keywords
@@ -4247,7 +4264,7 @@ ipcMain.handle('ocr-pdf-pages-sparse', async (event, filePath, pages, psm) => {
     // Allow-listed segmentation modes only — anything else falls back to sparse.
     const mode = ['3', '4', '6', '11', '12'].includes(String(psm)) ? String(psm) : '11';
 
-    const dataBuffer = fs.readFileSync(filePath);
+    const dataBuffer = _readPdfBytesForImport(filePath);
     const mupdf = await import('mupdf');
     const Tesseract = (await import('tesseract.js')).default;
     const doc = mupdf.Document.openDocument(dataBuffer, 'application/pdf');
@@ -4303,7 +4320,7 @@ ipcMain.handle('ocr-pdf-pages-banded', async (event, filePath, pages) => {
     const mupdf = await import('mupdf');
     const Tesseract = (await import('tesseract.js')).default;
     const res = await bandOcr.bandOcrPages({
-      data: fs.readFileSync(filePath),
+      data: _readPdfBytesForImport(filePath),
       pages: pages || [],
       mupdf: mupdf,
       Tesseract: Tesseract

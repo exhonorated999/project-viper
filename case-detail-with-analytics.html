@@ -3227,6 +3227,13 @@
                 .map(e => e.tag)
                 .filter(Boolean);
 
+            // ── Which case folders ride along in the ZIP ──
+            // Only the folders behind the tabs that were ticked. Before this,
+            // a report of just the Overview and Reports still zipped every
+            // evidence file on the case — on a case holding a phone
+            // extraction that is tens of gigabytes and a quarter of an hour.
+            _daExportFolders = _exportFoldersForTabs(selectedTabs.map(t => t.id));
+
             closeExportCaseModal();
 
             // Show progress indicator
@@ -3245,7 +3252,37 @@
                 viperToast('Error generating export: ' + error.message, 'error');
             } finally {
                 hideExportProgress();
+                _daExportFolders = null;
             }
+        }
+
+        // Tab → the case folder whose files that tab owns. A tab not listed
+        // here has no files on disk; its content is entirely in the PDF.
+        const EXPORT_TAB_FOLDERS = {
+            evidence:   'evidence',
+            warrants:   'warrants',
+            notes:      'notes',
+            areacanvas: 'canvas',
+            fieldwork:  'fieldwork'
+        };
+        const EXPORT_FOLDER_LABELS = {
+            evidence: 'evidence files', warrants: 'warrant files', notes: 'note attachments',
+            canvas: 'area canvas media', fieldwork: 'field work media'
+        };
+        function _exportFoldersForTabs(tabIds) {
+            const out = [];
+            (tabIds || []).forEach(id => {
+                const f = EXPORT_TAB_FOLDERS[id];
+                if (f && out.indexOf(f) === -1) out.push(f);
+            });
+            return out;
+        }
+        // What the success message says is in the ZIP — taken from the same
+        // list that was sent, so it can never claim files that were left out.
+        function _exportContentsLine(folders) {
+            const parts = (folders || []).map(f => EXPORT_FOLDER_LABELS[f]).filter(Boolean);
+            return parts.length ? 'Includes the PDF report and ' + parts.join(', ') + '.'
+                                : 'Includes the PDF report only — no case files were selected.';
         }
 
         // CSAM export state (retained for manifest back-compat only). CSAM is
@@ -3257,6 +3294,9 @@
         // Evidence tags flagged Not Discoverable — files excluded from the ZIP
         // and items omitted from the report PDF. Set in exportCase().
         let _daExportNonDiscoverableTags = [];
+        // Case folders the current export carries (see _exportFoldersForTabs).
+        // null = not set by the export dialog, which main treats as "all".
+        let _daExportFolders = null;
 
         // ─── Assist Package ───────────────────────────────────────────────────
         // An assist case is supplemental work done on another detective's case,
@@ -5024,6 +5064,8 @@
                         // Null on a normal case — that is what keeps the DA
                         // export path identical to what it has always been.
                         assist: _assist,
+                        // Only the folders behind the ticked tabs.
+                        folders: Array.isArray(_daExportFolders) ? _daExportFolders : undefined,
                     });
                     if (savedPath) {
                         const withheldTags = Array.isArray(_daExportNonDiscoverableTags) ? _daExportNonDiscoverableTags : [];
@@ -5032,7 +5074,7 @@
                             : '';
                         viperToast(_assist
                             ? `Assist Package saved to:\n${savedPath}\n\nOne folder, with MANIFEST.csv identifying every file as your work.${csamNote}`
-                            : `DA Export saved to:\n${savedPath}\n\nIncludes PDF report and all evidence files.${csamNote}`, 'success');
+                            : `DA Export saved to:\n${savedPath}\n\n${Array.isArray(_daExportFolders) ? _exportContentsLine(_daExportFolders) : 'Includes PDF report and all evidence files.'}${csamNote}`, 'success');
                     }
                 } catch (e) {
                     console.error('DA export IPC failed, falling back to PDF download:', e);
@@ -5643,6 +5685,7 @@
                     nonDiscoverableCanvasFiles: _canvasNonDiscoverableFiles(),
                     nonDiscoverableFieldWorkFiles: _fieldWorkNonDiscoverableFiles(),
                     assist: _assist,
+                    folders: _exportFoldersForTabs((fileTabs || []).map(t => t.id)),
                 });
                 if (savedPath) {
                     const withheldTags = Array.isArray(_daExportNonDiscoverableTags) ? _daExportNonDiscoverableTags : [];

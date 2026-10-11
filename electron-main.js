@@ -6525,7 +6525,7 @@ ipcMain.handle('copy-evidence-file', async (event, { caseNumber, evidenceTag, so
     const size = (await fs.promises.stat(sourcePath)).size;
     if (size > EVIDENCE_ENCRYPT_MAX_BYTES) {
       const gb = (size / (1024 * 1024 * 1024)).toFixed(1);
-      throw new Error(`TOO_LARGE_TO_ENCRYPT: "${path.basename(sourcePath)}" is ${gb} GB, too large to encrypt into the case folder while Field Security is on. Choose "Point to where it's stored" for this evidence instead.`);
+      throw new Error(`TOO_LARGE_TO_ENCRYPT: "${path.basename(sourcePath)}" is ${gb} GB, too large to encrypt into the case folder while Field Security is on. Choose "Reference only — do not copy" for this evidence instead.`);
     }
     const buffer = await fs.promises.readFile(sourcePath);
     await fs.promises.writeFile(destPath, security.encryptBuffer(buffer));

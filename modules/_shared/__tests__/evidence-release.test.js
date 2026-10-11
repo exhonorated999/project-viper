@@ -898,7 +898,7 @@ const resetLogs = () => { AUDITS = []; TOASTS = []; RENDERS = []; VIEWS = []; DI
         try { await copyFile(null, { caseNumber: '26-600', evidenceTag: 'Big', sourcePath: jpg.path }); }
         catch (e) { err = e; }
         ok(err && /^TOO_LARGE_TO_ENCRYPT:/.test(err.message), 'a file over the ceiling is refused when it would have to be encrypted');
-        ok(err && /Point to where it's stored/.test(err.message), 'and the message tells the officer what to do instead');
+        ok(err && /Reference only — do not copy/.test(err.message), 'and the message tells the officer what to do instead');
         ok(!exists(at('26-600', 'Evidence', 'Big', 'a.jpg')), 'and no partial file is left behind');
         try { fs.rmSync(SRC, { recursive: true, force: true }); } catch (_) {}
     }

@@ -4963,7 +4963,7 @@
                     itemHeading('Evidence Files');
                     _discoverableEvidence.forEach((ev, i) => {
                         need(18);
-                        const _evType = ev.type ? String(ev.type) : '';
+                        const _evType = ev.type ? String(EVIDENCE_TYPE_LABELS[ev.type] || ev.type) : '';
                         fieldBold(`${i + 1}. ${ev.tag || 'Evidence item'}`, _evType ? `— ${_evType}` : '');
                         // Include the full description in the itemized entry so the
                         // reader doesn't have to cross-reference a separate appendix.
@@ -9625,6 +9625,8 @@
                                             <option value="autopsy">Autopsy Report</option>
                                             <option value="toxicology">Toxicology Report</option>
                                             <option value="phone">Cell Phone Extraction</option>
+                                            <option value="computer">Computer / Drive Extraction</option>
+                                            <option value="warrantReturn">Warrant Return (provider data)</option>
                                             <option value="cellebrite">Cellebrite Report (Reader.exe)</option>
                                             <option value="cellebriteExtraction">Cellebrite Extraction (.ufdx)</option>
                                             <option value="datapilot">Datapilot Extraction</option>
@@ -9659,7 +9661,7 @@
                                 </div>
                                 
                                 <div id="evidenceUploadSection">
-                                    <label class="block text-sm font-medium text-gray-300 mb-2">Upload Files</label>
+                                    <label id="evidenceUploadHeading" class="block text-sm font-medium text-gray-300 mb-2">Upload Files</label>
                                     <!-- Standard file/folder upload (hidden when Cellebrite selected) -->
                                     <div id="standardUploadUI" class="relative">
                                         <div class="flex space-x-3">
@@ -9667,13 +9669,13 @@
                                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
                                                 </svg>
-                                                <span>Upload Files</span>
+                                                <span id="evidencePickFilesLabel">Upload Files</span>
                                             </button>
                                             <button type="button" onclick="selectEvidenceViaDialog('folder')" class="flex-1 px-4 py-3 bg-viper-card/50 border-2 border-dashed border-gray-600 rounded-lg hover:border-viper-cyan transition-colors flex items-center justify-center space-x-2 text-gray-400 hover:text-viper-cyan">
                                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
                                                 </svg>
-                                                <span>Upload Folder</span>
+                                                <span id="evidencePickFolderLabel">Upload Folder</span>
                                             </button>
                                         </div>
                                     </div>
@@ -9774,6 +9776,40 @@
                                         </div>
                                         <p class="text-xs text-red-300/70 mt-2">📂 ZIP = the full CyberTip export · Folder = already-unzipped CyberTip directory · PDF = the standalone CyberTip report</p>
                                     </div>
+                                    <!-- Storage Mode: Copy vs Reference-only. Same look as the Datapilot block. Offered for every
+                                         type except Datapilot (its own block) and CyberTips (always copied), before and after the pick. -->
+                                    <div id="evidenceStorageModeBlock" class="hidden mt-4">
+                                        <label class="block text-xs font-semibold text-gray-300 mb-2">Storage Mode <span id="evidenceStorageSizeLabel" class="font-normal text-viper-cyan/80 ml-1"></span></label>
+                                        <div class="space-y-2">
+                                            <label class="flex items-start gap-2 p-3 bg-viper-card/50 border border-viper-cyan/30 rounded-lg cursor-pointer hover:border-viper-cyan transition-colors">
+                                                <input type="radio" name="evidenceStorageMode" value="copy" checked onchange="onEvidenceStorageModeChange('copy', true)" class="mt-0.5 accent-viper-cyan">
+                                                <div class="flex-1">
+                                                    <div class="text-sm font-medium text-viper-cyan">📦 Copy into Evidence folder <span id="evidenceStorageRecCopy" class="text-xs font-normal text-viper-green ml-1">(recommended)</span></div>
+                                                    <div class="text-xs text-gray-400 mt-1">Files copied into <code>cases/{caseNumber}/Evidence/{tag}/</code>. Included in DA exports. Honors Field Security encryption.</div>
+                                                </div>
+                                            </label>
+                                            <label class="flex items-start gap-2 p-3 bg-viper-card/50 border border-gray-600 rounded-lg cursor-pointer hover:border-yellow-400/60 transition-colors">
+                                                <input type="radio" name="evidenceStorageMode" value="reference" onchange="onEvidenceStorageModeChange('reference', true)" class="mt-0.5 accent-yellow-400">
+                                                <div class="flex-1">
+                                                    <div class="text-sm font-medium text-gray-200">🔗 Reference only — do not copy <span id="evidenceStorageRecRef" class="hidden text-xs font-normal text-viper-green ml-1">(recommended)</span></div>
+                                                    <div class="text-xs text-gray-400 mt-1">VIPER stores only the path. Saves time/disk space, but you are responsible for preserving the source folder.</div>
+                                                </div>
+                                            </label>
+                                        </div>
+                                        <div id="evidenceStorageLargeNote" class="hidden mt-3 p-3 bg-viper-orange/10 border border-viper-orange/40 rounded-lg text-xs text-orange-200"></div>
+                                        <div id="evidenceStorageEncryptNote" class="hidden mt-3 p-3 bg-red-500/10 border border-red-500/40 rounded-lg text-xs text-red-200"></div>
+                                        <div id="evidenceStorageRefWarning" class="hidden mt-3 p-3 bg-yellow-500/10 border border-yellow-500/40 rounded-lg">
+                                            <div class="flex items-start gap-2">
+                                                <svg class="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0L3.16 16.25A2 2 0 005 19z"/>
+                                                </svg>
+                                                <div class="text-xs text-yellow-200">
+                                                    <strong class="text-yellow-300">Reference-only mode — VIPER will NOT store these files.</strong><br>
+                                                    The evidence stays at <code id="evidenceStorageRefPath" class="break-all"></code>. If that folder is moved, deleted, or unplugged (USB), VIPER can no longer open it and it will not be in the DA export. Preserve the source yourself, and back it up alongside this case.
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                     <div id="evidenceFilesInfo" class="hidden mt-3 p-4 bg-viper-cyan/10 border border-viper-cyan/30 rounded-lg">
                                         <div class="flex items-start justify-between mb-2">
                                             <div class="flex items-center space-x-2">
@@ -9789,39 +9825,6 @@
                                             </button>
                                         </div>
                                         <div id="evidenceFilesList" class="text-xs text-gray-400 max-h-32 overflow-y-auto space-y-1"></div>
-                                    </div>
-                                    <!-- Copy vs Point-to (shown after a standard, Cellebrite Reader or .ufdx pick) -->
-                                    <div id="evidenceStorageModeBlock" class="hidden mt-4">
-                                        <label class="block text-xs font-semibold text-gray-300 mb-2">Where should VIPER keep this evidence? <span id="evidenceStorageSizeLabel" class="font-normal text-viper-cyan/80 ml-1"></span></label>
-                                        <div class="space-y-2">
-                                            <label class="flex items-start gap-2 p-3 bg-viper-card/50 border border-viper-cyan/30 rounded-lg cursor-pointer hover:border-viper-cyan transition-colors">
-                                                <input type="radio" name="evidenceStorageMode" value="copy" checked onchange="onEvidenceStorageModeChange('copy')" class="mt-0.5 accent-viper-cyan">
-                                                <div class="flex-1">
-                                                    <div class="text-sm font-medium text-viper-cyan">📦 Copy into the case folder</div>
-                                                    <div class="text-xs text-gray-400 mt-1">A copy is stored with the case. Included in the Export to DA. Protected by Field Security when it is on. Large items take time and drive space.</div>
-                                                </div>
-                                            </label>
-                                            <label class="flex items-start gap-2 p-3 bg-viper-card/50 border border-gray-600 rounded-lg cursor-pointer hover:border-yellow-400/60 transition-colors">
-                                                <input type="radio" name="evidenceStorageMode" value="reference" onchange="onEvidenceStorageModeChange('reference')" class="mt-0.5 accent-yellow-400">
-                                                <div class="flex-1">
-                                                    <div class="text-sm font-medium text-gray-200">🔗 Point to where it's stored — don't copy</div>
-                                                    <div class="text-xs text-gray-400 mt-1">VIPER remembers where the files are and reads them from there. Instant, and uses no space on the case drive. The drive holding them must stay connected, and the files are not placed in the Export to DA.</div>
-                                                </div>
-                                            </label>
-                                        </div>
-                                        <div id="evidenceStorageLargeNote" class="hidden mt-3 p-3 bg-viper-orange/10 border border-viper-orange/40 rounded-lg text-xs text-orange-200"></div>
-                                        <div id="evidenceStorageEncryptNote" class="hidden mt-3 p-3 bg-red-500/10 border border-red-500/40 rounded-lg text-xs text-red-200"></div>
-                                        <div id="evidenceStorageRefWarning" class="hidden mt-3 p-3 bg-yellow-500/10 border border-yellow-500/40 rounded-lg">
-                                            <div class="flex items-start gap-2">
-                                                <svg class="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0L3.16 16.25A2 2 0 005 19z"/>
-                                                </svg>
-                                                <div class="text-xs text-yellow-200">
-                                                    <strong class="text-yellow-300">VIPER will not keep a copy of this evidence.</strong><br>
-                                                    It stays at <code id="evidenceStorageRefPath" class="break-all"></code>. If that drive is unplugged, moved or wiped, VIPER can no longer open it. Preserve the original yourself and deliver it to the DA separately.
-                                                </div>
-                                            </div>
-                                        </div>
                                     </div>
                                     <p id="standardUploadHint" class="text-xs text-gray-500 mt-2">✓ All formats supported: MP4, MOV, AVI • JPG, PNG, HEIC • PDF, DOC • Forensic data preserved in original format</p>
                                 </div>
@@ -9946,6 +9949,14 @@
             `;
         }
         
+        // Officer-facing names for evidence types whose stored value is not itself readable.
+        const EVIDENCE_TYPE_LABELS = {
+            ncmecCybertip: 'NCMEC CyberTip',
+            cellebriteExtraction: 'Cellebrite Extraction',
+            computer: 'Computer / Drive Extraction',
+            warrantReturn: 'Warrant Return',
+        };
+
         function renderEvidenceItems() {
             const typeIcons = {
                 digital: '💾',
@@ -9958,6 +9969,8 @@
                 autopsy: '⚕️',
                 toxicology: '🧪',
                 phone: '📱',
+                computer: '💻',
+                warrantReturn: '📜',
                 cellebrite: '📱',
                 cellebriteExtraction: '📱',
                 datapilot: '📲',
@@ -9965,10 +9978,7 @@
                 other: '📎'
             };
 
-            const typeLabels = {
-                ncmecCybertip: 'NCMEC CyberTip',
-                cellebriteExtraction: 'Cellebrite Extraction',
-            };
+            const typeLabels = EVIDENCE_TYPE_LABELS;
 
             return caseEvidence.filter(item => _provShow(item)).map(item => {
                 // IDs may be numeric (legacy) or string (Datapilot bundle pushes).
@@ -10031,6 +10041,7 @@
             document.getElementById('evidenceDescription').value = '';
             var _evLoc = document.getElementById('evidenceLocation'); if (_evLoc) _evLoc.value = '';
             var _evDisc = document.getElementById('evidenceDiscoverable'); if (_evDisc) _evDisc.value = 'yes';
+            _evidenceStorageChosen = false; // a fresh form starts from the Type's default
             clearEvidenceFiles();
             onEvidenceTypeChange('');
             document.getElementById('evidenceForm').classList.remove('hidden');
@@ -10395,6 +10406,7 @@
             editingEvidenceId = evidenceId;
             document.getElementById('evidenceFormTitle').textContent = 'Edit Evidence';
             document.getElementById('evidenceType').value = evidence.type;
+            _syncEvidenceStorageBlockForType(evidence.type); // hides Copy / Point-to: no files are picked when editing
             document.getElementById('evidenceTag').value = evidence.tag || '';
             document.getElementById('evidenceDescription').value = evidence.description;
             var _evLocEdit = document.getElementById('evidenceLocation'); if (_evLocEdit) _evLocEdit.value = evidence.location || '';
@@ -10485,7 +10497,7 @@
         let ncmecUploadMode = null;       // 'zip' | 'folder' | 'pdf'
         let ncmecSourceName = null;       // e.g. "CT_98765.zip"
 
-        // ====== Evidence storage: Copy into the case vs Point to where it's stored ======
+        // ====== Evidence storage: Copy into Evidence folder vs Reference only ======
         // Offered after a standard Upload Files / Upload Folder pick, a Cellebrite
         // Reader folder, or a Cellebrite Extraction (.ufdx). NCMEC CyberTips are
         // always copied; Datapilot keeps its own control.
@@ -10493,6 +10505,8 @@
         let evidenceStorageInfo = null;      // { kind, sourcePath, totalBytes, maxFileBytes, fileCount, encryptBlocked }
         let cellebriteExtractionPick = null; // cellebritePickBundle() result, held until Save
         let _evidenceStorageToken = 0;
+        let _evidenceStorageChosen = false;  // the officer clicked Copy or Point-to themselves
+        let _evidenceStoragePainted = null;  // the pick whose size is on screen (null before a pick)
         // Mirrors EVIDENCE_ENCRYPT_MAX_BYTES in electron-main.js copy-evidence-file:
         // Field Security encrypts a whole file in memory, so it has a ceiling.
         const EVIDENCE_ENCRYPT_MAX_BYTES = 1900 * 1024 * 1024;
@@ -10520,15 +10534,54 @@
             return r.value === 'reference' ? 'reference' : 'copy';
         }
 
-        function onEvidenceStorageModeChange(mode) {
+        function onEvidenceStorageModeChange(mode, byOfficer) {
+            if (byOfficer) _evidenceStorageChosen = true;
             const warn = document.getElementById('evidenceStorageRefWarning');
             if (warn) warn.classList.toggle('hidden', mode !== 'reference');
             _refreshEvidenceStorageNotes();
+            _paintEvidencePickLabels();
+        }
+
+        // The pick buttons say what will happen: "Upload" copies, "Point to" does not.
+        function _paintEvidencePickLabels() {
+            const blk = document.getElementById('evidenceStorageModeBlock');
+            const r = document.querySelector('input[name="evidenceStorageMode"]:checked');
+            const point = !!(blk && !blk.classList.contains('hidden') && r && r.value === 'reference');
+            const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+            set('evidenceUploadHeading', point ? 'Point to Files' : 'Upload Files');
+            set('evidencePickFilesLabel', point ? 'Point to Files' : 'Upload Files');
+            set('evidencePickFolderLabel', point ? 'Point to Folder' : 'Upload Folder');
+        }
+
+        // Size and location of the current pick, or the not-yet-picked wording.
+        function _paintEvidenceStorageInfo(i) {
+            _evidenceStoragePainted = i || null;
+            const sizeLbl = document.getElementById('evidenceStorageSizeLabel');
+            if (sizeLbl) {
+                const countPart = (i && i.fileCount) ? `${i.fileCount.toLocaleString()} file${i.fileCount !== 1 ? 's' : ''}, ` : '';
+                sizeLbl.textContent = (i && i.totalBytes) ? `— ${countPart}${formatFileSize(i.totalBytes)}` : '';
+            }
+            const pathEl = document.getElementById('evidenceStorageRefPath');
+            if (pathEl) pathEl.textContent = (i && i.sourcePath) || 'the location you choose';
+        }
+
+        // Before anything is picked: Cellebrite Extractions run to hundreds of
+        // GB, so they start on Point-to; everything else starts on Copy.
+        function _evidenceStorageTypeDefault(val) {
+            return val === 'cellebriteExtraction' ? 'reference' : 'copy';
         }
 
         function _refreshEvidenceStorageNotes() {
-            const info = evidenceStorageInfo || {};
+            const info = _evidenceStoragePainted || {};
             const mode = _evidenceStorageMode();
+            const typeEl = document.getElementById('evidenceType');
+            const pointRecommended = !!info.encryptBlocked
+                || (info.totalBytes || 0) >= EVIDENCE_SUGGEST_POINT_BYTES
+                || (!!typeEl && typeEl.value === 'cellebriteExtraction');
+            const recCopy = document.getElementById('evidenceStorageRecCopy');
+            const recRef = document.getElementById('evidenceStorageRecRef');
+            if (recCopy) recCopy.classList.toggle('hidden', pointRecommended);
+            if (recRef) recRef.classList.toggle('hidden', !pointRecommended);
             const large = document.getElementById('evidenceStorageLargeNote');
             if (large) {
                 const show = mode === 'copy' && (info.totalBytes || 0) >= EVIDENCE_SUGGEST_POINT_BYTES;
@@ -10539,7 +10592,7 @@
             if (enc) {
                 const show = mode === 'copy' && !!info.encryptBlocked;
                 enc.classList.toggle('hidden', !show);
-                if (show) enc.textContent = `Field Security is on, and at least one file here is larger than ${formatFileSize(EVIDENCE_ENCRYPT_MAX_BYTES)}. VIPER cannot protect a file that size inside the case folder, so it cannot be copied. Choose "Point to where it's stored".`;
+                if (show) enc.textContent = `Field Security is on, and at least one file here is larger than ${formatFileSize(EVIDENCE_ENCRYPT_MAX_BYTES)}. VIPER cannot protect a file that size inside the case folder, so it cannot be copied. Choose "Reference only — do not copy".`;
             }
         }
 
@@ -10557,46 +10610,52 @@
             }
             if (token !== _evidenceStorageToken) return; // the pick was cleared or replaced meanwhile
             evidenceStorageInfo = i;
-            const mode = i.defaultMode
-                || ((i.encryptBlocked || i.totalBytes >= EVIDENCE_DEFAULT_POINT_BYTES) ? 'reference' : 'copy');
+            // A choice the officer made before picking stands; otherwise suggest by size.
+            const chosen = document.querySelector('input[name="evidenceStorageMode"]:checked');
+            const mode = (_evidenceStorageChosen && chosen) ? (chosen.value === 'reference' ? 'reference' : 'copy')
+                : (i.defaultMode || ((i.encryptBlocked || i.totalBytes >= EVIDENCE_DEFAULT_POINT_BYTES) ? 'reference' : 'copy'));
             const radio = document.querySelector(`input[name="evidenceStorageMode"][value="${mode}"]`);
             if (radio) radio.checked = true;
-            const sizeLbl = document.getElementById('evidenceStorageSizeLabel');
-            if (sizeLbl) {
-                const countPart = i.fileCount ? `${i.fileCount.toLocaleString()} file${i.fileCount !== 1 ? 's' : ''}, ` : '';
-                sizeLbl.textContent = i.totalBytes ? `— ${countPart}${formatFileSize(i.totalBytes)}` : '';
-            }
-            const pathEl = document.getElementById('evidenceStorageRefPath');
-            if (pathEl) pathEl.textContent = i.sourcePath || '';
+            _paintEvidenceStorageInfo(i);
             blk.classList.remove('hidden');
             onEvidenceStorageModeChange(mode);
         }
 
+        // The pick was cleared. The choice stays on screen (it is made before
+        // picking); only the size/location of the old pick goes.
         function _hideEvidenceStorageBlock() {
             _evidenceStorageToken++;
-            const blk = document.getElementById('evidenceStorageModeBlock');
-            if (blk) blk.classList.add('hidden');
-            const copyRadio = document.querySelector('input[name="evidenceStorageMode"][value="copy"]');
-            if (copyRadio) copyRadio.checked = true;
-            ['evidenceStorageRefWarning', 'evidenceStorageLargeNote', 'evidenceStorageEncryptNote'].forEach(id => {
+            ['evidenceStorageLargeNote', 'evidenceStorageEncryptNote'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.classList.add('hidden');
             });
-            const sizeLbl = document.getElementById('evidenceStorageSizeLabel');
-            if (sizeLbl) sizeLbl.textContent = '';
+            const typeEl = document.getElementById('evidenceType');
+            _syncEvidenceStorageBlockForType(typeEl ? typeEl.value : '');
         }
 
-        // A pick only offers Copy / Point-to under the Type it was made for.
+        // Copy / Point-to is offered for every Type except Datapilot (its own
+        // control) and CyberTips (always copied), and never while editing an
+        // existing item (no files are picked then). A pick's size only shows
+        // under the Type it was made for.
         function _syncEvidenceStorageBlockForType(val) {
             const blk = document.getElementById('evidenceStorageModeBlock');
             if (!blk) return;
-            if (!evidenceStorageInfo) { blk.classList.add('hidden'); return; }
-            const kind = evidenceStorageInfo.kind;
-            const fits = (val === 'cellebrite') ? (kind === 'cellebriteReader' && !!cellebriteScanResult)
-                : (val === 'cellebriteExtraction') ? (kind === 'ufdx' && !!cellebriteExtractionPick)
-                : (val === 'datapilot' || val === 'ncmecCybertip') ? false
-                : (kind === 'standard' && !!(nativeEvidenceFiles && nativeEvidenceFiles.length));
-            blk.classList.toggle('hidden', !fits);
+            const offered = !editingEvidenceId && val !== 'datapilot' && val !== 'ncmecCybertip';
+            blk.classList.toggle('hidden', !offered);
+            let fits = false;
+            if (evidenceStorageInfo) {
+                const kind = evidenceStorageInfo.kind;
+                fits = (val === 'cellebrite') ? (kind === 'cellebriteReader' && !!cellebriteScanResult)
+                    : (val === 'cellebriteExtraction') ? (kind === 'ufdx' && !!cellebriteExtractionPick)
+                    : (kind === 'standard' && !!(nativeEvidenceFiles && nativeEvidenceFiles.length));
+            }
+            if (!_evidenceStorageChosen && !fits) {
+                const r = document.querySelector(`input[name="evidenceStorageMode"][value="${_evidenceStorageTypeDefault(val)}"]`);
+                if (r) r.checked = true;
+            }
+            _paintEvidenceStorageInfo(fits ? evidenceStorageInfo : null);
+            const cur = document.querySelector('input[name="evidenceStorageMode"]:checked');
+            onEvidenceStorageModeChange(cur && cur.value === 'reference' ? 'reference' : 'copy');
         }
 
         // Push + persist + audit a new evidence record. Throws (after undoing
@@ -11626,7 +11685,7 @@
                         if (sec && sec.enabled && sec.unlocked) {
                             viperToast(type === 'ncmecCybertip'
                                 ? `A file in this CyberTip is ${formatFileSize(biggest)}. Field Security cannot protect a file over ${formatFileSize(EVIDENCE_ENCRYPT_MAX_BYTES)}, so it was not added. Nothing was copied.`
-                                : `A file here is ${formatFileSize(biggest)}. Field Security cannot protect a file over ${formatFileSize(EVIDENCE_ENCRYPT_MAX_BYTES)}, so it cannot be copied. Choose "Point to where it's stored". Nothing was copied.`, 'error');
+                                : `A file here is ${formatFileSize(biggest)}. Field Security cannot protect a file over ${formatFileSize(EVIDENCE_ENCRYPT_MAX_BYTES)}, so it cannot be copied. Choose "Reference only — do not copy". Nothing was copied.`, 'error');
                             return;
                         }
                     }

@@ -4057,6 +4057,22 @@ ipcMain.handle('select-rms-files', async () => {
   return result.filePaths;
 });
 
+// Cyber Tips import: the report PDF, or the ZIP the ICAC Data System sends.
+ipcMain.handle('select-cybertip-files', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import CyberTip Reports',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: 'CyberTip PDF or ZIP', extensions: ['pdf', 'zip'] },
+      { name: 'PDF Reports', extensions: ['pdf'] },
+      { name: 'ZIP Archives', extensions: ['zip'] }
+    ]
+  });
+  restoreFocus();
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths;
+});
+
 ipcMain.handle('select-dmv-file', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Import DMV Printout',
@@ -4108,10 +4124,22 @@ function _readPdfBytesForImport(filePath) {
   return security.decryptBuffer(raw);
 }
 
-ipcMain.handle('extract-pdf-text', async (event, filePath) => {
+ipcMain.handle('extract-pdf-text', async (event, source) => {
   try {
     const pdfParse = require('pdf-parse');
-    const dataBuffer = _readPdfBytesForImport(filePath);
+    // `source` is a file path, or { zipPath, entryName, inZip } for a PDF
+    // inside a ZIP (a CyberTip as the ICAC Data System sends it). Only the
+    // read changes; everything below works on the bytes.
+    let dataBuffer, filePath;
+    if (source && typeof source === 'object') {
+      const got = await require('./modules/_shared/evidence-zip')
+        .readEvidenceZipEntry(source.zipPath, source.entryName, source.inZip || '', security);
+      dataBuffer = got.bytes;
+      filePath = got.name;
+    } else {
+      filePath = source;
+      dataBuffer = _readPdfBytesForImport(filePath);
+    }
     const data = await pdfParse(dataBuffer);
 
     // Check if text looks garbled (Type3 custom fonts) — test for common readable keywords
@@ -7108,6 +7136,25 @@ ipcMain.handle('read-evidence-file', async (event, filePath) => {
   } catch (error) {
     console.error('Failed to read evidence file:', error);
     throw error;
+  }
+});
+
+// ── Evidence ZIPs (CyberTips from the ICAC Data System) ─────────────────
+// List and read the files inside a ZIP filed as evidence, without unpacking
+// it. An encrypted ZIP is decrypted in memory only — CyberTip media is never
+// written to disk in the clear. See modules/_shared/evidence-zip.js.
+ipcMain.handle('evidence-zip-list', async (_event, zipPath) => {
+  return require('./modules/_shared/evidence-zip').listEvidenceZip(zipPath, security);
+});
+
+ipcMain.handle('evidence-zip-read', async (_event, zipPath, entryName, inZip) => {
+  try {
+    const got = await require('./modules/_shared/evidence-zip')
+      .readEvidenceZipEntry(zipPath, entryName, inZip || '', security);
+    return { ok: true, name: got.name, mime: got.mime, size: got.size, bytes: got.bytes };
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || String(e),
+             locked: !!(e && e.code === 'VIPER_LOCKED'), tooLarge: !!(e && e.code === 'TOO_LARGE') };
   }
 });
 

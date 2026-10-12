@@ -122,6 +122,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   noteGet: (caseNumber, noteId) => ipcRenderer.invoke('note-get', caseNumber, noteId),
   noteSave: (caseNumber, noteId, contentHtml) => ipcRenderer.invoke('note-save', caseNumber, noteId, contentHtml),
   selectRmsFiles: () => ipcRenderer.invoke('select-rms-files'),
+  selectCybertipFiles: () => ipcRenderer.invoke('select-cybertip-files'),
   selectDmvFile: () => ipcRenderer.invoke('select-dmv-file'),
   extractPdfText: (filePath) => ipcRenderer.invoke('extract-pdf-text', filePath),
   // Supplementary sparse-text OCR of specific pages. Used only by the Arkansas
@@ -317,6 +318,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveAppDataFile: (data) => ipcRenderer.invoke('save-appdata-file', data),
   deleteAppDataFile: (filePath) => ipcRenderer.invoke('delete-appdata-file', filePath),
   readEvidenceFile: (filePath) => ipcRenderer.invoke('read-evidence-file', filePath),
+  // Files inside a ZIP filed as evidence (CyberTips from the ICAC Data System)
+  evidenceZipList: (zipPath) => ipcRenderer.invoke('evidence-zip-list', zipPath),
+  evidenceZipRead: (zipPath, entryName, inZip) => ipcRenderer.invoke('evidence-zip-read', zipPath, entryName, inZip || ''),
 
   // ── Whisper on-device transcription (Faster-Whisper-XXL) ──
   whisperStatus: () => ipcRenderer.invoke('whisper-status'),

@@ -12104,6 +12104,9 @@
             }
             
             viewerContent.innerHTML = renderEvidenceFiles(evidence);
+            // ZIPs list their contents after the panel is on screen; the
+            // listing can take a moment on a large or encrypted ZIP.
+            _hydrateEvidenceZipPanels(evidence);
             
             // Hide loading overlay after content is rendered
             loadingOverlay.classList.add('hidden');
@@ -13817,6 +13820,183 @@
         }
         try { window.showDictationHelp = showDictationHelp; } catch (_) {}
 
+        // ── ZIPs filed as evidence ─────────────────────────────────────────
+        // The ICAC Data System sends each CyberTip as one ZIP: the report PDF
+        // plus a separate file (usually another ZIP) holding the reported
+        // media. The ZIP stays in Evidence exactly as received. This panel
+        // lists what is inside it and reads ONE file at a time into memory
+        // (main process: modules/_shared/evidence-zip.js) — nothing is
+        // unpacked to disk. The report PDF opens by itself; every other file,
+        // and above all the media, is shown only when the officer clicks View.
+        const _evZipState = {};
+        const EV_ZIP_ROW_CAP = 500;
+        const EV_ZIP_TEXT_CAP = 200 * 1024;
+        const EV_ZIP_ICONS = { pdf: '📄', image: '🖼️', video: '🎞️', audio: '🔊', text: '📝', zip: '📦', other: '📎' };
+        const EV_ZIP_VIEWABLE = { pdf: 1, image: 1, video: 1, audio: 1, text: 1 };
+
+        function _evZipPanelId(evidence, index) {
+            return 'evz_' + String((evidence && evidence.id) || 'x').replace(/[^\w-]/g, '_') + '_' + index;
+        }
+
+        function _evZipIsCsam(evidence) {
+            return !!(evidence && (evidence.csamSensitive || evidence.type === 'ncmecCybertip'));
+        }
+
+        function _evZipRevoke(pid) {
+            const st = _evZipState[pid];
+            if (!st) return;
+            Object.keys(st.urls).forEach(k => { try { URL.revokeObjectURL(st.urls[k]); } catch (_) {} });
+            st.urls = {};
+        }
+
+        async function _hydrateEvidenceZipPanels(evidence) {
+            // Free whatever an earlier, now-closed panel was showing.
+            Object.keys(_evZipState).forEach(pid => {
+                if (!document.getElementById(pid)) { _evZipRevoke(pid); delete _evZipState[pid]; }
+            });
+            if (!evidence || !Array.isArray(evidence.files)) return;
+            for (let index = 0; index < evidence.files.length; index++) {
+                const file = evidence.files[index];
+                if (!file || !file.path || !/\.zip$/i.test(String(file.name || file.path))) continue;
+                const pid = _evZipPanelId(evidence, index);
+                if (!document.getElementById(pid)) continue;
+                _evZipRevoke(pid);
+                const st = _evZipState[pid] = {
+                    zipPath: file.path, entries: [], nestedErrors: [], csam: _evZipIsCsam(evidence),
+                    urls: {}, error: '', locked: false
+                };
+                let res;
+                try {
+                    res = (window.electronAPI && window.electronAPI.evidenceZipList)
+                        ? await window.electronAPI.evidenceZipList(file.path)
+                        : { ok: false, error: 'Restart VIPER to finish turning on ZIP viewing.' };
+                } catch (err) {
+                    res = { ok: false, error: (err && err.message) || String(err) };
+                }
+                // The officer may have opened something else while this read.
+                if (_evZipState[pid] !== st || !document.getElementById(pid)) continue;
+                if (!res || !res.ok) {
+                    st.locked = !!(res && res.locked);
+                    st.error = st.locked
+                        ? 'This ZIP is protected by Field Security. Unlock Field Security to see what is inside it.'
+                        : 'Could not read this ZIP: ' + ((res && res.error) || 'unknown error');
+                } else {
+                    st.entries = Array.isArray(res.entries) ? res.entries : [];
+                    st.nestedErrors = Array.isArray(res.nestedErrors) ? res.nestedErrors : [];
+                }
+                _renderEvidenceZipPanel(pid);
+                const report = st.entries.findIndex(e => e && e.kind === 'pdf' && !e.inZip);
+                if (report !== -1) _evZipView(pid, report);
+            }
+        }
+
+        function _renderEvidenceZipPanel(pid) {
+            const el = document.getElementById(pid);
+            const st = _evZipState[pid];
+            if (!el || !st) return;
+            if (st.error) {
+                el.innerHTML = `<div class="bg-viper-orange/10 border border-viper-orange/30 rounded-lg p-3 text-sm text-viper-orange">${st.locked ? '🔒' : '⚠'} ${_evEsc(st.error)}</div>`;
+                return;
+            }
+            const files = st.entries.filter(e => e && e.kind !== 'zip');
+            const topBytes = st.entries.filter(e => e && !e.inZip).reduce((s, e) => s + (Number(e.size) || 0), 0);
+            const warn = st.csam ? `
+                <div class="mb-3 p-3 rounded-lg border border-red-500/40 bg-red-500/10 text-xs text-red-300 leading-relaxed">
+                    ⚠ <strong>Reported media.</strong> This ZIP may contain child sexual abuse material. Nothing inside it is shown until you click <strong>View</strong> on that file.
+                    Files are read into memory only — nothing is unpacked to disk, and the ZIP itself is kept exactly as received.
+                </div>` : '';
+            const nested = st.nestedErrors.map(n => `
+                <div class="mb-2 text-xs text-viper-orange">⚠ Could not open ${_evEsc(n.name)} inside this ZIP: ${_evEsc(n.error)}</div>`).join('');
+            const rows = [];
+            for (let i = 0; i < st.entries.length && rows.length < EV_ZIP_ROW_CAP; i++) {
+                const e = st.entries[i];
+                if (!e) continue;
+                const name = String(e.name || '');
+                const icon = EV_ZIP_ICONS[e.kind] || EV_ZIP_ICONS.other;
+                if (e.kind === 'zip') {
+                    const n = st.entries.filter(c => c && c.inZip === e.name).length;
+                    rows.push(`
+                        <div class="flex items-center justify-between gap-2 py-2 border-b border-white/5 text-sm">
+                            <span class="min-w-0 break-all">${icon} <span class="text-white">${_evEsc(name)}</span> <span class="text-xs text-gray-500">— ${n} file${n !== 1 ? 's' : ''} inside</span></span>
+                            <span class="text-xs text-gray-500 flex-shrink-0">${formatFileSize(e.size || 0)}</span>
+                        </div>`);
+                    continue;
+                }
+                const shown = e.inZip ? name.slice(name.lastIndexOf('/') + 1) || name : name;
+                rows.push(`
+                    <div style="padding-left:${e.inZip ? 22 : 0}px">
+                        <div class="flex items-center justify-between gap-2 py-1.5 border-b border-white/5 text-sm">
+                            <span class="min-w-0 break-all" title="${_evEsc(name)}">${icon} ${_evEsc(shown)}</span>
+                            <span class="flex items-center gap-2 flex-shrink-0">
+                                <span class="text-xs text-gray-500">${formatFileSize(e.size || 0)}</span>
+                                ${EV_ZIP_VIEWABLE[e.kind]
+                                    ? `<button id="${pid}_b${i}" onclick="_evZipView('${pid}', ${i})" class="px-3 py-1 rounded text-xs bg-viper-cyan/20 text-viper-cyan hover:bg-viper-cyan/30 transition-colors">View</button>`
+                                    : `<span class="text-xs text-gray-600">No preview</span>`}
+                            </span>
+                        </div>
+                        <div id="${pid}_v${i}"></div>
+                    </div>`);
+            }
+            const capped = files.length > EV_ZIP_ROW_CAP
+                ? `<div class="text-xs text-gray-500 pt-2">Showing the first ${EV_ZIP_ROW_CAP} of ${files.length} files.</div>` : '';
+            el.innerHTML = `
+                ${warn}
+                <div class="text-xs text-gray-400 mb-2">📦 ${files.length} file${files.length !== 1 ? 's' : ''} inside · ${formatFileSize(topBytes)}</div>
+                ${nested}
+                ${files.length || st.entries.length ? rows.join('') : '<div class="text-sm text-gray-500 py-3">This ZIP is empty.</div>'}
+                ${capped}`;
+        }
+
+        async function _evZipView(pid, i) {
+            const st = _evZipState[pid];
+            const slot = document.getElementById(pid + '_v' + i);
+            const btn = document.getElementById(pid + '_b' + i);
+            if (!st || !slot || !st.entries[i]) return;
+            const e = st.entries[i];
+            const tok = slot._evTok = (slot._evTok || 0) + 1;
+            if (st.urls[i]) { try { URL.revokeObjectURL(st.urls[i]); } catch (_) {} delete st.urls[i]; }
+            if (slot.dataset.open === '1') {
+                slot.dataset.open = '';
+                slot.innerHTML = '';
+                if (btn) btn.textContent = 'View';
+                return;
+            }
+            slot.dataset.open = '1';
+            if (btn) btn.textContent = 'Hide';
+            slot.innerHTML = '<div class="text-xs text-gray-400 py-2">Reading…</div>';
+            let r;
+            try {
+                r = await window.electronAPI.evidenceZipRead(st.zipPath, e.name, e.inZip || '');
+            } catch (err) {
+                r = { ok: false, error: (err && err.message) || String(err) };
+            }
+            if (slot._evTok !== tok || _evZipState[pid] !== st || !document.getElementById(pid + '_v' + i)) return;
+            if (!r || !r.ok) {
+                const why = r && r.locked ? 'Field Security is locked — unlock it to view this file.'
+                    : (r && r.error) || 'It could not be read.';
+                slot.innerHTML = `<div class="my-2 p-2 rounded bg-viper-orange/10 border border-viper-orange/30 text-xs text-viper-orange">⚠ ${_evEsc(why)}</div>`;
+                return;
+            }
+            const bytes = r.bytes instanceof Uint8Array ? r.bytes : new Uint8Array(r.bytes || []);
+            if (e.kind === 'text') {
+                const txt = new TextDecoder('utf-8', { fatal: false }).decode(bytes.subarray(0, EV_ZIP_TEXT_CAP));
+                slot.innerHTML = `<pre class="my-2 p-3 rounded bg-viper-dark text-xs text-gray-300 whitespace-pre-wrap break-all overflow-auto" style="max-height:500px">${_evEsc(txt)}</pre>`
+                    + (bytes.length > EV_ZIP_TEXT_CAP ? `<div class="text-xs text-gray-500">Showing the first ${formatFileSize(EV_ZIP_TEXT_CAP)}.</div>` : '');
+                return;
+            }
+            const url = URL.createObjectURL(new Blob([bytes], { type: r.mime || 'application/octet-stream' }));
+            st.urls[i] = url;
+            const alt = _evEsc(r.name || '');
+            slot.innerHTML = e.kind === 'pdf' ? `
+                <div class="my-2 bg-white rounded overflow-hidden"><iframe ${_S}="${url}" class="w-full" style="height: 800px;" frameborder="0"></iframe></div>`
+                : e.kind === 'image' ? `
+                <div class="my-2 bg-black rounded flex items-center justify-center p-4"><img ${_S}="${url}" alt="${alt}" class="max-w-full max-h-[600px] object-contain"></div>`
+                : e.kind === 'video' ? `
+                <div class="my-2 bg-black rounded overflow-hidden"><video controls preload="metadata" class="w-full" style="max-height: 600px;" ${_S}="${url}"></video>
+                    <p class="text-xs text-gray-500 p-2">If this does not play, VIPER cannot decode this video format.</p></div>`
+                : `<div class="my-2"><audio controls preload="metadata" class="w-full" ${_S}="${url}"></audio></div>`;
+        }
+
         function renderEvidenceFiles(evidence) {
             if (!evidence.files || evidence.files.length === 0) {
                 return `
@@ -13874,6 +14054,7 @@
                         const isAudio = ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'wma'].includes(fileExt);
                         const isHtml = ['html', 'htm'].includes(fileExt);
                         const isDocument = ['doc', 'docx', 'txt', 'rtf', 'xls', 'xlsx', 'csv'].includes(fileExt);
+                        const isZip = fileExt === 'zip';
                         const fileUrl = file.displayUrl || file.url || file.path;
                         
                         return `
@@ -13903,6 +14084,10 @@
                                         <div class="bg-white rounded overflow-hidden">
                                             <iframe ${_S}="${fileUrl}" class="w-full" style="height: 800px;" frameborder="0"></iframe>
                                         </div>
+                                    </div>
+                                ` : isZip && file.path ? `
+                                    <div class="ev-zip-panel" id="${_evZipPanelId(evidence, index)}">
+                                        <div class="text-sm text-gray-400 py-4 text-center">📦 Reading what is inside this ZIP…</div>
                                     </div>
                                 ` : isImage ? `
                                     <div class="bg-black rounded flex items-center justify-center p-4 min-h-[400px]">
@@ -45316,35 +45501,49 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
         async function importCyberTipPdf() {
             try {
-                const filePaths = await window.electronAPI.selectRmsFiles();
+                // The ICAC Data System sends each CyberTip as a ZIP, so the
+                // picker takes a PDF or a ZIP. The older PDF-only picker is the
+                // fallback for a preload that predates it.
+                const pick = window.electronAPI.selectCybertipFiles || window.electronAPI.selectRmsFiles;
+                const filePaths = await pick();
                 if (!filePaths || filePaths.length === 0) return;
                 await _importCyberTipFiles(filePaths.map(p => ({ path: p })));
             } catch (err) {
                 hideLoadingIndicator();
                 console.error('CyberTip import error:', err);
-                viperToast('Failed to import CyberTip PDFs', 'error');
+                viperToast('Failed to import CyberTip files', 'error');
             }
         }
 
         // The one import loop, shared by the file browser and Find in
         // Evidence so the two can never disagree about what a CyberTip is
         // or what counts as a duplicate. `items` are { path, evidenceTag? }.
+        // A `.zip` path is opened and the PDFs inside it are read in its
+        // place (see _cyberTipExpandZips) — the ZIP itself is never unpacked.
         // Returns { added, notTips, dupes, failed }.
         async function _importCyberTipFiles(items) {
             const tally = { added: 0, notTips: 0, dupes: 0, failed: 0 };
             showLoadingIndicator('Parsing CyberTip reports...');
             const tips = getCyberTips();
+            // ZIP name -> whether a CyberTip report was found inside it.
+            const zipFound = new Map();
             try {
+                items = await _cyberTipExpandZips(items, tally, zipFound);
                 for (const it of items) {
                     try {
-                        const result = await window.electronAPI.extractPdfText(it.path);
+                        const result = await window.electronAPI.extractPdfText(it.entryName
+                            ? { zipPath: it.path, entryName: it.entryName, inZip: it.inZip || '' }
+                            : it.path);
                         if (!result || !result.text) { tally.notTips++; continue; }
                         // Check if it's a CyberTip PDF
                         if (!/CyberTipline Report/i.test(result.text)) {
                             tally.notTips++;
-                            viperToast(`${_esc(result.fileName)} does not appear to be a CyberTip PDF`, 'error');
+                            // A ZIP routinely carries other PDFs besides the
+                            // report; one summary line per ZIP is said below.
+                            if (!it.fromZip) viperToast(`${_esc(result.fileName)} does not appear to be a CyberTip PDF`, 'error');
                             continue;
                         }
+                        if (it.fromZip) zipFound.set(it.fromZip, true);
                         const parsed = parseCyberTip(result.text, result.fileName);
                         // Skip duplicates by report number
                         if (parsed.reportNumber && tips.some(t => t.reportNumber === parsed.reportNumber)) {
@@ -45355,6 +45554,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         // Where it came from, so the tip can be traced back to
                         // the evidence item that holds the original PDF.
                         if (it.evidenceTag) parsed.sourceEvidenceTag = it.evidenceTag;
+                        if (it.fromZip) parsed.sourceZip = it.fromZip;
                         tips.push(parsed);
                         tally.added++;
                     } catch (err) {
@@ -45366,6 +45566,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             } finally {
                 hideLoadingIndicator();
             }
+            zipFound.forEach((found, zipName) => {
+                if (!found) viperToast(`No CyberTipline report was found inside ${_esc(zipName)}`, 'error', 7000);
+            });
             if (tally.added) {
                 saveCyberTips(tips);
                 viperToast(`Imported ${tally.added} CyberTip${tally.added > 1 ? 's' : ''}`, 'success');
@@ -45374,7 +45577,46 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             return tally;
         }
 
-        // Every PDF already filed in this case's Evidence, NCMEC CyberTip
+        // Swap each `.zip` in `items` for the PDFs inside it, as
+        // { path: <the zip>, entryName, inZip, evidenceTag, fromZip }.
+        // Only the list of names is read here; each PDF is read out of the
+        // ZIP into memory by extract-pdf-text. Nothing is unpacked to disk.
+        // The report PDF sits at the top of an ICAC ZIP, beside the media
+        // ZIP. PDFs inside the media ZIP are reported material, so they are
+        // only tried when the ZIP has no PDF of its own.
+        async function _cyberTipExpandZips(items, tally, zipFound) {
+            const out = [];
+            for (const it of (items || [])) {
+                if (!it || !/\.zip$/i.test(String(it.path || ''))) { if (it) out.push(it); continue; }
+                const zipName = String(it.path).split(/[\\/]/).pop();
+                let res = null;
+                try {
+                    res = window.electronAPI.evidenceZipList ? await window.electronAPI.evidenceZipList(it.path) : null;
+                } catch (err) {
+                    res = { ok: false, error: (err && err.message) || String(err) };
+                }
+                if (!res || !res.ok) {
+                    tally.failed++;
+                    const why = !res ? 'this version of VIPER cannot open ZIP files — restart VIPER after updating'
+                        : res.locked ? 'Field Security is locked — unlock it and try again'
+                        : (res.error || 'it could not be opened');
+                    viperToast(`Could not read ${_esc(zipName)}: ${_esc(why)}`, 'error', 8000);
+                    continue;
+                }
+                zipFound.set(zipName, false);
+                const pdfs = (res.entries || []).filter(e => e && e.kind === 'pdf');
+                const top = pdfs.filter(e => !e.inZip);
+                const use = top.length ? top : pdfs;
+                const tipish = e => /cyber\s*tip|ncmec|report/i.test(String(e.name).split('/').pop()) ? 1 : 0;
+                use.sort((a, b) => (tipish(b) - tipish(a)) || String(a.name).localeCompare(String(b.name)));
+                use.forEach(e => out.push({ path: it.path, entryName: e.name, inZip: e.inZip || '',
+                                            evidenceTag: it.evidenceTag, fromZip: zipName }));
+            }
+            return out;
+        }
+
+        // Every PDF — and every ZIP, which is how the ICAC Data System sends a
+        // CyberTip — already filed in this case's Evidence, NCMEC CyberTip
         // items first. Nothing is read here — reading a scanned PDF can mean
         // OCR, so the officer chooses which ones to open.
         function _cyberTipEvidenceCandidates() {
@@ -45386,10 +45628,12 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 ev.files.forEach(f => {
                     if (!f || !f.path) return;
                     const name = String(f.name || String(f.path).split(/[\\/]/).pop() || '');
-                    if (!/\.pdf$/i.test(name) && !/\.pdf$/i.test(String(f.path))) return;
+                    const isPdf = /\.pdf$/i.test(name) || /\.pdf$/i.test(String(f.path));
+                    const isZip = !isPdf && (/\.zip$/i.test(name) || /\.zip$/i.test(String(f.path)));
+                    if (!isPdf && !isZip) return;
                     if (seen.has(f.path)) return;
                     seen.add(f.path);
-                    out.push({ path: f.path, name, evidenceTag: ev.tag || '', ncmec: isNcmec,
+                    out.push({ path: f.path, name, evidenceTag: ev.tag || '', ncmec: isNcmec, zip: isZip,
                                looksLikeTip: isNcmec || /cyber\s*tip|ncmec|\bCT[\s#_-]*\d{6,}/i.test(name) });
                 });
             });
@@ -45400,13 +45644,17 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         async function findCyberTipsInEvidence() {
             const cands = _cyberTipEvidenceCandidates();
             if (!cands.length) {
-                viperToast('There are no PDFs in this case\'s Evidence. Add the CyberTip PDF to Evidence first, or use Import CyberTip PDF.', 'info', 7000);
+                viperToast('There are no PDFs or ZIPs in this case\'s Evidence. Add the CyberTip PDF or ZIP to Evidence first, or use Import CyberTip.', 'info', 7000);
                 return;
             }
             // A PDF whose file name matches a tip already on this tab is shown
             // but not pre-ticked. The report-number check during import is the
             // real duplicate guard; this just saves an unnecessary read.
-            const have = new Set(getCyberTips().map(t => String(t.fileName || '').toLowerCase()));
+            const have = new Set();
+            getCyberTips().forEach(t => {
+                if (t.fileName) have.add(String(t.fileName).toLowerCase());
+                if (t.sourceZip) have.add(String(t.sourceZip).toLowerCase());
+            });
             const rows = cands.map((c, i) => {
                 const already = have.has(c.name.toLowerCase());
                 const tick = c.looksLikeTip && !already;
@@ -45414,13 +45662,13 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     <input type="checkbox" class="ct-ev-pick" data-i="${i}" ${tick ? 'checked' : ''} style="margin-top:3px">
                     <span style="flex:1;min-width:0">
                         <span style="display:block;word-break:break-all">${_esc(c.name)}</span>
-                        <span style="display:block;font-size:11px;opacity:.65">${_esc(c.evidenceTag || 'Evidence')}${c.ncmec ? ' · NCMEC CyberTip item' : ''}${already ? ' · already on this tab' : ''}</span>
+                        <span style="display:block;font-size:11px;opacity:.65">${_esc(c.evidenceTag || 'Evidence')}${c.ncmec ? ' · NCMEC CyberTip item' : ''}${c.zip ? ' · ZIP — the report is read from inside it' : ''}${already ? ' · already on this tab' : ''}</span>
                     </span>
                 </label>`;
             }).join('');
             const ok = await viperConfirm(
-                `<strong>CyberTip PDFs in Evidence</strong><br>
-                 <span style="font-size:12px;opacity:.75">Tick the PDFs to read. Likely CyberTip reports are ticked for you. Anything that is not a CyberTipline report is skipped.</span>
+                `<strong>CyberTip reports in Evidence</strong><br>
+                 <span style="font-size:12px;opacity:.75">Tick the files to read. Likely CyberTip reports are ticked for you. A ZIP is opened in place and the report inside it is read — nothing is unpacked. Anything that is not a CyberTipline report is skipped.</span>
                  <span style="display:block;max-height:320px;overflow-y:auto;margin-top:10px">${rows}</span>`,
                 { okText: 'Import selected' });
             // viperConfirm removes its box ~150 ms after resolving, so the
@@ -45430,10 +45678,10 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 .map(cb => cands[Number(cb.dataset.i)])
                 .filter(Boolean);
             if (!ok) return;
-            if (!picked.length) { viperToast('No PDFs were ticked.', 'info'); return; }
+            if (!picked.length) { viperToast('No files were ticked.', 'info'); return; }
             const t = await _importCyberTipFiles(picked.map(c => ({ path: c.path, evidenceTag: c.evidenceTag })));
             if (!t.added && !t.failed) {
-                viperToast(t.dupes ? 'Those CyberTips are already on this tab.' : 'None of the ticked PDFs were CyberTipline reports.', 'info');
+                viperToast(t.dupes ? 'Those CyberTips are already on this tab.' : 'None of the ticked files held a CyberTipline report.', 'info');
             }
         }
 
@@ -45469,13 +45717,13 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             Cyber Tips
                         </h2>
                         <div class="flex items-center gap-2">
-                        <button onclick="findCyberTipsInEvidence()" class="px-4 py-2 bg-viper-cyan/10 hover:bg-viper-cyan/20 text-viper-cyan rounded-lg border border-viper-cyan/40 flex items-center gap-2 transition-colors" title="Read a CyberTip PDF that is already filed in this case's Evidence">
+                        <button onclick="findCyberTipsInEvidence()" class="px-4 py-2 bg-viper-cyan/10 hover:bg-viper-cyan/20 text-viper-cyan rounded-lg border border-viper-cyan/40 flex items-center gap-2 transition-colors" title="Read a CyberTip PDF or ICAC ZIP that is already filed in this case's Evidence">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z"/></svg>
                             Find in Evidence
                         </button>
                         <button onclick="importCyberTipPdf()" class="px-4 py-2 bg-viper-orange/20 hover:bg-viper-orange/30 text-viper-orange rounded-lg border border-viper-orange/50 flex items-center gap-2 transition-colors">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-                            Import CyberTip PDF
+                            Import CyberTip (PDF or ZIP)
                         </button>
                         </div>
                     </div>
@@ -45484,10 +45732,10 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
                         </svg>
                         <p class="text-gray-400 text-lg mb-2">No CyberTip reports imported</p>
-                        <p class="text-gray-500 text-sm mb-6">Import NCMEC CyberTipline report PDFs to parse and display case data</p>
+                        <p class="text-gray-500 text-sm mb-6">Import a CyberTipline report PDF, or the ZIP exactly as the ICAC Data System sent it, to parse and display case data</p>
                         <div class="flex items-center justify-center gap-3 flex-wrap">
                         <button onclick="importCyberTipPdf()" class="px-6 py-3 bg-viper-orange hover:bg-viper-orange/80 text-black font-semibold rounded-lg transition-colors">
-                            Import CyberTip PDF
+                            Import CyberTip (PDF or ZIP)
                         </button>
                         <button onclick="findCyberTipsInEvidence()" class="px-6 py-3 bg-viper-cyan/10 hover:bg-viper-cyan/20 text-viper-cyan font-semibold rounded-lg border border-viper-cyan/40 transition-colors">
                             Find in Evidence
@@ -45508,7 +45756,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         Cyber Tips <span class="text-sm font-normal text-gray-400 ml-2">${tips.length} report${tips.length !== 1 ? 's' : ''}</span>
                     </h2>
                     <div class="flex items-center gap-2">
-                    <button onclick="findCyberTipsInEvidence()" class="px-4 py-2 bg-viper-cyan/10 hover:bg-viper-cyan/20 text-viper-cyan rounded-lg border border-viper-cyan/40 flex items-center gap-2 transition-colors" title="Read a CyberTip PDF that is already filed in this case's Evidence">
+                    <button onclick="findCyberTipsInEvidence()" class="px-4 py-2 bg-viper-cyan/10 hover:bg-viper-cyan/20 text-viper-cyan rounded-lg border border-viper-cyan/40 flex items-center gap-2 transition-colors" title="Read a CyberTip PDF or ICAC ZIP that is already filed in this case's Evidence">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z"/></svg>
                         Find in Evidence
                     </button>

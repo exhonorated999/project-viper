@@ -135,6 +135,39 @@ class XWarrantUI {
                 onclick="event.stopPropagation(); window.xWarrantUI._onFlagClick('${section}', '${safeKey}')">🚩</button>`;
     }
 
+    /** "Show in original" — finds this record in the return as received. */
+    _srcBtn(section, item, title, valueLabels) {
+        const imp = this.currentImport;
+        if (!imp || typeof window === 'undefined' || !window.SourceViewer || !this.module._citationFor) return '';
+        const cit = this.module._citationFor(imp, section, item) || {};
+        const vals = cit.values || [];
+        if (!vals[0]) return '';
+        const module = this.module;
+        const impId = imp.id;
+        const current = () => module.imports.find(i => i && i.id === impId) || imp;
+        const spec0 = module._sourceSpec(imp);
+        return window.SourceViewer.buttonHtml({
+            title,
+            values: vals,
+            valueLabels: vals.map((_, i) => (valueLabels || [])[i] || (i === 0 ? title : 'related detail')),
+            context: [['Return', imp.fileName || '']],
+            // Read at click time so a relocated original is used everywhere.
+            source: null,
+            resolveSource: async () => {
+                const sp = module._sourceSpec(current());
+                return sp ? Object.assign({ label: String(sp.source.path).split(/[\\/]/).pop() }, sp.source) : null;
+            },
+            memberHints: cit.memberHints || [],
+            expected: spec0 ? spec0.expected : null,
+            onRelocate: async (picked, next) => {
+                // Kept apart from filePath, which identifies the import.
+                const cur = module.imports.find(i => i && i.id === impId);
+                if (cur) { cur.sourcePath = next.path; module.saveData(); }
+                return next;
+            },
+        }, { compact: true, label: '' });
+    }
+
     _onFlagClick(section, key) {
         this.module.toggleFlag(section, key);
         this._refreshFlagToolbar();
@@ -335,6 +368,7 @@ class XWarrantUI {
                                 <div class="xwp-msg-head">
                                     <span class="xwp-msg-sender">${this._esc(m.sender_id)}${fromTarget ? ' (account)' : ''}</span>
                                     <span class="xwp-msg-time">${this._esc(this._fmt(m.created_at))}</span>
+                                    ${this._srcBtn('threads', { messageId: m.message_id, rawTime: m.created_at_raw, text: m.text, conversation: t.conversation_id, sender: m.sender_id, recipient: m.recipient_id }, m.message_id ? 'Message ID' : 'Message', m.message_id ? ['Message ID', 'Message text'] : null)}
                                     ${this._flagBtn('threads', key)}
                                 </div>
                                 ${m.text ? `<div class="xwp-msg-text">${this._esc(m.text)}</div>` : ''}
@@ -370,6 +404,7 @@ class XWarrantUI {
                                 <div class="xwp-msg-head">
                                     <span class="xwp-msg-time">${this._esc(this._fmt(t.created_at))} ${t.deleted ? '<span class="xwp-tag">deleted</span>' : ''} ${t.is_retweet ? '<span class="xwp-tag">RT</span>' : ''}</span>
                                     <span class="xwp-tweet-stats">❤ ${t.favorite_count || 0} · 🔁 ${t.retweet_count || 0}</span>
+                                    ${this._srcBtn('tweets', { tweetId: t.tweet_id, text: t.full_text, rawTime: t.created_at_raw }, t.tweet_id ? 'Tweet ID' : 'Tweet', t.tweet_id ? ['Tweet ID', 'Tweet text'] : null)}
                                     ${this._flagBtn('tweets', key)}
                                 </div>
                                 <div class="xwp-msg-text">${this._esc(t.full_text)}</div>
@@ -407,7 +442,7 @@ class XWarrantUI {
                                         ${rec.rows.slice(0, 500).map((row, idx) => {
                                             const key = window.WarrantFlagsKey.xRecord(rec, row, idx);
                                             const flagged = this.module.isFlagged('records', key);
-                                            return `<tr class="${flagged ? 'xwp-row-flagged' : ''}"><td>${this._flagBtn('records', key)}</td>${rec.headers.map(h => `<td>${this._esc(row[h] || '')}</td>`).join('')}</tr>`;
+                                            return `<tr class="${flagged ? 'xwp-row-flagged' : ''}"><td style="white-space:nowrap">${this._srcBtn('records', { stem: rec.stem, row }, 'Record')}${this._flagBtn('records', key)}</td>${rec.headers.map(h => `<td>${this._esc(row[h] || '')}</td>`).join('')}</tr>`;
                                         }).join('')}
                                     </tbody>
                                 </table>
@@ -467,7 +502,7 @@ class XWarrantUI {
                             ${users.map(u => {
                                 const key = window.WarrantFlagsKey.xUser(u);
                                 const flagged = this.module.isFlagged('users', key);
-                                return `<tr class="${flagged ? 'xwp-row-flagged' : ''}"><td>${this._flagBtn('users', key)}</td><td class="xwp-mono">${this._esc(u.user_id)}</td><td>${this._esc(u.handle || '')}</td><td>${this._esc(u.display_name || '')}</td><td>${this._esc(u.source || '')}</td><td>${this._esc(String(u.confidence || ''))}</td></tr>`;
+                                return `<tr class="${flagged ? 'xwp-row-flagged' : ''}"><td style="white-space:nowrap">${this._srcBtn('users', { userId: u.user_id, handle: u.handle, displayName: u.display_name }, 'User ID', ['User ID', 'Handle', 'Display name'])}${this._flagBtn('users', key)}</td><td class="xwp-mono">${this._esc(u.user_id)}</td><td>${this._esc(u.handle || '')}</td><td>${this._esc(u.display_name || '')}</td><td>${this._esc(u.source || '')}</td><td>${this._esc(String(u.confidence || ''))}</td></tr>`;
                             }).join('')}
                         </tbody>
                     </table>

@@ -116,7 +116,9 @@ class MetaWarrantModule {
             dateRange: primaryRecord?.dateRange || null,
             generated: primaryRecord?.generated || null,
             records: data.records,
-            mediaFiles: data.mediaFiles
+            mediaFiles: data.mediaFiles,
+            // Source Validation: SHA-256 of the return as imported.
+            sourceIntegrity: data.sourceIntegrity || null
         };
 
         // Replace if same file, else add
@@ -326,6 +328,26 @@ class MetaWarrantModule {
         return out;
     }
 
+    /**
+     * What to search the original for, per flagged item (Source Validation).
+     * values[0] is the item itself; the rest only corroborate it.
+     */
+    _citationFor(imp, sectionId, it) {
+        const rec = imp && imp.records ? (imp.records.find(r => r.source === 'records') || imp.records[0]) : null;
+        const hints = [((rec && rec.source) || 'records') + '.html'];
+        const v = (...a) => ({ values: a, memberHints: hints });
+        switch (sectionId) {
+            case 'ipActivity':     return v(it.ip, it.time);
+            case 'statusUpdates':  return v(it.status || it.posted, it.posted, it.author);
+            case 'wallposts':      return v(it.text || it.time, it.time, it.from);
+            case 'otherWallPosts': return v(it.post || it.time, it.time, it.timelineOwner);
+            case 'shares':         return v(it.url || it.title || it.text, it.dateCreated);
+            case 'photos':         return v(it.id || it.uploaded, it.uploaded, it.uploadIp);
+            case 'messages':       return v(it.body || it.sent, it.sent, it.author);
+            default:               return null;
+        }
+    }
+
     _buildSubjectInfo(imp) {
         const rec = imp.records
             ? imp.records.find(r => r.source === 'records') || imp.records[0]
@@ -466,6 +488,12 @@ class MetaWarrantModule {
             resolveFlags:      (imp) => this._resolveFlagged(imp),
             getSubjectInfo:    (imp) => this._buildSubjectInfo(imp),
             getSourceFileName: (imp) => imp.fileName || '',
+            // Source Validation: cite each flagged item in the original return.
+            getSourceSpec:     (imp) => {
+                const p = imp.sourcePath || imp.filePath;
+                return p ? { source: { path: p }, expected: imp.sourceIntegrity || null } : null;
+            },
+            getItemCitation:   (sectionId, item, imp) => this._citationFor(imp, sectionId, item),
             getSectionConfigs: (imp, resolved) => this._buildSectionConfigs(imp, resolved)
         });
     }

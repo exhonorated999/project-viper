@@ -118,6 +118,45 @@ class CellebriteUI {
                 </button>`;
     }
 
+    /**
+     * 🔍 Source button: open the phone's own database at this record (e.g.
+     * mmssms.db › sms › row 1234) with the matching value highlighted. The
+     * values and row pointer come from the module's _citationFor.
+     */
+    _srcBtn(section, item) {
+        const module = this.module;
+        const imp = module && module.getActiveImport && module.getActiveImport();
+        if (!imp || !item || typeof window === 'undefined' || !window.SourceViewer || !module._citationFor) return '';
+        if (!module._sourceSpec(imp)) return '';
+        const cit = module._citationFor(imp, section, item) || {};
+        const vals = cit.values || [];
+        if (!vals[0]) return '';
+        const labels = cit.labels || [];
+        const impId = imp.id;
+        const current = () => ((module.data && module.data.imports) || []).find(i => i && i.id === impId) || imp;
+        const spec0 = module._sourceSpec(imp);
+        return window.SourceViewer.buttonHtml({
+            title: labels[0] || 'Record',
+            values: vals,
+            valueLabels: vals.map((_, i) => labels[i] || 'related detail'),
+            context: [['Cellebrite extraction', imp.deviceLabel || ''], ['Evidence tag', imp.evidenceTag || '']],
+            source: null,
+            // Read at click time so a relocated folder is used everywhere.
+            resolveSource: async () => {
+                const sp = module._sourceSpec(current());
+                return sp && sp.source.path ? Object.assign({ label: 'Databases extracted from the phone' }, sp.source) : null;
+            },
+            memberHints: cit.memberHints || [],
+            record: cit.record || null,
+            expected: spec0 ? spec0.expected : null,
+            relocateFolder: true,
+            onRelocate: async (picked, next) => {
+                module.relocateSource(impId, next && next.path);
+                return next;
+            },
+        }, { compact: true, label: '', title: 'See this in the phone\u2019s own database' });
+    }
+
     // ─── Phase 1.4 — pane search bar + filter helpers ───────────────────
     /**
      * Search input with persisted value + inline clear (×) button + Esc-to-clear.
@@ -1655,6 +1694,7 @@ class CellebriteUI {
                 text: m.body || m.subject || '',
                 meta: m.kind || 'sms',
                 attach: (m.attachments || []).length || 0,
+                ref: m,
             });
         }
         for (const c of active.calls) {
@@ -1665,6 +1705,7 @@ class CellebriteUI {
                 ts: Number(c.timestamp) || 0,
                 text: c.type ? `${c.type} call` : 'call',
                 meta: c.duration ? this._fmtDuration(c.duration) : '',
+                ref: c,
             });
         }
         events.sort((a, b) => b.ts - a.ts);
@@ -1787,6 +1828,7 @@ class CellebriteUI {
                 ${flagged ? '🚩' : '⚐'}
             </button>
         ` : '';
+        const srcBtn = ev.ref ? this._srcBtn(flagSection, ev.ref) : '';
 
         if (ev.kind === 'call') {
             const icon = isOut ? '📞↗' : (/in/i.test(ev.dir) ? '📞↙' : '📞');
@@ -1798,7 +1840,7 @@ class CellebriteUI {
                         ${ev.meta ? `<span class="text-gray-400">· ${this.escape(ev.meta)}</span>` : ''}
                         <span class="text-gray-500">${this.escape(time)}</span>
                     </div>
-                    ${flagBtn}
+                    ${srcBtn}${flagBtn}
                 </div>
             `;
         }
@@ -1816,9 +1858,9 @@ class CellebriteUI {
         `;
         return `
             <div class="flex ${align} my-1 items-center gap-1.5">
-                ${isOut ? flagBtn : ''}
+                ${isOut ? srcBtn + flagBtn : ''}
                 ${msgBubble}
-                ${isOut ? '' : flagBtn}
+                ${isOut ? '' : srcBtn + flagBtn}
             </div>
         `;
     }
@@ -2268,7 +2310,7 @@ class CellebriteUI {
             const clBadge = this._caseLinkBadgeHtml(allMatches, 'contacts');
             return `
                 <tr class="cellebrite-contact-row hover:bg-viper-card/30 transition" data-contact-id="${this.escape(c.id)}">
-                    <td class="px-3 py-2 align-top">${this._flagBtn('contacts', c.id)}</td>
+                    <td class="px-3 py-2 align-top whitespace-nowrap">${this._srcBtn('contacts', c)}${this._flagBtn('contacts', c.id)}</td>
                     <td class="px-3 py-2 text-sm text-white">
                         ${this.escape(c.displayName || '(no name)')} ${star}
                         ${clBadge ? `<div class="mt-1">${clBadge}</div>` : ''}
@@ -2564,7 +2606,7 @@ class CellebriteUI {
     // ─── Calls pane ─────────────────────────────────────────────────────
     /** Column layout shared between header row and virtualized rows. */
     _callsGridTemplate() {
-        return '48px 220px minmax(140px, 1fr) 70px 110px 90px 170px 60px';
+        return '76px 220px minmax(140px, 1fr) 70px 110px 90px 170px 60px';
     }
 
     /** Per-row HTML used by the virtualized renderer. */
@@ -2593,7 +2635,7 @@ class CellebriteUI {
         // Each child cell is a grid column. align-items:center on the row,
         // so we use plain divs (no padding-y) and rely on row height for spacing.
         return `
-            <div class="px-3 flex items-center justify-center">${this._flagBtn('calls', c.id)}</div>
+            <div class="px-1 flex items-center justify-center gap-1">${this._srcBtn('calls', c)}${this._flagBtn('calls', c.id)}</div>
             <div class="px-3 text-sm font-mono text-viper-cyan whitespace-nowrap overflow-hidden text-ellipsis">
                 ${this.escape(c.number || '—')}${clBadge ? `<div class="mt-0.5">${clBadge}</div>` : ''}
             </div>
@@ -2654,7 +2696,7 @@ class CellebriteUI {
 
     // ─── SMS / MMS pane ─────────────────────────────────────────────────
     _smsGridTemplate() {
-        return '48px 70px 40px 220px minmax(220px, 1fr) 170px';
+        return '76px 70px 40px 220px minmax(220px, 1fr) 170px';
     }
 
     /** Per-row HTML used by the virtualized SMS renderer. */
@@ -2678,7 +2720,7 @@ class CellebriteUI {
         ) : '';
 
         return `
-            <div class="px-3 flex items-center justify-center">${this._flagBtn('sms', m.id)}</div>
+            <div class="px-1 flex items-center justify-center gap-1">${this._srcBtn('sms', m)}${this._flagBtn('sms', m.id)}</div>
             <div class="px-3">${kindBadge}</div>
             <div class="px-3 text-center">${dirIcon}</div>
             <div class="px-3 text-sm font-mono text-viper-cyan whitespace-nowrap overflow-hidden text-ellipsis">
@@ -2789,7 +2831,7 @@ class CellebriteUI {
 
         const rows = accounts.map(a => `
             <tr class="cellebrite-account-row hover:bg-viper-card/30 transition">
-                <td class="px-3 py-2 align-top">${this._flagBtn('accounts', a.id)}</td>
+                <td class="px-3 py-2 align-top whitespace-nowrap">${this._srcBtn('accounts', a)}${this._flagBtn('accounts', a.id)}</td>
                 <td class="px-3 py-2 text-sm text-white break-all">${this.escape(a.name || '(no name)')}</td>
                 <td class="px-3 py-2 text-xs font-mono text-viper-cyan break-all">${this.escape(a.type || '')}</td>
                 <td class="px-3 py-2">
@@ -2858,7 +2900,7 @@ class CellebriteUI {
             const wifiKey = `${n.ssid || ''}::${n.bssid || ''}`;
             return `
             <tr class="cellebrite-wifi-row hover:bg-viper-card/30 transition">
-                <td class="px-3 py-2 align-top">${this._flagBtn('wifi', wifiKey)}</td>
+                <td class="px-3 py-2 align-top whitespace-nowrap">${this._srcBtn('wifi', n)}${this._flagBtn('wifi', wifiKey)}</td>
                 <td class="px-3 py-2 text-sm text-white">${this.escape(n.ssid || '(empty SSID)')}</td>
                 <td class="px-3 py-2 text-xs font-mono text-viper-cyan">${this.escape(n.bssid || '—')}</td>
                 <td class="px-3 py-2">${secBadge(n.security)}</td>
@@ -3340,6 +3382,7 @@ class CellebriteUI {
         const s = this._mediaState;
         if (!s) return;
         if (s.observer) { try { s.observer.disconnect(); } catch (_) {} }
+        if (s._statusHideTimer) { clearTimeout(s._statusHideTimer); s._statusHideTimer = null; }
         for (const url of s.blobUrls.values()) {
             try { URL.revokeObjectURL(url); } catch (_) {}
         }
@@ -3380,6 +3423,7 @@ class CellebriteUI {
                  data-cb-media-cat="${this.escape(it.category)}"
                  data-cb-media-search="${this.escape((it.filename || '').toLowerCase())}">
                 <div class="absolute top-1 left-1 z-10">${flagBtn}</div>
+                <div class="absolute top-1 right-1 z-10">${this._mediaVerifyBtn(it)}</div>
                 <div class="cb-media-thumb-wrap aspect-square bg-black/40 flex items-center justify-center overflow-hidden"
                      data-cb-media-thumb="${this.escape(it.id)}">
                     ${isImg
@@ -3437,12 +3481,18 @@ class CellebriteUI {
         const api = window.electronAPI;
         if (!api || !api.cellebriteMediaRead) return;
 
+        // Show that this one is working, and count it into the "Loading
+        // previews… X of Y" notice until it settles either way.
+        wrap.innerHTML = this._mediaThumbLoadingHtml();
+        s.thumbsStarted = (s.thumbsStarted || 0) + 1;
+        this._paintMediaLoadStatus();
         try {
             const r = await api.cellebriteMediaRead({
                 caseNumber: this.module.caseNumber,
                 importId: s.imp.id,
                 mediaId: id,
             });
+            if (this._mediaState !== s) return;   // grid was torn down meanwhile
             if (!r || !r.success || !r.buffer) {
                 wrap.innerHTML = `<div class="text-red-400 text-xs text-center px-2">load failed</div>`;
                 return;
@@ -3456,7 +3506,65 @@ class CellebriteUI {
             s.blobUrls.set(id, url);
             wrap.innerHTML = `<img src="${url}" loading="lazy" class="w-full h-full object-cover" alt="${this.escape(item.filename)}">`;
         } catch (e) {
-            wrap.innerHTML = `<div class="text-red-400 text-xs text-center px-2">${this.escape(e.message || String(e))}</div>`;
+            if (this._mediaState === s) {
+                wrap.innerHTML = `<div class="text-red-400 text-xs text-center px-2">${this.escape(e.message || String(e))}</div>`;
+            }
+        } finally {
+            if (this._mediaState === s) {
+                s.thumbsDone = (s.thumbsDone || 0) + 1;
+                this._paintMediaLoadStatus();
+            }
+        }
+    }
+
+    /** The preview window's "working on it" state — names large files. */
+    _mediaModalLoadingHtml(item) {
+        const size = Number(item && item.size) || 0;
+        const big = size >= 25 * 1024 * 1024;
+        const kind = item && item.type === 'video' ? 'video' : item && item.type === 'audio' ? 'recording' : 'file';
+        return `
+            <div class="cb-media-modal-loading" role="status" data-cb-media-loading>
+                <span class="cb-media-spinner cb-lg"></span>
+                <div class="text-sm text-gray-200">Reading this ${kind} out of the phone dump…</div>
+                <div class="text-xs text-gray-400">${big
+                    ? `This is a large ${kind} (${this.escape(this.fmtBytes(size))}) — it can take a little while. You can keep this window open.`
+                    : 'This usually takes a second or two.'}</div>
+            </div>`;
+    }
+
+    _mediaThumbLoadingHtml() {
+        return `<div class="cb-media-loading" role="status" aria-label="Loading preview"><span class="cb-media-spinner"></span></div>`;
+    }
+
+    /** Pure: the text of the floating loading notice, or '' when idle. */
+    _mediaLoadStatusText(started, done) {
+        const st = Number(started) || 0, dn = Number(done) || 0;
+        if (st <= dn) return '';
+        if (dn === 0) return 'Opening the phone dump — a large dump can take a few seconds…';
+        return `Loading previews from the phone dump… ${dn} of ${st}`;
+    }
+
+    // A floating pill pinned to the bottom of the grid's scroll area. It sits
+    // in a zero-height sticky row so it never pushes the cards around.
+    _paintMediaLoadStatus() {
+        const s = this._mediaState;
+        if (!s || !s.host) return;
+        let el = s.host.querySelector('[data-cb-media-status]');
+        if (!el) {
+            el = document.createElement('div');
+            el.className = 'cb-media-status';
+            el.setAttribute('data-cb-media-status', '');
+            el.setAttribute('aria-live', 'polite');
+            s.host.appendChild(el);
+        }
+        const text = this._mediaLoadStatusText(s.thumbsStarted, s.thumbsDone);
+        if (s._statusHideTimer) { clearTimeout(s._statusHideTimer); s._statusHideTimer = null; }
+        if (text) {
+            el.innerHTML = `<div class="cb-media-status-pill"><span class="cb-media-spinner cb-sm"></span><span>${this.escape(text)}</span></div>`;
+            el.classList.add('cb-on');
+        } else {
+            // Short grace so a quick burst of loads doesn't flicker the notice.
+            s._statusHideTimer = setTimeout(() => { el.classList.remove('cb-on'); el.innerHTML = ''; }, 350);
         }
     }
 
@@ -3464,6 +3572,9 @@ class CellebriteUI {
         if (pane._cbMediaWired) return;
         pane._cbMediaWired = true;
         pane.addEventListener('click', (ev) => {
+            // 🔍 on a card: check the file against the dump, don't open it.
+            const vb = ev.target.closest('[data-cb-media-verify]');
+            if (vb) { ev.stopPropagation(); this._openMediaVerify(vb.getAttribute('data-cb-media-verify')); return; }
             const card = ev.target.closest('.cb-media-card');
             if (!card) return;
             // Ignore clicks on the flag button — the global delegate handles it.
@@ -3490,10 +3601,13 @@ class CellebriteUI {
                         <div class="text-sm text-white truncate" title="${this.escape(item.filename)}">${this.escape(item.filename)}</div>
                         <div class="text-[11px] text-gray-400">${this.escape(item.category)} · ${this.escape(item.mime)} · ${((item.size||0)/1024).toFixed(0)} KB${item.capturedAt ? ` · ${this.escape(this._fmtTimestamp(Date.parse(item.capturedAt)))}` : ''}</div>
                     </div>
-                    <button class="text-gray-400 hover:text-white text-xl px-2" data-cb-media-close>✕</button>
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                        <button type="button" class="sv-src-btn" data-cb-media-verify-open title="Check this file against the phone dump Cellebrite made"><span aria-hidden="true">🔍</span> Check against the phone dump</button>
+                        <button class="text-gray-400 hover:text-white text-xl px-2" data-cb-media-close>✕</button>
+                    </div>
                 </div>
                 <div class="flex-1 overflow-auto flex items-center justify-center" data-cb-media-body>
-                    <div class="text-gray-400 text-sm">Loading...</div>
+                    ${this._mediaModalLoadingHtml(item)}
                 </div>
                 <div class="flex items-center justify-between text-[11px] text-gray-500 flex-shrink-0">
                     <span class="font-mono truncate" title="${this.escape(item.entryPath)}">${this.escape(item.entryPath)}</span>
@@ -3504,6 +3618,7 @@ class CellebriteUI {
         const close = () => { try { document.body.removeChild(wrap); } catch (_) {} document.removeEventListener('keydown', onEsc); };
         const onEsc = (e) => { if (e.key === 'Escape') close(); };
         wrap.querySelector('[data-cb-media-close]').addEventListener('click', close);
+        wrap.querySelector('[data-cb-media-verify-open]').addEventListener('click', () => this._openMediaVerify(id));
         wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
         document.addEventListener('keydown', onEsc);
         document.body.appendChild(wrap);
@@ -3543,6 +3658,383 @@ class CellebriteUI {
             }
         } catch (e) {
             body.innerHTML = `<div class="text-red-400 text-sm">${this.escape(e.message || String(e))}</div>`;
+        }
+    }
+
+    // ─── Media source check ─────────────────────────────────────────────
+    // Media is never copied out of the dump at import — VIPER reads each
+    // file straight out of Cellebrite's FileSystem zip. This check reads the
+    // file again, byte for byte, and compares it with the size and CRC-32
+    // Cellebrite wrote into the dump's own directory. A second, slower
+    // check hashes the whole dump and compares it with the SHA-256 in the
+    // .ufd Cellebrite wrote when it made the extraction.
+
+    _mediaVerifyBtn(it) {
+        return `<button type="button" class="sv-src-btn sv-compact cb-mv-btn" data-cb-media-verify="${this.escape(it.id)}" title="Check this file against the phone dump Cellebrite made"><span aria-hidden="true">🔍</span></button>`;
+    }
+
+    _hex32(n) {
+        if (n == null || !Number.isFinite(Number(n))) return '';
+        return '0x' + (Number(n) >>> 0).toString(16).toUpperCase().padStart(8, '0');
+    }
+
+    _exactBytes(n) {
+        const v = Number(n);
+        if (!Number.isFinite(v)) return '—';
+        return `${v.toLocaleString('en-US')} bytes${v >= 1024 ? ` (${this.fmtBytes(v)})` : ''}`;
+    }
+
+    _mvShortHash(h) { return h ? `${h.slice(0, 16)}…${h.slice(-8)}` : ''; }
+
+    _mvFmtIso(iso) {
+        if (!iso) return '';
+        const t = Date.parse(iso);
+        return Number.isFinite(t) ? this._fmtTimestamp(t) : String(iso);
+    }
+
+    /** {cls, icon, label, text} — the one-line answer for this file. */
+    _mvVerdict(r) {
+        if (!r) return { cls: 'sv-dim', icon: '', label: 'Checking…', text: '' };
+        if (!r.success) {
+            return r.locked
+                ? { cls: 'sv-warn', icon: '🔒', label: 'Locked', text: 'Unlock VIPER to check this file.' }
+                : { cls: 'sv-bad', icon: '✗', label: 'Check failed', text: r.error || 'The check could not be run.' };
+        }
+        if (r.zipMissing) {
+            return { cls: 'sv-warn', icon: '⚠', label: 'Dump not found',
+                text: 'The phone dump is not where it was imported from, so this file cannot be checked. Reconnect the drive it was on and try again.' };
+        }
+        if (r.entryMissing) {
+            return { cls: 'sv-bad', icon: '✗', label: 'Not in the dump',
+                text: 'This file is no longer inside the phone dump at that location. The dump may have been replaced by a different extraction.' };
+        }
+        if (r.readError) {
+            return { cls: 'sv-bad', icon: '✗', label: 'Could not be read cleanly',
+                text: `VIPER could not read this file back cleanly from the dump (${r.readError}). The dump may be damaged, or the drive had a read error. Do not rely on this copy until it has been checked.` };
+        }
+        const c = r.checks || {};
+        if (!(c.sizeMatch && c.crcMatch)) {
+            return { cls: 'sv-bad', icon: '✗', label: 'Does NOT match the dump',
+                text: 'The bytes VIPER read do not match the size and checksum Cellebrite recorded for this file. This file is damaged or has been altered inside the dump.' };
+        }
+        if (c.importHadCrc && !c.sameAsImport) {
+            return { cls: 'sv-warn', icon: '≈', label: 'Dump changed since import',
+                text: 'The file matches the dump as it is now, but the dump records a different size or checksum than it did when VIPER imported it. The dump has been changed or replaced since import.' };
+        }
+        return { cls: 'sv-ok', icon: '✓', label: 'Matches the dump',
+            text: 'The file’s size and checksum match exactly what Cellebrite wrote into the dump when it was made.' };
+    }
+
+    _mvDumpHtml(st) {
+        const r = st.r;
+        if (!r || !r.success || r.zipMissing) return '';
+        const ufd = r.ufd || null;
+        const d = st.dump || { state: 'none' };
+        const total = d.total || r.zipSize || 0;
+        let h = '<div class="cb-mv-sec-title">Whole dump</div>';
+        if (ufd && ufd.sha256) {
+            h += `<div class="cb-mv-line">When Cellebrite made this extraction${ufd.tool ? ` (${this.escape(ufd.tool)}` + (ufd.extractedAt ? `, ${this.escape(ufd.extractedAt)}` : '') + ')' : ''} it recorded this SHA-256 for <b>${this.escape(r.sourceZipName)}</b>: ` +
+                `<code class="sv-hash" title="${this.escape(ufd.sha256)}">${this.escape(this._mvShortHash(ufd.sha256))}</code> ` +
+                `<button type="button" class="sv-mini" data-cb-mv="copy" data-cb-mv-text="${this.escape(ufd.sha256)}">Copy</button>` +
+                `<div class="sv-dim sv-small">From ${this.escape(ufd.ufdName)}</div></div>`;
+        } else {
+            h += `<div class="cb-mv-line sv-dim">Cellebrite’s record of the dump’s SHA-256 (the .ufd file) was not found next to the dump, so the whole dump cannot be compared with it. VIPER can still compute the dump’s SHA-256 for you to compare by hand.</div>`;
+        }
+        if (d.state === 'running') {
+            const pct = total ? Math.min(100, Math.floor((d.done / total) * 100)) : 0;
+            h += `<div class="cb-mv-line"><span class="sv-spin sv-spin-sm"></span> Checking the whole dump… ${this.escape(this.fmtBytes(d.done))} of ${this.escape(this.fmtBytes(total))} (${pct}%)` +
+                `<div class="cb-mv-bar"><div style="width:${pct}%"></div></div>` +
+                `<div class="sv-dim sv-small">You can close this window — the check keeps running and the result is saved.</div></div>`;
+        } else if (d.state === 'done') {
+            const when = this._mvFmtIso(d.finishedAt);
+            if (d.match === true) {
+                h += `<div class="cb-mv-line"><span class="sv-ok">✓ The whole dump matches Cellebrite’s SHA-256.</span> It has not changed since the extraction was made.${when ? ` <span class="sv-dim">Checked ${this.escape(when)}.</span>` : ''}</div>`;
+            } else if (d.match === false) {
+                h += `<div class="cb-mv-line cb-mv-bad"><span class="sv-bad">✗ The whole dump does NOT match the SHA-256 Cellebrite recorded.</span> The dump has changed since Cellebrite made it, or it is a different file.` +
+                    `<div class="sv-int-row">Today’s SHA-256: <code class="sv-hash" title="${this.escape(d.sha256)}">${this.escape(this._mvShortHash(d.sha256))}</code></div>${when ? `<div class="sv-dim sv-small">Checked ${this.escape(when)}.</div>` : ''}</div>`;
+            } else {
+                h += `<div class="cb-mv-line">SHA-256 of the dump: <code class="sv-hash" title="${this.escape(d.sha256)}">${this.escape(this._mvShortHash(d.sha256))}</code> ` +
+                    `<button type="button" class="sv-mini" data-cb-mv="copy" data-cb-mv-text="${this.escape(d.sha256)}">Copy</button>` +
+                    `<div class="sv-dim sv-small">There is no Cellebrite record to compare it with.${when ? ` Computed ${this.escape(when)}.` : ''}</div></div>`;
+            }
+        } else if (d.state === 'error') {
+            h += `<div class="cb-mv-line"><span class="sv-bad">The whole-dump check stopped:</span> ${this.escape(d.error || 'unknown error')} ` +
+                `<button type="button" class="sv-act" data-cb-mv="dump">Try again</button></div>`;
+        } else {
+            h += `<div class="cb-mv-line"><button type="button" class="sv-act" data-cb-mv="dump">Check the whole dump${total ? ` (${this.escape(this.fmtBytes(total))})` : ''}</button> ` +
+                `<span class="sv-dim sv-small">Reads every byte of the dump. Large dumps take several minutes.</span></div>`;
+        }
+        return h;
+    }
+
+    _mvPreviewHtml(st) {
+        const it = st.item;
+        if (it.type === 'image') {
+            if (st.previewUrl) return `<img src="${st.previewUrl}" alt="${this.escape(it.filename)}">`;
+            if ((it.size || 0) > 25 * 1024 * 1024) return '<div class="sv-dim sv-small">Too large to preview here.</div>';
+            return '<div class="cb-mv-ico"><span class="sv-spin"></span></div>';
+        }
+        return `<div class="cb-mv-ico">${it.type === 'video' ? '🎬' : it.type === 'audio' ? '🎵' : '📄'}</div>`;
+    }
+
+    /** The whole window. Pure: depends only on st. */
+    _mediaVerifyHtml(st) {
+        const it = st.item;
+        const r = st.r;
+        const ok = r && r.success;
+        const v = this._mvVerdict(st.busy ? null : r);
+        const raw = (ok && r.rawEntryName) || it.rawEntryName || it.entryPath || '';
+        let h = '<div class="sv-modal cb-mv-modal">';
+        h += '<div class="sv-head"><div class="sv-title">Source check <span class="sv-dim">— picture / media file</span></div>' +
+            '<button type="button" class="sv-x" data-cb-mv="close" title="Close (Esc)">✕</button></div>';
+        h += '<div class="sv-compare">' +
+            `<div class="sv-cmp-col"><div class="sv-cmp-label">VIPER shows</div><div class="sv-cmp-val">${this.escape(it.filename)}</div></div>` +
+            `<div class="sv-cmp-col"><div class="sv-cmp-label">Inside the Cellebrite dump</div><div class="sv-cmp-val cb-mv-mono">${this.escape(raw)}</div></div>` +
+            (st.busy
+                ? '<div class="sv-cmp-badge sv-dim"><span class="sv-spin sv-spin-sm"></span>Checking…</div>'
+                : `<div class="sv-cmp-badge ${v.cls}" data-cb-mv-verdict="${this.escape(v.label)}">${v.icon ? v.icon + ' ' : ''}${this.escape(v.label)}</div>`) +
+            '</div>';
+        h += '<div class="sv-body cb-mv-body">';
+        if (!st.busy && v.text) {
+            const bcls = v.cls === 'sv-ok' ? 'sv-banner' : v.cls === 'sv-bad' ? 'sv-banner sv-banner-bad' : 'sv-banner sv-banner-warn';
+            h += `<div class="${bcls}">${this.escape(v.text)}</div>`;
+        }
+        if (ok && r.thumbnail) {
+            h += '<div class="sv-banner sv-banner-warn">This is a <b>thumbnail</b> — a small preview copy Android makes for its gallery, not the original picture. The original may be elsewhere in the dump, or may have been deleted from the phone.</div>';
+        }
+        h += '<div class="cb-mv-grid">';
+        h += `<div class="cb-mv-preview" data-cb-mv-preview>${this._mvPreviewHtml(st)}</div>`;
+        h += '<div class="cb-mv-facts">';
+        const ufd = ok && r.ufd;
+        const ctime = ok && r.container && r.container.time;
+        const facts = [
+            ['Where on the phone', it.entryPath ? '/' + String(it.entryPath).replace(/^\/+/, '') : ''],
+            ['In the dump', ok && r.sourceZipName ? `${r.sourceFolder} › ${r.sourceZipName}` : ''],
+            ['Size', this._exactBytes(it.size || 0)],
+            ['File date in the dump', ctime ? this._fmtTimestamp(ctime) : ''],
+            ['Picture taken (camera data)', it.capturedAt ? this._fmtTimestamp(Date.parse(it.capturedAt)) : ''],
+            ['GPS', it.gps && Number.isFinite(it.gps.lat) && Number.isFinite(it.gps.lon) ? `${it.gps.lat.toFixed(5)}, ${it.gps.lon.toFixed(5)}` : ''],
+            ['Dimensions', it.width && it.height ? `${it.width} × ${it.height}` : ''],
+            ['Extraction', ufd ? [ufd.tool, ufd.extractedAt].filter(Boolean).join(', ') : ''],
+        ].filter(f => f[1] != null && String(f[1]).trim());
+        h += '<dl class="cb-mv-dl">' + facts.map(f => `<dt>${this.escape(f[0])}</dt><dd>${this.escape(f[1])}</dd>`).join('') + '</dl>';
+
+        if (ok && r.read && r.container) {
+            const c = r.checks || {};
+            const mark = (b) => b ? '<span class="sv-ok">✓</span>' : '<span class="sv-bad">✗</span>';
+            h += '<div class="cb-mv-sec-title">This file</div>';
+            h += `<div class="cb-mv-line">${mark(c.sizeMatch)} Size read back: ${this.escape(this._exactBytes(r.read.size))}` +
+                (c.sizeMatch ? ' — the size the dump records.' : ` — the dump records ${this.escape(this._exactBytes(r.container.size))}.`) + '</div>';
+            h += `<div class="cb-mv-line">${mark(c.crcMatch)} Checksum (CRC-32): <code class="sv-hash">${this.escape(this._hex32(r.read.crc32))}</code>` +
+                (c.crcMatch ? ' — the checksum the dump records.' : ` — the dump records <code class="sv-hash">${this.escape(this._hex32(r.container.crc32))}</code>.`) + '</div>';
+            if (c.importHadCrc) {
+                h += `<div class="cb-mv-line">${mark(c.sameAsImport)} ${c.sameAsImport ? 'Same as when VIPER imported it.' : 'Different from what the dump recorded when VIPER imported it.'}</div>`;
+            } else {
+                h += '<div class="cb-mv-line sv-dim">○ This was imported before VIPER kept its own note of the dump’s checksum, so the comparison above is against the dump itself.</div>';
+            }
+            h += `<div class="cb-mv-line">SHA-256: <code class="sv-hash" title="${this.escape(r.read.sha256)}">${this.escape(r.read.sha256)}</code> <button type="button" class="sv-mini" data-cb-mv="copy" data-cb-mv-text="${this.escape(r.read.sha256)}">Copy</button></div>`;
+            h += `<div class="cb-mv-line">MD5: <code class="sv-hash" title="${this.escape(r.read.md5)}">${this.escape(r.read.md5)}</code> <button type="button" class="sv-mini" data-cb-mv="copy" data-cb-mv-text="${this.escape(r.read.md5)}">Copy</button></div>`;
+            h += '<div class="sv-dim sv-small">Compare these with Physical Analyzer or another forensic tool. A CRC-32 catches damage; the whole-dump check below compares against Cellebrite’s SHA-256.</div>';
+        }
+        h += `<div class="cb-mv-dump-slot">${this._mvDumpHtml(st)}</div>`;
+        h += '</div></div></div>';
+        const where = ok && r.sourceZipName ? `${r.sourceFolder} › ${r.sourceZipName} › ${raw}` : raw;
+        h += '<div class="sv-foot">' +
+            `<div class="sv-where" title="${this.escape(ok ? r.sourceZip : '')}">${this.escape(where)}</div>` +
+            '<div class="sv-actions">' +
+            (ok && !r.zipMissing ? `<button type="button" class="sv-act" data-cb-mv="reveal" title="${this.escape(r.sourceZip)}">📂 Show the dump in its folder</button>` : '') +
+            (ok && r.read ? '<button type="button" class="sv-act" data-cb-mv="save" title="Copy this file out of the dump exactly as it is">💾 Save an exact copy</button>' : '') +
+            (ok && r.read ? '<button type="button" class="sv-act sv-act-primary" data-cb-mv="report">📋 Copy for report</button>' : '') +
+            '<span class="sv-flash" aria-live="polite"></span></div></div>';
+        h += '</div>';
+        return h;
+    }
+
+    /** Plain-text summary for a report or a property sheet. */
+    _mvReportText(st) {
+        const it = st.item, r = st.r || {}, c = r.checks || {}, ufd = r.ufd, d = st.dump || {};
+        const v = this._mvVerdict(r);
+        const L = [];
+        L.push(`File: ${it.filename}`);
+        if (it.entryPath) L.push(`Location on the phone: /${String(it.entryPath).replace(/^\/+/, '')}`);
+        if (r.sourceZipName) L.push(`Source: ${r.sourceFolder}\\${r.sourceZipName}${ufd ? ` (Cellebrite extraction${ufd.tool ? ', ' + ufd.tool : ''}${ufd.extractedAt ? ', ' + ufd.extractedAt : ''})` : ''}`);
+        if (r.rawEntryName) L.push(`Entry in the dump: ${r.rawEntryName}`);
+        if (r.read) {
+            L.push(`Size: ${Number(r.read.size).toLocaleString('en-US')} bytes`);
+            L.push(`CRC-32: ${this._hex32(r.read.crc32)}${c.crcMatch ? ' (matches the dump’s record)' : ' (does NOT match the dump’s record)'}`);
+            L.push(`SHA-256: ${r.read.sha256}`);
+            L.push(`MD5: ${r.read.md5}`);
+        }
+        if (it.capturedAt) L.push(`Picture taken (camera data): ${this._fmtTimestamp(Date.parse(it.capturedAt))}`);
+        if (r.thumbnail) L.push('Note: this is an Android gallery thumbnail, not the original picture.');
+        L.push(`Checked by VIPER on ${this._mvFmtIso(r.checkedAt) || this._fmtTimestamp(Date.now())}: ${v.label}.`);
+        if (d.state === 'done') {
+            L.push(d.match === true ? `Whole dump: matches Cellebrite’s recorded SHA-256 (${d.sha256}).`
+                : d.match === false ? `Whole dump: does NOT match Cellebrite’s recorded SHA-256. Computed ${d.sha256}; Cellebrite recorded ${d.expected}.`
+                : `Whole dump SHA-256: ${d.sha256} (no Cellebrite record to compare).`);
+        } else {
+            L.push('Whole dump: not checked against Cellebrite’s SHA-256.');
+        }
+        return L.join('\r\n');
+    }
+
+    _closeMediaVerify() {
+        const st = this._mv;
+        if (!st) return;
+        this._mv = null;
+        if (st.timer) { clearTimeout(st.timer); st.timer = null; }
+        try { st.root.remove(); } catch (_) {}
+        try { document.removeEventListener('keydown', st.onKey, true); } catch (_) {}
+        if (st.ownUrl) { try { URL.revokeObjectURL(st.ownUrl); } catch (_) {} }
+    }
+
+    _paintMediaVerify() {
+        const st = this._mv;
+        if (!st) return;
+        st.root.innerHTML = this._mediaVerifyHtml(st);
+        this._wireMediaVerify(st, st.root);
+    }
+
+    _paintMediaVerifyDump() {
+        const st = this._mv;
+        if (!st) return;
+        const slot = st.root.querySelector('.cb-mv-dump-slot');
+        if (!slot) return;
+        slot.innerHTML = this._mvDumpHtml(st);
+        this._wireMediaVerify(st, slot);
+    }
+
+    _mvFlash(st, msg, bad) {
+        const f = st.root.querySelector('.sv-flash');
+        if (!f) return;
+        f.textContent = msg;
+        f.style.color = bad ? '#f87171' : '';
+        setTimeout(() => { if (f.textContent === msg) f.textContent = ''; }, 6000);
+    }
+
+    async _mvCopy(text) {
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); return true; }
+        } catch (_) {}
+        return false;
+    }
+
+    _wireMediaVerify(st, scope) {
+        scope.querySelectorAll('[data-cb-mv]').forEach((el) => {
+            el.addEventListener('click', (e) => { e.preventDefault(); this._mediaVerifyAct(st, el); });
+        });
+    }
+
+    async _mediaVerifyAct(st, el) {
+        const what = el.getAttribute('data-cb-mv');
+        const api = window.electronAPI || {};
+        const r = st.r || {};
+        if (what === 'close') { this._closeMediaVerify(); return; }
+        if (what === 'copy') {
+            const okc = await this._mvCopy(el.getAttribute('data-cb-mv-text') || '');
+            this._mvFlash(st, okc ? 'Copied.' : 'Could not copy.', !okc);
+            return;
+        }
+        if (what === 'report') {
+            const okc = await this._mvCopy(this._mvReportText(st));
+            this._mvFlash(st, okc ? 'Copied — paste it into your report.' : 'Could not copy.', !okc);
+            return;
+        }
+        if (what === 'reveal') {
+            const res = api.sourceReveal ? await api.sourceReveal({ path: r.sourceZip }) : null;
+            if (!res || !res.ok) this._mvFlash(st, (res && res.error) || 'Could not open the folder.', true);
+            return;
+        }
+        if (what === 'save') {
+            if (!api.cellebriteMediaSave) return;
+            const res = await api.cellebriteMediaSave({ caseNumber: this.module.caseNumber, importId: st.imp.id, mediaId: st.item.id });
+            if (this._mv !== st || !res || res.canceled) return;
+            if (!res.success) { this._mvFlash(st, res.error || 'Could not save the copy.', true); return; }
+            if (r.read && res.sha256 === r.read.sha256) this._mvFlash(st, '✓ Saved. The copy’s SHA-256 matches.');
+            else this._mvFlash(st, '✗ Saved, but the copy’s SHA-256 does not match. Do not use it.', true);
+            return;
+        }
+        if (what === 'dump') {
+            if (!api.cellebriteDumpVerify) return;
+            const res = await api.cellebriteDumpVerify({ caseNumber: this.module.caseNumber, importId: st.imp.id, mediaId: st.item.id, start: true });
+            if (this._mv !== st) return;
+            st.dump = res && res.success ? res.check : { state: 'error', error: (res && res.error) || 'The check could not be started.' };
+            this._paintMediaVerifyDump();
+            if (st.dump && st.dump.state === 'running') this._pollDumpCheck(st);
+        }
+    }
+
+    _pollDumpCheck(st) {
+        if (st.timer) clearTimeout(st.timer);
+        st.timer = setTimeout(async () => {
+            st.timer = null;
+            if (this._mv !== st) return;
+            let res = null;
+            try {
+                res = await window.electronAPI.cellebriteDumpVerify({ caseNumber: this.module.caseNumber, importId: st.imp.id, mediaId: st.item.id });
+            } catch (_) {}
+            if (this._mv !== st) return;
+            if (res && res.success && res.check) st.dump = res.check;
+            this._paintMediaVerifyDump();
+            if (st.dump && st.dump.state === 'running') this._pollDumpCheck(st);
+        }, 1000);
+    }
+
+    async _openMediaVerify(id) {
+        const s = this._mediaState;
+        const item = s && s.items.find(x => x.id === id);
+        if (!item || !s.imp) return;
+        const api = window.electronAPI || {};
+        this._closeMediaVerify();
+        const root = document.createElement('div');
+        root.className = 'sv-overlay cb-mv-overlay';
+        root.setAttribute('role', 'dialog');
+        root.setAttribute('aria-modal', 'true');
+        const st = {
+            root, item, imp: s.imp, r: null, dump: null, busy: true, timer: null, ownUrl: null,
+            previewUrl: s.blobUrls.get(id) || s.blobUrls.get(`modal:${id}`) || null,
+        };
+        // Capture phase so Esc closes this window and not the preview under it.
+        st.onKey = (e) => { if (e.key === 'Escape' && this._mv === st) { e.preventDefault(); e.stopPropagation(); this._closeMediaVerify(); } };
+        root.addEventListener('mousedown', (e) => { if (e.target === root) this._closeMediaVerify(); });
+        document.addEventListener('keydown', st.onKey, true);
+        this._mv = st;
+        document.body.appendChild(root);
+        this._paintMediaVerify();
+
+        let r;
+        try {
+            r = api.cellebriteMediaVerify
+                ? await api.cellebriteMediaVerify({ caseNumber: this.module.caseNumber, importId: s.imp.id, mediaId: id })
+                : { success: false, error: 'Restart VIPER to use the media check.' };
+        } catch (e) { r = { success: false, error: (e && e.message) || String(e) }; }
+        if (this._mv !== st) return;
+        st.r = r;
+        st.busy = false;
+        st.dump = (r && r.dumpCheck) || null;
+        this._paintMediaVerify();
+        if (st.dump && st.dump.state === 'running') this._pollDumpCheck(st);
+
+        if (item.type === 'image' && !st.previewUrl && (item.size || 0) <= 25 * 1024 * 1024 &&
+            r && r.success && r.read && api.cellebriteMediaRead) {
+            try {
+                const m = await api.cellebriteMediaRead({ caseNumber: this.module.caseNumber, importId: s.imp.id, mediaId: id });
+                if (this._mv !== st) return;
+                if (!m || !m.success || !m.buffer) throw new Error('no preview');
+                const bin = atob(m.buffer);
+                const bytes = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                st.ownUrl = st.previewUrl = URL.createObjectURL(new Blob([bytes], { type: m.mime || item.mime }));
+                const slot = st.root.querySelector('[data-cb-mv-preview]');
+                if (slot) slot.innerHTML = this._mvPreviewHtml(st);
+            } catch (_) {
+                // The preview is a convenience; the check stands without it.
+                const slot = this._mv === st && st.root.querySelector('[data-cb-mv-preview]');
+                if (slot) slot.innerHTML = '<div class="cb-mv-ico">🖼️</div>';
+            }
+        } else if (item.type === 'image' && !st.previewUrl) {
+            const slot = st.root.querySelector('[data-cb-mv-preview]');
+            if (slot && (item.size || 0) <= 25 * 1024 * 1024) slot.innerHTML = '<div class="cb-mv-ico">🖼️</div>';
         }
     }
 

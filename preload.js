@@ -321,6 +321,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Files inside a ZIP filed as evidence (CyberTips from the ICAC Data System)
   evidenceZipList: (zipPath) => ipcRenderer.invoke('evidence-zip-list', zipPath),
   evidenceZipRead: (zipPath, entryName, inZip) => ipcRenderer.invoke('evidence-zip-read', zipPath, entryName, inZip || ''),
+  // Source Validation — see modules/_shared/source-locator.js
+  sourceLocate: (req) => ipcRenderer.invoke('source-locate', req),
+  sourceView: (req) => ipcRenderer.invoke('source-view', req),
+  sourceHash: (req) => ipcRenderer.invoke('source-hash', req),
+  sourceFingerprint: (req) => ipcRenderer.invoke('source-fingerprint', req),
+  sourceCiteBatch: (req) => ipcRenderer.invoke('source-cite-batch', req),
+  sourceReveal: (req) => ipcRenderer.invoke('source-reveal', req),
+  sourceOpenExternal: (req) => ipcRenderer.invoke('source-open-external', req),
+  sourceSaveCopy: (req) => ipcRenderer.invoke('source-save-copy', req),
+  sourcePickOriginal: (req) => ipcRenderer.invoke('source-pick-original', req),
 
   // ── Whisper on-device transcription (Faster-Whisper-XXL) ──
   whisperStatus: () => ipcRenderer.invoke('whisper-status'),
@@ -461,6 +471,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Aperture: update/flag
   apertureUpdateEmail: (data) => ipcRenderer.invoke('aperture-update-email', data),
+  apertureSetSourcePath: (data) => ipcRenderer.invoke('aperture-set-source-path', data),
 
   // Aperture: evidence scanning
   apertureScanEvidence: (data) => ipcRenderer.invoke('aperture-scan-evidence', data),
@@ -518,6 +529,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cellebriteDeleteImport: (data) => ipcRenderer.invoke('cellebrite-delete-import', data),
   cellebriteCancelImport: (data) => ipcRenderer.invoke('cellebrite-cancel-import', data),
   cellebriteMediaRead: (data) => ipcRenderer.invoke('cellebrite-media-read', data),
+  cellebriteMediaVerify: (data) => ipcRenderer.invoke('cellebrite-media-verify', data),
+  cellebriteDumpVerify: (data) => ipcRenderer.invoke('cellebrite-dump-verify', data),
+  cellebriteMediaSave: (data) => ipcRenderer.invoke('cellebrite-media-save', data),
   onCellebriteImportProgress: (callback) => {
     const handler = (_e, data) => callback(data);
     ipcRenderer.on('cellebrite-import-progress', handler);

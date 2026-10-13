@@ -400,6 +400,7 @@ class DatapilotModule {
                 photoExifByHash: data.photoExifByHash,
                 stats: data.stats,
                 dpxPaths: data.dpxPaths || null,  // DPX-only
+                sourceIntegrity: data.sourceIntegrity || null,   // fingerprint of the files VIPER read
                 flagged: { contacts: [], messages: [], calls: [], calendar: [], apps: [], media: [], files: [] },
             };
             this.data.imports.push(imp);
@@ -451,6 +452,10 @@ class DatapilotModule {
             imp.appDataIndex = data.appDataIndex;
             imp.photoExifByHash = data.photoExifByHash;
             imp.stats = data.stats;
+            // The fingerprint stays the one taken at first import, so a folder
+            // that has changed since still shows as changed. An import made
+            // before fingerprints existed gets one now.
+            if (!imp.sourceIntegrity && data.sourceIntegrity) imp.sourceIntegrity = data.sourceIntegrity;
             imp.lastRescanAt = new Date().toISOString();
             // Drop stale flag keys that no longer exist after re-parse
             if (imp.flagged) {
@@ -528,6 +533,91 @@ class DatapilotModule {
         let n = 0;
         for (const k of Object.keys(imp.flagged)) n += (imp.flagged[k] || []).length;
         return n;
+    }
+
+    // ── Source Validation (🔍 Source) ──────────────────────────────────────
+
+    /**
+     * The files a Datapilot export is read from, for an import made before
+     * VIPER recorded which ones it fingerprinted. Missing names are skipped.
+     */
+    _defaultHashOnly(imp) {
+        if (imp && imp.format === 'dpx') return ['dptData.db'];
+        return [
+            'Summary_CaseAndAcquisitionInformation.csv', 'Summary_AcquisitionSummary.csv', 'Summary_ActivityTrail.csv',
+            'DeviceInfo.csv', 'Contacts.csv', 'Applications.csv', 'OtherImageFiles1.csv', 'CameraImageFile1.csv',
+            'ThumbnailImageFiles1.csv', 'VideoFiles1.csv', 'AudioFiles1.csv', 'Files1.csv', 'DatabaseFiles1.csv',
+            'TextFiles1.csv', 'CompressedFiles1.csv', 'DeletedData.csv', 'AppData.csv',
+            'AppData/com.android.providers.telephony_Correspondence.csv',
+            'DeletedData/calllog_db.csv', 'DeletedData/calendar_db.csv',
+        ];
+    }
+
+    /** Where the original export is, and the fingerprint taken at import. */
+    _sourceSpec(imp) {
+        imp = imp || this.getActiveImport();
+        if (!imp) return null;
+        const si = imp.sourceIntegrity || null;
+        const only = si && Array.isArray(si.hashOnly) && si.hashOnly.length ? si.hashOnly.slice() : this._defaultHashOnly(imp);
+        return { source: { path: imp.sourcePath || imp.folderPath || '', hashOnly: only }, expected: si };
+    }
+
+    /**
+     * What to look for in the original for one record: values[0] is the
+     * record's own ID where Datapilot wrote one, the rest are details that
+     * should sit beside it. Only values Datapilot stored as-is are used — a
+     * value with quotes or line breaks is written escaped in a CSV and would
+     * not be found letter for letter.
+     */
+    _citationFor(sectionId, rec) {
+        if (!rec) return { values: [], memberHints: [] };
+        const imp = this.getActiveImport();
+        const dpx = !!(imp && imp.format === 'dpx');
+        const db = ['dptData.db'];
+        const plain = (v) => {
+            const s = v == null ? '' : String(v).trim();
+            return s && s.length <= 160 && !/["\u0000-\u001f]/.test(s) ? s : '';
+        };
+        // pairs = [[label, value], …]; labels travel with the values so a
+        // record missing its ID is not shown with the wrong caption.
+        const pack = (pairs, hints) => {
+            const seen = new Set();
+            const values = [], labels = [];
+            for (const [label, v] of pairs) {
+                const s = plain(v);
+                if (s && !seen.has(s.toLowerCase())) { seen.add(s.toLowerCase()); values.push(s); labels.push(label); }
+            }
+            return { values, labels, memberHints: hints };
+        };
+        switch (sectionId) {
+            case 'messages':
+                return pack([['Message ID', String(rec.uid || '').replace(/^(wa_|wam_)/, '')], ['Message text', rec.text],
+                    ['Timestamp', rec.timestamp], ['Number', rec.address]], dpx ? db : ['telephony_Correspondence']);
+            case 'calls':
+                if (dpx || rec.uid) {
+                    return pack([['Call ID', String(rec.uid || '').replace(/^wacall_/, '')], ['Timestamp', rec.timestamp], ['Number', rec.number]], db);
+                }
+                return pack([['Call record', rec.deletedData]], ['calllog_db']);
+            case 'media':
+                return pack([['SHA-256', rec.sha256], ['File name', rec.fileName], ['SHA3', rec.sha3]],
+                    dpx ? db : ['ImageFile', 'VideoFiles', 'AudioFiles']);
+            case 'files':
+                return pack([['SHA-256', rec.sha256], ['File name', rec.fileName], ['SHA3', rec.sha3]], dpx ? db : ['Files1']);
+            case 'apps':
+                return pack([['App ID', rec.appId], ['App name', rec.displayName], ['Version', rec.version]], dpx ? db : ['Applications.csv']);
+            case 'deleted':
+                return pack([['Deleted record', rec.label], ['Details', rec.info]], dpx ? db : ['DeletedData.csv']);
+            default:
+                return { values: [], labels: [], memberHints: [] };
+        }
+    }
+
+    /** Point VIPER at the export after it has been moved. */
+    relocateSource(importId, newPath) {
+        const imp = (this.data.imports || []).find(i => i && i.id === importId);
+        if (!imp || !newPath) return;
+        imp.sourcePath = newPath;   // folderPath still identifies the import
+        this.saveData();
     }
 
     /**

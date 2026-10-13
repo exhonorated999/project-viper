@@ -368,6 +368,47 @@ class GoogleWarrantUI {
         if (content) content.innerHTML = this._renderSection();
     }
 
+    /**
+     * 🔍 Source button: open the original return at this record. What is
+     * searched for comes from the module's _citationFor, so this button and
+     * the Flag → Evidence report always look for the same thing.
+     */
+    _srcBtn(section, item, title, valueLabels) {
+        const imp = this.currentImport;
+        if (!imp || typeof window === 'undefined' || !window.SourceViewer || !this.module._citationFor) return '';
+        const cit = this.module._citationFor(imp, section, item) || {};
+        const vals = [], vLabels = [];
+        (cit.values || []).forEach((v, i) => {
+            const sv = v == null ? '' : String(v).trim();
+            if (i === 0 || sv) { vals.push(sv); vLabels.push((valueLabels || [])[i] || (i === 0 ? title : 'related detail')); }
+        });
+        if (!vals[0]) return '';
+        const module = this.module;
+        const impId = imp.id;
+        const current = () => module.imports.find(i => i && i.id === impId) || imp;
+        const spec0 = module._sourceSpec(imp);
+        return window.SourceViewer.buttonHtml({
+            title,
+            values: vals,
+            valueLabels: vLabels,
+            context: [['Return', imp.fileName || '']],
+            // Read at click time so a relocated original is used everywhere.
+            source: null,
+            resolveSource: async () => {
+                const sp = module._sourceSpec(current());
+                return sp ? Object.assign({ label: String(sp.source.path).split(/[\\/]/).pop() }, sp.source) : null;
+            },
+            memberHints: cit.memberHints || [],
+            expected: spec0 ? spec0.expected : null,
+            onRelocate: async (picked, next) => {
+                // Kept apart from filePath, which identifies the import.
+                const cur = module.imports.find(i => i && i.id === impId);
+                if (cur) { cur.sourcePath = next.path; module.saveData(); }
+                return next;
+            },
+        }, { compact: true, label: '' });
+    }
+
     _flagBtn(section, key, label) {
         const on = this.module.isFlagged(section, key);
         const safeKey = String(key)
@@ -512,7 +553,7 @@ class GoogleWarrantUI {
                                         <td>${ip.activityType}</td>
                                         <td class="gwp-mono gwp-truncate" title="${ip.androidId || ''}">${ip.androidId || '—'}</td>
                                         <td class="gwp-truncate" title="${ip.userAgent || ''}">${ip.userAgent || '—'}</td>
-                                        <td>${this._flagBtn('ipActivity', fk)}</td>
+                                        <td class="gwp-nowrap">${this._srcBtn('ipActivity', ip, 'IP address', ['IP address', 'Timestamp', 'Activity'])}${this._flagBtn('ipActivity', fk)}</td>
                                     </tr>`;
                                 }).join('')}
                             </tbody>
@@ -541,7 +582,7 @@ class GoogleWarrantUI {
                                         <td><span class="gwp-badge-change">${ch.changeType}</span></td>
                                         <td>${ch.oldValue || '—'}</td>
                                         <td>${ch.newValue || '—'}</td>
-                                        <td>${this._flagBtn('changeHistory', fk)}</td>
+                                        <td class="gwp-nowrap">${this._srcBtn('changeHistory', ch, 'Account change', ['Timestamp', 'IP address', 'Change type'])}${this._flagBtn('changeHistory', fk)}</td>
                                     </tr>`;
                                 }).join('')}
                             </tbody>
@@ -582,7 +623,7 @@ class GoogleWarrantUI {
                             <div class="gwp-email-row">
                                 <div class="gwp-email-from">${this._escHtml(em.from || 'Unknown')}</div>
                                 <div class="gwp-email-date">${em.date ? new Date(em.date).toLocaleString() : '—'}</div>
-                                <span style="margin-left:auto">${this._flagBtn('emails', em.id)}</span>
+                                <span style="margin-left:auto;white-space:nowrap">${this._srcBtn('emails', em, 'Email', ['Message-ID', 'From', 'Subject'])}${this._flagBtn('emails', em.id)}</span>
                             </div>
                             <div class="gwp-email-subject">${this._escHtml(em.subject)}</div>
                             <div class="gwp-email-to">To: ${this._escHtml(em.to || '—')}</div>
@@ -655,7 +696,7 @@ class GoogleWarrantUI {
                                         <td class="gwp-mono gwp-nowrap">${v.startTime || '—'}</td>
                                         <td class="gwp-mono gwp-nowrap">${v.endTime || '—'}</td>
                                         <td>${v.confidence ? v.confidence + '%' : '—'}</td>
-                                        <td>${this._flagBtn('locationVisits', fk)}</td>
+                                        <td class="gwp-nowrap">${this._srcBtn('locationVisits', v, 'Place visit', [v.placeId ? 'Place ID' : 'Place name', 'Address', 'Start time'])}${this._flagBtn('locationVisits', fk)}</td>
                                     </tr>`;
                                 }).join('')}
                             </tbody>
@@ -815,7 +856,7 @@ class GoogleWarrantUI {
                                 <div class="gwp-device-info">
                                     <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
                                         <div class="gwp-device-model">${d.manufacturer || ''} ${d.model || 'Unknown Device'}</div>
-                                        ${this._flagBtn('devices', d.androidId || '')}
+                                        <span style="white-space:nowrap">${this._srcBtn('devices', d, 'Android ID', ['Android ID', 'Model'])}${this._flagBtn('devices', d.androidId || '')}</span>
                                     </div>
                                     <div class="gwp-device-detail">${d.brand || ''} • ${d.carrier || 'No carrier'}</div>
                                     <div class="gwp-device-detail">Android SDK ${d.sdkVersion || '?'} • ${d.locale || ''}</div>
@@ -967,7 +1008,7 @@ class GoogleWarrantUI {
                                     return `
                                     <tr class="${flagged ? 'gwp-row-flagged' : ''}">
                                         ${Object.values(t).map(v => `<td>${this._escHtml(String(v))}</td>`).join('')}
-                                        <td>${this._flagBtn('payments', fk)}</td>
+                                        <td class="gwp-nowrap">${this._srcBtn('payments', t, 'Transaction')}${this._flagBtn('payments', fk)}</td>
                                     </tr>`;
                                 }).join('')}
                             </tbody>

@@ -160,6 +160,39 @@ class DiscordWarrantUI {
                 </button>`;
     }
 
+    /** "Show in original" — finds this record in the return as received. */
+    _srcBtn(section, item, title, valueLabels) {
+        const imp = this.currentImport;
+        if (!imp || typeof window === 'undefined' || !window.SourceViewer || !this.module || !this.module._citationFor) return '';
+        const cit = this.module._citationFor(imp, section, item) || {};
+        const vals = cit.values || [];
+        if (!vals[0]) return '';
+        const module = this.module;
+        const impId = imp.id;
+        const current = () => module.imports.find(i => i && i.id === impId) || imp;
+        const spec0 = module._sourceSpec(imp);
+        return window.SourceViewer.buttonHtml({
+            title,
+            values: vals,
+            valueLabels: vals.map((_, i) => (valueLabels || [])[i] || (i === 0 ? title : 'related detail')),
+            context: [['Return', imp.fileName || '']],
+            // Read at click time so a relocated original is used everywhere.
+            source: null,
+            resolveSource: async () => {
+                const sp = module._sourceSpec(current());
+                return sp ? Object.assign({ label: String(sp.source.path).split(/[\\/]/).pop() }, sp.source) : null;
+            },
+            memberHints: cit.memberHints || [],
+            expected: spec0 ? spec0.expected : null,
+            onRelocate: async (picked, next) => {
+                // Kept apart from filePath, which identifies the import.
+                const cur = module.imports.find(i => i && i.id === impId);
+                if (cur) { cur.sourcePath = next.path; module.saveData(); }
+                return next;
+            },
+        }, { compact: true, label: '' });
+    }
+
     renderEvidenceBar(files) {
         const bar = document.getElementById('dwp-evidence-bar');
         if (!bar) return;
@@ -898,7 +931,9 @@ class DiscordWarrantUI {
                     channel: channelLabel,
                     channelId: ch ? ch.channelId : null,
                     contents: m.contents || '',
-                    attachments: m.attachments || ''
+                    attachments: m.attachments || '',
+                    rawTimestamp: m.rawTimestamp || '',
+                    authorId: m.authorId || ''
                 };
             }
 
@@ -937,7 +972,7 @@ class DiscordWarrantUI {
                             <div class="dwp-bubble-foot">
                                 <span class="dwp-bubble-stamp" title="${this._esc(m.timestamp || m.rawTimestamp || '')}">${this._esc(this._fmtTime(m.timestamp))}</span>
                                 ${m.id ? `<code class="dwp-bubble-id">${this._esc(String(m.id))}</code>` : ''}
-                                <span class="dwp-bubble-flag">${this._flagBtn('messages', m.id)}</span>
+                                <span class="dwp-bubble-flag">${m.id != null ? this._srcBtn('messages', this._flagPayloads['messages|' + m.id], 'Message ID', ['Message ID', 'Message text', 'Time (as stored)', 'Author ID']) : ''}${this._flagBtn('messages', m.id)}</span>
                             </div>
                         </div>
                     </div>
@@ -1119,7 +1154,7 @@ class DiscordWarrantUI {
                     <div class="dwp-card dwp-mt" style="${flagged ? 'border:1px solid #fbbf24;box-shadow:0 0 0 2px rgba(245,158,11,.15);' : ''}">
                         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
                             <h3 class="dwp-card-title" style="margin:0">${this._esc(s.name)}</h3>
-                            ${this._flagBtn('servers', s.id)}
+                            <span style="white-space:nowrap">${this._srcBtn('servers', { id: s.id, name: s.name }, 'Server ID', ['Server ID', 'Server name'])}${this._flagBtn('servers', s.id)}</span>
                         </div>
                         <div class="dwp-kv-list">
                             ${this._kv('Server ID', s.id)}
@@ -1170,7 +1205,7 @@ class DiscordWarrantUI {
                                     <button class="dwp-arin-btn" onclick="dwpArinLookup(this, '${this._esc(r.ip)}')" title="ARIN WHOIS Lookup">🌐 ARIN</button>
                                     <span class="dwp-arin-result"></span>
                                 </td>
-                                <td>${this._flagBtn('ips', r.ip)}</td>
+                                <td style="white-space:nowrap">${this._srcBtn('ips', { ip: r.ip, firstSeen: r.firstSeen, lastSeen: r.lastSeen }, 'IP address', ['IP address', 'First seen (as stored)', 'Last seen (as stored)'])}${this._flagBtn('ips', r.ip)}</td>
                             </tr>
                         `;}).join('')}
                     </tbody>
@@ -1209,7 +1244,7 @@ class DiscordWarrantUI {
                                 <td>${r.ips.map(ip => `<code>${this._esc(ip)}</code>`).join('<br>')}</td>
                                 <td>${this._fmtDate(r.firstSeen)}</td>
                                 <td>${this._fmtDate(r.lastSeen)}</td>
-                                <td>${this._flagBtn('devices', k)}</td>
+                                <td style="white-space:nowrap">${this._srcBtn('devices', { vendorId: r.device_vendor_id || '', firstSeen: r.firstSeen, lastSeen: r.lastSeen }, 'Device ID', ['Device ID'])}${this._flagBtn('devices', k)}</td>
                             </tr>
                         `;}).join('')}
                     </tbody>
@@ -1303,7 +1338,7 @@ class DiscordWarrantUI {
                                 <td>${this._esc(r.device || r.browser || '—')}${r.client_version ? ' · v' + this._esc(r.client_version) : ''}</td>
                                 <td>${this._esc(r.os || '—')}${r.os_version ? ' ' + this._esc(r.os_version) : ''}</td>
                                 <td><code class="dwp-trunc">${this._esc(r.session || '—')}</code></td>
-                                <td>${this._flagBtn('activity', k)}</td>
+                                <td style="white-space:nowrap">${this._srcBtn('activity', { timestamp: r.timestamp, event_type: r.event_type, session: r.session, ip: r.ip, clientVersion: r.client_version }, 'Event time', ['Event time (as stored)', 'Event', 'Session', 'IP address', 'Client version'])}${this._flagBtn('activity', k)}</td>
                             </tr>
                         `;}).join('')}
                     </tbody>

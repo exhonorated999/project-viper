@@ -48,6 +48,13 @@
  *   • IPC call to warrant-export-flags-bundle
  *   • Insertion of the resulting Evidence record into viperCaseEvidence
  *   • Toast feedback
+ *   • Source Validation (optional): when the module supplies
+ *       getSourceSpec(imp)        → { source:{path,entry?,inZip?,extraPaths?}, expected? }
+ *       getItemCitation(id, item, imp) → { values:[primary, ...corroborating], memberHints:[...] } | null
+ *     every flagged item is searched for, word for word, in the original
+ *     return and the report records where it was found (file › line/page)
+ *     plus the original's SHA-256 and whether it still matches the
+ *     fingerprint taken at import. A failure here never blocks the push.
  */
 
 (function (global) {
@@ -133,7 +140,9 @@
                 resolveFlags,
                 getSubjectInfo,
                 getSourceFileName,
-                getSectionConfigs
+                getSectionConfigs,
+                getSourceSpec,
+                getItemCitation
             } = opts || {};
 
             const imp = (typeof getActiveImport === 'function') ? getActiveImport() : null;
@@ -191,13 +200,18 @@
                     ? (getSourceFileName(imp) || '')
                     : '';
 
+                // 5b. Source Validation — where each item sits in the original.
+                const sv = await this._citeSections(imp, sectionConfigsForReport, sections, getSourceSpec, getItemCitation);
+
                 const res = await global.electronAPI.warrantExportFlagsBundle({
                     caseNumber, bundleId,
                     moduleSlug, moduleLabel, moduleFolder, bundleLabel,
                     sourceFileName, subjectInfo,
                     sectionConfigs: sectionConfigsForReport,
                     sections,
-                    generatedAt
+                    generatedAt,
+                    provenance: sv ? sv.provenance : null,
+                    citations:  sv ? sv.citations : null
                 });
 
                 if (!res || !res.success) {
@@ -246,7 +260,15 @@
                         fileName: sourceFileName || imp.fileName || '',
                         subjectInfo,
                         flagCount: total,
-                        counts
+                        counts,
+                        sourceValidation: sv ? {
+                            integrity: sv.provenance.integrity,
+                            sha256: sv.provenance.sha256 || null,
+                            found: sv.summary.found,
+                            related: sv.summary.related,
+                            notFound: sv.summary.notFound,
+                            notChecked: sv.summary.notChecked
+                        } : null
                     }
                 };
 
@@ -271,6 +293,94 @@
                 this._toast('Failed to push to evidence: ' + (e.message || e), 'error');
                 return { success: false, error: e.message };
             }
+        },
+
+        /**
+         * Search the original return for every flagged item and hash it.
+         * Returns null when the module has not opted in or the desktop API is
+         * missing; otherwise { provenance, citations:{sectionId:[cite|null]}, summary }.
+         * Never throws — validation must not be the reason a push fails.
+         */
+        async _citeSections(imp, configs, sections, getSourceSpec, getItemCitation) {
+            const api = global.electronAPI;
+            if (typeof getSourceSpec !== 'function' || typeof getItemCitation !== 'function') return null;
+            if (!api || typeof api.sourceCiteBatch !== 'function' || typeof api.sourceHash !== 'function') return null;
+            let spec;
+            try { spec = getSourceSpec(imp); } catch (_) { spec = null; }
+            if (!spec || !spec.source || !spec.source.path) return null;
+
+            const provenance = {
+                checkedAt: new Date().toISOString(),
+                fileName: String(spec.source.path).split(/[\\/]/).pop(),
+                path: spec.source.path,
+                entry: spec.source.entry || '',
+                integrity: 'unknown',
+                recorded: spec.expected || null
+            };
+            const citations = {};
+            const summary = { found: 0, related: 0, notFound: 0, notChecked: 0, notApplicable: 0 };
+
+            this._toast('Checking flagged items against the original return…', 'info');
+
+            // Integrity first: the officer needs to know the file is unchanged
+            // before a line number in it means anything.
+            try {
+                const h = await api.sourceHash({ source: spec.source, expected: spec.expected || null });
+                if (h && h.ok) {
+                    provenance.scope = h.scope;
+                    provenance.sha256 = h.contentSha256 || null;
+                    if (h.container) { provenance.containerSha256 = h.container.sha256; provenance.size = h.container.size; provenance.encryptedAtRest = !!h.container.encryptedAtRest; }
+                    if (h.member && h.member.sha256) { provenance.memberName = h.member.name; provenance.memberSha256 = h.member.sha256; }
+                    if (h.folder) { provenance.fileCount = h.folder.fileCount; provenance.size = h.folder.totalBytes; provenance.manifestSha256 = h.folder.manifestSha256; }
+                    provenance.integrity = spec.expected ? (h.status || 'unknown') : 'none';
+                } else {
+                    provenance.integrity = h && h.missing ? 'missing' : (h && h.locked ? 'locked' : 'unknown');
+                    provenance.error = (h && h.error) || '';
+                }
+            } catch (e) { provenance.error = (e && e.message) || String(e); }
+
+            const queries = [];
+            for (const cfg of configs) {
+                const items = sections[cfg.id] || [];
+                citations[cfg.id] = items.map(() => null);
+                items.forEach((item, i) => {
+                    let q = null;
+                    try { q = getItemCitation(cfg.id, item, imp); } catch (_) { q = null; }
+                    const vals = q && Array.isArray(q.values) ? q.values.map(v => v == null ? '' : String(v).trim()) : [];
+                    if (!vals.length || !vals.some(Boolean)) { citations[cfg.id][i] = { notApplicable: true }; summary.notApplicable++; return; }
+                    queries.push({ id: cfg.id + '\u0001' + i, values: vals, memberHints: (q && q.memberHints) || [],
+                                   record: (q && q.record) || undefined });
+                });
+            }
+
+            if (queries.length && provenance.integrity !== 'missing') {
+                let r = null;
+                try { r = await api.sourceCiteBatch({ source: spec.source, items: queries }); }
+                catch (e) { r = { ok: false, error: (e && e.message) || String(e) }; }
+                const byId = new Map(((r && r.results) || []).map(x => [x && x.id, x]));
+                if (r && r.locked) provenance.citeNote = 'locked';
+                else if (!r || !r.ok) provenance.citeNote = (r && r.error) || 'The original could not be searched.';
+                for (const q of queries) {
+                    const [sid, idx] = q.id.split('\u0001');
+                    const x = byId.get(q.id);
+                    let c;
+                    if (!x || x.notChecked || !r || !r.ok) { c = { notChecked: true }; summary.notChecked++; }
+                    else if (!x.found) { c = { found: false }; summary.notFound++; }
+                    else {
+                        c = { found: true, member: x.member, line: x.line || null, page: x.page || null,
+                              matchKind: x.matchKind || 'exact', primaryFound: x.primaryFound !== false,
+                              corroborated: x.corroborated || 0,
+                              table: x.table || null, rowid: x.rowid != null ? x.rowid : null };
+                        // The value itself was not found; only a related record was.
+                        if (c.primaryFound) summary.found++; else summary.related++;
+                    }
+                    citations[sid][+idx] = c;
+                }
+            } else if (queries.length) {
+                for (const q of queries) { const [sid, idx] = q.id.split('\u0001'); citations[sid][+idx] = { notChecked: true }; summary.notChecked++; }
+            }
+            provenance.summary = summary;
+            return { provenance, citations, summary };
         },
 
         // ─── Toast helper (uses showToast if available, falls back to alert) ──

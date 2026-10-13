@@ -35,6 +35,10 @@
          writes nothing. Loads before the page script because every card
          renderer below asks it for a chip. -->
     <script src="modules/_shared/provenance.js"></script>
+    <!-- Source Validation: the "see it in the original return" window.
+         Buttons beside parsed values call window.SourceViewer.openToken(). -->
+    <link rel="stylesheet" href="modules/_shared/source-viewer.css" />
+    <script src="modules/_shared/source-viewer.js"></script>
     <script src="case-snapshot.js"></script>
 
     <script src="libs/tailwindcss.js"></script>
@@ -45555,6 +45559,17 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         // the evidence item that holds the original PDF.
                         if (it.evidenceTag) parsed.sourceEvidenceTag = it.evidenceTag;
                         if (it.fromZip) parsed.sourceZip = it.fromZip;
+                        // Source Validation: the exact original this tip was
+                        // read from, and its SHA-256 as imported, so every
+                        // value shown on the tip can be checked against it.
+                        parsed.sourcePath = it.path;
+                        if (it.entryName) { parsed.sourceEntry = it.entryName; if (it.inZip) parsed.sourceInZip = it.inZip; }
+                        if (window.electronAPI.sourceFingerprint) {
+                            const fpSrc = { path: it.path };
+                            if (it.entryName) { fpSrc.entry = it.entryName; if (it.inZip) fpSrc.inZip = it.inZip; }
+                            try { parsed.sourceIntegrity = await window.electronAPI.sourceFingerprint({ source: fpSrc }); }
+                            catch (_) { parsed.sourceIntegrity = null; }
+                        }
                         tips.push(parsed);
                         tally.added++;
                     } catch (err) {
@@ -46063,6 +46078,83 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             __ctSendToPayload = null;
         }
 
+        // ── Source Validation: 🔍 Source buttons on a CyberTip ─────────
+        // One click from a value on the tip to the same words in the
+        // original NCMEC report, with the report's SHA-256. Tips imported
+        // from this version on carry the original's path; older ones are
+        // found through the Evidence item they were read from, and if that
+        // fails the officer can point VIPER at the report once.
+        function _ctSourceOf(t) {
+            if (!t || !t.sourcePath) return null;
+            const s = { path: t.sourcePath, label: String(t.sourcePath).split(/[\\/]/).pop() };
+            if (t.sourceEntry) s.entry = t.sourceEntry;
+            if (t.sourceInZip) s.inZip = t.sourceInZip;
+            return s;
+        }
+        function _ctSourceFromEvidence(t) {
+            if (!t) return null;
+            const wants = [t.sourceZip, t.fileName].filter(Boolean).map(n => String(n).toLowerCase());
+            if (!wants.length) return null;
+            const evs = (caseEvidence || []).filter(ev => ev && Array.isArray(ev.files));
+            // The Evidence item the tip was read from first, then any other.
+            evs.sort((a, b) => ((b.tag === t.sourceEvidenceTag) - (a.tag === t.sourceEvidenceTag)));
+            for (const want of wants) {
+                for (const ev of evs) {
+                    for (const f of ev.files) {
+                        if (!f || !f.path) continue;
+                        const base = String(f.path).split(/[\\/]/).pop().toLowerCase();
+                        if (base === want || String(f.name || '').toLowerCase() === want) return { path: f.path, label: base };
+                    }
+                }
+            }
+            return null;
+        }
+        // values[0] is the value itself; the rest are other details of the
+        // same record that should sit beside it in the original (they rank
+        // the right occurrence first, and are never required).
+        function _ctSrcBtn(t, title, values, opts) {
+            if (!t || !window.SourceViewer) return '';
+            opts = opts || {};
+            const labels = opts.valueLabels || [];
+            const vals = [], vLabels = [];
+            (values || []).forEach((v, i) => {
+                const sv = v == null ? '' : String(v).trim();
+                if (i === 0 || sv) { vals.push(sv); vLabels.push(labels[i] || (i === 0 ? title : 'related detail')); }
+            });
+            if (!vals[0]) return '';
+            const hint = t.sourceEntry ? String(t.sourceEntry).split('/').pop() : (t.fileName || '');
+            const reportNumber = t.reportNumber || '';
+            const fileName = t.fileName || '';
+            return window.SourceViewer.buttonHtml({
+                title,
+                shown: opts.shown,
+                values: vals,
+                valueLabels: vLabels,
+                context: [['CyberTip', reportNumber ? 'CT# ' + reportNumber : fileName]].concat(opts.context || []),
+                // Looked up at click time, so a relocated original is used
+                // by every button on the tip without a re-render.
+                source: null,
+                resolveSource: async () => _ctSourceOf(t) || _ctSourceFromEvidence(t),
+                memberHints: hint ? [hint] : [],
+                expected: t.sourceIntegrity || null,
+                onRelocate: async (picked, next) => {
+                    const tips = getCyberTips();
+                    const i = tips.findIndex(x => x && (reportNumber ? x.reportNumber === reportNumber : x.fileName === fileName));
+                    if (i < 0) return next;
+                    tips[i].sourcePath = next.path;
+                    if (next.entry) { tips[i].sourceEntry = next.entry; tips[i].sourceInZip = next.inZip || ''; }
+                    else { delete tips[i].sourceEntry; delete tips[i].sourceInZip; }
+                    saveCyberTips(tips);
+                    // Later buttons on this tip read the new path.
+                    t.sourcePath = tips[i].sourcePath;
+                    if (next.entry) { t.sourceEntry = tips[i].sourceEntry; t.sourceInZip = tips[i].sourceInZip; }
+                    else { delete t.sourceEntry; delete t.sourceInZip; }
+                    viperToast('VIPER will use that file as this CyberTip\'s original from now on.', 'success');
+                    return next;
+                },
+            }, { compact: true, label: opts.label != null ? opts.label : 'Source' });
+        }
+
         function renderCyberTipDetail(idx) {
             // Reset send-to payload registry per detail render
             __ctSendRegistry = [];
@@ -46079,6 +46171,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 const typeKey = (type || '').toLowerCase().replace(/\s+/g, '');
                 const sendKey = typeKey === 'userid' ? 'userid' : (typeKey === 'profileurl' ? 'profile' : typeKey);
                 const regIdx = ctRegisterSend([{ key: sendKey, label: type, value: value, espName: espName }]);
+                const srcTitle = ({ NAME: 'Name', EMAIL: 'Email', PHONE: 'Phone', USERNAME: 'Username', USERID: 'User ID' })[type] || type;
+                const srcBtn = _ctSrcBtn(t, srcTitle, [String(value || '').replace(/\s*\(Verified\)\s*$/i, '')],
+                    { context: [['Role', role]], label: 'Source' });
                 return `
                 <div class="glass-card rounded-lg p-4 border border-gray-700/50">
                     <div class="flex items-center gap-2 mb-2 flex-wrap">
@@ -46088,7 +46183,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     </div>
                     <div class="text-white font-semibold text-lg break-all">${value}</div>
                     ${extra || ''}
-                    <div class="mt-3 flex justify-end">
+                    <div class="mt-3 flex justify-end items-center gap-2">
+                        ${srcBtn}
                         <button onclick="ctSendBtn(${regIdx})" class="px-2.5 py-1 text-xs bg-viper-cyan/20 text-viper-cyan rounded border border-viper-cyan/40 hover:bg-viper-cyan/30 transition-colors flex items-center gap-1" title="Send to Suspect / Victim / Other Individual">
                             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
                             Send To
@@ -46120,6 +46216,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>
                             ARIN Lookup
                         </button>
+                        ${_ctSrcBtn(t, 'IP address', [ip.address, ip.timestamp, ip.port], { valueLabels: ['IP address', 'Timestamp', 'Port'], context: [['Role', typeLabel], ['Time', ip.timestamp], ['Port', ip.port]] })}
                         <button onclick="ctSendBtn(${regIdx})" class="ml-auto px-2.5 py-1 text-xs bg-viper-cyan/20 text-viper-cyan rounded border border-viper-cyan/40 hover:bg-viper-cyan/30 transition-colors flex items-center gap-1" title="Send to Suspect / Victim / Other Individual">
                             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
                             Send To
@@ -46160,7 +46257,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     <div class="grid grid-cols-2 gap-x-8 gap-y-3">
                         <div>
                             <div class="text-xs text-gray-400">CyberTipline Report Number</div>
-                            <div class="text-white font-bold text-lg">${t.reportNumber || 'N/A'}</div>
+                            <div class="text-white font-bold text-lg">${t.reportNumber || 'N/A'}${_ctSrcBtn(t, 'Report number', [t.reportNumber], { label: '' })}</div>
                         </div>
                         <div>
                             <div class="text-xs text-gray-400">Priority Level</div>
@@ -46172,15 +46269,15 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         </div>
                         <div>
                             <div class="text-xs text-gray-400">Incident Type</div>
-                            <div class="text-white">${t.incidentType || 'N/A'}</div>
+                            <div class="text-white">${t.incidentType || 'N/A'}${_ctSrcBtn(t, 'Incident type', [t.incidentType], { label: '' })}</div>
                         </div>
                         <div>
                             <div class="text-xs text-gray-400">Incident Time</div>
-                            <div class="text-white">${t.incidentTime || 'N/A'}</div>
+                            <div class="text-white">${t.incidentTime || 'N/A'}${_ctSrcBtn(t, 'Incident time', [t.incidentTime], { label: '' })}</div>
                         </div>
                         <div>
                             <div class="text-xs text-gray-400">Date Received (UTC)</div>
-                            <div class="text-white">${t.receivedDate || 'N/A'}</div>
+                            <div class="text-white">${t.receivedDate || 'N/A'}${_ctSrcBtn(t, 'Date received', [t.receivedDate], { label: '' })}</div>
                         </div>
                         ${t.chatService ? `<div><div class="text-xs text-gray-400">Chat Service / IM Client</div><div class="text-white">${t.chatService}</div></div>` : ''}
                         ${t.incidentDescription ? `<div class="col-span-2"><div class="text-xs text-gray-400">Description of Incident</div><div class="text-gray-200 text-sm whitespace-pre-wrap leading-relaxed">${t.incidentDescription}</div></div>` : ''}
@@ -46252,15 +46349,15 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             <div class="border border-gray-700 rounded-lg p-4">
                                 <div class="flex items-center gap-3 mb-2 flex-wrap">
                                     <span class="text-xs px-2 py-0.5 rounded border font-semibold ${roleColor}">${p.role}</span>
-                                    <span class="text-white font-bold">${p.name || '(unnamed)'}</span>
+                                    <span class="text-white font-bold">${p.name || '(unnamed)'}${_ctSrcBtn(t, 'Name', [p.name, p.dob], { valueLabels: ['Name', 'Date of birth'], context: [['Role', p.role]], label: '' })}</span>
                                     ${p.displayName ? `<span class="text-xs px-1.5 py-0.5 rounded border bg-gray-500/20 text-gray-300 border-gray-500/40">"${p.displayName}"</span>` : ''}
                                     ${p.espProductService ? `<span class="text-xs px-1.5 py-0.5 rounded border bg-cyan-500/20 text-cyan-400 border-cyan-500/40">${p.espProductService}</span>` : ''}
                                     ${sendBtnHtml}
                                 </div>
                                 <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-                                    ${p.dob ? `<div><span class="text-gray-500">DOB:</span> <span class="text-gray-300">${p.dob}</span></div>` : ''}
+                                    ${p.dob ? `<div><span class="text-gray-500">DOB:</span> <span class="text-gray-300">${p.dob}</span>${_ctSrcBtn(t, 'Date of birth', [p.dob, p.name], { valueLabels: ['Date of birth', 'Name'], context: [['Person', p.name]], label: '' })}</div>` : ''}
                                     ${p.age ? `<div><span class="text-gray-500">Age:</span> <span class="text-gray-300">${p.age}</span></div>` : ''}
-                                    ${p.estimatedLocation ? `<div class="col-span-2"><span class="text-gray-500">Location:</span> <span class="text-gray-300">${p.estimatedLocation}</span></div>` : ''}
+                                    ${p.estimatedLocation ? `<div class="col-span-2"><span class="text-gray-500">Location:</span> <span class="text-gray-300">${p.estimatedLocation}</span>${_ctSrcBtn(t, 'Location', [p.estimatedLocation], { context: [['Person', p.name]], label: '' })}</div>` : ''}
                                     ${p.priorReports ? `<div class="col-span-2"><span class="text-gray-500">Prior CTs:</span> <span class="text-yellow-400 text-xs">${p.priorReports}</span></div>` : ''}
                                     ${p.profileUrls.length ? `<div class="col-span-2"><span class="text-gray-500">Profile:</span> ${p.profileUrls.map(u => `<a href="${u}" target="_blank" class="text-cyan-400 hover:underline text-xs break-all">${u}</a>`).join(', ')}</div>` : ''}
                                 </div>
@@ -46285,11 +46382,11 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             return `
                             <div class="border border-gray-700 rounded-lg p-4">
                                 <div class="flex items-start justify-between gap-3 mb-1 flex-wrap">
-                                    <div class="text-white font-medium text-sm break-all flex-1 min-w-0">${f.filename}</div>
+                                    <div class="text-white font-medium text-sm break-all flex-1 min-w-0">${f.filename}${_ctSrcBtn(t, 'File name', [f.filename, f.md5], { valueLabels: ['File name', 'MD5'], label: '' })}</div>
                                     ${viewedTag}
                                 </div>
                                 <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400">
-                                    ${f.md5 ? `<span>MD5: <span class="text-gray-300 font-mono">${f.md5}</span></span>` : ''}
+                                    ${f.md5 ? `<span>MD5: <span class="text-gray-300 font-mono">${f.md5}</span>${_ctSrcBtn(t, 'MD5', [f.md5, f.filename], { valueLabels: ['MD5', 'File name'], context: [['File', f.filename]], label: '' })}</span>` : ''}
                                     ${f.categorization ? `<span>Category: <span class="text-yellow-400">${f.categorization}</span></span>` : ''}
                                     ${espViewed}
                                     ${publicly}
@@ -46306,7 +46403,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     <div class="space-y-3">
                         ${t.webpages.map(w => `
                         <div class="border border-gray-700 rounded-lg p-4">
-                            ${w.url ? `<div class="break-all"><a href="${w.url}" target="_blank" class="text-cyan-400 hover:underline font-mono text-sm">${w.url}</a></div>` : ''}
+                            ${w.url ? `<div class="break-all"><a href="${w.url}" target="_blank" class="text-cyan-400 hover:underline font-mono text-sm">${w.url}</a>${_ctSrcBtn(t, 'Web address', [w.url, w.timestamp], { valueLabels: ['Web address', 'Time'], label: '' })}</div>` : ''}
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-x-4 gap-y-1 mt-2 text-xs text-gray-400">
                                 ${w.timestamp ? `<span>Time: <span class="text-gray-300">${w.timestamp}</span></span>` : ''}
                                 ${w.publicly ? `<span>Publicly available: <span class="text-gray-300">${w.publicly}</span></span>` : ''}
@@ -46337,7 +46434,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             <tbody>
                                 ${t.ipGeoLookup.map(g => `
                                 <tr class="border-b border-gray-800/50">
-                                    <td class="py-2 pr-3 font-mono text-white break-all">${g.address || ''}</td>
+                                    <td class="py-2 pr-3 font-mono text-white break-all">${g.address || ''}${_ctSrcBtn(t, 'IP address', [g.address, g.city, g.isp], { valueLabels: ['IP address', 'City', 'ISP'], context: [['City', g.city], ['ISP', g.isp]], label: '' })}</td>
                                     <td class="py-2 pr-3 text-gray-200">${g.country || ''}</td>
                                     <td class="py-2 pr-3 text-gray-200">${g.region || ''}</td>
                                     <td class="py-2 pr-3 text-gray-200">${g.city || ''}</td>
@@ -46370,7 +46467,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                 <tr class="border-b border-gray-800/50">
                                     <td class="py-2 pr-3 text-gray-200">${d.role || ''}</td>
                                     <td class="py-2 pr-3 text-gray-300">${d.type || ''}</td>
-                                    <td class="py-2 pr-3 text-white font-mono break-all">${d.value || ''}</td>
+                                    <td class="py-2 pr-3 text-white font-mono break-all">${d.value || ''}${_ctSrcBtn(t, d.type || 'Value', [d.value, d.result], { valueLabels: [d.type || 'Value', 'Result'], label: '' })}</td>
                                     <td class="py-2 pr-3 text-gray-300">${d.result || ''}</td>
                                 </tr>`).join('')}
                             </tbody>

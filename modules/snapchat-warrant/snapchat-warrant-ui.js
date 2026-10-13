@@ -154,6 +154,84 @@ class SnapchatWarrantUI {
         }
     }
 
+    /**
+     * "Source" button: opens the original return at the exact row a value
+     * came from (Source Validation). values[0] is what the officer is
+     * checking; the rest corroborate it. Returns '' when there is nothing
+     * to look for, so a blank cell never grows a button.
+     */
+    _srcBtn(title, values, opts) {
+        const imp = this.currentImport;
+        if (!imp || typeof window === 'undefined' || !window.SourceViewer) return '';
+        opts = opts || {};
+        const labels = opts.valueLabels || [];
+        const vals = [], vLabels = [];
+        (values || []).forEach((v, i) => {
+            const sv = v == null ? '' : String(v).trim();
+            if (i === 0 || sv) { vals.push(sv); vLabels.push(labels[i] || (i === 0 ? title : 'related detail')); }
+        });
+        if (!vals[0]) return '';
+        const module = this.module;
+        const impId = imp.id;
+        const current = () => module.imports.find(i => i && i.id === impId) || imp;
+        return window.SourceViewer.buttonHtml({
+            title,
+            values: vals,
+            valueLabels: vLabels,
+            context: [['Return', imp.fileName || '']].concat(opts.context || []),
+            // Read at click time so a relocated original is used everywhere.
+            source: null,
+            resolveSource: async () => {
+                const cur = current();
+                const p = cur.sourcePath || cur.filePath;
+                if (!p) return null;
+                const out = { path: p, label: String(p).split(/[\\/]/).pop() };
+                if (Array.isArray(cur.sourceExtraPaths) && cur.sourceExtraPaths.length) out.extraPaths = cur.sourceExtraPaths.slice();
+                return out;
+            },
+            memberHints: opts.hints || [],
+            expected: imp.sourceIntegrity || null,
+            relocateFolder: !!imp.isFolder,
+            onRelocate: async (picked, next) => {
+                // Kept apart from filePath, which identifies the import.
+                const cur = module.imports.find(i => i && i.id === impId);
+                if (cur) {
+                    // Multi-part productions travel together: re-point the
+                    // sibling part folders at the new parent folder.
+                    if (Array.isArray(cur.sourceExtraPaths) && cur.sourceExtraPaths.length) {
+                        const sep = /\\/.test(next.path) ? '\\' : '/';
+                        const parent = String(next.path).replace(/[\\/]+$/, '').replace(/[\\/][^\\/]*$/, '');
+                        cur.sourceExtraPaths = cur.sourceExtraPaths.map(x => parent + sep + String(x).replace(/[\\/]+$/, '').split(/[\\/]/).pop());
+                        next.extraPaths = cur.sourceExtraPaths.slice();
+                    }
+                    cur.sourcePath = next.path;
+                    module.saveData();
+                }
+                return next;
+            },
+        }, { compact: true, label: opts.label != null ? opts.label : '' });
+    }
+
+    /** Pick the most identifying cells of a generic CSV row for _srcBtn. */
+    _rowSrcValues(r, prefer) {
+        const vals = [], labels = [];
+        const used = new Set();
+        const take = (c) => {
+            const v = r[c] == null ? '' : String(r[c]).trim();
+            if (!v || used.has(c) || vals.length >= 3) return;
+            used.add(c); vals.push(v); labels.push(c);
+        };
+        const cols = Object.keys(r || {}).filter(c => c.charAt(0) !== '_');
+        (prefer || []).forEach(re => { const c = cols.find(k => re.test(k) && String(r[k] == null ? '' : r[k]).trim()); if (c) take(c); });
+        cols.filter(c => String(r[c] == null ? '' : r[c]).trim().length >= 4).forEach(take);
+        return { vals, labels };
+    }
+
+    _rowSrcBtn(title, r, prefer, hint) {
+        const rv = this._rowSrcValues(r, prefer);
+        return this._srcBtn(title, rv.vals, { valueLabels: rv.labels, hints: [hint] });
+    }
+
     _flagBtn(section, key, label) {
         const on = this.module.isFlagged(section, key);
         // Keys embed real message text, so they can contain quotes, newlines
@@ -359,12 +437,12 @@ class SnapchatWarrantUI {
                 <div class="swp-account-header">
                     <div class="swp-snap-logo">👻</div>
                     <div class="swp-account-info">
-                        <h2 class="swp-account-username">${this._esc(imp.targetUsername || '(unknown)')}</h2>
+                        <h2 class="swp-account-username">${this._esc(imp.targetUsername || '(unknown)')} ${this._srcBtn('Target username', [imp.targetUsername], { hints: ['conversations.csv', 'subscriber_info.csv'] })}</h2>
                         <div class="swp-account-meta">
-                            ${imp.email ? `<span>📧 ${this._esc(imp.email)}</span>` : ''}
-                            ${imp.userId ? `<span class="swp-mono">🆔 ${this._esc(imp.userId)}</span>` : ''}
+                            ${imp.email ? `<span>📧 ${this._esc(imp.email)} ${this._srcBtn('Email', [imp.email], { hints: ['conversations.csv', 'subscriber_info.csv'] })}</span>` : ''}
+                            ${imp.userId ? `<span class="swp-mono">🆔 ${this._esc(imp.userId)} ${this._srcBtn('User ID', [imp.userId], { hints: ['conversations.csv', 'subscriber_info.csv'] })}</span>` : ''}
                         </div>
-                        ${imp.dateRange ? `<div class="swp-date-range">📅 ${this._esc(imp.dateRange)}</div>` : ''}
+                        ${imp.dateRange ? `<div class="swp-date-range">📅 ${this._esc(imp.dateRange)} ${this._srcBtn('Date range', [imp.dateRange], { hints: ['conversations.csv'] })}</div>` : ''}
                     </div>
                 </div>
 
@@ -403,7 +481,7 @@ class SnapchatWarrantUI {
                     <div class="swp-card">
                         <h3 class="swp-card-title">📋 Subscriber Info</h3>
                         <div class="swp-kv-list">
-                            ${Object.entries(sub).map(([k, v]) => this._kvRow(k, v)).join('')}
+                            ${Object.entries(sub).map(([k, v]) => this._kvRow(k, v, v && typeof v === 'object' ? '' : this._srcBtn(k, [v], { hints: ['subscriber_info.csv'] }))).join('')}
                         </div>
                     </div>
                 ` : ''}
@@ -530,7 +608,7 @@ class SnapchatWarrantUI {
                     <span class="swp-msg-author">${this._esc(m.sender_username || '?')}</span>
                     ${m.recipient_username ? `<span class="swp-msg-arrow">→</span><span class="swp-msg-recipient">${this._esc(m.recipient_username)}</span>` : ''}
                     <span class="swp-msg-time">${this._esc(m.timestamp || '')}</span>
-                    <span style="margin-left:auto">${this._flagBtn('conversations', window.WarrantFlagsKey.snapchatMessage(m))}</span>
+                    <span style="margin-left:auto;display:inline-flex;gap:4px;align-items:center">${this._srcBtn('Message', [m.text || m.message_id || m.timestamp, m.timestamp, m.sender_username, m.conversation_id], { valueLabels: ['Message', 'Sent', 'Sender', 'Conversation ID'], context: [['Sender', m.sender_username || ''], ['Sent', m.timestamp || '']], hints: ['conversations.csv'] })}${this._flagBtn('conversations', window.WarrantFlagsKey.snapchatMessage(m))}</span>
                 </div>
                 <div class="swp-msg-meta">
                     <span class="swp-tag">${this._esc(m.content_type || m.message_type || '')}</span>
@@ -782,7 +860,7 @@ class SnapchatWarrantUI {
                                 <td>${m.duration ? parseFloat(m.duration).toFixed(2) + 's' : ''}</td>
                                 <td>${m.encrypted === 'true' ? '🔒' : ''}</td>
                                 <td class="swp-mono">${this._esc((m.media_id || m.id || '').slice(0, 24))}</td>
-                                <td>${this._flagBtn('memories', k)}</td>
+                                <td style="white-space:nowrap">${this._srcBtn('Memory', [m.media_id || m.id || m.timestamp, m.timestamp, m.latitude], { valueLabels: ['Media ID', 'Timestamp', 'Latitude'], hints: ['memories.csv'] })}${this._flagBtn('memories', k)}</td>
                             </tr>
                         `;}).join('')}
                     </tbody>
@@ -814,7 +892,7 @@ class SnapchatWarrantUI {
                                     <td class="swp-mono">${g.latitude}</td>
                                     <td class="swp-mono">${g.longitude}</td>
                                     <td>${g.latitudeAccuracy != null ? '±' + g.latitudeAccuracy.toFixed(0) : ''}</td>
-                                    <td>${this._flagBtn('geo', k)}</td>
+                                    <td style="white-space:nowrap">${this._srcBtn('Location ping', [g.timestamp, g._raw ? g._raw.latitude : g.latitude, g._raw ? g._raw.longitude : g.longitude], { valueLabels: ['Timestamp', 'Latitude', 'Longitude'], hints: ['geo_locations.csv'] })}${this._flagBtn('geo', k)}</td>
                                 </tr>
                             `;}).join('')}
                         </tbody>
@@ -887,7 +965,7 @@ class SnapchatWarrantUI {
                             return `
                             <tr class="${this.module.isFlagged('devices', k) ? 'swp-row-flagged' : ''}">
                                 ${sampleKeys.map(k2 => `<td class="${/id|device/i.test(k2) ? 'swp-mono' : ''}">${this._esc(d[k2] || '')}</td>`).join('')}
-                                <td>${this._flagBtn('devices', k)}</td>
+                                <td style="white-space:nowrap">${this._rowSrcBtn('Device ID', d, [/advertis/i, /device.?id/i, /^id$/i, /time|date|created/i], 'device_advertising_id.csv')}${this._flagBtn('devices', k)}</td>
                             </tr>
                         `;}).join('')}
                     </tbody>
@@ -917,7 +995,7 @@ class SnapchatWarrantUI {
                                     const isIp = /^ip$/i.test(c) || /ip_address/i.test(c);
                                     return `<td class="${isIp ? 'swp-mono' : ''}">${this._esc(v)}${isIp && v ? ` <button class="swp-arin-btn" onclick="swpArinLookup(this, '${this._escJs(v)}')" title="ARIN lookup">🔎</button>` : ''}</td>`;
                                 }).join('')}
-                                <td>${this._flagBtn('logins', k)}</td>
+                                <td style="white-space:nowrap">${this._rowSrcBtn('Login', r, [/^ip$|ip.?address/i, /time|date/i], 'login_history.csv')}${this._flagBtn('logins', k)}</td>
                             </tr>
                         `;}).join('')}
                     </tbody>
@@ -943,7 +1021,7 @@ class SnapchatWarrantUI {
                             return `
                             <tr class="${this.module.isFlagged('friends', k) ? 'swp-row-flagged' : ''}">
                                 ${cols.map(c => `<td class="${/id|user_id/i.test(c) ? 'swp-mono' : ''}">${this._esc(r[c] || '')}</td>`).join('')}
-                                <td>${this._flagBtn('friends', k)}</td>
+                                <td style="white-space:nowrap">${this._rowSrcBtn('Friend', r, [/user.?name/i, /user.?id/i, /display/i, /time|date|created/i], 'friends.csv')}${this._flagBtn('friends', k)}</td>
                             </tr>
                         `;}).join('')}
                     </tbody>
@@ -969,7 +1047,7 @@ class SnapchatWarrantUI {
                             return `
                             <tr class="${this.module.isFlagged('snapHistory', k) ? 'swp-row-flagged' : ''}">
                                 ${cols.map(c => `<td>${this._esc(r[c] || '')}</td>`).join('')}
-                                <td>${this._flagBtn('snapHistory', k)}</td>
+                                <td style="white-space:nowrap">${this._rowSrcBtn('Snap', r, [/^id$|snap.?id|message.?id/i, /time|date/i, /user.?name|sender/i], 'snap_history.csv')}${this._flagBtn('snapHistory', k)}</td>
                             </tr>
                         `;}).join('')}
                     </tbody>
@@ -1107,9 +1185,9 @@ class SnapchatWarrantUI {
 
     // ─── Helpers ────────────────────────────────────────────────────────
 
-    _kvRow(label, value) {
+    _kvRow(label, value, extraHtml) {
         if (value === null || value === undefined || value === '') return '';
-        return `<div class="swp-kv-row"><span class="swp-kv-label">${this._esc(label)}</span><span class="swp-kv-value">${this._esc(String(value))}</span></div>`;
+        return `<div class="swp-kv-row"><span class="swp-kv-label">${this._esc(label)}</span><span class="swp-kv-value">${this._esc(String(value))}${extraHtml ? ' ' + extraHtml : ''}</span></div>`;
     }
 
     _statBadge(label, count, icon) {

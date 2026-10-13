@@ -6344,6 +6344,8 @@ ipcMain.handle('security-lock', async (event, opts) => {
     }
   } catch (_) { /* ignore */ }
   if (security) security.lock();
+  // Drop any decrypted copy Source Validation is holding in memory.
+  try { require('./modules/_shared/source-locator').onLock(); } catch (_) {}
   try {
     const evt = reason === 'idle' ? AUDIT_EVENTS.SECURITY_IDLE_LOCK : AUDIT_EVENTS.SECURITY_LOCK;
     audit && audit.write(evt, { reason });
@@ -7156,6 +7158,174 @@ ipcMain.handle('evidence-zip-read', async (_event, zipPath, entryName, inZip) =>
     return { ok: false, error: (e && e.message) || String(e),
              locked: !!(e && e.code === 'VIPER_LOCKED'), tooLarge: !!(e && e.code === 'TOO_LARGE') };
   }
+});
+
+// ── Source Validation ───────────────────────────────────────────────────
+// "How do I know what VIPER shows is really in the return?" — one click
+// from a displayed value to the exact spot in the ORIGINAL file, with the
+// original's SHA-256. VIPER's readers copy text verbatim and infer nothing,
+// so a literal search of the original is a complete answer, and it works
+// for returns imported before this existed. Only text-like files and PDFs
+// are ever opened (never pictures/video/audio); encrypted originals are
+// decrypted in memory only. See modules/_shared/source-locator.js.
+function _sourceSpec(src) {
+  src = src || {};
+  const spec = { path: typeof src.path === 'string' ? src.path : '' };
+  if (typeof src.entry === 'string' && src.entry) spec.entry = src.entry;
+  if (typeof src.inZip === 'string' && src.inZip) spec.inZip = src.inZip;
+  if (Array.isArray(src.extraPaths)) spec.extraPaths = src.extraPaths.filter(p => typeof p === 'string' && p).slice(0, 64);
+  if (Array.isArray(src.hashOnly)) spec.hashOnly = src.hashOnly.filter(p => typeof p === 'string' && p && !/(^|[\\/])\.\.([\\/]|$)/.test(p)).slice(0, 256);
+  return spec;
+}
+
+function _sourceErr(e) {
+  return { ok: false, error: (e && e.message) || String(e), locked: !!(e && e.code === 'VIPER_LOCKED') };
+}
+
+/**
+ * The fingerprint recorded at import time. Stored on the import record and
+ * compared later by source-hash. Returns null (never throws) — a failed
+ * fingerprint must not fail an import.
+ */
+async function _sourceFingerprint(spec) {
+  try {
+    const h = await require('./modules/_shared/source-locator').hashSource(spec, security);
+    if (!h || !h.ok) return null;
+    const out = {
+      algorithm: 'SHA-256',
+      scope: h.scope,
+      sha256: h.contentSha256 || null,
+      recordedAt: new Date().toISOString(),
+    };
+    if (h.container) {
+      out.containerSha256 = h.container.sha256;
+      out.size = h.container.size;
+      out.name = h.container.name;
+      out.encryptedAtRest = !!h.container.encryptedAtRest;
+    }
+    if (h.folder) {
+      out.name = h.folder.name;
+      out.size = h.folder.totalBytes;
+      out.fileCount = h.folder.fileCount;
+    }
+    if (h.member && h.member.sha256) {
+      out.memberSha256 = h.member.sha256;
+      out.memberName = h.member.name;
+    }
+    if (spec.extraPaths && spec.extraPaths.length) out.extraPaths = spec.extraPaths.slice();
+    if (spec.hashOnly && spec.hashOnly.length) out.hashOnly = spec.hashOnly.slice();
+    return out;
+  } catch (e) {
+    console.warn('[source] fingerprint failed:', e && e.message);
+    return null;
+  }
+}
+
+ipcMain.handle('source-locate', async (_event, req) => {
+  try {
+    req = req || {};
+    return await require('./modules/_shared/source-locator')
+      .locate(_sourceSpec(req.source), { values: req.values, memberHints: req.memberHints, maxHits: req.maxHits, record: req.record }, security);
+  } catch (e) { return _sourceErr(e); }
+});
+
+ipcMain.handle('source-view', async (_event, req) => {
+  try {
+    req = req || {};
+    return await require('./modules/_shared/source-locator')
+      .view(_sourceSpec(req.source), req.hit, { values: req.values }, security);
+  } catch (e) { return _sourceErr(e); }
+});
+
+ipcMain.handle('source-fingerprint', async (_event, req) => {
+  return _sourceFingerprint(_sourceSpec(req && req.source));
+});
+
+ipcMain.handle('source-hash', async (_event, req) => {
+  try {
+    req = req || {};
+    const L = require('./modules/_shared/source-locator');
+    const h = await L.hashSource(_sourceSpec(req.source), security);
+    if (!h || !h.ok) return h;
+    const out = Object.assign({}, h);
+    if (out.folder && Array.isArray(out.folder.files) && out.folder.files.length > 2000) {
+      out.folder = Object.assign({}, out.folder, { files: out.folder.files.slice(0, 2000), filesTruncated: true });
+    }
+    out.status = req.expected ? L.compareIntegrity(req.expected, h) : 'none';
+    return out;
+  } catch (e) { return _sourceErr(e); }
+});
+
+ipcMain.handle('source-cite-batch', async (_event, req) => {
+  try {
+    req = req || {};
+    return await require('./modules/_shared/source-locator')
+      .citeBatch(_sourceSpec(req.source), req.items, security);
+  } catch (e) { return _sourceErr(e); }
+});
+
+ipcMain.handle('source-reveal', async (_event, req) => {
+  const p = req && typeof req.path === 'string' ? req.path : '';
+  if (!p || !fs.existsSync(p)) return { ok: false, error: 'The original file is not on disk.' };
+  shell.showItemInFolder(p);
+  return { ok: true };
+});
+
+// "Open in its own program" — only for a PLAIN text/PDF file on disk.
+// An encrypted file would open as noise, and a ZIP would hand the whole
+// return (pictures included) to Explorer.
+ipcMain.handle('source-open-external', async (_event, req) => {
+  const p = req && typeof req.path === 'string' ? req.path : '';
+  if (!p || !fs.existsSync(p) || !fs.statSync(p).isFile()) return { ok: false, error: 'The original file is not on disk.' };
+  const L = require('./modules/_shared/source-locator');
+  if (!L.searchKind(p)) return { ok: false, error: 'Only text files, web pages, spreadsheets and PDFs can be opened from here.' };
+  if (require('./modules/_shared/evidence-zip').isEncryptedFile(p, security)) {
+    return { ok: false, error: 'This file is encrypted by Field Security. Use Save a copy instead.' };
+  }
+  const err = await shell.openPath(p);
+  return err ? { ok: false, error: err } : { ok: true };
+});
+
+// Save a decrypted copy of ONE text/PDF member — e.g. records.html out of a
+// Meta ZIP — so it can be opened in any other tool for independent checking.
+ipcMain.handle('source-save-copy', async (_event, req) => {
+  try {
+    req = req || {};
+    const got = await require('./modules/_shared/source-locator')
+      .memberBytes(_sourceSpec(req.source), req.memberKey, security);
+    if (!got || !got.ok) return got;
+    const safeName = String(got.name || 'original').replace(/[<>:"|?*\x00-\x1F\\/]/g, '_');
+    const res = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save a copy of the original file',
+      defaultPath: safeName,
+    });
+    restoreFocus && restoreFocus();
+    if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+    fs.writeFileSync(res.filePath, got.bytes);
+    return { ok: true, path: res.filePath, sha256: require('crypto').createHash('sha256').update(got.bytes).digest('hex') };
+  } catch (e) { return _sourceErr(e); }
+});
+
+// Re-point an item at its original when the recorded path has moved.
+// Separate file / folder pickers: never combine openFile + openDirectory
+// (Windows silently shows a folder-only dialog — the 5.1.8 trap).
+ipcMain.handle('source-pick-original', async (_event, req) => {
+  req = req || {};
+  const opts = req.folder
+    ? { title: req.title || 'Locate the original folder', properties: ['openDirectory'] }
+    : {
+        title: req.title || 'Locate the original file',
+        properties: ['openFile'],
+        filters: [
+          { name: 'Original return', extensions: ['zip', 'pdf', 'html', 'htm', 'csv', 'txt', 'json', 'xml'] },
+          { name: 'All files', extensions: ['*'] },
+        ],
+      };
+  if (typeof req.defaultPath === 'string' && req.defaultPath) opts.defaultPath = req.defaultPath;
+  const res = await dialog.showOpenDialog(mainWindow, opts);
+  restoreFocus && restoreFocus();
+  if (res.canceled || !res.filePaths.length) return null;
+  return res.filePaths[0];
 });
 
 // Connection Board → self-contained HTML export. The renderer builds a fully
@@ -10685,6 +10855,8 @@ ipcMain.handle('aperture-import-mbox', async (event, data) => {
     
     console.log('Importing mbox:', filePath);
     
+    // Fingerprint the original alongside the parse (Source Validation).
+    const fingerprintP = _sourceFingerprint({ path: filePath });
     // Parse the mbox file
     const emails = await ApertureParser.parseMbox(filePath);
     
@@ -10696,7 +10868,8 @@ ipcMain.handle('aperture-import-mbox', async (event, data) => {
       fileName: fileName,
       filePath: filePath,
       fileType: 'mbox',
-      emailCount: emails.length
+      emailCount: emails.length,
+      sourceIntegrity: await fingerprintP
     });
     
     // Add emails
@@ -10709,6 +10882,17 @@ ipcMain.handle('aperture-import-mbox', async (event, data) => {
     };
   } catch (error) {
     console.error('Failed to import mbox:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Source Validation: the examiner pointed VIPER at a moved copy of the original.
+ipcMain.handle('aperture-set-source-path', async (event, data) => {
+  try {
+    const { caseId, sourceId, sourcePath } = data || {};
+    const src = apertureData.setSourcePath(String(caseId), sourceId, sourcePath);
+    return { success: true, source: src };
+  } catch (error) {
     return { success: false, error: error.message };
   }
 });
@@ -10729,6 +10913,8 @@ ipcMain.handle('aperture-import-email-file', async (event, data) => {
   try {
     const { caseId, filePath, sourceName, fileName } = data;
     const ext = path.extname(filePath).toLowerCase();
+    // Fingerprint the original alongside the parse (Source Validation).
+    const fingerprintP = _sourceFingerprint({ path: filePath });
 
     let emails;
     if (ext === '.mbox') {
@@ -10744,7 +10930,8 @@ ipcMain.handle('aperture-import-email-file', async (event, data) => {
       fileName: fileName,
       filePath: filePath,
       fileType: ext.replace('.', ''),
-      emailCount: emails.length
+      emailCount: emails.length,
+      sourceIntegrity: await fingerprintP
     });
 
     apertureData.addEmails(caseId, source.id, emails);
@@ -12748,6 +12935,9 @@ ipcMain.handle('google-warrant-scan', async (event, { caseNumber }) => {
 ipcMain.handle('google-warrant-import', async (event, { filePath, caseNumber }) => {
   try {
     const stat = fs.statSync(filePath);
+    // Fingerprint the original alongside the parse (Source Validation).
+    // A folder of Google's per-product ZIPs is fingerprinted as a folder.
+    const fingerprintP = _sourceFingerprint({ path: filePath });
 
     // Build a media output root for any GooglePhotos.PhotoResourceLegal / video
     // payloads the parser encounters. Without this, large binary attachments
@@ -12777,12 +12967,14 @@ ipcMain.handle('google-warrant-import', async (event, { filePath, caseNumber }) 
         mediaRoot,
         inputName: path.basename(filePath)
       });
+      if (data) data.sourceIntegrity = await fingerprintP;
       return { success: true, data };
     }
 
     // Single ZIP file — pass the path; the parser streams it via node-stream-zip,
     // so we no longer load multi-GB warrant returns into a Buffer.
     const data = await gwParser.parseOuterZip(filePath, { security, mediaRoot });
+    if (data) data.sourceIntegrity = await fingerprintP;
     return { success: true, data };
   } catch (error) {
     console.error('Google warrant import error:', error);
@@ -12931,7 +13123,10 @@ ipcMain.handle('meta-warrant-scan', async (event, { caseNumber }) => {
 
 ipcMain.handle('meta-warrant-import', async (event, { filePath, caseNumber }) => {
   try {
+    // Fingerprint the original alongside the parse (Source Validation).
+    const fingerprintP = _sourceFingerprint({ path: filePath });
     const data = await mwParser.parseZip(filePath, { security });
+    data.sourceIntegrity = await fingerprintP;
 
     // Save large media files to disk instead of keeping in localStorage
     if (caseNumber && data.mediaFiles) {
@@ -13046,10 +13241,13 @@ ipcMain.handle('kik-warrant-import', async (event, { filePath, caseNumber }) => 
     const extractDir = caseNumber
       ? path.join(casesDir, caseNumber, 'Evidence', 'KikWarrant', 'content')
       : null;
+    // Fingerprint the original alongside the parse (Source Validation).
+    const fingerprintP = _sourceFingerprint({ path: filePath });
     const data = await kkParser.parseZip(filePath, {
       extractDir,
       security: security && security.isUnlocked() ? security : null
     });
+    if (data) data.sourceIntegrity = await fingerprintP;
 
     const extractedCount = extractDir
       ? Object.values(data.contentFiles).filter(f => f.diskPath).length
@@ -13181,13 +13379,34 @@ ipcMain.handle('snapchat-warrant-import', async (event, { filePath, caseNumber, 
     if (extractDir && !fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
 
     let data;
+    let fingerprintP = null;
     if (isFolder) {
       data = await swParser.parseFolder(filePath, { extractDir, security });
     } else {
+      fingerprintP = _sourceFingerprint({ path: filePath });
       // Pass file path directly — the streaming reader handles VIPENC
       // decryption transparently and supports ZIP64 (no 2 GB cap).
       data = await swParser.parseZip(filePath, { extractDir, security });
     }
+
+    // Source Validation: a production picked as ONE part folder pulls in its
+    // sibling part folders (see parseFolder). Record them so a later search
+    // of "the original" covers the same files the import read.
+    if (isFolder) {
+      const extra = [];
+      const parent = path.dirname(filePath);
+      for (const pt of (data && data.parts) || []) {
+        const n = pt && pt.partFolder;
+        if (!n || n === '__root__' || n === path.basename(filePath)) continue;
+        const cand = path.join(parent, n);
+        try {
+          if (cand !== filePath && fs.existsSync(cand) && fs.statSync(cand).isDirectory()) extra.push(cand);
+        } catch (_) {}
+      }
+      if (extra.length) data.sourceExtraPaths = extra;
+      fingerprintP = _sourceFingerprint({ path: filePath, extraPaths: extra });
+    }
+    data.sourceIntegrity = await fingerprintP;
 
     return { success: true, data };
   } catch (error) {
@@ -13398,9 +13617,12 @@ ipcMain.handle('x-warrant-import', async (event, { filePath, caseNumber, isFolde
       ? path.join(casesDir, caseNumber, 'Evidence', 'XWarrant')
       : null;
     if (extractDir && !fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
+    // Fingerprint the original alongside the parse (Source Validation).
+    const fingerprintP = _sourceFingerprint({ path: filePath });
     let data;
     if (isFolder) data = await xwParser.parseFolder(filePath, { extractDir, security });
     else data = await xwParser.parseZip(filePath, { extractDir, security });
+    if (data) data.sourceIntegrity = await fingerprintP;
     return { success: true, data };
   } catch (error) {
     console.error('X warrant import error:', error);
@@ -13604,6 +13826,9 @@ ipcMain.handle('discord-warrant-import', async (event, { filePath, caseNumber, i
     }
 
     const parseOpts = { extractDir, security, messageSink: writer };
+    // Fingerprint the original alongside the parse (Source Validation).
+    // Streams the file, so even a multi-GB return adds no memory.
+    const fingerprintP = _sourceFingerprint({ path: filePath });
     const data = isFolder
       ? await dwParser.parseFolder(filePath, parseOpts)
       // Pass file path directly — streaming reader handles VIPENC decryption
@@ -13646,6 +13871,7 @@ ipcMain.handle('discord-warrant-import', async (event, { filePath, caseNumber, i
       }
     }
 
+    if (data) data.sourceIntegrity = await fingerprintP;
     return { success: true, data };
   } catch (error) {
     if (writer) { try { writer.abort(); } catch (_) {} }
@@ -13945,13 +14171,34 @@ ipcMain.handle('datapilot-pick-folder', async () => {
 /**
  * Parse a Datapilot folder (CSV or DPX). Returns the structured data for the renderer.
  */
+// The files a Datapilot export is read from, relative to its folder.
+function _datapilotIndexFiles(folderPath) {
+  const out = [];
+  const add = (sub) => {
+    let names = [];
+    try { names = fs.readdirSync(sub ? path.join(folderPath, sub) : folderPath, { withFileTypes: true }); } catch (_) { return; }
+    for (const d of names) {
+      if (!d.isFile()) continue;
+      if (/\.csv$/i.test(d.name) || (!sub && /^dptData\.db$/i.test(d.name))) out.push(sub ? sub + '/' + d.name : d.name);
+    }
+  };
+  add(''); add('AppData'); add('DeletedData');
+  return out.sort().slice(0, 256);
+}
+
 ipcMain.handle('datapilot-import', async (event, { folderPath }) => {
   try {
     if (!folderPath) return { success: false, error: 'No folder path provided' };
     if (!DatapilotParser.isDatapilotFolder(folderPath)) {
       return { success: false, error: 'Not a Datapilot folder (no Summary CSV or dptData.db found)' };
     }
+    // Fingerprint only the files VIPER actually reads (the CSV index files
+    // and dptData.db) — the export's pictures and videos can run to
+    // gigabytes and are never parsed. Taken alongside the parse; it never
+    // fails the import.
+    const fingerprintP = _sourceFingerprint({ path: folderPath, hashOnly: _datapilotIndexFiles(folderPath) });
     const data = await dpParser.parseFolder(folderPath);
+    if (data) data.sourceIntegrity = await fingerprintP;
     return { success: true, data };
   } catch (error) {
     console.error('Datapilot import error:', error);
@@ -14767,7 +15014,9 @@ ipcMain.handle('warrant-export-flags-bundle', async (event, payload) => {
       sourceFileName, subjectInfo = {},
       sectionConfigs = [],
       sections = {},
-      generatedAt
+      generatedAt,
+      provenance = null,
+      citations = null
     } = payload || {};
 
     if (!caseNumber || !bundleId || !moduleSlug || !moduleFolder) {
@@ -14805,6 +15054,10 @@ ipcMain.handle('warrant-export-flags-bundle', async (event, payload) => {
       counts,
       totalItems
     };
+    // Source Validation: where each flagged item was found in the original
+    // return, and the original's SHA-256 at the time of this report.
+    if (provenance && typeof provenance === 'object') report.provenance = provenance;
+    if (citations && typeof citations === 'object') report.citations = citations;
     const reportJsonPath = path.join(bundlePath, 'report.json');
     writeFileMaybeEncrypted(reportJsonPath, Buffer.from(JSON.stringify(report, null, 2), 'utf-8'));
 
@@ -14880,6 +15133,41 @@ function _buildWarrantReportHtml(report) {
     return esc(val);
   };
 
+  // ── Source Validation (present only when the module opted in) ──
+  const cites = (report.citations && typeof report.citations === 'object') ? report.citations : null;
+  const MATCH_WORDS = {
+    'exact': 'exact match',
+    'case': 'same text, different capital letters',
+    'spacing': 'same text, different spacing',
+    'case+spacing': 'same text, different capitals and spacing',
+  };
+  const citeText = (c) => {
+    if (!c) return '';
+    if (c.notApplicable) return '';
+    if (c.notChecked) return { cls: 'cite-unk', text: 'Not checked automatically — verify by hand in the original.' };
+    if (!c.found) return { cls: 'cite-miss', text: 'Not found word-for-word in the original — verify by hand.' };
+    // A database hit names its table and row; its `line` IS the row id, so it is not repeated.
+    const where = (c.table
+      ? [c.member ? String(c.member) : '', 'table ' + String(c.table), c.rowid != null ? 'row ' + Number(c.rowid).toLocaleString() : '']
+      : [c.member ? String(c.member) : '', c.page ? 'page ' + Number(c.page).toLocaleString() : '', c.line ? 'line ' + Number(c.line).toLocaleString() : ''])
+      .filter(Boolean).join(' › ');
+    if (c.primaryFound === false) {
+      // Lead with the negative: the value itself is NOT in the original.
+      return { cls: 'cite-part', text: 'Not found word-for-word. A related record (matching ' +
+        (c.corroborated >= 1 ? 'two or more of its other details' : 'one of its other details') + ') is at: ' + where + ' — verify by hand.' };
+    }
+    return { cls: 'cite-ok', text: 'Found in original: ' + where + ' (' + (MATCH_WORDS[c.matchKind] || 'match') + ')' };
+  };
+  const citeFor = (cfgId, i) => {
+    if (!cites || !Array.isArray(cites[cfgId])) return null;
+    return citeText(cites[cfgId][i]) || null;
+  };
+  const citeDiv = (cfgId, i) => {
+    const c = citeFor(cfgId, i);
+    return c ? `<div class="src-cite ${c.cls}">${c.cls === 'cite-ok' ? '✓ ' : c.cls === 'cite-part' ? '≈ ' : '⚠ '}${esc(c.text)}</div>` : '';
+  };
+  const sectionHasCites = (cfgId) => !!(cites && Array.isArray(cites[cfgId]) && cites[cfgId].some(c => c && !c.notApplicable));
+
   const renderSection = (cfg) => {
     const items = Array.isArray(report.sections[cfg.id]) ? report.sections[cfg.id] : [];
     const title = `${cfg.icon ? cfg.icon + ' ' : ''}${esc(cfg.title || cfg.id)}`;
@@ -14918,7 +15206,7 @@ function _buildWarrantReportHtml(report) {
           return `<div class="att att-link">📎 <a href="${esc(u)}" target="_blank" rel="noopener">${esc(fname)}</a></div>`;
         }).join('') + `</div>`;
       };
-      const html = items.map(item => `
+      const html = items.map((item, i) => `
         <div class="msg">
           <div class="msg-head">
             ${authorF ? `<span class="msg-author">${esc(item[authorF] || '')}</span>` : ''}
@@ -14927,13 +15215,14 @@ function _buildWarrantReportHtml(report) {
           </div>
           <div class="msg-body">${esc(item[bodyF] || '').replace(/\n/g, '<br>') || '<em class="muted">(no body)</em>'}</div>
           ${attachF && item[attachF] ? renderAtts(item[attachF]) : ''}
+          ${citeDiv(cfg.id, i)}
         </div>
       `).join('');
       return `<h2>${title} <span class="count">(${items.length})</span></h2>${html}`;
     }
 
     if (hint === 'cards') {
-      const html = items.map(item => `
+      const html = items.map((item, i) => `
         <div class="warrant-card">
           ${cols.map(c => {
             const v = item[c.field];
@@ -14943,6 +15232,7 @@ function _buildWarrantReportHtml(report) {
               <div class="kv-value">${fmtCell(v, c.type)}</div>
             </div>`;
           }).join('')}
+          ${citeDiv(cfg.id, i)}
         </div>
       `).join('');
       return `<h2>${title} <span class="count">(${items.length})</span></h2>
@@ -14954,7 +15244,7 @@ function _buildWarrantReportHtml(report) {
       // the remaining columns as a metadata list underneath each thumbnail.
       const previewF = (cols.find(c => c.type === 'image') || {}).field;
       const metaCols = cols.filter(c => c.type !== 'image');
-      const html = items.map(item => {
+      const html = items.map((item, i) => {
         const src = previewF ? item[previewF] : '';
         const thumb = src
           ? `<a href="${esc(src)}" target="_blank" rel="noopener"><img class="gal-img" src="${esc(src)}" loading="lazy" alt=""/></a>`
@@ -14967,6 +15257,7 @@ function _buildWarrantReportHtml(report) {
               if (v == null || v === '') return '';
               return `<div class="kv-row"><div class="kv-label">${esc(c.label)}</div><div class="kv-value">${fmtCell(v, c.type)}</div></div>`;
             }).join('')}
+            ${citeDiv(cfg.id, i)}
           </div>
         </div>`;
       }).join('');
@@ -14975,12 +15266,13 @@ function _buildWarrantReportHtml(report) {
     }
 
     if (hint === 'pre') {
-      const html = items.map(item => `<pre class="pre-cell">${esc(JSON.stringify(item, null, 2))}</pre>`).join('');
+      const html = items.map((item, i) => `<pre class="pre-cell">${esc(JSON.stringify(item, null, 2))}</pre>${citeDiv(cfg.id, i)}`).join('');
       return `<h2>${title} <span class="count">(${items.length})</span></h2>${html}`;
     }
 
-    const head = cols.map(c => `<th>${esc(c.label)}</th>`).join('');
-    const rows = items.map(item => `<tr>${cols.map(c => `<td>${fmtCell(item[c.field], c.type)}</td>`).join('')}</tr>`).join('');
+    const withCites = sectionHasCites(cfg.id);
+    const head = cols.map(c => `<th>${esc(c.label)}</th>`).join('') + (withCites ? '<th>Found in original</th>' : '');
+    const rows = items.map((item, i) => `<tr>${cols.map(c => `<td>${fmtCell(item[c.field], c.type)}</td>`).join('')}${withCites ? `<td class="cite-cell">${citeDiv(cfg.id, i)}</td>` : ''}</tr>`).join('');
     return `<h2>${title} <span class="count">(${items.length})</span></h2>
       <table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
   };
@@ -14993,6 +15285,46 @@ function _buildWarrantReportHtml(report) {
         <div class="value">${esc(v)}</div>
       </div>
     `).join('');
+
+  const pv = (report.provenance && typeof report.provenance === 'object') ? report.provenance : null;
+  const INTEGRITY_WORDS = {
+    match:    ['pv-ok',   '✓ Unchanged since import — the SHA-256 below matches the fingerprint VIPER recorded when this return was imported.'],
+    mismatch: ['pv-bad',  '✗ CHANGED since import — the original no longer matches the fingerprint recorded when it was imported. Do not rely on the locations below until this is explained.'],
+    none:     ['pv-unk',  'No fingerprint was recorded at import (this return was imported before VIPER recorded one). The SHA-256 below is the file as it is today.'],
+    missing:  ['pv-bad',  'The original return was not found on disk when this report was made, so nothing could be checked.'],
+    locked:   ['pv-unk',  'Field Security was locked, so the original could not be read. Unlock and push again to check it.'],
+    unknown:  ['pv-unk',  'Integrity could not be confirmed automatically.'],
+  };
+  const provenanceHtml = !pv ? '' : (() => {
+    const iw = INTEGRITY_WORDS[pv.integrity] || INTEGRITY_WORDS.unknown;
+    const rows = [
+      ['Original return', pv.fileName],
+      ['Location', pv.path],
+      ['Report inside it', pv.memberName || pv.entry || ''],
+      ['SHA-256 (provider\u2019s original bytes)', pv.sha256 || ''],
+      [pv.encryptedAtRest ? 'SHA-256 (as stored, encrypted by VIPER)' : '', pv.encryptedAtRest ? (pv.containerSha256 || '') : ''],
+      ['SHA-256 (report inside it)', pv.memberSha256 || ''],
+      ['Files in folder', pv.fileCount != null ? Number(pv.fileCount).toLocaleString() : ''],
+      ['Fingerprint recorded at import', pv.recorded && pv.recorded.recordedAt ? fmtDate(pv.recorded.recordedAt) : ''],
+      ['Checked', fmtDate(pv.checkedAt)],
+    ].filter(r => r[0] && r[1] != null && r[1] !== '')
+     .map(r => `<div class="kv-row"><div class="kv-label">${esc(r[0])}</div><div class="kv-value">${/SHA-256/.test(r[0]) ? `<code>${esc(r[1])}</code>` : esc(r[1])}</div></div>`).join('');
+    const sm = pv.summary || {};
+    const counts = [
+      sm.found ? `${Number(sm.found).toLocaleString()} found in the original` : '',
+      sm.related ? `${Number(sm.related).toLocaleString()} not found word-for-word, but a related record was located` : '',
+      sm.notFound ? `${Number(sm.notFound).toLocaleString()} not found word-for-word` : '',
+      sm.notChecked ? `${Number(sm.notChecked).toLocaleString()} not checked` : '',
+      sm.notApplicable ? `${Number(sm.notApplicable).toLocaleString()} with no text to search for (a picture or video is itself the original)` : '',
+    ].filter(Boolean).join(' · ');
+    return `<h2>Source &amp; Integrity</h2>
+<div class="provenance">
+  <div class="pv-status ${iw[0]}">${esc(iw[1])}</div>
+  ${rows}
+  ${counts ? `<div class="pv-counts">${esc(counts)}</div>` : ''}
+  <div class="pv-note">Each flagged item below was searched for, word for word, in the original return when this report was made. VIPER does not interpret or infer anything; a line number refers to the file named, counting from 1. Anything marked \u201cverify by hand\u201d should be checked against the original directly.</div>
+</div>`;
+  })();
 
   const countsBar = (report.sectionConfigs || [])
     .filter(c => (report.counts || {})[c.id] > 0)
@@ -15052,7 +15384,22 @@ function _buildWarrantReportHtml(report) {
   .gal-noimg { width: 100%; height: 150px; display: flex; align-items: center; justify-content: center; font-size: 40px; background: #f3f4f6; color: #9ca3af; }
   .gal-meta { padding: 10px 12px; }
   .gal-meta .kv-label { min-width: 80px; }
-  @media print { body { background: #fff; padding: 0.5in; } .warrant-card, .msg, table, .subject-card, .gal-card { break-inside: avoid; } }
+  /* Source Validation */
+  .provenance { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 16px; font-size: 12px; }
+  .provenance .kv-label { min-width: 230px; }
+  .provenance code { word-break: break-all; }
+  .pv-status { font-weight: 600; padding: 8px 10px; border-radius: 6px; margin-bottom: 8px; font-size: 13px; }
+  .pv-ok { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+  .pv-bad { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+  .pv-unk { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+  .pv-counts { margin-top: 8px; font-weight: 600; color: #374151; }
+  .pv-note { margin-top: 6px; color: #6b7280; font-size: 11px; }
+  .src-cite { margin-top: 6px; font-size: 11px; line-height: 1.35; word-break: break-word; }
+  .cite-cell .src-cite { margin-top: 0; }
+  .cite-ok { color: #047857; }
+  .cite-part { color: #b45309; }
+  .cite-miss, .cite-unk { color: #b45309; }
+  @media print { body { background: #fff; padding: 0.5in; } .warrant-card, .msg, table, .subject-card, .gal-card, .provenance { break-inside: avoid; } }
 </style>
 </head><body>
 
@@ -15066,6 +15413,8 @@ ${subjectRows ? `<h2>Subject &amp; Account</h2>
 <div class="subject-card">${subjectRows}</div>` : ''}
 
 ${countsBar ? `<div class="stats">${countsBar}</div>` : ''}
+
+${provenanceHtml}
 
 ${(report.sectionConfigs || []).map(renderSection).join('\n')}
 
@@ -15085,6 +15434,9 @@ try {
   Cellebrite.registerIpc(ipcMain);
   if (typeof Cellebrite.setSecurityManager === 'function') {
     Cellebrite.setSecurityManager(security);
+  }
+  if (typeof Cellebrite.setSourceFingerprint === 'function') {
+    Cellebrite.setSourceFingerprint(_sourceFingerprint);
   }
   console.log('[Cellebrite] Mobile Forensics IPC registered (security wired:',
     typeof Cellebrite.setSecurityManager === 'function', ')');

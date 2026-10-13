@@ -80,6 +80,8 @@ class XWarrantModule {
             users: data.users || [],
             mediaFiles: data.mediaFiles || {},
             readmeText: data.readmeText || null,
+            // Source Validation: SHA-256 of the original, taken at import.
+            sourceIntegrity: data.sourceIntegrity || null,
         };
 
         const existingIdx = this.imports.findIndex(i => i.filePath === filePath);
@@ -148,7 +150,11 @@ class XWarrantModule {
                         sender: m.sender_id || '',
                         recipient: m.recipient_id || '',
                         text: m.text || '',
-                        deleted: m.deleted ? 'Yes' : ''
+                        deleted: m.deleted ? 'Yes' : '',
+                        // Not shown — the record's own ID and the time exactly
+                        // as X wrote it, used to find it in the original.
+                        messageId: m.message_id || '',
+                        rawTime: m.created_at_raw || ''
                     });
                 }
             }
@@ -164,7 +170,8 @@ class XWarrantModule {
                 out.tweets.push({
                     key: k, timestamp: t.created_at || '', tweetId: t.tweet_id || '',
                     text: t.full_text || '', lang: t.lang || '', favorites: t.favorite_count, retweets: t.retweet_count,
-                    deleted: t.deleted ? 'Yes' : ''
+                    deleted: t.deleted ? 'Yes' : '',
+                    rawTime: t.created_at_raw || ''
                 });
             }
             out.tweets.sort((a, b) => (Date.parse(a.timestamp || '') || 0) - (Date.parse(b.timestamp || '') || 0));
@@ -177,7 +184,7 @@ class XWarrantModule {
                 rec.rows.forEach((row, idx) => {
                     const k = window.WarrantFlagsKey.xRecord(rec, row, idx);
                     if (!recKeys.has(k)) return;
-                    out.records.push({ key: k, recordType: rec.label, category: rec.category, summary: this._rowSummary(rec, row) });
+                    out.records.push({ key: k, recordType: rec.label, category: rec.category, summary: this._rowSummary(rec, row), stem: rec.stem || '' });
                 });
             }
         }
@@ -273,8 +280,87 @@ class XWarrantModule {
             resolveFlags: (imp) => this._resolveFlagged(imp),
             getSubjectInfo: (imp) => this._buildSubjectInfo(imp),
             getSourceFileName: (imp) => imp.fileName || '',
-            getSectionConfigs: (imp, resolved) => this._buildSectionConfigs(imp, resolved)
+            getSectionConfigs: (imp, resolved) => this._buildSectionConfigs(imp, resolved),
+            // Source Validation: find each flagged item in the original return.
+            getSourceSpec:     (imp) => this._sourceSpec(imp),
+            getItemCitation:   (sectionId, item, imp) => this._citationFor(imp, sectionId, item)
         });
+    }
+
+    _sourceSpec(imp) {
+        if (!imp) return null;
+        const p = imp.sourcePath || imp.filePath;
+        if (!p) return null;
+        return { source: { path: p }, expected: imp.sourceIntegrity || null };
+    }
+
+    /**
+     * What to look for in the original, per item. values[0] is the thing
+     * being validated; the rest are details of the same record.
+     *
+     * X writes its data as JavaScript text, so a value containing a quote,
+     * a backslash or a line break is stored in an escaped form and would
+     * never match word for word. The record's own ID is always plain, so
+     * messages and tweets are found by ID and the text is offered as a
+     * detail that agrees when it is stored plainly. Dates VIPER shows are
+     * converted; the time exactly as X wrote it is used instead.
+     */
+    _citationFor(imp, sectionId, it) {
+        it = it || {};
+        const plain = (v) => {
+            if (v == null) return '';
+            const s = String(v).trim();
+            if (!s || /["\\\u0000-\u001f]/.test(s)) return '';
+            return s;
+        };
+        const pack = (hints, primary, ...rest) => {
+            const seen = new Set();
+            const vals = [primary == null ? '' : String(primary).trim()];
+            seen.add(vals[0]);
+            for (const r of rest) {
+                const s = plain(r);
+                if (!s || seen.has(s)) continue;
+                seen.add(s); vals.push(s);
+            }
+            return { values: vals, memberHints: hints };
+        };
+        switch (sectionId) {
+            case 'threads':
+                return it.messageId
+                    ? pack(['direct-messages'], it.messageId, it.text, it.rawTime, it.conversation, it.sender, it.recipient)
+                    : pack(['direct-messages'], plain(it.text) || plain(it.rawTime), it.rawTime, it.conversation, it.sender, it.recipient);
+            case 'tweets':
+                return it.tweetId
+                    ? pack(['tweets'], it.tweetId, it.text, it.rawTime)
+                    : pack(['tweets'], plain(it.text) || plain(it.rawTime), it.rawTime);
+            case 'records': {
+                let row = it.row || null;
+                const rec = (imp && imp.records || []).find(r => r && r.stem === it.stem) || null;
+                if (!row && rec && it.key) {
+                    const rows = rec.rows || [];
+                    for (let i = 0; i < rows.length; i++) {
+                        if (window.WarrantFlagsKey.xRecord(rec, rows[i], i) === it.key) { row = rows[i]; break; }
+                    }
+                }
+                if (!row) return { values: [] };
+                const headers = (rec && rec.headers) || Object.keys(row);
+                // Only cells VIPER shows exactly as stored: not Yes/No (true/
+                // false in the file), not lists it joined, not "[3 items]".
+                const cells = [];
+                for (const h of headers) {
+                    const s = plain(row[h]);
+                    if (!s || s === 'Yes' || s === 'No' || s.includes('; ')) continue;
+                    if (/^\[\d+ items?\]$|^\{\d+ fields?\}$/.test(s)) continue;
+                    cells.push(s);
+                }
+                const lead = cells.find(c => c.length >= 4) || cells[0] || '';
+                return pack(it.stem ? [it.stem] : [], lead, ...cells.filter(c => c !== lead).slice(0, 5));
+            }
+            case 'users':
+                return pack([], plain(it.userId), it.handle, it.displayName);
+            default:
+                return { values: [] };
+        }
     }
 }
 

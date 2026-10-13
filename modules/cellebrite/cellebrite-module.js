@@ -120,6 +120,13 @@ class CellebriteModule {
         }
         this._lastLoadError = null;
 
+        // Imports made before Source Validation existed don't know where
+        // their extracted databases are; the main process tells us.
+        if (r.extractedDir) {
+            const imp = ((this.data && this.data.imports) || []).find(i => i && i.id === importId);
+            if (imp && !imp.extractedDir) { imp.extractedDir = r.extractedDir; try { this.saveData(); } catch (_) {} }
+        }
+
         if (!bucket) { bucket = {}; this._parsedCache.set(importId, bucket); }
         bucket[surface] = r.data;
         return r.data;
@@ -205,6 +212,10 @@ class CellebriteModule {
                     counts: r.counts || {},
                     status: 'imported',
                     flagged: {},
+                    // Source Validation: the folder of databases VIPER reads,
+                    // and the SHA-256 fingerprint taken before they were opened.
+                    extractedDir: r.extractedDir || null,
+                    sourceIntegrity: r.sourceIntegrity || null,
                 };
                 this.data.imports.unshift(entry);
                 this.activeImportId = entry.id;
@@ -392,9 +403,45 @@ class CellebriteModule {
                 });
             }
             out.media.sort((a, b) => String(a.filename).localeCompare(String(b.filename)));
+            await this._checkFlaggedMedia(imp, out.media);
         }
 
         return out;
+    }
+
+    /**
+     * Read each flagged file back out of the phone dump and record its
+     * SHA-256 and whether it still matches the dump's own checksum, so the
+     * evidence report carries them. Sequential and capped: a check reads the
+     * whole file (about a second for a large video).
+     */
+    async _checkFlaggedMedia(imp, rows) {
+        const api = (typeof window !== 'undefined' && window.electronAPI) || null;
+        const CAP = 100;
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            row.sha256 = '';
+            row.dumpCheck = 'Not checked';
+            if (!api || !api.cellebriteMediaVerify) continue;
+            if (i >= CAP) { row.dumpCheck = `Not checked (only the first ${CAP} flagged files are checked; use 🔍 on the card)`; continue; }
+            let r = null;
+            try { r = await api.cellebriteMediaVerify({ caseNumber: this.caseNumber, importId: imp.id, mediaId: row.id }); } catch (_) {}
+            row.dumpCheck = CellebriteModule._dumpCheckText(r);
+            if (r && r.success && r.read) row.sha256 = r.read.sha256 || '';
+        }
+    }
+
+    /** One plain-language line for the evidence report. */
+    static _dumpCheckText(r) {
+        if (!r || !r.success) return r && r.locked ? 'Not checked (VIPER was locked)' : 'Not checked' + (r && r.error ? ` (${r.error})` : '');
+        const where = r.sourceZipName ? ` · ${r.sourceFolder}\\${r.sourceZipName}` : '';
+        if (r.zipMissing) return 'Not checked (the phone dump was not on disk)';
+        if (r.entryMissing) return 'NOT FOUND in the phone dump' + where;
+        if (r.readError) return `Could not be read cleanly (${r.readError})` + where;
+        const c = r.checks || {};
+        if (!(c.sizeMatch && c.crcMatch)) return 'Does NOT match the phone dump' + where;
+        if (c.importHadCrc && !c.sameAsImport) return 'Matches the dump, but the dump changed since import' + where;
+        return 'Matches the phone dump (size + CRC-32)' + where + (r.thumbnail ? ' · Android thumbnail, not the original' : '');
     }
 
     _buildSubjectInfo(imp) {
@@ -515,11 +562,146 @@ class CellebriteModule {
                     { label: 'Captured', field: 'capturedAt', type: 'date' },
                     { label: 'GPS',      field: 'gps' },
                     { label: 'Path',     field: 'entryPath',  type: 'mono' },
+                    { label: 'SHA-256',  field: 'sha256',     type: 'mono' },
+                    { label: 'Checked against the phone dump', field: 'dumpCheck' },
                 ],
                 items: resolved.media,
                 emptyText: 'No media flagged.',
             },
         ];
+    }
+
+    // ─── Source Validation ──────────────────────────────────────────────
+
+    /**
+     * Where the databases VIPER read are (the extracted folder inside the
+     * case), and the fingerprint taken before they were opened. Imports made
+     * before this version have neither — the viewer then says so.
+     */
+    _sourceSpec(imp) {
+        imp = imp || this.getActiveImport();
+        if (!imp) return null;
+        const p = imp.sourcePath || imp.extractedDir || '';
+        if (!p) return null;
+        const si = imp.sourceIntegrity || null;
+        const source = { path: p };
+        if (si && Array.isArray(si.hashOnly) && si.hashOnly.length) source.hashOnly = si.hashOnly.slice();
+        return { source, expected: si };
+    }
+
+    /**
+     * What to look for in the phone's own databases for one record.
+     * values[0] is the record itself (a message body, a number, a name); the
+     * rest are details that should sit in the same row. `record` points at the
+     * exact database row where the reader knows it (e.g. mmssms.db › sms ›
+     * row 1234) so that row is shown first. Works for both the raw rows the
+     * tables show and the trimmed rows used for an evidence push.
+     */
+    _citationFor(imp, sectionId, it) {
+        const none = { values: [], labels: [], memberHints: [] };
+        if (!it) return none;
+        imp = imp || this.getActiveImport();
+        const s = (v) => (v == null ? '' : String(v).trim());
+        const pack = (pairs, hints, record) => {
+            const seen = new Set();
+            const values = [], labels = [];
+            for (const [label, v] of pairs) {
+                const t = s(v);
+                if (t && !seen.has(t.toLowerCase())) { seen.add(t.toLowerCase()); values.push(t); labels.push(label); }
+            }
+            const out = { values, labels, memberHints: hints };
+            if (record) out.record = record;
+            return out;
+        };
+        const rowOf = (id, prefix) => {
+            const t = s(id);
+            const m = prefix ? t.match(new RegExp('^' + prefix + '(\\d+)$')) : t.match(/^(\d+)$/);
+            return m ? Number(m[1]) : null;
+        };
+        const phonesOf = (v) => Array.isArray(v)
+            ? v.map(p => s(p && (p.number != null ? p.number : p)))
+            : s(v).split(';').map(x => x.replace(/^[^:]*:\s*/, '').trim());
+        const emailsOf = (v) => Array.isArray(v)
+            ? v.map(e => s(e && (e.address != null ? e.address : e)))
+            : s(v).split(';').map(x => x.replace(/^[^:]*:\s*/, '').trim());
+
+        switch (sectionId) {
+            case 'contacts': {
+                const name = s(it.displayName) === '(no name)' ? '' : it.displayName;
+                const pairs = [['Name', name]];
+                phonesOf(it.phones).forEach(p => pairs.push(['Phone number', p]));
+                emailsOf(it.emails).forEach(e => pairs.push(['Email', e]));
+                const rowid = rowOf(it.id);
+                return pack(pairs, ['contacts2.db'],
+                    rowid != null ? { member: 'contacts2.db', table: 'raw_contacts', rowid } : null);
+            }
+            case 'calls': {
+                let member = '';
+                try {
+                    const b = imp && this._parsedCache.get(imp.id);
+                    member = (b && b.calls && b.calls.source) || '';
+                } catch (_) { member = ''; }
+                const rowid = rowOf(it.id);
+                const rec = rowid != null ? { table: 'calls', rowid } : null;
+                if (rec && member) rec.member = member;
+                return pack([
+                    ['Phone number', it.number],
+                    ['Call time (raw)', it.timestamp ? String(it.timestamp) : ''],
+                ], member ? [member] : ['calllog.db', 'contacts2.db'], rec);
+            }
+            case 'sms': {
+                const id = s(it.id);
+                const ts = Number(it.timestamp) || 0;
+                // MMS / Google Messages text is stored one part per row and
+                // joined with line breaks for display — search by one part.
+                const firstPart = s(it.body).split('\n').map(x => x.trim()).filter(Boolean)[0] || '';
+                if (/^(sms|mms|rcs)-bg-\d+$/.test(id)) {
+                    // Google Messages keeps the text in a separate parts table,
+                    // so it is found by its words rather than by row number.
+                    return pack([
+                        ['Message text', firstPart],
+                        ['Phone number', it.address],
+                        ['Message time (raw)', ts ? String(ts) : ''],
+                    ], ['bugle_db'], null);
+                }
+                if (/^mms-\d+$/.test(id)) {
+                    return pack([
+                        ['Message text', firstPart],
+                        ['Phone number', it.address],
+                        ['Message time (raw)', ts ? String(Math.floor(ts / 1000)) : ''],
+                    ], ['mmssms.db'], null);
+                }
+                const rowid = rowOf(id, 'sms-');
+                return pack([
+                    ['Message text', it.body],
+                    ['Phone number', it.address],
+                    ['Message time (raw)', ts ? String(ts) : ''],
+                ], ['mmssms.db'], rowid != null ? { member: 'mmssms.db', table: 'sms', rowid } : null);
+            }
+            case 'accounts': {
+                const rowid = rowOf(it.id);
+                return pack([
+                    ['Account', it.name],
+                    ['Account type', it.type],
+                ], ['accounts_ce.db', 'accounts.db'], rowid != null ? { table: 'accounts', rowid } : null);
+            }
+            case 'wifi':
+                return pack([
+                    ['Network name (SSID)', it.ssid],
+                    ['Router address (BSSID)', it.bssid],
+                ], ['WifiConfigStore.xml'], null);
+            default:
+                // Media is indexed inside the phone's ZIPs and never extracted.
+                return none;
+        }
+    }
+
+    /** The user pointed VIPER at the extracted folder's new location. */
+    relocateSource(importId, newPath) {
+        const imp = ((this.data && this.data.imports) || []).find(i => i && i.id === importId);
+        if (!imp || !newPath) return;
+        imp.sourcePath = newPath;
+        this.saveData();
     }
 
     async pushFlagsToEvidence() {
@@ -540,6 +722,9 @@ class CellebriteModule {
             getSubjectInfo:    (imp) => this._buildSubjectInfo(imp),
             getSourceFileName: (imp) => imp.ufdxPath || imp.deviceLabel || '',
             getSectionConfigs: (imp, resolved) => this._buildSectionConfigs(imp, resolved),
+            // Source Validation: find each flagged item in the phone's own databases.
+            getSourceSpec:     (imp) => this._sourceSpec(imp),
+            getItemCitation:   (sectionId, item, imp) => this._citationFor(imp, sectionId, item),
         });
     }
 

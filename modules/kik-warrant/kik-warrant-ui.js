@@ -147,6 +147,49 @@ class KikWarrantUI {
         this._renderSection();
     }
 
+    /**
+     * 🔍 Source button: open the original return at this record. The values
+     * come from the module's _citationFor, so this button and the
+     * Flag → Evidence report look for the same thing.
+     */
+    _srcBtn(section, item, title, valueLabels) {
+        const imp = this.currentImport;
+        if (!imp || typeof window === 'undefined' || !window.SourceViewer || !this.module._citationFor) return '';
+        const cit = this.module._citationFor(imp, section, item) || {};
+        const vals = cit.values || [];
+        if (!vals[0]) return '';
+        const module = this.module;
+        const impId = imp.id;
+        const current = () => module.imports.find(i => i && i.id === impId) || imp;
+        const spec0 = module._sourceSpec(imp);
+        return window.SourceViewer.buttonHtml({
+            title,
+            values: vals,
+            valueLabels: vals.map((_, i) => (valueLabels || [])[i] || (i === 0 ? title : 'related detail')),
+            context: [['Return', imp.fileName || '']],
+            // Read at click time so a relocated original is used everywhere.
+            source: null,
+            resolveSource: async () => {
+                const sp = module._sourceSpec(current());
+                return sp ? Object.assign({ label: String(sp.source.path).split(/[\\/]/).pop() }, sp.source) : null;
+            },
+            memberHints: cit.memberHints || [],
+            expected: spec0 ? spec0.expected : null,
+            onRelocate: async (picked, next) => {
+                // Kept apart from filePath, which identifies the import.
+                const cur = module.imports.find(i => i && i.id === impId);
+                if (cur) { cur.sourcePath = next.path; module.saveData(); }
+                return next;
+            },
+        }, { compact: true, label: '' });
+    }
+
+    /** A conversation/media event → the record shape _citationFor reads. */
+    _evtItem(e) {
+        const r = (e && e._raw) || e || {};
+        return Object.assign({}, r, { text: r.text || (e && e.text) || '', mediaUuid: r.mediaUuid || (e && e.uuid) || '' });
+    }
+
     _flagBtn(section, key, label) {
         const on = this.module.isFlagged(section, key);
         const safeKey = String(key)
@@ -395,7 +438,7 @@ class KikWarrantUI {
                                         <td class="kkp-mono">${b.ip}</td>
                                         <td class="kkp-mono">${b.port}</td>
                                         <td>${b.country || '—'}</td>
-                                        <td>${this._flagBtn('sessions', k)}</td>
+                                        <td style="white-space:nowrap">${this._srcBtn('sessions', b, 'IP address')}${this._flagBtn('sessions', k)}</td>
                                     </tr>
                                     `;
                                 }).join('')}
@@ -454,7 +497,7 @@ class KikWarrantUI {
             <tr class="${flagged ? 'kwp-row-flagged' : ''}">
                 <td style="color: #4ade80; font-weight: 500;">${f.friend}</td>
                 <td>${f.datetime}</td>
-                <td>${this._flagBtn('friends', k)}</td>
+                <td style="white-space:nowrap">${this._srcBtn('friends', f, 'Friend added')}${this._flagBtn('friends', k)}</td>
             </tr>
         `;
         }).join('') || '<tr><td colspan="3" style="text-align:center; color:#6b7280">No friends found</td></tr>';
@@ -608,7 +651,7 @@ class KikWarrantUI {
                             <span class="kkp-msg-time">${e.dt}</span>
                             <span class="kkp-msg-dir ${dirClass}">${dirIcon}</span>
                             <span class="kkp-msg-body">${body}</span>
-                            <span style="margin-left:auto; flex-shrink:0">${this._flagBtn('dms', k)}</span>
+                            <span style="margin-left:auto; flex-shrink:0; white-space:nowrap">${this._srcBtn('dms', this._evtItem(e), e.type === 'text' && e.text ? 'Message' : e.uuid ? 'Media ID' : 'Message time (raw)')}${this._flagBtn('dms', k)}</span>
                         </div>
                     `;
                 }).join('')}
@@ -760,7 +803,7 @@ class KikWarrantUI {
                             <span class="kkp-msg-time">${e.dt}</span>
                             <span class="kkp-msg-dir ${dirClass}">${dirIcon}</span>
                             <span class="kkp-msg-body">${body}</span>
-                            <span style="margin-left:auto; flex-shrink:0">${this._flagBtn('groups', k)}</span>
+                            <span style="margin-left:auto; flex-shrink:0; white-space:nowrap">${this._srcBtn('groups', this._evtItem(e), e.type === 'text' && e.text ? 'Message' : e.uuid ? 'Media ID' : 'Message time (raw)')}${this._flagBtn('groups', k)}</span>
                         </div>
                     `;
                 }).join('')}
@@ -846,7 +889,7 @@ class KikWarrantUI {
                                         <td>${m.mediaType}</td>
                                         <td>${hasFile ? `<span id="${thumbId}" style="cursor:pointer" onclick="window.kikWarrantUI.loadMediaThumb('${m.uuid}', '${thumbId}')">📷 Load</span>` : `<span class="kkp-mono" title="${m.uuid}">${m.uuid ? m.uuid.substring(0, 12) + '…' : '—'}</span>`}</td>
                                         <td>${m.context}</td>
-                                        <td>${this._flagBtn('media', k)}</td>
+                                        <td style="white-space:nowrap">${this._srcBtn('media', this._evtItem(m), 'Media ID')}${this._flagBtn('media', k)}</td>
                                     </tr>
                                     `;
                                 }).join('')}

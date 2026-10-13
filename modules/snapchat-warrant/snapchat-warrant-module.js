@@ -52,6 +52,11 @@ class SnapchatWarrantModule {
             dateRange: i.dateRange || null,
             stats: i.stats || {},
             parts: i.parts || [],
+            // Source Validation (see importWarrant). Small; kept so the index
+            // never loses where the original is or what it hashed to.
+            sourceIntegrity: i.sourceIntegrity || null,
+            sourceExtraPaths: i.sourceExtraPaths || null,
+            sourcePath: i.sourcePath || null,
             // Warrant Author harvests subject identifiers from this.
             subscriberInfo: i.subscriberInfo || null,
             subject: {
@@ -284,7 +289,11 @@ class SnapchatWarrantModule {
             friends: data.friends || [],
             snapHistory: data.snapHistory || [],
             otherCsvs: data.otherCsvs || {},
-            mediaFiles: data.mediaFiles || {}
+            mediaFiles: data.mediaFiles || {},
+            // Source Validation: SHA-256 of the production as imported, and
+            // the sibling part folders the import also read.
+            sourceIntegrity: data.sourceIntegrity || null,
+            sourceExtraPaths: data.sourceExtraPaths || null
         };
 
         const existingIdx = this.imports.findIndex(i => i.filePath === filePath);
@@ -559,6 +568,37 @@ class SnapchatWarrantModule {
         return rows;
     }
 
+    /** Most identifying cells of a generic CSV row (key/derived fields skipped). */
+    _rowCiteValues(r, prefer) {
+        const vals = [];
+        const used = new Set();
+        const cols = Object.keys(r || {}).filter(c => c !== 'key' && c.charAt(0) !== '_');
+        const val = (c) => (r[c] == null ? '' : String(r[c]).trim());
+        const take = (c) => { if (!used.has(c) && val(c) && vals.length < 3) { used.add(c); vals.push(val(c)); } };
+        (prefer || []).forEach(re => { const c = cols.find(k => re.test(k) && val(k)); if (c) take(c); });
+        cols.filter(c => val(c).length >= 4).forEach(take);
+        return vals;
+    }
+
+    /**
+     * What to search the original for, per flagged item (Source Validation).
+     * values[0] is the item itself; the rest only corroborate it. Media files
+     * return null — the picture/video file IS the original.
+     */
+    _citationFor(sectionId, it) {
+        const v = (hint, values) => ({ values, memberHints: [hint] });
+        switch (sectionId) {
+            case 'conversations': return v('conversations.csv', [it.text || it.mediaId || it.timestamp, it.timestamp, it.sender, it.conversationId]);
+            case 'geo':           return v('geo_locations.csv', [it.timestamp, it.latitude, it.longitude]);
+            case 'memories':      return v('memories.csv', [it.timestamp, it.latitude, it.longitude]);
+            case 'logins':        return v('login_history.csv', this._rowCiteValues(it, [/^ip$|ip.?address/i, /time|date/i]));
+            case 'devices':       return v('device_advertising_id.csv', this._rowCiteValues(it, [/advertis/i, /device.?id/i, /^id$/i, /time|date|created/i]));
+            case 'friends':       return v('friends.csv', this._rowCiteValues(it, [/user.?name/i, /user.?id/i, /display/i, /time|date|created/i]));
+            case 'snapHistory':   return v('snap_history.csv', this._rowCiteValues(it, [/^id$|snap.?id|message.?id/i, /time|date/i, /user.?name|sender/i]));
+            default:              return null;
+        }
+    }
+
     _buildSubjectInfo(imp) {
         const sub = imp.subscriberInfo || {};
         return {
@@ -722,6 +762,15 @@ class SnapchatWarrantModule {
             resolveFlags:      (imp) => this._resolveFlagged(imp),
             getSubjectInfo:    (imp) => this._buildSubjectInfo(imp),
             getSourceFileName: (imp) => imp.fileName || '',
+            // Source Validation: cite each flagged item in the original return.
+            getSourceSpec:     (imp) => {
+                const p = imp.sourcePath || imp.filePath;
+                if (!p) return null;
+                const source = { path: p };
+                if (Array.isArray(imp.sourceExtraPaths) && imp.sourceExtraPaths.length) source.extraPaths = imp.sourceExtraPaths.slice();
+                return { source, expected: imp.sourceIntegrity || null };
+            },
+            getItemCitation:   (sectionId, item) => this._citationFor(sectionId, item),
             getSectionConfigs: (imp, resolved) => this._buildSectionConfigs(imp, resolved)
         });
     }

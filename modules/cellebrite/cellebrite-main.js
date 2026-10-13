@@ -27,7 +27,7 @@
  * Stages: 'precheck' | 'copying' | 'scanning' | 'extracting' |
  *         'parsing-device' | 'parsing-apps' | 'parsing-contacts' |
  *         'parsing-calls' | 'parsing-sms' | 'parsing-accounts' |
- *         'parsing-wifi' | 'done'
+ *         'parsing-wifi' | 'fingerprinting' | 'done'
  */
 
 const fs = require('fs');
@@ -58,6 +58,376 @@ function clearCancelled(importId) { _cancelFlags.delete(importId); }
 let _security = null;
 function setSecurityManager(sm) { _security = sm; }
 function _isSecActive() { return !!(_security && _security.isEnabled() && _security.isUnlocked()); }
+
+// ─── Source Validation fingerprint ──────────────────────────────────────
+// electron-main.js injects its _sourceFingerprint() so the record taken here
+// has exactly the same shape as every other warrant module's. Only the files
+// VIPER actually reads are fingerprinted (the extracted databases/XML), plus
+// a separate SHA-256 of the report's own index files (.ufdx/.ufd). The whole
+// multi-gigabyte dump is never hashed — that would take minutes.
+let _fingerprintFn = null;
+function setSourceFingerprint(fn) { _fingerprintFn = typeof fn === 'function' ? fn : null; }
+
+function _sha256File(p) {
+    return new Promise((resolve) => {
+        try {
+            const h = require('crypto').createHash('sha256');
+            const s = fs.createReadStream(p);
+            s.on('data', (d) => h.update(d));
+            s.on('error', () => resolve(null));
+            s.on('end', () => resolve(h.digest('hex')));
+        } catch (_) { resolve(null); }
+    });
+}
+
+async function _cellebriteFingerprint(extractedDir, extractedFiles, indexPaths) {
+    if (!_fingerprintFn) return null;
+    try {
+        const root = path.resolve(extractedDir);
+        const hashOnly = [];
+        for (const f of (extractedFiles || [])) {
+            if (!f || !f.destPath) continue;
+            const rel = path.relative(root, path.resolve(f.destPath)).split(path.sep).join('/');
+            // -shm is SQLite scratch space that merely opening a database can rewrite.
+            if (!rel || rel.startsWith('..') || /-(shm|journal)$/i.test(rel)) continue;
+            if (!hashOnly.includes(rel)) hashOnly.push(rel);
+        }
+        if (!hashOnly.length) return null;
+        hashOnly.sort();
+        const out = await _fingerprintFn({ path: root, hashOnly: hashOnly.slice(0, 256) });
+        if (!out) return null;
+        const indexFiles = [];
+        for (const p of (indexPaths || [])) {
+            if (!p || indexFiles.some(x => x.path === p)) continue;
+            let size = 0;
+            try { size = fs.statSync(p).size; } catch (_) { continue; }
+            const sha256 = await _sha256File(p);
+            if (sha256) indexFiles.push({ name: path.basename(p), path: p, size, sha256 });
+        }
+        if (indexFiles.length) out.indexFiles = indexFiles;
+        return out;
+    } catch (e) {
+        console.warn('[Cellebrite] fingerprint failed:', e && e.message);
+        return null;
+    }
+}
+
+// ─── Media source check ─────────────────────────────────────────────────
+// Pictures, videos and audio are never extracted: VIPER reads them straight
+// out of the phone dump Cellebrite wrote (FileSystem NN/<device>.zip). A
+// source check re-reads those exact bytes and shows:
+//   1. size and CRC-32 against what Cellebrite wrote into the dump's own
+//      directory for that file — the bytes are the ones Cellebrite stored;
+//   2. SHA-256 and MD5 of the file, to compare with any other tool;
+//   3. on request, the whole dump against the SHA-256 Cellebrite recorded in
+//      its .ufd when the extraction was made. That one is slow (a dump can be
+//      48 GB) so it runs in the background and its result is kept.
+
+const _CRC_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+        let c = n;
+        for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        t[n] = c >>> 0;
+    }
+    return t;
+})();
+
+/** Running CRC-32 (the checksum ZIP files use). Start with 0. */
+function _crc32(buf, prev) {
+    let c = ((prev >>> 0) ^ 0xFFFFFFFF) >>> 0;
+    for (let i = 0; i < buf.length; i++) c = _CRC_TABLE[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+function _importDir(caseNumber, importId) {
+    return path.join('cases', String(caseNumber), 'Cellebrite', String(importId));
+}
+
+// ── One shared reader per phone dump, for previews ─────────────────────
+// Opening a FileSystem zip reads its whole central directory: measured at
+// ~0.5 s on a 48 GB / 195,197-entry Pixel dump, while reading one picture
+// out of it takes ~1 ms. Re-opening per thumbnail made a grid of 30
+// previews take ~15 s. Previews now share one open reader per dump, keyed
+// on the dump's size + modified time (a changed dump gets a fresh reader),
+// and closed after DUMP_READER_IDLE_MS idle so the drive can be ejected.
+// The source check deliberately does NOT use this — it opens the dump fresh.
+const DUMP_READER_IDLE_MS = 30 * 1000;
+const _dumpReaders = new Map();   // zipPath → { key, promise, users, timer, retired }
+
+function _closeDumpEntry(ent) {
+    ent.promise.then((r) => { try { r.close(); } catch (_) {} }, () => {});
+}
+
+function _retireDumpReader(zipPath, ent) {
+    if (_dumpReaders.get(zipPath) === ent) _dumpReaders.delete(zipPath);
+    if (ent.timer) { clearTimeout(ent.timer); ent.timer = null; }
+    if (ent.retired) return;
+    ent.retired = true;
+    if (ent.users === 0) _closeDumpEntry(ent);
+}
+
+async function _withDumpReader(zipPath, fn) {
+    const st = fs.statSync(zipPath);
+    const key = `${st.size}|${st.mtimeMs}`;
+    let ent = _dumpReaders.get(zipPath);
+    if (ent && ent.key !== key) { _retireDumpReader(zipPath, ent); ent = null; }
+    if (!ent) {
+        const { openZip } = require('../_shared/zip-reader');
+        ent = { key, users: 0, timer: null, retired: false, promise: openZip(zipPath, {}) };
+        ent.promise.catch(() => {});   // handled by the awaiting caller
+        _dumpReaders.set(zipPath, ent);
+    }
+    ent.users++;
+    if (ent.timer) { clearTimeout(ent.timer); ent.timer = null; }
+    try {
+        let reader;
+        try { reader = await ent.promise; }
+        catch (e) { _retireDumpReader(zipPath, ent); throw e; }
+        return await fn(reader);
+    } finally {
+        ent.users--;
+        if (ent.users === 0) {
+            if (ent.retired) _closeDumpEntry(ent);
+            else {
+                ent.timer = setTimeout(() => _retireDumpReader(zipPath, ent), DUMP_READER_IDLE_MS);
+                if (ent.timer.unref) ent.timer.unref();
+            }
+        }
+    }
+}
+
+function _closeDumpReaders() {
+    for (const [p, ent] of Array.from(_dumpReaders.entries())) _retireDumpReader(p, ent);
+}
+
+/** Look a media item up by id in the import's own index — never by a path
+ *  the renderer supplies. Returns { ok, item } or { ok:false, error, locked }. */
+function _loadMediaItem(caseNumber, importId, mediaId) {
+    if (!caseNumber || !importId || !mediaId) {
+        return { ok: false, error: 'caseNumber + importId + mediaId required' };
+    }
+    const p = path.join(_importDir(caseNumber, importId), 'parsed', 'media.json');
+    if (!fs.existsSync(p)) return { ok: false, error: 'media.json not found for this import' };
+    const r = _secureReadJson(p);
+    if (!r.ok) return { ok: false, error: r.error, locked: !!r.locked };
+    const item = ((r.data && r.data.items) || []).find(x => x && x.id === mediaId);
+    if (!item) return { ok: false, error: `media id not found: ${mediaId}` };
+    return { ok: true, item };
+}
+
+/**
+ * What Cellebrite itself recorded about a dump, from the .ufd beside it:
+ * the dump's SHA-256 (the [SHA256] section) plus when and with what it was
+ * made. null when there is no .ufd naming this dump.
+ */
+function _ufdRecordFor(zipPath) {
+    try {
+        const dir = path.dirname(zipPath);
+        const zipName = path.basename(zipPath).toLowerCase();
+        for (const ent of readDirSafe(dir)) {
+            if (!ent.isFile() || !/\.ufd$/i.test(ent.name)) continue;
+            const full = path.join(dir, ent.name);
+            let parsed;
+            try { parsed = Parser.parseUfd(fs.readFileSync(full, 'utf-8')); } catch (_) { continue; }
+            const d = parsed && parsed.data;
+            const secs = (d && d.sections) || {};
+            const pick = (secName) => {
+                const sec = secs[secName] || secs[secName.toLowerCase()] || null;
+                if (!sec) return null;
+                const k = Object.keys(sec).find(x => x.toLowerCase() === zipName);
+                return k ? String(sec[k]).trim() : null;
+            };
+            const sha256 = pick('SHA256');
+            const md5 = pick('MD5');
+            const dumpName = d && d.fileDump ? String(d.fileDump).toLowerCase() : '';
+            if (!sha256 && !md5 && dumpName !== zipName) continue;
+            const gen = secs.General || {};
+            return {
+                ufdName: ent.name,
+                ufdPath: full,
+                sha256: sha256 ? sha256.toLowerCase() : null,
+                md5: md5 ? md5.toLowerCase() : null,
+                tool: [gen.AcquisitionTool, gen.Version].filter(Boolean).join(' ') || null,
+                extractedAt: gen.Date || null,
+                machine: gen.MachineName || null,
+            };
+        }
+    } catch (_) {}
+    return null;
+}
+
+/** Re-read one media entry from the dump and check it. Never throws. */
+/**
+ * One entry's bytes, read straight from its local header with no CRC check
+ * (stored or deflated). Used only after the zip library has refused an
+ * entry, so the altered bytes can still be measured.
+ */
+async function _rawEntryStream(zipPath, meta) {
+    const fd = fs.openSync(zipPath, 'r');
+    let start;
+    try {
+        const h = Buffer.alloc(30);
+        fs.readSync(fd, h, 0, 30, meta.offset);
+        if (h.readUInt32LE(0) !== 0x04034b50) throw new Error('local file header not found');
+        start = meta.offset + 30 + h.readUInt16LE(26) + h.readUInt16LE(28);
+    } finally { fs.closeSync(fd); }
+    const src = meta.compressedSize > 0
+        ? fs.createReadStream(zipPath, { start, end: start + meta.compressedSize - 1 })
+        : require('stream').Readable.from([]);
+    if (meta.method === 0) return src;
+    if (meta.method !== 8) throw new Error(`unsupported compression method ${meta.method}`);
+    const inf = require('zlib').createInflateRaw();
+    src.on('error', (e) => inf.destroy(e));
+    return src.pipe(inf);
+}
+
+async function _checkMediaItem(item) {
+    const out = {
+        filename: item.filename || '',
+        mime: item.mime || '',
+        type: item.type || '',
+        entryPath: item.entryPath || '',
+        rawEntryName: item.rawEntryName || '',
+        sourceZip: item.sourceZip || '',
+        sourceZipName: item.sourceZip ? path.basename(item.sourceZip) : '',
+        sourceFolder: item.sourceZip ? path.basename(path.dirname(item.sourceZip)) : '',
+        // Android's own gallery thumbnails, not the original picture.
+        thumbnail: /(^|\/)\.thumbnails?\//i.test(item.entryPath || item.rawEntryName || ''),
+        recorded: { size: item.size || 0, crc32: item.crc32 != null ? (item.crc32 >>> 0) : null, mtime: item.mtime || null },
+        capturedAt: item.capturedAt || null,
+        gps: item.gps || null,
+        width: item.width || null,
+        height: item.height || null,
+        checkedAt: new Date().toISOString(),
+    };
+    if (!item.sourceZip || !fs.existsSync(item.sourceZip)) {
+        out.zipMissing = true;
+        return out;
+    }
+    try {
+        const st = fs.statSync(item.sourceZip);
+        out.zipSize = st.size;
+        out.zipMtimeMs = Math.round(st.mtimeMs);
+    } catch (_) {}
+    out.ufd = _ufdRecordFor(item.sourceZip);
+
+    const { openZip } = require('../_shared/zip-reader');
+    let reader = null;
+    try {
+        reader = await openZip(item.sourceZip, {});
+        const meta = reader._zip && typeof reader._zip.entry === 'function'
+            ? reader._zip.entry(item.rawEntryName) : null;
+        if (!meta) { out.entryMissing = true; return out; }
+        out.container = {
+            size: meta.size,
+            compressedSize: meta.compressedSize,
+            crc32: meta.crc != null ? (meta.crc >>> 0) : null,
+            time: meta.time || null,
+            stored: meta.method === 0,
+        };
+        const measure = async (stm) => {
+            const sha = require('crypto').createHash('sha256');
+            const md5 = require('crypto').createHash('md5');
+            let crc = 0, size = 0;
+            await new Promise((resolve, reject) => {
+                stm.on('data', (b) => { sha.update(b); md5.update(b); crc = _crc32(b, crc); size += b.length; });
+                stm.on('error', reject);
+                stm.on('end', resolve);
+            });
+            out.read = { size, crc32: crc, sha256: sha.digest('hex'), md5: md5.digest('hex') };
+        };
+        try {
+            const stm = await reader.openStream(item.rawEntryName);
+            if (!stm) { out.entryMissing = true; return out; }
+            await measure(stm);
+        } catch (e) {
+            // The zip library refuses an entry whose bytes don't fit the
+            // dump's own CRC — and drops the last chunk when it does. Read
+            // the entry again WITHOUT that check so the real (altered) bytes
+            // can be measured and shown as a mismatch.
+            const msg = (e && e.message) || String(e);
+            if (!/crc/i.test(msg) || meta.offset == null) throw e;
+            out.libraryRefused = msg;
+            await measure(await _rawEntryStream(item.sourceZip, meta));
+        }
+        out.checks = {
+            sizeMatch: out.read.size === out.container.size,
+            crcMatch: out.container.crc32 != null && out.read.crc32 === out.container.crc32,
+            // The dump's directory still says what it said when imported.
+            sameAsImport: out.recorded.size === out.container.size &&
+                (out.recorded.crc32 == null || out.recorded.crc32 === out.container.crc32),
+            importHadCrc: out.recorded.crc32 != null,
+        };
+    } catch (e) {
+        // A read that fails outright is a failed check, not a crash.
+        out.readError = (e && e.message) || String(e);
+    } finally {
+        if (reader) { try { reader.close(); } catch (_) {} }
+    }
+    return out;
+}
+
+// Whole-dump checks: one per dump file at a time, keyed by path+size+mtime.
+const _dumpJobs = new Map();
+
+function _dumpKey(zipPath, st) { return `${path.resolve(zipPath)}|${st.size}|${Math.round(st.mtimeMs)}`; }
+
+function _dumpCheckFile(caseNumber, importId) {
+    return path.join(_importDir(caseNumber, importId), 'dump-check.json');
+}
+
+/** A finished whole-dump check saved earlier for this exact file, or null. */
+function _savedDumpCheck(caseNumber, importId, key) {
+    try {
+        const p = _dumpCheckFile(caseNumber, importId);
+        if (!fs.existsSync(p)) return null;
+        const r = _secureReadJson(p);
+        const rec = r.ok && r.data && r.data[key];
+        return rec && rec.state === 'done' ? rec : null;
+    } catch (_) { return null; }
+}
+
+function _saveDumpCheck(caseNumber, importId, key, rec) {
+    try {
+        const p = _dumpCheckFile(caseNumber, importId);
+        let all = {};
+        if (fs.existsSync(p)) { const r = _secureReadJson(p); if (r.ok && r.data) all = r.data; }
+        all[key] = rec;
+        _secureWriteJson(p, all);
+    } catch (e) { console.warn('[Cellebrite] could not save dump check:', e && e.message); }
+}
+
+function _startDumpJob(caseNumber, importId, zipPath, key, size, expected) {
+    const job = { state: 'running', done: 0, total: size, startedAt: new Date().toISOString(), expected };
+    _dumpJobs.set(key, job);
+    const h = require('crypto').createHash('sha256');
+    const s = fs.createReadStream(zipPath, { highWaterMark: 4 * 1024 * 1024 });
+    s.on('data', (b) => { h.update(b); job.done += b.length; });
+    s.on('error', (e) => {
+        job.state = 'error';
+        job.error = (e && e.message) || String(e);
+        job.finishedAt = new Date().toISOString();
+    });
+    s.on('end', () => {
+        job.sha256 = h.digest('hex');
+        job.state = 'done';
+        job.finishedAt = new Date().toISOString();
+        job.match = expected ? job.sha256 === expected : null;
+        _saveDumpCheck(caseNumber, importId, key, {
+            state: 'done', sha256: job.sha256, expected: expected || null, match: job.match,
+            total: job.total, startedAt: job.startedAt, finishedAt: job.finishedAt,
+        });
+    });
+    return job;
+}
+
+function _publicJob(j) {
+    if (!j) return { state: 'none' };
+    const o = { state: j.state, done: j.done || 0, total: j.total || 0 };
+    for (const k of ['sha256', 'expected', 'match', 'error', 'startedAt', 'finishedAt']) if (j[k] !== undefined) o[k] = j[k];
+    return o;
+}
 
 function _secureWriteJson(filePath, obj) {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -554,6 +924,14 @@ function registerIpc(ipcMain) {
             }
             log(`Extracted ${extractedFiles.length} target file(s) into ${extractedDir}`);
 
+            // ── fingerprint (before anything opens the databases) ─────────
+            // A failed fingerprint never fails the import.
+            sendProgress(event, importId, { stage: 'fingerprinting', current: 0, total: 1, label: 'Recording SHA-256 fingerprint...' });
+            const sourceIntegrity = await _cellebriteFingerprint(
+                extractedDir, extractedFiles,
+                [importedUfdxPath].concat((scan.ufds || []).map(u => u && u.path)));
+            log(sourceIntegrity ? `Fingerprint recorded: ${sourceIntegrity.fileCount} file(s), sha256=${sourceIntegrity.sha256}` : 'Fingerprint not recorded');
+
             // ── parse: device ─────────────────────────────────────────────
             sendProgress(event, importId, { stage: 'parsing-device', current: 0, total: 1, label: 'Parsing device overview...' });
             const deviceData = buildDeviceOverview(scan, extractedFiles);
@@ -765,6 +1143,8 @@ function registerIpc(ipcMain) {
                     targetSizeTotal: scan.targetSizeTotal,
                 },
                 extractedFiles: extractedFiles.map(f => ({ kind: f.kind, srcPath: f.srcPath, destPath: f.destPath, size: f.size })),
+                extractedDir: path.resolve(extractedDir),
+                sourceIntegrity,
             });
 
             sendProgress(event, importId, { stage: 'done', current: 1, total: 1, label: 'Import complete' });
@@ -776,6 +1156,8 @@ function registerIpc(ipcMain) {
                 caseNumber,
                 caseId,
                 caseRoot,
+                extractedDir: path.resolve(extractedDir),
+                sourceIntegrity,
                 manifest,
                 counts,
                 errors,
@@ -808,14 +1190,18 @@ function registerIpc(ipcMain) {
                 'cases', String(caseNumber), 'Cellebrite', String(importId),
                 'parsed', `${surface}.json`
             );
+            // Source Validation: where the databases this import read live.
+            // Lets imports made before fingerprints existed still be opened.
+            const ex = path.resolve('cases', String(caseNumber), 'Cellebrite', String(importId), 'extracted');
+            const extractedDir = fs.existsSync(ex) ? ex : null;
             if (!fs.existsSync(file)) {
-                return { success: true, data: null, exists: false };
+                return { success: true, data: null, exists: false, extractedDir };
             }
             const r = _secureReadJson(file);
             if (!r.ok) {
                 return { success: false, error: r.error, locked: !!r.locked };
             }
-            return { success: true, data: r.data, exists: true };
+            return { success: true, data: r.data, exists: true, extractedDir };
         } catch (e) {
             return { success: false, error: e.message };
         }
@@ -877,9 +1263,8 @@ function registerIpc(ipcMain) {
                 return { success: false, error: 'sourceZip missing on disk', sourceZip: item.sourceZip };
             }
 
-            const { openZip } = require('../_shared/zip-reader');
-            const reader = await openZip(item.sourceZip, {});
-            try {
+            // Shared reader — see _withDumpReader. Never close it here.
+            return await _withDumpReader(item.sourceZip, (reader) => {
                 const buf = reader._zip
                     ? reader._zip.entryDataSync(item.rawEntryName)
                     : (function () {
@@ -898,11 +1283,72 @@ function registerIpc(ipcMain) {
                     size: buf.length,
                     buffer: buf.toString('base64'),
                 };
-            } finally {
-                try { reader.close(); } catch (_) {}
-            }
+            });
         } catch (e) {
             console.error('[Cellebrite] media-read error:', e);
+            return { success: false, error: e.message || String(e) };
+        }
+    });
+
+    // ── media-verify: check one picture/video against the phone dump ─────
+    ipcMain.handle('cellebrite-media-verify', async (event, { caseNumber, importId, mediaId } = {}) => {
+        try {
+            const got = _loadMediaItem(caseNumber, importId, mediaId);
+            if (!got.ok) return { success: false, error: got.error, locked: !!got.locked };
+            const out = await _checkMediaItem(got.item);
+            if (out.zipSize != null) {
+                const key = _dumpKey(got.item.sourceZip, { size: out.zipSize, mtimeMs: out.zipMtimeMs });
+                out.dumpCheck = _publicJob(_dumpJobs.get(key) || _savedDumpCheck(caseNumber, importId, key));
+            }
+            return Object.assign({ success: true, mediaId }, out);
+        } catch (e) {
+            console.error('[Cellebrite] media-verify error:', e);
+            return { success: false, error: e.message || String(e) };
+        }
+    });
+
+    // ── dump-verify: whole-dump SHA-256 vs the one Cellebrite recorded ───
+    // Polled by the renderer; {start:true} begins a check if none is running
+    // or saved. The dump is found through the media item, never a raw path.
+    ipcMain.handle('cellebrite-dump-verify', async (event, { caseNumber, importId, mediaId, start } = {}) => {
+        try {
+            const got = _loadMediaItem(caseNumber, importId, mediaId);
+            if (!got.ok) return { success: false, error: got.error, locked: !!got.locked };
+            const zip = got.item.sourceZip;
+            if (!zip || !fs.existsSync(zip)) return { success: false, error: 'The phone dump is not on disk at its recorded location.' };
+            const st = fs.statSync(zip);
+            const key = _dumpKey(zip, st);
+            let job = _dumpJobs.get(key);
+            if (!job || job.state === 'error') {
+                const saved = _savedDumpCheck(caseNumber, importId, key);
+                if (saved) return { success: true, check: _publicJob(saved) };
+                if (start) {
+                    const ufd = _ufdRecordFor(zip);
+                    job = _startDumpJob(caseNumber, importId, zip, key, st.size, ufd && ufd.sha256);
+                }
+            }
+            return { success: true, check: _publicJob(job) };
+        } catch (e) {
+            return { success: false, error: e.message || String(e) };
+        }
+    });
+
+    // ── media-save: save an exact copy of one file out of the dump ───────
+    ipcMain.handle('cellebrite-media-save', async (event, { caseNumber, importId, mediaId } = {}) => {
+        try {
+            const got = _loadMediaItem(caseNumber, importId, mediaId);
+            if (!got.ok) return { success: false, error: got.error, locked: !!got.locked };
+            const item = got.item;
+            if (!item.sourceZip || !fs.existsSync(item.sourceZip)) return { success: false, error: 'The phone dump is not on disk at its recorded location.' };
+            const safeName = String(item.filename || 'media').replace(/[<>:"|?*\x00-\x1F\\/]/g, '_');
+            const res = await dialog.showSaveDialog({ title: 'Save an exact copy of this file', defaultPath: safeName });
+            if (res.canceled || !res.filePath) return { success: false, canceled: true };
+            const { openZip } = require('../_shared/zip-reader');
+            const reader = await openZip(item.sourceZip, {});
+            try { await reader.extractEntryToFile(item.rawEntryName, res.filePath); }
+            finally { try { reader.close(); } catch (_) {} }
+            return { success: true, path: res.filePath, sha256: await _sha256File(res.filePath) };
+        } catch (e) {
             return { success: false, error: e.message || String(e) };
         }
     });
@@ -1119,5 +1565,6 @@ function findFirstByExt(dir, ext) {
 module.exports = {
     registerIpc,
     setSecurityManager,
-    _internals: { genImportId, sumBundleSize, isCancelled, setCancelled, clearCancelled, runScan, buildDeviceOverview, parseAppsForBundle, freeSpaceFor, rmrfSafe, _cbDedupeMessages, _cbNormAddr, _secureWriteJson, _secureReadJson, setSecurityManager },
+    setSourceFingerprint,
+    _internals: { _cellebriteFingerprint, _crc32, _checkMediaItem, _rawEntryStream, _withDumpReader, _closeDumpReaders, _dumpReaders, DUMP_READER_IDLE_MS, _ufdRecordFor, _loadMediaItem, genImportId, sumBundleSize, isCancelled, setCancelled, clearCancelled, runScan, buildDeviceOverview, parseAppsForBundle, freeSpaceFor, rmrfSafe, _cbDedupeMessages, _cbNormAddr, _secureWriteJson, _secureReadJson, setSecurityManager },
 };

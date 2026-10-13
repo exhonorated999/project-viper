@@ -120,13 +120,29 @@ class ApertureData {
             filePath: sourceData.filePath || null,
             fileType: sourceData.fileType,
             importedDate: new Date().toISOString(),
-            emailCount: sourceData.emailCount || 0
+            emailCount: sourceData.emailCount || 0,
+            // Source Validation: SHA-256 of the original, taken at import.
+            sourceIntegrity: sourceData.sourceIntegrity || null
         };
         
         sources.push(newSource);
         this.saveSources(caseId, sources);
         
         return newSource;
+    }
+
+    /**
+     * Remember where the original file is now, after the examiner points
+     * VIPER at a moved copy. filePath (the import's identity) is untouched.
+     */
+    setSourcePath(caseId, sourceId, newPath) {
+        const sources = this.loadSources(caseId);
+        const src = sources.find(s => s && String(s.id) === String(sourceId));
+        if (!src) throw new Error('Source not found');
+        if (typeof newPath !== 'string' || !newPath) throw new Error('No path given');
+        src.sourcePath = newPath;
+        this.saveSources(caseId, sources);
+        return src;
     }
 
     /**

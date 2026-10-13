@@ -132,6 +132,11 @@ const _cache = new Map();   // zipPath -> { reader, inner: Map, mtimeMs, timer }
 
 function _touch(zipPath, rec) {
     if (rec.timer) clearTimeout(rec.timer);
+    rec.timer = null;
+    // Never close a reader while a caller is still streaming out of it
+    // (Source Validation scans members that take longer than the idle
+    // window). The timer is re-armed when the last stream finishes.
+    if (rec.streams > 0) return;
     rec.timer = setTimeout(() => _drop(zipPath), LIMITS.idleCloseMs);
     if (rec.timer && rec.timer.unref) rec.timer.unref();
 }
@@ -158,7 +163,7 @@ async function _get(zipPath, security) {
     if (hit) _drop(zipPath);
     const encrypted = !!(security && security.isEncryptedBuffer && security.isEncryptedBuffer(peek(zipPath, 8)));
     const reader = await openEvidenceZip(zipPath, security);
-    const rec = { reader, inner: new Map(), mtimeMs, timer: null, encrypted };
+    const rec = { reader, inner: new Map(), mtimeMs, timer: null, encrypted, streams: 0 };
     _cache.set(zipPath, rec);
     _touch(zipPath, rec);
     return rec;
@@ -245,6 +250,44 @@ async function readEvidenceZipEntry(zipPath, entryName, inZip, security) {
     return { bytes, name: path.basename(entryName.replace(/\\/g, '/')), mime: mimeFor(entryName), size: bytes.length };
 }
 
+/**
+ * Open one file inside the ZIP (or inside a ZIP inside it) as a Readable,
+ * without buffering it. Same memory-only rule as everything else here: an
+ * encrypted ZIP is decrypted into memory by _get, never to a temp file.
+ * Used by Source Validation to search very large CSV members.
+ */
+async function openEvidenceZipEntryStream(zipPath, entryName, inZip, security) {
+    const bad = validateZipPath(zipPath);
+    if (bad) throw new Error(bad);
+    if (typeof entryName !== 'string' || !entryName) throw new Error('No file inside the ZIP was named.');
+    const rec = await _get(zipPath, security);
+    const reader = inZip ? await _getInner(rec, inZip) : rec.reader;
+    const ent = _findEntry(reader, entryName);
+    if (!ent) throw new Error('That file is not in the ZIP.');
+    const stm = await reader.openStream(ent);
+    if (!stm) throw new Error('That file is not in the ZIP.');
+    rec.streams = (rec.streams || 0) + 1;
+    if (rec.timer) { clearTimeout(rec.timer); rec.timer = null; }
+    let done = false;
+    const finish = () => {
+        if (done) return;
+        done = true;
+        rec.streams = Math.max(0, (rec.streams || 0) - 1);
+        if (_cache.get(zipPath) === rec) _touch(zipPath, rec);
+    };
+    stm.once('end', finish);
+    stm.once('close', finish);
+    stm.once('error', finish);
+    return stm;
+}
+
+/** True when the file on disk is a Field-Security (VIPENC) container. */
+function isEncryptedFile(filePath, security) {
+    try {
+        return !!(security && security.isEncryptedBuffer && security.isEncryptedBuffer(peek(filePath, 8)));
+    } catch (_) { return false; }
+}
+
 function closeAll() {
     for (const k of Array.from(_cache.keys())) _drop(k);
 }
@@ -252,4 +295,5 @@ function closeAll() {
 module.exports = {
     LIMITS, kindOf, mimeFor, isJunk,
     openEvidenceZip, listEvidenceZip, readEvidenceZipEntry, closeAll,
+    openEvidenceZipEntryStream, isEncryptedFile,
 };

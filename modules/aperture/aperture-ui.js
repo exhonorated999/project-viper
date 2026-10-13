@@ -335,6 +335,7 @@ class ApertureUI {
                 <div class="flex items-start justify-between mb-4 gap-3">
                     <h2 class="text-xl font-bold text-white flex-1">${this.esc(email.subject)}</h2>
                     <div class="flex items-center space-x-2 flex-shrink-0">
+                        ${this._srcBtn('emails', { id: email.id }, 'Email', ['Message-ID', 'Subject', 'Sender address', 'Recipient', 'Recipient', 'Originating IP'], email)}
                         ${this._flagBtn('emails', email.id, 'Flag')}
                         <button onclick="apertureUI.toggleFlag('${email.id}')"
                                 class="px-3 py-1.5 text-sm rounded-lg transition-all ${
@@ -614,6 +615,7 @@ class ApertureUI {
                         <span class="text-gray-400 text-xs font-semibold uppercase tracking-wide">IP Analysis</span>
                     </div>
                     <div class="flex items-center space-x-2">
+                        ${this._srcBtn('ips', { ip: ipInfo.ip_address }, 'IP address', ['IP address'], this.selectedEmail)}
                         ${this._flagBtn('ips', ipInfo.ip_address)}
                         <button onclick="apertureUI.lookupIp('${ipInfo.ip_address}')"
                                 class="px-2 py-1 text-xs bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/50 rounded hover:bg-viper-cyan/30 transition-all ${this.lookingUpIp ? 'opacity-50' : ''}">
@@ -749,6 +751,7 @@ class ApertureUI {
                                 <div class="text-xs text-gray-500">${this.formatBytes(att.size)} · ${att.mime_type || 'unknown'}</div>
                             </div>
                             <div class="flex space-x-1 flex-shrink-0">
+                                ${this._srcBtn('attachments', { emailId: email.id, index: idx }, 'Attachment name', ['Attachment name'], email)}
                                 ${this._flagBtn('attachments', `${email.id}::${idx}`)}
                                 <button onclick="apertureUI.viewAttachment(${idx})" class="text-viper-cyan hover:text-white px-1" title="Preview">👁️</button>
                                 <button onclick="apertureUI.openAttachmentExternal(${idx})" class="text-viper-green hover:text-white px-1" title="Open">📂</button>
@@ -1136,6 +1139,42 @@ class ApertureUI {
                         onclick="event.stopPropagation(); window.apertureUI._onFlagClick('${section}', '${safeKey}')">
                   🚩${label ? '<span style="margin-left:2px">' + label + '</span>' : ''}
                 </button>`;
+    }
+
+    /**
+     * "Show in original" — finds this item in the .mbox/.eml file the
+     * email came from, exactly as received.
+     */
+    _srcBtn(section, item, title, valueLabels, email) {
+        const module = this.module;
+        if (typeof window === 'undefined' || !window.SourceViewer || !module || !module._citationFor) return '';
+        const src = module._sourceOf(email);
+        const spec0 = module._specForSource(src);
+        if (!spec0) return '';
+        const cit = module._citationFor(null, section, item) || {};
+        const vals = cit.values || [];
+        if (!vals[0]) return '';
+        const sourceId = src.id;
+        const currentSrc = () => (module.sources || []).find(s => s && String(s.id) === String(sourceId)) || src;
+        return window.SourceViewer.buttonHtml({
+            title,
+            values: vals,
+            valueLabels: vals.map((_, i) => (valueLabels || [])[i] || (i === 0 ? title : 'related detail')),
+            context: [['File', src.fileName || '']],
+            // Read at click time so a relocated original is used everywhere.
+            source: null,
+            resolveSource: async () => {
+                const sp = module._specForSource(currentSrc());
+                return sp ? Object.assign({ label: String(sp.source.path).split(/[\\/]/).pop() }, sp.source) : null;
+            },
+            memberHints: cit.memberHints || [],
+            expected: spec0.expected,
+            onRelocate: async (picked, next) => {
+                // Kept apart from filePath, which identifies the import.
+                await module.relocateSource(sourceId, next.path);
+                return next;
+            },
+        }, { compact: true, label: '' });
     }
 
     /* ═══════════════════════════════════════════════════

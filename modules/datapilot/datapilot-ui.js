@@ -708,7 +708,7 @@ class DatapilotUI {
         let events = [];
         for (const m of active.msgs) {
             events.push({
-                kind: 'msg', uid: m.uid,
+                kind: 'msg', uid: m.uid, ref: m,
                 dir: m.direction,
                 date: m.timestampIso || m.timestamp,
                 dateRaw: m.timestamp,
@@ -718,7 +718,7 @@ class DatapilotUI {
         }
         for (const c of active.calls) {
             events.push({
-                kind: 'call', uid: `call_${c.no}`,
+                kind: 'call', uid: `call_${c.no}`, ref: c,
                 dir: c.direction || 'unknown',
                 date: c.timestampIso || c.timestamp || '',
                 dateRaw: c.timestamp || '',
@@ -806,6 +806,42 @@ class DatapilotUI {
         `;
     }
 
+    /**
+     * 🔍 Source button: open the original Datapilot export at this record.
+     * The values come from the module's _citationFor.
+     */
+    _srcBtn(section, rec) {
+        const module = this.module;
+        const imp = module && module.getActiveImport && module.getActiveImport();
+        if (!imp || !rec || typeof window === 'undefined' || !window.SourceViewer || !module._citationFor) return '';
+        const cit = module._citationFor(section, rec) || {};
+        const vals = cit.values || [];
+        if (!vals[0]) return '';
+        const labels = cit.labels || [];
+        const impId = imp.id;
+        const current = () => (module.data.imports || []).find(i => i && i.id === impId) || imp;
+        const spec0 = module._sourceSpec(imp);
+        return window.SourceViewer.buttonHtml({
+            title: labels[0] || 'Record',
+            values: vals,
+            valueLabels: vals.map((_, i) => labels[i] || 'related detail'),
+            context: [['Datapilot export', imp.fileName || '']],
+            source: null,
+            // Read at click time so a relocated export is used everywhere.
+            resolveSource: async () => {
+                const sp = module._sourceSpec(current());
+                return sp && sp.source.path ? Object.assign({ label: String(sp.source.path).split(/[\\/]/).pop() }, sp.source) : null;
+            },
+            memberHints: cit.memberHints || [],
+            expected: spec0 ? spec0.expected : null,
+            relocateFolder: true,
+            onRelocate: async (picked, next) => {
+                module.relocateSource(impId, next && next.path);
+                return next;
+            },
+        }, { compact: true, label: '' });
+    }
+
     _renderThreadEvent(ev) {
         const time = ev.date ? this._timeOnly(ev.date) : '';
         const dirClass = ev.dir === 'outgoing' ? 'out' : (ev.dir === 'incoming' ? 'in' : 'unk');
@@ -818,6 +854,7 @@ class DatapilotUI {
                         <div class="dp-msg-foot">
                             <span class="dp-msg-time">${this._esc(time)}</span>
                             ${ev.meta ? `<span class="dp-msg-meta">${this._esc(ev.meta)}</span>` : ''}
+                            ${this._srcBtn('messages', ev.ref)}
                             <button class="dp-flag-btn" data-dp-flag="messages" data-dp-key="${this._esc(ev.uid)}" title="Flag this message">${flagged ? '🚩' : '⚐'}</button>
                         </div>
                     </div>
@@ -835,6 +872,7 @@ class DatapilotUI {
                     <div class="dp-call-foot">
                         <span class="dp-msg-time">${this._esc(time)}</span>
                         <span class="dp-msg-meta">${this._esc(ev.meta)}</span>
+                        ${this._srcBtn('calls', ev.ref)}
                         <button class="dp-flag-btn" data-dp-flag="calls" data-dp-key="${this._esc(ev.uid.replace('call_', ''))}">${flagged ? '🚩' : '⚐'}</button>
                     </div>
                 </div>
@@ -1476,6 +1514,12 @@ class DatapilotUI {
         `;
     }
 
+    _artSrcBtn(it) {
+        if (!it || !it.ref) return '';
+        const section = { media: 'media', file: 'files', app: 'apps', deleted: 'deleted' }[it.kind];
+        return section ? this._srcBtn(section, it.ref) : '';
+    }
+
     _renderArtifactCard(it) {
         const flagged = this.module.isFlagged(it.flagSection, it.flagKey);
         const icon = it.type === 'photo' ? '🖼' : it.type === 'video' ? '🎬' : it.type === 'audio' ? '🔊'
@@ -1515,6 +1559,7 @@ class DatapilotUI {
                         ${it.kind === 'app' && it.version ? `<span class="dp-card-sub">v${this._esc(it.version)}${it.isPrivate ? ' · private' : ''}</span>` : ''}
                     </div>
                     <div class="dp-art-actions">
+                        ${this._artSrcBtn(it)}
                         <button class="dp-flag-btn" data-dp-flag="${it.flagSection}" data-dp-key="${this._esc(it.flagKey)}">${flagged ? '🚩' : '⚐'}</button>
                         ${isMedia ? `<button class="dp-btn dp-btn-link dp-art-open" data-dp-open="${this._esc(it.id)}">Open</button>` : ''}
                     </div>

@@ -109,6 +109,8 @@ class KikWarrantModule {
             importedAt: new Date().toISOString(),
             accountUsername: data.accountUsername || 'unknown',
             caseNumber: data.caseNumber || null,
+            // Source Validation: SHA-256 of the original taken at import.
+            sourceIntegrity: data.sourceIntegrity || null,
             data: data
         };
 
@@ -273,7 +275,10 @@ class KikWarrantModule {
                     msgCount: r.msgCount || '',
                     mediaType: r.mediaType || '',
                     mediaUuid: r.mediaUuid || '',
-                    ip: r.ip || ''
+                    ip: r.ip || '',
+                    // Message body, when the return carries one (CSV layouts) —
+                    // it is what Source Validation looks for in the original.
+                    ...(r.text ? { text: String(r.text) } : {})
                 });
             }
         }
@@ -302,7 +307,8 @@ class KikWarrantModule {
                     msgCount: r.msgCount || '',
                     mediaType: r.mediaType || '',
                     mediaUuid: r.mediaUuid || '',
-                    ip: r.ip || ''
+                    ip: r.ip || '',
+                    ...(r.text ? { text: String(r.text) } : {})
                 });
             }
         }
@@ -449,8 +455,49 @@ class KikWarrantModule {
             resolveFlags:      (imp) => this._resolveFlagged(imp),
             getSubjectInfo:    (imp) => this._buildSubjectInfo(imp),
             getSourceFileName: (imp) => imp.fileName || '',
-            getSectionConfigs: (imp, resolved) => this._buildSectionConfigs(imp, resolved)
+            getSectionConfigs: (imp, resolved) => this._buildSectionConfigs(imp, resolved),
+            // Source Validation: find each flagged item in the original return.
+            getSourceSpec:     (imp) => this._sourceSpec(imp),
+            getItemCitation:   (sectionId, item, imp) => this._citationFor(imp, sectionId, item)
         });
+    }
+
+    _sourceSpec(imp) {
+        if (!imp) return null;
+        const p = imp.sourcePath || imp.filePath;
+        if (!p) return null;
+        return { source: { path: p }, expected: imp.sourceIntegrity || (imp.data && imp.data.sourceIntegrity) || null };
+    }
+
+    /**
+     * What to look for in the original, per item. values[0] is the thing
+     * being validated; the rest are details of the same record. The raw
+     * 13-digit time is always included: in the CSV layouts the date VIPER
+     * shows is converted from it, so only the raw number is in the file.
+     */
+    _citationFor(imp, sectionId, it) {
+        it = it || {};
+        const ts = it.timestamp != null && it.timestamp !== '' ? String(it.timestamp) : '';
+        const pack = (hints, primary, ...rest) => {
+            const seen = new Set();
+            const vals = [primary == null ? '' : String(primary).trim()];
+            seen.add(vals[0]);
+            for (const r of rest) {
+                const s = r == null ? '' : String(r).trim();
+                if (!s || seen.has(s)) continue;
+                seen.add(s); vals.push(s);
+            }
+            return { values: vals, memberHints: hints };
+        };
+        const msgHints = ['chat_sent', 'chat_platform', 'data-text.csv', 'data-media.csv', 'text-msg-data'];
+        switch (sectionId) {
+            case 'sessions': return pack(['bind'], it.ip, ts, it.datetime, it.port);
+            case 'friends':  return pack(['friend_added'], it.friend, ts, it.datetime);
+            case 'dms':      return pack(msgHints, it.text || it.mediaUuid || ts, ts, it.datetime, it.sender, it.recipient, it.ip);
+            case 'groups':   return pack(['group_', 'data-text.csv', 'data-media.csv'], it.text || it.mediaUuid || ts, ts, it.datetime, it.groupId, it.sender, it.ip);
+            case 'media':    return pack(['data-media.csv', 'chat_', 'group_'], it.mediaUuid, ts, it.datetime, it.sender, it.recipient);
+            default:         return { values: [] };
+        }
     }
 }
 

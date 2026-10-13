@@ -576,8 +576,121 @@ class ApertureModule {
             resolveFlags:      (imp) => this._resolveFlagged(imp),
             getSubjectInfo:    (imp) => this._buildSubjectInfo(imp),
             getSourceFileName: (imp) => imp.fileName || 'Aperture Session',
-            getSectionConfigs: (imp, resolved) => this._buildSectionConfigs(imp, resolved)
+            getSectionConfigs: (imp, resolved) => this._buildSectionConfigs(imp, resolved),
+            // Source Validation: find each flagged item in the original file.
+            getSourceSpec:     (imp) => this._sourceSpec(imp),
+            getItemCitation:   (sectionId, item, imp) => this._citationFor(imp, sectionId, item)
         });
+    }
+
+    // ── Source Validation ────────────────────────────────────────────────
+    // Each imported .mbox/.eml is its own source, so an email is looked up
+    // in the file it came from.
+
+    _emailById(id) {
+        return (this.emails || []).find(e => e && String(e.id) === String(id)) || null;
+    }
+
+    _sourceOf(email) {
+        if (!email || email.sourceId == null) return null;
+        return (this.sources || []).find(s => s && String(s.id) === String(email.sourceId)) || null;
+    }
+
+    /** One original file → { source:{path}, expected }. */
+    _specForSource(src) {
+        const p = src && (src.sourcePath || src.filePath);
+        if (!p) return null;
+        return { source: { path: p }, expected: src.sourceIntegrity || null, sourceId: src.id };
+    }
+
+    /** The emails a flagged/cited item belongs to. */
+    _emailsForItem(sectionId, it) {
+        it = it || {};
+        if (sectionId === 'emails') { const e = this._emailById(it.id); return e ? [e] : []; }
+        if (sectionId === 'attachments') { const e = this._emailById(it.emailId); return e ? [e] : []; }
+        if (sectionId === 'ips') {
+            const ip = String(it.ip || '');
+            return ip ? (this.emails || []).filter(e => e && e.originating_ip && String(e.originating_ip.ip_address) === ip) : [];
+        }
+        return [];
+    }
+
+    /**
+     * For the evidence report: every original file a flagged item came from.
+     * The first is the file whose fingerprint is checked; the others are
+     * searched too.
+     */
+    _sourceSpec(imp) {
+        const f = (imp && imp.flagged) || this._flagged || {};
+        const seen = new Map();
+        const add = (e) => { const s = this._sourceOf(e); const sp = this._specForSource(s); if (sp && !seen.has(sp.source.path)) seen.set(sp.source.path, sp); };
+        for (const id of (f.emails || [])) add(this._emailById(id));
+        for (const k of (f.attachments || [])) add(this._emailById(String(k).split('::')[0]));
+        for (const ip of (f.ips || [])) this._emailsForItem('ips', { ip }).forEach(add);
+        const specs = [...seen.values()];
+        if (!specs.length) return null;
+        const main = specs[0];
+        const extra = specs.slice(1).map(s => s.source.path);
+        return { source: extra.length ? { path: main.source.path, extraPaths: extra } : { path: main.source.path }, expected: main.expected };
+    }
+
+    /**
+     * What to look for, per item. values[0] is the thing being validated.
+     *
+     * An email file stores headers as written but bodies are often encoded,
+     * and a subject or name with accents is stored encoded too. So emails
+     * are found by their Message-ID, which is always plain; the subject,
+     * sender address and originating IP are details that agree when they
+     * are stored plainly. Dates are never cited — VIPER converts them.
+     */
+    _citationFor(imp, sectionId, it) {
+        const plain = (v) => {
+            if (v == null) return '';
+            const s = String(v).trim();
+            if (!s || /[^\x20-\x7e]/.test(s) || s.includes('=?')) return '';
+            return s;
+        };
+        const addr = (v) => { const m = /<([^<>\s]+@[^<>\s]+)>/.exec(String(v || '')); return m ? m[1] : (/^[^\s<>]+@[^\s<>]+$/.test(String(v || '').trim()) ? String(v).trim() : ''); };
+        const pack = (hints, primary, ...rest) => {
+            const seen = new Set();
+            const vals = [plain(primary)];
+            seen.add(vals[0]);
+            for (const r of rest) {
+                const s = plain(r);
+                if (!s || seen.has(s)) continue;
+                seen.add(s); vals.push(s);
+            }
+            return { values: vals, memberHints: hints };
+        };
+        const emails = this._emailsForItem(sectionId, it);
+        const hints = [...new Set(emails.map(e => { const s = this._sourceOf(e); return s && s.fileName ? String(s.fileName) : ''; }).filter(Boolean))];
+        if (sectionId === 'emails') {
+            const e = emails[0];
+            if (!e) return { values: [] };
+            const mid = String(e.messageId || '').replace(/^<|>$/g, '');
+            const subj = e.subject && e.subject !== '(No Subject)' ? e.subject : '';
+            const from = addr(e.from);
+            const ip = e.originating_ip ? e.originating_ip.ip_address : '';
+            return pack(hints, plain(mid) || plain(subj) || from, subj, from, ...(e.to || []).slice(0, 2).map(addr), ip);
+        }
+        if (sectionId === 'ips') return pack(hints, it && it.ip);
+        if (sectionId === 'attachments') {
+            const e = emails[0];
+            const att = e && e.attachments ? e.attachments[Number(it.index)] : null;
+            return pack(hints, att && att.filename);
+        }
+        return { values: [] };
+    }
+
+    /** Remember a moved original for one source (filePath is kept as-is). */
+    async relocateSource(sourceId, newPath) {
+        const src = (this.sources || []).find(s => s && String(s.id) === String(sourceId));
+        if (src) src.sourcePath = newPath;
+        try {
+            if (window.electronAPI && window.electronAPI.apertureSetSourcePath) {
+                await window.electronAPI.apertureSetSourcePath({ caseId: this.caseId, sourceId, sourcePath: newPath });
+            }
+        } catch (e) { console.warn('Could not save the new location:', e); }
     }
 }
 

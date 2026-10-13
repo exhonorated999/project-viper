@@ -174,6 +174,8 @@ class DiscordWarrantModule {
             phone: data.subscriber?.phone || null,
             ip: data.subscriber?.ip || null,
             stats: data.stats || {},
+            // Source Validation: SHA-256 of the original, taken at import.
+            sourceIntegrity: data.sourceIntegrity || null,
             data
         };
 
@@ -416,7 +418,11 @@ class DiscordWarrantModule {
                     channel: s.channel || '',
                     channelId: s.channelId || null,
                     contents: s.contents || '',
-                    attachments: s.attachments || ''
+                    attachments: s.attachments || '',
+                    // Not shown — the time exactly as the return wrote it and
+                    // the author, used to find the message in the original.
+                    rawTimestamp: s.rawTimestamp || '',
+                    authorId: s.authorId || ''
                 });
                 resolved.add(String(id));
             }
@@ -432,7 +438,9 @@ class DiscordWarrantModule {
                             channel: channelLabel,
                             channelId: ch.channelId,
                             contents: m.contents || '',
-                            attachments: m.attachments || ''
+                            attachments: m.attachments || '',
+                            rawTimestamp: m.rawTimestamp || '',
+                            authorId: m.authorId || ''
                         });
                         resolved.add(mid);
                     }
@@ -485,7 +493,10 @@ class DiscordWarrantModule {
                 ips: (r.ips || []).join(', '),
                 firstSeen: r.firstSeen,
                 lastSeen: r.lastSeen,
-                userAgent: r.browser_user_agent || ''
+                userAgent: r.browser_user_agent || '',
+                // Not shown — the ID exactly as Discord wrote it (deviceVendorId
+                // above may be VIPER's own grouping key).
+                vendorId: r.device_vendor_id || ''
             });
         }
 
@@ -639,8 +650,64 @@ class DiscordWarrantModule {
             resolveFlags:      (imp) => this._resolveFlagged(imp),
             getSubjectInfo:    (imp) => this._buildSubjectInfo(imp),
             getSourceFileName: (imp) => imp.fileName || '',
-            getSectionConfigs: (imp, resolved) => this._buildSectionConfigs(imp, resolved)
+            getSectionConfigs: (imp, resolved) => this._buildSectionConfigs(imp, resolved),
+            // Source Validation: find each flagged item in the original return.
+            getSourceSpec:     (imp) => this._sourceSpec(imp),
+            getItemCitation:   (sectionId, item, imp) => this._citationFor(imp, sectionId, item)
         });
+    }
+
+    _sourceSpec(imp) {
+        if (!imp) return null;
+        const p = imp.sourcePath || imp.filePath;
+        if (!p) return null;
+        return { source: { path: p }, expected: imp.sourceIntegrity || (imp.data && imp.data.sourceIntegrity) || null };
+    }
+
+    /**
+     * What to look for in the original, per item. values[0] is the thing
+     * being validated; the rest are details of the same record.
+     *
+     * Messages are found by their Discord ID, which is stored plainly in
+     * both the Data Package and the law-enforcement return. The text is
+     * offered as a detail that agrees only when it contains no quote,
+     * backslash or line break (stored escaped, so never word for word).
+     * The return's own time is used where VIPER converted it.
+     */
+    _citationFor(imp, sectionId, it) {
+        it = it || {};
+        const plain = (v) => {
+            if (v == null) return '';
+            const s = String(v).trim();
+            if (!s || /["\\\u0000-\u001f]/.test(s)) return '';
+            return s;
+        };
+        const pack = (hints, primary, ...rest) => {
+            const seen = new Set();
+            const vals = [plain(primary)];
+            seen.add(vals[0]);
+            for (const r of rest) {
+                const s = plain(r);
+                if (!s || seen.has(s)) continue;
+                seen.add(s); vals.push(s);
+            }
+            return { values: vals, memberHints: hints };
+        };
+        switch (sectionId) {
+            case 'messages':
+                return pack(it.channelId ? [String(it.channelId), 'messages'] : ['messages'],
+                    it.id, it.contents, it.rawTimestamp || it.timestamp, it.authorId);
+            case 'servers':
+                return pack(['servers'], it.id, it.name);
+            case 'ips':
+                return pack(['session', 'activity', 'user'], it.ip, it.firstSeen, it.lastSeen);
+            case 'devices':
+                return pack(['activity'], it.vendorId, it.firstSeen, it.lastSeen);
+            case 'activity':
+                return pack(['activity'], it.timestamp, it.event_type, it.session, it.ip, it.clientVersion);
+            default:
+                return { values: [] };
+        }
     }
 }
 

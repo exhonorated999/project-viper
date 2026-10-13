@@ -148,6 +148,9 @@ class GoogleWarrantModule {
             bundleSources: result.data.bundleSources || [],
             rawSections: result.data.rawSections || {},
             sourceFiles: [filePath], // tracks which physical files contributed
+            // Source Validation: SHA-256 of the original taken at import.
+            sourceIntegrity: result.data.sourceIntegrity || null,
+            sourceIntegrityByPath: result.data.sourceIntegrity ? { [filePath]: result.data.sourceIntegrity } : {},
             _diagnostics: result.data._diagnostics
         };
 
@@ -231,6 +234,9 @@ class GoogleWarrantModule {
         merged.noRecordCategories = Array.from(new Set([...(base.noRecordCategories || []), ...(incoming.noRecordCategories || [])]));
         merged.bundleSources = Array.from(new Set([...(base.bundleSources || []), ...(incoming.bundleSources || [])]));
         merged.sourceFiles = Array.from(new Set([...(base.sourceFiles || []), ...(incoming.sourceFiles || [])]));
+        // Each part keeps its own import fingerprint; the card's main file stays the first part.
+        merged.sourceIntegrity = base.sourceIntegrity || null;
+        merged.sourceIntegrityByPath = Object.assign({}, base.sourceIntegrityByPath || {}, incoming.sourceIntegrityByPath || {});
 
         // Subscriber / cover letter / change history: take incoming if base missing
         merged.subscriber = base.subscriber || incoming.subscriber;
@@ -416,7 +422,9 @@ class GoogleWarrantModule {
      */
     _resolveFlagged(imp) {
         const f = imp.flagged || {};
-        const d = imp.data || {};
+        // Google import records keep their sections at the top level (there is
+        // no .data). Reading imp.data here left every flagged item behind.
+        const d = (imp && imp.data) || imp || {};
         const out = {
             ipActivity: [],
             changeHistory: [],
@@ -702,8 +710,43 @@ class GoogleWarrantModule {
             resolveFlags:      (imp) => this._resolveFlagged(imp),
             getSubjectInfo:    (imp) => this._buildSubjectInfo(imp),
             getSourceFileName: (imp) => imp.fileName || '',
-            getSectionConfigs: (imp, resolved) => this._buildSectionConfigs(imp, resolved)
+            getSectionConfigs: (imp, resolved) => this._buildSectionConfigs(imp, resolved),
+            // Source Validation: find each flagged item in the original return.
+            getSourceSpec:     (imp) => this._sourceSpec(imp),
+            getItemCitation:   (sectionId, item, imp) => this._citationFor(imp, sectionId, item)
         });
+    }
+
+    /** The original return: the main file plus every other part merged into this card. */
+    _sourceSpec(imp) {
+        if (!imp) return null;
+        const main = imp.sourcePath || imp.filePath;
+        if (!main) return null;
+        const extra = (imp.sourceFiles || []).filter(p => p && p !== main && p !== imp.filePath);
+        const source = extra.length ? { path: main, extraPaths: extra } : { path: main };
+        const byPath = imp.sourceIntegrityByPath || {};
+        return { source, expected: imp.sourcePath ? (imp.sourceIntegrity || null) : (byPath[main] || imp.sourceIntegrity || null) };
+    }
+
+    /**
+     * What to look for in the original, per flagged item. values[0] is the
+     * thing being validated; the rest are details of the same record that
+     * should sit beside it. Only values Google prints as-is are used —
+     * email dates and coordinates are converted on import, so they are not.
+     */
+    _citationFor(imp, sectionId, it) {
+        it = it || {};
+        const v = (hints, ...a) => ({ values: a, memberHints: hints });
+        switch (sectionId) {
+            case 'ipActivity':     return v(['SubscriberInfo'], it.ip, it.timestamp, it.activityType);
+            case 'changeHistory':  return v(['ChangeHistory', 'SubscriberInfo'], it.timestamp, it.ip, it.changeType);
+            case 'emails':         return v(['.mbox'], it.id, it.from, it.subject);
+            case 'locationVisits': return v(['Semantic', 'Location'], it.placeId || it.name, it.address, it.startTime);
+            case 'devices':        return v(['Device'], it.androidId, it.model);
+            case 'accessLog':      return v(['Access', 'Activity'], it.ip, it.timestamp, it.activity);
+            case 'payments':       return v(['Pay'], ...Object.values(it).filter(x => x != null && String(x).trim()).slice(0, 4));
+            default:               return { values: [] }; // chat content is re-encoded on import
+        }
     }
 }
 

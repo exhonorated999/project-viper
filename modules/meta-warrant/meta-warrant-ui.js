@@ -148,6 +148,50 @@ class MetaWarrantUI {
         }
     }
 
+    // ─── Source Validation (🔍) ────────────────────────────────────────
+    // One click from a value to the same words in the ORIGINAL Meta return
+    // (records.html / preservation-N.html inside the ZIP), highlighted, with
+    // the ZIP's SHA-256 checked against the one taken at import.
+    // values[0] is the value; the rest are other details of the same record
+    // that should sit beside it (they rank the right occurrence first).
+    _srcBtn(title, values, opts) {
+        const imp = this.currentImport;
+        if (!imp || typeof window === 'undefined' || !window.SourceViewer) return '';
+        opts = opts || {};
+        const labels = opts.valueLabels || [];
+        const vals = [], vLabels = [];
+        (values || []).forEach((v, i) => {
+            const sv = v == null ? '' : String(v).trim();
+            if (i === 0 || sv) { vals.push(sv); vLabels.push(labels[i] || (i === 0 ? title : 'related detail')); }
+        });
+        if (!vals[0]) return '';
+        const rec = opts.record || this.primaryRecord;
+        const page = rec && rec.source ? String(rec.source) + '.html' : 'records.html';
+        const module = this.module;
+        const impId = imp.id;
+        const current = () => module.imports.find(i => i && i.id === impId) || imp;
+        return window.SourceViewer.buttonHtml({
+            title,
+            values: vals,
+            valueLabels: vLabels,
+            context: [['Return', imp.fileName || '']].concat(opts.context || []),
+            // Read at click time so a relocated original is used everywhere.
+            source: null,
+            resolveSource: async () => {
+                const p = current().sourcePath || current().filePath;
+                return p ? { path: p, label: String(p).split(/[\\/]/).pop() } : null;
+            },
+            memberHints: [page],
+            expected: imp.sourceIntegrity || null,
+            onRelocate: async (picked, next) => {
+                // Kept apart from filePath, which identifies the import.
+                const cur = module.imports.find(i => i && i.id === impId);
+                if (cur) { cur.sourcePath = next.path; module.saveData(); }
+                return next;
+            },
+        }, { compact: true, label: opts.label != null ? opts.label : '' });
+    }
+
     _flagBtn(section, key, label) {
         const on = this.module.isFlagged(section, key);
         const safeKey = String(key)
@@ -336,10 +380,10 @@ class MetaWarrantUI {
                         <h3 class="mwp-card-title">📋 Request Parameters</h3>
                         <div class="mwp-kv-list">
                             ${this._kvRow('Service', rec.service)}
-                            ${this._kvRow('Target ID', rec.targetId)}
-                            ${this._kvRow('Account ID', rec.accountId)}
-                            ${this._kvRow('Date Range', rec.dateRange)}
-                            ${this._kvRow('Generated', rec.generated)}
+                            ${this._kvRow('Target ID', rec.targetId, this._srcBtn('Target ID', [rec.targetId]))}
+                            ${this._kvRow('Account ID', rec.accountId, this._srcBtn('Account ID', [rec.accountId]))}
+                            ${this._kvRow('Date Range', rec.dateRange, this._srcBtn('Date range', [rec.dateRange]))}
+                            ${this._kvRow('Generated', rec.generated, this._srcBtn('Generated', [rec.generated]))}
                             ${this._kvRow('Imported', imp?.importedAt ? new Date(imp.importedAt).toLocaleString() : null)}
                         </div>
                     </div>
@@ -349,7 +393,7 @@ class MetaWarrantUI {
                     <div class="mwp-card">
                         <h3 class="mwp-card-title">👤 Bio</h3>
                         <div class="mwp-kv-list">
-                            ${this._kvRow('Text', rec.bio.text)}
+                            ${this._kvRow('Text', rec.bio.text, this._srcBtn('Bio', [rec.bio.text, rec.bio.creationTime], { valueLabels: ['Bio', 'Created'] }))}
                             ${this._kvRow('Created', rec.bio.creationTime)}
                         </div>
                     </div>
@@ -367,7 +411,7 @@ class MetaWarrantUI {
                     ${rec.registrationIp ? `
                     <div class="mwp-card">
                         <h3 class="mwp-card-title">🔒 Registration IP</h3>
-                        <p class="mwp-mono">${this._esc(rec.registrationIp)}</p>
+                        <p class="mwp-mono">${this._esc(rec.registrationIp)}${this._srcBtn('Registration IP', [rec.registrationIp])}</p>
                     </div>
                     ` : ''}
 
@@ -453,7 +497,7 @@ class MetaWarrantUI {
                                 const flagged = this.module.isFlagged('ipActivity', entry.ip);
                                 return `
                                 <tr class="${flagged ? 'mwp-row-flagged' : ''}">
-                                    <td class="mwp-mono">${this._esc(entry.ip || '—')}</td>
+                                    <td class="mwp-mono">${this._esc(entry.ip || '—')}${this._srcBtn('IP address', [entry.ip, entry.time], { valueLabels: ['IP address', 'Timestamp'], context: [['Time', entry.time]] })}</td>
                                     <td>${entry.ip ? `<button class="mwp-arin-btn" onclick="mwpArinLookup(this, '${this._esc(entry.ip)}')" title="ARIN WHOIS Lookup">🌐</button>` : '—'}</td>
                                     <td>${this._esc(entry.time || '—')}</td>
                                     <td>${this._flagBtn('ipActivity', entry.ip || '')}</td>
@@ -491,7 +535,7 @@ class MetaWarrantUI {
                                     <span class="mwp-post-author">${this._esc(u.author || 'Unknown')}</span>
                                     <span class="mwp-post-time">${this._esc(u.posted || '')}</span>
                                     ${u.mobile === 'true' ? '<span class="mwp-tag">📱 Mobile</span>' : ''}
-                                    <span style="margin-left:auto">${this._flagBtn('statusUpdates', k)}</span>
+                                    <span style="margin-left:auto">${this._srcBtn('Status update', [u.status || u.posted, u.posted, u.author], { valueLabels: [u.status ? 'Status text' : 'Posted', 'Posted', 'Author'], context: [['Posted', u.posted]] })}${this._flagBtn('statusUpdates', k)}</span>
                                 </div>
                                 <div class="mwp-post-body">${this._esc(u.status || '(no text)')}</div>
                                 ${u.lifeExperience ? `<div class="mwp-post-extra">Life Experience: ${this._esc(u.lifeExperience)}</div>` : ''}
@@ -513,7 +557,7 @@ class MetaWarrantUI {
                                 <div class="mwp-post-meta">
                                     <span class="mwp-post-author">${this._esc(w.from || 'Unknown')} → ${this._esc(w.to || 'Unknown')}</span>
                                     <span class="mwp-post-time">${this._esc(w.time || '')}</span>
-                                    <span style="margin-left:auto">${this._flagBtn('wallposts', k)}</span>
+                                    <span style="margin-left:auto">${this._srcBtn('Wallpost', [w.text || w.time, w.time, w.from], { valueLabels: [w.text ? 'Wallpost text' : 'Time', 'Time', 'From'], context: [['Time', w.time]] })}${this._flagBtn('wallposts', k)}</span>
                                 </div>
                                 <div class="mwp-post-body">${this._esc(w.text || '(no text)')}</div>
                             </div>
@@ -533,7 +577,7 @@ class MetaWarrantUI {
                                 <div class="mwp-post-meta">
                                     <span class="mwp-post-author">→ ${this._esc(p.timelineOwner || 'Unknown')}</span>
                                     <span class="mwp-post-time">${this._esc(p.time || '')}</span>
-                                    <span style="margin-left:auto">${this._flagBtn('otherWallPosts', p.id || '')}</span>
+                                    <span style="margin-left:auto">${this._srcBtn('Post to another wall', [p.post || p.id, p.time, p.timelineOwner], { valueLabels: [p.post ? 'Post text' : 'Post ID', 'Time', 'Timeline owner'], context: [['Time', p.time]] })}${this._flagBtn('otherWallPosts', p.id || '')}</span>
                                 </div>
                                 <div class="mwp-post-body">${this._esc(p.post || '(no text)')}</div>
                             </div>
@@ -553,7 +597,7 @@ class MetaWarrantUI {
                             <div class="mwp-post-item ${flagged ? 'mwp-flagged' : ''}">
                                 <div class="mwp-post-meta">
                                     <span class="mwp-post-time">${this._esc(s.dateCreated || '')}</span>
-                                    <span style="margin-left:auto">${this._flagBtn('shares', k)}</span>
+                                    <span style="margin-left:auto">${this._srcBtn('Share', [s.url || s.title || s.text, s.dateCreated], { valueLabels: [s.url ? 'URL' : 'Share', 'Date created'], context: [['Date', s.dateCreated]] })}${this._flagBtn('shares', k)}</span>
                                 </div>
                                 ${s.title ? `<div class="mwp-post-title">${this._esc(s.title)}</div>` : ''}
                                 <div class="mwp-post-body">${this._esc(s.text || s.summary || '(no text)')}</div>
@@ -613,7 +657,7 @@ class MetaWarrantUI {
                                             <div class="mwp-photo-meta">${this._esc(p.uploaded || '')}</div>
                                             ${p.uploadIp ? `<div class="mwp-photo-ip">${this._esc(p.uploadIp)}</div>` : ''}
                                         </div>
-                                        <div class="mwp-photo-flag">${this._flagBtn('photos', k)}</div>
+                                        <div class="mwp-photo-flag">${this._srcBtn('Photo', [p.imageFile || p.id, p.uploaded, p.uploadIp], { valueLabels: [p.imageFile ? 'Image file' : 'Photo ID', 'Uploaded', 'Upload IP'], context: [['Uploaded', p.uploaded], ['Upload IP', p.uploadIp]] })}${this._flagBtn('photos', k)}</div>
                                     </div>
                                 `;
                             }).join('')}
@@ -715,7 +759,7 @@ class MetaWarrantUI {
                 <div class="mwp-msg-header">
                     <span class="mwp-msg-author">${this._esc(msg.author || 'Unknown')}</span>
                     <span class="mwp-msg-time">${this._esc(msg.sent || '')}</span>
-                    <span style="margin-left:auto">${this._flagBtn('messages', k)}</span>
+                    <span style="margin-left:auto">${this._srcBtn('Message', [msg.body || msg.sent, msg.sent, msg.author], { valueLabels: [msg.body ? 'Message text' : 'Sent', 'Sent', 'Author'], context: [['Thread', threadId], ['Author', msg.author], ['Sent', msg.sent]] })}${this._flagBtn('messages', k)}</span>
                 </div>
                 <div class="mwp-msg-body">${this._esc(msg.body || '')}</div>
                 ${(msg.attachments || []).map(att => {
@@ -821,9 +865,9 @@ class MetaWarrantUI {
 
     // ─── Helpers ────────────────────────────────────────────────────────
 
-    _kvRow(label, value) {
+    _kvRow(label, value, extraHtml) {
         if (value === null || value === undefined || value === '') return '';
-        return `<div class="mwp-kv-row"><span class="mwp-kv-label">${this._esc(label)}</span><span class="mwp-kv-value">${this._esc(String(value))}</span></div>`;
+        return `<div class="mwp-kv-row"><span class="mwp-kv-label">${this._esc(label)}</span><span class="mwp-kv-value">${this._esc(String(value))}${extraHtml || ''}</span></div>`;
     }
 
     _statBadge(label, count, icon) {

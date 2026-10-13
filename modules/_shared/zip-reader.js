@@ -132,6 +132,10 @@ class ZipReader {
             isDirectory: !!e.isDirectory,
             size: e.size,
             compressedSize: e.compressedSize,
+            // The checksum and date the zip's own directory records — kept so
+            // an index can later prove a file is unchanged.
+            crc: e.crc,
+            time: e.time,
             _name: e.name,
             getData() { return self._zip.entryDataSync(this._name); },
         }));

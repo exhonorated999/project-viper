@@ -441,6 +441,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('working-doc-event', handler);
     return () => ipcRenderer.removeListener('working-doc-event', handler);
   },
+  // Word report — the case report written in Word (Reports tab), kept in
+  // cases/<cn>/Reports/Word/. Same engine as Working Documents.
+  reportDocsList: (caseNumber) => ipcRenderer.invoke('report-docs-list', { caseNumber }),
+  reportDocImport: (caseNumber, replace) => ipcRenderer.invoke('report-doc-import', { caseNumber, replace: replace || null }),
+  reportDocNewBlank: (caseNumber, newName, seedText) => ipcRenderer.invoke('report-doc-new-blank', { caseNumber, newName, seedText: seedText || '' }),
+  reportDocOpen: (caseNumber, fileName) => ipcRenderer.invoke('report-doc-open', { caseNumber, fileName }),
+  reportDocRemove: (caseNumber, fileName) => ipcRenderer.invoke('report-doc-remove', { caseNumber, fileName }),
+  reportDocSaveCopy: (caseNumber, fileName) => ipcRenderer.invoke('report-doc-save-copy', { caseNumber, fileName }),
+  onReportDocEvent: (cb) => {
+    const handler = (_e, payload) => { try { cb(payload); } catch (_) {} };
+    ipcRenderer.on('report-doc-event', handler);
+    return () => ipcRenderer.removeListener('report-doc-event', handler);
+  },
   selectProductionZip: (data) => ipcRenderer.invoke('select-production-zip', data),
 
   // Forensic Devices (Device Exams) file storage

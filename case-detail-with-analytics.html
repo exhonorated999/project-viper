@@ -119,6 +119,7 @@
     <!-- Working Documents (live Word drafts in the Warrants tab). Loaded
          WITHOUT defer: renderWarrantsTab() calls it while rendering. -->
     <script src="modules/warrants/working-docs-ui.js"></script>
+    <script src="modules/reports/word-report-ui.js"></script>
     <!-- P2P Activity Check (TorrentAnalytics). Loaded WITHOUT defer:
          _p2pScanBtn() is called synchronously while identifier rows
          render. p2p-scan.js (pure core) must precede the UI half. -->
@@ -2743,6 +2744,7 @@
                                                     <span class="text-xl">${tab.icon}</span>
                                                     <span class="text-sm font-medium text-white">${tab.label}</span>
                                                     ${tab.type === 'files' ? '<span class="text-xs text-viper-orange bg-viper-orange/20 px-2 py-0.5 rounded">Files</span>' : ''}
+                                                    ${tabId === 'reports' && _reportIsWord() ? '<span class="text-xs text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded" title="The Word report is not included. Send it separately with Save a copy on the Reports tab.">Word report not included</span>' : ''}
                                                 </div>
                                                 ${itemCount > 0 ? `<span class="text-xs text-gray-400">${itemCount} ${itemCount === 1 ? 'item' : 'items'}</span>` : ''}
                                             </div>
@@ -2762,6 +2764,9 @@
                                             <li>Data tabs will be compiled into a professional PDF report with title page and table of contents</li>
                                             <li>Evidence and Warrant files will be bundled with the PDF or separately if no data tabs are selected</li>
                                             <li>All exports will be saved as a ZIP file for easy sharing</li>
+                                            ${_reportIsWord() ? `
+                                            <li class="text-amber-300"><strong>The case report is a Microsoft Word document and is not included.</strong> VIPER cannot convert a Word document into its report format. Use &ldquo;Save a copy&hellip;&rdquo; on the Reports tab and send it separately.</li>
+                                            ` : ''}
                                             ${_asx ? `
                                             <li>Everything sits inside one folder named for you and this case, so it cannot scatter into the lead detective's own folders</li>
                                             <li><strong class="text-white">File names are left exactly as they are</strong> — a renamed file stops matching the report that describes it. MANIFEST.csv lists every file with its SHA-256 hash and your name and badge</li>
@@ -4672,6 +4677,16 @@
                     break;
                 }
                 case 'reports': {
+                    // A Word report cannot be converted into this PDF. Say
+                    // so, rather than print the VIPER text the officer set
+                    // aside or a bare "No report content".
+                    if (_reportIsWord()) {
+                        need(16);
+                        doc.setFontSize(10); doc.setFont(undefined, 'italic'); doc.setTextColor(...LGRAY);
+                        const wl = doc.splitTextToSize('The case report for this case was written in Microsoft Word and is provided separately. It is not reproduced in this report.', CW - 4);
+                        doc.text(wl, M + 2, y); y += wl.length * 5 + 2;
+                        break;
+                    }
                     const rd = _lsParse('viperCaseReports', {});
                     const rpt = rd[caseNum];
                     if (rpt && rpt.content) {
@@ -9190,7 +9205,46 @@
             viperToast('Case notes exported successfully!', 'success');
         }
         
+        // The case report can be written in Microsoft Word instead of the
+        // VIPER editor (modules/reports/word-report-ui.js). The choice lives
+        // on the case record — NOT in viperCaseReports, which saveReport()
+        // and the popout's report-save overwrite wholesale. Switching never
+        // deletes either version. A Word report is left out of Export to DA.
+        function _reportIsWord() {
+            return !!(currentCase && currentCase.reportFormat === 'word');
+        }
+        function _setCaseReportField(key, value) {
+            if (!currentCase) return false;
+            const had = Object.prototype.hasOwnProperty.call(currentCase, key);
+            const prev = currentCase[key];
+            if (value == null) delete currentCase[key]; else currentCase[key] = value;
+            if (saveCase({ silent: true }) !== false) return true;
+            if (had) currentCase[key] = prev; else delete currentCase[key];
+            return false;
+        }
+
         function renderReportsTab() {
+            // Host state reaches the module only through these closures
+            // (currentCase / caseReport are top-level `let`).
+            if (window.WordReportUI) {
+                WordReportUI.configure({
+                    getCaseNumber: () => (currentCase && currentCase.caseNumber) || null,
+                    getFormat: () => (_reportIsWord() ? 'word' : 'viper'),
+                    setFormat: (f) => _setCaseReportField('reportFormat', f === 'word' ? 'word' : 'viper'),
+                    getWordName: () => (currentCase && currentCase.reportWordName) || null,
+                    setWordName: (n) => _setCaseReportField('reportWordName', n || null),
+                    getViperHtml: () => {
+                        const ed = document.getElementById('reportEditor');
+                        return ed ? ed.innerHTML : (caseReport || '');
+                    },
+                    saveViperReport: () => saveReport(true),
+                    rerender: () => {
+                        try { if (window.ViperDictation && ViperDictation.isActive()) ViperDictation.stop(); } catch (_) {}
+                        if (currentTab === 'reports') renderTabContent('reports');
+                    },
+                });
+                if (_reportIsWord()) return WordReportUI.renderPanel();
+            }
             return `
                 <div class="space-y-6">
                     <!-- Header with Controls -->
@@ -9205,6 +9259,7 @@
                             <p class="text-sm text-gray-400 mt-1" id="reportLastSavedText">
                                 ${reportLastSaved ? `Last saved: ${new Date(reportLastSaved).toLocaleString()}` : 'Not yet saved'}
                             </p>
+                            ${window.WordReportUI ? `<div class="mt-3">${WordReportUI.renderModeSwitch()}</div>` : ''}
                         </div>
                         <div class="flex items-center space-x-3">
                             <button onclick="copyReportToClipboard()" id="copyReportBtn" class="px-4 py-2 rounded-lg bg-viper-orange/20 text-viper-orange border border-viper-orange/30 hover:bg-viper-orange/30 transition-colors text-sm font-medium flex items-center space-x-2" title="Copy entire narrative to clipboard">

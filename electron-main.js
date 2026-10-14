@@ -801,6 +801,8 @@ async function flushVaultIfNeeded() {
           .map(k => [k, localStorage.getItem(k)])
       ))
     `);
+    // Bring in any Word save not yet taken while the key is still here.
+    _workingDocsCheckIn('vault-flush');
     security.encryptVault(data);
     // Clear sensitive localStorage so it's not readable at rest
     await mainWindow.webContents.executeJavaScript(`
@@ -955,6 +957,11 @@ app.whenReady().then(async () => {
 
     await startServer();
     createWindow();
+
+    // Leftover Word working copies from a crash or a quit with Word still
+    // open. With Field Security on and still locked, encrypted ones wait for
+    // the unlock (security-unlock runs this again).
+    _workingDocsRecover('startup');
 
     // UC Chat Operations — register persona/chat/link/event IPC handlers.
     try {
@@ -4787,6 +4794,10 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
       .filter(t => typeof t === 'string' && t.length > 0)
   );
   const csamSkippedLog = [];
+  // Folders left out because they are the officer's own working drafts
+  // (Warrants/Working) — work product, not withheld evidence. Kept apart
+  // from csamSkippedLog so the manifest never reads them as withheld.
+  const workProductOmitted = [];
 
   // Non-discoverable (investigative-only) evidence: ALWAYS excluded from the
   // ZIP, independent of the CSAM toggle. Matched by evidence-tag folder name.
@@ -4958,10 +4969,14 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
     // opts.onlyExts: Set<string> — when present, only files with one of
     //   these extensions are carried (Warrant Author: the PDF/DOCX, not the
     //   working manifest).
+    // opts.omitTopLevelDirs: Set<string> — immediate subdirectories left out
+    //   as work product (the officer's live Word drafts). Recorded in
+    //   workProductOmitted, NOT the withheld-evidence log.
     // opts.trackFolders: true — count per top-level folder into
     //   evidenceFolderStats (the per-item export record).
     const skipTopLevelDirs = opts.skipTopLevelDirs instanceof Set ? opts.skipTopLevelDirs : null;
     const skipFileNames = opts.skipFileNames instanceof Set ? opts.skipFileNames : null;
+    const omitTopLevelDirs = opts.omitTopLevelDirs instanceof Set ? opts.omitTopLevelDirs : null;
     const onlyExts = opts.onlyExts instanceof Set ? opts.onlyExts : null;
     const track = opts.trackFolders === true;
     const bump = (top, k, n = 1) => { if (track) folderStat(top)[k] += n; };
@@ -4977,6 +4992,11 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
         if (entry.isDirectory() && !rel && skipTopLevelDirs && skipTopLevelDirs.has(entry.name)) {
           csamSkippedLog.push(`${archivePrefix}/${entry.name}/`);
           if (track) folderStat(entry.name).withheld = true;
+          continue;
+        }
+        // Working drafts — left out as work product, never counted as withheld.
+        if (entry.isDirectory() && !rel && omitTopLevelDirs && omitTopLevelDirs.has(entry.name)) {
+          workProductOmitted.push(`${archivePrefix}/${entry.name}/`);
           continue;
         }
         if (entry.isDirectory()) {
@@ -5150,9 +5170,11 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
         }
       );
 
-      // 3. Warrants (streamed from disk)
+      // 3. Warrants (streamed from disk). Warrants/Working holds the officer's
+      //    live Word drafts — work product, left out of every package. The
+      //    signed warrant and returns still go.
       if (wants('warrants')) addTreeToArchive(path.join(casesDir, caseNumber, 'Warrants'), pfx('Warrants'), archive,
-        { manifestModule: 'Warrants' });
+        { manifestModule: 'Warrants', omitTopLevelDirs: new Set(['Working']) });
 
       // 4. Note attachments (PDFs, pasted images stored from the Notes tab)
       if (wants('notes')) addTreeToArchive(path.join(casesDir, caseNumber, 'Notes'), pfx('Notes'), archive,
@@ -5234,6 +5256,9 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
           ? 'Some filenames were shortened to satisfy Windows MAX_PATH (260 chars) on extraction. See renameMap for original → archived.'
           : undefined,
         renameMap: renameLog.length ? renameLog : undefined,
+        workProduct: workProductOmitted.length
+          ? { omitted: workProductOmitted, note: 'The officer\'s working drafts (live Word documents kept in the case) are work product and are not included in this package. Signed warrants and returns are included.' }
+          : undefined,
         log,
       };
       if (assistInfo) {
@@ -5974,6 +5999,8 @@ ipcMain.handle('security-unlock', async (event, { password }) => {
     if (raw) vaultData = JSON.parse(raw);
   } catch (e) { console.error('Vault decrypt:', e.message); }
   try { audit && audit.write(AUDIT_EVENTS.SECURITY_UNLOCK, { method: 'password' }); } catch (_) {}
+  // Word saves made while locked (or before a crash) can now go into the case.
+  _workingDocsRecover('unlock');
   return { success: true, vaultData };
 });
 
@@ -5989,6 +6016,8 @@ ipcMain.handle('security-recover', async (event, { recoveryKey }) => {
     if (raw) vaultData = JSON.parse(raw);
   } catch (e) { console.error('Vault decrypt:', e.message); }
   try { audit && audit.write(AUDIT_EVENTS.SECURITY_RECOVERY, {}); } catch (_) {}
+  // Word saves made while locked (or before a crash) can now go into the case.
+  _workingDocsRecover('recovery-key');
   return { success: true, vaultData };
 });
 
@@ -6343,9 +6372,20 @@ ipcMain.handle('security-lock', async (event, opts) => {
       }
     }
   } catch (_) { /* ignore */ }
+  // Bring in every pending Word save while the key is still available.
+  const _wdLock = _workingDocsCheckIn('lock');
   if (security) security.lock();
   // Drop any decrypted copy Source Validation is holding in memory.
   try { require('./modules/_shared/source-locator').onLock(); } catch (_) {}
+  if (_wdLock.stillOpen.length && mainWindow && !mainWindow.isDestroyed()) {
+    // Not awaited: the lock must not wait on the officer reading this.
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Word documents still open',
+      message: 'Everything you saved has gone into the case.',
+      detail: 'Still open in Word: ' + _wdLock.stillOpen.join(', ') + '.\n\nAnything you save in Word while VIPER is locked is kept and goes into the case when you unlock.',
+    }).catch(() => {});
+  }
   try {
     const evt = reason === 'idle' ? AUDIT_EVENTS.SECURITY_IDLE_LOCK : AUDIT_EVENTS.SECURITY_LOCK;
     audit && audit.write(evt, { reason });
@@ -8901,6 +8941,121 @@ ipcMain.handle('dictation-stop', async () => {
 
 // Ensure the dictation child never outlives the app.
 app.on('before-quit', () => { try { if (_dictationChild) _dictationChild.kill(); } catch (_) {} });
+
+// --- Working Documents: the officer's live Word drafts, kept in the case ---
+// Files live in cases/<caseNumber>/Warrants/Working/. Editing happens in the
+// officer's own Word; modules/warrants/working-docs.js makes sure every save
+// lands in the case (and, with Field Security on, that Word edits a private
+// decrypted copy whose saves are re-encrypted back in). It deliberately does
+// NOT go through 'open-file', which opens a throwaway copy and never brings
+// changes back.
+const WorkingDocsLib = require('./modules/warrants/working-docs');
+let _workingDocsMgr = null;
+function _workingDocs() {
+  if (_workingDocsMgr) return _workingDocsMgr;
+  _workingDocsMgr = WorkingDocsLib.createWorkingDocs({
+    fs, path, crypto,
+    casesDir: () => casesDir,
+    sessionsRoot: () => path.join(app.getPath('userData'), 'working-docs'),
+    getSecurity: () => security || null,
+    openPath: (p) => shell.openPath(p),
+    trashItem: (p) => shell.trashItem(p),
+    notify: (evt) => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        try { if (w && !w.isDestroyed() && !w.webContents.isDestroyed()) w.webContents.send('working-doc-event', evt); } catch (_) {}
+      }
+    },
+  });
+  return _workingDocsMgr;
+}
+function _wdFail(e) {
+  return { success: false, error: (e && e.message) || String(e), code: (e && e.code) || null };
+}
+// Bring in every pending Word save before the vault locks or the app quits.
+// Copies Word still holds stay in place and are brought in later / at the
+// next unlock — nothing is deleted out from under Word.
+function _workingDocsCheckIn(reason) {
+  if (!_workingDocsMgr) return { saved: [], stillOpen: [], failed: [] };
+  let r = { saved: [], stillOpen: [], failed: [] };
+  try { r = _workingDocsMgr.checkInAll({ final: true }); }
+  catch (e) { console.error('Working docs check-in failed:', e && e.message); }
+  if (r.saved.length || r.stillOpen.length || r.failed.length) {
+    console.log(`Working docs check-in (${reason}): saved=${r.saved.length} stillOpen=${r.stillOpen.length} failed=${r.failed.length}`);
+  }
+  return r;
+}
+function _workingDocsRecover(reason) {
+  try {
+    const out = _workingDocs().recover();
+    if (out.length) console.log(`Working docs recovery (${reason}):`, out.map(o => `${o.fileName || o.id}:${o.action}`).join(', '));
+    return out;
+  } catch (e) {
+    console.error('Working docs recovery failed:', e && e.message);
+    return [];
+  }
+}
+app.on('before-quit', () => { _workingDocsCheckIn('quit'); if (_workingDocsMgr) _workingDocsMgr.stop(); });
+
+ipcMain.handle('working-docs-list', async (event, { caseNumber } = {}) => {
+  try { return { success: true, docs: _workingDocs().list(caseNumber) }; }
+  catch (e) { return _wdFail(e); }
+});
+
+ipcMain.handle('working-doc-import', async (event, { caseNumber } = {}) => {
+  try {
+    _workingDocs().workingDir(caseNumber);   // validates the case number before a dialog opens
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Add Word documents to this case',
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Word documents', extensions: ['docx', 'doc', 'rtf'] }],
+    });
+    restoreFocus();
+    if (result.canceled || !result.filePaths || !result.filePaths.length) return { success: true, canceled: true, added: [] };
+    const added = [], failed = [];
+    for (const src of result.filePaths) {
+      try { added.push(_workingDocs().importFile(caseNumber, src).fileName); }
+      catch (e) { failed.push({ fileName: path.basename(src), error: (e && e.message) || String(e) }); }
+    }
+    return { success: failed.length === 0 || added.length > 0, added, failed, error: failed.length && !added.length ? failed[0].error : undefined };
+  } catch (e) { restoreFocus(); return _wdFail(e); }
+});
+
+ipcMain.handle('working-doc-new-from', async (event, { caseNumber, sourceName, newName } = {}) => {
+  try { return { success: true, ..._workingDocs().newFrom(caseNumber, sourceName, newName) }; }
+  catch (e) { return _wdFail(e); }
+});
+
+ipcMain.handle('working-doc-new-blank', async (event, { caseNumber, newName } = {}) => {
+  try {
+    const name = WorkingDocsLib.withExt(WorkingDocsLib.cleanName(newName), '.docx') || 'New Document.docx';
+    const { Document, Packer, Paragraph } = require('docx');
+    const doc = new Document({
+      styles: { default: { document: { run: { font: 'Times New Roman', size: 24 } } } },
+      sections: [{ children: [new Paragraph('')] }],
+    });
+    const buf = await Packer.toBuffer(doc);
+    return { success: true, ..._workingDocs().addBuffer(caseNumber, name, buf) };
+  } catch (e) { return _wdFail(e); }
+});
+
+ipcMain.handle('working-doc-open', async (event, { caseNumber, fileName } = {}) => {
+  try { return { success: true, ...(await _workingDocs().open(caseNumber, fileName)) }; }
+  catch (e) {
+    const r = _wdFail(e);
+    if (r.code === 'NO_APP') r.error = 'Windows could not find a program to open this document. Microsoft Word (or another program that opens .docx files) needs to be installed.';
+    return r;
+  }
+});
+
+ipcMain.handle('working-doc-rename', async (event, { caseNumber, fileName, newName } = {}) => {
+  try { return { success: true, ..._workingDocs().rename(caseNumber, fileName, newName) }; }
+  catch (e) { return _wdFail(e); }
+});
+
+ipcMain.handle('working-doc-remove', async (event, { caseNumber, fileName } = {}) => {
+  try { return { success: true, ...(await _workingDocs().remove(caseNumber, fileName)) }; }
+  catch (e) { return _wdFail(e); }
+});
 
 // --- Save warrant file to disk ---
 ipcMain.handle('save-warrant-file', async (event, data) => {

@@ -8951,6 +8951,7 @@ app.on('before-quit', () => { try { if (_dictationChild) _dictationChild.kill();
 // changes back.
 const WorkingDocsLib = require('./modules/warrants/working-docs');
 let _workingDocsMgr = null;
+let _reportDocsMgr = null;   // the Reports tab's Word report — see below
 function _workingDocs() {
   if (_workingDocsMgr) return _workingDocsMgr;
   _workingDocsMgr = WorkingDocsLib.createWorkingDocs({
@@ -8974,27 +8975,40 @@ function _wdFail(e) {
 // Bring in every pending Word save before the vault locks or the app quits.
 // Copies Word still holds stay in place and are brought in later / at the
 // next unlock — nothing is deleted out from under Word.
+// Covers BOTH managers — the Warrants-tab drafts and the Reports-tab Word
+// report — so every lock / quit path brings in every pending Word save.
 function _workingDocsCheckIn(reason) {
-  if (!_workingDocsMgr) return { saved: [], stillOpen: [], failed: [] };
-  let r = { saved: [], stillOpen: [], failed: [] };
-  try { r = _workingDocsMgr.checkInAll({ final: true }); }
-  catch (e) { console.error('Working docs check-in failed:', e && e.message); }
-  if (r.saved.length || r.stillOpen.length || r.failed.length) {
-    console.log(`Working docs check-in (${reason}): saved=${r.saved.length} stillOpen=${r.stillOpen.length} failed=${r.failed.length}`);
+  const r = { saved: [], stillOpen: [], failed: [] };
+  for (const [label, mgr] of [['Working docs', _workingDocsMgr], ['Word report', _reportDocsMgr]]) {
+    if (!mgr) continue;
+    let one = { saved: [], stillOpen: [], failed: [] };
+    try { one = mgr.checkInAll({ final: true }); }
+    catch (e) { console.error(`${label} check-in failed:`, e && e.message); }
+    r.saved.push(...one.saved); r.stillOpen.push(...one.stillOpen); r.failed.push(...one.failed);
+    if (one.saved.length || one.stillOpen.length || one.failed.length) {
+      console.log(`${label} check-in (${reason}): saved=${one.saved.length} stillOpen=${one.stillOpen.length} failed=${one.failed.length}`);
+    }
   }
   return r;
 }
 function _workingDocsRecover(reason) {
-  try {
-    const out = _workingDocs().recover();
-    if (out.length) console.log(`Working docs recovery (${reason}):`, out.map(o => `${o.fileName || o.id}:${o.action}`).join(', '));
-    return out;
-  } catch (e) {
-    console.error('Working docs recovery failed:', e && e.message);
-    return [];
+  const all = [];
+  for (const [label, get] of [['Working docs', _workingDocs], ['Word report', _reportDocs]]) {
+    try {
+      const out = get().recover();
+      if (out.length) console.log(`${label} recovery (${reason}):`, out.map(o => `${o.fileName || o.id}:${o.action}`).join(', '));
+      all.push(...out);
+    } catch (e) {
+      console.error(`${label} recovery failed:`, e && e.message);
+    }
   }
+  return all;
 }
-app.on('before-quit', () => { _workingDocsCheckIn('quit'); if (_workingDocsMgr) _workingDocsMgr.stop(); });
+app.on('before-quit', () => {
+  _workingDocsCheckIn('quit');
+  if (_workingDocsMgr) _workingDocsMgr.stop();
+  if (_reportDocsMgr) _reportDocsMgr.stop();
+});
 
 ipcMain.handle('working-docs-list', async (event, { caseNumber } = {}) => {
   try { return { success: true, docs: _workingDocs().list(caseNumber) }; }
@@ -9055,6 +9069,114 @@ ipcMain.handle('working-doc-rename', async (event, { caseNumber, fileName, newNa
 ipcMain.handle('working-doc-remove', async (event, { caseNumber, fileName } = {}) => {
   try { return { success: true, ...(await _workingDocs().remove(caseNumber, fileName)) }; }
   catch (e) { return _wdFail(e); }
+});
+
+// --- Word report: the case report written in the officer's own Word ---
+// The Reports tab lets an officer write the case report in Microsoft Word
+// instead of VIPER's editor (the choice is per case, currentCase.reportFormat).
+// One document per case, in cases/<caseNumber>/Reports/Word/. It runs on the
+// same engine as Working Documents — a SECOND manager with its own session
+// folder, so neither ever adopts the other's working copies at recovery.
+//
+// save-da-export never walks Reports/, so the Word report is left out of
+// every Export to DA and Assist Package: VIPER cannot turn a Word document
+// into its report format. The renderer says so on the tab, in the export
+// dialog, and in the PDF; "Save a copy" is how the officer sends it.
+const REPORT_WORD_SUBDIR = ['Reports', 'Word'];
+function _reportDocs() {
+  if (_reportDocsMgr) return _reportDocsMgr;
+  _reportDocsMgr = WorkingDocsLib.createWorkingDocs({
+    fs, path, crypto,
+    subDir: REPORT_WORD_SUBDIR,
+    casesDir: () => casesDir,
+    sessionsRoot: () => path.join(app.getPath('userData'), 'report-docs'),
+    getSecurity: () => security || null,
+    openPath: (p) => shell.openPath(p),
+    trashItem: (p) => shell.trashItem(p),
+    notify: (evt) => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        try { if (w && !w.isDestroyed() && !w.webContents.isDestroyed()) w.webContents.send('report-doc-event', evt); } catch (_) {}
+      }
+    },
+  });
+  return _reportDocsMgr;
+}
+
+ipcMain.handle('report-docs-list', async (event, { caseNumber } = {}) => {
+  try { return { success: true, docs: _reportDocs().list(caseNumber) }; }
+  catch (e) { return _wdFail(e); }
+});
+
+// One document per case: `replace` names the current report, which goes to
+// the Recycle Bin only AFTER the new one is safely in the case.
+ipcMain.handle('report-doc-import', async (event, { caseNumber, replace } = {}) => {
+  try {
+    _reportDocs().workingDir(caseNumber);   // validates the case number before a dialog opens
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: replace ? 'Replace the Word report for this case' : 'Use a Word document as the case report',
+      properties: ['openFile'],
+      filters: [{ name: 'Word documents', extensions: ['docx', 'doc', 'rtf'] }],
+    });
+    restoreFocus();
+    if (result.canceled || !result.filePaths || !result.filePaths.length) return { success: true, canceled: true };
+    const added = _reportDocs().importFile(caseNumber, result.filePaths[0]);
+    let replaceError = null;
+    if (replace) {
+      try { await _reportDocs().remove(caseNumber, replace); }
+      catch (e) { replaceError = (e && e.message) || String(e); }
+    }
+    return { success: true, fileName: added.fileName, replaceError };
+  } catch (e) { restoreFocus(); return _wdFail(e); }
+});
+
+// seedText: optional plain text (the VIPER editor's report) to start from —
+// one Word paragraph per line. Formatting and pictures do not carry over.
+ipcMain.handle('report-doc-new-blank', async (event, { caseNumber, newName, seedText } = {}) => {
+  try {
+    const name = WorkingDocsLib.withExt(WorkingDocsLib.cleanName(newName), '.docx') || 'Case Report.docx';
+    const { Document, Packer, Paragraph, TextRun } = require('docx');
+    const text = typeof seedText === 'string' ? seedText.replace(/\r\n?/g, '\n').slice(0, 2 * 1024 * 1024) : '';
+    const lines = text.trim() ? text.split('\n') : [''];
+    const doc = new Document({
+      styles: { default: { document: { run: { font: 'Times New Roman', size: 24 } } } },
+      sections: [{ children: lines.map((ln) => new Paragraph({ children: [new TextRun(ln)] })) }],
+    });
+    const buf = await Packer.toBuffer(doc);
+    return { success: true, ..._reportDocs().addBuffer(caseNumber, name, buf) };
+  } catch (e) { return _wdFail(e); }
+});
+
+ipcMain.handle('report-doc-open', async (event, { caseNumber, fileName } = {}) => {
+  try { return { success: true, ...(await _reportDocs().open(caseNumber, fileName)) }; }
+  catch (e) {
+    const r = _wdFail(e);
+    if (r.code === 'NO_APP') r.error = 'Windows could not find a program to open this document. Microsoft Word (or another program that opens .docx files) needs to be installed.';
+    return r;
+  }
+});
+
+ipcMain.handle('report-doc-remove', async (event, { caseNumber, fileName } = {}) => {
+  try { return { success: true, ...(await _reportDocs().remove(caseNumber, fileName)) }; }
+  catch (e) { return _wdFail(e); }
+});
+
+// The Word report never rides in an export, so this is how it reaches the
+// DA. A readable copy — decrypted when Field Security is on, since the
+// recipient has no key — written where the officer chooses.
+ipcMain.handle('report-doc-save-copy', async (event, { caseNumber, fileName } = {}) => {
+  try {
+    const plain = _reportDocs().readPlain(caseNumber, fileName);
+    const ext = WorkingDocsLib.extOf(fileName).slice(1) || 'docx';
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save a copy of the Word report',
+      defaultPath: path.join(app.getPath('documents'), fileName),
+      filters: [{ name: 'Word document', extensions: [ext] }],
+    });
+    restoreFocus();
+    if (result.canceled || !result.filePath) return { success: true, canceled: true };
+    fs.writeFileSync(result.filePath, plain);
+    return { success: true, filePath: result.filePath, bytes: plain.length };
+  } catch (e) { restoreFocus(); return _wdFail(e); }
 });
 
 // --- Save warrant file to disk ---

@@ -11,7 +11,9 @@
  * and make sure every save Word makes ends up in the case.
  *
  * Files live in   cases/<caseNumber>/Warrants/Working/<name>.docx
- * and the folder is the source of truth: there is no localStorage list to
+ * (or wherever deps.subDir points — the Reports tab runs a second manager
+ * over cases/<caseNumber>/Reports/Word/ for an officer who writes the case
+ * report in Word) and the folder is the source of truth: there is no localStorage list to
  * drift away from what is actually on disk, and nothing to lose when a case
  * is re-imported under a new internal id.
  *
@@ -165,7 +167,11 @@ function coded(code, message) {
  * deps:
  *   fs, path, crypto
  *   casesDir()      → current cases root (it can be moved in Settings)
- *   sessionsRoot()  → private folder for decrypted working copies
+ *   sessionsRoot()  → private folder for decrypted working copies. Each
+ *                     manager needs its OWN — recover() adopts every session
+ *                     folder it finds there as one of its documents.
+ *   subDir          → optional path segments under the case folder
+ *                     (default ['Warrants', 'Working'])
  *   getSecurity()   → the SecurityManager, or null
  *   openPath(p)     → Promise<string>  ('' on success — shell.openPath)
  *   trashItem(p)    → Promise<void>    (shell.trashItem)
@@ -184,6 +190,11 @@ function createWorkingDocs(deps) {
   const pollMs = deps.pollMs || DEFAULT_POLL_MS;
   const setIv = deps.setInterval || setInterval;
   const clearIv = deps.clearInterval || clearInterval;
+
+  const subDir = Array.isArray(deps.subDir) && deps.subDir.length ? deps.subDir.map(String) : ['Warrants', WORKING_SUBDIR];
+  for (const seg of subDir) {
+    if (!seg || /[\\/\x00]/.test(seg) || seg === '.' || seg === '..') throw new Error('Bad working-documents folder: ' + subDir.join('/'));
+  }
 
   const sessions = new Map();   // key → session
   let timer = null;
@@ -213,7 +224,7 @@ function createWorkingDocs(deps) {
   function keyOf(cn, name) { return cn + '\u0000' + String(name).toLowerCase(); }
 
   function workingDir(caseNumber) {
-    return path.join(deps.casesDir(), assertCaseNumber(caseNumber), 'Warrants', WORKING_SUBDIR);
+    return path.join(deps.casesDir(), assertCaseNumber(caseNumber), ...subDir);
   }
 
   // ── security ──
@@ -468,6 +479,20 @@ function createWorkingDocs(deps) {
     return addBuffer(caseNumber, desired, plain);
   }
 
+  /**
+   * The document's plaintext — what the officer would see in Word. Takes any
+   * save Word has made but VIPER has not polled yet, so a copy made the
+   * moment after a save is never one save behind.
+   */
+  function readPlain(caseNumber, fileName) {
+    assertFileName(fileName);
+    const s = sessions.get(keyOf(caseNumber, fileName));
+    if (s) { try { syncSession(s); } catch (_) {} }
+    const full = path.join(workingDir(caseNumber), fileName);
+    if (!fs.existsSync(full)) throw coded('NOT_FOUND', `"${fileName}" is no longer in this case.`);
+    return readCasePlain(full);
+  }
+
   function rename(caseNumber, fileName, newName) {
     assertFileName(fileName);
     if (sessions.has(keyOf(caseNumber, fileName))) {
@@ -659,7 +684,7 @@ function createWorkingDocs(deps) {
   function stop() { if (timer) { clearIv(timer); timer = null; } }
 
   return {
-    list, addBuffer, importFile, newFrom, rename, remove, open,
+    list, addBuffer, importFile, newFrom, readPlain, rename, remove, open,
     checkInAll, recover, tick, active, stop,
     workingDir,
     _sessions: sessions,

@@ -256,6 +256,12 @@ const mk = (rel, body) => {
 mk(path.join('Evidence', 'Canvass Main St', 'door.jpg'), 'PHOTO-BYTES');
 mk(path.join('Evidence', 'TLO Report', 'tlo.pdf'), 'TLO-BYTES');
 mk(path.join('Warrants', 'sw-001.pdf'), 'WARRANT-BYTES');
+// Live Word drafts (5.3.9) live in Warrants/Working and are work product —
+// they never ship. A signed warrant in any other sub-folder still does, and so
+// does a folder that merely happens to be called "Working" deeper down.
+mk(path.join('Warrants', 'Working', 'Running Affidavit.docx'), 'DRAFT-BYTES');
+mk(path.join('Warrants', 'Signed', 'sw-001-signed.pdf'), 'SIGNED-BYTES');
+mk(path.join('Warrants', 'Returns', 'Working', 'google-return.zip'), 'RETURN-BYTES');
 mk(path.join('Notes', 'note-1.png'), 'NOTE-BYTES');
 mk(path.join(CANVAS_MEDIA_DIR, 'canvass-01.jpg'), 'CANVASS-BYTES');
 mk(path.join(FIELD_WORK_MEDIA_DIR, 'Field Work 2026-10-05 3200-Las-Vegas-Trl photo 1.jpg'), 'FIELDWORK-BYTES');
@@ -354,6 +360,12 @@ const ASSIST = {
     ok(daNames.every(n => n.indexOf('Assist Package') === -1), 'and nothing is nested under an assist folder');
     ok(daNames.indexOf('Evidence/Canvass Main St/door.jpg') !== -1, 'evidence is at the top level as before');
     ok(daNames.indexOf('Warrants/sw-001.pdf') !== -1, 'warrants too');
+    ok(daNames.every(n => n.indexOf('Warrants/Working/') !== 0),
+       'the officer\'s live Word drafts are left out of a DA export');
+    ok(daNames.indexOf('Warrants/Signed/sw-001-signed.pdf') !== -1,
+       'but a signed warrant in its own sub-folder still ships');
+    ok(daNames.indexOf('Warrants/Returns/Working/google-return.zip') !== -1,
+       'and only the top-level Working folder is withheld, not any folder of that name');
 
     // ── THE ASSIST PACKAGE ──
     ENTRIES = [];
@@ -384,6 +396,10 @@ const ASSIST = {
     ok(names.indexOf(ROOT + '/Evidence/Canvass Main St/door.jpg') !== -1,
        'the evidence file keeps its original name and its original folder');
     ok(names.indexOf(ROOT + '/Warrants/sw-001.pdf') !== -1, 'the warrant keeps its name');
+    ok(names.every(n => n.indexOf(ROOT + '/Warrants/Working/') !== 0),
+       'live Word drafts are left out of an assist package too');
+    ok(names.indexOf(ROOT + '/Warrants/Signed/sw-001-signed.pdf') !== -1,
+       'while the signed warrant still goes');
     ok(names.indexOf(ROOT + '/Notes/note-1.png') !== -1, 'the note attachment keeps its name');
     ok(names.indexOf(ROOT + '/' + CANVAS_MEDIA_DIR + '/canvass-01.jpg') !== -1,
        'canvass media keeps its name');
@@ -443,6 +459,12 @@ const ASSIST = {
     ok(jm.assist.note.indexOf('not a second case file') === -1
        || typeof jm.assist.note === 'string', 'the note is a string');
     ok(/preserved unchanged/.test(jm.assist.note), 'the note states that file names are preserved');
+    // The omission is recorded as work product — never dressed up as a
+    // discovery decision, which it is not.
+    ok(jm.workProduct && Array.isArray(jm.workProduct.omitted)
+       && jm.workProduct.omitted.indexOf(ROOT + '/Warrants/Working/') !== -1,
+       'the assist manifest records that the working drafts were left out');
+    eq(jm.workProduct ? jm.workProduct.omitted.length : 0, 1, 'and records exactly that one folder');
     // The DA export's own manifest must not grow an assist block.
     ENTRIES = [];
     await exportZip(null, {
@@ -451,6 +473,12 @@ const ASSIST = {
     });
     const daJm = JSON.parse(ENTRIES.find(e => e.name === 'EXPORT_MANIFEST.json').body.toString('utf8'));
     eq(daJm.assist, undefined, 'a DA export manifest carries no assist block');
+    ok(!!daJm.workProduct && daJm.workProduct.omitted.indexOf('Warrants/Working/') !== -1,
+       'the DA manifest records that the working drafts were left out');
+    ok(/Signed warrants and returns are included/.test((daJm.workProduct || {}).note || ''),
+       'and says plainly that the signed warrants still went');
+    ok(JSON.stringify(daJm.discoveryPolicy || {}).indexOf('Working') === -1,
+       'the drafts are not listed as a discovery withholding');
 
     // ── READ ME FIRST.txt ──
     ENTRIES = [];
@@ -574,6 +602,7 @@ const ASSIST = {
     eq(JSON.stringify(f0), JSON.stringify(['EXPORT_MANIFEST.json', CASE + '_DA_Report.pdf'].sort()),
        'an Overview-only report ships just the PDF and the manifest');
     eq(JSON.stringify(manifestOf().foldersIncluded), '[]', 'and the manifest records that no folders were included');
+    eq(manifestOf().workProduct, undefined, 'and claims no drafts were withheld when Warrants was never walked');
 
     // Evidence only.
     ENTRIES = [];
@@ -591,6 +620,7 @@ const ASSIST = {
     await exportZip(null, Object.assign({ fileName: 'f2.zip', folders: ['warrants', 'fieldwork'] }, BASE));
     const f2 = ENTRIES.map(e => e.name);
     ok(f2.indexOf('Warrants/sw-001.pdf') !== -1, 'Warrants ticked -> warrant files ship');
+    ok(f2.every(n => n.indexOf('Warrants/Working/') !== 0), 'but never the live Word drafts');
     ok(f2.some(n => n.indexOf(FIELD_WORK_MEDIA_DIR + '/') === 0), 'Field Work ticked -> field work media ships');
     ok(f2.every(n => n.indexOf('Evidence/') !== 0), 'Evidence NOT ticked -> no evidence walked');
 

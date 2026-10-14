@@ -111,6 +111,9 @@
          Shared with index.html so the alert badges and the warrant cards
          can never disagree. Loaded WITHOUT defer (used during render). -->
     <script src="modules/warrant-status.js"></script>
+    <!-- Working Documents (live Word drafts in the Warrants tab). Loaded
+         WITHOUT defer: renderWarrantsTab() calls it while rendering. -->
+    <script src="modules/warrants/working-docs-ui.js"></script>
     <!-- P2P Activity Check (TorrentAnalytics). Loaded WITHOUT defer:
          _p2pScanBtn() is called synchronously while identifier rows
          render. p2p-scan.js (pure core) must precede the UI half. -->
@@ -14415,6 +14418,16 @@
         }
 
         function renderWarrantsTab() {
+            // Working Documents: host state reaches the module only through
+            // these closures (currentCase / caseWarrants are top-level `let`).
+            if (window.WorkingDocsUI) {
+                WorkingDocsUI.configure({
+                    getCaseNumber: () => (currentCase && currentCase.caseNumber) || null,
+                    getWarrants: () => caseWarrants,
+                    saveWarrants: () => saveWarrantsToStorage(),
+                    isPreservation: (w) => _warrantIsPreservation(w),
+                });
+            }
             return `
                 <div class="space-y-6">
                     <!-- Header -->
@@ -14565,6 +14578,9 @@
                         </form>
                     </div>
                     
+                    <!-- Working Documents: the officer's live Word drafts -->
+                    ${window.WorkingDocsUI ? WorkingDocsUI.renderPanel() : ''}
+
                     <!-- Warrants List -->
                     <div id="warrantsList">
                         ${caseWarrants.length === 0 ? `
@@ -14859,6 +14875,7 @@
                                                 </svg>
                                             </button>
                                         `)}
+                                        ${window.WorkingDocsUI ? WorkingDocsUI.renderWarrantRow(warrant) : ''}
                                     </div>
                                 </div>
                             </div>

@@ -428,6 +428,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Warrant file storage
   saveWarrantFile: (data) => ipcRenderer.invoke('save-warrant-file', data),
   readWarrantFile: (filePath) => ipcRenderer.invoke('read-warrant-file', filePath),
+  // Working Documents — live Word drafts kept in cases/<cn>/Warrants/Working/
+  workingDocsList: (caseNumber) => ipcRenderer.invoke('working-docs-list', { caseNumber }),
+  workingDocImport: (caseNumber) => ipcRenderer.invoke('working-doc-import', { caseNumber }),
+  workingDocNewFrom: (caseNumber, sourceName, newName) => ipcRenderer.invoke('working-doc-new-from', { caseNumber, sourceName, newName }),
+  workingDocNewBlank: (caseNumber, newName) => ipcRenderer.invoke('working-doc-new-blank', { caseNumber, newName }),
+  workingDocOpen: (caseNumber, fileName) => ipcRenderer.invoke('working-doc-open', { caseNumber, fileName }),
+  workingDocRename: (caseNumber, fileName, newName) => ipcRenderer.invoke('working-doc-rename', { caseNumber, fileName, newName }),
+  workingDocRemove: (caseNumber, fileName) => ipcRenderer.invoke('working-doc-remove', { caseNumber, fileName }),
+  onWorkingDocEvent: (cb) => {
+    const handler = (_e, payload) => { try { cb(payload); } catch (_) {} };
+    ipcRenderer.on('working-doc-event', handler);
+    return () => ipcRenderer.removeListener('working-doc-event', handler);
+  },
   selectProductionZip: (data) => ipcRenderer.invoke('select-production-zip', data),
 
   // Forensic Devices (Device Exams) file storage

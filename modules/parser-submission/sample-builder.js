@@ -14,9 +14,10 @@
  *     key paths, format inferences — NEVER raw values.
  *
  * Envelope schema (wire-compatible with Scout v1; v3 adds robust PDF text;
- * v4 hardens redaction and adds measured layout hints):
+ * v4 hardens redaction and adds measured layout hints; v5 closes the
+ * CyberTip / people-search leaks):
  *   {
- *     schema_version: 4,
+ *     schema_version: 5,
  *     scout_version:  "<viper version>",
  *     submitted_at:   "<ISO 8601 UTC>",
  *     provider_hint:  "T-Mobile CDR",
@@ -53,6 +54,15 @@
  *   furniture, mid-word wrap behaviour and multi-label cells — the three
  *   measurements that otherwise have to be done by hand before a parser for
  *   a stacked-label form can be written at all.
+ *
+ * Schema v5 (5.3.9) closes four routes by which a CyberTip report and the
+ * people-search printout beside it still shipped a real name and address:
+ * a middle initial broke an ALL-CAPS name run; one recognised word ("DRIVERS
+ * LICENSE KYLE W SMITH") kept the whole run; values glued together by the
+ * text extractor ("SMITH111 W PARK", "2025XXX-XX-4235") slipped past \b
+ * boundaries; and there was no pass for IP addresses or coordinates.  Name
+ * words are now also learned across the whole document and swept wherever
+ * else they appear.
  */
 
 const fs = require('fs');
@@ -60,7 +70,7 @@ const path = require('path');
 
 // ─── Limits & knobs (mirror Scout) ─────────────────────────────────────────
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const PER_FILE_BUDGET_BYTES = 64 * 1024 * 1024;     // 64 MB
 const MAX_FILES = 50_000;
 const MAX_STRUCTURE_DEPTH = 32;
@@ -734,7 +744,38 @@ const CAPS_KEEP = new Set([
     'OREGON', 'PENNSYLVANIA', 'RHODE', 'ISLAND', 'TENNESSEE', 'TEXAS',
     'UTAH', 'VERMONT', 'VIRGINIA', 'WASHINGTON', 'WEST', 'WISCONSIN',
     'WYOMING', 'COLUMBIA', 'NORTH', 'SOUTH', 'EAST', 'NEW',
+    // CyberTip / people-search / phone-record furniture (5.3.9).  Since a
+    // run is now split at recognised words instead of kept whole, every
+    // structural word missing here costs a <NAME> token, not a leak.
+    'DRIVERS', 'IDENTIFICATION', 'NCMEC', 'CYBERTIPLINE', 'CYBERTIP', 'ESP',
+    'IP', 'IPV4', 'IPV6', 'UTC', 'US', 'USA', 'PRIORITY', 'LEVEL', 'LAW',
+    'ENFORCEMENT', 'PURPOSES', 'SECTION', 'INFORMATION', 'ADDITIONAL',
+    'REPORTED', 'CHILD', 'USER', 'USERNAME', 'ACCOUNT', 'EMAIL', 'SCREEN',
+    'DISPLAY', 'UPLOAD', 'UPLOADED', 'LOGIN', 'FILE', 'FILES', 'GEO',
+    'LOOKUP', 'SEARCH', 'RESULTS', 'POSSIBLE', 'RELATIVE', 'RELATIVES',
+    'ASSOCIATES', 'SUBSCRIBER', 'CARRIER', 'WIRELESS', 'MOBILE', 'CELL',
+    'LANDLINE', 'VOIP', 'PEOPLE', 'SSN', 'DOB', 'DL', 'ID', 'MT', 'PT',
+    'CT', 'ET', 'CST', 'EST', 'MST', 'PST', 'AM', 'PM',
+    // Function words.  A run is split at recognised words, so "ASSAULT WITH
+    // A DEADLY WEAPON" needs WITH here or it reports a name in the middle.
+    'WITH', 'WITHOUT', 'WITHIN', 'FROM', 'INTO', 'ONTO', 'UNDER', 'OVER',
+    'AS', 'IS', 'AN', 'IF', 'BE', 'WAS', 'WERE', 'ARE', 'HAS', 'HAD', 'HAVE',
+    'THAT', 'THIS', 'IT', 'ITS', 'OUT', 'UP', 'OFF', 'PER', 'VIA', 'UPON',
+    'AGAINST', 'BETWEEN', 'AFTER', 'BEFORE', 'DURING', 'WHILE', 'SHERIFFS',
+    'MARSHALS',
 ]);
+
+// A short unrecognised stretch directly before one of these is an agency
+// name ("FORT WORTH POLICE DEPARTMENT"), not a person.  Deliberately narrow:
+// COUNTY / CITY / STATE are left out because they also print as labels
+// right after a name ("JOHN SMITH COUNTY OF RESIDENCE").
+const AGENCY_TAIL = new Set([
+    'POLICE', 'SHERIFF', 'SHERIFFS', 'DEPARTMENT', 'DEPT', 'BUREAU',
+    'MARSHAL', 'MARSHALS', 'CONSTABLE',
+]);
+// ...which may sit between the place name and the tail ("ALDER COUNTY
+// SHERIFF'S OFFICE").  Only counts when an AGENCY_TAIL word follows.
+const AGENCY_PLACE = new Set(['COUNTY', 'CITY', 'STATE', 'TOWN', 'TOWNSHIP', 'PARISH', 'VILLAGE']);
 
 // Longest-first so a multi-word protected phrase wins over its own prefix.
 function _buildProtectIndex(protect) {
@@ -783,6 +824,11 @@ function _dateMask(a, b, c, sep) {
  *        document furniture by repetition (see _safeCapsWords), so that a
  *        standalone "FORT WORTH" on the City line survives even though
  *        "WORTH" is not in the built-in keep-list.
+ * @param {Set<string>} [opts.capsNameWords]  ALL-CAPS words already known
+ *        to be part of a name somewhere in the document; swept wherever
+ *        they appear (see inspectPdfTextAsync).
+ * @param {Set<string>} [opts.learnInto]  Receives every ALL-CAPS name word
+ *        this call redacted.
  */
 function _redactExcerpt(s, opts) {
     const phrases = _buildProtectIndex(opts && opts.protect);
@@ -804,15 +850,43 @@ function _redactExcerpt(s, opts) {
         }
     }
 
+    // Digit runs are bounded by (?<!\d) / (?!\d), NOT \b.  pdf-parse glues
+    // adjacent cells together ("4235XX", "2025XXX", "174.0.0.1USCO"), and a
+    // \b never fires between a digit and a letter — so before 5.3.9 the last
+    // four of an SSN and every IP address on a CyberTip report rode out
+    // untouched inside a glued token (measured: Westminster submission, Oct
+    // 2026).
     let out = s
         .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '<EMAIL>')
-        .replace(/\b\d{3}-\d{2}-\d{4}\b/g, '<SSN>')
+        // IP addresses run before dates and phones, whose patterns can match
+        // pieces of a dotted quad.
+        .replace(/(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d])/g, '<IPV4>')
+        .replace(/(?<![\w:])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![\w:])/g, (m) => {
+            // A clock time ("17:43:39") has the same outline — so an IPv6
+            // needs a hex letter or a "::", and at least four groups.
+            if (/^[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}$/.test(m)) return '<MAC>';
+            const groups = m.split(':').length;
+            if (groups < 4 || !(/[A-Fa-f]/.test(m) || m.indexOf('::') >= 0)) return m;
+            return '<IPV6>';
+        })
+        // Latitude / longitude: a decimal with four or more places.
+        .replace(/(?<![\d.])-?\d{1,3}\.\d{4,}(?![\d.])/g, '<GEO>')
+        .replace(/(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)/g, '<SSN>')
         .replace(/\((\d{3})\)\s*(\d{3})-?(\d{4})/g,
             (m) => '<PHONE ' + m.replace(/\d/g, 'N') + '>')
-        .replace(/\b\d{3}-\d{3}-\d{4}\b/g, '<PHONE NNN-NNN-NNNN>')
-        .replace(/\b(\d{1,2})([\/\-.])(\d{1,2})\2(\d{2,4})\b/g,
+        .replace(/(?<!\d)\d{3}-\d{3}-\d{4}(?!\d)/g, '<PHONE NNN-NNN-NNNN>')
+        .replace(/(?<!\d)(\d{1,2})([\/\-.])(\d{1,2})\2(\d{4}|\d{2}(?!\d))/g,
             (m, a, sep, b, c) => _dateMask(a, b, c, sep))
-        .replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, '<DATE YYYY-MM-DD>');
+        // Twice: in "12/01/202312/31/2025" the second date's lookbehind
+        // sees the first date's last digit until the first one is replaced.
+        .replace(/(?<!\d)(\d{1,2})([\/\-.])(\d{1,2})\2(\d{4}|\d{2}(?!\d))/g,
+            (m, a, sep, b, c) => _dateMask(a, b, c, sep))
+        .replace(/(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)/g, '<DATE YYYY-MM-DD>')
+        // Masked values still print part of the value: the last four of an
+        // SSN ("XXX-XX-4235") and the year of a DOB ("XX/XX/1980").  After
+        // the dates, so a glued "…2025XXX-XX-4235" has lost its digit edge.
+        .replace(/(?<![A-Za-z0-9])[X*]{3}-[X*]{2}-\d{4}(?!\d)/gi, '<SSN XXX-XX-NNNN>')
+        .replace(/(?<![A-Za-z0-9])[X*]{2}\/[X*]{2}\/\d{4}(?!\d)/gi, '<DATE XX/XX/YYYY>');
 
     // Addresses run BEFORE the name passes: "3226 LAS VEGAS TRL" is an
     // address, and if the all-caps name pass saw it first it would report
@@ -820,7 +894,9 @@ function _redactExcerpt(s, opts) {
     const suffixRe = STREET_SUFFIXES.map(_escapeRe).join('|');
     out = out.replace(
         new RegExp(
-            '\\b\\d{1,6}\\s+[A-Za-z0-9][A-Za-z0-9\\s.\'-]{1,40}?\\s+(?:' + suffixRe + ')\\b\\.?' +
+            // (?<!\\d), not \\b: "SMITH111 W PARK AVE" — a surname glued to
+            // the house number — must still be read as an address.
+            '(?<!\\d)\\d{1,6}\\s+[A-Za-z0-9][A-Za-z0-9\\s.\'-]{1,40}?\\s+(?:' + suffixRe + ')\\b\\.?' +
             '(?:\\s*,?\\s*(?:Apt|Apt#|Unit|Ste|Suite|#)\\s*[A-Za-z0-9-]{1,8})?' +
             '(?:\\s*,\\s*[A-Za-z][A-Za-z\\s.\'-]{1,30})?' +
             '(?:\\s*,\\s*[A-Z]{2})?' +
@@ -838,19 +914,103 @@ function _redactExcerpt(s, opts) {
         }
     );
 
+    // Every ALL-CAPS word redacted as part of a name.  Swept again at the
+    // end, wherever it appears, so the same surname cannot survive glued to
+    // a number ("SMITH111") or standing alone on another line.
+    const learned = new Set();
+    const learn = (w) => {
+        const bare = w.replace(/[^A-Z]/g, '');
+        if (bare.length >= 3 && !keep(bare)) learned.add(bare);
+    };
+    const isInitial = (w) => /^[A-Z]\.?$/.test(w);
+
+    // Park every token already emitted ("<DATE MM/DD/YYYY>", "<NAME LAST,
+    // FIRST>") behind a sentinel, after every pass, so a later pass cannot
+    // read the capitals INSIDE a token as a name.  The index is written in
+    // private-use characters — neither digits (the NUM pass) nor letters
+    // (the word sweep) — and restored at the very end.
+    const parked = [];
+    const park = (str) => str.replace(/<[^<>\n\u0002]*>/g, (t) => {
+        parked.push(t);
+        return '\u0002' + String(parked.length - 1)
+            .replace(/\d/g, d => String.fromCharCode(0xE000 + +d)) + '\u0002';
+    });
+    out = park(out);
+
     out = out
         // "JONES, MARK ANDREW"
         .replace(/\b[A-Z]{2,}, [A-Z]{2,}(?: [A-Z]{2,})?\b/g, (m) => {
             const words = m.replace(/,/g, '').split(/\s+/);
             if (words.some(w => keep(w.replace(/[^A-Z]/g, '')))) return m;
+            words.forEach(learn);
             return '<NAME LAST, FIRST>';
-        })
-        // ALL-CAPS space-separated runs — the leak this release closes.
-        .replace(/\b[A-Z][A-Z'`-]+(?:\s+[A-Z][A-Z'`-]+){1,3}\b/g, (m) => {
-            const words = m.split(/\s+/);
-            if (words.some(w => keep(w.replace(/[^A-Z]/g, '')))) return m;
-            return '<NAME CAPS x' + words.length + '>';
-        })
+        });
+    out = park(out);
+    out = out
+        // ALL-CAPS space-separated runs.  Two 5.3.9 changes, both from the
+        // Westminster CyberTip submission, which shipped a real name:
+        //   - a middle initial ("KYLE W SMITH") used to break the run, so
+        //     neither half was long enough to match;
+        //   - ONE recognised word used to keep the WHOLE run, so
+        //     "DRIVERS LICENSE KYLE W SMITH" shipped verbatim.  The run is now
+        //     split at recognised words and each unrecognised stretch is
+        //     redacted on its own.  Single letters never count as recognised.
+        .replace(/\b[A-Z][A-Z'`-]*\.?(?:\s+[A-Z][A-Z'`-]*\.?){1,5}\b/g, (m) => {
+            const parts = m.split(/(\s+)/);          // words at even indexes
+            const words = parts.filter((_, i) => i % 2 === 0);
+            const kept = words.map(w => !isInitial(w) && keep(w.replace(/[^A-Z]/g, '')));
+            if (!kept.some(Boolean)) {
+                if (words.every(isInitial)) return m;
+                words.forEach(learn);
+                return '<NAME CAPS x' + words.length + '>';
+            }
+            let res = '';
+            let group = [];
+            const flush = () => {
+                if (!group.length) return;
+                const ws = group.filter((_, i) => i % 2 === 0);
+                if (ws.some(w => !isInitial(w))) {
+                    ws.forEach(learn);
+                    res += '<NAME CAPS x' + ws.length + '>';
+                } else {
+                    res += group.join('');
+                }
+                group = [];
+            };
+            for (let i = 0; i < parts.length; i += 2) {
+                const wi = i / 2;
+                // "FORT WORTH" + POLICE: keep up to three words verbatim.
+                if (!kept[wi] && !group.length) {
+                    let j = wi;
+                    while (j < words.length && !kept[j]) j++;
+                    let t = j;
+                    while (t < words.length && t - j < 2
+                        && AGENCY_PLACE.has(words[t].replace(/[^A-Z]/g, ''))) t++;
+                    if (j < words.length && j - wi <= 3 && t < words.length
+                        && AGENCY_TAIL.has(words[t].replace(/[^A-Z]/g, ''))) {
+                        for (let k = wi; k < j; k++) res += parts[2 * k] + parts[2 * k + 1];
+                        i = 2 * (j - 1);
+                        continue;
+                    }
+                }
+                if (kept[i / 2]) {
+                    flush();
+                    res += parts[i] + (i + 1 < parts.length ? parts[i + 1] : '');
+                } else {
+                    if (group.length) group.push(parts[i - 1]);
+                    group.push(parts[i]);
+                    // separator after a group is emitted once the group closes
+                    if (i + 2 >= parts.length || kept[i / 2 + 1]) {
+                        flush();
+                        if (i + 1 < parts.length) res += parts[i + 1];
+                    }
+                }
+            }
+            flush();
+            return res;
+        });
+    out = park(out);
+    out = out
         // "Thornbury, Rowan" — proper case with the comma.  Matches neither
         // of the two rules above, and it is the layout every "Last, First"
         // roster column uses.
@@ -858,12 +1018,43 @@ function _redactExcerpt(s, opts) {
             const words = m.replace(/,/g, '').split(/\s+/);
             if (words.some(w => keep(w.replace(/[^A-Za-z]/g, '').toUpperCase()))) return m;
             return '<NAME Last, First>';
-        })
+        });
+    out = park(out);
+    out = out
         // "Mark Andrew Jones"
         .replace(/\b[A-Z][a-z]+(?: [A-Z][a-z]+){1,3}\b/g,
-            (m) => '<NAME Caps x' + m.split(/\s+/).length + '>')
+            (m) => '<NAME Caps x' + m.split(/\s+/).length + '>');
+    out = park(out);
+    out = out
         // Bare digit runs — keep the width, it separates a ZIP from a DL.
-        .replace(/\b\d{4,}\b/g, (m) => '<NUM:' + m.length + '>')
+        .replace(/(?<!\d)\d{4,}(?!\d)/g, (m) => '<NUM:' + m.length + '>');
+
+    // Sweep the ALL-CAPS name words learned above — this call's, and the
+    // whole document's when the caller passes them (opts.capsNameWords) —
+    // wherever else they appear.  Letter boundaries, not \b, so a word glued
+    // to digits ("SMITH111") is caught.  Case-sensitive on purpose: the
+    // Title-Case form of a common surname is too often a form label.
+    if (opts && opts.learnInto) for (const w of learned) opts.learnInto.add(w);
+    const sweep = new Set(learned);
+    const docWords = opts && opts.capsNameWords;
+    if (docWords) for (const w of docWords) if (!keep(w)) sweep.add(w);
+    if (sweep.size) {
+        const list = Array.from(sweep).filter(w => w.length >= 3).sort((a, b) => b.length - a.length);
+        if (list.length) {
+            out = out.replace(new RegExp('(?<![A-Za-z])(?:' + list.map(_escapeRe).join('|') + ')(?![A-Za-z])', 'g'),
+                '<NAME word>');
+        }
+    }
+
+    // Unpark (a token can contain a token parked before it, hence the loop).
+    for (let guard = 0; guard < 4 && out.indexOf('\u0002') >= 0; guard++) {
+        out = out.replace(/\u0002([\uE000-\uE009]+)\u0002/g, (m, enc) => {
+            const i = +enc.replace(/[\uE000-\uE009]/g, c => String(c.charCodeAt(0) - 0xE000));
+            return parked[i] != null ? parked[i] : m;
+        });
+    }
+
+    out = out
         .replace(/[ \t]+/g, ' ')
         .replace(/\n{3,}/g, '\n\n');
 
@@ -1549,7 +1740,19 @@ async function inspectPdfTextAsync(buf, syncShape, onOcrPage) {
     _safeCapsWords(headings, safeWords);
     _safeCapsWords(labels, safeWords);
     _safeCapsWords(verticalLabels, safeWords);
-    const redOpts = { protect, safeWords };
+    // ALL-CAPS name words, learned once over the WHOLE document and then
+    // swept out of every channel.  A heading is redacted on its own, so
+    // without this a surname printed alone on one line ("SMITH") or glued to
+    // a number ("SMITH111") survived even though the same word had already
+    // been redacted as part of a full name a few lines earlier.  Words a
+    // name label identified ("Name: Smith") join them, upper-cased.
+    const capsNameWords = new Set();
+    _redactExcerpt(text, { protect, safeWords, learnInto: capsNameWords });
+    for (const w of _redactNameContextLines(text.split('\n')).nameWords) {
+        const up = String(w).toUpperCase().replace(/[^A-Z]/g, '');
+        if (up.length >= 3) capsNameWords.add(up);
+    }
+    const redOpts = { protect, safeWords, capsNameWords };
 
     // Headings / labels used to ship RAW.  Measured against the two Fort
     // Worth submissions, that channel alone leaked two real names and two

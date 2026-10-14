@@ -7040,7 +7040,10 @@
             if (totalAlerts === 0) {
                 listElement.innerHTML = '<div class="text-center py-4 text-gray-400 text-sm">No active alerts</div>';
             } else {
-                let html = overdueWarrants.slice(0, 3).map(item => `
+                // Every alert is listed. The box is about three cards tall and
+                // scrolls — the old "+N more" line was text, not a button, so
+                // the alerts past the third could not be reached at all.
+                let html = overdueWarrants.map(item => `
                     <div class="mb-3 p-3 bg-viper-orange/10 border border-viper-orange/30 rounded-lg text-left cursor-pointer hover:bg-viper-orange/20 transition-colors" onclick="openCaseDetail(${item.caseId})">
                         <div class="flex items-center justify-between mb-1">
                             <span class="text-sm font-medium text-viper-orange">Case ${item.caseNumber}</span>
@@ -7050,10 +7053,7 @@
                         <div class="text-xs text-gray-400 mt-1">Due: ${new Date(item.warrant.dueDate).toLocaleDateString()}</div>
                     </div>
                 `).join('');
-                if (overdueWarrants.length > 3) {
-                    html += `<div class="text-center text-xs text-viper-orange mb-3">+${overdueWarrants.length - 3} more warrants</div>`;
-                }
-                html += staleCases.slice(0, 3).map(item => `
+                html += staleCases.map(item => `
                     <div class="mb-3 p-3 bg-viper-cyan/10 border border-viper-cyan/30 rounded-lg text-left cursor-pointer hover:bg-viper-cyan/20 transition-colors" onclick="openCaseDetail(${item.caseId})">
                         <div class="flex items-center justify-between mb-1">
                             <span class="text-sm font-medium text-viper-cyan">Case ${item.caseNumber}</span>
@@ -7063,8 +7063,9 @@
                         <div class="text-xs text-gray-400 mt-1">Alerts after ${item.threshold}d of inactivity</div>
                     </div>
                 `).join('');
-                if (staleCases.length > 3) {
-                    html += `<div class="text-center text-xs text-viper-cyan mt-2">+${staleCases.length - 3} more stale cases</div>`;
+                html = `<div data-alert-scroll class="overflow-y-auto pr-1" style="max-height: 19rem; overscroll-behavior: contain;">${html}</div>`;
+                if (totalAlerts > 3) {
+                    html += `<div class="text-center text-xs text-gray-400 mt-2" data-alert-scroll-hint>${totalAlerts} alerts — scroll the list to see them all</div>`;
                 }
                 listElement.innerHTML = html;
             }

@@ -2770,6 +2770,26 @@
                     </div><!-- /customMetricsSectionBody -->
                 </div>
 
+                <!-- ═══ ICAC Task Force Reporting (IDS) ═══ -->
+                <div class="glass-card rounded-xl p-6">
+                    <div class="flex items-center justify-between gap-4">
+                        <div>
+                            <h3 class="text-xl font-bold flex items-center gap-2">
+                                <svg class="w-6 h-6 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                </svg>
+                                ICAC Task Force Reporting (IDS)
+                            </h3>
+                            <p class="text-gray-400 text-sm mt-2">For ICAC affiliates. Adds an "ICAC case" box to cases, an ICAC card on the case overview, an ICAC Activity Log on the dashboard, and a <span class="text-gray-300">Generate IDS Measures</span> button that adds up your monthly IDS numbers from your cases. Only cases marked ICAC are counted. If this is off, none of it appears.</p>
+                        </div>
+                        <button id="idsToggleBtn" onclick="toggleIdsEnabled()"
+                            class="relative inline-flex items-center h-6 rounded-full w-11 flex-shrink-0 transition-colors focus:outline-none bg-gray-700"
+                            aria-label="Toggle ICAC task force reporting">
+                            <span id="idsToggleIndicator" class="inline-block w-4 h-4 transform transition-transform bg-white rounded-full translate-x-1"></span>
+                        </button>
+                    </div>
+                </div>
+
                 <!-- ═══ Warrant Authoring Section ═══ -->
                 <div class="glass-card rounded-xl p-6">
                     <div class="flex justify-between items-center cursor-pointer" onclick="toggleDocumentAuthoringSection()">
@@ -9859,6 +9879,25 @@
         }
         renderCustomMetricsList();
     }
+    // ═══ ICAC Task Force Reporting (IDS) ═══
+    // One switch. Off (the default) means no IDS control is drawn anywhere.
+    function isIdsEnabled() {
+        return localStorage.getItem('viperIdsEnabled') === 'true';
+    }
+    function toggleIdsEnabled() {
+        localStorage.setItem('viperIdsEnabled', isIdsEnabled() ? 'false' : 'true');
+        refreshIdsUI();
+    }
+    function refreshIdsUI() {
+        const on = isIdsEnabled();
+        const btn = document.getElementById('idsToggleBtn');
+        const ind = document.getElementById('idsToggleIndicator');
+        if (!btn || !ind) return;
+        btn.classList.toggle('bg-viper-purple', on);
+        btn.classList.toggle('bg-gray-700', !on);
+        ind.classList.toggle('translate-x-6', on);
+        ind.classList.toggle('translate-x-1', !on);
+    }
     const metricColorMap = {
         cyan: { bg: 'bg-viper-cyan/10', text: 'text-viper-cyan', border: 'border-viper-cyan/30', dot: 'bg-viper-cyan' },
         purple: { bg: 'bg-viper-purple/10', text: 'text-viper-purple', border: 'border-viper-purple/30', dot: 'bg-viper-purple' },
@@ -10051,6 +10090,7 @@
         refreshConnectionBoardUI();
         refreshReportRecipientUI();
         refreshCustomMetricsUI();
+        try { refreshIdsUI(); } catch (e) { console.warn('IDS switch render failed:', e); }
         try { renderAgencyProfileFields(); } catch (e) { console.warn('Agency Profile render failed:', e); }
         try { _renderProviderTypeFilters(); renderProviderDirectory(); } catch (e) { console.warn('Provider Directory render failed:', e); }
         refreshWarrantAuthorUI();

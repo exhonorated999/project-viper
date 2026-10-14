@@ -99,6 +99,11 @@
     <link rel="stylesheet" href="modules/field-work/field-work.css" />
     <script src="modules/field-work/field-work-schema.js"></script>
     <script src="modules/field-work/field-work-ui.js"></script>
+    <!-- IDS (ICAC Data System) monthly measures. Pure builder first; the
+         Case Overview card resolves it lazily. Inert unless Settings →
+         ICAC Task Force Reporting is switched on. -->
+    <script src="modules/ids-measures/ids-measures.js"></script>
+    <script src="modules/ids-measures/ids-case-card.js"></script>
     <!-- Analytics CDR Libraries -->
     <script src="libs/papaparse.min.js"></script>
     <script src="libs/d3.v7.min.js"></script>
@@ -6859,79 +6864,58 @@
                             </button>
                         </div>
                         <div id="overviewReadMode">
-                            <div class="grid grid-cols-2 gap-6">
+                            <!-- Key facts.  auto-fill columns: the strip fills the card's
+                                 width at any size instead of leaving a half-empty right side. -->
+                            <div class="grid gap-x-6 gap-y-5" style="grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));">
                                 <div>
                                     <label class="text-sm text-gray-400">Case Number</label>
-                                    <p class="text-lg font-medium text-white mt-1">${currentCase.caseNumber}</p>
+                                    <p class="text-lg font-medium text-white mt-1 break-words">${currentCase.caseNumber}</p>
                                 </div>
-                                <div class="flex gap-4">
-                                    <div class="flex-1">
-                                        <label class="text-sm text-gray-400">Status</label>
-                                        <select onchange="updateCaseStatus(this.value)" class="mt-1 w-full px-3 py-1.5 text-sm bg-viper-card/50 border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none">
-                                            ${buildStatusOptions(currentCase.status)}
-                                        </select>
-                                    </div>
-                                    ${localStorage.getItem('viperCasePriorityEnabled') === 'true' ? `
-                                    <div class="flex-1">
-                                        <label class="text-sm text-gray-400">Priority</label>
-                                        <select onchange="updateCasePriority(parseInt(this.value)||0)" class="mt-1 w-full px-3 py-1.5 text-sm bg-viper-card/50 border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none">
-                                            <option value="0" ${!currentCase.priority ? 'selected' : ''}>— None —</option>
-                                            <option value="1" ${currentCase.priority===1 ? 'selected' : ''}>🔴 Critical</option>
-                                            <option value="2" ${currentCase.priority===2 ? 'selected' : ''}>🟠 High</option>
-                                            <option value="3" ${currentCase.priority===3 ? 'selected' : ''}>🟡 Medium</option>
-                                            <option value="4" ${currentCase.priority===4 ? 'selected' : ''}>🟢 Low</option>
-                                        </select>
-                                    </div>
-                                    ` : ''}
+                                <div>
+                                    <label class="text-sm text-gray-400">Status</label>
+                                    <select onchange="updateCaseStatus(this.value)" class="mt-1 w-full px-3 py-1.5 text-sm bg-viper-card/50 border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none">
+                                        ${buildStatusOptions(currentCase.status)}
+                                    </select>
                                 </div>
-                                <div class="col-span-2">
+                                ${localStorage.getItem('viperCasePriorityEnabled') === 'true' ? `
+                                <div>
+                                    <label class="text-sm text-gray-400">Priority</label>
+                                    <select onchange="updateCasePriority(parseInt(this.value)||0)" class="mt-1 w-full px-3 py-1.5 text-sm bg-viper-card/50 border border-gray-600 rounded-lg text-white focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none">
+                                        <option value="0" ${!currentCase.priority ? 'selected' : ''}>— None —</option>
+                                        <option value="1" ${currentCase.priority===1 ? 'selected' : ''}>🔴 Critical</option>
+                                        <option value="2" ${currentCase.priority===2 ? 'selected' : ''}>🟠 High</option>
+                                        <option value="3" ${currentCase.priority===3 ? 'selected' : ''}>🟡 Medium</option>
+                                        <option value="4" ${currentCase.priority===4 ? 'selected' : ''}>🟢 Low</option>
+                                    </select>
+                                </div>
+                                ` : ''}
+                                <div>
                                     <label class="text-sm text-gray-400">Case Role</label>
                                     ${currentCase.caseRole === 'assist' ? `
                                     <p class="mt-1 flex items-center gap-2 flex-wrap">
                                         <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-viper-purple/15 text-viper-purple border border-viper-purple/40 text-sm font-semibold">ASSIST</span>
                                         <span class="text-white">Assisting ${currentCase.leadDetective ? _esc(currentCase.leadDetective) : 'another detective'}${currentCase.leadAgency ? ' — ' + _esc(currentCase.leadAgency) : ''}</span>
                                     </p>
-                                    <p class="text-xs text-gray-500 mt-1">Your warrants, arrests, seizures and recoveries here still count as your work. Case-level counts — cases assigned, open, closed, clearance rate — leave this case out.</p>
                                     ` : `
-                                    <p class="text-white mt-1">My case <span class="text-gray-500">— counts toward my case statistics</span></p>
+                                    <p class="text-white mt-1">My case</p>
+                                    <p class="text-xs text-gray-500">Counts toward my case statistics</p>
                                     `}
                                 </div>
                                 ${currentCase.cybertipNumber ? `
-                                <div class="col-span-2">
+                                <div>
                                     <label class="text-sm text-gray-400">CyberTip #</label>
-                                    <p class="mt-1"><span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-viper-purple/15 text-viper-purple border border-viper-purple/40 text-sm font-medium font-mono">🌐 ${String(currentCase.cybertipNumber).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span></p>
+                                    <p class="mt-1"><span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-viper-purple/15 text-viper-purple border border-viper-purple/40 text-sm font-medium font-mono break-all">🌐 ${String(currentCase.cybertipNumber).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span></p>
                                 </div>
                                 ` : ''}
-                                <div class="col-span-2">
-                                    <label class="text-sm text-gray-400">Location of Occurrence</label>
-                                    <p class="text-white mt-1">${currentCase.locationOfOccurrence ? String(currentCase.locationOfOccurrence).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '<span class="text-gray-500 italic">Not set</span>'}</p>
-                                </div>
-                                <div class="col-span-2">
+                                <div>
                                     <label class="text-sm text-gray-400">Category</label>
-                                    <p class="text-white mt-1">${currentCase.category
+                                    <p class="text-white mt-1 break-words">${currentCase.category
                                         ? String(currentCase.category).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-                                        : '<span class="text-gray-500 italic">Not set — shown in the Category column on the dashboard</span>'}</p>
-                                </div>
-                                <div class="col-span-2">
-                                    <label class="text-sm text-gray-400">Synopsis</label>
-                                    <p class="text-white mt-2 leading-relaxed">${currentCase.synopsis || '<span class="text-gray-500 italic">No synopsis</span>'}</p>
-                                </div>
-                                ${(isCaseStatusInactive(currentCase.status) || currentCase.dispositionSummary) ? `
-                                <div class="col-span-2">
-                                    <label class="text-sm text-gray-400">Disposition Summary</label>
-                                    <p class="text-white mt-2 leading-relaxed">${currentCase.dispositionSummary
-                                        ? String(currentCase.dispositionSummary).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')
-                                        : '<span class="text-gray-500 italic">No disposition recorded — why was this case closed or inactivated?</span>'}</p>
-                                    ${currentCase.dispositionUpdatedAt ? `<p class="text-xs text-gray-500 mt-1">Recorded ${new Date(currentCase.dispositionUpdatedAt).toLocaleString()}</p>` : ''}
-                                </div>
-                                ` : ''}
-                                <div>
-                                    <label class="text-sm text-gray-400">Created By</label>
-                                    <p class="text-white mt-1">${currentCase.createdBy}</p>
+                                        : '<span class="text-gray-500 italic">Not set</span>'}</p>
                                 </div>
                                 <div>
-                                    <label class="text-sm text-gray-400">Created Date</label>
-                                    <p class="text-white mt-1">${new Date(currentCase.createdAt).toLocaleString()}</p>
+                                    <label class="text-sm text-gray-400">Date of Offense</label>
+                                    <p class="text-white mt-1">${currentCase.offenseDate ? new Date(String(currentCase.offenseDate).slice(0, 10) + 'T00:00').toLocaleDateString() : '<span class="text-gray-500 italic">Not set</span>'}</p>
                                 </div>
                                 <div>
                                     <label class="text-sm text-gray-400">Date Assigned</label>
@@ -6942,10 +6926,27 @@
                                     <p class="text-white mt-1">${currentCase.dateClosed ? new Date(String(currentCase.dateClosed).slice(0, 10) + 'T00:00').toLocaleDateString() : '<span class="text-gray-500 italic">—</span>'}</p>
                                 </div>
                                 <div>
-                                    <label class="text-sm text-gray-400">Date of Offense</label>
-                                    <p class="text-white mt-1">${currentCase.offenseDate ? new Date(String(currentCase.offenseDate).slice(0, 10) + 'T00:00').toLocaleDateString() : '<span class="text-gray-500 italic">Not set</span>'}</p>
+                                    <label class="text-sm text-gray-400">Created</label>
+                                    <p class="text-white mt-1 break-words">${currentCase.createdBy}</p>
+                                    <p class="text-xs text-gray-500">${new Date(currentCase.createdAt).toLocaleString()}</p>
                                 </div>
-                                <div class="col-span-2">
+                            </div>
+                            ${currentCase.caseRole === 'assist' ? `
+                            <p class="text-xs text-gray-500 mt-3">Assist case: your warrants, arrests, seizures and recoveries here still count as your work. Case-level counts — cases assigned, open, closed, clearance rate — leave this case out.</p>
+                            ` : ''}
+                            <!-- Where / what happened, and the offenses: side by side when there is room. -->
+                            <div class="grid gap-x-8 gap-y-6 mt-6 pt-5 border-t border-gray-700/50" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));">
+                                <div class="space-y-5 min-w-0">
+                                    <div>
+                                        <label class="text-sm text-gray-400">Location of Occurrence</label>
+                                        <p class="text-white mt-1 break-words">${currentCase.locationOfOccurrence ? String(currentCase.locationOfOccurrence).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '<span class="text-gray-500 italic">Not set</span>'}</p>
+                                    </div>
+                                    <div>
+                                        <label class="text-sm text-gray-400">Synopsis</label>
+                                        <p class="text-white mt-1 leading-relaxed break-words">${currentCase.synopsis || '<span class="text-gray-500 italic">No synopsis</span>'}</p>
+                                    </div>
+                                </div>
+                                <div class="min-w-0">
                                     <label class="text-sm text-gray-400">Offenses</label>
                                     <div class="text-white mt-2 leading-relaxed">
                                         ${(() => {
@@ -6980,8 +6981,20 @@
                                         })()}
                                     </div>
                                 </div>
+                            </div>
+                                ${(isCaseStatusInactive(currentCase.status) || currentCase.dispositionSummary) ? `
+                                <div class="mt-6 pt-5 border-t border-gray-700/50">
+                                    <label class="text-sm text-gray-400">Disposition Summary</label>
+                                    <p class="text-white mt-2 leading-relaxed">${currentCase.dispositionSummary
+                                        ? String(currentCase.dispositionSummary).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')
+                                        : '<span class="text-gray-500 italic">No disposition recorded — why was this case closed or inactivated?</span>'}</p>
+                                    ${currentCase.dispositionUpdatedAt ? `<p class="text-xs text-gray-500 mt-1">Recorded ${new Date(currentCase.dispositionUpdatedAt).toLocaleString()}</p>` : ''}
+                                </div>
+                                ` : ''}
+                            <div class="grid grid-cols-2 gap-6 mt-2">
                                 ${renderCustomMetricsInline()}
                                 ${renderActivityTimerInline()}
+                                ${renderIdsCaseCardInline()}
                             </div>
                         </div>
                         <div id="overviewEditMode" class="hidden">
@@ -13845,6 +13858,20 @@
             return 'evz_' + String((evidence && evidence.id) || 'x').replace(/[^\w-]/g, '_') + '_' + index;
         }
 
+        // A CyberTip report PDF inside a ZIP inside the evidence ZIP — the
+        // newer IDS download: investigator/*.pdf + 217175500.zip, which holds
+        // 217175500.pdf beside 217175500.xml / .json. Recognised by NCMEC's
+        // own signature, a same-named .xml or .json in the same inner ZIP;
+        // reported media never arrives that way, so this never reaches into
+        // a media ZIP. `entries` is an evidence-zip listing.
+        function _isNcmecReportBundlePdf(entries, e) {
+            if (!e || e.kind !== 'pdf' || !e.inZip || !Array.isArray(entries)) return false;
+            const base = n => String(n || '').replace(/\\/g, '/').split('/').pop().replace(/\.[^.]*$/, '').toLowerCase();
+            const b = base(e.name);
+            return !!b && entries.some(x => x && x !== e && x.inZip === e.inZip
+                && /\.(xml|json)$/i.test(String(x.name)) && base(x.name) === b);
+        }
+
         function _evZipIsCsam(evidence) {
             return !!(evidence && (evidence.csamSensitive || evidence.type === 'ncmecCybertip'));
         }
@@ -13892,7 +13919,10 @@
                     st.nestedErrors = Array.isArray(res.nestedErrors) ? res.nestedErrors : [];
                 }
                 _renderEvidenceZipPanel(pid);
-                const report = st.entries.findIndex(e => e && e.kind === 'pdf' && !e.inZip);
+                // The report opens by itself: the newer IDS download keeps it in
+                // a report ZIP inside this one, so that is looked for first.
+                let report = st.entries.findIndex(e => _isNcmecReportBundlePdf(st.entries, e));
+                if (report === -1) report = st.entries.findIndex(e => e && e.kind === 'pdf' && !e.inZip);
                 if (report !== -1) _evZipView(pid, report);
             }
         }
@@ -14356,6 +14386,7 @@
             show('warrantDateSignedField', !isPres);
             show('warrantDueDateField', !isPres);
             show('warrantCourtFieldsRow', !isPres);
+            show('warrantCourtLevelRow', !isPres);
 
             const row = document.getElementById('warrantDatesRow');
             if (row) {
@@ -14541,6 +14572,14 @@
                                         </div>
                                     </div>
                                 </div>
+                                ${localStorage.getItem('viperIdsEnabled') === 'true' ? `
+                                <div id="warrantCourtLevelRow">
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Court <span class="text-gray-500 font-normal">· for ICAC (IDS) reporting</span></label>
+                                    <select id="warrantCourtLevel" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white">
+                                        <option value="state">State / Local</option>
+                                        <option value="federal">Federal</option>
+                                    </select>
+                                </div>` : ''}
                                 
                                 <div>
                                     <label class="block text-sm font-medium text-gray-300 mb-2" id="warrantFileLabel">Upload Signed Warrant (PDF)</label>
@@ -14912,6 +14951,8 @@
             document.getElementById('warrantTimeSigned').value = '';
             document.getElementById('warrantTimeServed').value = '';
             document.getElementById('warrantTimeCourtReturn').value = '';
+            const courtLevelNew = document.getElementById('warrantCourtLevel');
+            if (courtLevelNew) courtLevelNew.value = 'state';
             clearWarrantFile();
             warrantTypeChanged();
             document.getElementById('warrantForm').classList.remove('hidden');
@@ -14935,6 +14976,8 @@
             document.getElementById('warrantTimeSigned').value = warrant.timeSigned || '';
             document.getElementById('warrantTimeServed').value = warrant.timeServed || '';
             document.getElementById('warrantTimeCourtReturn').value = warrant.timeCourtReturn || '';
+            const courtLevelEdit = document.getElementById('warrantCourtLevel');
+            if (courtLevelEdit) courtLevelEdit.value = warrant.courtLevel === 'federal' ? 'federal' : 'state';
             warrantTypeChanged();
             
             if (warrant.hasWarrantFile) {
@@ -14996,6 +15039,11 @@
             const timeSigned = isPres ? '' : _warrantReadTime('warrantTimeSigned', dateSigned);
             const timeServed = _warrantReadTime('warrantTimeServed', dateServed);
             const timeCourtReturn = isPres ? '' : _warrantReadTime('warrantTimeCourtReturn', courtReturnDate);
+            // State vs federal court, for ICAC (IDS) reporting. The select only
+            // exists while IDS is switched on; when it is absent the record's
+            // existing value is left untouched (undefined = don't write).
+            const courtLevelEl = document.getElementById('warrantCourtLevel');
+            const courtLevel = courtLevelEl ? (courtLevelEl.value === 'federal' ? 'federal' : 'state') : undefined;
 
             // Generate the warrant id NOW so we can pass it to the file-save IPC.
             // The IPC prefixes the on-disk filename with this id to prevent
@@ -15040,6 +15088,7 @@
                     warrant.timeSigned = timeSigned;
                     warrant.timeServed = timeServed;
                     warrant.timeCourtReturn = timeCourtReturn;
+                    if (courtLevel !== undefined) warrant.courtLevel = courtLevel;
                     warrant.lastModified = new Date().toISOString();
                     
                     if (savedFilePath) {
@@ -15079,6 +15128,7 @@
                     courtReturnFile: null,
                     createdAt: new Date().toISOString()
                 };
+                if (courtLevel !== undefined) newWarrant.courtLevel = courtLevel;
                 
                 caseWarrants.push(newWarrant);
                 audit('warrant_added', {
@@ -16135,6 +16185,12 @@
                                     <input type="checkbox" id="fxReviewed" class="w-4 h-4 rounded border-gray-600 text-viper-green focus:ring-viper-green">
                                     <label for="fxReviewed" class="text-sm text-gray-300">Marked reviewed by examiner</label>
                                 </div>
+                                ${localStorage.getItem('viperIdsEnabled') === 'true' ? `
+                                <!-- On-scene (ICAC / IDS reporting) -->
+                                <div class="flex items-center gap-2">
+                                    <input type="checkbox" id="fxOnScene" class="w-4 h-4 rounded border-gray-600 text-viper-purple focus:ring-viper-purple">
+                                    <label for="fxOnScene" class="text-sm text-gray-300">Previewed / examined on scene <span class="text-gray-500">· for ICAC (IDS) reporting</span></label>
+                                </div>` : ''}
 
                                 <!-- Report upload -->
                                 <div>
@@ -16274,6 +16330,7 @@
             if (title) title.textContent = 'Add New Device';
             ['fxCrimeType','fxAcqType','fxAcqDate','fxSubject','fxSubjectRole','fxTool','fxExtraction','fxExaminer','fxExaminerRole','fxCategory','fxMakeModel','fxModelNumber','fxImei','fxSerial','fxStorage','fxCarrier','fxOsVersion','fxNotes'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
             const rev = document.getElementById('fxReviewed'); if (rev) rev.checked = false;
+            const onScene = document.getElementById('fxOnScene'); if (onScene) onScene.checked = false;
             const linkedSel = document.getElementById('fxLinkedSelect'); if (linkedSel) linkedSel.value = '';
             const linkedText = document.getElementById('fxLinkedText'); if (linkedText) { linkedText.value = ''; if (document.getElementById('fxLinkedSelect')) linkedText.classList.add('hidden'); }
             const info = document.getElementById('fxReportInfo'); if (info) info.classList.add('hidden');
@@ -16370,6 +16427,10 @@
                 notes: v('fxNotes'),
                 reviewed: !!(document.getElementById('fxReviewed') && document.getElementById('fxReviewed').checked)
             };
+            // Only present while IDS reporting is on; when absent, an edit
+            // leaves the recorded value alone (Object.assign below).
+            const onSceneEl = document.getElementById('fxOnScene');
+            if (onSceneEl) payload.onScene = !!onSceneEl.checked;
 
             if (editingForensicId) {
                 const d = caseForensicDevices.find(x => x.id === editingForensicId);
@@ -16442,6 +16503,7 @@
             set('fxOsVersion', d.osVersion);
             set('fxNotes', d.notes);
             const rev = document.getElementById('fxReviewed'); if (rev) rev.checked = !!d.reviewed;
+            const onScene = document.getElementById('fxOnScene'); if (onScene) onScene.checked = !!d.onScene;
 
             // Linked import
             const linkedSel = document.getElementById('fxLinkedSelect');
@@ -19033,6 +19095,28 @@
                             </button>
                         </div>
                         
+                        <!-- Arrest -->
+                        <div>
+                            <h3 class="text-lg font-bold text-viper-cyan mb-3">Arrest</h3>
+                            <div class="flex flex-wrap items-center gap-4">
+                                <label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                                    <input type="checkbox" name="arrested" ${suspect.arrested ? 'checked' : ''} class="w-4 h-4 accent-cyan-400"
+                                        onchange="if (this.checked && !this.form.arrestDate.value) { const d = new Date(); this.form.arrestDate.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }">
+                                    Arrested
+                                </label>
+                                <label class="flex items-center gap-2 text-sm text-gray-400">
+                                    Arrest date
+                                    <input type="date" name="arrestDate" value="${/^\d{4}-\d{2}-\d{2}/.test(String(suspect.arrestDate || '')) ? String(suspect.arrestDate).slice(0, 10) : ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-3 py-1.5 text-white text-sm focus:border-viper-cyan focus:outline-none">
+                                </label>
+                                ${localStorage.getItem('viperIdsEnabled') === 'true' ? `
+                                <label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer" title="IDS asks how many arrests were of offenders who committed hands-on (contact) offenses against a child.">
+                                    <input type="checkbox" name="handsOnOffender" ${suspect.handsOnOffender ? 'checked' : ''} class="w-4 h-4 accent-purple-400">
+                                    Hands-on (contact) offender
+                                </label>` : ''}
+                            </div>
+                            <p class="text-xs text-gray-500 mt-2">The arrest date is what puts this arrest in the right month on the dashboard.</p>
+                        </div>
+
                         <!-- Criminal History -->
                         <div>
                             <h3 class="text-lg font-bold text-viper-cyan mb-3">Criminal History</h3>
@@ -19092,9 +19176,19 @@
                     rapSheet: isEdit ? suspect.rapSheet || null : null,
                     firearmsDoc: isEdit ? suspect.firearmsDoc || null : null
                 };
+                suspectData.arrested = formData.get('arrested') === 'on';
+                suspectData.arrestDate = suspectData.arrested ? String(formData.get('arrestDate') || '') : '';
+                // Only present while IDS reporting is switched on; otherwise
+                // the merge below keeps whatever was recorded before.
+                if (e.target.elements.namedItem('handsOnOffender')) {
+                    suspectData.handsOnOffender = formData.get('handsOnOffender') === 'on';
+                }
                 
                 if (isEdit) {
-                    suspects[editIndex] = suspectData;
+                    // MERGE, don't replace: the record carries fields this form
+                    // never shows (noteUid links from Case Notes, OSINT results,
+                    // source provenance). Replacing dropped them on every edit.
+                    suspects[editIndex] = Object.assign({}, suspects[editIndex], suspectData);
                 } else {
                     suspects.push(suspectData);
                 }
@@ -21293,7 +21387,10 @@
                 };
                 
                 if (isEdit) {
-                    victims[editIndex] = victimData;
+                    // MERGE, don't replace — see the suspect form. This also
+                    // stopped an edit from silently wiping the identifiers,
+                    // which this form never shows.
+                    victims[editIndex] = Object.assign({}, victims[editIndex], victimData);
                 } else {
                     victims.push(victimData);
                 }
@@ -30851,6 +30948,8 @@
                         </div>
                     </div>
 
+                    ${renderProsecutionSubmissionsCard()}
+
                     <!-- Upcoming Court Dates -->
                     <div class="glass-card rounded-xl p-6">
                         <div class="flex items-center justify-between mb-4">
@@ -30977,6 +31076,76 @@
             if (y) parts.push(`${y} year${y === 1 ? '' : 's'}`);
             if (m) parts.push(`${m} month${m === 1 ? '' : 's'}`);
             return parts.length ? parts.join(' ') : '<span class="text-gray-500">—</span>';
+        }
+
+        // ── Submitted for prosecution (ICAC / IDS reporting) ─────────────
+        // IDS counts cases SUBMITTED to a prosecutor and cases ACCEPTED,
+        // state and federal separately. One row per submission, because a
+        // case declined by the DA and then taken federally is two of them.
+        // Shown only while Settings → ICAC Task Force Reporting is on; the
+        // data is kept either way.
+        function renderProsecutionSubmissionsCard() {
+            if (localStorage.getItem('viperIdsEnabled') !== 'true') return '';
+            const subs = Array.isArray(prosecutionData.submissions) ? prosecutionData.submissions : [];
+            const fmt = (d) => (window.IdsMeasures ? window.IdsMeasures.fmtDate(d) : d) || '';
+            const INPUT = 'px-2 py-1 bg-viper-dark border border-gray-600 rounded text-xs text-white focus:border-viper-cyan outline-none';
+            const rows = subs.map((s, i) => `
+                <div class="flex flex-wrap items-center gap-2 text-sm p-2 rounded-lg border border-gray-700 bg-viper-dark/30" data-ids="submission">
+                    <span class="px-1.5 py-0.5 rounded text-xs bg-gray-700/60 border border-gray-600 text-gray-200">${s.venue === 'federal' ? 'Federal' : 'State / Local'}</span>
+                    ${s.office ? `<span class="text-gray-300">${_esc(s.office)}</span>` : ''}
+                    <span class="text-gray-400">Submitted <span class="text-white">${_esc(fmt(s.submittedDate) || '—')}</span></span>
+                    <label class="flex items-center gap-1.5 text-gray-400">Accepted
+                        <input type="date" value="${_esc(/^\d{4}-\d{2}-\d{2}$/.test(String(s.acceptedDate || '')) ? s.acceptedDate : '')}" onchange="setProsecutionSubmissionAccepted(${i}, this.value)" class="${INPUT}">
+                    </label>
+                    <button type="button" onclick="removeProsecutionSubmission(${i})" title="Remove" class="ml-auto text-gray-500 hover:text-red-400 text-xs px-1">✕</button>
+                </div>`).join('');
+            return `
+                <div class="glass-card rounded-xl p-6" id="prosSubmissionsCard">
+                    <h3 class="text-xl font-bold text-viper-cyan mb-1">Submitted for Prosecution</h3>
+                    <p class="text-xs text-gray-500 mb-4">For ICAC (IDS) reporting. Add a row each time the case goes to a prosecutor; fill in the accepted date when they take it.</p>
+                    <div class="space-y-2 mb-3">${rows || '<p class="text-sm text-gray-500 italic">Not submitted yet</p>'}</div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <input type="date" id="prosSubDate" class="${INPUT}" aria-label="Date submitted">
+                        <select id="prosSubVenue" class="${INPUT}"><option value="state">State / Local</option><option value="federal">Federal</option></select>
+                        <input type="text" id="prosSubOffice" maxlength="80" placeholder="Office (optional)" class="${INPUT} w-44">
+                        <button type="button" onclick="addProsecutionSubmission()" class="px-3 py-1 rounded-lg text-xs font-medium bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/40 hover:bg-viper-cyan/30 transition">Add submission</button>
+                    </div>
+                </div>`;
+        }
+        function _commitProsecutionSubmissions(next) {
+            const prev = prosecutionData.submissions;
+            prosecutionData.submissions = next;
+            try {
+                saveProsecutionData();
+            } catch (e) {
+                prosecutionData.submissions = prev;
+                console.error('[prosecution] save failed', e);
+                viperToast('Could not save — nothing was changed. ' + ((e && e.message) || ''), 'error');
+                return false;
+            }
+            renderTabContent('prosecution');
+            return true;
+        }
+        function addProsecutionSubmission() {
+            const date = (document.getElementById('prosSubDate') || {}).value || '';
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { viperToast('Enter the date the case was submitted.', 'warning'); return; }
+            const venue = ((document.getElementById('prosSubVenue') || {}).value === 'federal') ? 'federal' : 'state';
+            const office = String((document.getElementById('prosSubOffice') || {}).value || '').trim().slice(0, 80);
+            const list = (Array.isArray(prosecutionData.submissions) ? prosecutionData.submissions : []).slice();
+            list.push({ venue, submittedDate: date, acceptedDate: '', office });
+            _commitProsecutionSubmissions(list);
+        }
+        function setProsecutionSubmissionAccepted(i, value) {
+            const list = (Array.isArray(prosecutionData.submissions) ? prosecutionData.submissions : []).slice();
+            if (!list[i]) return;
+            list[i] = Object.assign({}, list[i], { acceptedDate: /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? value : '' });
+            _commitProsecutionSubmissions(list);
+        }
+        function removeProsecutionSubmission(i) {
+            const list = (Array.isArray(prosecutionData.submissions) ? prosecutionData.submissions : []).slice();
+            if (!list[i]) return;
+            list.splice(i, 1);
+            _commitProsecutionSubmissions(list);
         }
 
         function _formatSentenceSummary(p) {
@@ -37693,6 +37862,36 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             // Choosing a threshold also enables the alert (intuitive UX).
             saveCaseTimer(currentCase.caseNumber, { enabled: true, days });
             _refreshActivityTimerInline();
+        }
+        // IDS (ICAC Data System) card on Case Overview. The module cannot see
+        // `currentCase` (top-level let), so it gets closures. Returns '' from
+        // IdsCaseCard.html() unless Settings → ICAC Task Force Reporting is on.
+        function _idsCardHost() {
+            return {
+                enabled: () => localStorage.getItem('viperIdsEnabled') === 'true',
+                getCase: () => currentCase || null,
+                getTips: () => (currentCase ? _lsParse('cyberTips_' + currentCase.id, []) : []),
+                load: () => (currentCase ? _lsParse('icac_' + currentCase.id, {}) : {}),
+                save: (data) => {
+                    if (!currentCase) return false;
+                    try { localStorage.setItem('icac_' + currentCase.id, JSON.stringify(data || {})); return true; }
+                    catch (e) { console.error('[IDS] save failed', e); return false; }
+                },
+                setCaseFlag: (b) => {
+                    if (!currentCase) return false;
+                    const had = Object.prototype.hasOwnProperty.call(currentCase, 'icac');
+                    const prev = currentCase.icac;
+                    currentCase.icac = !!b;
+                    const ok = saveCase({ silent: true });
+                    if (ok === false) { if (had) currentCase.icac = prev; else delete currentCase.icac; }
+                    return ok !== false;
+                },
+                toast: (msg, kind) => { try { showToast(msg, kind || 'info'); } catch (_) {} }
+            };
+        }
+        function renderIdsCaseCardInline() {
+            try { return window.IdsCaseCard ? window.IdsCaseCard.html(_idsCardHost()) : ''; }
+            catch (e) { console.warn('[IDS] card render failed', e); return ''; }
         }
         function renderActivityTimerInline() {
             if (!currentCase) return '';
@@ -45614,8 +45813,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         // Only the list of names is read here; each PDF is read out of the
         // ZIP into memory by extract-pdf-text. Nothing is unpacked to disk.
         // The report PDF sits at the top of an ICAC ZIP, beside the media
-        // ZIP. PDFs inside the media ZIP are reported material, so they are
-        // only tried when the ZIP has no PDF of its own.
+        // ZIP — or, in the newer IDS download, inside a report ZIP of its
+        // own (see _isNcmecReportBundlePdf). PDFs inside the media ZIP are reported
+        // material, so they are only tried when the ZIP has no PDF of its own.
         async function _cyberTipExpandZips(items, tally, zipFound) {
             const out = [];
             for (const it of (items || [])) {
@@ -45636,12 +45836,23 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     continue;
                 }
                 zipFound.set(zipName, false);
-                const pdfs = (res.entries || []).filter(e => e && e.kind === 'pdf');
+                const entries = res.entries || [];
+                const pdfs = entries.filter(e => e && e.kind === 'pdf');
                 const top = pdfs.filter(e => !e.inZip);
-                const use = top.length ? top : pdfs;
+                // The newer IDS download nests the report one level down: the
+                // outer ZIP holds an investigator/ folder of PDFs plus a ZIP
+                // named for the report (217175500.zip) holding 217175500.pdf
+                // beside its .xml / .json. That PDF is the report, not
+                // reported media, so it is tried FIRST. Media-ZIP PDFs still
+                // never are while the ZIP has PDFs of its own.
+                const isBundled = e => _isNcmecReportBundlePdf(entries, e);
+                const bundled = pdfs.filter(isBundled);
+                const rest = top.length ? top : pdfs.filter(e => !isBundled(e));
                 const tipish = e => /cyber\s*tip|ncmec|report/i.test(String(e.name).split('/').pop()) ? 1 : 0;
-                use.sort((a, b) => (tipish(b) - tipish(a)) || String(a.name).localeCompare(String(b.name)));
-                use.forEach(e => out.push({ path: it.path, entryName: e.name, inZip: e.inZip || '',
+                const byTip = (a, b) => (tipish(b) - tipish(a)) || String(a.name).localeCompare(String(b.name));
+                bundled.sort(byTip);
+                rest.sort(byTip);
+                bundled.concat(rest).forEach(e => out.push({ path: it.path, entryName: e.name, inZip: e.inZip || '',
                                             evidenceTag: it.evidenceTag, fromZip: zipName }));
             }
             return out;

@@ -60,6 +60,9 @@
     <script src="libs/chart.min.js"></script>
     <script src="libs/jspdf.umd.min.js"></script>
     <script src="libs/jspdf.plugin.autotable.min.js"></script>
+    <!-- IDS (ICAC Data System) monthly measures + activity log. Inert unless the Settings switch is on. -->
+    <script src="modules/ids-measures/ids-measures.js"></script>
+    <script src="modules/ids-measures/ids-dashboard.js"></script>
     <style>
         /* Font size accessibility — set via Settings > Display */
         :root { --viper-font-size: 15px; }
@@ -1181,6 +1184,21 @@
                                     <p class="text-xs text-gray-400">Export case data</p>
                                 </div>
                             </button>
+                            <!-- IDS buttons: shown only when Settings > IDS Monthly Measures is on (IdsDashboard.refresh). -->
+                            <div id="idsDashboardPanel" class="hidden pt-4 space-y-2">
+                                <button onclick="IdsDashboard.openLog()" class="w-full flex items-center justify-center space-x-3 p-3 bg-viper-card/50 rounded-lg border border-purple-500/30 hover:bg-purple-500/10 hover:border-purple-500/50 transition-all">
+                                    <div class="text-left">
+                                        <p class="text-sm font-medium">ICAC Activity Log</p>
+                                        <p class="text-xs text-gray-400">Presentations, trainings, outreach</p>
+                                    </div>
+                                </button>
+                                <button onclick="IdsDashboard.openMeasures()" class="w-full flex items-center justify-center space-x-3 p-3 bg-viper-card/50 rounded-lg border border-purple-500/30 hover:bg-purple-500/10 hover:border-purple-500/50 transition-all">
+                                    <div class="text-left">
+                                        <p class="text-sm font-medium">IDS Monthly Measures</p>
+                                        <p class="text-xs text-gray-400">The month's numbers for IDS</p>
+                                    </div>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1540,7 +1558,18 @@
                 <!-- CyberTip # (optional) -->
                 <div>
                     <label class="block text-sm font-medium text-gray-300 mb-2">CyberTip # <span class="text-gray-500 font-normal">(optional)</span></label>
-                    <input type="text" id="caseCybertip" placeholder="e.g. NCMEC CyberTip report number" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none text-white placeholder-gray-500">
+                    <input type="text" id="caseCybertip" oninput="ncSyncIcac()" placeholder="e.g. NCMEC CyberTip report number" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none text-white placeholder-gray-500">
+                </div>
+
+                <!-- ICAC case (IDS reporting — only drawn when the Settings switch is on) -->
+                <div id="newCaseIcacRow" class="hidden">
+                    <label class="flex items-start gap-3 p-3 rounded-lg border border-gray-600 bg-viper-card/30 cursor-pointer">
+                        <input type="checkbox" id="newCaseIcac" class="mt-1 accent-current text-viper-purple" onchange="this.dataset.touched='1'">
+                        <span>
+                            <span class="block text-sm font-medium text-gray-200">ICAC case</span>
+                            <span class="block text-xs text-gray-500 mt-0.5">Counts toward your monthly IDS numbers. Ticked for you when there is a CyberTip — untick it if this one should not count.</span>
+                        </span>
+                    </label>
                 </div>
 
                 <!-- Category (short label shown on the dashboard) -->
@@ -4398,7 +4427,26 @@
             try { ncPopulateOffensesEditor(); } catch (_) {}
             try { ncRenderCustomMetrics(); } catch (_) {}
             try { ncSyncCaseRole(); } catch (_) {}
+            try { ncSyncIcac(true); } catch (_) {}
             document.getElementById('createCaseModal').classList.add('show');
+        }
+
+        // ═══ ICAC case flag (IDS reporting) ═══════════════════════════════
+        // Off unless Settings → ICAC Task Force Reporting is on. While the
+        // officer has not touched the box it follows the CyberTip field, and
+        // the case is saved WITHOUT an explicit flag — so a tip imported later
+        // still makes it an ICAC case. Touching the box records their choice,
+        // and that choice always wins.
+        function _idsEnabled() { return localStorage.getItem('viperIdsEnabled') === 'true'; }
+        function ncSyncIcac(fresh) {
+            const row = document.getElementById('newCaseIcacRow');
+            const box = document.getElementById('newCaseIcac');
+            if (!row || !box) return;
+            row.classList.toggle('hidden', !_idsEnabled());
+            if (fresh) delete box.dataset.touched;
+            if (!box.dataset.touched) {
+                box.checked = !!(document.getElementById('caseCybertip')?.value || '').trim();
+            }
         }
 
         // ═══ Case Role ═══════════════════════════════════════════════════
@@ -4428,6 +4476,7 @@
             // form.reset() restores the checked radio but not the panel it
             // controls, so re-run the sync or the assist fields stay open.
             try { ncSyncCaseRole(); } catch (_) {}
+            try { ncSyncIcac(true); } catch (_) {}
             // Reset RMS import state
             pendingRmsData = null;
             const statusDiv = document.getElementById('rmsImportStatus');
@@ -4506,6 +4555,9 @@
                     ? (document.getElementById('newCaseLeadAgency')?.value || '').trim() : '';
                 const ncOff = ncReadOffenses();
                 const ncMetricVals = ncCollectMetricValues();
+                // Only an explicit choice is stored (see ncSyncIcac).
+                const icacBox = document.getElementById('newCaseIcac');
+                const icacChoice = (_idsEnabled() && icacBox && icacBox.dataset.touched) ? !!icacBox.checked : undefined;
                 
                 // Check if case number already exists. Re-read from storage
                 // first — the in-memory copy can be minutes old — and compare
@@ -4542,6 +4594,7 @@
                     createdBy: localStorage.getItem('viper_customer_name') || 'Officer',
                     lastModified: new Date().toISOString()
                 };
+                if (icacChoice !== undefined) newCase.icac = icacChoice;
                 
                 cases.push(newCase);
                 localStorage.setItem('viperCases', JSON.stringify(cases));

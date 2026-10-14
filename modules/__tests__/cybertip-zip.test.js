@@ -77,6 +77,30 @@ const tipZip = path.join(TMP, 'ICAC 999000111.zip');
 fs.writeFileSync(tipZip, buildTipZip());
 const noReportZip = path.join(TMP, 'No Report.zip');
 fs.writeFileSync(noReportZip, buildTipZip({ noReport: true }));
+// The newer IDS download (Westminster, Oct 2026): the report is NOT at the
+// top. The outer ZIP holds investigator/*.pdf (records the investigator ran)
+// plus a ZIP named for the report, which holds the report PDF beside its own
+// .xml / .json and a file_report.csv. Names mirror the real download.
+const INVESTIGATOR_PDF = Buffer.from('%PDF-1.4\nPhone search results\n%%EOF\n', 'latin1');
+const NEW_REPORT_PDF = Buffer.from('%PDF-1.4\nCyberTipline Report 217175500\n%%EOF\n', 'latin1');
+function buildIdsBundleZip(opts) {
+    const inner = new AdmZip();
+    inner.addFile('217175500.pdf', NEW_REPORT_PDF);
+    if (!opts || !opts.noSidecar) {
+        inner.addFile('217175500.xml', Buffer.from('<reportedInformation/>'));
+        inner.addFile('217175500.json', Buffer.from('{}'));
+    }
+    inner.addFile('file_report.csv', Buffer.from('File Name (Reported),MD5,Location in Zip\r\n'));
+    const z = new AdmZip();
+    z.addFile('investigator/phone_lookup.pdf', INVESTIGATOR_PDF);
+    z.addFile('investigator/people_search.pdf', INVESTIGATOR_PDF);
+    z.addFile('217175500.zip', inner.toBuffer());
+    return z.toBuffer();
+}
+const idsZip = path.join(TMP, 'f5f5f41b-3954-411b-853e-5946bdf66ad6.zip');
+fs.writeFileSync(idsZip, buildIdsBundleZip());
+const idsNoSidecarZip = path.join(TMP, 'No Sidecar.zip');
+fs.writeFileSync(idsNoSidecarZip, buildIdsBundleZip({ noSidecar: true }));
 const brokenZip = path.join(TMP, 'Broken.zip');
 fs.writeFileSync(brokenZip, Buffer.from('PK this is not a zip at all'));
 
@@ -235,6 +259,7 @@ const tempBefore = new Set(fs.readdirSync(os.tmpdir()).filter(n => /^viper-zip-/
     vm.runInContext([
         liftFunction(DETAIL, 'async function _importCyberTipFiles(items) {'),
         liftFunction(DETAIL, 'async function _cyberTipExpandZips(items, tally, zipFound) {'),
+        liftFunction(DETAIL, 'function _isNcmecReportBundlePdf(entries, e) {'),
         ';globalThis.__imp = _importCyberTipFiles; globalThis.__exp = _cyberTipExpandZips;',
     ].join('\n'), ienv);
 
@@ -264,6 +289,28 @@ const tempBefore = new Set(fs.readdirSync(os.tmpdir()).filter(n => /^viper-zip-/
     await ienv.__imp([{ path: onlyMedia }]);
     ok(extracted.length === 1 && extracted[0].inZip === 'inner.zip',
        'a nested PDF is only tried when the ZIP holds no PDF of its own');
+
+    // The newer IDS download: investigator PDFs at the top, the report one
+    // ZIP down. Before the fix only the investigator PDFs were tried and the
+    // officer was told no report was in the ZIP.
+    toasts.length = 0; extracted.length = 0; saved = null;
+    const t7 = await ienv.__imp([{ path: idsZip, evidenceTag: 'CyberTip-Reports' }]);
+    eq([t7.added, t7.failed], [1, 0], 'the newer IDS download imports its CyberTip');
+    eq(saved && saved[0] && saved[0].reportNumber, '217175500', 'the report inside the inner ZIP is the one parsed');
+    eq([extracted[0] && extracted[0].entryName, extracted[0] && extracted[0].inZip], ['217175500.pdf', '217175500.zip'],
+       'the report is read first, out of the inner ZIP');
+    eq([saved[0].sourceEntry, saved[0].sourceInZip], ['217175500.pdf', '217175500.zip'],
+       'Source Validation is pointed at the report inside the inner ZIP');
+    eq(saved[0].sourceZip, 'f5f5f41b-3954-411b-853e-5946bdf66ad6.zip', 'the tip remembers the evidence ZIP');
+    ok(!toasts.some(t => /No CyberTipline report was found/.test(t[1])), 'no "not found" message for the newer download');
+    ok(extracted.some(s => /^investigator\//.test(s.entryName)), 'the investigator PDFs are still tried (a ZIP may hold more than one tip)');
+
+    // Without NCMEC's .xml/.json beside it, a PDF inside an inner ZIP is
+    // treated like any other nested file — not reached while the top has PDFs.
+    toasts.length = 0; extracted.length = 0;
+    const t8 = await ienv.__imp([{ path: idsNoSidecarZip }]);
+    eq(t8.added, 0, 'without the .xml/.json signature an inner PDF is not assumed to be a report');
+    ok(!extracted.some(s => s.inZip), 'and is not read while the ZIP has PDFs of its own');
 
     toasts.length = 0; extracted.length = 0;
     const t3 = await ienv.__imp([{ path: brokenZip }]);
@@ -344,6 +391,7 @@ const tempBefore = new Set(fs.readdirSync(os.tmpdir()).filter(n => /^viper-zip-/
         liftFunction(DETAIL, 'function _evEsc(s) {'),
         liftFunction(DETAIL, 'function _evZipPanelId(evidence, index) {'),
         liftFunction(DETAIL, 'function _evZipIsCsam(evidence) {'),
+        liftFunction(DETAIL, 'function _isNcmecReportBundlePdf(entries, e) {'),
         liftFunction(DETAIL, 'function _evZipRevoke(pid) {'),
         liftFunction(DETAIL, 'async function _hydrateEvidenceZipPanels(evidence) {'),
         liftFunction(DETAIL, 'function _renderEvidenceZipPanel(pid) {'),
@@ -391,6 +439,16 @@ const tempBefore = new Set(fs.readdirSync(os.tmpdir()).filter(n => /^viper-zip-/
     await venv._hydrateEvidenceZipPanels(ev2);
     ok(!/Reported media/.test(nodes[pid2].innerHTML), 'an ordinary ZIP has no reported-media warning');
     ok(/csamSensitive/.test(liftFunction(DETAIL, 'function _evZipIsCsam(evidence) {')), 'a CSAM-flagged item of any type gets the warning');
+
+    // The newer IDS download: the report one ZIP down opens by itself,
+    // not the first investigator PDF at the top.
+    const ev4 = { id: 'ev4', type: 'ncmecCybertip', files: [{ name: 'f5f5.zip', path: idsZip }] };
+    const pid4 = venv._evZipPanelId(ev4, 0);
+    mkNode(pid4);
+    reads.length = 0;
+    await venv._hydrateEvidenceZipPanels(ev4);
+    await new Promise(r => setTimeout(r, 50));
+    eq(reads, ['217175500.pdf'], 'the newer IDS download opens the CyberTip report automatically, nothing else');
 
     // Locked.
     const ev3 = { id: 'ev3', type: 'ncmecCybertip', files: [{ name: 'Encrypted Tip.zip', path: encZip }] };

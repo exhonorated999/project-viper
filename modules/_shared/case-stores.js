@@ -175,6 +175,10 @@
           identity: null, merge: 'replace' },
         { key: 'opsplan', pattern: 2, label: 'Operations Plan', shape: 'object',
           identity: null, merge: 'replace' },
+        /* The ICAC card (IDS reporting): investigation type, referrals made,
+         * victims identified/rescued, evidence-needed and CVIP dates. */
+        { key: 'icac', pattern: 2, label: 'ICAC Reporting', shape: 'object',
+          identity: null, merge: 'replace' },
 
         /* ── warrant author ──────────────────────────────────────────────
          * NOT in any previous list. A .vcase handoff silently dropped every

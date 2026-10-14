@@ -250,7 +250,7 @@ console.log('\n[electron-main: report IPC]');
         shell: { openPath: async () => '', trashItem: async (p) => { trashed.push(p); fs.unlinkSync(p); } },
         BrowserWindow: { getAllWindows: () => [{ isDestroyed: () => false, webContents: { isDestroyed: () => false, send: (ch, e) => sent.push([ch, e]) } }] },
         dialog: {
-            showOpenDialog: async () => dialogQ.open.shift(),
+            showOpenDialog: async (w, opts) => { dialogQ.lastOpts = opts; return dialogQ.open.shift(); },
             showSaveDialog: async () => dialogQ.save.shift(),
         },
         ipcMain: { handle: (ch, fn) => { handlers[ch] = fn; } },
@@ -258,8 +258,8 @@ console.log('\n[electron-main: report IPC]');
     vm.createContext(env);
     vm.runInContext('let _reportDocsMgr = null;\n' + wdFail + block, env);
     const call = (ch, args) => handlers[ch]({}, args);
-    ok('all six handlers are registered',
-        ['report-docs-list', 'report-doc-import', 'report-doc-new-blank', 'report-doc-open', 'report-doc-remove', 'report-doc-save-copy']
+    ok('all seven handlers are registered',
+        ['report-docs-list', 'report-doc-import', 'report-doc-new-blank', 'report-doc-open', 'report-doc-remove', 'report-doc-save-copy', 'report-doc-rename']
             .every((c) => typeof handlers[c] === 'function'), Object.keys(handlers));
 
     // New, seeded from the VIPER editor's text.
@@ -320,6 +320,39 @@ console.log('\n[electron-main: report IPC]');
     fs.writeFileSync(path.join(root, 'incoming', 'notes.txt'), 'x');
     r = await call('report-doc-import', { caseNumber: 'C-6' });
     ok('a file that is not a Word document is refused', !r.success && r.code === 'BAD_NAME', r);
+    ok('adding allows picking several documents', Array.isArray(dialogQ.lastOpts.properties) && dialogQ.lastOpts.properties.includes('multiSelections'));
+
+    // Several documents at once — the good ones go in, the bad one is named.
+    const s1 = path.join(root, 'incoming', 'Supplement 1.docx');
+    const s2 = path.join(root, 'incoming', 'Supplement 2.docx');
+    fs.writeFileSync(s1, 's1'); fs.writeFileSync(s2, 's2');
+    dialogQ.open.push({ canceled: false, filePaths: [s1, s2, path.join(root, 'incoming', 'notes.txt')] });
+    r = await call('report-doc-import', { caseNumber: 'C-7' });
+    ok('several documents come in together', r.success && JSON.stringify(r.added) === JSON.stringify(['Supplement 1.docx', 'Supplement 2.docx']), r);
+    ok('…the one that is not Word is reported by name, not fatal', r.failed.length === 1 && r.failed[0].fileName === 'notes.txt' && !!r.failed[0].error, r.failed);
+    ok('…and both are in the case', env._reportDocs().list('C-7').length === 2);
+    dialogQ.open.push({ canceled: false, filePaths: [s1] });
+    r = await call('report-doc-import', { caseNumber: 'C-7' });
+    ok('bringing the same file in again never overwrites — it gets its own name',
+        r.success && r.added.length === 1 && r.added[0] !== 'Supplement 1.docx' && env._reportDocs().list('C-7').length === 3, r);
+    dialogQ.open.push({ canceled: false, filePaths: [s1, s2] });
+    r = await call('report-doc-import', { caseNumber: 'C-7', replace: 'Supplement 2.docx' });
+    ok('a replace offers only a single pick', !dialogQ.lastOpts.properties.includes('multiSelections'));
+    ok('…and uses only one file even if handed two', r.success && r.added.length === 1, r);
+
+    // Rename.
+    r = await call('report-doc-rename', { caseNumber: 'C-5', fileName: 'Final Report.docx', newName: 'Original' });
+    ok('a report open in Word cannot be renamed', !r.success && r.code === 'OPEN', r);
+    r = await call('report-doc-rename', { caseNumber: 'C-5', fileName: 'Another.docx', newName: 'Supplement - Search Warrant' });
+    ok('rename keeps the .docx and returns the new name', r.success && r.fileName === 'Supplement - Search Warrant.docx', r);
+    ok('…and the file really moved', env._reportDocs().list('C-5').some((d) => d.fileName === 'Supplement - Search Warrant.docx') &&
+        !env._reportDocs().list('C-5').some((d) => d.fileName === 'Another.docx'));
+    r = await call('report-doc-rename', { caseNumber: 'C-5', fileName: 'Supplement - Search Warrant.docx', newName: 'final report' });
+    ok('renaming onto a name already in use is refused (any capitalisation)', !r.success && r.code === 'EXISTS', r);
+    r = await call('report-doc-rename', { caseNumber: 'C-5', fileName: 'Supplement - Search Warrant.docx', newName: '   ' });
+    ok('a blank name is refused', !r.success && r.code === 'BAD_NAME', r);
+    r = await call('report-doc-rename', { caseNumber: 'C-5', fileName: '..\\x.docx', newName: 'y' });
+    ok('a path is never accepted as a file name', !r.success, r);
 
     r = await call('report-docs-list', { caseNumber: '../x' });
     ok('a case number that could climb out of the cases folder is refused', !r.success && r.code === 'BAD_CASE', r);

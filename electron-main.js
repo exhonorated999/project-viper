@@ -9074,7 +9074,8 @@ ipcMain.handle('working-doc-remove', async (event, { caseNumber, fileName } = {}
 // --- Word report: the case report written in the officer's own Word ---
 // The Reports tab lets an officer write the case report in Microsoft Word
 // instead of VIPER's editor (the choice is per case, currentCase.reportFormat).
-// One document per case, in cases/<caseNumber>/Reports/Word/. It runs on the
+// A case can hold several Word reports (5.4.1 — e.g. the original report and
+// each supplement), all in cases/<caseNumber>/Reports/Word/. It runs on the
 // same engine as Working Documents — a SECOND manager with its own session
 // folder, so neither ever adopts the other's working copies at recovery.
 //
@@ -9107,26 +9108,46 @@ ipcMain.handle('report-docs-list', async (event, { caseNumber } = {}) => {
   catch (e) { return _wdFail(e); }
 });
 
-// One document per case: `replace` names the current report, which goes to
-// the Recycle Bin only AFTER the new one is safely in the case.
+// Without `replace`, the officer may pick SEVERAL documents; each is added as
+// its own report. `fileName` is the first one added, `added` lists them all,
+// `failed` names any that could not be added. Nothing added at all → the
+// first failure is the result.
+// With `replace` (one file): `replace` names the report being swapped out,
+// which goes to the Recycle Bin only AFTER the new one is safely in the case.
 ipcMain.handle('report-doc-import', async (event, { caseNumber, replace } = {}) => {
   try {
     _reportDocs().workingDir(caseNumber);   // validates the case number before a dialog opens
     const result = await dialog.showOpenDialog(mainWindow, {
-      title: replace ? 'Replace the Word report for this case' : 'Use a Word document as the case report',
-      properties: ['openFile'],
+      title: replace ? 'Replace this Word report' : 'Add Word documents as case reports',
+      properties: replace ? ['openFile'] : ['openFile', 'multiSelections'],
       filters: [{ name: 'Word documents', extensions: ['docx', 'doc', 'rtf'] }],
     });
     restoreFocus();
     if (result.canceled || !result.filePaths || !result.filePaths.length) return { success: true, canceled: true };
-    const added = _reportDocs().importFile(caseNumber, result.filePaths[0]);
+    const picks = replace ? result.filePaths.slice(0, 1) : result.filePaths;
+    const added = [], failed = [];
+    let firstError = null;
+    for (const p of picks) {
+      try { added.push(_reportDocs().importFile(caseNumber, p).fileName); }
+      catch (e) {
+        if (!firstError) firstError = e;
+        failed.push({ fileName: path.basename(String(p)), error: (e && e.message) || String(e) });
+      }
+    }
+    if (!added.length) throw firstError || new Error('Nothing was added.');
     let replaceError = null;
     if (replace) {
       try { await _reportDocs().remove(caseNumber, replace); }
       catch (e) { replaceError = (e && e.message) || String(e); }
     }
-    return { success: true, fileName: added.fileName, replaceError };
+    return { success: true, fileName: added[0], added, failed, replaceError };
   } catch (e) { restoreFocus(); return _wdFail(e); }
+});
+
+// Rename a report (refused while it is open in Word, or onto a name in use).
+ipcMain.handle('report-doc-rename', async (event, { caseNumber, fileName, newName } = {}) => {
+  try { return { success: true, ..._reportDocs().rename(caseNumber, fileName, newName) }; }
+  catch (e) { return _wdFail(e); }
 });
 
 // seedText: optional plain text (the VIPER editor's report) to start from —

@@ -3,25 +3,30 @@
  *
  * Per case, the officer chooses where the case report is written:
  *   - the VIPER editor (the built-in rich-text editor, unchanged), or
- *   - Microsoft Word, with the .docx living inside the case at
+ *   - Microsoft Word, with the .docx files living inside the case at
  *     cases/<caseNumber>/Reports/Word/ — opened in Word, and every save the
  *     officer makes there goes straight back into the case (re-encrypted when
- *     Field Security is on). The main process owns the file
+ *     Field Security is on). The main process owns the files
  *     (modules/warrants/working-docs.js, second manager, 'report-doc-*' IPC).
  *
- * Switching is never destructive: the VIPER text stays in viperCaseReports
- * and the Word file stays in the case folder, whichever is showing.
+ * A case can hold SEVERAL Word reports (5.4.1 — the original report, each
+ * supplement, a follow-up…). Every file in the folder is a report in its own
+ * right: listed by name, each with its own Open / Save a copy / Rename /
+ * Replace / Remove. There is no "main" report any more — the case record's
+ * old `reportWordName` is simply no longer read.
  *
- * A Word report is NOT part of Export to DA / Assist Package — VIPER cannot
+ * Switching is never destructive: the VIPER text stays in viperCaseReports
+ * and the Word files stay in the case folder, whichever is showing.
+ *
+ * Word reports are NOT part of Export to DA / Assist Package — VIPER cannot
  * turn a Word document into its report format. This module says so on the
  * tab and on the switch; the host says so in the export dialog and the PDF.
- * "Save a copy…" is how the officer sends it separately.
+ * "Save a copy…" is how the officer sends each one separately.
  *
  * Host state reaches this module only through configure(): the case page
  * declares currentCase with top-level `let`, which never lands on window.
- * The choice is stored on the case record (currentCase.reportFormat /
- * reportWordName), NOT in viperCaseReports, which two writers overwrite
- * wholesale.
+ * The choice is stored on the case record (currentCase.reportFormat), NOT in
+ * viperCaseReports, which two writers overwrite wholesale.
  *
  * UMD, assigned to BOTH module.exports and the global: `module` IS defined
  * in VIPER's renderer, so an either/or wrapper would leave window.X unset.
@@ -33,14 +38,14 @@
 }(typeof globalThis !== 'undefined' ? globalThis : this, function () {
     'use strict';
 
-    var DISCLAIMER = 'A Word report is not included in Export to DA or the Assist Package. ' +
-        'VIPER cannot convert a Word document into its report format, so it cannot be added to the overall report. ' +
-        'Use \u201cSave a copy\u2026\u201d and send it with the export separately.';
+    var DISCLAIMER = 'Word reports are not included in Export to DA or the Assist Package. ' +
+        'VIPER cannot convert a Word document into its report format, so they cannot be added to the overall report. ' +
+        'Use \u201cSave a copy\u2026\u201d on each report and send it with the export separately.';
 
     var host = {};
     var state = {
         loadedFor: null,     // case number the cached list belongs to
-        docs: [],            // [{fileName, bytes, modifiedAt, open, lastSavedAt, error}] newest first
+        docs: [],            // [{fileName, bytes, modifiedAt, open, lastSavedAt, error}] sorted by name
         loading: null,
         again: false,
         loadError: null,
@@ -71,6 +76,8 @@
     function setField(fn, v) {
         try { return host[fn] ? host[fn](v) !== false : false; } catch (_) { return false; }
     }
+    var WORD_EXT = /\.(docx|doc|rtf)$/i;
+    function baseName(n) { return String(n || '').replace(WORD_EXT, ''); }
 
     function fmtTime(iso) {
         if (!iso) return '';
@@ -117,20 +124,19 @@
         for (var i = 0; i < state.docs.length; i++) if (state.docs[i].fileName.toLowerCase() === low) return state.docs[i];
         return null;
     }
+    /** A copy VIPER kept after a crash so a Word save was not lost. */
+    function isRecovered(d) { return !!d && /\(recovered/i.test(d.fileName); }
     /**
-     * The case's Word report: the file the officer made or chose, if it is
-     * still there; otherwise the newest file that is not a "(recovered)"
-     * copy; otherwise the newest file.
+     * Reports are listed by NAME (numbers in order: "Supplement 2" before
+     * "Supplement 10"), not by last change — a list that reshuffles every
+     * time Word saves is a list an officer cannot find things in. Compared
+     * WITHOUT the extension, so "Case Report (recovered)" lands directly
+     * beneath "Case Report" rather than above it (a space sorts before ".").
      */
-    function primaryDoc() {
-        var chosen = findDoc(call('getWordName'));
-        if (chosen) return chosen;
-        for (var i = 0; i < state.docs.length; i++) if (!/\(recovered/i.test(state.docs[i].fileName)) return state.docs[i];
-        return state.docs[0] || null;
-    }
-    function extraDocs() {
-        var p = primaryDoc();
-        return state.docs.filter(function (d) { return d !== p; });
+    function byName(a, b) {
+        var x = baseName(a.fileName), y = baseName(b.fileName);
+        try { return x.localeCompare(y, undefined, { numeric: true, sensitivity: 'base' }) || String(a.fileName).localeCompare(String(b.fileName)); }
+        catch (_) { return x.toLowerCase() < y.toLowerCase() ? -1 : x.toLowerCase() > y.toLowerCase() ? 1 : 0; }
     }
 
     // ── loading ──────────────────────────────────────────────────────────
@@ -143,7 +149,7 @@
             .then(function () { return a.reportDocsList(cn); })
             .then(function (r) {
                 if (caseNumber() !== cn) return;
-                if (r && r.success) { state.docs = r.docs || []; state.loadError = null; }
+                if (r && r.success) { state.docs = (r.docs || []).slice().sort(byName); state.loadError = null; }
                 else { state.loadError = (r && r.error) || 'Could not read the Word report folder.'; }
                 state.loadedFor = cn;
             }, function (e) {
@@ -180,7 +186,7 @@
             repaint();
         } else if (evt.type === 'recovered') {
             toast(evt.action === 'recover-beside'
-                ? 'A Word save that had not reached the case was kept as <b>' + esc(evt.recoveredAs || evt.fileName) + '</b>, beside the report (both had changed). It is listed under the report.'
+                ? 'A Word save that had not reached the case was kept as <b>' + esc(evt.recoveredAs || evt.fileName) + '</b>, beside the report it came from (both had changed). It is listed with your reports.'
                 : 'A Word save that had not reached the case was brought into the report.', 'info', 10000);
             refresh();
         } else {
@@ -243,38 +249,31 @@
     function reportCard(d) {
         var busy = !!state.busy[d.fileName];
         var lockedTip = ' disabled title="Close it in Word first"';
+        var rec = isRecovered(d);
         return '' +
-            '<div class="glass-card rounded-xl p-5 border border-viper-cyan/20" data-wr-row="' + esc(d.fileName) + '">' +
+            '<div class="glass-card rounded-xl p-5 border ' + (rec ? 'border-amber-500/30' : 'border-viper-cyan/20') + '" data-wr-row="' + esc(d.fileName) + '">' +
                 '<div class="flex items-start justify-between gap-4 flex-wrap">' +
                     '<div class="min-w-0 flex-1">' +
-                        '<div class="text-xs uppercase tracking-wide text-gray-400 mb-1">The case report</div>' +
-                        '<div class="text-lg font-semibold break-all">\uD83D\uDCDD ' + esc(d.fileName) + '</div>' +
+                        '<div class="text-lg font-semibold break-all">\uD83D\uDCDD ' + esc(baseName(d.fileName)) +
+                            '<span class="text-xs font-normal text-gray-500 ml-1">' + esc((d.fileName.match(WORD_EXT) || [''])[0]) + '</span></div>' +
                         '<div class="text-sm mt-1">' + statusLine(d) + '</div>' +
+                        (rec ? '<div class="text-xs text-amber-300 mt-1" data-wr-recovered>A copy VIPER kept so a Word save was not lost. Open it to compare, then keep or remove it.</div>' : '') +
                     '</div>' +
                     '<div class="flex gap-2 flex-wrap justify-end">' +
                         btn('open', busy ? 'Opening\u2026' : 'Open in Word', ORANGE, nameAttr(d.fileName) + (busy ? ' disabled' : '')) +
                         btn('copy', 'Save a copy\u2026', CYAN, nameAttr(d.fileName)) +
+                        btn('rename', 'Rename', null, nameAttr(d.fileName) + (d.open ? lockedTip : '')) +
                         btn('replace', 'Replace\u2026', null, nameAttr(d.fileName) + (d.open ? lockedTip : '')) +
                         btn('remove', 'Remove', RED, nameAttr(d.fileName) + (d.open ? lockedTip : '')) +
                     '</div>' +
                 '</div>' +
-                '<p class="text-xs text-gray-500 mt-3">Kept inside this case. Work on it in Word as usual \u2014 each time you press Save in Word, the report in VIPER is updated.</p>' +
             '</div>';
     }
 
-    function extraRow(d) {
-        return '' +
-            '<div class="flex items-center justify-between gap-3 bg-viper-card/30 rounded-lg px-3 py-2" data-wr-extra="' + esc(d.fileName) + '">' +
-                '<div class="min-w-0 flex-1">' +
-                    '<div class="text-sm truncate" title="' + esc(d.fileName) + '">' + esc(d.fileName) + '</div>' +
-                    '<div class="text-xs">' + statusLine(d) + '</div>' +
-                '</div>' +
-                '<div class="flex gap-1 flex-shrink-0 flex-wrap justify-end">' +
-                    btn('open', state.busy[d.fileName] ? 'Opening\u2026' : 'Open', null, nameAttr(d.fileName)) +
-                    btn('use', 'Make this the report', null, nameAttr(d.fileName)) +
-                    btn('remove', 'Remove', RED, nameAttr(d.fileName) + (d.open ? ' disabled title="Close it in Word first"' : '')) +
-                '</div>' +
-            '</div>';
+    function seedLabel(id) {
+        return '<label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">' +
+            '<input type="checkbox" id="' + id + '" class="w-4 h-4 rounded border-gray-600"> Start with the text of my VIPER report ' +
+            '<span class="text-xs text-gray-500">(text only \u2014 formatting and pictures do not carry over)</span></label>';
     }
 
     function emptyState() {
@@ -282,13 +281,25 @@
         var creating = !!state.busy._create;
         return '' +
             '<div class="glass-card rounded-xl p-6 border border-viper-cyan/20" data-wr-empty>' +
-                '<h4 class="text-lg font-semibold mb-1">No Word report yet</h4>' +
-                '<p class="text-sm text-gray-400 mb-4">Start a new Word document for this case, or bring in one you have already written. It opens in Microsoft Word on this computer and stays inside the case.</p>' +
-                (hasText ? '<label class="flex items-center gap-2 text-sm text-gray-300 mb-4 cursor-pointer">' +
-                    '<input type="checkbox" id="wrSeed" class="w-4 h-4 rounded border-gray-600"> Start with the text of my VIPER report <span class="text-xs text-gray-500">(text only \u2014 formatting and pictures do not carry over)</span></label>' : '') +
+                '<h4 class="text-lg font-semibold mb-1">No Word reports yet</h4>' +
+                '<p class="text-sm text-gray-400 mb-4">Start a new Word document for this case, or bring in ones you have already written. They open in Microsoft Word on this computer and stay inside the case. You can keep as many reports here as the case needs \u2014 the original report, supplements, follow-ups.</p>' +
+                (hasText ? '<div class="mb-4">' + seedLabel('wrSeed') + '</div>' : '') +
                 '<div class="flex gap-2 flex-wrap">' +
                     btn('create', creating ? 'Creating\u2026' : 'Create a new Word report', ORANGE, creating ? 'disabled' : '') +
-                    btn('import', 'Use an existing Word document\u2026', null, creating ? 'disabled' : '') +
+                    btn('import', 'Use existing Word documents\u2026', null, creating ? 'disabled' : '') +
+                '</div>' +
+            '</div>';
+    }
+
+    function toolbar() {
+        var creating = !!state.busy._create;
+        return '' +
+            '<div class="flex items-center justify-between gap-3 flex-wrap" data-wr-toolbar>' +
+                '<p class="text-sm text-gray-400">' + state.docs.length + ' Word report' + (state.docs.length === 1 ? '' : 's') +
+                    ' in this case. Each one is kept inside the case \u2014 every time you press Save in Word, VIPER is updated.</p>' +
+                '<div class="flex gap-2 flex-wrap">' +
+                    btn('create-another', creating ? 'Creating\u2026' : '+ New Word report', ORANGE, creating ? 'disabled' : '') +
+                    btn('import', 'Add existing documents\u2026', null, creating ? 'disabled' : '') +
                 '</div>' +
             '</div>';
     }
@@ -303,20 +314,12 @@
         } else if (!state.docs.length) {
             body = emptyState();
         } else {
-            var extras = extraDocs();
-            body = reportCard(primaryDoc()) +
-                (extras.length
-                    ? '<div class="glass-card rounded-xl p-4 border border-gray-700" data-wr-extras>' +
-                        '<p class="text-sm font-medium mb-1">Other Word files kept with this report</p>' +
-                        '<p class="text-xs text-gray-500 mb-3">Usually a copy VIPER kept so a save was not lost. Open it to compare, make it the report, or remove it.</p>' +
-                        '<div class="space-y-2">' + extras.map(extraRow).join('') + '</div>' +
-                      '</div>'
-                    : '');
+            body = toolbar() + '<div class="space-y-3" data-wr-list>' + state.docs.map(reportCard).join('') + '</div>';
         }
         return '' +
             '<div class="flex items-start justify-between gap-4 flex-wrap">' +
                 '<div>' +
-                    '<h3 class="text-2xl font-bold">Case Report</h3>' +
+                    '<h3 class="text-2xl font-bold">Case Reports</h3>' +
                     '<p class="text-sm text-gray-400 mt-1">Written in Microsoft Word</p>' +
                 '</div>' +
                 renderModeSwitch() +
@@ -337,6 +340,53 @@
         if (p) p.innerHTML = panelInner();
     }
 
+    // ── the small name dialog ────────────────────────────────────────────
+    /**
+     * ask(spec) → Promise<null | {name, seed}>
+     * spec: { title, text?, name, seed?: bool (offer the VIPER-text box), okText }
+     * host.ask(spec) overrides it (tests, or a host with its own dialog).
+     */
+    function ask(spec) {
+        if (host.ask) return Promise.resolve(host.ask(spec));
+        if (typeof document === 'undefined' || !document.createElement || !document.body) return Promise.resolve(null);
+        return new Promise(function (resolve) {
+            var wrap = document.createElement('div');
+            wrap.className = 'fixed inset-0 z-[9999] flex items-center justify-center bg-black/60';
+            wrap.innerHTML = '' +
+                '<div class="glass-card rounded-xl p-6 w-full max-w-md border border-viper-orange/30" style="background: rgb(var(--vp-card, 30 31 38));">' +
+                    '<h4 class="text-lg font-bold mb-2">' + esc(spec.title) + '</h4>' +
+                    (spec.text ? '<p class="text-xs text-gray-400 mb-3">' + esc(spec.text) + '</p>' : '') +
+                    '<label class="block text-xs text-gray-400 mb-1">Name</label>' +
+                    '<input data-wr-f="name" type="text" maxlength="110" value="' + esc(spec.name) + '" class="w-full px-3 py-2 bg-viper-card/50 border border-gray-600 rounded-lg text-sm">' +
+                    (spec.seed ? '<div class="mt-3">' + seedLabel('wrSeedAsk') + '</div>' : '') +
+                    '<div class="flex justify-end gap-2 mt-5">' +
+                        '<button type="button" data-wr-b="cancel" class="px-4 py-2 rounded-lg text-sm text-gray-300 hover:bg-viper-card/60">Cancel</button>' +
+                        '<button type="button" data-wr-b="ok" class="px-4 py-2 rounded-lg text-sm bg-viper-orange/20 text-viper-orange border border-viper-orange/30 hover:bg-viper-orange/30">' + esc(spec.okText || 'OK') + '</button>' +
+                    '</div>' +
+                '</div>';
+            function done(v) { document.removeEventListener('keydown', onKey, true); if (wrap.parentNode) wrap.parentNode.removeChild(wrap); resolve(v); }
+            function collect() {
+                var n = wrap.querySelector('[data-wr-f="name"]');
+                var s = wrap.querySelector('#wrSeedAsk');
+                return { name: n ? n.value : '', seed: !!(s && s.checked) };
+            }
+            function onKey(e) {
+                if (e.key === 'Escape') { e.preventDefault(); done(null); }
+                else if (e.key === 'Enter' && e.target && e.target.getAttribute && e.target.getAttribute('data-wr-f') === 'name') { e.preventDefault(); done(collect()); }
+            }
+            wrap.addEventListener('click', function (e) {
+                if (e.target === wrap) return done(null);
+                var b = e.target && e.target.closest ? e.target.closest('[data-wr-b]') : null;
+                if (!b) return;
+                done(b.getAttribute('data-wr-b') === 'ok' ? collect() : null);
+            });
+            document.addEventListener('keydown', onKey, true);
+            document.body.appendChild(wrap);
+            var first = wrap.querySelector('[data-wr-f="name"]');
+            if (first) { first.focus(); if (first.select) first.select(); }
+        });
+    }
+
     // ── actions ──────────────────────────────────────────────────────────
     function fail(r, what) {
         toast(esc(what) + ': ' + esc((r && r.error) || 'something went wrong.'), 'error', 9000);
@@ -348,15 +398,15 @@
         var msg;
         if (mode === 'word') {
             try { if (host.saveViperReport) host.saveViperReport(); } catch (_) {}
-            msg = '<b>Write this case\u2019s report in Microsoft Word?</b><br><br>' +
+            msg = '<b>Write this case\u2019s reports in Microsoft Word?</b><br><br>' +
                 'Your VIPER report is kept \u2014 you can switch back at any time and nothing is deleted.<br><br>' +
                 '<span style="color:#fbbf24">' + esc(DISCLAIMER) + '</span>';
         } else {
-            var p = primaryDoc();
+            var anyOpen = state.docs.some(function (d) { return d.open; });
             msg = '<b>Go back to the VIPER editor?</b><br><br>' +
-                'The Word report stays in the case and nothing is deleted. You can switch back to Word at any time.<br><br>' +
+                'Your Word reports stay in the case and nothing is deleted. You can switch back to Word at any time.<br><br>' +
                 'The VIPER report is the one included in Export to DA.' +
-                (p && p.open ? '<br><br><span style="color:#fbbf24">The Word report is still open in Word. Saves you make there will still go into the case.</span>' : '');
+                (anyOpen ? '<br><br><span style="color:#fbbf24">A Word report is still open in Word. Saves you make there will still go into the case.</span>' : '');
         }
         state.busy._switch = true;
         return confirmBox(msg, { okText: mode === 'word' ? 'Use Microsoft Word' : 'Use the VIPER editor' }).then(function (yes) {
@@ -369,12 +419,6 @@
             rerender();
             return true;
         }, function () { delete state.busy._switch; return false; });
-    }
-
-    function adopt(fileName) {
-        if (fileName && !setField('setWordName', fileName)) {
-            toast('The Word report is in the case, but VIPER could not record which file it is. It will still be listed here.', 'warning', 9000);
-        }
     }
 
     function openDoc(name) {
@@ -391,23 +435,47 @@
         }, function (e) { delete state.busy[name]; fail({ error: e && e.message }, 'Could not open ' + name); repaint(); return false; });
     }
 
+    function safeCn() { return String(caseNumber() || '').replace(/[\\/:*?"<>|]/g, '-'); }
     function defaultName() {
-        var cn = caseNumber();
-        return cn ? 'Case Report ' + String(cn).replace(/[\\/:*?"<>|]/g, '-') : 'Case Report';
+        var cn = safeCn();
+        return cn ? 'Case Report ' + cn : 'Case Report';
+    }
+    /** The suggested name for a second, third… report. Main makes it unique. */
+    function nextName() {
+        var cn = safeCn();
+        var n = state.docs.filter(function (d) { return !isRecovered(d); }).length;
+        return 'Supplemental Report' + (n > 1 ? ' ' + n : '') + (cn ? ' ' + cn : '');
     }
 
-    function create() {
+    function makeDoc(name, seed) {
         var a = api(), cn = caseNumber();
         if (!a || !cn || state.busy._create) return Promise.resolve(null);
-        var box = doc$('wrSeed');
-        var seed = box && box.checked ? viperText() : '';
         state.busy._create = true; repaint();
-        return Promise.resolve(a.reportDocNewBlank(cn, defaultName(), seed)).then(function (r) {
+        return Promise.resolve(a.reportDocNewBlank(cn, name, seed)).then(function (r) {
             delete state.busy._create;
             if (!r || !r.success) { fail(r, 'Could not create the Word report'); repaint(); return null; }
-            adopt(r.fileName);
             return refresh().then(function () { return openDoc(r.fileName); }).then(function () { return r.fileName; });
         }, function (e) { delete state.busy._create; fail({ error: e && e.message }, 'Could not create the Word report'); repaint(); return null; });
+    }
+
+    /** The first report, from the empty state: no dialog, default name. */
+    function create() {
+        var box = doc$('wrSeed');
+        return makeDoc(defaultName(), box && box.checked ? viperText() : '');
+    }
+
+    /** Another report alongside the ones already here: asks for a name. */
+    function createAnother() {
+        if (state.busy._create) return Promise.resolve(null);
+        var hasText = !!viperText();
+        return ask({
+            title: 'New Word report',
+            text: 'It is added beside the reports already in this case. Nothing else changes.',
+            name: nextName(), seed: hasText, okText: 'Create and open',
+        }).then(function (v) {
+            if (!v || !String(v.name || '').trim()) return null;
+            return makeDoc(v.name, v.seed && hasText ? viperText() : '');
+        });
     }
 
     function importDoc(replace) {
@@ -416,22 +484,40 @@
         return Promise.resolve(a.reportDocImport(cn, replace || null)).then(function (r) {
             if (!r || r.canceled) return null;
             if (!r.success) { fail(r, 'Could not add the document'); return null; }
-            adopt(r.fileName);
+            var added = r.added && r.added.length ? r.added : (r.fileName ? [r.fileName] : []);
+            (r.failed || []).forEach(function (f) { toast('Not added \u2014 ' + esc(f.fileName) + ': ' + esc(f.error), 'error', 9000); });
             if (r.replaceError) {
-                toast('The new report is in. The old one could not be removed (' + esc(r.replaceError) + ') \u2014 it is listed under the report.', 'warning', 10000);
+                toast('The new report is in. The old one could not be removed (' + esc(r.replaceError) + ') \u2014 both are listed.', 'warning', 10000);
+            } else if (replace) {
+                toast('Report replaced: <b>' + esc(added[0]) + '</b>', 'success', 5000);
             } else {
-                toast((replace ? 'Report replaced' : 'Added as the case report') + ': <b>' + esc(r.fileName) + '</b>', 'success', 5000);
+                toast('Added to the case: <b>' + added.map(esc).join('</b>, <b>') + '</b>', 'success', 5000);
             }
-            return refresh().then(function () { return r.fileName; });
+            return refresh().then(function () { return added; });
         }, function (e) { fail({ error: e && e.message }, 'Could not add the document'); return null; });
     }
 
     function replaceDoc(name) {
         var d = findDoc(name);
         if (d && d.open) { toast('Close the report in Word first, then replace it.', 'warning', 6000); return Promise.resolve(null); }
-        return confirmBox('<b>Replace the Word report?</b><br><br>Pick the Word document to use instead. "' + esc(name) +
-            '" goes to the Windows Recycle Bin once the new one is safely in the case.', { okText: 'Choose a document\u2026' })
+        return confirmBox('<b>Replace "' + esc(name) + '"?</b><br><br>Pick the Word document to use instead. "' + esc(name) +
+            '" goes to the Windows Recycle Bin once the new one is safely in the case. Your other reports are not affected.', { okText: 'Choose a document\u2026' })
             .then(function (yes) { return yes ? importDoc(name) : null; });
+    }
+
+    function renameDoc(name) {
+        var a = api(), cn = caseNumber();
+        if (!a || !cn || !name) return Promise.resolve(null);
+        var d = findDoc(name);
+        if (d && d.open) { toast('Close it in Word first, then rename it.', 'warning', 6000); return Promise.resolve(null); }
+        if (!a.reportDocRename) { toast('Renaming needs VIPER to be restarted.', 'warning', 6000); return Promise.resolve(null); }
+        return ask({ title: 'Rename Word report', name: baseName(name), okText: 'Rename' }).then(function (v) {
+            if (!v || !String(v.name || '').trim()) return null;
+            return Promise.resolve(a.reportDocRename(cn, name, v.name)).then(function (r) {
+                if (!r || !r.success) { fail(r, 'Could not rename'); return null; }
+                return refresh().then(function () { return r.fileName; });
+            }, function (e) { fail({ error: e && e.message }, 'Could not rename'); return null; });
+        });
     }
 
     function removeDoc(name) {
@@ -439,14 +525,12 @@
         if (!a || !cn || !name) return Promise.resolve(false);
         var d = findDoc(name);
         if (d && d.open) { toast('Close it in Word first, then remove it.', 'warning', 6000); return Promise.resolve(false); }
-        var isReport = primaryDoc() === d;
-        var msg = '<b>Remove "' + esc(name) + '" from this case?</b><br><br>It goes to the Windows Recycle Bin, so it can be restored from there.' +
-            (isReport ? '<br><br>This is the case report. Your VIPER report is not affected.' : '');
+        var msg = '<b>Remove "' + esc(name) + '" from this case?</b><br><br>It goes to the Windows Recycle Bin, so it can be restored from there. ' +
+            'Your other reports and your VIPER report are not affected.';
         return confirmBox(msg, { danger: true, okText: 'Remove' }).then(function (yes) {
             if (!yes) return false;
             return Promise.resolve(a.reportDocRemove(cn, name)).then(function (r) {
                 if (!r || !r.success) { fail(r, 'Could not remove ' + name); return false; }
-                if (isReport && String(call('getWordName') || '').toLowerCase() === String(name).toLowerCase()) setField('setWordName', null);
                 toast('Moved to the Recycle Bin: <b>' + esc(name) + '</b>', 'success', 5000);
                 return refresh().then(function () { return true; });
             });
@@ -466,14 +550,6 @@
         }, function (e) { fail({ error: e && e.message }, 'Could not save a copy'); return null; });
     }
 
-    function useAsReport(name) {
-        if (!findDoc(name)) return false;
-        if (!setField('setWordName', name)) { toast('Could not save the change.', 'error', 8000); return false; }
-        repaint();
-        toast('<b>' + esc(name) + '</b> is now the case report.', 'success', 5000);
-        return true;
-    }
-
     /** Single click entry point for every button this module draws. */
     function act(action, el, ev) {
         if (ev && ev.stopPropagation) ev.stopPropagation();
@@ -483,10 +559,11 @@
             case 'mode-viper': return switchTo('viper');
             case 'open': return openDoc(name);
             case 'copy': return saveCopy(name);
+            case 'rename': return renameDoc(name);
             case 'replace': return replaceDoc(name);
             case 'remove': return removeDoc(name);
-            case 'use': return useAsReport(name);
             case 'create': return create();
+            case 'create-another': return createAnother();
             case 'import': return importDoc(null);
         }
         return null;
@@ -496,10 +573,9 @@
      * host: {
      *   getCaseNumber() → string,
      *   getFormat() → 'word' | 'viper', setFormat(fmt) → bool (false = not saved),
-     *   getWordName() → string|null, setWordName(name|null) → bool,
      *   getViperHtml() → the VIPER editor's HTML, saveViperReport(),
      *   rerender() → repaint the whole Reports tab,
-     *   toast?(), confirm?(), api?
+     *   toast?(), confirm?(), ask?(spec), api?
      * }
      * Safe to call on every render — the cached list is kept unless the case changed.
      */
@@ -525,6 +601,6 @@
         _state: function () { return state; },
         _setState: function (patch) { for (var k in patch) state[k] = patch[k]; },
         _onEvent: onEvent,
-        _primaryDoc: primaryDoc,
+        _nextName: nextName,
     };
 }));

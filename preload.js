@@ -448,6 +448,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   reportDocNewBlank: (caseNumber, newName, seedText) => ipcRenderer.invoke('report-doc-new-blank', { caseNumber, newName, seedText: seedText || '' }),
   reportDocOpen: (caseNumber, fileName) => ipcRenderer.invoke('report-doc-open', { caseNumber, fileName }),
   reportDocRemove: (caseNumber, fileName) => ipcRenderer.invoke('report-doc-remove', { caseNumber, fileName }),
+  reportDocRename: (caseNumber, fileName, newName) => ipcRenderer.invoke('report-doc-rename', { caseNumber, fileName, newName }),
   reportDocSaveCopy: (caseNumber, fileName) => ipcRenderer.invoke('report-doc-save-copy', { caseNumber, fileName }),
   onReportDocEvent: (cb) => {
     const handler = (_e, payload) => { try { cb(payload); } catch (_) {} };

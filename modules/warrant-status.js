@@ -98,12 +98,119 @@
         return NO_RETURN_TYPES.indexOf(String(w.type || '').toLowerCase()) !== -1;
     }
 
+    /* ------------------------------------------------------------------
+     * Orders that EXPIRE — Pen Register / Trap & Trace (PRTT)
+     * ------------------------------------------------------------------
+     * A PRTT order authorises collection for a fixed period and then lapses.
+     * What the detective needs is not a production deadline but a warning
+     * the day the authority runs out, so it can be renewed or wound down.
+     *
+     * The date lives in its OWN field, `expirationDate` (bare 'YYYY-MM-DD',
+     * date-only like dueDate), and never in dueDate: every overdue site in
+     * the app reads dueDate as "production owed by", and an expiry is not
+     * that.
+     *
+     * The alert fires ON the expiration date, not the day after — the
+     * officer asked to be told "when that expiration date occurs", and the
+     * last day of authority is the day there is still time to act.
+     *
+     * Acknowledging records WHICH date was acknowledged
+     * (`expirationAcknowledgedFor`). An order that is extended gets a new
+     * expirationDate, the two no longer match, and the alert comes back on
+     * the new date without anyone having to remember to un-acknowledge it.
+     *
+     * A close-out also silences it: "Close Out" already means "stop the
+     * alerts for this one" everywhere else in the warrant module. A received
+     * return does NOT — data arriving says nothing about whether the order
+     * has lapsed.
+     */
+    const EXPIRING_TYPES = ['prtt'];
+
+    const TYPE_LABELS = {
+        search: 'Search Warrant',
+        arrest: 'Arrest Warrant',
+        preservation: 'Preservation Request',
+        subpoena: 'Subpoena',
+        'court-order': 'Court Order',
+        prtt: 'PRTT (Pen Register / Trap & Trace)',
+        other: 'Other',
+    };
+
+    /** Readable name for a warrant type; unknown types come back as stored. */
+    function typeLabel(w) {
+        const t = String((w && w.type) || '').toLowerCase();
+        if (!t) return 'Warrant';
+        return TYPE_LABELS[t] || String(w.type);
+    }
+
+    /** True for order types that carry an expiration date. */
+    function hasExpiration(w) {
+        if (!w) return false;
+        return EXPIRING_TYPES.indexOf(String(w.type || '').toLowerCase()) !== -1;
+    }
+
+    /** Signed whole days to expiry: 0 = expires today, negative = lapsed. */
+    function daysUntilExpiration(w, now) {
+        if (!hasExpiration(w) || !w.expirationDate) return null;
+        const exp = parseDueDate(w.expirationDate);
+        if (!exp) return null;
+        const ref = now ? new Date(now) : new Date();
+        ref.setHours(0, 0, 0, 0);
+        return Math.round((exp - ref) / 86400000);
+    }
+
+    /** True from the expiration date onward. */
+    function isExpired(w, now) {
+        const n = daysUntilExpiration(w, now);
+        return n !== null && n <= 0;
+    }
+
+    /** True when THIS expiration date has been acknowledged. */
+    function isExpirationAcknowledged(w) {
+        if (!w || !w.expirationAcknowledgedAt || !w.expirationDate) return false;
+        return w.expirationAcknowledgedFor === w.expirationDate;
+    }
+
+    /** True when the dashboard should be showing an expiration alert. */
+    function needsExpirationAlert(w, now) {
+        if (!w || w.closedOut) return false;
+        return isExpired(w, now) && !isExpirationAcknowledged(w);
+    }
+
+    /**
+     * Mark the current expiration date acknowledged. Mutates and returns the
+     * warrant. Does nothing (returns null) when there is no date to
+     * acknowledge, so a stray click can never write a meaningless record.
+     */
+    function acknowledgeExpiration(w, nowIso) {
+        if (!hasExpiration(w) || !w.expirationDate) return null;
+        w.expirationAcknowledgedAt = nowIso || new Date().toISOString();
+        w.expirationAcknowledgedFor = w.expirationDate;
+        return w;
+    }
+
+    /** Expiration wording shared by the card, the header chip and reports. */
+    function expirationLabel(w, now) {
+        const n = daysUntilExpiration(w, now);
+        if (n === null) return '';
+        if (n === 0) return 'Expires today';
+        if (n === -1) return 'Expired 1 day ago';
+        if (n < 0) return 'Expired ' + (-n) + ' days ago';
+        if (n === 1) return 'Expires tomorrow';
+        return 'Expires in ' + n + ' days';
+    }
+
     /**
      * Short human status for lists and reports.  Kept here so the wording is
      * identical in the UI and the DA report.
      */
     function label(w, now) {
         if (!w) return 'Unknown';
+        if (w.closedOut && hasExpiration(w)) return 'Closed out';
+        if (hasExpiration(w) && w.expirationDate) {
+            const lbl = expirationLabel(w, now);
+            if (lbl) return lbl;
+        }
         if (w.returnReceived) return 'Return received';
         if (w.closedOut) return hasNothingToReceive(w) ? 'Closed out (no return expected)' : 'Closed out';
         if (isOverdue(w, now)) return daysOverdue(w, now) + ' days overdue';
@@ -121,5 +228,14 @@
         daysUntilDue: daysUntilDue,
         hasNothingToReceive: hasNothingToReceive,
         label: label,
+        EXPIRING_TYPES: EXPIRING_TYPES,
+        typeLabel: typeLabel,
+        hasExpiration: hasExpiration,
+        daysUntilExpiration: daysUntilExpiration,
+        isExpired: isExpired,
+        isExpirationAcknowledged: isExpirationAcknowledged,
+        needsExpirationAlert: needsExpirationAlert,
+        acknowledgeExpiration: acknowledgeExpiration,
+        expirationLabel: expirationLabel,
     };
 });

@@ -146,10 +146,90 @@ eq(W.isOverdue(legacyOpen), true, 'legacy open warrant still flags overdue');
 const legacyDone = { id: 2, type: 'search', dueDate: localDate(-10), returnReceived: true, returnReceivedAt: '2026-01-02T03:04:05.000Z' };
 eq(W.isOverdue(legacyDone), false, 'legacy received warrant stays silent');
 
+// ── PRTT: orders that expire ────────────────────────────────────────
+console.log('\n-- PRTT expiration --');
+const prtt = (offset, extra) => Object.assign({ id: 9, type: 'prtt', expirationDate: localDate(offset) }, extra || {});
+
+eq(W.hasExpiration({ type: 'prtt' }), true, 'prtt carries an expiration');
+eq(W.hasExpiration({ type: 'PRTT' }), true, 'expiring type match is case-insensitive');
+eq(W.hasExpiration({ type: 'search', expirationDate: localDate(-3) }), false, 'a search warrant never expires, even with a stray date');
+eq(W.hasExpiration(null), false, 'null does not expire');
+eq(W.hasNothingToReceive({ type: 'prtt' }), false, 'a PRTT still produces data');
+
+eq(W.daysUntilExpiration(prtt(10)), 10, '10 days out');
+eq(W.daysUntilExpiration(prtt(0)), 0, 'expires today is 0');
+eq(W.daysUntilExpiration(prtt(-4)), -4, 'lapsed 4 days is -4');
+eq(W.daysUntilExpiration({ type: 'prtt' }), null, 'no date → null');
+eq(W.daysUntilExpiration({ type: 'prtt', expirationDate: 'garbage' }), null, 'unparseable date → null');
+
+// The officer asked to be told WHEN the date occurs — so the alert is live
+// on the date itself, not the day after.
+eq(W.isExpired(prtt(1)), false, 'tomorrow is not yet expired');
+eq(W.isExpired(prtt(0)), true, 'the expiration date itself raises the alert');
+eq(W.isExpired(prtt(-30)), true, 'long past is expired');
+eq(W.needsExpirationAlert(prtt(0)), true, 'expires today → alert');
+eq(W.needsExpirationAlert(prtt(1)), false, 'tomorrow → no alert yet');
+eq(W.needsExpirationAlert({ type: 'prtt' }), false, 'no date → never alerts');
+eq(W.needsExpirationAlert(null), false, 'null never alerts');
+
+// An explicit "now" is honoured (the dashboard passes none; tests pin it).
+const fixedNow = new Date(2026, 9, 14, 15, 30); // 14 Oct 2026, mid-afternoon
+eq(W.isExpired({ type: 'prtt', expirationDate: '2026-10-14' }, fixedNow), true, 'afternoon of the expiration date is expired');
+eq(W.isExpired({ type: 'prtt', expirationDate: '2026-10-15' }, fixedNow), false, 'day before is not');
+
+// Acknowledgement hides THAT date only.
+const ackd = prtt(-2);
+eq(W.acknowledgeExpiration(ackd, '2026-10-14T12:00:00.000Z'), ackd, 'acknowledge returns the warrant');
+eq(ackd.expirationAcknowledgedAt, '2026-10-14T12:00:00.000Z', 'acknowledged-at recorded');
+eq(ackd.expirationAcknowledgedFor, ackd.expirationDate, 'the acknowledged date is recorded');
+eq(W.isExpirationAcknowledged(ackd), true, 'reads back as acknowledged');
+eq(W.needsExpirationAlert(ackd), false, 'acknowledged → alert hidden');
+eq(W.isExpired(ackd), true, 'acknowledging does not pretend the order is still live');
+
+// Extended order: new date, the old acknowledgement no longer applies.
+ackd.expirationDate = localDate(0);
+eq(W.isExpirationAcknowledged(ackd), false, 'an extended order is no longer acknowledged');
+eq(W.needsExpirationAlert(ackd), true, 'and alerts again on its new date');
+ackd.expirationDate = localDate(30);
+eq(W.needsExpirationAlert(ackd), false, 'extended into the future → quiet until then');
+
+eq(W.acknowledgeExpiration({ type: 'prtt' }), null, 'nothing to acknowledge without a date');
+eq(W.acknowledgeExpiration({ type: 'search', expirationDate: localDate(-1) }), null, 'a non-expiring type is never acknowledged');
+const noAckWritten = { type: 'prtt' };
+W.acknowledgeExpiration(noAckWritten);
+eq('expirationAcknowledgedAt' in noAckWritten, false, 'a refused acknowledgement writes nothing');
+
+// Close-out silences it; a received return does not.
+eq(W.needsExpirationAlert(prtt(-1, { closedOut: true })), false, 'closed out → no expiration alert');
+eq(W.needsExpirationAlert(prtt(-1, { returnReceived: true })), true, 'data received does not mean the order is still running');
+
+// The production-overdue rule is untouched by an expiration date.
+eq(W.isOverdue(prtt(-10)), false, 'an expired PRTT is not "overdue" — it has no production deadline');
+
+// Wording.
+eq(W.expirationLabel(prtt(0)), 'Expires today', 'today wording');
+eq(W.expirationLabel(prtt(1)), 'Expires tomorrow', 'tomorrow wording');
+eq(W.expirationLabel(prtt(12)), 'Expires in 12 days', 'future wording');
+eq(W.expirationLabel(prtt(-1)), 'Expired 1 day ago', 'singular past wording');
+eq(W.expirationLabel(prtt(-5)), 'Expired 5 days ago', 'plural past wording');
+eq(W.expirationLabel({ type: 'prtt' }), '', 'no date → no wording');
+eq(W.label(prtt(-5)), 'Expired 5 days ago', 'label() uses the expiration wording for a PRTT');
+eq(W.label(prtt(12, { returnReceived: true })), 'Expires in 12 days', 'expiry outranks "return received" — it is the live fact');
+eq(W.label(prtt(-5, { closedOut: true })), 'Closed out', 'a closed-out PRTT reads Closed out');
+eq(W.label({ type: 'prtt' }), 'Pending', 'a PRTT with no date reads Pending');
+
+eq(W.typeLabel({ type: 'prtt' }), 'PRTT (Pen Register / Trap & Trace)', 'PRTT type label');
+eq(W.typeLabel({ type: 'court-order' }), 'Court Order', 'court order type label');
+eq(W.typeLabel({ type: 'custom-thing' }), 'custom-thing', 'an unknown type comes back as stored');
+eq(W.typeLabel({}), 'Warrant', 'no type reads Warrant');
+
 // ── surface ─────────────────────────────────────────────────────────
 console.log('\n-- module surface --');
-['isResolved', 'isOpen', 'isOverdue', 'daysOverdue', 'daysUntilDue', 'hasNothingToReceive', 'label']
+['isResolved', 'isOpen', 'isOverdue', 'daysOverdue', 'daysUntilDue', 'hasNothingToReceive', 'label',
+ 'typeLabel', 'hasExpiration', 'daysUntilExpiration', 'isExpired', 'isExpirationAcknowledged',
+ 'needsExpirationAlert', 'acknowledgeExpiration', 'expirationLabel']
   .forEach(fn => eq(typeof W[fn], 'function', `exports ${fn}()`));
+ok(Array.isArray(W.EXPIRING_TYPES) && W.EXPIRING_TYPES.indexOf('prtt') !== -1, 'EXPIRING_TYPES contains prtt');
 ok(Array.isArray(W.NO_RETURN_TYPES), 'exports NO_RETURN_TYPES array');
 eq(W.NO_RETURN_TYPES.indexOf('preservation') !== -1, true, 'NO_RETURN_TYPES contains preservation');
 

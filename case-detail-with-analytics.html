@@ -120,6 +120,9 @@
          WITHOUT defer: renderWarrantsTab() calls it while rendering. -->
     <script src="modules/warrants/working-docs-ui.js"></script>
     <script src="modules/reports/word-report-ui.js"></script>
+    <!-- Optional phone carrier on phone identifiers. Synchronous: the
+         identifier renderers call it while painting. -->
+    <script src="modules/_shared/phone-carrier.js"></script>
     <!-- P2P Activity Check (TorrentAnalytics). Loaded WITHOUT defer:
          _p2pScanBtn() is called synchronously while identifier rows
          render. p2p-scan.js (pure core) must precede the UI half. -->
@@ -3766,7 +3769,7 @@
                         (r.type || '').toString().toUpperCase(),
                         r.platform || '—',
                         r.value || '',
-                        r.provider ? ('ISP: ' + r.provider) : (r.status || '')
+                        _identProviderLabel(r) || (r.status || '')
                     ]),
                     theme: 'grid',
                     headStyles: { fillColor: CYAN, textColor: [255,255,255], fontStyle: 'bold', fontSize: 9 },
@@ -17549,7 +17552,8 @@
                                                 <span class="px-2 py-0.5 rounded text-xs font-semibold bg-${color}/20 text-${color} border border-${color}/40 uppercase">${ident.type}</span>
                                                 ${ident.platform ? `<span class="px-2 py-0.5 rounded text-xs font-semibold bg-viper-purple/20 text-viper-purple border border-viper-purple/40">${ident.platform}</span>` : ''}
                                                 <span class="text-white font-medium">${ident.value}</span>
-                                                ${ident.provider ? `<span class="px-2 py-0.5 rounded text-xs bg-green-500/20 text-green-400 border border-green-500/40">ISP: ${ident.provider}</span>` : ''}
+                                                ${_identIspBadge(ident, false)}
+                                                ${_identCarrierBadge('suspect', index, iIdx, ident, false)}
                                                 ${ident.emailResult ? `<span class="px-2 py-0.5 rounded text-xs bg-${ident.emailResult.valid ? 'green' : 'red'}-500/20 text-${ident.emailResult.valid ? 'green' : 'red'}-400 border border-${ident.emailResult.valid ? 'green' : 'red'}-500/40">${ident.emailResult.status}</span>` : ''}
                                                 ${_osintIdentBadgeHtml('suspect', index, iIdx, ident)}
                                             </div>
@@ -19128,8 +19132,8 @@
                             <h3 class="text-lg font-bold text-viper-cyan mb-3">Identifiers</h3>
                             <div id="suspectIdentifiersList" class="space-y-2 mb-3">
                                 ${(suspect.identifiers || []).map((id, i) => `
-                                    <div class="flex items-center gap-2" data-ident-row="${i}">
-                                        <select class="ident-type bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-cyan focus:outline-none w-40">
+                                    <div class="flex items-center gap-2" data-ident-row="${i}" data-ident-orig="${i}">
+                                        <select class="ident-type bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-cyan focus:outline-none w-40" onchange="PhoneCarrier.syncRow(this)">
                                             <option value="email" ${id.type === 'email' ? 'selected' : ''}>Email</option>
                                             <option value="phone" ${id.type === 'phone' ? 'selected' : ''}>Phone</option>
                                             <option value="username" ${id.type === 'username' ? 'selected' : ''}>Username / User ID</option>
@@ -19138,6 +19142,7 @@
                                             <option value="ssn" ${id.type === 'ssn' ? 'selected' : ''}>SSN</option>
                                         </select>
                                         <input type="text" class="ident-value flex-1 bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white text-sm focus:border-viper-cyan focus:outline-none" value="${id.value || ''}" placeholder="Value">
+                                        <input type="text" class="ident-carrier w-44 bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-cyan focus:outline-none" list="viperPhoneCarriers" maxlength="60" autocomplete="off" placeholder="Carrier (optional)" value="${escHtmlSafe(window.PhoneCarrier ? PhoneCarrier.carrierOf(id) : '')}" style="${id.type === 'phone' ? '' : 'display:none;'}">
                                         <button type="button" onclick="this.closest('[data-ident-row]').remove()" class="text-red-400 hover:text-red-300 p-1">
                                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                                         </button>
@@ -19226,7 +19231,7 @@
                     employerPhone: formData.get('employerPhone'),
                     firearms: isEdit ? suspect.firearms : [],
                     vehicles: isEdit ? suspect.vehicles : [],
-                    identifiers: collectSuspectIdentifiers(),
+                    identifiers: collectSuspectIdentifiers(isEdit ? suspect.identifiers : null),
                     criminalHistory: isEdit ? suspect.criminalHistory || [] : [],
                     rapSheet: isEdit ? suspect.rapSheet || null : null,
                     firearmsDoc: isEdit ? suspect.firearmsDoc || null : null
@@ -19284,7 +19289,8 @@
                 const icon = typeIcons[ident.type] || '🔗';
                 const sourceBadge = ident.source ? `<span class="px-1.5 py-0.5 rounded text-[10px] bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">via ${escHtmlSafe(ident.source)}</span>` : '';
                 const platformBadge = ident.platform ? `<span class="px-1.5 py-0.5 rounded text-[10px] bg-viper-purple/20 text-viper-purple border border-viper-purple/40">${escHtmlSafe(ident.platform)}</span>` : '';
-                const providerBadge = ident.provider ? `<span class="px-1.5 py-0.5 rounded text-[10px] bg-green-500/20 text-green-400 border border-green-500/40">ISP: ${escHtmlSafe(ident.provider)}</span>` : '';
+                const providerBadge = _identIspBadge(ident, true);
+                const carrierBadge = _identCarrierBadge(kind, index, iIdx, ident, true);
                 const osintBadge = _osintIdentBadgeHtml(kind, index, iIdx, ident);
                 const arinBtn = ident.type === 'ip' ? `<button onclick="arinLookupPersonIdent('${kind}', ${index}, ${iIdx})" class="px-2 py-1 bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500 rounded text-yellow-400 text-xs transition" title="ARIN WHOIS Lookup">🌐 ARIN</button>` : '';
                 const p2pBtn = ident.type === 'ip' ? _p2pScanBtn(ident.value) : '';
@@ -19296,6 +19302,7 @@
                         ${platformBadge}
                         <span class="text-white font-medium break-all">${escHtmlSafe(ident.value)}</span>
                         ${providerBadge}
+                        ${carrierBadge}
                         ${sourceBadge}
                         ${osintBadge}
                     </div>
@@ -19410,7 +19417,7 @@
                 <div class="glass-card rounded-xl p-6 max-w-md w-full" onclick="event.stopPropagation()">
                     <h3 class="text-xl font-bold text-white mb-4">Add Identifier</h3>
                     <form id="addPersonIdentForm" class="space-y-4">
-                        <select name="type" id="ppIdentTypeSelect" onchange="document.getElementById('ppIdentPlatformRow').style.display = this.value === 'username' ? 'block' : 'none'" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
+                        <select name="type" id="ppIdentTypeSelect" onchange="PhoneCarrier.syncTypeRows(this)" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                             <option value="email">Email</option>
                             <option value="phone">Phone</option>
                             <option value="username">Username / User ID</option>
@@ -19418,10 +19425,13 @@
                             <option value="dl">Driver's License</option>
                             <option value="ssn">SSN</option>
                         </select>
-                        <div id="ppIdentPlatformRow" style="display:none;">
+                        <div id="ppIdentPlatformRow" data-ident-platform-row style="display:none;">
                             <input type="text" name="platform" placeholder="Platform (e.g. Snapchat, Instagram, Discord)" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                         </div>
                         <input type="text" name="value" placeholder="Value" required class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
+                        <div data-ident-carrier-row style="display:none;">
+                            <input type="text" name="carrier" list="viperPhoneCarriers" maxlength="60" autocomplete="off" placeholder="Carrier — optional (e.g. AT&amp;T, Verizon, T-Mobile)" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
+                        </div>
                         <div class="flex justify-end gap-3">
                             <button type="button" onclick="this.closest('.fixed').remove()" class="px-4 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white transition">Cancel</button>
                             <button type="submit" class="px-4 py-2 bg-viper-cyan hover:bg-viper-cyan/80 rounded-lg text-black font-semibold transition">Add</button>
@@ -19442,6 +19452,7 @@
                     const platform = fd.get('platform');
                     if (platform) ident.platform = platform;
                 }
+                if (type === 'phone' && window.PhoneCarrier) PhoneCarrier.setCarrier(ident, fd.get('carrier'));
                 r.target.identifiers.push(ident);
                 _ppSave(kind, r.records);
                 modal.remove();
@@ -19957,6 +19968,83 @@
             showToast('Lead removed.', 'success');
         }
 
+        // ============================================================
+        // Phone carrier — optional, officer-typed service provider on a
+        // PHONE identifier (AT&T, Verizon, T-Mobile, a VoIP provider…).
+        // The logic is in modules/_shared/phone-carrier.js; these are the
+        // host's thin wrappers. Stored as `ident.carrier`, deliberately NOT
+        // `ident.provider`, which the ARIN lookup owns and labels "ISP".
+        // ============================================================
+        function _identIspBadge(ident, small) {
+            const isp = window.PhoneCarrier ? PhoneCarrier.ispOf(ident) : ((ident && ident.provider) || '');
+            if (!isp) return '';
+            const sz = small ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs';
+            return `<span class="${sz} rounded bg-green-500/20 text-green-400 border border-green-500/40">ISP: ${escHtmlSafe(isp)}</span>`;
+        }
+
+        function _identCarrierBadge(kind, index, iIdx, ident, small) {
+            if (!window.PhoneCarrier) return '';
+            return PhoneCarrier.badgeHtml(ident, {
+                small: !!small,
+                onclick: `editIdentCarrier('${String(kind).replace(/[^a-z]/gi, '')}', ${Number(index)}, ${Number(iIdx)})`
+            });
+        }
+
+        // Plain-text "Carrier: X" / "ISP: X" for reports and exports.
+        function _identProviderLabel(ident) {
+            if (window.PhoneCarrier) return PhoneCarrier.describe(ident);
+            return ident && ident.provider ? 'ISP: ' + ident.provider : '';
+        }
+
+        function editIdentCarrier(kind, index, iIdx) {
+            if (!window.PhoneCarrier) return;
+            const ctx = _osintPersonCtx(kind, index); if (!ctx) return;
+            const ident = Array.isArray(ctx.record.identifiers) ? ctx.record.identifiers[iIdx] : null;
+            if (!ident || !PhoneCarrier.isPhone(ident)) return;
+            PhoneCarrier.ensureDatalist();
+            const current = PhoneCarrier.carrierOf(ident);
+            const prior = document.getElementById('identCarrierModal'); if (prior) prior.remove();
+            const modal = document.createElement('div');
+            modal.id = 'identCarrierModal';
+            modal.className = 'fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4';
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+            modal.innerHTML = `
+                <div class="glass-card rounded-xl p-6 max-w-md w-full" onclick="event.stopPropagation()">
+                    <h3 class="text-xl font-bold text-white mb-1">Phone Carrier</h3>
+                    <p class="text-sm text-gray-400 mb-4">📱 ${escHtmlSafe(ident.value)}</p>
+                    <form id="identCarrierForm" class="space-y-3">
+                        <input type="text" name="carrier" list="${PhoneCarrier.DATALIST_ID}" maxlength="${PhoneCarrier.MAX_LEN}" autocomplete="off" value="${escHtmlSafe(current)}" placeholder="Carrier (e.g. AT&amp;T, Verizon, T-Mobile)" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
+                        <p class="text-xs text-gray-500">Optional. Pick a suggestion or type any provider. Leave it blank to remove the carrier.</p>
+                        <div class="flex justify-end gap-3 pt-1">
+                            <button type="button" onclick="this.closest('.fixed').remove()" class="px-4 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white transition">Cancel</button>
+                            <button type="submit" class="px-4 py-2 bg-viper-cyan hover:bg-viper-cyan/80 rounded-lg text-black font-semibold transition">Save</button>
+                        </div>
+                    </form>
+                </div>`;
+            document.body.appendChild(modal);
+            const input = modal.querySelector('input[name="carrier"]');
+            if (input) { input.focus(); input.select(); }
+            document.getElementById('identCarrierForm').onsubmit = (e) => {
+                e.preventDefault();
+                // Snapshot so a failed save leaves the record exactly as it was.
+                const had = Object.prototype.hasOwnProperty.call(ident, 'carrier');
+                const snap = { carrier: ident.carrier, provider: ident.provider };
+                PhoneCarrier.setCarrier(ident, input ? input.value : '');
+                const after = PhoneCarrier.carrierOf(ident);
+                try {
+                    ctx.save();
+                } catch (err) {
+                    if (had) ident.carrier = snap.carrier; else delete ident.carrier;
+                    ident.provider = snap.provider;
+                    showToast('Carrier NOT saved: ' + ((err && err.message) || err), 'error');
+                    return;
+                }
+                modal.remove();
+                ctx.rerender();
+                if (after !== current) showToast(after ? `Carrier set: ${after}` : 'Carrier removed', 'success');
+            };
+        }
+
         function addSuspectIdentifierRow() {
             const list = document.getElementById('suspectIdentifiersList');
             if (!list) return;
@@ -19965,7 +20053,7 @@
             row.className = 'flex items-center gap-2';
             row.setAttribute('data-ident-row', idx);
             row.innerHTML = `
-                <select class="ident-type bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-cyan focus:outline-none w-40">
+                <select class="ident-type bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-cyan focus:outline-none w-40" onchange="PhoneCarrier.syncRow(this)">
                     <option value="email">Email</option>
                     <option value="phone">Phone</option>
                     <option value="username">Username / User ID</option>
@@ -19974,6 +20062,7 @@
                     <option value="ssn">SSN</option>
                 </select>
                 <input type="text" class="ident-value flex-1 bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="Value">
+                <input type="text" class="ident-carrier w-44 bg-viper-dark border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:border-viper-cyan focus:outline-none" list="viperPhoneCarriers" maxlength="60" autocomplete="off" placeholder="Carrier (optional)" style="display:none;">
                 <button type="button" onclick="this.closest('[data-ident-row]').remove()" class="text-red-400 hover:text-red-300 p-1">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                 </button>
@@ -19982,15 +20071,25 @@
             row.querySelector('.ident-value').focus();
         }
 
-        function collectSuspectIdentifiers() {
+        // `originals` is the suspect's identifier list as it was when the
+        // edit form opened (rows carry data-ident-orig = their index in it).
+        // Rebuilding each identifier from scratch used to drop the platform,
+        // ISP, OSINT leads and email check on every save; the merge keeps
+        // whatever a row did not change.
+        function collectSuspectIdentifiers(originals) {
             const rows = document.querySelectorAll('#suspectIdentifiersList [data-ident-row]');
-            const identifiers = [];
+            const spec = [];
             rows.forEach(row => {
-                const type = row.querySelector('.ident-type')?.value;
-                const value = row.querySelector('.ident-value')?.value?.trim();
-                if (type && value) identifiers.push({ type, value, provider: '' });
+                const carrierEl = row.querySelector('.ident-carrier');
+                spec.push({
+                    orig: row.hasAttribute('data-ident-orig') ? row.getAttribute('data-ident-orig') : null,
+                    type: row.querySelector('.ident-type')?.value,
+                    value: row.querySelector('.ident-value')?.value?.trim(),
+                    carrier: carrierEl ? carrierEl.value : undefined
+                });
             });
-            return identifiers;
+            if (window.PhoneCarrier) return PhoneCarrier.mergeEditedIdentifiers(originals, spec);
+            return spec.filter(r => r.type && r.value).map(r => ({ type: r.type, value: r.value, provider: '' }));
         }
 
         async function arinLookupSuspectIdent(suspectIdx, identIdx) {
@@ -20066,7 +20165,7 @@
                 <div class="glass-card rounded-xl p-6 max-w-md w-full" onclick="event.stopPropagation()">
                     <h3 class="text-xl font-bold text-white mb-4">Add Identifier</h3>
                     <form id="addIdentForm" class="space-y-4">
-                        <select name="type" id="identTypeSelect" onchange="document.getElementById('identPlatformRow').style.display = this.value === 'username' ? 'block' : 'none'" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
+                        <select name="type" id="identTypeSelect" onchange="PhoneCarrier.syncTypeRows(this)" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                             <option value="email">Email</option>
                             <option value="phone">Phone</option>
                             <option value="username">Username / User ID</option>
@@ -20074,10 +20173,13 @@
                             <option value="dl">Driver's License</option>
                             <option value="ssn">SSN</option>
                         </select>
-                        <div id="identPlatformRow" style="display:none;">
+                        <div id="identPlatformRow" data-ident-platform-row style="display:none;">
                             <input type="text" name="platform" placeholder="Platform (e.g. Snapchat, Instagram, Discord)" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                         </div>
                         <input type="text" name="value" placeholder="Value" required class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
+                        <div data-ident-carrier-row style="display:none;">
+                            <input type="text" name="carrier" list="viperPhoneCarriers" maxlength="60" autocomplete="off" placeholder="Carrier — optional (e.g. AT&amp;T, Verizon, T-Mobile)" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
+                        </div>
                         <div class="flex justify-end gap-3">
                             <button type="button" onclick="this.closest('.fixed').remove()" class="px-4 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white transition">Cancel</button>
                             <button type="submit" class="px-4 py-2 bg-viper-cyan hover:bg-viper-cyan/80 rounded-lg text-black font-semibold transition">Add</button>
@@ -20098,6 +20200,7 @@
                     const platform = fd.get('platform');
                     if (platform) ident.platform = platform;
                 }
+                if (type === 'phone' && window.PhoneCarrier) PhoneCarrier.setCarrier(ident, fd.get('carrier'));
                 suspects[suspectIdx].identifiers.push(ident);
                 saveSuspects();
                 modal.remove();
@@ -20801,7 +20904,7 @@
                                                     <td style="padding:6px 10px; border:1px solid #ddd; text-transform:uppercase; font-size:11px; font-weight:bold;">${id.type}</td>
                                                     <td style="padding:6px 10px; border:1px solid #ddd;">${id.platform || '—'}</td>
                                                     <td style="padding:6px 10px; border:1px solid #ddd;">${id.value}</td>
-                                                    <td style="padding:6px 10px; border:1px solid #ddd;">${id.provider ? 'ISP: ' + id.provider : ''}${id.emailResult ? (id.emailResult.status || '') : ''}</td>
+                                                    <td style="padding:6px 10px; border:1px solid #ddd;">${escHtmlSafe(_identProviderLabel(id))}${id.emailResult ? (id.emailResult.status || '') : ''}</td>
                                                 </tr>
                                             `).join('')}
                                         </tbody>
@@ -35138,7 +35241,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         ${s.identifiers.map(id => {
                             let extra = '';
                             if (id.platform) extra += ' (' + id.platform + ')';
-                            if (id.provider) extra += ' — ISP: ' + id.provider;
+                            const provLbl = _identProviderLabel(id);
+                            if (provLbl) extra += ' — ' + escHtmlSafe(provLbl);
                             return '<div class="item-card"><strong style="text-transform:uppercase;font-size:11px;color:#00d9ff">' + (id.type || '?') + '</strong> &nbsp; ' + (id.value || '—') + extra + '</div>';
                         }).join('')}
                     </div>

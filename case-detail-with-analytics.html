@@ -2751,7 +2751,7 @@
                                                     <span class="text-xl">${tab.icon}</span>
                                                     <span class="text-sm font-medium text-white">${tab.label}</span>
                                                     ${tab.type === 'files' ? '<span class="text-xs text-viper-orange bg-viper-orange/20 px-2 py-0.5 rounded">Files</span>' : ''}
-                                                    ${tabId === 'reports' && _reportIsWord() ? '<span class="text-xs text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded" title="The Word report is not included. Send it separately with Save a copy on the Reports tab.">Word report not included</span>' : ''}
+                                                    ${tabId === 'reports' && _reportIsWord() ? '<span class="text-xs text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded" title="Word reports are not included. Send each one separately with Save a copy on the Reports tab.">Word reports not included</span>' : ''}
                                                 </div>
                                                 ${itemCount > 0 ? `<span class="text-xs text-gray-400">${itemCount} ${itemCount === 1 ? 'item' : 'items'}</span>` : ''}
                                             </div>
@@ -2772,7 +2772,7 @@
                                             <li>Evidence and Warrant files will be bundled with the PDF or separately if no data tabs are selected</li>
                                             <li>All exports will be saved as a ZIP file for easy sharing</li>
                                             ${_reportIsWord() ? `
-                                            <li class="text-amber-300"><strong>The case report is a Microsoft Word document and is not included.</strong> VIPER cannot convert a Word document into its report format. Use &ldquo;Save a copy&hellip;&rdquo; on the Reports tab and send it separately.</li>
+                                            <li class="text-amber-300"><strong>This case&rsquo;s reports are written in Microsoft Word and are not included.</strong> VIPER cannot convert a Word document into its report format. Use &ldquo;Save a copy&hellip;&rdquo; on each report on the Reports tab and send them separately.</li>
                                             ` : ''}
                                             ${_asx ? `
                                             <li>Everything sits inside one folder named for you and this case, so it cannot scatter into the lead detective's own folders</li>
@@ -4690,7 +4690,7 @@
                     if (_reportIsWord()) {
                         need(16);
                         doc.setFontSize(10); doc.setFont(undefined, 'italic'); doc.setTextColor(...LGRAY);
-                        const wl = doc.splitTextToSize('The case report for this case was written in Microsoft Word and is provided separately. It is not reproduced in this report.', CW - 4);
+                        const wl = doc.splitTextToSize('The case reports for this case were written in Microsoft Word and are provided separately. They are not reproduced in this report.', CW - 4);
                         doc.text(wl, M + 2, y); y += wl.length * 5 + 2;
                         break;
                     }
@@ -9216,7 +9216,8 @@
         // VIPER editor (modules/reports/word-report-ui.js). The choice lives
         // on the case record — NOT in viperCaseReports, which saveReport()
         // and the popout's report-save overwrite wholesale. Switching never
-        // deletes either version. A Word report is left out of Export to DA.
+        // deletes either version. Word reports (a case may hold several) are
+        // left out of Export to DA.
         function _reportIsWord() {
             return !!(currentCase && currentCase.reportFormat === 'word');
         }
@@ -9238,8 +9239,9 @@
                     getCaseNumber: () => (currentCase && currentCase.caseNumber) || null,
                     getFormat: () => (_reportIsWord() ? 'word' : 'viper'),
                     setFormat: (f) => _setCaseReportField('reportFormat', f === 'word' ? 'word' : 'viper'),
-                    getWordName: () => (currentCase && currentCase.reportWordName) || null,
-                    setWordName: (n) => _setCaseReportField('reportWordName', n || null),
+                    // (5.4.1: a case holds several Word reports, so there is no
+                    // "chosen" one any more — currentCase.reportWordName, set by
+                    // 5.4.0, is left on old records and simply no longer read.)
                     getViperHtml: () => {
                         const ed = document.getElementById('reportEditor');
                         return ed ? ed.innerHTML : (caseReport || '');

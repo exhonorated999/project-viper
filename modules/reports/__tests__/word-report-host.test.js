@@ -5,11 +5,13 @@
  *
  * Slices the shipping glue out of case-detail-with-analytics.html and runs
  * it against the real word-report-ui.js. What it pins:
- *   - the choice is stored on the CASE RECORD (reportFormat/reportWordName),
- *     never in viperCaseReports, and a failed saveCase() rolls it back;
+ *   - the choice is stored on the CASE RECORD (reportFormat), never in
+ *     viperCaseReports, and a failed saveCase() rolls it back; the 5.4.0
+ *     "chosen report" field (reportWordName) is no longer wired in — every
+ *     Word file in the case is a report (5.4.1);
  *   - Word mode replaces the editor; VIPER mode keeps the editor and shows
  *     the switch; nothing is deleted by switching;
- *   - the export dialog and the DA PDF both say the Word report is not
+ *   - the export dialog and the DA PDF both say the Word reports are not
  *     included, and the PDF does NOT print the set-aside VIPER text.
  */
 const fs = require('fs');
@@ -71,6 +73,8 @@ function makeEnv(over) {
         ok('Word mode replaces the editor with the Word panel', /id="wrPanel"/.test(w) && !/id="reportEditor"/.test(w));
         ok('…carrying the export disclaimer', w.indexOf('Not included in Export to DA') !== -1);
         ok('…and never prints the set-aside VIPER text', w.indexOf('VIPER narrative text.') === -1);
+        const glue = slice('        function _reportIsWord() {', '        function initializeReportEditor() {');
+        ok('the page no longer hands the module a "chosen report" field', !/getWordName\s*:|setWordName\s*:/.test(glue));
     }
 
     console.log('\n[switching]');
@@ -124,11 +128,12 @@ function makeEnv(over) {
     console.log('\n[export dialog and the DA PDF]');
     {
         const modal = slice('        function openExportCaseModal(', '<div class="bg-viper-card/30 border border-viper-cyan/20 rounded-lg p-4 text-sm text-gray-300">');
-        ok('the reports row is tagged "Word report not included" in Word mode',
-            /tabId === 'reports' && _reportIsWord\(\) \? '<span[^']*>Word report not included<\/span>'/.test(modal));
+        ok('the reports row is tagged "Word reports not included" in Word mode',
+            /tabId === 'reports' && _reportIsWord\(\) \? '<span[^']*>Word reports not included<\/span>'/.test(modal));
         const info = slice('<li>All exports will be saved as a ZIP file for easy sharing</li>', '</ul>');
-        ok('the export notes say the Word report is not included and why',
-            /_reportIsWord\(\)/.test(info) && /is not included\./.test(info) && /cannot convert a Word document into its report format/.test(info));
+        ok('the export notes say the Word reports are not included, why, and to send each one',
+            /_reportIsWord\(\)/.test(info) && /are written in Microsoft Word and are not included\./.test(info) &&
+            /cannot convert a Word document into its report format/.test(info) && /on each report on the Reports tab/.test(info));
 
         const pdf = slice('                case \'reports\': {\n                    // A Word report', '                case \'opsplan\': {');
         ok('the DA PDF checks Word mode before reading viperCaseReports',
@@ -146,8 +151,8 @@ function makeEnv(over) {
         vm.createContext(env);
         const body = '(async () => { switch ("reports") {\n' + pdf + '\n} })()';
         await vm.runInContext(body, env);
-        ok('Word mode: the PDF says it was written in Word and is provided separately',
-            printed.some((p) => p[0] === 'text' && /written in Microsoft Word and is provided separately/.test(p[1])), printed);
+        ok('Word mode: the PDF says the reports were written in Word and are provided separately',
+            printed.some((p) => p[0] === 'text' && /written in Microsoft Word and are provided separately/.test(p[1])), printed);
         ok('…and does not print the VIPER text', !printed.some((p) => p[0] === 'html'));
         printed.length = 0;
         env.currentCase.reportFormat = 'viper';

@@ -5027,11 +5027,13 @@
                     itemHeading('Search Warrants');
                     caseWarrants.forEach((w, i) => {
                         need(30);
-                        fieldBold(`${i + 1}. ${w.type || 'Warrant'}`, w.issuedTo ? `→ ${w.issuedTo}` : '');
+                        const _isPrttW = WarrantStatus.hasExpiration && WarrantStatus.hasExpiration(w);
+                        fieldBold(`${i + 1}. ${_isPrttW ? WarrantStatus.typeLabel(w) : (w.type || 'Warrant')}`, w.issuedTo ? `→ ${w.issuedTo}` : '');
                         fieldBold('   Description', w.description);
                         fieldBold('   Date Signed', w.dateSigned ? formatDate(w.dateSigned) + (_warrantTimeLabel(w.timeSigned) ? ' at ' + _warrantTimeLabel(w.timeSigned) : '') : 'Not signed');
                         fieldBold('   Date Served', w.dateServed ? formatDate(w.dateServed) + (_warrantTimeLabel(w.timeServed) ? ' at ' + _warrantTimeLabel(w.timeServed) : '') : 'Not served');
-                        fieldBold('   Due Date', w.dueDate ? formatDate(w.dueDate) : 'None');
+                        if (_isPrttW) fieldBold('   Order Expires', w.expirationDate ? formatDate(w.expirationDate) : 'Not recorded');
+                        else fieldBold('   Due Date', w.dueDate ? formatDate(w.dueDate) : 'None');
                         if (w.judge) fieldBold('   Judge/Magistrate', w.judge);
                         // Report the real disposition. A closed-out preservation
                         // request must NOT read as "Return Received: Yes" —
@@ -14385,6 +14387,15 @@
             return !!(window.WarrantStatus && WarrantStatus.hasNothingToReceive({ type: t }));
         }
 
+        /* PRTT (Pen Register / Trap & Trace) orders expire. The type swaps
+         * the production due date for an expiration date, and the dashboard
+         * alerts on that date until it is acknowledged. The rule itself lives
+         * in WarrantStatus so this page and the dashboard cannot disagree. */
+        function _warrantIsPrtt(typeOrWarrant) {
+            const t = typeof typeOrWarrant === 'string' ? typeOrWarrant : (typeOrWarrant && typeOrWarrant.type);
+            return !!(window.WarrantStatus && WarrantStatus.hasExpiration && WarrantStatus.hasExpiration({ type: t }));
+        }
+
         /* ------------------------------------------------------------------
          * Optional times on the warrant dates
          * ------------------------------------------------------------------
@@ -14443,14 +14454,20 @@
         function warrantTypeChanged() {
             const sel = document.getElementById('warrantType');
             const isPres = _warrantIsPreservation(sel ? sel.value : '');
+            const isPrtt = _warrantIsPrtt(sel ? sel.value : '');
             const show = (id, on) => {
                 const el = document.getElementById(id);
                 if (el) el.classList.toggle('hidden', !on);
             };
             show('warrantDateSignedField', !isPres);
-            show('warrantDueDateField', !isPres);
+            show('warrantDueDateField', !isPres && !isPrtt);
+            show('warrantExpirationField', isPrtt);
             show('warrantCourtFieldsRow', !isPres);
             show('warrantCourtLevelRow', !isPres);
+            /* Required only while it is on screen: a hidden required input
+             * makes Chromium refuse the submit with no visible message. */
+            const expEl = document.getElementById('warrantExpirationDate');
+            if (expEl) expEl.required = isPrtt;
 
             const row = document.getElementById('warrantDatesRow');
             if (row) {
@@ -14503,7 +14520,12 @@
             const txt = window.WarrantStatus ? WarrantStatus.label(w) : '';
             if (!txt) return '';
             let cls = 'bg-gray-700/40 border-gray-600 text-gray-300';
-            if (WarrantStatus.isOverdue(w)) cls = 'bg-red-500/15 border-red-500/50 text-red-300';
+            if (WarrantStatus.isOverdue(w) || (WarrantStatus.needsExpirationAlert && WarrantStatus.needsExpirationAlert(w))) cls = 'bg-red-500/15 border-red-500/50 text-red-300';
+            else if (WarrantStatus.hasExpiration && WarrantStatus.hasExpiration(w) && w.expirationDate && !w.closedOut) {
+                // A PRTT is coloured by its expiry, never by "return received".
+                const n = WarrantStatus.daysUntilExpiration(w);
+                if (n !== null && n > 0 && n <= 7) cls = 'bg-viper-orange/15 border-viper-orange/40 text-viper-orange';
+            }
             else if (w.returnReceived || w.closedOut) cls = 'bg-viper-green/15 border-viper-green/40 text-viper-green';
             else {
                 const n = WarrantStatus.daysUntilDue(w);
@@ -14569,6 +14591,7 @@
                                             <option value="preservation">Preservation Request</option>
                                             <option value="subpoena">Subpoena</option>
                                             <option value="court-order">Court Order</option>
+                                            <option value="prtt">PRTT — Pen Register / Trap &amp; Trace</option>
                                             <option value="other">Other</option>
                                         </select>
                                     </div>
@@ -14620,6 +14643,15 @@
                                     <div id="warrantDueDateField">
                                         <label class="block text-sm font-medium text-gray-300 mb-2">Production Due Date</label>
                                         <input type="date" id="warrantDueDate" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white">
+                                    </div>
+                                    <!-- PRTT orders only: the date the authority
+                                         lapses. Takes the due date's slot — a
+                                         PRTT has no production deadline, and
+                                         the dashboard alerts on this date. -->
+                                    <div id="warrantExpirationField" class="hidden">
+                                        <label class="block text-sm font-medium text-gray-300 mb-2" for="warrantExpirationDate">Order Expires *</label>
+                                        <input type="date" id="warrantExpirationDate" class="w-full px-4 py-3 bg-viper-card/50 border border-gray-600 rounded-lg focus:border-viper-orange focus:ring-1 focus:ring-viper-orange outline-none text-white">
+                                        <p class="text-xs text-gray-500 mt-1">The dashboard alerts you on this date.</p>
                                     </div>
                                 </div>
                                 
@@ -14705,8 +14737,10 @@
             const sorted = [...caseWarrants].sort((a, b) => {
                 switch (warrantSortBy) {
                     case 'dueDate': {
-                        const da = a.dueDate ? new Date(a.dueDate + 'T00:00:00').getTime() : Infinity;
-                        const db = b.dueDate ? new Date(b.dueDate + 'T00:00:00').getTime() : Infinity;
+                        // A PRTT has no production date; its deadline is the expiry.
+                        const ka = a.dueDate || a.expirationDate, kb = b.dueDate || b.expirationDate;
+                        const da = ka ? new Date(ka + 'T00:00:00').getTime() : Infinity;
+                        const db = kb ? new Date(kb + 'T00:00:00').getTime() : Infinity;
                         return da - db;
                     }
                     case 'type': {
@@ -14717,8 +14751,8 @@
                     }
                     case 'status': {
                         // Overdue first, then pending (unserved), then complete
-                        const scoreA = WarrantStatus.isResolved(a) ? 2 : (WarrantStatus.isOverdue(a) ? 0 : 1);
-                        const scoreB = WarrantStatus.isResolved(b) ? 2 : (WarrantStatus.isOverdue(b) ? 0 : 1);
+                        const scoreA = WarrantStatus.isResolved(a) && !WarrantStatus.needsExpirationAlert(a) ? 2 : ((WarrantStatus.isOverdue(a) || WarrantStatus.needsExpirationAlert(a)) ? 0 : 1);
+                        const scoreB = WarrantStatus.isResolved(b) && !WarrantStatus.needsExpirationAlert(b) ? 2 : ((WarrantStatus.isOverdue(b) || WarrantStatus.needsExpirationAlert(b)) ? 0 : 1);
                         return scoreA - scoreB;
                     }
                     case 'dateSigned':
@@ -14737,11 +14771,18 @@
                 const noReturnExpected = WarrantStatus.hasNothingToReceive(warrant);
                 const daysUntilDue = dueDateLocal ? Math.ceil((dueDateLocal - todayLocal) / (1000 * 60 * 60 * 24)) : null;
                 const isPres = _warrantIsPreservation(warrant);
+                const isPrtt = _warrantIsPrtt(warrant);
+                const expAlert = WarrantStatus.needsExpirationAlert(warrant);
+                const expDays = WarrantStatus.daysUntilExpiration(warrant);
+                const expAcked = WarrantStatus.isExpirationAcknowledged(warrant);
+                const flagged = isOverdue || expAlert;
                 const expanded = !!_warrantExpanded[warrant.id];
-                const typeLabel = isPres ? 'PRESERVATION REQUEST' : warrant.type.toUpperCase().replace('-', ' ');
+                const typeLabel = isPres ? 'PRESERVATION REQUEST'
+                    : isPrtt ? 'PRTT — PEN REGISTER / TRAP &amp; TRACE'
+                    : warrant.type.toUpperCase().replace('-', ' ');
                 
                 return `
-                    <div class="glass-card rounded-xl mb-4 ${isOverdue ? 'border-2 border-red-500/50' : 'border-viper-orange/20'}" style="${_provAccent(warrant)}">
+                    <div class="glass-card rounded-xl mb-4 ${flagged ? 'border-2 border-red-500/50' : 'border-viper-orange/20'}" style="${_provAccent(warrant)}">
                         <!-- Header. Always visible, and the whole strip is the
                              fold control except where a button sits. -->
                         <div class="flex items-start justify-between p-5 cursor-pointer select-none" onclick="toggleWarrantCard(${warrant.id}, event)">
@@ -14749,7 +14790,7 @@
                                 <svg id="warrantChevron-${warrant.id}" style="transform: rotate(${expanded ? 90 : 0}deg)" class="w-4 h-4 mt-1.5 text-gray-400 flex-shrink-0 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                                 </svg>
-                                ${isOverdue ? `<span class="text-2xl leading-none">⚠️</span>` : `<span class="text-2xl leading-none">📜</span>`}
+                                ${flagged ? `<span class="text-2xl leading-none">⚠️</span>` : `<span class="text-2xl leading-none">📜</span>`}
                                 <div class="min-w-0 flex-1">
                                     <div class="flex items-center flex-wrap gap-2">
                                         <h4 class="text-lg font-bold">${typeLabel}</h4>
@@ -14824,6 +14865,18 @@
                                                     ${isOverdue ? `${Math.abs(daysUntilDue)} days overdue` : `${daysUntilDue} days remaining`}
                                                 </p>
                                             ` : ''}
+                                        </div>
+                                    ` : ''}
+                                    ${isPrtt && warrant.expirationDate ? `
+                                        <div class="bg-viper-card/50 rounded p-2 ${expAlert ? 'border-2 border-red-500' : ''}" data-prtt-expiry>
+                                            <p class="text-gray-400 text-xs">Order Expires</p>
+                                            <p class="${expAlert ? 'text-red-400 font-bold' : 'text-white'}">${formatDate(warrant.expirationDate)}</p>
+                                            ${!warrant.closedOut && expDays !== null ? `
+                                                <p class="text-xs ${expDays <= 0 ? (expAcked ? 'text-gray-400' : 'text-red-400') : expDays <= 7 ? 'text-viper-orange' : 'text-gray-400'}">
+                                                    ${WarrantStatus.expirationLabel(warrant)}
+                                                </p>
+                                            ` : ''}
+                                            ${expAcked ? `<p class="text-xs text-gray-500">Alert acknowledged ${new Date(warrant.expirationAcknowledgedAt).toLocaleDateString()}</p>` : ''}
                                         </div>
                                     ` : ''}
                                     ${warrant.courtReturnDate && !isPres ? `
@@ -14994,6 +15047,18 @@
                                     </div>
                                 </div>
                             ` : ''}
+                            ${expAlert ? `
+                                <div class="bg-red-500/10 border-2 border-red-500/50 rounded-lg p-3 mt-4 flex items-start space-x-2" data-prtt-expired-banner>
+                                    <svg class="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                                    </svg>
+                                    <div class="flex-1">
+                                        <p class="text-red-400 font-bold text-sm">${expDays === 0 ? 'PRTT ORDER EXPIRES TODAY' : 'PRTT ORDER EXPIRED'}</p>
+                                        <p class="text-red-300 text-xs mt-1">${expDays === 0 ? 'Today is the last day of this order.' : 'This order lapsed on ' + formatDate(warrant.expirationDate) + '.'} If it was extended, edit the warrant and enter the new expiration date.</p>
+                                        <button onclick="acknowledgeWarrantExpiration(${warrant.id})" data-prtt-ack class="mt-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/15 border border-red-500/40 text-red-300 hover:bg-red-500/25 transition-colors">Acknowledge — hide this alert</button>
+                                    </div>
+                                </div>
+                            ` : ''}
                         </div>
                     </div>
                 `;
@@ -15010,6 +15075,7 @@
             document.getElementById('warrantDateSigned').value = '';
             document.getElementById('warrantDateServed').value = '';
             document.getElementById('warrantDueDate').value = '';
+            document.getElementById('warrantExpirationDate').value = '';
             document.getElementById('warrantJudge').value = '';
             document.getElementById('warrantCourtReturnDate').value = '';
             document.getElementById('warrantTimeSigned').value = '';
@@ -15035,6 +15101,7 @@
             document.getElementById('warrantDateSigned').value = warrant.dateSigned || '';
             document.getElementById('warrantDateServed').value = warrant.dateServed || '';
             document.getElementById('warrantDueDate').value = warrant.dueDate || '';
+            document.getElementById('warrantExpirationDate').value = warrant.expirationDate || '';
             document.getElementById('warrantJudge').value = warrant.judge || '';
             document.getElementById('warrantCourtReturnDate').value = warrant.courtReturnDate || '';
             document.getElementById('warrantTimeSigned').value = warrant.timeSigned || '';
@@ -15088,6 +15155,7 @@
             const referenceNumber = document.getElementById('warrantReferenceNumber').value.trim();
             const description = document.getElementById('warrantDescription').value;
             const isPres = _warrantIsPreservation(type);
+            const isPrtt = _warrantIsPrtt(type);
             // A preservation request is not signed by a judge, has no
             // production due date and produces no court return.  Those inputs
             // are hidden for one, but a warrant switched to preservation on
@@ -15095,7 +15163,15 @@
             // source rather than merely hiding them in the card.
             const dateSigned = isPres ? '' : document.getElementById('warrantDateSigned').value;
             const dateServed = document.getElementById('warrantDateServed').value;
-            const dueDate = isPres ? '' : document.getElementById('warrantDueDate').value;
+            const dueDate = (isPres || isPrtt) ? '' : document.getElementById('warrantDueDate').value;
+            // PRTT orders carry an expiration date instead of a production
+            // due date. Any other type has no business holding one, so it is
+            // cleared at the source if the type was changed on edit.
+            const expirationDate = isPrtt ? (document.getElementById('warrantExpirationDate').value || '') : '';
+            if (isPrtt && !/^\d{4}-\d{2}-\d{2}$/.test(expirationDate)) {
+                showToast('Enter the date the PRTT order expires.', 'error');
+                return;
+            }
             const judge = isPres ? '' : document.getElementById('warrantJudge').value;
             const courtReturnDate = isPres ? '' : document.getElementById('warrantCourtReturnDate').value;
             // Times follow their own date: cleared with it, and cleared with
@@ -15147,6 +15223,14 @@
                     warrant.dateSigned = dateSigned;
                     warrant.dateServed = dateServed;
                     warrant.dueDate = dueDate;
+                    warrant.expirationDate = expirationDate;
+                    // The acknowledgement names the date it applied to, so an
+                    // extended order alerts again on its new date by itself.
+                    // Only a type change away from PRTT wipes it.
+                    if (!isPrtt) {
+                        warrant.expirationAcknowledgedAt = null;
+                        warrant.expirationAcknowledgedFor = null;
+                    }
                     warrant.judge = judge;
                     warrant.courtReturnDate = courtReturnDate;
                     warrant.timeSigned = timeSigned;
@@ -15171,6 +15255,9 @@
                     dateSigned: dateSigned,
                     dateServed: dateServed,
                     dueDate: dueDate,
+                    expirationDate: expirationDate,
+                    expirationAcknowledgedAt: null,
+                    expirationAcknowledgedFor: null,
                     judge: judge,
                     courtReturnDate: courtReturnDate,
                     timeSigned: timeSigned,
@@ -15367,6 +15454,27 @@
 
             saveWarrantsToStorage();
             renderTabContent('warrants');
+        }
+
+        /* Acknowledge a lapsed PRTT order: the alert is hidden here and on
+         * the dashboard. The expiry itself stays on the card, and a new
+         * expiration date (an extension) brings the alert back on that date. */
+        function acknowledgeWarrantExpiration(warrantId) {
+            const warrant = caseWarrants.find(w => w.id === warrantId);
+            if (!warrant || !WarrantStatus.acknowledgeExpiration(warrant)) return;
+            warrant.lastModified = new Date().toISOString();
+
+            audit('warrant_expiration_acknowledged', {
+                case_number: currentCase ? currentCase.caseNumber : null,
+                case_id: currentCase ? currentCase.id : null,
+                warrant_id: warrant.id,
+                type: warrant.type,
+                expiration_date: warrant.expirationDate,
+            });
+
+            saveWarrantsToStorage();
+            renderTabContent('warrants');
+            showToast('Alert acknowledged. The expiration date stays on the warrant.', 'success');
         }
         
         function uploadWarrantProduction(warrantId) {
@@ -37603,6 +37711,17 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         timestamp: _warrantEventIso(w.courtReturnDate, w.timeCourtReturn),
                         endTimestamp: null,
                         title: `Court Return` + (w.issuedTo ? ` — ${w.issuedTo}` : ''),
+                        description: w.description || '',
+                        lane: 'investigation', category: 'warrant', significance: 'supporting',
+                        entityLink: w.issuedTo || '', sourceType: 'auto:warrant', sourceId: w.id, color: null, createdAt: now
+                    });
+                }
+                if (w.expirationDate && window.WarrantStatus && WarrantStatus.hasExpiration && WarrantStatus.hasExpiration(w)) {
+                    auto.push({
+                        id: 'tl_auto_warrant_expires_' + w.id,
+                        timestamp: _warrantEventIso(w.expirationDate, ''),
+                        endTimestamp: null,
+                        title: `PRTT Order Expires` + (w.issuedTo ? ` — ${w.issuedTo}` : ''),
                         description: w.description || '',
                         lane: 'investigation', category: 'warrant', significance: 'supporting',
                         entityLink: w.issuedTo || '', sourceType: 'auto:warrant', sourceId: w.id, color: null, createdAt: now

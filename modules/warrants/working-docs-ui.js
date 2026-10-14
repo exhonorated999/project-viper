@@ -77,7 +77,7 @@
     }
     var TYPE_LABELS = {
         search: 'Search Warrant', arrest: 'Arrest Warrant', preservation: 'Preservation Request',
-        subpoena: 'Subpoena', 'court-order': 'Court Order', other: 'Warrant',
+        subpoena: 'Subpoena', 'court-order': 'Court Order', prtt: 'PRTT Order', other: 'Warrant',
     };
     function warrantLabel(w) {
         var t = isPreservation(w) ? 'Preservation Request' : (TYPE_LABELS[String((w && w.type) || '').toLowerCase()] || 'Warrant');

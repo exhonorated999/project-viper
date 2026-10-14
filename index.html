@@ -6007,8 +6007,8 @@
             let overdueCount = 0;
             
             Object.values(allWarrants).forEach(caseWarrants => {
-                caseWarrants.forEach(warrant => {
-                    if (WarrantStatus.isOverdue(warrant)) {
+                (Array.isArray(caseWarrants) ? caseWarrants : []).forEach(warrant => {
+                    if (warrant && WarrantStatus.isOverdue(warrant)) {
                         overdueCount++;
                     }
                 });
@@ -6993,9 +6993,9 @@
             const overdueWarrants = [];
             
             Object.entries(allWarrants).forEach(([caseNumber, warrants]) => {
-                warrants.forEach(warrant => {
-                    if (WarrantStatus.isOverdue(warrant)) {
-                        const caseInfo = allCases.find(c => c.caseNumber === caseNumber);
+                (Array.isArray(warrants) ? warrants : []).forEach(warrant => {
+                    if (warrant && WarrantStatus.isOverdue(warrant)) {
+                        const caseInfo = allCases.find(c => c && c.caseNumber === caseNumber);
                         overdueWarrants.push({
                             caseNumber: caseNumber,
                             warrant: warrant,
@@ -7019,6 +7019,7 @@
             const closedStatuses = new Set(['closed', 'closed-arrest', 'transferred', 'inactive']);
             const staleCases = [];
             allCases.forEach(c => {
+                if (!c) return;
                 const t = activityTimers[c.caseNumber];
                 if (!t || !t.enabled) return;
                 if (closedStatuses.has(c.status)) return;
@@ -7034,7 +7035,12 @@
             });
             staleCases.sort((a, b) => b.days - a.days);
 
-            const totalAlerts = overdueWarrants.length + staleCases.length;
+            // Lapsed PRTT orders. Listed first: an order that has expired
+            // means collection has stopped, which is the most time-critical
+            // thing on this card.
+            const expiredOrders = getExpiredOrdersList();
+
+            const totalAlerts = overdueWarrants.length + staleCases.length + expiredOrders.length;
             countElement.textContent = `${totalAlerts} Active`;
 
             if (totalAlerts === 0) {
@@ -7043,7 +7049,20 @@
                 // Every alert is listed. The box is about three cards tall and
                 // scrolls — the old "+N more" line was text, not a button, so
                 // the alerts past the third could not be reached at all.
-                let html = overdueWarrants.map(item => `
+                let html = expiredOrders.map(item => `
+                    <div data-prtt-alert class="mb-3 p-3 bg-red-500/10 border border-red-500/40 rounded-lg text-left cursor-pointer hover:bg-red-500/20 transition-colors" onclick="openCaseDetail(${item.caseId})">
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="text-sm font-medium text-red-400">Case ${caseTextEsc(item.caseNumber)}</span>
+                            <span class="text-xs text-red-400">${item.days === 0 ? 'expires today' : item.days + 'd expired'}</span>
+                        </div>
+                        <div class="text-xs text-gray-300">PRTT order${item.warrant.issuedTo ? ' → ' + caseTextEsc(item.warrant.issuedTo) : ''}</div>
+                        <div class="flex items-center justify-between gap-2 mt-1">
+                            <span class="text-xs text-gray-400">${item.days === 0 ? 'Expires' : 'Expired'}: ${new Date(item.warrant.expirationDate + 'T00:00:00').toLocaleDateString()}</span>
+                            <button type="button" data-prtt-ack onclick="event.stopPropagation(); acknowledgePrttExpiration(${JSON.stringify(String(item.caseNumber)).replace(/"/g, '&quot;')}, ${JSON.stringify(item.warrant.id).replace(/"/g, '&quot;')})" class="px-2 py-1 rounded text-xs font-medium bg-red-500/15 border border-red-500/40 text-red-300 hover:bg-red-500/30 transition-colors">Acknowledge</button>
+                        </div>
+                    </div>
+                `).join('');
+                html += overdueWarrants.map(item => `
                     <div class="mb-3 p-3 bg-viper-orange/10 border border-viper-orange/30 rounded-lg text-left cursor-pointer hover:bg-viper-orange/20 transition-colors" onclick="openCaseDetail(${item.caseId})">
                         <div class="flex items-center justify-between mb-1">
                             <span class="text-sm font-medium text-viper-orange">Case ${item.caseNumber}</span>
@@ -7249,13 +7268,15 @@
         // Update notification badge
         function updateNotificationBadge() {
             const overdueCount = checkOverdueWarrants();
+            let expiredCount = 0;
+            try { expiredCount = getExpiredOrdersList().length; } catch (_) {}
             let supPending = 0;
             try {
                 if (window.SupervisorLink && SupervisorLink.getInboxCounts) {
                     supPending = SupervisorLink.getInboxCounts().totalPending || 0;
                 }
             } catch (_) {}
-            const total = overdueCount + supPending;
+            const total = overdueCount + expiredCount + supPending;
             const badge = document.querySelector('.notification-badge');
             if (badge) {
                 if (total > 0) {
@@ -7824,14 +7845,73 @@
             const allCases = JSON.parse(localStorage.getItem('viperCases')) || [];
             const overdue = [];
             Object.entries(allWarrants).forEach(([caseNumber, warrants]) => {
-                (warrants || []).forEach(warrant => {
-                    if (WarrantStatus.isOverdue(warrant)) {
-                        const caseInfo = allCases.find(c => c.caseNumber === caseNumber);
+                (Array.isArray(warrants) ? warrants : []).forEach(warrant => {
+                    if (warrant && WarrantStatus.isOverdue(warrant)) {
+                        const caseInfo = allCases.find(c => c && c.caseNumber === caseNumber);
                         overdue.push({ caseNumber, warrant, caseId: caseInfo ? caseInfo.id : null });
                     }
                 });
             });
             return overdue;
+        }
+
+        // ── Expired PRTT orders ────────────────────────────────────────────
+        // A Pen Register / Trap & Trace order carries an expiration date. The
+        // alert appears ON that date and stays until the officer acknowledges
+        // it (or closes the order out). The rule — including "an extended
+        // order alerts again on its new date" — is WarrantStatus's, shared
+        // with the case page.
+        function getExpiredOrdersList() {
+            const allWarrants = JSON.parse(localStorage.getItem('viperCaseWarrants')) || {};
+            const allCases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            const out = [];
+            if (!window.WarrantStatus || !WarrantStatus.needsExpirationAlert) return out;
+            Object.entries(allWarrants).forEach(([caseNumber, warrants]) => {
+                (Array.isArray(warrants) ? warrants : []).forEach(warrant => {
+                    if (!warrant || !WarrantStatus.needsExpirationAlert(warrant)) return;
+                    const caseInfo = allCases.find(c => c && c.caseNumber === caseNumber);
+                    out.push({
+                        caseNumber,
+                        warrant,
+                        caseId: caseInfo ? caseInfo.id : null,
+                        days: -WarrantStatus.daysUntilExpiration(warrant), // 0 = expires today
+                    });
+                });
+            });
+            // Expiring today first, then the most recently lapsed.
+            out.sort((a, b) => a.days - b.days);
+            return out;
+        }
+
+        function acknowledgePrttExpiration(caseNumber, warrantId) {
+            const allWarrants = JSON.parse(localStorage.getItem('viperCaseWarrants')) || {};
+            const list = Array.isArray(allWarrants[caseNumber]) ? allWarrants[caseNumber] : [];
+            const warrant = list.find(w => w && w.id === warrantId);
+            if (!warrant || !WarrantStatus.acknowledgeExpiration(warrant)) {
+                if (typeof viperToast === 'function') viperToast('That order could not be found — open the case to check it.', 'error');
+                return;
+            }
+            warrant.lastModified = new Date().toISOString();
+            try {
+                localStorage.setItem('viperCaseWarrants', JSON.stringify(allWarrants));
+            } catch (e) {
+                // Never report an acknowledgement that did not save.
+                if (typeof viperToast === 'function') viperToast('Could not save the acknowledgement: ' + (e && e.message ? e.message : e), 'error');
+                return;
+            }
+            try {
+                audit('warrant_expiration_acknowledged', {
+                    case_number: caseNumber,
+                    warrant_id: warrant.id,
+                    type: warrant.type,
+                    expiration_date: warrant.expirationDate,
+                    from: 'dashboard',
+                });
+            } catch (_) {}
+            updateWarrantAlerts();
+            try { updateNotificationBadge(); } catch (_) {}
+            if (document.getElementById('bellDropdown')) { try { renderBellDropdown(); } catch (_) {} }
+            if (typeof viperToast === 'function') viperToast('Alert acknowledged. The expiration date stays on the warrant.', 'success');
         }
 
         function closeBellDropdown() {
@@ -7898,6 +7978,52 @@
                 : { cyberTotal: 0, caseTotal: 0, reviewTotal: 0 };
 
             let anything = false;
+
+            // Expired PRTT orders
+            let expired = [];
+            try { expired = getExpiredOrdersList(); } catch (_) {}
+            if (expired.length) {
+                anything = true;
+                body.appendChild(_bellSectionTitle('Expired PRTT Orders (' + expired.length + ')'));
+                expired.forEach(item => {
+                    const row = document.createElement('div');
+                    row.setAttribute('data-prtt-bell', '');
+                    row.style.cssText = 'border:1px solid rgba(248,113,113,.3);border-radius:10px;padding:11px 13px;'
+                        + 'margin-bottom:9px;background:#151b28;cursor:pointer;';
+                    const top = document.createElement('div');
+                    top.style.cssText = 'display:flex;align-items:center;gap:8px;';
+                    const icon = document.createElement('span'); icon.style.color = '#f87171'; icon.textContent = '\u26A0';
+                    const cn = document.createElement('span');
+                    cn.style.cssText = 'color:#fff;font-size:13.5px;font-weight:600;';
+                    cn.textContent = 'Case ' + item.caseNumber;
+                    const when = document.createElement('span');
+                    when.style.cssText = 'margin-left:auto;color:#f87171;font-size:12px;';
+                    when.textContent = item.days === 0 ? 'expires today' : item.days + 'd expired';
+                    top.append(icon, cn, when);
+                    const sub = document.createElement('div');
+                    sub.style.cssText = 'display:flex;align-items:center;gap:8px;color:#9aa4b2;font-size:12px;margin-top:5px;';
+                    const what = document.createElement('span');
+                    what.textContent = 'PRTT order' + (item.warrant.issuedTo ? ' to ' + item.warrant.issuedTo : '');
+                    const ack = document.createElement('button');
+                    ack.type = 'button';
+                    ack.textContent = 'Acknowledge';
+                    ack.style.cssText = 'margin-left:auto;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);'
+                        + 'color:#fca5a5;border-radius:6px;padding:3px 8px;font-size:11.5px;cursor:pointer;';
+                    ack.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        acknowledgePrttExpiration(item.caseNumber, item.warrant.id);
+                    });
+                    sub.append(what, ack);
+                    row.append(top, sub);
+                    row.addEventListener('click', () => {
+                        if (item.caseId) {
+                            localStorage.setItem('currentCaseId', item.caseId);
+                            window.location.href = 'case-detail-with-analytics.html';
+                        }
+                    });
+                    body.appendChild(row);
+                });
+            }
 
             // Overdue warrants
             if (overdue.length) {

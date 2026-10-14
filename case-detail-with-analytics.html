@@ -78,6 +78,10 @@
          own reader because the general-purpose one filled the name and the
          licence number with the wrong text. -->
     <script src="modules/dmv/tx-dps-parser.js"></script>
+    <!-- Colorado driver records returned through an Open Fox terminal
+         (Westminster PD). The general-purpose reader filled the licence
+         number with the page heading and a disclaimer line. -->
+    <script src="modules/dmv/co-openfox-parser.js"></script>
     <!-- Colorado VEHICLE query printouts (the "RESPONSE FROM DMV" page out
          of the Central Square records window). Separate from the driver
          readers above: it fills a vehicle form, not a person. -->
@@ -17794,6 +17798,13 @@
             catch (_) { return (typeof window !== 'undefined' && window.TxDpsParser) || null; }
         }
 
+        // Colorado driver records returned through Open Fox are read by
+        // modules/dmv/co-openfox-parser.js, resolved lazily for the same reason.
+        function _coFox() {
+            try { return (typeof CoOpenFoxParser !== 'undefined' && CoOpenFoxParser) ? CoOpenFoxParser : (window.CoOpenFoxParser || null); }
+            catch (_) { return (typeof window !== 'undefined' && window.CoOpenFoxParser) || null; }
+        }
+
         // Detect issuing state from the printout (e.g. Colorado DOR header, OLN
         // state suffix, CO__LICENSE_CATEGORY label).  Returns a 2-letter code
         // or '' when nothing recognisable was found.  Later printouts (CA, TX…)
@@ -17803,6 +17814,8 @@
             // TX: DPS Image Manager printout — the page states no state of
             // its own, but it is the only thing that produces this page.
             if (_txDps() && _txDps().detect(t)) return 'TX';
+            // CO: a driver record returned through Open Fox from the DOR.
+            if (_coFox() && _coFox().detect(t)) return 'CO';
             // CO: state-specific labels we've seen in DOR exports
             if (/\bCO__LICENSE_CATEGORY\b/i.test(t) || /\bColorado\s+Department\s+of\s+Revenue\b/i.test(t)
                 || /\bDOR(?:-R\d|\s*R\d)/i.test(t)) return 'CO';
@@ -17966,6 +17979,15 @@
             const tx = _txDps();
             if (tx && tx.detect(text)) {
                 return tx.parse(text);
+            }
+
+            // Colorado through Open Fox: one label per line, a spacer line,
+            // then the value.  The reader below matches "Driver License" in
+            // the page heading and fills the licence number with the rest of
+            // the heading and a disclaimer line.  Read by its own module.
+            const fox = _coFox();
+            if (fox && fox.detect(text)) {
+                return fox.parse(text);
             }
 
             // CAL-PHOTO printouts use a distinct labeled-field layout with

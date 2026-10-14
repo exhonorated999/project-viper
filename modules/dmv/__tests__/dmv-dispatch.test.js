@@ -17,6 +17,7 @@ const vm = require('vm');
 
 const ROOT = path.join(__dirname, '..', '..', '..');
 const TX = require(path.join(__dirname, '..', 'tx-dps-parser.js'));
+const FOX = require(path.join(__dirname, '..', 'co-openfox-parser.js'));
 
 let pass = 0, fail = 0;
 const ok = (n, c, x) => { if (c) { pass++; console.log('  PASS  ' + n); } else { fail++; console.log('  FAIL  ' + n + (x !== undefined ? ' -> ' + JSON.stringify(x) : '')); } };
@@ -38,6 +39,7 @@ const DMV_BLOCK = lift('const DMV_COLOR_MAP = {', 'async function importDmvPrint
 const sandbox = {
     console, Math, JSON, parseInt, parseFloat, String, RegExp, Object, Array, Date, isNaN,
     TxDpsParser: TX,
+    CoOpenFoxParser: FOX,
     showToast: function () {},
     _viewSuspectDocPopup: function () {}
 };
@@ -125,6 +127,30 @@ ok('a Colorado record still reads its address', co.address === '1600 WOODSIDE LN
 ok('Colorado is still detected as Colorado', detectDmvState(CO) === 'CO', detectDmvState(CO));
 
 /* ------------------------------------------------------------------ */
+console.log('\n[a Colorado Open Fox driver return reaches the Open Fox reader]');
+
+const FOXDOC = fs.readFileSync(
+    path.join(__dirname, '..', 'fixtures', 'co-openfox-dl.synthetic.txt'), 'utf8');
+
+const f = parseDmvText(FOXDOC);
+ok('it went through the Open Fox reader', f.format === 'co-openfox', f.format);
+ok('the license number is the number, not the page heading', f.dlNumber === '99-123-4567', f.dlNumber);
+ok('the name is read', f.name === 'MARGARET OLIVE FENWICK', f.name);
+ok('the date of birth is the record\'s, not the query\'s', f.dob === '1982-04-17', f.dob);
+ok('the street line is separated from the city line',
+    f.address === '1600 WOODSIDE LN APT 4' && f.addressCityStateZip === 'WESTMINSTER, CO 80031-1234', f);
+ok('height comes back in inches', f.height === '69', f.height);
+ok('weight comes back as a bare number', f.weight === '180', f.weight);
+ok('eye colour is tidied', f.eyeColor === 'Hazel', f.eyeColor);
+ok('hair colour is tidied', f.hairColor === 'Brown', f.hairColor);
+ok('the state is reported as Colorado', detectDmvState(FOXDOC) === 'CO', detectDmvState(FOXDOC));
+ok('the record carries Colorado as the issuing state', f.dlState === 'CO', f.dlState);
+ok('Open Fox does not claim a Texas printout', !FOX.detect(TXDOC));
+ok('Open Fox does not claim a CAL-PHOTO record', !FOX.detect(CAL));
+ok('Open Fox does not claim the older Colorado DOR record', !FOX.detect(CO));
+ok('the older Colorado DOR record still reads through the old path', parseDmvText(CO).format === undefined);
+
+/* ------------------------------------------------------------------ */
 console.log('\n[the Texas check cannot swallow the other states]');
 
 ok('Texas does not claim a CAL-PHOTO record', detectDmvState(CAL) !== 'TX');
@@ -153,6 +179,10 @@ ok('California still works without the Texas module',
     alt.parseDmvText(CAL).dlNumber === 'D6074798');
 ok('Colorado still works without the Texas module',
     alt.parseDmvText(CO).dlNumber === '123456789');
+ok('parseDmvText does not throw without the Open Fox module',
+    (function () { try { alt.parseDmvText(FOXDOC); return true; } catch (e) { return false; } })());
+ok('detectDmvState does not throw without the Open Fox module',
+    (function () { try { alt.detectDmvState(FOXDOC); return true; } catch (e) { return false; } })());
 
 /* ------------------------------------------------------------------ */
 console.log('\n[the page is wired to the module]');
@@ -162,6 +192,8 @@ ok('the Texas reader is loaded by the page',
     RAW.indexOf('modules/dmv/tx-dps-parser.js') >= 0);
 ok('the Texas reader is loaded synchronously, like the other parsers',
     /<script src="modules\/dmv\/tx-dps-parser\.js"><\/script>/.test(RAW));
+ok('the Open Fox reader is loaded synchronously by the page',
+    /<script src="modules\/dmv\/co-openfox-parser\.js"><\/script>/.test(RAW));
 ok('race is offered on the import preview',
     RAW.indexOf('fields.push(`<b>Race:</b> ${parsed.race}`)') >= 0);
 ok('race is filled on all four person tabs',

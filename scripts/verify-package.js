@@ -66,10 +66,14 @@ if (pkg) {
   if (pkg.version === expected) pass('version matches source (' + expected + ')');
   else fail('version mismatch: asar=' + pkg.version + ' source=' + expected);
 
-  // 3. The entry point must exist and be valid JavaScript.
+  // 3. The entry point must exist and be valid JavaScript. Compile it the
+  //    way Electron loads it — as a CommonJS module, i.e. inside Node's
+  //    module wrapper function — so a legal top-level `return` (the portable
+  //    update helper branch at the top of electron-main.js) is accepted.
+  //    Corrupt or truncated bytes still fail to compile.
   try {
     const mainBuf = asar.extractFile(asarPath, pkg.main);
-    new vm.Script(mainBuf.toString('utf8'), { filename: pkg.main });
+    new vm.Script(require('module').wrap(mainBuf.toString('utf8')), { filename: pkg.main });
     pass('entry point ' + pkg.main + ' parses (' + mainBuf.length + ' bytes)');
   } catch (e) {
     fail('entry point ' + pkg.main + ' unusable: ' + e.message);

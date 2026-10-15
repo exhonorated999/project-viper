@@ -305,6 +305,7 @@ class DatapilotUI {
                                 ${this._kv('IMEI', dev.imei)}
                                 ${this._kv('Serial', dev.serial)}
                                 ${this._kv('OS', dev.osVersion)}
+                                ${this._kv('Device Time Zone', dev.timeZone)}
                                 ${this._kv('Acquisition', sum.acquisitionDate || sum.created)}
                                 ${this._kv('Examiner', sum.examiner)}
                                 ${this._kv('Case Ref', sum.caseRef)}
@@ -746,14 +747,14 @@ class DatapilotUI {
             });
         }
         if (dateFilter) {
-            events = events.filter(e => (e.date || '').startsWith(dateFilter));
+            events = events.filter(e => this._dayKey(e.date) === dateFilter);
         }
 
         // Group by date for separators
         const groups = [];
         let currentDate = null;
         for (const ev of events) {
-            const dKey = (ev.date || '').split('T')[0] || 'Unknown';
+            const dKey = this._dayKey(ev.date) || 'Unknown';
             if (dKey !== currentDate) {
                 groups.push({ date: dKey, items: [] });
                 currentDate = dKey;
@@ -948,14 +949,14 @@ class DatapilotUI {
             const b = ensureBucket(m.address);
             b.msgs.push(m);
             const iso = m.timestampIso || '';
-            if (iso && iso > b.lastDateIso) { b.lastDateIso = iso; b.lastDate = iso.split('T')[0]; }
+            if (iso && iso > b.lastDateIso) { b.lastDateIso = iso; b.lastDate = this._dayKey(iso); }
         }
         for (const c of calls) {
             const addr = c.address || c.number || '';
             const b = ensureBucket(addr);
             b.calls.push(c);
             const iso = c.timestampIso || '';
-            if (iso && iso > b.lastDateIso) { b.lastDateIso = iso; b.lastDate = iso.split('T')[0]; }
+            if (iso && iso > b.lastDateIso) { b.lastDateIso = iso; b.lastDate = this._dayKey(iso); }
         }
         // Also include contacts with no comms (so investigator can browse)
         for (const c of contacts) {
@@ -1927,9 +1928,26 @@ class DatapilotUI {
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
 
+    /**
+     * The examiner's calendar day ("YYYY-MM-DD") for a stored instant. Message
+     * times are true UTC instants, so slicing the ISO string would file an
+     * evening message under the next day.
+     */
+    _dayKey(v) {
+        if (!v) return '';
+        const s = String(v);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+        const d = new Date(s);
+        if (isNaN(d)) return s.split('T')[0];
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
     _friendlyDate(s) {
         if (!s) return '';
-        const d = new Date(s);
+        // A bare date is a calendar day, not midnight UTC — build it locally
+        // or it renders as the previous day west of Greenwich.
+        const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s));
+        const d = dm ? new Date(Number(dm[1]), Number(dm[2]) - 1, Number(dm[3])) : new Date(s);
         if (isNaN(d)) return s;
         return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
     }

@@ -496,7 +496,7 @@ class DatapilotCoach {
     }
 
     _renderDetailCommsForDate(imp, date) {
-        const events = this._collectThreadEvents(imp).filter(e => (e.date || '').startsWith(date));
+        const events = this._collectThreadEvents(imp).filter(e => this._dayKey(e.date) === date);
         return this._renderDetailEventList(events, `No comms on ${date}.`);
     }
 
@@ -576,7 +576,7 @@ class DatapilotCoach {
         const groups = [];
         let currentDate = null;
         for (const ev of events) {
-            const dKey = (ev.date || '').split('T')[0] || 'Unknown';
+            const dKey = this._dayKey(ev.date) || 'Unknown';
             if (dKey !== currentDate) { groups.push({ date: dKey, items: [] }); currentDate = dKey; }
             groups[groups.length - 1].items.push(ev);
         }
@@ -586,8 +586,26 @@ class DatapilotCoach {
         `).join('');
     }
 
+    /** Examiner-local "YYYY-MM-DD" for a stored instant (see datapilot-ui _dayKey). */
+    _dayKey(v) {
+        if (!v) return '';
+        const s = String(v);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+        const d = new Date(s);
+        if (isNaN(d)) return s.split('T')[0];
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
+    /** Examiner-local "HH:MM" for a stored instant. */
+    _localHM(v) {
+        if (!v) return '';
+        const d = new Date(v);
+        if (isNaN(d)) return (String(v).split('T')[1] || '').slice(0, 5);
+        return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    }
+
     _renderDetailEvent(ev) {
-        const time = ev.date ? (ev.date.split('T')[1] || '').slice(0, 5) : '';
+        const time = this._localHM(ev.date);
         const dirLabel = ev.dir === 'outgoing' ? '→ Sent' : (ev.dir === 'incoming' ? '← Recv' : '↔');
         const cls = ev.kind === 'call' ? 'call' : (ev.dir === 'outgoing' ? 'out' : (ev.dir === 'incoming' ? 'in' : ''));
         const icon = ev.kind === 'call' ? '📞 ' : '';
@@ -611,7 +629,7 @@ class DatapilotCoach {
         const byDay = {};
         for (const m of (imp.messages || [])) {
             if (!m.timestampIso) continue;
-            const d = m.timestampIso.slice(0, 10);
+            const d = this._dayKey(m.timestampIso);
             byDay[d] = (byDay[d] || 0) + 1;
         }
         const counts = Object.values(byDay);

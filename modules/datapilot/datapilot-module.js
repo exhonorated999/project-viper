@@ -107,6 +107,28 @@ class DatapilotModule {
         if (!this.activeImportId && this.data.imports.length) {
             this.activeImportId = this.data.imports[0].id;
         }
+        this._repairStoredImports();
+    }
+
+    /**
+     * Imports stored by builds before 5.4.2 read DataPilot's device-local
+     * message/call times as UTC (shown hours off) and put the IMEI in Phone
+     * Number. Correct them once, in place, and save. Resolved at call time —
+     * never at load — so script order cannot silently disable it.
+     */
+    _repairStoredImports() {
+        const T = (typeof window !== 'undefined' && window.DatapilotTime) || (typeof globalThis !== 'undefined' && globalThis.DatapilotTime);
+        if (!T || typeof T.repairImport !== 'function') {
+            console.warn('DatapilotTime not loaded — stored DataPilot times not corrected');
+            return;
+        }
+        let changed = false;
+        for (const imp of this.data.imports) {
+            try { if (T.repairImport(imp)) changed = true; } catch (e) { console.warn('DataPilot import repair failed:', e); }
+        }
+        if (changed) {
+            Promise.resolve(this.saveData()).catch(e => console.warn('DataPilot repair save failed:', e));
+        }
     }
 
     /**
@@ -384,6 +406,7 @@ class DatapilotModule {
                 fileName: displayName || folderPath.split(/[\\/]/).pop(),
                 folderPath,
                 format: data.format || 'csv',
+                timeFixVersion: data.timeFixVersion || 0,   // 0 → repairImport corrects it on next load
                 importedAt: new Date().toISOString(),
                 deviceInfo: data.deviceInfo,
                 summary: data.summary,
@@ -440,9 +463,11 @@ class DatapilotModule {
             const data = res.data;
             // Preserve id, fileName, importedAt, flags. Replace parsed arrays.
             imp.deviceInfo = data.deviceInfo;
+            imp.timeFixVersion = data.timeFixVersion || 0;
             imp.summary = data.summary;
             imp.contacts = data.contacts;
             imp.messages = data.messages;
+            if (Array.isArray(data.chats)) imp.chats = data.chats;
             imp.calls = data.calls;
             imp.calendar = data.calendar;
             imp.apps = data.apps;

@@ -32,6 +32,7 @@
 const fs = require('fs');
 const fsp = require('fs').promises;
 const path = require('path');
+const DatapilotTime = require('./datapilot-time');
 
 // SQLite is only needed for DPX. Lazy-loaded so CSV-only environments don't
 // fail if the native module is missing.
@@ -186,6 +187,7 @@ class DatapilotParser {
         const result = {
             folderPath,
             format: 'csv',
+            timeFixVersion: DatapilotTime.TIME_FIX_VERSION,   // CSV dates were always read as local time
             parsedAt: new Date().toISOString(),
             deviceInfo: null,
             summary: {},
@@ -305,6 +307,12 @@ class DatapilotParser {
             result.summary = this._dpxParseSummary(db, caseDb);
             result.deviceInfo = this._dpxParseDeviceInfo(db, caseDb);
 
+            // DataPilot's plain datetime columns are the device's wall-clock
+            // time. Every section below reads them in the device's zone, so
+            // it must be known first. (Synchronous from here to `finally`.)
+            this._dpxZone = DatapilotTime.zoneFromDevice(result.deviceInfo);
+            result.timeFixVersion = DatapilotTime.TIME_FIX_VERSION;
+
             // Contacts
             result.contacts = this._dpxParseContacts(db);
 
@@ -354,6 +362,7 @@ class DatapilotParser {
 
             result.stats = this._computeStats(result);
         } finally {
+            this._dpxZone = null;
             try { db.close(); } catch (_) {}
         }
 
@@ -399,7 +408,21 @@ class DatapilotParser {
         try { return JSON.parse(val); } catch (_) { return fallback; }
     }
 
-    /** Convert SQLite datetime ('YYYY-MM-DD HH:MM:SS' or ISO) to ISO string. */
+    /**
+     * DataPilot's plain (non-"Utc") datetime columns hold the device's
+     * wall-clock time. Read them in the device's zone (set per import in
+     * _parseDpxFolder) and return a true UTC ISO string.
+     */
+    _dpxLocal(s, opts) {
+        return DatapilotTime.deviceLocalToIso(s, this._dpxZone || null, opts);
+    }
+
+    /**
+     * Convert a datetime that is ALREADY UTC ('YYYY-MM-DD HH:MM:SS' with no
+     * marker, or ISO) to an ISO string. Use only for columns DataPilot
+     * documents as UTC (…Utc columns, WhatsApp "Message Date (UTC)") — the
+     * plain columns go through _dpxLocal.
+     */
     _dpxIso(s) {
         if (!s) return '';
         const str = String(s).trim();
@@ -499,14 +522,21 @@ class DatapilotParser {
             return '';
         };
 
+        // DataPilot writes the IMEI into PhoneNumber; the subscriber number,
+        // when it has one, is in MDN. cleanIdentity keeps hardware ids out
+        // of the Phone Number field.
+        const ident = DatapilotTime.cleanIdentity(devInfo);
         const out = {
             make:        get('Make', 'Manufacturer', 'Vendor', 'Brand'),
             model:       get('Model', 'DeviceModel', 'ModelName', 'Product'),
-            phoneNumber: get('PhoneNumber', 'Phone Number', 'MSISDN'),
+            phoneNumber: ident.phoneNumber,
+            imei:        ident.imei,
             carrier:     get('Carrier', 'WirelessCarrier', 'Wireless Carrier', 'Operator'),
             serial:      get('Serial', 'SerialNumber', 'Serial Number', 'IMEI'),
+            osVersion:   ident.osVersion,
             firmware:    get('Firmware', 'FirmwareVersion', 'Firmware Version', 'OS', 'OSVersion', 'AndroidVersion'),
-            clockUtc:    get('ClockUtc', 'Clock', 'Clock (UTC)', 'CurrentTime'),
+            clockUtc:    get('ClockUTCDateTime', 'ClockUtc', 'Clock', 'Clock (UTC)', 'CurrentTime'),
+            clockLocal:  get('ClockLocalDateTime', 'ClockLocal'),
             timeZone:    get('TimeZone', 'Time Zone'),
         };
 
@@ -517,9 +547,11 @@ class DatapilotParser {
                 try {
                     const r = cdb.prepare(`SELECT * FROM DeviceInfo LIMIT 1`).get();
                     if (r) {
+                        const ci = DatapilotTime.cleanIdentity(r);
                         out.make = out.make || r.Make || r.Vendor || '';
                         out.model = out.model || r.Model || '';
-                        out.phoneNumber = out.phoneNumber || r.PhoneNumber || '';
+                        out.phoneNumber = out.phoneNumber || ci.phoneNumber;
+                        out.imei = out.imei || ci.imei;
                         out.serial = out.serial || r.Serial || r.IMEI || '';
                     }
                 } catch (_) {}
@@ -664,8 +696,8 @@ class DatapilotParser {
                     sha3: r.SHA3 || '',
                     sha256: r.SHA256 || '',
                     md5: r.MD5 || '',
-                    lastModified: this._dpxIso(r.LastModifiedLocal || r.LastModifiedUtc),
-                    dateTaken: this._dpxIso(r.DateTimeTaken),
+                    lastModified: r.LastModifiedUtc ? this._dpxIso(r.LastModifiedUtc) : this._dpxLocal(r.LastModifiedLocal),
+                    dateTaken: this._dpxLocal(r.DateTimeTaken),
                     dimension: r.Dimension || '',
                     cameraModel: r.Model || '',
                     gpsRaw: r.GpsCoordinates || '',
@@ -687,7 +719,7 @@ class DatapilotParser {
                     sha3: r.SHA3 || '',
                     sha256: r.SHA256 || '',
                     md5: r.MD5 || '',
-                    lastModified: this._dpxIso(r.LastModifiedLocal || r.LastModifiedUtc),
+                    lastModified: r.LastModifiedUtc ? this._dpxIso(r.LastModifiedUtc) : this._dpxLocal(r.LastModifiedLocal),
                 });
             }
         }
@@ -717,7 +749,7 @@ class DatapilotParser {
                 service: r.ServiceName || '',
                 owner: r.ChatOwner || '',
                 title: r.Title || '',
-                lastMessageAt: this._dpxIso(r.MessageDateTime),
+                lastMessageAt: this._dpxLocal(r.MessageDateTime),
                 participants: partsArr.map(p => typeof p === 'string' ? p : (p && (p.Name || p.Address)) || '').filter(Boolean),
                 lastMessage: r.LastMessage || '',
                 messageCount: r.MessageCount || 0,
@@ -760,7 +792,7 @@ class DatapilotParser {
                 chatStyle: chat ? chat.style : '',
                 service: chat ? chat.service : (msgType === 'sms' || msgType === 'mms' ? 'Telephony' : ''),
                 timestamp: r.DateTime || '',
-                timestampIso: this._dpxIso(r.DateTime),
+                timestampIso: this._dpxLocal(r.DateTime),
                 type: msgType + (direction === 'outgoing' ? ' outgoing' : ' incoming'),
                 direction,
                 address: String(address || '').trim(),
@@ -1074,7 +1106,7 @@ class DatapilotParser {
                 no,
                 uid: r.CallHistoryUUID || '',
                 timestamp: r.DateTime || '',
-                timestampIso: this._dpxIso(r.DateTime),
+                timestampIso: this._dpxLocal(r.DateTime),
                 type: t.replace(/^TYPE_/, '').toLowerCase(),
                 direction,
                 name: r.Name || '',
@@ -1119,8 +1151,8 @@ class DatapilotParser {
                 title: r.Title || '',
                 description: r.Description || '',
                 location: r.Location || r.Address || '',
-                start: this._dpxIso(r.StartDateTime),
-                end: this._dpxIso(r.EndDateTime),
+                start: this._dpxLocal(r.StartDateTime, { floating: !!r.AllDay }),
+                end: this._dpxLocal(r.EndDateTime, { floating: !!r.AllDay }),
                 allDay: !!r.AllDay,
                 organizer: r.Organizer || '',
                 notes: r.Notes || '',
@@ -1237,7 +1269,7 @@ class DatapilotParser {
                 if (isFinite(lat) && isFinite(lon)) {
                     out[key] = out[key] || {};
                     out[key].gps = { lat, lon };
-                    if (r.DateTimeTaken) out[key].dateTaken = this._dpxIso(r.DateTimeTaken);
+                    if (r.DateTimeTaken) out[key].dateTaken = this._dpxLocal(r.DateTimeTaken);
                     if (sha.model) out[key].model = sha.model;
                 }
             }
@@ -1317,13 +1349,16 @@ class DatapilotParser {
         const rows = await this._readCsvSafe(path.join(folderPath, 'DeviceInfo.csv'));
         if (rows.length < 2) return null;
         const obj = this._rowsToKeyedObject(rows);
+        const ident = DatapilotTime.cleanIdentity(obj);
         // Normalize
         return {
             make: obj['Make'] || '',
             model: obj['Model'] || '',
-            phoneNumber: obj['Phone Number'] || '',
+            phoneNumber: ident.phoneNumber,
+            imei: ident.imei,
             carrier: obj['Wireless Carrier'] || '',
             serial: obj['Serial Number'] || '',
+            osVersion: ident.osVersion,
             firmware: obj['Firmware Version'] || '',
             clockUtc: obj['Clock (UTC)'] || '',
             timeZone: obj['Time Zone'] || '',

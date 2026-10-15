@@ -90,6 +90,7 @@
             color: #e2e8f0;
         }
         #editor img { max-width: 100%; height: auto; border-radius: 4px; margin: 10px 0; }
+        #editor a, #editor a * { color: #38bdf8; text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
         .status {
             background: #12151d;
             border-top: 1px solid rgba(255,255,255,0.06);
@@ -135,11 +136,13 @@
 
     <div class="status">
         <span id="statusLeft">Loading&hellip;</span>
-        <span id="statusRight">Saves automatically every 5 minutes</span>
+        <span id="statusRight">Saves automatically every 5 minutes &middot; Ctrl+click a link to open it</span>
     </div>
 
     <!-- Photo downscaling. Must load before the editor script below. -->
     <script src="modules/_shared/case-storage.js"></script>
+    <!-- Web links: paste a bare address → link; Ctrl+click → VIPER browser. -->
+    <script src="modules/case-notes/note-links.js"></script>
     <script>
         // Case Note pop-out.
         //
@@ -245,6 +248,7 @@
 
         // Paste images straight in, same as the main note editor.
         editor.addEventListener('paste', (e) => {
+            if (window.NoteLinks && window.NoteLinks.pasteAsLink(e, document)) { markDirty(); return; }
             const items = (e.clipboardData && e.clipboardData.items) || [];
             for (let i = 0; i < items.length; i++) {
                 if (items[i].type.indexOf('image') === -1) continue;

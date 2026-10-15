@@ -3221,6 +3221,31 @@ ipcMain.handle('open-external-url', async (_e, url) => {
   return false;
 });
 
+// --- Links in Case Notes open in the VIPER browser window ---
+// One remembered sign-in shared by every link window, wiped by Settings →
+// Links in Case Notes → Sign out. See modules/_shared/link-browser.js.
+let _linkBrowser = null;
+function _getLinkBrowser() {
+  if (_linkBrowser) return _linkBrowser;
+  _linkBrowser = require('./modules/_shared/link-browser.js').createLinkBrowser({
+    BrowserWindow, BrowserView, session, shell, ipcMain, Menu,
+    clipboard: electron.clipboard,
+    iconPath,
+    toolbarFile: path.join(__dirname, 'link-browser.html'),
+    toolbarPreload: path.join(__dirname, 'link-browser-preload.js'),
+    log: (...a) => console.warn('[link-browser]', ...a)
+  });
+  return _linkBrowser;
+}
+ipcMain.handle('open-web-link', async (_e, url) => {
+  try { return _getLinkBrowser().open(url); }
+  catch (err) { return { success: false, error: err && err.message ? err.message : String(err) }; }
+});
+ipcMain.handle('web-links-sign-out', async () => {
+  try { return await _getLinkBrowser().signOut(); }
+  catch (err) { return { success: false, error: err && err.message ? err.message : String(err) }; }
+});
+
 // --- App version (reads from package.json via Electron) ---
 ipcMain.handle('get-app-version', () => app.getVersion());
 

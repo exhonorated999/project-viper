@@ -3362,6 +3362,34 @@
                     </div>
                 </div>
 
+                <!-- Links in Case Notes — the VIPER browser window's remembered sign-in -->
+                <div class="glass-card rounded-xl p-6">
+                    <div class="flex items-center justify-between cursor-pointer" onclick="toggleWebLinksCard()">
+                        <h3 class="text-xl font-bold flex items-center gap-2">
+                            <svg class="w-6 h-6 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                            </svg>
+                            Links in Case Notes
+                        </h3>
+                        <svg id="webLinksCardChevron" class="w-5 h-5 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </div>
+                    <div id="webLinksCardBody" class="hidden mt-4">
+                    <p class="text-gray-400 text-sm mb-4">
+                        Paste a Google Drive, OneDrive or any web link into a case note and it becomes clickable. It opens in a VIPER browser window where you can view and edit your files. VIPER remembers your Google / Microsoft sign-in so you only sign in once.
+                    </p>
+                    <div class="flex items-center justify-between bg-viper-dark rounded-lg p-4 border border-viper-cyan/20 gap-4">
+                        <div class="min-w-0">
+                            <p class="font-medium">Sign out of Google / Microsoft in VIPER</p>
+                            <p class="text-gray-400 text-xs">Closes any open VIPER browser windows and forgets the saved sign-ins. Use this on a shared computer, or before handing the drive to someone else.</p>
+                            <p id="webLinksStatus" class="text-xs mt-1 hidden"></p>
+                        </div>
+                        <button id="webLinksSignOutBtn" onclick="signOutWebLinks()" class="flex-shrink-0 px-4 py-2 rounded-lg border border-red-400/40 text-red-300 hover:bg-red-400/10 text-sm font-medium transition-colors">
+                            Sign out
+                        </button>
+                    </div>
+                    </div>
+                </div>
+
                 <!-- GenLogs and TRACE are now in the Investigative Tools section below -->
 
                 <!-- Supervisor Link Toggle -->
@@ -8029,6 +8057,40 @@
     function toggleMediaPlayerCard()      { toggleSettingsCard('mediaPlayerCardBody', 'mediaPlayerCardChevron'); }
     function toggleSupervisorLinkCard()   { toggleSettingsCard('supervisorLinkCardBody', 'supervisorLinkCardChevron'); }
     function toggleTelemetryCard()        { toggleSettingsCard('telemetryBody', 'telemetryCardChevron'); }
+    function toggleWebLinksCard()         { toggleSettingsCard('webLinksCardBody', 'webLinksCardChevron'); }
+
+    // Links in Case Notes — wipe the VIPER browser window's saved sign-ins
+    // (modules/_shared/link-browser.js → signOut). Not destructive to any
+    // case data: the worst outcome is signing in to Google again.
+    async function signOutWebLinks() {
+        const btn = document.getElementById('webLinksSignOutBtn');
+        const status = document.getElementById('webLinksStatus');
+        const say = (msg, ok) => {
+            status.textContent = msg;
+            status.className = 'text-xs mt-1 ' + (ok ? 'text-green-400' : 'text-red-400');
+        };
+        if (!window.electronAPI || typeof window.electronAPI.webLinksSignOut !== 'function') {
+            say('Not available in this window — restart VIPER and try again.', false);
+            return;
+        }
+        btn.disabled = true;
+        btn.textContent = 'Signing out…';
+        try {
+            const r = await window.electronAPI.webLinksSignOut();
+            if (r && r.success) {
+                const n = r.closedWindows || 0;
+                say('Signed out. ' + (n ? n + ' browser window' + (n === 1 ? '' : 's') + ' closed. ' : '') +
+                    'The next link you open will ask you to sign in.', true);
+            } else {
+                say('Sign out failed' + (r && r.error ? ': ' + r.error : '.'), false);
+            }
+        } catch (e) {
+            say('Sign out failed: ' + (e && e.message ? e.message : e), false);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Sign out';
+        }
+    }
 
     // ============================================
     // TRACE NETWORK SEARCH

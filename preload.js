@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   isDevBuild: () => { try { return ipcRenderer.sendSync('get-is-dev'); } catch { return false; } },
   platform: process.platform,  // 'win32' | 'darwin' | 'linux' — for telemetry & UA-aware code
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
+  // Links in Case Notes: open in the VIPER browser window (remembered
+  // Google / Microsoft sign-in), and wipe that sign-in from Settings.
+  openWebLink: (url) => ipcRenderer.invoke('open-web-link', url),
+  webLinksSignOut: () => ipcRenderer.invoke('web-links-sign-out'),
 
   // Resolve a real filesystem path from a dropped File (Electron 32+ safe).
   // In Electron <32, File.path also still works in the renderer.

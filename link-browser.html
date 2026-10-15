@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
+<title>VIPER Browser</title>
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { background: #0f1117; color: #e2e8f0; overflow: hidden;
+        font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif; font-size: 13px; }
+    .bar { height: 44px; display: flex; align-items: center; gap: 6px; padding: 0 10px;
+        background: #161921; border-bottom: 1px solid rgba(0, 224, 255, 0.15); }
+    .nav { width: 30px; height: 30px; border: 0; border-radius: 6px; background: transparent;
+        color: #94a3b8; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .nav:hover:not(:disabled) { background: rgba(0, 224, 255, 0.12); color: #00e0ff; }
+    .nav:disabled { opacity: 0.3; cursor: default; }
+    .nav svg { width: 16px; height: 16px; }
+    .addr { flex: 1; min-width: 0; height: 30px; display: flex; align-items: center; gap: 7px; padding: 0 10px;
+        background: #0f1117; border: 1px solid #263041; border-radius: 6px; }
+    .addr svg { width: 13px; height: 13px; flex-shrink: 0; }
+    .addr .lock { color: #4ade80; }
+    .addr .open { color: #fbbf24; }
+    .url { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        user-select: text; cursor: text; color: #64748b; }
+    .url b { color: #e2e8f0; font-weight: 600; }
+    .spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(0, 224, 255, 0.25);
+        border-top-color: #00e0ff; animation: s 0.8s linear infinite; flex-shrink: 0; display: none; }
+    .loading .spin { display: block; }
+    @keyframes s { to { transform: rotate(360deg); } }
+    .btn { height: 30px; padding: 0 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600;
+        white-space: nowrap; flex-shrink: 0; border: 1px solid #334155; background: transparent; color: #cbd5e1; }
+    .btn:hover { border-color: rgba(0, 224, 255, 0.5); color: #00e0ff; }
+    .btn.primary { background: rgba(0, 224, 255, 0.12); border-color: rgba(0, 224, 255, 0.4); color: #00e0ff; }
+    .btn.primary:hover { background: rgba(0, 224, 255, 0.22); }
+    .banner { height: 36px; display: none; align-items: center; gap: 10px; padding: 0 14px;
+        background: rgba(251, 191, 36, 0.12); border-bottom: 1px solid rgba(251, 191, 36, 0.35); color: #fde68a; }
+    .banner.show { display: flex; }
+    .banner .msg { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .banner .btn { height: 26px; border-color: rgba(251, 191, 36, 0.5); color: #fde68a; }
+    .banner .btn:hover { background: rgba(251, 191, 36, 0.15); color: #fff7d6; }
+    .copied { color: #4ade80 !important; border-color: rgba(74, 222, 128, 0.5) !important; }
+</style>
+</head>
+<body>
+    <div class="bar" id="bar">
+        <button class="nav" id="back" title="Back (Alt+Left)" disabled>
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M15 19l-7-7 7-7"/></svg>
+        </button>
+        <button class="nav" id="forward" title="Forward (Alt+Right)" disabled>
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M9 5l7 7-7 7"/></svg>
+        </button>
+        <button class="nav" id="reload" title="Reload (F5)">
+            <svg id="reloadIcon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        </button>
+        <div class="addr" id="addr">
+            <svg id="lockIcon" class="lock" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+            <span class="url" id="url"></span>
+            <span class="spin"></span>
+        </div>
+        <button class="btn" id="copy" title="Copy this page's address">Copy link</button>
+        <button class="btn primary" id="external" title="Open this page in your normal web browser">Open in my browser</button>
+    </div>
+    <div class="banner" id="banner">
+        <span class="msg" id="bannerMsg"></span>
+        <button class="btn" id="bannerRetry">Try again</button>
+        <button class="btn" id="bannerExternal">Open in my browser</button>
+    </div>
+<script>
+(function () {
+    'use strict';
+    var api = window.viperLinkBrowser;
+    function $(id) { return document.getElementById(id); }
+    function cmd(name) { if (api) api.command(name); }
+
+    $('back').onclick = function () { cmd('back'); };
+    $('forward').onclick = function () { cmd('forward'); };
+    $('external').onclick = function () { cmd('external'); };
+    $('bannerExternal').onclick = function () { cmd('external'); };
+    $('bannerRetry').onclick = function () { cmd('reload'); };
+    var loading = false;
+    $('reload').onclick = function () { cmd(loading ? 'stop' : 'reload'); };
+    $('copy').onclick = function () {
+        cmd('copy');
+        var b = $('copy');
+        b.textContent = 'Copied';
+        b.classList.add('copied');
+        setTimeout(function () { b.textContent = 'Copy link'; b.classList.remove('copied'); }, 1500);
+    };
+
+    var LOCK = 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z';
+    var OPEN = 'M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z';
+    var RELOAD = 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15';
+    var STOP = 'M6 18L18 6M6 6l12 12';
+
+    function renderUrl(u) {
+        var el = $('url');
+        el.textContent = '';
+        el.title = u || '';
+        try {
+            var p = new URL(u);
+            var host = document.createElement('b');
+            host.textContent = p.hostname;
+            el.appendChild(document.createTextNode(p.protocol + '//'));
+            el.appendChild(host);
+            el.appendChild(document.createTextNode((p.port ? ':' + p.port : '') + p.pathname + p.search + p.hash));
+        } catch (_) {
+            el.textContent = u || '';
+        }
+    }
+
+    function render(st) {
+        if (!st) return;
+        loading = !!st.loading;
+        $('back').disabled = !st.canGoBack;
+        $('forward').disabled = !st.canGoForward;
+        $('addr').classList.toggle('loading', loading);
+        $('reload').title = loading ? 'Stop' : 'Reload (F5)';
+        $('reloadIcon').firstElementChild.setAttribute('d', loading ? STOP : RELOAD);
+        var lock = $('lockIcon');
+        lock.setAttribute('class', st.secure ? 'lock' : 'open');
+        lock.firstElementChild.setAttribute('d', st.secure ? LOCK : OPEN);
+        renderUrl(st.error && st.error.url ? st.error.url : st.url);
+
+        var msg = '';
+        if (st.googleBlocked) {
+            msg = 'Google refused sign-in inside VIPER this time. Press "Try again", or use "Open in my browser" to work on this file.';
+        } else if (st.error) {
+            msg = 'This page could not be opened (' + (st.error.description || 'load failed') +
+                '). Check the connection, or open it in your browser.';
+        }
+        $('bannerMsg').textContent = msg;
+        $('bannerMsg').title = msg;
+        $('banner').classList.toggle('show', !!msg);
+    }
+
+    if (api) api.onState(render);
+})();
+</script>
+</body>
+</html>

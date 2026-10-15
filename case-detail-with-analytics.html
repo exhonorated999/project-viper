@@ -35,6 +35,10 @@
          writes nothing. Loads before the page script because every card
          renderer below asks it for a chip. -->
     <script src="modules/_shared/provenance.js"></script>
+    <!-- Web links in Case Notes (Google Drive, OneDrive, any http/https):
+         turned into links when a note is shown, opened in the VIPER browser
+         window on click. Installs its own click handler. -->
+    <script src="modules/case-notes/note-links.js"></script>
     <!-- Source Validation: the "see it in the original return" window.
          Buttons beside parsed values call window.SourceViewer.openToken(). -->
     <link rel="stylesheet" href="modules/_shared/source-viewer.css" />
@@ -223,6 +227,23 @@
             white-space: pre-wrap;
             overflow-wrap: anywhere;
         }
+        /* Web links in notes (modules/case-notes/note-links.js). A click
+           opens the VIPER browser window; while editing, Ctrl+click. The
+           descendant rule beats the editor's forced span colour. */
+        .note-rendered a,
+        .note-rendered a *,
+        #noteEditor a,
+        #noteEditor a * {
+            color: #38bdf8 !important;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+            overflow-wrap: anywhere;
+        }
+        .note-rendered a { cursor: pointer; }
+        .note-rendered a:hover,
+        .note-rendered a:hover * { color: #7dd3fc !important; }
+        body.light-mode .note-rendered a, body.light-mode .note-rendered a *,
+        body.light-mode #noteEditor a, body.light-mode #noteEditor a * { color: #0369a1 !important; }
         
         /* Custom scrollbar styling */
         ::-webkit-scrollbar {
@@ -7422,7 +7443,7 @@
                                         </div>
                                         <!-- Editor Area -->
                                         <div class="p-4 min-h-[220px] bg-viper-card/30" style="font-family: Arial, sans-serif;">
-                                            <div id="noteEditor" contenteditable="true" spellcheck="true" class="outline-none text-gray-100 min-h-[200px]" style="font-size: 14px; line-height: 1.6;" data-placeholder="Enter note details — paste screenshots with Ctrl+V, drag &amp; drop files below…"></div>
+                                            <div id="noteEditor" contenteditable="true" spellcheck="true" class="outline-none text-gray-100 min-h-[200px]" style="font-size: 14px; line-height: 1.6;" data-placeholder="Enter note details — paste screenshots or Google Drive / OneDrive links with Ctrl+V, drag &amp; drop files below…"></div>
                                         </div>
                                     </div>
                                 </div>
@@ -7784,6 +7805,9 @@
             // On commit these are moved out to disk entirely (see
             // _noteImagesToDisk), so what stays in storage is just the markup.
             editor.addEventListener('paste', function(e) {
+                // A bare web address becomes a link on the spot, so the
+                // officer can see it took. Everything else falls through.
+                if (window.NoteLinks && window.NoteLinks.pasteAsLink(e, document)) return;
                 const items = e.clipboardData && e.clipboardData.items;
                 if (!items) return;
                 for (let i = 0; i < items.length; i++) {
@@ -8124,14 +8148,18 @@
             return '<p>' + _escapeHtml(txt).replace(/\r?\n/g, '<br>') + '</p>';
         }
 
-        // Render-safe HTML used in the notes list (strips <script>/<iframe>)
+        // Render-safe HTML used in the notes list (strips <script>/<iframe>),
+        // with web addresses made clickable (see modules/case-notes/note-links.js).
+        // Display only — the stored note is never rewritten here.
         function _noteRenderHtml(note) {
             const html = _noteResolveHtml(note);
-            return html
+            const safe = html
                 .replace(/<\s*script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
                 .replace(/<\s*iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
                 .replace(/\son\w+\s*=\s*"[^"]*"/gi, '')
                 .replace(/\son\w+\s*=\s*'[^']*'/gi, '');
+            const NL = window.NoteLinks;
+            return (NL && typeof NL.linkifyHtml === 'function') ? NL.linkifyHtml(safe) : safe;
         }
 
         function _noteAttachmentList(note) {

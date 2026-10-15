@@ -767,6 +767,7 @@ class DatapilotUI {
         const totalEvents = active.msgs.length + active.calls.length;
         const filterActive = !!(dayHour || dateFilter || (filter && filter !== 'all'));
         const visibleEvents = events.length;
+        const flagAll = this._flagAllButton(events, filterActive && visibleEvents !== totalEvents);
         const filterChip = (dayHour || dateFilter) ? `
             <div class="dp-filter-chip">
                 Filter:
@@ -791,6 +792,7 @@ class DatapilotUI {
                         : ''}
                 </div>
                 <div class="dp-thread-filters">
+                    ${flagAll}
                     <button class="dp-pill-btn ${filter === 'all' ? 'on' : ''}" data-dp-dirfilter="all">All</button>
                     <button class="dp-pill-btn ${filter === 'sent' ? 'on' : ''}" data-dp-dirfilter="sent">Sent</button>
                     <button class="dp-pill-btn ${filter === 'received' ? 'on' : ''}" data-dp-dirfilter="received">Received</button>
@@ -914,6 +916,7 @@ class DatapilotUI {
         });
         const clear = root.querySelector('#dp-clear-bucket');
         if (clear) clear.onclick = () => { this.commsState.dayHourFilter = null; this.commsState.dateFilter = null; this.module.render(); };
+        this._wireFlagAll(root);
         this._wireFlagButtons(root);
     }
 
@@ -1870,8 +1873,95 @@ class DatapilotUI {
                 // Update flag count in header
                 const cnt = document.querySelector('.dp-flag-count');
                 if (cnt) cnt.textContent = String(this.module.flagCount());
+                // Keep the conversation's Flag All / Unflag All label honest.
+                if (section === 'messages' || section === 'calls') this._refreshFlagAllButton(root);
             };
         });
+    }
+
+    /**
+     * "Flag All" for the open conversation. It acts on exactly what the
+     * thread is showing — with Sent / Received / Calls or a date filter on,
+     * only those items. Once everything shown is flagged it becomes
+     * "Unflag All". Remembers its targets for the click handler.
+     */
+    _flagAllButton(events, filtered) {
+        const targets = { messages: [], calls: [] };
+        for (const ev of (events || [])) {
+            if (!ev || !ev.uid) continue;
+            if (ev.kind === 'msg') targets.messages.push(String(ev.uid));
+            else if (ev.kind === 'call') targets.calls.push(String(ev.uid).replace('call_', ''));
+        }
+        this._flagAllTargets = { targets, filtered: !!filtered };
+        return this._flagAllMarkup();
+    }
+
+    _flagAllCounts() {
+        const st = this._flagAllTargets;
+        if (!st) return { total: 0, flaggedN: 0 };
+        const { messages, calls } = st.targets;
+        let flaggedN = 0;
+        for (const k of messages) if (this.module.isFlagged('messages', k)) flaggedN++;
+        for (const k of calls) if (this.module.isFlagged('calls', k)) flaggedN++;
+        return { total: messages.length + calls.length, flaggedN };
+    }
+
+    _flagAllMarkup() {
+        const st = this._flagAllTargets;
+        const { total, flaggedN } = this._flagAllCounts();
+        if (!st || !total) return '';
+        const allOn = flaggedN === total;
+        const scope = st.filtered ? 'Shown' : 'All';
+        const label = `${allOn ? '⚐ Unflag' : '🚩 Flag'} ${scope} (${total.toLocaleString()})`;
+        const what = st.filtered ? 'every item shown' : 'every message and call in this conversation';
+        const title = allOn
+            ? `Remove the flag from ${what}`
+            : (flaggedN
+                ? `${flaggedN.toLocaleString()} of ${total.toLocaleString()} already flagged — flag the rest`
+                : `Flag ${what} for the Evidence push`);
+        return `<button class="dp-pill-btn dp-flag-all-btn ${allOn ? 'is-on' : ''}" id="dp-flag-all" data-dp-flagall="${allOn ? 'off' : 'on'}" title="${this._esc(title)}">${this._esc(label)}</button>`;
+    }
+
+    _wireFlagAll(root) {
+        const btn = root && root.querySelector('#dp-flag-all');
+        if (btn) btn.onclick = (e) => { e.stopPropagation(); this._flagAllInThread(btn.dataset.dpFlagall === 'on'); };
+    }
+
+    _refreshFlagAllButton(root) {
+        const btn = root && root.querySelector('#dp-flag-all');
+        if (!btn) return;
+        const html = this._flagAllMarkup();
+        if (!html) return;
+        btn.outerHTML = html;
+        this._wireFlagAll(root);
+    }
+
+    async _flagAllInThread(on) {
+        const st = this._flagAllTargets;
+        if (!st) return;
+        const { total, flaggedN } = this._flagAllCounts();
+        const n = on ? total - flaggedN : flaggedN;
+        if (!n) return;
+        const where = st.filtered ? 'shown in this conversation' : 'in this conversation';
+        const plural = n === 1 ? '' : 's';
+        // Unflagging undoes work, so always ask. Flagging only asks when it
+        // is big enough to swamp the Evidence bundle.
+        if (on ? n >= 100 : n > 1) {
+            const msg = on
+                ? `Flag ${n.toLocaleString()} item${plural} ${where}? They will all be included in the next Push to Evidence.`
+                : `Remove the flag from ${n.toLocaleString()} item${plural} ${where}?`;
+            const okText = on ? 'Flag All' : 'Unflag';
+            let ok;
+            if (typeof viperConfirm === 'function') ok = await viperConfirm(msg, { okText });
+            else ok = (typeof confirm === 'function') ? confirm(msg) : true;
+            if (!ok) return;
+        }
+        const changed = this.module.setFlags(st.targets, on);
+        if (typeof showToast === 'function') {
+            showToast(on ? `Flagged ${changed.toLocaleString()} item${changed === 1 ? '' : 's'}`
+                         : `Removed ${changed.toLocaleString()} flag${changed === 1 ? '' : 's'}`, 'success');
+        }
+        this.module.render();
     }
 
     _openFlagsSummary() {

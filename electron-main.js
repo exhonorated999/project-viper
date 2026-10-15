@@ -14,6 +14,18 @@ if (process.argv.includes('--viper-apply-portable-update')) {
   return;
 }
 
+// DRIVE-COPY UPDATE STARTED BY THE INSTALLER — also before anything else.
+// Setup.exe (build/installer.nsh, preInit) unpacks the new program into
+// %TEMP%\viper-drive-setup\app and starts it with this flag to update a
+// VIPER folder on an external drive in place (the one-time bridge for drive
+// copies on 5.4.1 and older). Shows a small progress window, swaps the
+// program files, relaunches the drive copy. See modules/_shared/drive-setup.js.
+// Contract with the installer script: never rename the flag.
+if (process.argv.includes('--viper-drive-setup')) {
+  require('./modules/_shared/drive-setup.js').run(electron, process.argv);
+  return;
+}
+
 const { app, BrowserView, ipcMain, shell, dialog, globalShortcut, session, protocol, net, Menu, safeStorage } = electron;
 const path = require('path');
 const http = require('http');
@@ -3441,6 +3453,14 @@ function _portableUpdateAfterLoad() {
       else dialog.showMessageBox(opts).catch(() => {});
     } catch (_) {}
   };
+  // The installer's drive-update leaves its unpacked copy of this version in
+  // %TEMP%\viper-drive-setup; remove it once this version is up and running.
+  setTimeout(() => {
+    try {
+      const r = require('./modules/_shared/drive-setup.js').cleanupSetupDir(ofs, app.getPath('temp'), app.getVersion());
+      if (r.reason !== 'absent') console.log('[update] drive-setup cleanup:', r.removed, r.reason);
+    } catch (e) { console.warn('[update] drive-setup cleanup failed:', e.message); }
+  }, 30000);
   if (st.status === 'applied') {
     // Keep the previous version on disk until the new one has proven it runs.
     cleanupLater(30000);

@@ -542,14 +542,56 @@ class DatapilotModule {
         } else {
             imp.flagged[section].push(key);
         }
+        if (this._flagSets) this._flagSets.delete(imp.flagged[section]);
         this.saveData();
         return idx < 0; // returns true if newly flagged
     }
 
+    /**
+     * Flag (on=true) or unflag many records at once — e.g. a whole
+     * conversation. `bySection` is { messages: [uid…], calls: [no…], … }.
+     * One save for the lot. Returns how many flags actually changed.
+     */
+    setFlags(bySection, on) {
+        const imp = this.getActiveImport();
+        if (!imp || !bySection || typeof bySection !== 'object') return 0;
+        if (!imp.flagged) imp.flagged = {};
+        let changed = 0;
+        for (const section of Object.keys(bySection)) {
+            const keys = Array.isArray(bySection[section]) ? bySection[section] : [];
+            const arr = Array.isArray(imp.flagged[section]) ? imp.flagged[section] : [];
+            if (this._flagSets) this._flagSets.delete(arr);
+            if (on) {
+                const have = new Set(arr);
+                for (const raw of keys) {
+                    const k = raw == null ? '' : String(raw);
+                    if (!k || have.has(k)) continue;
+                    have.add(k);
+                    arr.push(k);
+                    changed++;
+                }
+                imp.flagged[section] = arr;
+            } else {
+                const drop = new Set(keys.map(k => String(k)));
+                const kept = arr.filter(k => !drop.has(String(k)));
+                changed += arr.length - kept.length;
+                imp.flagged[section] = kept;
+            }
+        }
+        if (changed) this.saveData();
+        return changed;
+    }
+
     isFlagged(section, key) {
         const imp = this.getActiveImport();
-        if (!imp || !imp.flagged || !imp.flagged[section]) return false;
-        return imp.flagged[section].includes(key);
+        const arr = imp && imp.flagged && imp.flagged[section];
+        if (!Array.isArray(arr)) return false;
+        // A whole flagged conversation can be thousands of keys, checked once
+        // per bubble — look up in a Set, not by scanning the array.
+        if (!this._flagSets) this._flagSets = new WeakMap();
+        let set = this._flagSets.get(arr);
+        if (!set) { set = new Set(arr); this._flagSets.set(arr, set); }
+        return set.has(key);
     }
 
     flagCount() {
@@ -785,9 +827,27 @@ class DatapilotModule {
             return c ? c.name : '';
         };
 
+        // One pass per section to index records by flag key. A flagged
+        // conversation is thousands of keys against 100k+ messages — a
+        // per-key .find() here froze the Evidence push.
+        const indexBy = (list, keyOf) => {
+            const map = new Map();
+            for (const x of (list || [])) {
+                if (!x) continue;
+                const k = keyOf(x);
+                if (k !== '' && k != null && !map.has(k)) map.set(k, x);
+            }
+            return map;
+        };
+        const msgByUid    = indexBy(imp.messages, x => x.uid);
+        const callByNo    = indexBy(imp.calls,    x => String(x.no));
+        const contactByNo = indexBy(imp.contacts, x => String(x.no));
+        const mediaBySha  = indexBy(imp.media,    x => x.sha256 || '');
+        const mediaByNo   = indexBy(imp.media,    x => String(x.no));
+
         // Messages
         for (const k of (f.messages || [])) {
-            const m = (imp.messages || []).find(x => x.uid === k);
+            const m = msgByUid.get(k);
             if (!m) continue;
             out.messages.push({
                 uid: m.uid,
@@ -809,7 +869,7 @@ class DatapilotModule {
 
         // Calls
         for (const k of (f.calls || [])) {
-            const c = (imp.calls || []).find(x => String(x.no) === String(k));
+            const c = callByNo.get(String(k));
             if (!c) continue;
             out.calls.push({
                 no: c.no,
@@ -825,7 +885,7 @@ class DatapilotModule {
 
         // Contacts
         for (const k of (f.contacts || [])) {
-            const c = (imp.contacts || []).find(x => String(x.no) === String(k));
+            const c = contactByNo.get(String(k));
             if (!c) continue;
             out.contacts.push({
                 no: c.no,
@@ -841,8 +901,8 @@ class DatapilotModule {
         const exifIdx = imp.photoExifByHash || {};
         for (const k of (f.media || [])) {
             // Flag key is sha256 (preferred) or String(no)
-            let m = (imp.media || []).find(x => x.sha256 === k);
-            if (!m) m = (imp.media || []).find(x => String(x.no) === String(k));
+            let m = k ? mediaBySha.get(k) : undefined;
+            if (!m) m = mediaByNo.get(String(k));
             if (!m) continue;
             const exif = m.exifHash ? exifIdx[m.exifHash] : null;
             const gps = exif && exif.gps;

@@ -747,6 +747,15 @@
 .dp-thread-name .dp-mono { color: #9ca3af; font-size: 12px; }
 .dp-thread-stats { display: flex; gap: 12px; color: #94a3b8; font-size: 12px; }
 .dp-thread-filters { margin-left: auto; display: flex; gap: 4px; }
+.dp-thread-filters .dp-flag-all-btn {
+    margin-right: 8px;
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, 0.45);
+    background: rgba(239, 68, 68, 0.08);
+    white-space: nowrap;
+}
+.dp-thread-filters .dp-flag-all-btn:hover { color: #fff; border-color: #ef4444; background: rgba(239, 68, 68, 0.18); }
+.dp-thread-filters .dp-flag-all-btn.is-on { color: #9ca3af; border-color: #374151; background: rgba(31, 41, 55, 0.5); }
 
 .dp-thread-body {
     flex: 1; overflow-y: auto; padding: 14px 18px; min-height: 0;
@@ -1474,6 +1483,11 @@ body.light-mode .dp-pill-btn.active {
     background: rgba(8, 145, 178, 0.12) !important;
     border-color: var(--lm-accent, #0891b2) !important;
     color: var(--lm-accent, #0891b2) !important;
+}
+body.light-mode .dp-thread-filters .dp-flag-all-btn:not(.is-on) {
+    background: rgba(220, 38, 38, 0.08) !important;
+    border-color: rgba(220, 38, 38, 0.45) !important;
+    color: #b91c1c !important;
 }
 
 /* ── Tables ──────────────────────────────────────────────────────── */

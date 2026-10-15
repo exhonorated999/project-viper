@@ -1,4 +1,19 @@
 const electron = require('electron');
+
+// ─────────────────────────────────────────────────────────────────────
+// PORTABLE-FOLDER UPDATE HELPER — must stay the FIRST thing that runs.
+// When an older VIPER installs an update into a portable folder it starts
+// THIS exe from <folder>\.viper-update\stage\ with the flag below. In that
+// role the process does nothing but swap the program files in place and
+// relaunch — no window, no data folders, no single-instance lock, no
+// updater. See modules/_shared/portable-update.js. The flag is a frozen
+// contract between versions: never rename it.
+// ─────────────────────────────────────────────────────────────────────
+if (process.argv.includes('--viper-apply-portable-update')) {
+  require('./modules/_shared/portable-update.js').runHelper(electron, process.argv);
+  return;
+}
+
 const { app, BrowserView, ipcMain, shell, dialog, globalShortcut, session, protocol, net, Menu, safeStorage } = electron;
 const path = require('path');
 const http = require('http');
@@ -728,6 +743,7 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => clearTimeout(_readyToShowFallback));
   mainWindow.webContents.on('did-finish-load', () => {
     console.log('[window] did-finish-load:', mainWindow.webContents.getURL());
+    try { _portableUpdateAfterLoad(); } catch (e) { console.warn('[update] startup check failed:', e.message); }
   });
   mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
     console.error('[window] did-fail-load:', code, desc, url);
@@ -3222,6 +3238,202 @@ function sendUpdateStatus(channel, data) {
   }
 }
 
+// ── Portable-folder updates ────────────────────────────────────────
+// A VIPER folder on an external drive (F:\VIPER\V.I.P.E.R with userdata\
+// and cases\ beside the exe) cannot be updated by the NSIS installer: a
+// per-user install goes to whatever folder Windows has registered for
+// VIPER — usually C:\Users\<you>\AppData\Local\Programs — so the drive copy
+// stayed on the old version. Such a folder now updates itself in place
+// (modules/_shared/portable-update.js).
+//
+// DESKTOP INSTALLS ARE UNCHANGED. _portableUpdateMode() answers 'nsis' for
+// every desktop install, for the single-file Portable.exe, and whenever
+// it cannot be certain; the 'nsis' answer runs exactly the code below that
+// existed before this feature. Only a portable folder that the installer
+// would provably miss answers 'folder'.
+const portableUpdate = require('./modules/_shared/portable-update.js');
+let _lastUpdateInfo = null;          // from 'update-available'
+let _portableUpdateModeCache = null;
+let _portablePrepared = null;        // { version, stageExe } once staged
+let _portablePreparing = null;       // in-flight prepare promise
+
+function _portableUpdateMode() {
+  if (_portableUpdateModeCache) return _portableUpdateModeCache;
+  let d;
+  try {
+    d = portableUpdate.decideUpdateMode({
+      isPackaged: app.isPackaged,
+      platform: process.platform,
+      isPortable,
+      portableExecutableFile: process.env.PORTABLE_EXECUTABLE_FILE || '',
+      exeDir,
+      localAppData: process.env.LOCALAPPDATA || '',
+      readRegisteredLocation: () => portableUpdate.readHkcuInstallLocation(require('child_process').execFileSync),
+      fs,
+    });
+  } catch (e) {
+    d = { mode: 'nsis', reason: 'decide-failed: ' + e.message };
+  }
+  _portableUpdateModeCache = d;
+  console.log('[update] mode:', d.mode, '(' + d.reason + ')', d.predicted || '');
+  return d;
+}
+
+// GET through Chromium's network stack (same proxy settings as the app),
+// following GitHub's redirect to its download CDN.
+function _portableNetGet(u) {
+  return new Promise((resolve, reject) => {
+    let req;
+    const t = setTimeout(() => {
+      try { req && req.abort(); } catch (_) {}
+      reject(new Error('The update server did not respond. Check the connection and try again.'));
+    }, 30000);
+    try {
+      req = net.request({ url: u, redirect: 'follow' });
+      req.setHeader('User-Agent', 'VIPER/' + app.getVersion());
+      req.on('response', (res) => {
+        clearTimeout(t);
+        res.abort = () => { try { req.abort(); } catch (_) {} };
+        resolve(res);
+      });
+      req.on('error', (e) => { clearTimeout(t); reject(e); });
+      req.end();
+    } catch (e) { clearTimeout(t); reject(e); }
+  });
+}
+
+function _portableOfs() {
+  // original-fs treats app.asar as the plain file it is; Electron's patched
+  // fs would treat it as a folder and corrupt the copy.
+  return require('original-fs');
+}
+
+async function _portableDownload() {
+  const info = _lastUpdateInfo;
+  if (!info || !info.version) {
+    sendUpdateStatus('update-status', { status: 'error', message: 'Check for updates first.' });
+    return { success: false, error: 'no-update-info' };
+  }
+  if (_portablePreparing) return _portablePreparing;
+  _portablePreparing = (async () => {
+    const ofs = _portableOfs();
+    let lastSent = 0;
+    try {
+      const r = await portableUpdate.prepareUpdate({
+        fs: ofs,
+        exeDir,
+        exeName: path.basename(process.execPath),
+        version: String(info.version),
+        currentVersion: app.getVersion(),
+        get: _portableNetGet,
+        StreamZip: require('node-stream-zip'),
+        readVersion: (dir) => portableUpdate.readAsarVersion(ofs, path.join(dir, 'resources', 'app.asar')),
+        freeBytes: (dir) => { const s = ofs.statfsSync(dir); return Number(s.bavail) * Number(s.bsize); },
+        onProgress: ({ phase, transferred, total }) => {
+          const now = Date.now();
+          if (now - lastSent < 250 && transferred < total) return;
+          lastSent = now;
+          sendUpdateStatus('update-status', {
+            status: 'downloading',
+            phase,
+            percent: total ? Math.floor((transferred * 100) / total) : 0,
+            transferred,
+            total,
+          });
+        },
+      });
+      _portablePrepared = r;
+      try {
+        audit && audit.write(AUDIT_EVENTS.UPDATE_DOWNLOADED, {
+          from_version: app.getVersion(), to_version: r.version, mode: 'portable-folder', reused: !!r.reused,
+        });
+      } catch (_) {}
+      sendUpdateStatus('update-status', { status: 'downloaded', version: r.version });
+      return { success: true };
+    } catch (e) {
+      console.error('[update] portable prepare failed:', e && e.message);
+      sendUpdateStatus('update-status', { status: 'error', message: (e && e.message) || 'The update could not be downloaded.' });
+      return { success: false, error: (e && e.message) || String(e) };
+    } finally {
+      _portablePreparing = null;
+    }
+  })();
+  return _portablePreparing;
+}
+
+async function _portableInstall() {
+  const prepared = _portablePrepared;
+  if (!prepared) {
+    sendUpdateStatus('update-status', { status: 'error', message: 'The update is not ready. Click Download Update again.' });
+    return { success: false, error: 'not-prepared' };
+  }
+  let launched;
+  try {
+    // Save the vault while the window is still alive, BEFORE the helper is
+    // started: from the moment it starts it is waiting for us to exit.
+    await flushVaultIfNeeded();
+    launched = portableUpdate.launchHelper({
+      fs: _portableOfs(), spawn, exeDir, exeName: path.basename(process.execPath),
+      version: prepared.version, pid: process.pid,
+    });
+  } catch (e) {
+    sendUpdateStatus('update-status', { status: 'error', message: (e && e.message) || 'The update could not be started.' });
+    return { success: false, error: (e && e.message) || String(e) };
+  }
+  try {
+    audit && audit.write(AUDIT_EVENTS.UPDATE_APPLIED, {
+      from_version: app.getVersion(), to_version: prepared.version, mode: 'portable-folder', tx: launched.txId,
+    });
+  } catch (_) {}
+  isQuitting = true;
+  setTimeout(() => { try { app.quit(); } catch (_) {} }, 150);
+  // The helper changes nothing until this process is gone; make sure it goes.
+  setTimeout(() => { try { app.exit(0); } catch (_) {} }, 10000);
+  return { success: true };
+}
+
+// After a restart: report how the last folder update went, and remove the
+// update work folder once the new version has been running for a while.
+let _portableStartupChecked = false;
+function _portableUpdateAfterLoad() {
+  if (_portableStartupChecked) return;
+  _portableStartupChecked = true;
+  if (!app.isPackaged || !isPortable) return;
+  const ofs = _portableOfs();
+  let st;
+  try { st = portableUpdate.inspectWorkDir(ofs, exeDir, app.getVersion()); } catch (_) { return; }
+  console.log('[update] portable work folder:', st.status, st.reason || '');
+  const cleanupLater = (ms) => setTimeout(() => {
+    try {
+      const r = portableUpdate.cleanupWorkDir(ofs, exeDir);
+      console.log('[update] portable cleanup:', r.removed, r.reason);
+    } catch (e) { console.warn('[update] portable cleanup failed:', e.message); }
+  }, ms);
+  const tell = (type, message, detail) => {
+    try {
+      const opts = { type, title: 'V.I.P.E.R. update', message, detail, buttons: ['OK'] };
+      if (mainWindow && !mainWindow.isDestroyed()) dialog.showMessageBox(mainWindow, opts).catch(() => {});
+      else dialog.showMessageBox(opts).catch(() => {});
+    } catch (_) {}
+  };
+  if (st.status === 'applied') {
+    // Keep the previous version on disk until the new one has proven it runs.
+    cleanupLater(30000);
+  } else if (st.status === 'failed' && st.safe) {
+    tell('warning', 'The update to version ' + (st.to || 'the new version') + ' was not installed.',
+      (st.error ? st.error + '\n\n' : '') + 'This copy of VIPER is unchanged and your cases are untouched. You can try the update again from Settings.');
+    cleanupLater(5000);
+  } else if (st.status === 'failed' || st.status === 'interrupted') {
+    tell('error', 'The last update did not finish cleanly.',
+      'Your cases and saved data (the "cases" and "userdata" folders) were not touched. '
+      + 'The previous program files are kept in:\n' + st.workDir + '\n\n'
+      + 'Please contact Intellect LE support before deleting anything in that folder.'
+      + (st.error ? '\n\nDetails: ' + st.error : ''));
+  } else if (st.status === 'empty' || (st.status === 'prepared' && st.stale)) {
+    cleanupLater(30000);
+  }
+}
+
 if (autoUpdater) {
   autoUpdater.autoDownload = false;          // user must click "Download"
   autoUpdater.autoInstallOnAppQuit = false;  // user must click "Install & Restart"
@@ -3260,6 +3472,7 @@ if (autoUpdater) {
   });
 
   autoUpdater.on('update-available', (info) => {
+    _lastUpdateInfo = info || null;   // the portable-folder path needs the version
     sendUpdateStatus('update-status', {
       status: 'available',
       version: info.version,
@@ -3323,6 +3536,7 @@ ipcMain.handle('update-check', async () => {
 
 ipcMain.handle('update-download', async () => {
   if (!autoUpdater) return { success: false, error: 'Auto-updater not available.' };
+  if (_portableUpdateMode().mode === 'folder') return _portableDownload();
   try {
     const path = require('path');
     const fs = require('fs');
@@ -3349,6 +3563,7 @@ ipcMain.handle('update-download', async () => {
 
 ipcMain.handle('update-install', async () => {
   if (!autoUpdater) return { success: false, error: 'Auto-updater not available.' };
+  if (_portableUpdateMode().mode === 'folder') return _portableInstall();
   const path = require('path');
   const fs = require('fs');
 

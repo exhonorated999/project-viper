@@ -6332,7 +6332,14 @@
             const btn = document.getElementById('updateDownloadBtn');
             btn.disabled = true; btn.textContent = 'Starting...';
             try {
-                await window.electronAPI.updateDownload();
+                const result = await window.electronAPI.updateDownload();
+                // The error text itself arrives via onUpdateStatus; just let
+                // the officer try again.
+                if (result && result.success === false) {
+                    btn.style.display = 'inline-block';
+                    btn.disabled = false; btn.textContent = 'Download Update';
+                    document.getElementById('updateProgressWrap').style.display = 'none';
+                }
             } catch (e) {
                 showUpdateError('Download failed: ' + (e.message || e));
                 btn.disabled = false; btn.textContent = 'Download Update';
@@ -6346,7 +6353,7 @@
             const installBtn = document.getElementById('updateInstallBtn');
             if (installBtn) {
                 installBtn.disabled = true;
-                installBtn.textContent = 'Launching installer…';
+                installBtn.textContent = 'Installing…';
             }
             try {
                 const result = await window.electronAPI.updateInstall();
@@ -6427,7 +6434,7 @@
                         break;
 
                     case 'downloading':
-                        text.textContent = 'Downloading update...';
+                        text.textContent = data.phase === 'extract' ? 'Preparing update...' : 'Downloading update...';
                         text.style.color = '#00d9ff';
                         progressWrap.style.display = 'block';
                         progressBar.style.width = data.percent + '%';

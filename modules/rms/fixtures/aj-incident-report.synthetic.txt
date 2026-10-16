@@ -1,0 +1,289 @@
+
+
+INCIDENT NUMBER:
+269990001
+APACHE JUNCTION POLICE
+Department
+INCIDENT REPORT
+ORI #
+AZ0999900
+ADMINISTRATIVE INFORMATION
+Incident Description
+THREATS
+Report Date
+03/14/2026 19:05
+Incident Start Date
+03/14/2026 18:40
+Day of Week
+SAT
+Incident End Date
+03/14/2026 20:15
+Location of Incident
+4410 W HARBOR LN, AJ, AZ 85120
+Case Status
+PENDING
+Related Case/Incident Number
+OFFENSE INFORMATION
+Statute Code
+13-1202/703
+Statute Description
+THREAT - INTIMIDATE
+Counts
+2
+F/M
+M
+Type of Weapon Used
+#Error
+Units EnteredForced Entry
+NO
+Method of EntryPoint of EntryCompleted
+COMPLETED
+PremiseCriminal Activity/Gang Info
+Location Type
+RESIDENCE/HOME
+Bias Motivation
+88
+Suspected of Using
+NOT APPLICABLE
+Statute Code
+13-1204A2
+Statute Description
+AGG ASSAULT - DEADLY WEAPON
+Counts
+1
+F/M
+F
+Type of Weapon Used
+#Error
+Units EnteredForced Entry
+NO
+Method of EntryPoint of EntryCompleted
+ATTEMPTED
+PremiseCriminal Activity/Gang Info
+Location Type
+RESIDENCE/HOME
+1of6Page
+
+INCIDENT NUMBER:
+269990001
+APACHE JUNCTION POLICE
+Department
+INCIDENT REPORT
+ORI #
+AZ0999900
+VICTIM INFORMATION
+Victim #
+1
+Name (Last, First, Middle)
+QUILLFEATHER , MARGO 
+Moniker
+Address
+ 
+EmailHome #Cell #Work #
+DOB
+5/9/2012
+Age
+13
+To AgeSex
+F
+Race
+U
+Ethnicity
+N
+Resident Status
+#Error
+HeightWeight
+Eye ColorHair Color
+SSNOLNOLN State
+EmployerOccupation
+Address
+ 
+Victim Type
+PERSON/INDIVIDUAL (NOT A LAW ENFORCEMENT OFFICER)
+Statement
+NO
+Domestic Violence
+Aggravated Assault CircumstancesJustifiable Homicide Circumstances
+Offenses Involved
+703
+Relationship to Offender
+Type of Injury
+#Error
+Scars, Marks, and Tattoos
+COMPLAINANT / OTHER INVOLVED PARTIES
+Other Person #
+1
+Name (Last, First, Middle)
+DRAVEN, OTIS PELL
+Moniker
+Address
+4410 W HARBOR LN , 7, APACHE JUNCTION, AZ 85120
+EmailHome #Cell #
+555-201-0144
+Work #
+ORGANIZATION INFORMATION
+Organization #
+1
+OrganizationBusiness #
+555-201-0900
+Address
+900 S LANTERN WAY, APACHE JUNCTION, AZ 85120
+Victim Type
+Government (Federal, State, County, City)
+Involvement Type
+VICTIM OF INCIDENT
+Offenses Involved
+703
+2of6Page
+
+INCIDENT NUMBER:
+269990001
+APACHE JUNCTION POLICE
+Department
+INCIDENT REPORT
+ORI #
+AZ0999900
+DOB
+11/2/1988
+Age
+37
+To AgeSexRaceEthnicityResident Status
+#Error
+HeightWeight
+Eye ColorHair Color
+SSNOLNOLN State
+NM
+Involvement Type
+MISC. ASSOCIATED NAMES
+Statement
+NO
+Scars, Marks, and Tattoos
+Other Person #
+2
+Name (Last, First, Middle)
+DRAVEN, LUCILLE 
+Moniker
+Address
+4410 W HARBOR LN , 7, APACHE JUNCTION, AZ 85120
+EmailHome #Cell #
+555-201-0177
+Work #
+DOB
+4/21/1990
+Age
+35
+To AgeSexRaceEthnicityResident Status
+#Error
+HeightWeight
+Eye ColorHair Color
+SSNOLNOLN State
+AZ
+Involvement Type
+MISC. ASSOCIATED NAMES
+Statement
+NO
+Scars, Marks, and Tattoos
+Other Person #
+3
+Name (Last, First, Middle)
+CASEWORKER, RENA - BRIGHTPATH CLINIC
+Moniker
+Address
+77 E ORCHARD RD, MESA, AZ 85201
+EmailHome #
+555-201-0300
+Cell #Work #
+DOBAgeTo AgeSexRaceEthnicityResident Status
+#Error
+HeightWeight
+Eye ColorHair Color
+SSNOLNOLN State
+Involvement Type
+PERSON REPORTING EVENT
+Statement
+NO
+Scars, Marks, and Tattoos
+SUSPECT(S)  INFORMATION
+Suspect #
+1
+Name (Last, First, Middle)
+DRAVEN PELL, JASPER 
+Moniker
+3of6Page
+
+INCIDENT NUMBER:
+269990001
+APACHE JUNCTION POLICE
+Department
+INCIDENT REPORT
+ORI #
+AZ0999900
+Address
+4410 W HARBOR LN, 7, APACHE JUNCTION, AZ 85120
+DOB
+7/30/2010
+Age
+15
+To AgeSex
+M
+Race
+W
+Ethnicity
+N
+Resident Status
+RESIDENT
+HeightWeightGlasses
+SSNOLNOLN State
+AZ
+Email
+Home #Cell #Work #Offenses Involved
+703
+Eye ColorHair Color
+Hair StyleHair Length
+Facial HairDominant HandBuildComplexion
+Speech/Voice
+Teeth
+Clothing
+Type of Weapon Used
+#Error
+Scars, Marks, and Tattoos
+4of6Page
+
+INCIDENT NUMBER:
+269990001
+APACHE JUNCTION POLICE
+Department
+INCIDENT REPORT
+ORI #
+AZ0999900
+NARRATIVE
+INITIAL REPORT
+Officer: HOLLOWAY #512
+Case: 269990001
+Date: 03.14.2026
+Location: 4410 W Harbor Ln #7, Apache Junction, AZ 85120
+On 03/14/2026 at approximately 1840 hours I was dispatched to 4410 W Harbor Ln #7 reference a juvenile making 
+threats toward family members. Upon arrival I made contact with the reporting party, Rena Caseworker of Brightpath 
+Clinic, who advised that the juvenile had made the statements during a scheduled visit earlier in the evening and 
+that the clinic had a duty to report them.
+Rena stated that the juvenile told staff he wanted to hurt his sister and that he had been thinking about it for a 
+long time. She advised the clinic staff removed all sharp objects from the room and called for a supervisor. The 
+juvenile was described as calm and quiet for the rest of the visit, and the staff remained with him until his mother 
+5of6Page
+
+INCIDENT NUMBER:
+269990001
+APACHE JUNCTION POLICE
+Department
+INCIDENT REPORT
+ORI #
+AZ0999900
+arrived to collect him at the end of the session.
+I contacted the juvenile's mother, Lucille Draven, by telephone. Lucille confirmed the statements and advised there 
+are no weapons in the home and that all medications are kept in a locked cabinet. She agreed to attend a follow-
+up meeting with the school resource officer on Monday morning so that a safety plan can be put in place at once.
+This incident was recorded on my department-issued body worn camera and uploaded into evidence. 
+OFFICER INFORMATION
+REPORTINGHOLLOWAY, DANA 512
+APPROVINGPRESCOTT, ALAN 330
+6of6Page

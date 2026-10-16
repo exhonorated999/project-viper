@@ -181,6 +181,8 @@ function build(o) {
         renderTabContent: t => rendered.push(t),
         renderNoteAttachmentsList: () => {},
         _revealNoteDay: () => {},
+        // Case Activity Timer touch — counted so tests can see a save touched it.
+        _touchCaseActivity: () => { sandbox.__touches = (sandbox.__touches || 0) + 1; },
         _persistCaseNotes() {
             // Mirrors the page: a real quota-guarded write that reports back.
             return sandbox._CS.setItemSafe('viperCaseNotes', JSON.stringify({
@@ -410,6 +412,7 @@ section('THE DUPLICATE TRAP — repeated silent commits update, never insert');
     check('a plain-text note is stored verbatim',
         t23.sandbox.caseNotes[0].contentHtml === '<p>text only</p>');
     check('  and nothing was written to disk', Object.keys(t23.fakeDisk).length === 0);
+    check('a stored note counts as case activity (one touch)', t23.sandbox.__touches === 1, t23.sandbox.__touches);
 
     // Storage really is full: the commit must say so, not claim success.
     const t24 = build({ formOpen: true, editorHtml: '<p>a note</p>' });
@@ -417,6 +420,7 @@ section('THE DUPLICATE TRAP — repeated silent commits update, never insert');
     const r24 = await t24.sandbox._noteCommit({ silent: true });
     check('a refused write reports the commit as FAILED', r24.saved === false);
     check('  with a quota reason', r24.reason === 'quota', r24.reason);
+    check('  and is NOT counted as case activity', !t24.sandbox.__touches, t24.sandbox.__touches);
 
     // ------------------------------------- the beforeunload guarantee
 

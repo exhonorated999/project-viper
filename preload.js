@@ -196,6 +196,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   metaWarrantImport: (data) => ipcRenderer.invoke('meta-warrant-import', data),
   metaWarrantPickFile: () => ipcRenderer.invoke('meta-warrant-pick-file'),
   metaWarrantReadMedia: (data) => ipcRenderer.invoke('meta-warrant-read-media', data),
+  metaWarrantOverview: (data) => ipcRenderer.invoke('meta-warrant-overview', data),
+  metaWarrantQuery: (data) => ipcRenderer.invoke('meta-warrant-query', data),
+  metaWarrantMediaUrl: (data) => ipcRenderer.invoke('meta-warrant-media-url', data),
+  metaWarrantListStores: (data) => ipcRenderer.invoke('meta-warrant-list-stores', data),
+  metaWarrantDeleteStore: (data) => ipcRenderer.invoke('meta-warrant-delete-store', data),
+  onMetaWarrantImportProgress: (cb) => {
+    if (typeof cb !== 'function') return () => {};
+    const handler = (_evt, payload) => { try { cb(payload); } catch {} };
+    ipcRenderer.on('meta-warrant-import-progress', handler);
+    return () => ipcRenderer.removeListener('meta-warrant-import-progress', handler);
+  },
 
   // KIK Warrant Parser
   kikWarrantScan: (data) => ipcRenderer.invoke('kik-warrant-scan', data),
@@ -320,6 +331,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   evidenceReleaseFiles: (data) => ipcRenderer.invoke('evidence-release-files', data),
   saveEvidenceFile: (data) => ipcRenderer.invoke('save-evidence-file', data),
   saveAppDataFile: (data) => ipcRenderer.invoke('save-appdata-file', data),
+  copyAppDataFile: (data) => ipcRenderer.invoke('copy-appdata-file', data),
   deleteAppDataFile: (filePath) => ipcRenderer.invoke('delete-appdata-file', filePath),
   readEvidenceFile: (filePath) => ipcRenderer.invoke('read-evidence-file', filePath),
   // Files inside a ZIP filed as evidence (CyberTips from the ICAC Data System)

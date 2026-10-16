@@ -1,0 +1,55 @@
+
+
+INCIDENT NUMBER:
+259990077
+APACHE JUNCTION POLICE
+Department
+FORENSIC SUPPLEMENT REPORT
+ORI #
+AZ0999900
+ADMINISTRATIVE INFORMATION
+Case Status
+PENDING
+Reporting Date
+01/07/2025 00:00:00
+Related Case/Incident Number
+PROPERTY INFORMATION
+Property Description
+THUMB DRIVE
+Evidence # 
+990412
+MakeModelSerial
+Cell NumberCell PasscodeCell SIM Card #
+Cell IMEI/ESNCell IMSI #SD Card Storage
+Location Seizure
+GOLD CANYON
+NARRATIVE
+Forensic Examination Report
+Case: 259990077 - 8GB Thumb Drive
+Prepared by: Tobias Marsh # 164
+Background:
+On 11/02/2024 a tip was received regarding images stored on a removable drive belonging to the subject. The drive 
+was later handed to me by a family member, who gave written consent to search it.
+Summary of Findings:
+A copy of an e-mail order confirmation was recovered from the unallocated space of the drive. Its text follows.
+
+INCIDENT NUMBER:
+259990077
+APACHE JUNCTION POLICE
+Department
+FORENSIC SUPPLEMENT REPORT
+ORI #
+AZ0999900
+OUR PAYMENT DETAILS
+You have chosen an invoice as your payment method for this order.
+ORDER INFORMATION
+Attached to this e-mail you will find the order information for your order.
+QUESTIONS OR SUGGESTIONS?
+Device Volume ID (Serial):               
+40B1C9E2
+Conclusion:
+The drive was imaged with a write blocker and the image hash was verified before and after the examination.
+Case Status: Pending further investigation.
+OFFICER INFORMATION
+REPORTINGMARSH, TOBIAS 164
+APPROVINGROWE, EDITH 146

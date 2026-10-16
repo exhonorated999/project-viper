@@ -4176,6 +4176,20 @@ async function _noteWriteToMain(caseNumber, noteId, contentHtml) {
     note.editHistory.push(d.editedAt);
     localStorage.setItem('viperCaseNotes', JSON.stringify(all));
 
+    // Editing a note in the pop-out is case activity too: the dashboard's
+    // Case Activity Timer measures from case.lastModified. Touch ONLY that
+    // field (storage here, the in-memory copy below when it is open).
+    try {
+      const cases = JSON.parse(localStorage.getItem('viperCases') || '[]');
+      let hit = false;
+      if (Array.isArray(cases)) {
+        for (const c of cases) {
+          if (c && String(c.caseNumber) === d.caseNumber) { c.lastModified = d.editedAt; hit = true; }
+        }
+      }
+      if (hit) localStorage.setItem('viperCases', JSON.stringify(cases));
+    } catch (_) {}
+
     // The main window may be sitting on a DIFFERENT case, or on index.html,
     // in which case there is no in-memory copy to patch and the localStorage
     // write above is the whole job. These identifiers are top-level \`let\`
@@ -4186,6 +4200,15 @@ async function _noteWriteToMain(caseNumber, noteId, contentHtml) {
       sameCase = (typeof currentCase !== 'undefined' && currentCase
         && String(currentCase.caseNumber) === d.caseNumber);
     } catch (_) { sameCase = false; }
+
+    // Keep the open page's in-memory case copy in step with the touch above,
+    // so its next full save does not write the old date back.
+    try {
+      if (sameCase) currentCase.lastModified = d.editedAt;
+      if (typeof cases !== 'undefined' && Array.isArray(cases)) {
+        cases.forEach(c => { if (c && String(c.caseNumber) === d.caseNumber) c.lastModified = d.editedAt; });
+      }
+    } catch (_) {}
 
     if (sameCase) {
       try {
@@ -6972,21 +6995,46 @@ ipcMain.handle('save-evidence-file', async (event, data) => {
 // collision-safe name. Returns the ABSOLUTE path (stored in localStorage
 // alongside the metadata record). Written PLAIN (these are shareable
 // training materials, not case evidence); open-file still reads them fine.
+function _appDataTarget(subdir, fileName) {
+  const safeSub = String(subdir || 'misc').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const dir = path.join(casesDir, '_appdata', safeSub);
+  fs.mkdirSync(dir, { recursive: true });
+  // Collision-safe unique name: <base>__<timestamp><ext>
+  const base = path.basename(String(fileName || 'file'));
+  const ext = path.extname(base);
+  const stem = base.slice(0, base.length - ext.length) || 'file';
+  return { base, filePath: path.join(dir, `${stem}__${Date.now()}${ext}`) };
+}
+
+// Preferred path: copy straight from the file the user picked, so a large
+// presentation (hundreds of MB) never travels through the renderer. The old
+// byte-array route died with "Invalid array length" on a 252 MB .pptx and
+// left the Add Material button on "Saving…" forever.
+ipcMain.handle('copy-appdata-file', async (event, data) => {
+  try {
+    const { subdir, sourcePath } = data || {};
+    const ofs = require('original-fs');
+    const src = String(sourcePath || '');
+    if (!src || !path.isAbsolute(src)) return { success: false, error: 'No source file path' };
+    const st = await ofs.promises.stat(src);
+    if (!st.isFile()) return { success: false, error: 'Not a file' };
+    const { base, filePath } = _appDataTarget(subdir, path.basename(src));
+    await ofs.promises.copyFile(src, filePath);
+    console.log(`App-data file copied: ${filePath} (${st.size} bytes)`);
+    return { success: true, path: filePath, fileName: base };
+  } catch (error) {
+    console.error('Failed to copy app-data file:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('save-appdata-file', async (event, data) => {
   try {
     const { subdir, fileName, fileData } = data || {};
-    const safeSub = String(subdir || 'misc').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const dir = path.join(casesDir, '_appdata', safeSub);
-    fs.mkdirSync(dir, { recursive: true });
+    const { base, filePath } = _appDataTarget(subdir, fileName);
 
-    // Collision-safe unique name: <base>__<timestamp><ext>
-    const base = path.basename(String(fileName || 'file'));
-    const ext = path.extname(base);
-    const stem = base.slice(0, base.length - ext.length) || 'file';
-    const unique = `${stem}__${Date.now()}${ext}`;
-    const filePath = path.join(dir, unique);
-
-    fs.writeFileSync(filePath, Buffer.from(fileData));
+    // fileData: a Uint8Array (current renderer) or a plain number array (older callers).
+    await fs.promises.writeFile(filePath, Buffer.from(fileData));
     console.log(`App-data file saved: ${filePath}`);
     return { success: true, path: filePath, fileName: base };
   } catch (error) {
@@ -13633,94 +13681,97 @@ ipcMain.handle('google-warrant-pick-file', async () => {
   return result.filePaths[0];
 });
 
-// ─── META Warrant Parser IPC ────────────────────────────────────────────
+// ─── META Warrant IPC ───────────────────────────────────────────────────
+// Facebook / Instagram returns are parsed page by page into an on-disk store
+// under <case>/Evidence/MetaWarrant/returns/<key>/ (modules/meta-warrant/
+// meta-warrant-service.js).  The renderer keeps a light record and asks for
+// one page of items at a time — a 22-page Instagram return with ~800 media
+// files cannot live in localStorage or travel over IPC as base64.
 
-const MetaWarrantParser = require('./modules/meta-warrant/meta-warrant-parser');
-const mwParser = new MetaWarrantParser();
+const _metaService = require('./modules/meta-warrant/meta-warrant-service').createService({
+  casesDir: () => casesDir,
+  security: () => security,
+  tempDir: path.join(app.getPath('temp'), 'viper-view-meta-warrant'),
+  issueToken: (absPath) => _datapilotIssueMediaToken(absPath),
+  fingerprint: (spec) => _sourceFingerprint(spec)
+});
+_metaService.clearTemp();
 
-ipcMain.handle('meta-warrant-scan', async (event, { caseNumber }) => {
+const _metaErr = (error) => ({ success: false, error: (error && error.message) || String(error), locked: !!(error && error.code === 'VIPER_LOCKED') });
+
+ipcMain.handle('meta-warrant-scan', async (event, { caseNumber } = {}) => {
   try {
-    const dirsToScan = [
-      path.join(casesDir, caseNumber, 'Evidence'),
-      path.join(casesDir, caseNumber, 'Warrants', 'Production')
-    ];
-
-    const files = [];
-
-    for (const dir of dirsToScan) {
-      if (!fs.existsSync(dir)) continue;
-      const scanDir = async (d) => {
-        const entries = fs.readdirSync(d, { withFileTypes: true });
-        for (const entry of entries) {
-          const fullPath = path.join(d, entry.name);
-          if (entry.isDirectory()) {
-            await scanDir(fullPath);
-          } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')) {
-            try {
-              const isMatch = await MetaWarrantParser.isMetaWarrantZip(fullPath, { security });
-              if (isMatch) {
-                files.push({
-                  name: entry.name,
-                  path: fullPath,
-                  size: fs.statSync(fullPath).size
-                });
-              }
-            } catch (e) { /* not a valid zip or encrypted, skip */ }
-          }
-        }
-      };
-      await scanDir(dir);
-    }
-
-    return { success: true, files };
+    return { success: true, files: await _metaService.scan(caseNumber) };
   } catch (error) {
     console.error('META warrant scan error:', error);
-    return { success: false, error: error.message, files: [] };
+    return Object.assign(_metaErr(error), { files: [] });
   }
 });
 
-ipcMain.handle('meta-warrant-import', async (event, { filePath, caseNumber }) => {
+ipcMain.handle('meta-warrant-import', async (event, req = {}) => {
+  const sender = event.sender;
+  const caseNumber = req.caseNumber;
+  let last = 0;
+  const onProgress = (p) => {
+    // Pages report one by one; media every 10 files.  Cap at ~10/s anyway.
+    const now = Date.now();
+    if (p.phase !== 'done' && p.done !== p.total && now - last < 100) return;
+    last = now;
+    try { if (!sender.isDestroyed()) sender.send('meta-warrant-import-progress', Object.assign({ caseNumber }, p)); } catch (_) {}
+  };
   try {
-    // Fingerprint the original alongside the parse (Source Validation).
-    const fingerprintP = _sourceFingerprint({ path: filePath });
-    const data = await mwParser.parseZip(filePath, { security });
-    data.sourceIntegrity = await fingerprintP;
-
-    // Save large media files to disk instead of keeping in localStorage
-    if (caseNumber && data.mediaFiles) {
-      const mediaDir = path.join(casesDir, caseNumber, 'Evidence', 'MetaWarrant', 'linked_media');
-      if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
-
-      for (const [fileName, info] of Object.entries(data.mediaFiles)) {
-        const fileDest = path.join(mediaDir, fileName);
-        const fileBuf = Buffer.from(info.data, 'base64');
-        if (security && security.isUnlocked()) {
-          fs.writeFileSync(fileDest, security.encryptBuffer(fileBuf));
-        } else {
-          fs.writeFileSync(fileDest, fileBuf);
-        }
-        // Replace base64 with disk path reference
-        info.diskPath = fileDest;
-        info.data = null; // clear base64 to save memory
-      }
-    }
-
-    return { success: true, data };
+    const record = await _metaService.importReturn({ caseNumber, sourcePath: req.sourcePath || req.filePath, storeKey: req.storeKey }, onProgress);
+    return { success: true, record };
   } catch (error) {
     console.error('META warrant import error:', error);
-    return { success: false, error: error.message };
+    return _metaErr(error);
   }
 });
 
 ipcMain.handle('meta-warrant-pick-file', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Select META Warrant Return ZIP',
-    properties: ['openFile'],
-    filters: [{ name: 'ZIP Archives', extensions: ['zip'] }]
+  const result = await pickProductionFileOrFolder({
+    title: 'Select Meta Warrant Return (ZIP or Folder)',
+    filterName: 'Meta Warrant Return'
   });
   restoreFocus();
   if (result.canceled || !result.filePaths.length) return null;
-  return result.filePaths[0];
+  const picked = result.filePaths[0];
+  let isFolder = false;
+  try { isFolder = fs.statSync(picked).isDirectory(); } catch (e) { /* leave false */ }
+  return { path: picked, isFolder };
+});
+
+ipcMain.handle('meta-warrant-overview', async (event, { caseNumber, storeKey } = {}) => {
+  try {
+    const overview = _metaService.overview(caseNumber, storeKey);
+    return overview ? { success: true, overview } : { success: false, missing: true, error: 'This return is no longer on disk. Re-import it.' };
+  } catch (error) { return _metaErr(error); }
+});
+
+ipcMain.handle('meta-warrant-query', async (event, { caseNumber, storeKey, req } = {}) => {
+  try {
+    return Object.assign({ success: true }, _metaService.query(caseNumber, storeKey, req));
+  } catch (error) { return _metaErr(error); }
+});
+
+ipcMain.handle('meta-warrant-media-url', async (event, { caseNumber, storeKey, ref } = {}) => {
+  try {
+    const r = _metaService.mediaUrl(caseNumber, storeKey, ref);
+    return r.found ? Object.assign({ success: true }, r) : { success: false, error: 'Media file not found' };
+  } catch (error) { return _metaErr(error); }
+});
+
+ipcMain.handle('meta-warrant-list-stores', async (event, { caseNumber } = {}) => {
+  try {
+    return { success: true, stores: _metaService.list(caseNumber) };
+  } catch (error) { return Object.assign(_metaErr(error), { stores: [] }); }
+});
+
+ipcMain.handle('meta-warrant-delete-store', async (event, { caseNumber, storeKey } = {}) => {
+  try {
+    _metaService.remove(caseNumber, storeKey);
+    return { success: true };
+  } catch (error) { return _metaErr(error); }
 });
 
 ipcMain.handle('meta-warrant-read-media', async (event, { filePath }) => {

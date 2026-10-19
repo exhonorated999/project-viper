@@ -38,10 +38,31 @@ class XWarrantModule {
         localStorage.setItem(`xWarrant_${this.caseId}`, JSON.stringify({ imports: this.imports }));
     }
 
+    /**
+     * Paths of Evidence items added as LINKS (reference-only: the files stay
+     * on the drive/folder they came from, nothing is copied into the case
+     * folder), so the main-process scan can look at them too.
+     */
+    _evidenceReferencePaths() {
+        const out = [];
+        try {
+            const all = JSON.parse(localStorage.getItem('viperCaseEvidence') || '{}');
+            const list = Array.isArray(all[this.caseNumber]) ? all[this.caseNumber] : [];
+            for (const ev of list) {
+                if (!ev || !(ev.referenceOnly || ev.storageMode === 'reference')) continue;
+                if (ev.sourcePath) out.push(String(ev.sourcePath));
+                for (const f of (Array.isArray(ev.files) ? ev.files : [])) {
+                    if (f && f.path && /\.zip$/i.test(String(f.path))) out.push(String(f.path));
+                }
+            }
+        } catch (e) { console.warn('X warrant: evidence links unreadable', e); }
+        return Array.from(new Set(out)).slice(0, 200);
+    }
+
     async scanForWarrants() {
         if (!window.electronAPI?.xWarrantScan) return;
         try {
-            const result = await window.electronAPI.xWarrantScan({ caseNumber: this.caseNumber, caseId: this.caseId });
+            const result = await window.electronAPI.xWarrantScan({ caseNumber: this.caseNumber, caseId: this.caseId, extraPaths: this._evidenceReferencePaths() });
             if (result.success && result.files.length > 0) {
                 const importedPaths = this.imports.map(i => i.filePath);
                 this.evidenceFiles = result.files.map(f => ({ ...f, alreadyImported: importedPaths.includes(f.path) }));
@@ -55,11 +76,15 @@ class XWarrantModule {
         }
     }
 
-    /** Import an X warrant ZIP or unzipped folder. */
-    async importWarrant(filePath, fileName, isFolder) {
+    /** Import an X warrant ZIP or unzipped folder. `password` is used for this call only (never saved). */
+    async importWarrant(filePath, fileName, isFolder, password) {
         if (!window.electronAPI?.xWarrantImport) throw new Error('X Warrant IPC handler not available');
-        const result = await window.electronAPI.xWarrantImport({ filePath, caseNumber: this.caseNumber, isFolder: !!isFolder });
-        if (!result.success) throw new Error(result.error || 'Import failed');
+        const result = await window.electronAPI.xWarrantImport({ filePath, caseNumber: this.caseNumber, isFolder: !!isFolder, password: password || null });
+        if (!result.success) {
+            const err = new Error(result.error || 'Import failed');
+            err.code = result.code || null;
+            throw err;
+        }
         const data = result.data;
 
         const importRecord = {
@@ -94,11 +119,17 @@ class XWarrantModule {
     }
 
     async importFromPicker() {
+        const picked = await this.pickProduction();
+        if (!picked) return null;
+        return this.importWarrant(picked.path, picked.name, picked.isFolder);
+    }
+
+    /** Ask for a production ZIP/folder → { path, name, isFolder } or null. */
+    async pickProduction() {
         if (!window.electronAPI?.xWarrantPickFile) throw new Error('File picker not available');
         const result = await window.electronAPI.xWarrantPickFile();
         if (!result || !result.path) return null;
-        const fileName = result.path.split(/[\\/]/).pop();
-        return this.importWarrant(result.path, fileName, !!result.isFolder);
+        return { path: result.path, name: result.path.split(/[\\/]/).pop(), isFolder: !!result.isFolder };
     }
 
     deleteImport(importId) {

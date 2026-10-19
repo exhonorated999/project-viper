@@ -14201,43 +14201,71 @@ ipcMain.handle('snapchat-warrant-delete-data', async (event, { caseId } = {}) =>
 const XWarrantParser = require('./modules/x-warrant/x-warrant-parser');
 const xwParser = new XWarrantParser();
 
-// Scan Evidence/ and Warrants/Production/ for X productions (ZIP or folder).
-ipcMain.handle('x-warrant-scan', async (event, { caseNumber }) => {
+// Scan Evidence/ and Warrants/Production/ for X productions (ZIP or folder),
+// plus Evidence items added as LINKS (reference-only — files stay on the
+// drive/folder they came from). The renderer passes those paths in
+// `extraPaths` from viperCaseEvidence.
+const _xwInspectCache = new Map(); // path -> { key, res }
+async function _xwInspectZip(fullPath) {
+  let st; try { st = fs.statSync(fullPath); } catch (e) { return null; }
+  const key = `${st.size}:${st.mtimeMs}:${!!(security && security.isUnlocked && security.isUnlocked())}`;
+  const hit = _xwInspectCache.get(fullPath);
+  if (hit && hit.key === key) return hit.res;
+  const res = await XWarrantParser.inspectZip(fullPath, { security });
+  _xwInspectCache.set(fullPath, { key, res });
+  return res;
+}
+
+ipcMain.handle('x-warrant-scan', async (event, { caseNumber, extraPaths }) => {
   try {
-    const dirsToScan = [
-      path.join(casesDir, caseNumber, 'Evidence'),
-      path.join(casesDir, caseNumber, 'Warrants', 'Production')
-    ];
     const files = [];
     const seen = new Set();
-    for (const dir of dirsToScan) {
-      if (!fs.existsSync(dir)) continue;
-      const scanDir = async (d, depth) => {
-        if (depth > 5) return;
-        let entries;
-        try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { return; }
-        for (const entry of entries) {
-          const fullPath = path.join(d, entry.name);
-          if (seen.has(fullPath)) continue;
-          if (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')) {
-            try {
-              const detected = await XWarrantParser.isXWarrantZip(fullPath, { security });
-              if (detected) {
-                seen.add(fullPath);
-                files.push({ name: entry.name, path: fullPath, size: fs.statSync(fullPath).size, isFolder: false });
-              }
-            } catch (e) { /* skip */ }
-          } else if (entry.isDirectory()) {
-            if (XWarrantParser.isXWarrantFolder(fullPath)) {
-              seen.add(fullPath);
-              files.push({ name: entry.name, path: fullPath, size: 0, isFolder: true });
-              continue;
-            }
-            await scanDir(fullPath, depth + 1);
+    const norm = (p) => String(p).replace(/[\\/]+$/, '').toLowerCase();
+    const considerZip = async (fullPath, source) => {
+      const res = await _xwInspectZip(fullPath);
+      if (!res || !res.isX) return;
+      seen.add(norm(fullPath));
+      let size = 0; try { size = fs.statSync(fullPath).size; } catch (e) { /* ignore */ }
+      files.push({ name: path.basename(fullPath), path: fullPath, size, isFolder: false,
+        encrypted: !!res.encrypted, nested: !!res.nested, source });
+    };
+    const scanDir = async (d, depth, source) => {
+      if (depth > 5) return;
+      let entries;
+      try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { return; }
+      for (const entry of entries) {
+        const fullPath = path.join(d, entry.name);
+        if (seen.has(norm(fullPath))) continue;
+        if (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')) {
+          try { await considerZip(fullPath, source); } catch (e) { /* skip */ }
+        } else if (entry.isDirectory()) {
+          if (XWarrantParser.isXWarrantFolder(fullPath)) {
+            seen.add(norm(fullPath));
+            files.push({ name: entry.name, path: fullPath, size: 0, isFolder: true, source });
+            continue;
           }
+          await scanDir(fullPath, depth + 1, source);
         }
-      };
-      await scanDir(dir, 0);
+      }
+    };
+    if (caseNumber) {
+      for (const dir of [path.join(casesDir, caseNumber, 'Evidence'), path.join(casesDir, caseNumber, 'Warrants', 'Production')]) {
+        if (fs.existsSync(dir)) await scanDir(dir, 0, 'case');
+      }
+    }
+    for (const p of (Array.isArray(extraPaths) ? extraPaths.slice(0, 200) : [])) {
+      if (typeof p !== 'string' || !p || seen.has(norm(p))) continue;
+      let st; try { st = fs.statSync(p); } catch (e) { continue; } // drive unplugged / moved
+      if (st.isDirectory()) {
+        if (XWarrantParser.isXWarrantFolder(p)) {
+          seen.add(norm(p));
+          files.push({ name: path.basename(p), path: p, size: 0, isFolder: true, source: 'evidence-link' });
+        } else {
+          await scanDir(p, 3, 'evidence-link'); // the linked folder + two levels
+        }
+      } else if (st.isFile() && /\.zip$/i.test(p)) {
+        try { await considerZip(p, 'evidence-link'); } catch (e) { /* skip */ }
+      }
     }
     return { success: true, files };
   } catch (error) {
@@ -14246,7 +14274,7 @@ ipcMain.handle('x-warrant-scan', async (event, { caseNumber }) => {
   }
 });
 
-ipcMain.handle('x-warrant-import', async (event, { filePath, caseNumber, isFolder }) => {
+ipcMain.handle('x-warrant-import', async (event, { filePath, caseNumber, isFolder, password }) => {
   try {
     const extractDir = caseNumber
       ? path.join(casesDir, caseNumber, 'Evidence', 'XWarrant')
@@ -14255,13 +14283,14 @@ ipcMain.handle('x-warrant-import', async (event, { filePath, caseNumber, isFolde
     // Fingerprint the original alongside the parse (Source Validation).
     const fingerprintP = _sourceFingerprint({ path: filePath });
     let data;
+    // The ZIP password (if any) is used for this parse only — never stored or logged.
     if (isFolder) data = await xwParser.parseFolder(filePath, { extractDir, security });
-    else data = await xwParser.parseZip(filePath, { extractDir, security });
+    else data = await xwParser.parseZip(filePath, { extractDir, security, password: password || null });
     if (data) data.sourceIntegrity = await fingerprintP;
     return { success: true, data };
   } catch (error) {
-    console.error('X warrant import error:', error);
-    return { success: false, error: error.message };
+    console.error('X warrant import error:', error && error.code ? `${error.code}: ${error.message}` : error);
+    return { success: false, error: error.message, code: (error && error.code) || null };
   }
 });
 

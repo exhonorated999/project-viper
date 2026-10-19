@@ -88,11 +88,18 @@
     function usageBytes(store) {
         var ls = store || (typeof localStorage !== 'undefined' ? localStorage : null);
         if (!ls) return 0;
+        // Measure what is really stored: VpCaseBlobs (case-blobs.js) wraps the
+        // page's localStorage.getItem to restore photos from the case folder,
+        // so getItem would over-count — and read every photo off disk.
+        var blobs = (typeof window !== 'undefined' && window.VpCaseBlobs) || null;
+        var raw = (blobs && typeof blobs.getRaw === 'function' && typeof localStorage !== 'undefined' && ls === localStorage)
+            ? function (k) { return blobs.getRaw(k); }
+            : function (k) { return ls.getItem(k); };
         var total = 0;
         for (var i = 0; i < ls.length; i++) {
             var k = ls.key(i);
             if (k === null) continue;
-            var v = ls.getItem(k);
+            var v = raw(k);
             total += (k.length + (v === null ? 0 : v.length)) * 2;
         }
         return total;
@@ -132,9 +139,11 @@
             var needed = formatBytes(str.length * 2);
             return {
                 ok: false, quota: true, error: err,
-                message: 'Not enough storage to save ' + (o.label || 'this item') + ' \u2014 nothing was saved. '
-                    + 'This case needs ' + needed + ' and the app is already holding ' + used + '. '
-                    + 'Close and reopen the case: VIPER will move older photos out to disk and free space automatically.'
+                message: 'Not enough room in VIPER\u2019s built-in storage to save ' + (o.label || 'this item') + ' \u2014 nothing was saved. '
+                    + 'This needs ' + needed + ' and VIPER is already holding ' + used + '. '
+                    + 'This is a fixed space inside VIPER, separate from your computer\u2019s disk and OneDrive, '
+                    + 'so freeing disk space will not help. VIPER already moves person photos and documents '
+                    + 'into the case folder to save room; if you keep seeing this, contact VIPER support.'
             };
         }
     }

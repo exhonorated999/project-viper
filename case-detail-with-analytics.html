@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: viper-media: uc-photo: https:; media-src 'self' blob: file: viper-media: https:; connect-src 'self' https://api.wigle.net http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://ip-api.com https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://api.genlogs.io https://trace-broker-production.up.railway.app https://router.project-osrm.org; font-src 'self' data:; frame-src 'self' blob: file: viper-media: https: http:;">
     <title>V.I.P.E.R. - Case Detail</title>
+    <!-- FIRST script, on purpose: keeps record photos/documents in the case
+         folder instead of localStorage by wrapping getItem/setItem. Must be
+         in place before case-snapshot.js captures setItem and before any
+         page code reads a suspects_/victims_/… key. -->
+    <script src="modules/_shared/case-blobs.js"></script>
     <script src="modules/viper-ui.js"></script>
     <script src="modules/viper-prefs.js"></script>
     <script src="modules/datetime-format.js"></script>
@@ -33628,9 +33633,13 @@
         window.viperStorageReport = function () {
             try {
                 const keys = Object.keys(localStorage);
+                // Stored size, not hydrated size: VpCaseBlobs' getItem would
+                // count photos that now live in the case folder.
+                const _b = window.VpCaseBlobs;
+                const _raw = (_b && typeof _b.getRaw === 'function') ? (k) => _b.getRaw(k) : (k) => localStorage.getItem(k);
                 const items = keys.map((k) => {
                     let bytes = 0;
-                    try { bytes = (localStorage.getItem(k) || '').length; } catch (_) { bytes = -1; }
+                    try { bytes = (_raw(k) || '').length; } catch (_) { bytes = -1; }
                     return { key: k, bytes };
                 });
                 items.sort((a, b) => b.bytes - a.bytes);

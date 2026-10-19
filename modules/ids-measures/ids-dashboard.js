@@ -40,7 +40,13 @@
         return m;
     }
     function ls() { try { return root && root.localStorage; } catch (_) { return null; } }
-    function defaultGet(k) { var s = ls(); return s ? s.getItem(k) : null; }
+    // Raw stored text: the measures never need photos, and VpCaseBlobs'
+    // getItem would read them back off disk for every case.
+    function defaultGet(k) {
+        var b = root && root.VpCaseBlobs;
+        if (b && typeof b.getRaw === 'function') return b.getRaw(k);
+        var s = ls(); return s ? s.getItem(k) : null;
+    }
     function J(getItem, key, fb) {
         try {
             var raw = getItem(key);

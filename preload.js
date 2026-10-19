@@ -85,6 +85,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   caseAttachmentSave: (data) => ipcRenderer.invoke('case-attachment-save', data),
   caseAttachmentRead: (data) => ipcRenderer.invoke('case-attachment-read', data),
   caseAttachmentDelete: (data) => ipcRenderer.invoke('case-attachment-delete', data),
+  // Case record photos/documents (modules/_shared/case-blobs.js). SYNC on
+  // purpose — they run underneath localStorage.getItem/setItem. Never throw:
+  // an IPC failure comes back as a result, so the data simply stays inline.
+  caseBlobPutSync: (data) => { try { return ipcRenderer.sendSync('case-blob-put-sync', data); } catch (e) { return { ok: false, code: 'IPC', error: String((e && e.message) || e) }; } },
+  caseBlobReadSync: (data) => { try { return ipcRenderer.sendSync('case-blob-read-sync', data); } catch (e) { return { ok: false, code: 'IPC', error: String((e && e.message) || e) }; } },
   noteListAttachments: (caseNumber) => ipcRenderer.invoke('note-list-attachments', caseNumber),
   // Area Canvas media — photos/video/audio per canvass entry, saved to
   // cases/{caseNumber}/Canvas Media/ on disk for the same reason note

@@ -539,7 +539,7 @@ ok('victim handler carries the merge line', VICTIM_BODY.includes(NEW_VICTIM_LINE
 // index.html's getMonthlyArrests / getTotalArrests AND IdsMeasures.
 console.log('[arrest reaches the dashboard and IDS]');
 {
-    const fnNames = ['_isAssistCase', '_statCases', '_setMetricPeriod', '_inThisMonth', '_itemDate', 'getTotalArrests', 'getMonthlyArrests'];
+    const fnNames = ['_isAssistCase', '_statCases', '_lsRaw', '_setMetricPeriod', '_inThisMonth', '_itemDate', 'getTotalArrests', 'getMonthlyArrests'];
     const lifted = 'var _metricPeriod = null;\n' + fnNames.map(n => liftFn(INDEX_HTML, n)).join('\n');
     // The suspect save, writing where the real saveSuspects writes.
     const existing = [{ name: 'Doe', noteUid: 'pn_abc', firearms: [], vehicles: [] }];

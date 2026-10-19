@@ -2822,6 +2822,32 @@ ipcMain.handle('case-attachment-delete', async (_e, payload) => {
   }
 });
 
+// ── Case record photos/documents (cases/{caseNumber}/Attachments/) ───
+// The disk half of modules/_shared/case-blobs.js, which keeps suspect /
+// victim / witness / property photos, DMV printouts and attached PDFs out
+// of localStorage (one fixed-size area for the whole app — it filled up
+// and every save in every tab started failing). SYNCHRONOUS on purpose:
+// it sits underneath localStorage.getItem/setItem. The store never throws
+// and derives every path itself; see case-blob-store.js.
+const _caseBlobStore = require('./modules/_shared/case-blob-store.js').create({
+  fs, path,
+  getCasesDir: () => casesDir,
+  getSecurity: () => security,
+  safeCaseNumber: _safeCaseNumber
+});
+ipcMain.on('case-blob-put-sync', (e, payload) => {
+  let res;
+  try { res = _caseBlobStore.put(payload); }
+  catch (err) { res = { ok: false, code: 'ERROR', error: err && err.message }; }
+  e.returnValue = res;
+});
+ipcMain.on('case-blob-read-sync', (e, payload) => {
+  let res;
+  try { res = _caseBlobStore.read(payload); }
+  catch (err) { res = { ok: false, code: 'ERROR', error: err && err.message }; }
+  e.returnValue = res;
+});
+
 // ── Area Canvas media (cases/{caseNumber}/Canvas Media/) ─────────────
 // Photos, video and audio captured against a single canvass entry. Same
 // contract as note attachments: the renderer hands over base64, we write

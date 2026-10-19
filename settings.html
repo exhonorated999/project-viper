@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: uc-photo:; connect-src 'self' http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://api.wigle.net https://api.genlogs.io https://trace-broker-production.up.railway.app; font-src 'self' data:; frame-src https: http:;">
     <title>V.I.P.E.R. - Settings</title>
+    <!-- FIRST script, on purpose: keeps record photos/documents in the case
+         folder instead of localStorage by wrapping getItem/setItem. Must be
+         in place before case-snapshot.js captures setItem and before the
+         backup collector reads a suspects_/victims_/… key. -->
+    <script src="modules/_shared/case-blobs.js"></script>
     <script src="modules/viper-ui.js"></script>
     <script src="modules/viper-prefs.js"></script>
     <script src="modules/datetime-format.js"></script>

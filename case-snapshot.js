@@ -249,9 +249,10 @@
         const now = Date.now();
         if (now - _quotaToastAt < 4000) return;
         _quotaToastAt = now;
-        const msg = 'Out of storage \u2014 that change was NOT saved. '
-            + 'Open a case and VIPER will move its photos out to disk automatically, '
-            + 'which frees the space back up.';
+        const msg = 'VIPER\u2019s built-in storage is full \u2014 that change was NOT saved. '
+            + 'This is a fixed space inside VIPER, separate from your computer\u2019s disk and OneDrive, '
+            + 'so freeing disk space will not help. VIPER already moves person photos and documents '
+            + 'into the case folder to save room; if you keep seeing this, contact VIPER support.';
         try {
             if (typeof window.viperToast === 'function') { window.viperToast(msg, 'error', 15000); return; }
             if (typeof window.showToast === 'function') { window.showToast(msg, 'error'); return; }

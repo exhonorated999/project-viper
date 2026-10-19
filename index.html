@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: uc-photo:; connect-src 'self' http://localhost:* https://intellect-unified-dashboard-production.up.railway.app https://api.genlogs.io https://trace-broker-production.up.railway.app; font-src 'self' data:; frame-src https: http:;">
     <title>V.I.P.E.R. - Dashboard</title>
+    <!-- FIRST script, on purpose: keeps record photos/documents in the case
+         folder instead of localStorage by wrapping getItem/setItem. Must be
+         in place before case-snapshot.js captures setItem and before any
+         page code reads a suspects_/victims_/… key. -->
+    <script src="modules/_shared/case-blobs.js"></script>
     <script src="modules/viper-ui.js"></script>
     <script src="modules/viper-prefs.js"></script>
     <script src="modules/datetime-format.js"></script>
@@ -6117,12 +6122,20 @@
             return all.filter(_isAssistCase);
         }
 
+        // Counters only need names, flags and dates. Read the stored text as
+        // it is — VpCaseBlobs (case-blobs.js) would otherwise fetch every
+        // photo of every case off disk just to count arrests.
+        function _lsRaw(key) {
+            const b = (typeof window !== 'undefined') ? window.VpCaseBlobs : null;
+            return (b && typeof b.getRaw === 'function') ? b.getRaw(key) : localStorage.getItem(key);
+        }
+
         function getTotalRecoveredVehicles() {
             const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
             let totalVehicles = 0;
             
             cases.forEach(caseItem => {
-                const recoveredVehicles = JSON.parse(localStorage.getItem(`recoveredVehicles_${caseItem.id}`)) || [];
+                const recoveredVehicles = JSON.parse(_lsRaw(`recoveredVehicles_${caseItem.id}`)) || [];
                 totalVehicles += recoveredVehicles.length;
             });
             
@@ -6132,7 +6145,7 @@
             const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
             let count = 0;
             cases.forEach(caseItem => {
-                const recoveredVehicles = JSON.parse(localStorage.getItem(`recoveredVehicles_${caseItem.id}`)) || [];
+                const recoveredVehicles = JSON.parse(_lsRaw(`recoveredVehicles_${caseItem.id}`)) || [];
                 recoveredVehicles.forEach(v => { if (_inThisMonth(_itemDate(v, caseItem))) count++; });
             });
             return count;
@@ -6267,7 +6280,7 @@
             let totalLocated = 0;
             
             cases.forEach(caseItem => {
-                const missingPersons = JSON.parse(localStorage.getItem(`missingpersons_${caseItem.id}`)) || [];
+                const missingPersons = JSON.parse(_lsRaw(`missingpersons_${caseItem.id}`)) || [];
                 missingPersons.forEach(person => {
                     if (person.located === true) {
                         totalLocated++;
@@ -6281,7 +6294,7 @@
             const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
             let count = 0;
             cases.forEach(caseItem => {
-                const missingPersons = JSON.parse(localStorage.getItem(`missingpersons_${caseItem.id}`)) || [];
+                const missingPersons = JSON.parse(_lsRaw(`missingpersons_${caseItem.id}`)) || [];
                 missingPersons.forEach(p => {
                     if (!p.located) return;
                     // Use locatedDate if present, fall back to item createdAt or case createdAt
@@ -6297,7 +6310,7 @@
             let totalActive = 0;
             
             cases.forEach(caseItem => {
-                const missingPersons = JSON.parse(localStorage.getItem(`missingpersons_${caseItem.id}`)) || [];
+                const missingPersons = JSON.parse(_lsRaw(`missingpersons_${caseItem.id}`)) || [];
                 missingPersons.forEach(person => {
                     if (!person.located) {
                         totalActive++;
@@ -6314,7 +6327,7 @@
             let recoveredValue = 0;
 
             cases.forEach(caseItem => {
-                const cargo = JSON.parse(localStorage.getItem(`cargo_${caseItem.id}`)) || [];
+                const cargo = JSON.parse(_lsRaw(`cargo_${caseItem.id}`)) || [];
                 cargo.forEach(item => {
                     const raw = parseFloat(item.estimatedValue) || 0;
                     const val = item.valueType === 'total' ? raw : raw * (parseInt(item.quantity) || 1);
@@ -6330,7 +6343,7 @@
             let totalValue = 0;
             let recoveredValue = 0;
             cases.forEach(caseItem => {
-                const cargo = JSON.parse(localStorage.getItem(`cargo_${caseItem.id}`)) || [];
+                const cargo = JSON.parse(_lsRaw(`cargo_${caseItem.id}`)) || [];
                 cargo.forEach(item => {
                     if (!_inThisMonth(_itemDate(item, caseItem))) return;
                     const raw = parseFloat(item.estimatedValue) || 0;
@@ -6346,7 +6359,7 @@
             const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
             let total = 0;
             cases.forEach(caseItem => {
-                const suspects = JSON.parse(localStorage.getItem(`suspects_${caseItem.id}`) || '[]');
+                const suspects = JSON.parse(_lsRaw(`suspects_${caseItem.id}`) || '[]');
                 suspects.forEach(s => { if (s.arrested) total++; });
             });
             // Also count closed-with-arrest cases (built-in + custom 'cleared-arrest' category)
@@ -6369,7 +6382,7 @@
             const cases = JSON.parse(localStorage.getItem('viperCases')) || [];
             let total = 0;
             cases.forEach(caseItem => {
-                const suspects = JSON.parse(localStorage.getItem(`suspects_${caseItem.id}`) || '[]');
+                const suspects = JSON.parse(_lsRaw(`suspects_${caseItem.id}`) || '[]');
                 suspects.forEach(s => {
                     if (!s.arrested) return;
                     const d = s.arrestDate || s.dateArrested || _itemDate(s, caseItem);
@@ -8480,8 +8493,8 @@
         }
 
         function getCaseExtras(c) {
-            const suspects = JSON.parse(localStorage.getItem('suspects_' + c.id) || '[]');
-            const victims  = JSON.parse(localStorage.getItem('victims_' + c.id) || '[]');
+            const suspects = JSON.parse(_lsRaw('suspects_' + c.id) || '[]');
+            const victims  = JSON.parse(_lsRaw('victims_' + c.id) || '[]');
             const suspectNames = suspects.map(s => s.name || ((s.firstName||'')+ ' '+(s.lastName||'')).trim() || 'Unknown').join(', ');
             const victimNames  = victims.map(v => v.name || 'Unknown').join(', ');
 

@@ -107,7 +107,7 @@ ok('nothing was written', tiny.getItem('consentSearches_42') === null);
 // actually names the thing that did not save and says so plainly.
 ok('the message names the record', /the consent search/.test(bad.message), bad.message);
 ok('the message states nothing was saved', /nothing was saved/i.test(bad.message), bad.message);
-ok('the message tells the officer what to do', /close and reopen/i.test(bad.message), bad.message);
+ok('the message explains the space is not the disk / OneDrive', /built-in storage/i.test(bad.message) && /OneDrive/.test(bad.message), bad.message);
 
 // A pre-existing key must survive a failed overwrite rather than being
 // clobbered to a half state.

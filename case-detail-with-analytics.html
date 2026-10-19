@@ -4823,9 +4823,15 @@
                                 if (emails.length) fieldBold('Email', emails.join(', '));
                                 if (phones.length) fieldBold('Phone', phones.join(', '));
                                 if (ips.length) fieldBold('IPs', ips.map(ip => (ip && ip.address) ? ip.address : ip).join(', '));
+                                const devs = Array.isArray(p.deviceIds) ? p.deviceIds : [];
+                                if (devs.length) fieldBold('Device IDs', devs.map(d => (d.type ? d.type + ' ' : '') + d.value).join(', '));
                                 if (p.estimatedLocation) fieldBold('Location', p.estimatedLocation);
                                 gap();
                             });
+                        }
+                        {
+                            const upIps = [...new Set((ct.uploadedFiles || []).flatMap(f => (f.sourceIps || []).map(s => s && s.address).filter(Boolean)))];
+                            if (upIps.length) fieldBold('Upload IPs', upIps.join(', '));
                         }
                         gap(3);
                     });
@@ -45657,7 +45663,43 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             // blank line then the "The following information was submitted" intro.
             const sectionAStart = clean.search(/Section A: Reported Information\s*\n(?:\s*\n)?\s*The following information was submitted/);
             const body = sectionAStart > 0 ? clean.substring(sectionAStart) : clean;
-            const lines = body.split('\n');
+            const lines = _ctDestack(body.split('\n'));
+
+            // Some reports (seen on a 129-page Google tip, Oct 2026) come out of
+            // the PDF reader "stacked": the label on one line, its value on the
+            // next ("IP Address:" / "2600:1700:… (Login)" / timestamp). Every
+            // field reader below expects "Label: value" on ONE line, so this
+            // rejoins them first. Long IPv6 addresses that wrapped onto a second
+            // line are glued back together too. Reports already on one line pass
+            // through unchanged.
+            function _ctDestack(src) {
+                const STACK_LABEL = /^(Name|Display Name|ESP Product\/Service|Mobile Phone|Home Phone|Phone|Date of Birth|Approximate Age|Email Address|Screen\/User Name|ESP User ID|Profile URL|IP Address|Estimated Location|Prior CT Reports|Device ID(?: \([^)]{1,30}\))?|MD5|Original Filename Associated with File|Image Categorization by ESP):$/;
+                const STACK_QUESTION = /^(Did Reporting ESP view [^?]{1,80}\?|Were entire contents of uploaded file publicly available\?)$/;
+                const NOT_A_VALUE = /^(Suspect|Recipient|Child Victim|Uploaded File Information|Webpage\/URL)$|^Section [A-D]:|^This concludes|^[A-Z][A-Za-z0-9 \/()'&-]{0,60}:$|\?$/;
+                const out = [];
+                for (let k = 0; k < src.length; k++) {
+                    const t = src[k].trim();
+                    if (!STACK_LABEL.test(t) && !STACK_QUESTION.test(t)) { out.push(src[k]); continue; }
+                    // Value = next non-blank line, at most one blank line away.
+                    let v = k + 1;
+                    if (v < src.length && !src[v].trim()) v++;
+                    if (v >= src.length || !src[v].trim() || NOT_A_VALUE.test(src[v].trim())) { out.push(src[k]); continue; }
+                    let val = src[v].trim();
+                    // IPv6 wrapped mid-address: "2600:1700:a4d6:" + "dc76:…:e50a (Login)".
+                    while (v + 1 < src.length && /^[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){1,7}:$/i.test(val)
+                           && /^[0-9a-f]{1,4}(?::|\s|\(|$)/i.test(src[v + 1].trim())) {
+                        val += src[++v].trim();
+                    }
+                    // Type tag pushed onto its own line: "<ip>" + "(Login)".
+                    if (v + 1 < src.length && /^\([A-Za-z ]{1,20}\)$/.test(src[v + 1].trim())
+                        && /^[0-9a-f.:]+$/i.test(val)) {
+                        val += ' ' + src[++v].trim();
+                    }
+                    out.push(t + ' ' + val);
+                    k = v;
+                }
+                return out;
+            }
 
             // ---------- 2. Report-level metadata ----------
             const rptMatch = text.match(/CyberTipline Report (\d+)/);
@@ -45692,6 +45734,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 for (let i = startIdx; i < Math.min(startIdx + 25, lines.length); i++) {
                     const ln = lines[i].trim();
                     if (/^(Company Information|Relevant Terms of Service|Incident Information)$/.test(ln)) break;
+                    // Stacked layout puts this on its own line after "Submitter:".
+                    if (/^Point of Contact for Law Enforcement:?$/i.test(ln)) continue;
                     if (ln) espBlock.push(ln);
                 }
                 // First non-empty, non-"Business Address:" line is ESP name
@@ -45768,8 +45812,10 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 const ln = lines[i].trim();
                 if (!/^(Suspect|Recipient|Child Victim)$/.test(ln)) continue;
                 // Skip TOC and "Summary of ESP Reported ..." lines — those are headers, no follow-up data.
-                const nextLine = (lines[i + 1] || '').trim();
-                const personFieldRe = /^(Name|Date of Birth|Mobile Phone|Home Phone|Phone|Email Address|Screen\/User Name|ESP User ID|ESP Product\/Service|Display Name|Profile URL|IP Address|Approximate Age|Estimated Location|Prior CT|Additional Information):/;
+                // The first field may sit one blank line below the header (stacked layout).
+                let nextLine = (lines[i + 1] || '').trim();
+                if (!nextLine) nextLine = (lines[i + 2] || '').trim();
+                const personFieldRe = /^(Name|Date of Birth|Mobile Phone|Home Phone|Phone|Email Address|Screen\/User Name|ESP User ID|ESP Product\/Service|Display Name|Profile URL|IP Address|Approximate Age|Estimated Location|Prior CT|Additional Information|Device ID(?: \([^)]{1,30}\))?):/;
                 if (!personFieldRe.test(nextLine)) continue;
 
                 const person = {
@@ -45779,6 +45825,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     emails: [], phones: [],
                     screenNames: [], userIds: [],
                     profileUrls: [], ipAddresses: [],
+                    deviceIds: [],
                     priorReports: '', estimatedLocation: '', additionalInfo: ''
                 };
 
@@ -45787,7 +45834,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     const fl = lines[j].trim();
                     // Section break or next person
                     if (/^(Suspect|Recipient|Child Victim)$/.test(fl)) break;
-                    if (/^Section [A-D]:/.test(fl) || /^Uploaded File Information$/.test(fl) || /^Webpage\/URL$/.test(fl) || /^Sent in product:/.test(fl) || /^The number of recipients/.test(fl) || /^This concludes Section/.test(fl)) break;
+                    if (/^Section [A-D]:/.test(fl) || /^Uploaded File Information$/.test(fl) || /^Webpage\/URL$/.test(fl) || /^Sent in product:/.test(fl) || /^The number of recipients/.test(fl) || /^This concludes Section/.test(fl) || /^Additional Information Submitted by/.test(fl)) break;
 
                     if (fl.startsWith('Name:')) person.name = fl.substring(5).trim();
                     else if (fl.startsWith('Display Name:')) person.displayName = fl.substring(13).trim();
@@ -45834,11 +45881,13 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             port: '',
                             timestamp: ''
                         };
-                        // Look ahead up to 2 lines for Port then Timestamp.
-                        let look = j + 1;
+                        // Look ahead up to 2 lines for Port then Timestamp (a single
+                        // blank line in between is tolerated — stacked layout).
+                        const nb = (x) => (x < lines.length && !lines[x].trim() && x + 1 < lines.length && lines[x + 1].trim()) ? x + 1 : x;
+                        let look = nb(j + 1);
                         if (look < lines.length && /^Port:\s*\d+/.test(lines[look].trim())) {
                             ip.port = lines[look].trim().substring(5).trim();
-                            look++;
+                            look = nb(look + 1);
                         }
                         if (look < lines.length && /^\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}:\d{2}\s*UTC/i.test(lines[look].trim())) {
                             ip.timestamp = lines[look].trim();
@@ -45847,7 +45896,18 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             // Port consumed but no timestamp — back off
                             j = look - 1;
                         }
-                        person.ipAddresses.push(ip);
+                        if (ip.address) person.ipAddresses.push(ip);
+                    }
+                    else if (/^Device ID(?: \([^)]{1,30}\))?:/.test(fl)) {
+                        // "Device ID (IMEI): 356…" then an optional timestamp line.
+                        const dm = fl.match(/^Device ID(?: \(([^)]{1,30})\))?:\s*(.*)$/);
+                        const dev = { type: (dm[1] || '').trim(), value: dm[2].trim(), timestamp: '' };
+                        let look = j + 1;
+                        if (look < lines.length && /^\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}:\d{2}\s*UTC/i.test(lines[look].trim())) {
+                            dev.timestamp = lines[look].trim();
+                            j = look;
+                        }
+                        if (dev.value) person.deviceIds.push(dev);
                     }
                     else if (fl.startsWith('Prior CT Reports:')) {
                         person.priorReports = fl.substring(17).trim();
@@ -45864,7 +45924,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         while (j + 1 < lines.length) {
                             const nl = lines[j + 1].trim();
                             if (/^(Name|IP Address|Email Address|Estimated Location|Prior CT|Mobile Phone|Screen\/User Name|ESP User ID|ESP Product\/Service|Display Name|Profile URL|Uploaded File Information|Webpage\/URL|Sent in product):/.test(nl)
-                                || /^(Suspect|Recipient|Child Victim)$/.test(nl)
+                                || /^(Suspect|Recipient|Child Victim|Uploaded File Information|Webpage\/URL)$/.test(nl)
+                                || /^Additional Information Submitted by/.test(nl)
+                                || /^Device ID(?: \([^)]{1,30}\))?:/.test(nl)
                                 || /^Section [A-D]:/.test(nl)
                                 || /^This concludes/.test(nl)) break;
                             j++;
@@ -45873,6 +45935,13 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         person.additionalInfo = (person.additionalInfo ? person.additionalInfo + '\n' : '') + al.join('\n').trim();
                     }
                     j++;
+                }
+                // Google lists the account's phone under "Device Information"
+                // with the IP it last checked in from — an identifier too.
+                const ckM = person.additionalInfo.match(/(?:^|\n)Checkin IP:\s*(\d{1,3}(?:\.\d{1,3}){3}|[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7})\s*(?:\n|$)/i);
+                if (ckM && !person.ipAddresses.some(x => x.address === ckM[1] && x.type === 'Checkin')) {
+                    const ctM = person.additionalInfo.match(/(?:^|\n)Checkin Time:\s*([^\n]+)/);
+                    person.ipAddresses.push({ address: ckM[1], type: 'Checkin', port: '', timestamp: ctM ? ctM[1].trim() : '' });
                 }
                 report.persons.push(person);
                 i = j - 1;
@@ -45945,7 +46014,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         }
                         curFile = {
                             filename, md5: '', categorization: '',
-                            viewedByESP: '', viewedByNCMEC: null, publicly: ''
+                            viewedByESP: '', viewedByNCMEC: null, publicly: '',
+                            espCategorization: '', sourceIps: []
                         };
                     } else if (curFile && /^MD5:/.test(ln)) {
                         curFile.md5 = ln.substring(4).trim().toLowerCase();
@@ -45953,6 +46023,37 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         curFile.viewedByESP = ln.split('?').slice(1).join('?').trim();
                     } else if (curFile && /^Were entire contents of uploaded file publicly available\?/.test(ln)) {
                         curFile.publicly = ln.split('?').slice(1).join('?').trim();
+                    } else if (curFile && /^Image Categorization by ESP:/.test(ln)) {
+                        curFile.espCategorization = ln.substring(28).trim();
+                    } else if (curFile && /^IP Address(?::|\s|$)/.test(ln)) {
+                        // "Source Information" — the IP the file was uploaded from.
+                        // One line:  "IP Address 1.2.3.4 Upload 05-01-2026 22:46:19 UTC"
+                        //            "IP Address: 1.2.3.4 (Upload)" + timestamp line
+                        // Stacked table cells: "IP Address" / <ip> / "Upload" / <timestamp>
+                        const IPX = /^(\d{1,3}(?:\.\d{1,3}){3}|[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7})$/i;
+                        const TSX = /^\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}:\d{2}\s*UTC$/i;
+                        const nextAt = (x) => { while (x < lines.length && !lines[x].trim()) x++; return x; };
+                        const row = { address: '', event: '', timestamp: '' };
+                        let last = j;
+                        let rest = ln.replace(/^IP Address:?\s*/, '');
+                        if (rest) {
+                            const tsM = rest.match(/(\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}:\d{2}\s*UTC)\s*$/i);
+                            if (tsM) { row.timestamp = tsM[1]; rest = rest.slice(0, tsM.index).trim(); }
+                            const m = rest.match(/^(\S+)\s*(?:\(([^)]{1,20})\)|([A-Za-z][A-Za-z ]{0,20}))?$/);
+                            if (m && IPX.test(m[1])) { row.address = m[1]; row.event = (m[2] || m[3] || '').trim(); }
+                        } else {
+                            let k = nextAt(j + 1);
+                            let v = k < lines.length ? lines[k].trim() : '';
+                            while (/:$/.test(v) && k + 1 < lines.length && /^[0-9a-f]{1,4}(?::|$)/i.test(lines[k + 1].trim())) v += lines[++k].trim();
+                            if (IPX.test(v)) { row.address = v; last = k; }
+                        }
+                        if (row.address) {
+                            let k = nextAt(last + 1);
+                            if (!row.event && k < lines.length && /^[A-Za-z][A-Za-z ]{0,20}$/.test(lines[k].trim())) { row.event = lines[k].trim(); last = k; k = nextAt(k + 1); }
+                            if (!row.timestamp && k < lines.length && TSX.test(lines[k].trim())) { row.timestamp = lines[k].trim(); last = k; }
+                            curFile.sourceIps.push(row);
+                            j = last;
+                        }
                     }
                     j++;
                 }
@@ -46721,6 +46822,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 else if (k === 'userid') addIdent('username', it.value, { platform: platform ? `${platform} (UserID)` : 'UserID' });
                 else if (k === 'ip') addIdent('ip', it.value, { platform, note: it.meta || '' });
                 else if (k === 'profile' || k === 'profileurl') addIdent('username', it.value, { platform: platform ? `${platform} (URL)` : 'URL' });
+                else if (k === 'deviceid' || k === 'device') appendNote(`Device ID (from CyberTip${platform ? ', ' + platform : ''}): ${it.value}`);
                 else addIdent('username', it.value, { platform: it.label || '' });
             });
 
@@ -46910,6 +47012,30 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 for (const sn of p.screenNames) idCards.push(identifierCard('USERNAME', sn, p.role, espName));
                 for (const uid of p.userIds) idCards.push(identifierCard('USERID', uid, p.role, espName));
                 for (const ip of p.ipAddresses) idCards.push(ipCard(ip, p.role, espName));
+                for (const d of (p.deviceIds || [])) {
+                    const dv = (d.type ? d.type + ': ' : '') + d.value;
+                    const tsHtml = d.timestamp ? `<div class="text-xs text-gray-400 mt-1">${escHtmlSafe(d.timestamp)}</div>` : '';
+                    idCards.push(identifierCard('DEVICE ID', escHtmlSafe(dv), p.role, espName, tsHtml));
+                }
+            }
+            // Upload IPs from the uploaded-file "Source Information" — one card
+            // per distinct address, with how many files came from it.
+            {
+                const byIp = new Map();
+                for (const f of (t.uploadedFiles || [])) {
+                    for (const s of (f.sourceIps || [])) {
+                        if (!s || !s.address) continue;
+                        const cur = byIp.get(s.address) || { address: s.address, files: 0, events: new Set() };
+                        cur.files++;
+                        if (s.event) cur.events.add(s.event);
+                        byIp.set(s.address, cur);
+                    }
+                }
+                const espName = t.esp?.name || '';
+                for (const u of byIp.values()) {
+                    const ev = [...u.events].join('/') || 'Upload';
+                    idCards.push(ipCard({ address: u.address, type: `${ev} · ${u.files} file${u.files === 1 ? '' : 's'}`, port: '', timestamp: '' }, 'Uploaded Files', espName));
+                }
             }
 
             return `
@@ -47012,6 +47138,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             (p.userIds || []).forEach(u => personItems.push({ key: 'userid', label: 'User ID', value: u, espName }));
                             (p.ipAddresses || []).forEach(ip => personItems.push({ key: 'ip', label: 'IP', value: ip.address, meta: ip.type || '', espName }));
                             (p.profileUrls || []).forEach(u => personItems.push({ key: 'profile', label: 'Profile URL', value: u, espName }));
+                            (p.deviceIds || []).forEach(d => personItems.push({ key: 'deviceid', label: 'Device ID', value: (d.type ? d.type + ': ' : '') + d.value, espName }));
                             const personRegIdx = ctRegisterSend(personItems);
                             const sendBtnHtml = personRegIdx >= 0 ? `<button onclick="ctSendBtn(${personRegIdx})" class="ml-auto px-2.5 py-1 text-xs bg-viper-cyan/20 text-viper-cyan rounded border border-viper-cyan/40 hover:bg-viper-cyan/30 transition-colors flex items-center gap-1" title="Send this person's data to Suspect / Victim / Other Individual">
                                     <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
@@ -47032,6 +47159,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                     ${p.estimatedLocation ? `<div class="col-span-2"><span class="text-gray-500">Location:</span> <span class="text-gray-300">${p.estimatedLocation}</span>${_ctSrcBtn(t, 'Location', [p.estimatedLocation], { context: [['Person', p.name]], label: '' })}</div>` : ''}
                                     ${p.priorReports ? `<div class="col-span-2"><span class="text-gray-500">Prior CTs:</span> <span class="text-yellow-400 text-xs">${p.priorReports}</span></div>` : ''}
                                     ${p.profileUrls.length ? `<div class="col-span-2"><span class="text-gray-500">Profile:</span> ${p.profileUrls.map(u => `<a href="${u}" target="_blank" class="text-cyan-400 hover:underline text-xs break-all">${u}</a>`).join(', ')}</div>` : ''}
+                                    ${(p.deviceIds || []).length ? `<div class="col-span-2"><span class="text-gray-500">Device:</span> <span class="text-gray-300 font-mono text-xs">${p.deviceIds.map(d => escHtmlSafe((d.type ? d.type + ' ' : '') + d.value)).join(', ')}</span></div>` : ''}
                                 </div>
                             </div>`;
                         }).join('')}
@@ -47060,8 +47188,10 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                 <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400">
                                     ${f.md5 ? `<span>MD5: <span class="text-gray-300 font-mono">${f.md5}</span>${_ctSrcBtn(t, 'MD5', [f.md5, f.filename], { valueLabels: ['MD5', 'File name'], context: [['File', f.filename]], label: '' })}</span>` : ''}
                                     ${f.categorization ? `<span>Category: <span class="text-yellow-400">${f.categorization}</span></span>` : ''}
+                                    ${f.espCategorization ? `<span>ESP category: <span class="text-gray-300">${escHtmlSafe(f.espCategorization)}</span></span>` : ''}
                                     ${espViewed}
                                     ${publicly}
+                                    ${(f.sourceIps || []).map(s => `<span>${escHtmlSafe(s.event || 'Upload')} IP: <span class="text-gray-300 font-mono">${escHtmlSafe(s.address)}</span>${s.timestamp ? ` <span class="text-gray-500">${escHtmlSafe(s.timestamp)}</span>` : ''}${_ctSrcBtn(t, 'Upload IP', [s.address, s.timestamp], { valueLabels: ['IP address', 'Time'], context: [['File', f.filename]], label: '' })}</span>`).join('')}
                                 </div>
                             </div>`;
                         }).join('')}

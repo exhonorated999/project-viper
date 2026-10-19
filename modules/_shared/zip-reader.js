@@ -46,6 +46,9 @@ class ZipReader {
     }
 
     async _init(input, options) {
+        // Optional password for password-protected entries. Held only on this
+        // reader instance (cleared in close()); never logged.
+        this._password = (options && options.password != null && options.password !== '') ? String(options.password) : null;
         if (Buffer.isBuffer(input)) {
             const buf = this._maybeDecryptBuffer(input, options.security);
             this._openFromBuffer(buf);
@@ -136,10 +139,35 @@ class ZipReader {
             // an index can later prove a file is unchanged.
             crc: e.crc,
             time: e.time,
+            // Password-protected entry (GP flag bit 0). Read through
+            // _readEncrypted() with the reader's password.
+            encrypted: !!e.encrypted,
             _name: e.name,
-            getData() { return self._zip.entryDataSync(this._name); },
+            getData() { return self._entryData(this._name); },
         }));
         return this._entryList;
+    }
+
+    /** True when any file entry is password-protected. */
+    hasEncryptedEntries() {
+        return this.getEntries().some(e => e && !e.isDirectory && e.encrypted);
+    }
+
+    _rawEntry(name) {
+        return (this._mode === 'file' && this._zip) ? this._zip.entry(name) : null;
+    }
+
+    _readEncrypted(raw) {
+        const { readEncryptedEntry } = require('./zip-crypto');
+        if (this._cryptFd == null) this._cryptFd = fs.openSync(this._sourcePath, 'r');
+        return readEncryptedEntry(this._cryptFd, raw, this._password);
+    }
+
+    /** Entry bytes; decrypts password-protected entries, otherwise unchanged. */
+    _entryData(name) {
+        const raw = this._rawEntry(name);
+        if (raw && raw.encrypted) return this._readEncrypted(raw);
+        return this._zip.entryDataSync(name);
     }
 
     readAsText(entryOrName) {
@@ -150,7 +178,7 @@ class ZipReader {
             ? entryOrName
             : (entryOrName && (entryOrName._name || entryOrName.entryName));
         if (!name) return '';
-        return this._zip.entryDataSync(name).toString('utf-8');
+        return this._entryData(name).toString('utf-8');
     }
 
     /**
@@ -167,6 +195,11 @@ class ZipReader {
             const ent = this._adm.getEntry(name);
             if (!ent) return Promise.resolve(null);
             return Promise.resolve(require('stream').Readable.from([ent.getData()]));
+        }
+        const rawS = this._rawEntry(name);
+        if (rawS && rawS.encrypted) {
+            try { return Promise.resolve(require('stream').Readable.from([this._readEncrypted(rawS)])); }
+            catch (e) { return Promise.reject(e); }
         }
         return new Promise((resolve, reject) => {
             this._zip.stream(name, (err, stm) => err ? reject(err) : resolve(stm));
@@ -190,6 +223,11 @@ class ZipReader {
             return Promise.resolve();
         }
         fs.mkdirSync(path.dirname(destPath), { recursive: true });
+        const rawX = this._rawEntry(name);
+        if (rawX && rawX.encrypted) {
+            try { fs.writeFileSync(destPath, this._readEncrypted(rawX)); return Promise.resolve(); }
+            catch (e) { return Promise.reject(e); }
+        }
         return new Promise((resolve, reject) => {
             this._zip.extract(name, destPath, (err) => err ? reject(err) : resolve());
         });
@@ -213,6 +251,9 @@ class ZipReader {
 
     close() {
         try { if (this._zip) this._zip.close(); } catch (_) {}
+        try { if (this._cryptFd != null) fs.closeSync(this._cryptFd); } catch (_) {}
+        this._cryptFd = null;
+        this._password = null;
         for (const t of this._tempFiles) {
             try { fs.unlinkSync(t); } catch (_) {}
         }

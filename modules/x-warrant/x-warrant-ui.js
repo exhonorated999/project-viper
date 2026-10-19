@@ -27,6 +27,7 @@ class XWarrantUI {
         if (!this.container) return;
         if (this.module.imports.length === 0) {
             this.container.innerHTML = this._renderEmptyState();
+            this.renderEvidenceBar(this.module.evidenceFiles);
             return;
         }
         this.container.innerHTML = `
@@ -42,6 +43,7 @@ class XWarrantUI {
             </div>
             <div id="xwp-evidence-bar"></div>
         `;
+        this.renderEvidenceBar(this.module.evidenceFiles);
         this._loadLazyImages();
     }
 
@@ -50,7 +52,7 @@ class XWarrantUI {
             <div class="xwp-empty-state">
                 <div class="xwp-empty-icon">𝕏</div>
                 <h3 class="xwp-empty-title">No X / Twitter warrant data imported</h3>
-                <p class="xwp-empty-text">Drop an X production ZIP or folder into the case Evidence/Warrants folder, or import one directly.</p>
+                <p class="xwp-empty-text">Drop an X production ZIP or folder into the case Evidence/Warrants folder, add it on the Evidence tab (copied or linked), or import one directly. Password-protected ZIPs are supported.</p>
                 <button class="xwp-btn-primary" onclick="window.xWarrantUI.handleFilePicker()">Import X Production (ZIP or folder)</button>
                 <div id="xwp-evidence-bar"></div>
             </div>
@@ -67,14 +69,80 @@ class XWarrantUI {
                 ${files.map(f => `
                     <button class="xwp-evidence-file ${f.alreadyImported ? 'imported' : ''}"
                             onclick="window.xWarrantUI.handleEvidenceClick('${this._escJs(f.path)}', '${this._escJs(f.name)}', ${f.isFolder ? 'true' : 'false'})"
-                            title="${f.alreadyImported ? 'Already imported — click to re-import' : 'Click to import'}">
-                        <span class="xwp-evidence-icon">${f.alreadyImported ? '✅' : (f.isFolder ? '📁' : '📦')}</span>
+                            title="${this._esc(this._evidenceTitle(f))}">
+                        <span class="xwp-evidence-icon">${f.alreadyImported ? '✅' : (f.encrypted ? '🔒' : (f.isFolder ? '📁' : '📦'))}</span>
                         <span class="xwp-evidence-name">${this._esc(f.name)}</span>
+                        ${f.source === 'evidence-link' ? '<span class="xwp-evidence-size">linked</span>' : ''}
                         ${f.size ? `<span class="xwp-evidence-size">${(f.size / 1024 / 1024).toFixed(1)} MB</span>` : ''}
                     </button>
                 `).join('')}
             </div>
         `;
+    }
+
+    _evidenceTitle(f) {
+        const parts = [f.alreadyImported ? 'Already imported — click to re-import' : 'Click to import'];
+        if (f.encrypted) parts.push('password-protected — you will be asked for the password');
+        if (f.nested) parts.push('production ZIP inside a delivery ZIP');
+        if (f.source === 'evidence-link') parts.push('linked from the Evidence tab: ' + f.path);
+        return parts.join(' · ');
+    }
+
+    /**
+     * Ask for a ZIP password in an in-page dialog (Electron has no
+     * window.prompt). Resolves the typed string, or null on Cancel. The value
+     * is handed straight to the import call and never stored.
+     */
+    _askPassword(fileName, wasWrong) {
+        return new Promise((resolve) => {
+            const wrap = document.createElement('div');
+            wrap.className = 'xwp-pw-overlay';
+            wrap.setAttribute('style', 'position:fixed;inset:0;z-index:10050;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;');
+            wrap.innerHTML = `
+                <div role="dialog" aria-modal="true" style="background:#1e2130;color:#e6e8ef;border:1px solid #3a3f55;border-radius:10px;padding:20px 22px;width:420px;max-width:92vw;box-shadow:0 10px 40px rgba(0,0,0,.5);font-size:14px;">
+                    <div style="font-weight:600;font-size:16px;margin-bottom:6px;">🔒 Password-protected X production</div>
+                    <div style="opacity:.85;margin-bottom:12px;word-break:break-all;">${this._esc(fileName || '')}</div>
+                    ${wasWrong ? '<div class="xwp-pw-wrong" style="color:#ff8a8a;margin-bottom:8px;">That password did not open the ZIP. Try again.</div>' : ''}
+                    <div style="opacity:.8;margin-bottom:6px;">Enter the password the provider sent with the production. VIPER does not save it.</div>
+                    <input type="password" class="xwp-pw-input" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:6px;border:1px solid #4a5070;background:#11131c;color:#fff;font-size:14px;">
+                    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+                        <button type="button" class="xwp-btn-sm xwp-pw-cancel">Cancel</button>
+                        <button type="button" class="xwp-btn-primary xwp-pw-ok">Open</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(wrap);
+            const input = wrap.querySelector('.xwp-pw-input');
+            const finish = (val) => {
+                input.value = '';
+                wrap.remove();
+                resolve(val);
+            };
+            wrap.querySelector('.xwp-pw-ok').onclick = () => { if (input.value) finish(input.value); else input.focus(); };
+            wrap.querySelector('.xwp-pw-cancel').onclick = () => finish(null);
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && input.value) { e.preventDefault(); finish(input.value); }
+                else if (e.key === 'Escape') { e.preventDefault(); finish(null); }
+            });
+            setTimeout(() => input.focus(), 0);
+        });
+    }
+
+    /** Import, asking for the ZIP password when the production needs one. */
+    async _runImport(filePath, fileName, isFolder) {
+        let password = null;
+        for (let attempt = 0; attempt < 6; attempt++) {
+            try {
+                this._showLoading('Importing X production… (large productions may take a minute)');
+                return await this.module.importWarrant(filePath, fileName, isFolder, password);
+            } catch (err) {
+                const code = err && err.code;
+                if (code !== 'ZIP_PASSWORD_REQUIRED' && code !== 'ZIP_PASSWORD_WRONG') throw err;
+                this.render();
+                password = await this._askPassword(fileName, code === 'ZIP_PASSWORD_WRONG' && password != null);
+                if (password == null) return null; // cancelled
+            }
+        }
+        throw new Error('Too many wrong password attempts.');
     }
 
     // ─── Flag toolbar ───────────────────────────────────────────────────
@@ -178,8 +246,8 @@ class XWarrantUI {
 
     async handleEvidenceClick(filePath, fileName, isFolder) {
         try {
-            this._showLoading('Importing X production… (large productions may take a minute)');
-            const record = await this.module.importWarrant(filePath, fileName, isFolder);
+            const record = await this._runImport(filePath, fileName, isFolder);
+            if (!record) { this.render(); return; }
             this.activeImportIdx = this.module.imports.findIndex(i => i.id === record.id);
             this.activeSection = 'overview';
             this.render();
@@ -189,8 +257,9 @@ class XWarrantUI {
 
     async handleFilePicker() {
         try {
-            this._showLoading('Importing X production… (large productions may take a minute)');
-            const record = await this.module.importFromPicker();
+            const picked = await this.module.pickProduction();
+            if (!picked) { this.render(); return; }
+            const record = await this._runImport(picked.path, picked.name, picked.isFolder);
             if (!record) { this.render(); return; }
             this.activeImportIdx = this.module.imports.findIndex(i => i.id === record.id);
             this.activeSection = 'overview';

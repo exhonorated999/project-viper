@@ -29,6 +29,10 @@ const fs = require('fs');
 const path = require('path');
 const { openZip } = require('../_shared/zip-reader');
 
+// Largest inner ZIP we unpack to temp just to SEE whether a delivery ZIP
+// wraps an X production (scan time). Import has no such limit.
+const NESTED_PEEK_MAX = 1024 * 1024 * 1024;
+
 const MEDIA_EXTS = new Set([
     '.jpeg', '.jpg', '.png', '.gif', '.webp', '.heic', '.heif', '.svg',
     '.mp4', '.webm', '.mov', '.m4v',
@@ -137,12 +141,40 @@ class XWarrantParser {
     }
 
     static async isXWarrantZipAsync(filePath, options = {}) {
+        const res = await XWarrantParser.inspectZip(filePath, options);
+        return !!res.isX;
+    }
+
+    /**
+     * Look inside a ZIP without reading any record bodies:
+     *   { isX, encrypted, nested, innerName }
+     * - Password-protected productions are still recognised (entry NAMES are
+     *   readable without the password); `encrypted` tells the UI to ask.
+     * - A delivery ZIP that wraps the production ZIP (X / legal portals do
+     *   this) is recognised when the inner ZIP is not itself locked inside a
+     *   password-protected outer ZIP.
+     */
+    static async inspectZip(filePath, options = {}) {
         let zip = null;
         try {
             zip = await openZip(filePath, { security: options.security });
-            const names = zip.getEntries().filter(e => !e.isDirectory).map(e => e.entryName);
-            return XWarrantParser._entriesLookXish(names);
-        } catch (e) { return false; }
+            const files = zip.getEntries().filter(e => !e.isDirectory && !/^__macosx/i.test(e.entryName));
+            const encrypted = files.some(e => e.encrypted);
+            if (XWarrantParser._entriesLookXish(files.map(e => e.entryName))) {
+                return { isX: true, encrypted, nested: false };
+            }
+            if (options.noNested) return { isX: false, encrypted };
+            const inner = files.filter(e => /\.zip$/i.test(e.entryName)).slice(0, 8);
+            for (const e of inner) {
+                if (e.encrypted) continue;                           // needs the password to look inside
+                if ((e.size || 0) > NESTED_PEEK_MAX) continue;
+                let tmp;
+                try { tmp = await zip.extractEntryToTemp(e, '.zip'); } catch (_) { continue; }
+                const sub = await XWarrantParser.inspectZip(tmp, { noNested: true });
+                if (sub.isX) return { isX: true, encrypted: !!sub.encrypted, nested: true, innerName: e.entryName };
+            }
+            return { isX: false, encrypted };
+        } catch (e) { return { isX: false, encrypted: false, error: e.message }; }
         finally { try { if (zip) zip.close(); } catch (_) {} }
     }
 
@@ -167,9 +199,22 @@ class XWarrantParser {
     // ─── Parse entrypoints ──────────────────────────────────────────────
 
     async parseZip(input, options = {}) {
-        const zip = await openZip(input, { security: options.security });
+        const zip = await openZip(input, { security: options.security, password: options.password });
         try {
             const entries = zip.getEntries().filter(e => !e.isDirectory && !e.entryName.startsWith('__MACOSX'));
+            // Delivery ZIP wrapping the production ZIP → parse the inner one.
+            if (!options._nested && !XWarrantParser._entriesLookXish(entries.map(e => e.entryName))) {
+                for (const e of entries.filter(x => /\.zip$/i.test(x.entryName))) {
+                    let tmp;
+                    try { tmp = await zip.extractEntryToTemp(e, '.zip'); }
+                    catch (err) { if (err && /^ZIP_/.test(err.code || '')) throw err; continue; }
+                    const peek = await XWarrantParser.inspectZip(tmp, { noNested: true });
+                    if (!peek.isX) continue;
+                    const res = await this.parseZip(tmp, Object.assign({}, options, { _nested: true }));
+                    res.nestedIn = e.entryName;
+                    return res;
+                }
+            }
             const fileMap = {};   // stem -> text
             let readmeText = null;
             const mediaEntries = []; // { name, read() }
@@ -223,6 +268,12 @@ class XWarrantParser {
 
     _buildResult({ fileMap, readmeText, mediaEntries, options }) {
         const opts = options || {};
+        // Nothing recognisable → say so instead of saving an empty import.
+        if (!fileMap || !Object.keys(fileMap).some(s => SIGNATURE_STEMS.includes(s))) {
+            const err = new Error('No X / Twitter record files (for example <account>-account.txt or <account>-direct-messages.txt) were found. Check that this is an X production.');
+            err.code = 'NOT_X_PRODUCTION';
+            throw err;
+        }
         const catalog = this._parseReadmeCatalog(readmeText || '');
 
         // Media index: (kind, parentId) -> [filenames]; mediaFiles map.

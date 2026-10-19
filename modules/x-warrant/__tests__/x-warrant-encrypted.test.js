@@ -366,6 +366,72 @@ function checkParsed(r, m, extractDir) {
     let otherErr = null; try { await ui._runImport(path.join(TMP, 'other.zip'), 'other.zip', false); } catch (e) { otherErr = e; }
     ok(otherErr && otherErr.code === 'NOT_X_PRODUCTION' && asks.length === 6, 'non-password errors are not turned into a prompt');
 
+    // 10. Find in Evidence (Cyber Tips-style tick list).
+    {
+        const delivery = W(path.join('cases', 'C2', 'Evidence', 'E1', 'delivery.zip'),
+            buildZip([{ name: 'cover.pdf', data: '%PDF' }, { name: 'inner/' + ACC + '.zip', data: buildZip(prodEntries('aes')), method: 0 }]));
+        const releasedZip = W(path.join('released-elsewhere', 'released.zip'), fs.readFileSync(plainP));
+        const otherZip = path.join(TMP, 'other.zip');
+        store.viperCaseEvidence = JSON.stringify(Object.assign(JSON.parse(store.viperCaseEvidence), {
+            C2: [
+                { id: 'a', tag: 'E1', storageMode: 'copy', files: [{ name: 'delivery.zip', path: delivery }] },
+                { id: 'b', tag: 'E2', referenceOnly: true, storageMode: 'reference', sourcePath: linkedDir,
+                  files: PROD.map(([n]) => ({ name: path.basename(n), path: path.join(linkedDir, n) })) },
+                { id: 'c', tag: 'E3', referenceOnly: true, storageMode: 'reference', sourcePath: otherZip, files: [{ name: 'other.zip', path: otherZip }] },
+                { id: 'd', tag: 'E4', storageMode: 'copy', files: [{ name: 'report.pdf', path: path.join(TMP, 'report.pdf') }] },
+                { id: 'e', tag: 'E9', released: true, files: [{ name: 'released.zip', path: releasedZip }] },
+            ],
+            C3: [{ id: 'z', storageMode: 'copy', files: [{ path: path.join(TMP, 'x.pdf') }] }],
+        }));
+        const toasts = [];
+        sb.viperToast = (m, t) => toasts.push([t, String(m)]);
+        let lastHtml = '', confirmAnswer = true, confirms = 0, tickOverride = null;
+        sb.viperConfirm = (html) => { confirms++; lastHtml = html; return Promise.resolve(confirmAnswer); };
+        document.querySelectorAll = (sel) => {
+            if (sel !== '.xwp-ev-pick') return [];
+            const boxes = []; const re = /data-i="(\d+)"\s*(checked)?/g; let m;
+            while ((m = re.exec(lastHtml))) boxes.push({ checked: !!m[2], dataset: { i: m[1] } });
+            if (tickOverride) boxes.forEach(bx => { bx.checked = tickOverride(bx.dataset.i); });
+            return boxes;
+        };
+        const mod2 = new sb.XWarrantModule('id2', 'C2', 'Case 2');
+        const ui2 = new sb.XWarrantUI('xw2', mod2); mod2.ui = ui2;
+        ok(/findInEvidence\(\)/.test(ui2._renderEmptyState()) && /Find in Evidence/.test(ui2._renderEmptyState()), 'empty X tab has a Find in Evidence button');
+        ui2.render = () => {}; ui2._showLoading = () => {};
+        ui2._askPassword = (name, wasWrong) => { asks.push([name, !!wasWrong]); return Promise.resolve(answers.shift()); };
+        await mod2.scanForWarrants();
+        const cands = mod2.evidenceCandidates();
+        const cn = cands.map(c => c.name);
+        ok(cands.length === 3 && cn.includes('delivery.zip') && cn.includes(ACC) && cn.includes('other.zip'), 'candidates: copied zip, linked folder, linked zip (pdf-only / released / other cases excluded) — got ' + JSON.stringify(cn));
+        const dc = cands.find(c => c.name === 'delivery.zip'), fc = cands.find(c => c.name === ACC), oc = cands.find(c => c.name === 'other.zip');
+        ok(dc && dc.detected && dc.likely && dc.encrypted && !dc.isFolder, 'nested locked delivery zip: detected, likely, 🔒');
+        ok(fc && fc.isFolder && fc.likely && fc.linked && fc.path === linkedDir, 'linked unzipped folder offered as a folder');
+        ok(oc && !oc.likely && cands.indexOf(oc) === 2, 'unrelated zip offered last, not ticked');
+        asks = []; answers = [PW];
+        let res = await ui2.findInEvidence();
+        ok(confirms === 1 && /delivery\.zip/.test(lastHtml) && /🔒 password-protected/.test(lastHtml) && /linked/.test(lastHtml), 'dialog lists the items with lock / linked notes');
+        ok(res && res.added === 2 && mod2.imports.length === 2 && res.notX.length === 0, 'default ticks import the two X productions');
+        ok(asks.length === 1 && asks[0][0] === 'delivery.zip', 'password asked once, for the locked one');
+        ok(toasts.some(t => t[0] === 'success' && /Imported 2 X productions/.test(t[1])), 'success toast');
+        ok(mod2.evidenceCandidates().filter(c => c.alreadyImported).length === 2, 'imported items marked already on this tab');
+        ok(/findInEvidence\(\)/.test((() => { ui2.activeImportIdx = 0; return ui2._renderNav(); })()), 'X tab sidebar keeps a Find in Evidence button after import');
+        tickOverride = (i) => cands[Number(i)] && cands[Number(i)].name === 'other.zip';
+        toasts.length = 0;
+        res = await ui2.findInEvidence();
+        ok(res && res.added === 0 && res.notX.length === 1 && res.notX[0] === 'other.zip' && mod2.imports.length === 2, 'ticked non-X zip is skipped and named');
+        ok(toasts.some(t => /Not an X production, skipped: other\.zip/.test(t[1])), 'skip toast names the file');
+        tickOverride = () => true; confirmAnswer = false;
+        let importCalls = 0; const realImport = mod2.importWarrant.bind(mod2);
+        mod2.importWarrant = (...x) => { importCalls++; return realImport(...x); };
+        res = await ui2.findInEvidence();
+        ok(res === undefined && importCalls === 0 && mod2.imports.length === 2, 'cancel imports nothing (even with items ticked)');
+        tickOverride = null;
+        const mod3 = new sb.XWarrantModule('id3', 'C3', 'Case 3'); const ui3 = new sb.XWarrantUI('xw3', mod3); mod3.ui = ui3; ui3.render = () => {};
+        confirms = 0; toasts.length = 0;
+        await ui3.findInEvidence();
+        ok(confirms === 0 && toasts.some(t => /no ZIPs or production folders/.test(t[1])), 'no candidates → explains, no dialog');
+    }
+
     try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (_) {}
     console.log(`\n${fail === 0 ? '✔ ALL TESTS PASSED' : '✖ FAILURES'} pass=${pass} fail=${fail}`);
     process.exit(fail ? 1 : 0);

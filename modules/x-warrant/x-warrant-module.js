@@ -59,6 +59,68 @@ class XWarrantModule {
         return Array.from(new Set(out)).slice(0, 200);
     }
 
+    /**
+     * "Find in Evidence": every ZIP and every folder of .txt record files on
+     * this case's Evidence tab (copied OR linked), whether or not the
+     * background scan recognised it. Nothing is opened here — the officer
+     * ticks what to import and the import itself says if it is not X.
+     *   → [{ path, name, isFolder, evidenceTag, linked, detected, likely }]
+     */
+    evidenceCandidates() {
+        const out = [];
+        const seen = new Set();
+        const base = (p) => String(p).replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+        const dirOf = (p) => String(p).replace(/[\\/][^\\/]*$/, '');
+        const add = (c) => {
+            const k = String(c.path).replace(/[\\/]+$/, '').toLowerCase();
+            if (!c.path || seen.has(k)) return;
+            seen.add(k);
+            out.push(c);
+        };
+        let list = [];
+        try {
+            const all = JSON.parse(localStorage.getItem('viperCaseEvidence') || '{}');
+            list = Array.isArray(all[this.caseNumber]) ? all[this.caseNumber] : [];
+        } catch (e) { console.warn('X warrant: evidence list unreadable', e); }
+        const xName = (n) => /twitter|(^|[^a-z])x[\s_-]?(corp|prod|return|warrant)|^\d{8,}([-_.]|$)/i.test(String(n));
+        const xRecord = /(^|[\\/])\d+-(account|direct-messages|direct-messages-group|tweets|tweet-headers)\.txt$/i;
+        for (const ev of list) {
+            if (!ev || ev.released) continue;
+            const evidenceTag = ev.tag || ev.title || ev.name || '';
+            const linked = !!(ev.referenceOnly || ev.storageMode === 'reference');
+            const files = (Array.isArray(ev.files) ? ev.files : []).filter(f => f && f.path);
+            for (const f of files) {
+                if (!/\.zip$/i.test(String(f.path))) continue;
+                const name = f.name || base(f.path);
+                add({ path: String(f.path), name, isFolder: false, evidenceTag, linked, likely: xName(name) || xName(evidenceTag) });
+            }
+            // Unzipped production → the folder holding its <account>-*.txt files.
+            const recs = files.filter(f => xRecord.test(String(f.path)));
+            if (recs.length) {
+                const dir = recs.map(f => dirOf(f.path)).sort((a, b) => a.length - b.length)[0];
+                add({ path: dir, name: base(dir), isFolder: true, evidenceTag, linked, likely: true });
+            } else if (linked && ev.sourcePath && !/\.[a-z0-9]{1,5}$/i.test(String(ev.sourcePath))) {
+                // A linked folder (files stay on the drive it came from).
+                add({ path: String(ev.sourcePath), name: base(ev.sourcePath), isFolder: true, evidenceTag, linked, likely: xName(ev.sourcePath) || xName(evidenceTag) });
+            }
+        }
+        // Productions the background scan found in the case folder.
+        for (const f of (this.evidenceFiles || [])) {
+            add({ path: f.path, name: f.name, isFolder: !!f.isFolder, evidenceTag: '', linked: f.source === 'evidence-link', likely: true });
+        }
+        const detected = new Set((this.evidenceFiles || []).map(f => String(f.path).replace(/[\\/]+$/, '').toLowerCase()));
+        const imported = new Set(this.imports.map(i => String(i.filePath || '').toLowerCase()));
+        for (const c of out) {
+            const k = String(c.path).replace(/[\\/]+$/, '').toLowerCase();
+            c.detected = detected.has(k);
+            c.encrypted = !!((this.evidenceFiles || []).find(f => String(f.path).replace(/[\\/]+$/, '').toLowerCase() === k) || {}).encrypted;
+            c.alreadyImported = imported.has(String(c.path).toLowerCase());
+            if (c.detected) c.likely = true;
+        }
+        out.sort((a, b) => (b.likely - a.likely) || String(a.name).localeCompare(String(b.name)));
+        return out;
+    }
+
     async scanForWarrants() {
         if (!window.electronAPI?.xWarrantScan) return;
         try {

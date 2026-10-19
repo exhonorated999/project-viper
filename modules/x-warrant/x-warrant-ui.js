@@ -52,8 +52,11 @@ class XWarrantUI {
             <div class="xwp-empty-state">
                 <div class="xwp-empty-icon">𝕏</div>
                 <h3 class="xwp-empty-title">No X / Twitter warrant data imported</h3>
-                <p class="xwp-empty-text">Drop an X production ZIP or folder into the case Evidence/Warrants folder, add it on the Evidence tab (copied or linked), or import one directly. Password-protected ZIPs are supported.</p>
-                <button class="xwp-btn-primary" onclick="window.xWarrantUI.handleFilePicker()">Import X Production (ZIP or folder)</button>
+                <p class="xwp-empty-text">Add the X production (ZIP or unzipped folder) on the Evidence tab — copied or linked — then click Find in Evidence. Or import one directly. Password-protected ZIPs are supported.</p>
+                <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+                    <button class="xwp-btn-primary xwp-find-ev" onclick="window.xWarrantUI.findInEvidence()" style="background:transparent;border:1px solid rgba(168,85,247,.6);color:#c084fc;">🔍 Find in Evidence</button>
+                    <button class="xwp-btn-primary" onclick="window.xWarrantUI.handleFilePicker()">Import X Production (ZIP or folder)</button>
+                </div>
                 <div id="xwp-evidence-bar"></div>
             </div>
         `;
@@ -143,6 +146,69 @@ class XWarrantUI {
             }
         }
         throw new Error('Too many wrong password attempts.');
+    }
+
+    /**
+     * Find in Evidence (same workflow as the Cyber Tips tab): list every ZIP
+     * and production folder on this case's Evidence tab, the officer ticks
+     * which to import, each is imported in turn (asking for a ZIP password
+     * when needed). Items that are not X productions are skipped and named.
+     */
+    async findInEvidence() {
+        try { await this.module.scanForWarrants(); } catch (_) { /* list Evidence anyway */ }
+        const cands = this.module.evidenceCandidates();
+        if (!cands.length) {
+            this._toast('There are no ZIPs or production folders in this case\'s Evidence. Add the X production on the Evidence tab first, or use Import.', 'info');
+            return;
+        }
+        const anyLikely = cands.some(c => c.likely && !c.alreadyImported);
+        const rows = cands.map((c, i) => {
+            const tick = !c.alreadyImported && (c.likely || (!anyLikely && cands.length === 1));
+            const notes = [c.evidenceTag || 'Evidence', c.isFolder ? 'folder' : 'ZIP'];
+            if (c.linked) notes.push('linked — stays where it is');
+            if (c.detected) notes.push('looks like an X production');
+            if (c.encrypted) notes.push('🔒 password-protected');
+            if (c.alreadyImported) notes.push('already on this tab');
+            return `<label style="display:flex;gap:8px;align-items:flex-start;padding:6px 4px;border-bottom:1px solid rgba(255,255,255,.06);cursor:pointer;text-align:left">
+                <input type="checkbox" class="xwp-ev-pick" data-i="${i}" ${tick ? 'checked' : ''} style="margin-top:3px">
+                <span style="flex:1;min-width:0">
+                    <span style="display:block;word-break:break-all">${c.isFolder ? '📁' : '📦'} ${this._esc(c.name)}</span>
+                    <span style="display:block;font-size:11px;opacity:.65">${this._esc(notes.join(' · '))}</span>
+                </span>
+            </label>`;
+        }).join('');
+        const html = `<strong>X / Twitter productions in Evidence</strong><br>
+            <span style="font-size:12px;opacity:.75">Tick the ZIPs or folders to import. Likely X productions are ticked for you. You will be asked for the password if a ZIP is protected. Anything that is not an X production is skipped.</span>
+            <span style="display:block;max-height:320px;overflow-y:auto;margin-top:10px">${rows}</span>`;
+        const ok = (typeof viperConfirm === 'function')
+            ? await viperConfirm(html, { okText: 'Import selected' })
+            : window.confirm('Import the X productions found in Evidence?');
+        // viperConfirm removes its box shortly after resolving — read ticks now.
+        const boxes = Array.from(document.querySelectorAll('.xwp-ev-pick'));
+        const picked = boxes.length
+            ? boxes.filter(cb => cb.checked).map(cb => cands[Number(cb.dataset ? cb.dataset.i : cb.getAttribute('data-i'))]).filter(Boolean)
+            : cands.filter(c => c.likely && !c.alreadyImported);
+        if (!ok) return;
+        if (!picked.length) { this._toast('Nothing was ticked.', 'info'); return; }
+        let last = null, added = 0, failed = 0;
+        const notX = [];
+        for (const c of picked) {
+            try {
+                const rec = await this._runImport(c.path, c.name, c.isFolder);
+                if (rec) { added++; last = rec; }
+            } catch (err) {
+                if (err && err.code === 'NOT_X_PRODUCTION') notX.push(c.name);
+                else { failed++; this._toast(`Could not import ${this._esc(c.name)}: ${this._esc(err && err.message || err)}`, 'error'); }
+            }
+        }
+        if (last) {
+            this.activeImportIdx = Math.max(0, this.module.imports.findIndex(i => i.id === last.id));
+            this.activeSection = 'overview';
+        }
+        this.render();
+        if (added) this._toast(`Imported ${added} X production${added > 1 ? 's' : ''}${last && last.accountUsername ? ' (@' + this._esc(last.accountUsername) + ')' : ''}`, 'success');
+        if (notX.length) this._toast(`Not an X production, skipped: ${this._esc(notX.join(', '))}`, added || failed ? 'info' : 'error');
+        return { added, failed, notX };
     }
 
     // ─── Flag toolbar ───────────────────────────────────────────────────
@@ -334,6 +400,7 @@ class XWarrantUI {
                 `).join('')}
             </nav>
             <div class="xwp-nav-actions">
+                <button class="xwp-btn-sm xwp-find-ev" onclick="window.xWarrantUI.findInEvidence()">🔍 Find in Evidence</button>
                 <button class="xwp-btn-sm" onclick="window.xWarrantUI.handleFilePicker()">+ Import</button>
                 <button class="xwp-btn-sm danger" onclick="window.xWarrantUI.deleteCurrentImport()">🗑️ Delete</button>
             </div>

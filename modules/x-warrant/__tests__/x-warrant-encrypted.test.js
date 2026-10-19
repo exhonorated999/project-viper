@@ -365,6 +365,13 @@ function checkParsed(r, m, extractDir) {
     ok(tooMany && /Too many/.test(tooMany.message) && asks.length === 6, 'gives up after 6 wrong passwords');
     let otherErr = null; try { await ui._runImport(path.join(TMP, 'other.zip'), 'other.zip', false); } catch (e) { otherErr = e; }
     ok(otherErr && otherErr.code === 'NOT_X_PRODUCTION' && asks.length === 6, 'non-password errors are not turned into a prompt');
+    {
+        const realImp = mod.importWarrant;
+        mod.importWarrant = async () => { throw new Error('Entry encrypted'); }; // pre-5.4.7 background process
+        let e3 = null; try { await ui._runImport(linkedZip, 'X-21-locked.zip', false); } catch (e) { e3 = e; }
+        ok(e3 && e3.code === 'ZIP_NEEDS_RESTART' && /full restart/.test(e3.message) && asks.length === 6, 'stale background process → "restart VIPER", no endless prompt');
+        mod.importWarrant = realImp;
+    }
 
     // 10. Find in Evidence (Cyber Tips-style tick list).
     {

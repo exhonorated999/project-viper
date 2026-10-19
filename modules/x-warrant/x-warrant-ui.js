@@ -139,6 +139,13 @@ class XWarrantUI {
                 return await this.module.importWarrant(filePath, fileName, isFolder, password);
             } catch (err) {
                 const code = err && err.code;
+                // Background process from before password support: it can
+                // see the ZIP is locked but cannot use a password.
+                if (!code && /entry encrypted/i.test(String(err && err.message))) {
+                    const e2 = new Error('This ZIP is password-protected, but VIPER needs a full restart (close it completely and open it again) before it can ask for the password.');
+                    e2.code = 'ZIP_NEEDS_RESTART';
+                    throw e2;
+                }
                 if (code !== 'ZIP_PASSWORD_REQUIRED' && code !== 'ZIP_PASSWORD_WRONG') throw err;
                 this.render();
                 password = await this._askPassword(fileName, code === 'ZIP_PASSWORD_WRONG' && password != null);

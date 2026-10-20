@@ -3466,11 +3466,18 @@ function _portableUpdateAfterLoad() {
   let st;
   try { st = portableUpdate.inspectWorkDir(ofs, exeDir, app.getVersion()); } catch (_) { return; }
   console.log('[update] portable work folder:', st.status, st.reason || '');
-  const cleanupLater = (ms) => setTimeout(() => {
+  const cleanupLater = (ms, retiredToo) => setTimeout(() => {
     try {
       const r = portableUpdate.cleanupWorkDir(ofs, exeDir);
       console.log('[update] portable cleanup:', r.removed, r.reason);
     } catch (e) { console.warn('[update] portable cleanup failed:', e.message); }
+    // Earlier stuck updates set aside as .viper-update-old-* (5.4.7): obsolete
+    // once a new version has been applied and has run this long.
+    if (retiredToo) {
+      try {
+        for (const r of portableUpdate.cleanupRetiredWorkDirs(ofs, exeDir)) console.log('[update] retired cleanup:', r.name, r.removed, r.reason);
+      } catch (e) { console.warn('[update] retired cleanup failed:', e.message); }
+    }
   }, ms);
   const tell = (type, message, detail) => {
     try {
@@ -3489,16 +3496,15 @@ function _portableUpdateAfterLoad() {
   }, 30000);
   if (st.status === 'applied') {
     // Keep the previous version on disk until the new one has proven it runs.
-    cleanupLater(30000);
+    cleanupLater(30000, true);
   } else if (st.status === 'failed' && st.safe) {
     tell('warning', 'The update to version ' + (st.to || 'the new version') + ' was not installed.',
       (st.error ? st.error + '\n\n' : '') + 'This copy of VIPER is unchanged and your cases are untouched. You can try the update again from Settings.');
     cleanupLater(5000);
   } else if (st.status === 'failed' || st.status === 'interrupted') {
-    tell('error', 'The last update did not finish cleanly.',
-      'Your cases and saved data (the "cases" and "userdata" folders) were not touched. '
-      + 'The previous program files are kept in:\n' + st.workDir + '\n\n'
-      + 'Please contact Intellect LE support before deleting anything in that folder.'
+    tell('warning', 'The last update did not finish cleanly.',
+      'Your cases and saved data (the "cases" and "userdata" folders) were not touched.\n\n'
+      + 'To fix this, run the update again from Settings. VIPER will set the unfinished update aside and install a complete fresh copy.'
       + (st.error ? '\n\nDetails: ' + st.error : ''));
   } else if (st.status === 'empty' || (st.status === 'prepared' && st.stale)) {
     cleanupLater(30000);

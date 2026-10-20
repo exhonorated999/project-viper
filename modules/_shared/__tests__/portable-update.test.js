@@ -490,8 +490,21 @@ const dlPath = (version, file) => '/dl/v' + version + '/' + file;
     ok('the old copy that could not be restored is still on disk', FS.existsSync(path.join(RI.wd, 'previous-' + tx3, 'locales', 'en-US.pak')));
     PU.writeJsonDurable(FS, path.join(RI.wd, PU.RESULT_FILE), { kind: PU.MARKER_KIND, txId: tx3, to: '5.4.3', ok: false, error: ri.error, rolledBack: false });
     ok('startup sees an UNSAFE failure', PU.inspectWorkDir(FS, RI.dir, '5.4.2').safe === false);
-    await rejects('a new update is refused while that is unresolved', PU.prepareUpdate({ fs: FS, exeDir: RI.dir, exeName: EXE, version: '5.4.3', currentVersion: '5.4.2', get: () => { throw new Error('must not download'); }, StreamZip }), /did not finish cleanly/);
-    ok('… and the evidence of it is not cleaned away', FS.existsSync(path.join(RI.wd, 'previous-' + tx3)));
+    {
+        const rtx = PU.cleanupRetiredWorkDirs(FS, RI.dir);
+        ok('(no retired folders yet)', rtx.length === 0);
+        let fetched = false;
+        await rejects('a new update sets the unresolved one aside and goes ahead (fails here only because it is offline)', PU.prepareUpdate({ fs: FS, exeDir: RI.dir, exeName: EXE, version: '5.4.3', currentVersion: '5.4.2', get: () => { fetched = true; throw new Error('offline'); }, StreamZip }), /offline/);
+        ok('… it really went on to download', fetched);
+        const ret = FS.readdirSync(RI.dir).filter(n => /^\.viper-update-old-[a-z0-9]+$/.test(n));
+        ok('… the stuck folder was renamed to .viper-update-old-<id>, not deleted', ret.length === 1
+            && FS.existsSync(path.join(RI.dir, ret[0], 'previous-' + tx3, 'locales', 'en-US.pak'))
+            && FS.existsSync(path.join(RI.dir, ret[0], PU.RESULT_FILE)), ret);
+        ok('… and the live work folder is clear for the next attempt', PU.inspectWorkDir(FS, RI.dir, '5.4.2').status === 'none');
+        ok('… userdata and cases untouched', FS.existsSync(path.join(RI.dir, 'userdata')) && FS.existsSync(path.join(RI.dir, 'cases')));
+        // Put it back so the launchHelper check below still sees previous-*.
+        FS.renameSync(path.join(RI.dir, ret[0]), RI.wd);
+    }
     throwsSync('launchHelper also refuses while previous-* exists', () => PU.launchHelper({ fs: FS, spawn: () => { throw new Error('must not spawn'); }, exeDir: RI.dir, exeName: EXE, version: '5.4.3', pid: 1 }));
 
     section('transient locks are retried');
@@ -540,8 +553,54 @@ const dlPath = (version, file) => '/dl/v' + version + '/' + file;
     write(path.join(C1, PU.WORK_DIR_NAME, 'stage', 'x'), 'x');
     ok('no marker → not removed', PU.cleanupWorkDir(FS, C1).reason === 'no-marker' && FS.existsSync(path.join(C1, PU.WORK_DIR_NAME, 'stage', 'x')));
     ok('no marker → startup calls it unknown', PU.inspectWorkDir(FS, C1, '1.0.0').status === 'unknown');
-    await rejects('… and prepare refuses to touch it', PU.prepareUpdate({ fs: FS, exeDir: C1, exeName: EXE, version: '1.0.1', currentVersion: '1.0.0', get: () => { throw new Error('no'); }, StreamZip }), /did not finish cleanly/);
-    ok('… leaving it intact', FS.existsSync(path.join(C1, PU.WORK_DIR_NAME, 'stage', 'x')));
+    await rejects('… prepare sets it aside (renamed, not deleted) and goes on', PU.prepareUpdate({ fs: FS, exeDir: C1, exeName: EXE, version: '1.0.1', currentVersion: '1.0.0', get: () => { throw new Error('offline'); }, StreamZip }), /offline/);
+    {
+        const ret = FS.readdirSync(C1).filter(n => /^\.viper-update-old-[a-z0-9]+$/.test(n));
+        ok('… leaving its contents intact under .viper-update-old-<id>', ret.length === 1 && FS.existsSync(path.join(C1, ret[0], 'stage', 'x')), ret);
+        const cr = PU.cleanupRetiredWorkDirs(FS, C1);
+        ok('… and retired-folder cleanup never deletes a folder that is not provably ours', cr.length === 1 && cr[0].removed === false && cr[0].reason === 'no-marker'
+            && FS.existsSync(path.join(C1, ret[0], 'stage', 'x')), cr);
+    }
+    {
+        // Submission: Winnemucca USB (2026-10-20). The drive copy updated itself
+        // once, was later updated another way, and its old result.json (ok, to
+        // an OLDER version) blocked every update with "contact support".
+        const D = tmpDir('stale-applied');
+        const wd = PU.ensureWorkDir(FS, D);
+        write(path.join(wd, 'previous-abc123', EXE), 'old exe');
+        PU.writeJsonDurable(FS, path.join(wd, PU.RESULT_FILE), { kind: PU.MARKER_KIND, txId: 'abc123', to: '5.4.3', ok: true });
+        write(path.join(D, 'cases', '24-001', 'note.txt'), 'case');
+        const st = PU.inspectWorkDir(FS, D, '5.4.6');
+        ok('stale "applied" record from an older version → unknown', st.status === 'unknown' && st.reason === 'applied-version-mismatch', st);
+        let fetched = false;
+        await rejects('prepare no longer refuses it', PU.prepareUpdate({ fs: FS, exeDir: D, exeName: EXE, version: '5.4.7', currentVersion: '5.4.6', get: () => { fetched = true; throw new Error('offline'); }, StreamZip }), /offline/);
+        ok('… it went on to download', fetched);
+        const ret = FS.readdirSync(D).filter(n => /^\.viper-update-old-/.test(n));
+        ok('… the old record was set aside', ret.length === 1 && FS.existsSync(path.join(D, ret[0], 'previous-abc123', EXE)));
+        const cr = PU.cleanupRetiredWorkDirs(FS, D);
+        ok('once a new version runs, our retired folder is removed', cr.length === 1 && cr[0].removed === true && !FS.existsSync(path.join(D, ret[0])), cr);
+        ok('… and the case folder is untouched', FS.readFileSync(path.join(D, 'cases', '24-001', 'note.txt'), 'utf8') === 'case');
+        ok('retired cleanup ignores everything else in the folder', PU.cleanupRetiredWorkDirs(FS, D).length === 0 && FS.existsSync(path.join(D, 'cases')));
+        // A junction named like a retired folder is never followed.
+        const real = tmpDir('rt-real');
+        write(path.join(real, PU.MARKER_FILE), JSON.stringify({ kind: PU.MARKER_KIND }));
+        write(path.join(real, 'stage', 'keep.txt'), 'keep');
+        let jn = false;
+        try { FS.symlinkSync(real, path.join(D, '.viper-update-old-zz9'), 'junction'); jn = true; } catch (_) {}
+        if (jn) {
+            const cj = PU.cleanupRetiredWorkDirs(FS, D);
+            ok('a junctioned retired folder is never followed', cj.length === 1 && cj[0].removed === false && FS.existsSync(path.join(real, 'stage', 'keep.txt')), cj);
+            FS.unlinkSync(path.join(D, '.viper-update-old-zz9'));
+        }
+        // Rename failing for good → a clear, actionable message, nothing lost.
+        const E = tmpDir('stuck-rename');
+        const ewd = PU.ensureWorkDir(FS, E);
+        write(path.join(ewd, 'Report.docx'), 'officer file');
+        const lockFs = Object.create(FS);
+        lockFs.renameSync = (a, b) => { if (/\.viper-update$/.test(a)) { const e = new Error('EPERM'); e.code = 'EPERM'; throw e; } return FS.renameSync(a, b); };
+        await rejects('a work folder that cannot be moved gives a plain retry message', PU.prepareUpdate({ fs: lockFs, exeDir: E, exeName: EXE, version: '1.0.1', currentVersion: '1.0.0', retireOpts: { tries: 2, delayMs: 5 }, get: () => { throw new Error('must not download'); }, StreamZip }), /could not be moved out of the way \(EPERM\)/);
+        ok('… and nothing in it was deleted', FS.readFileSync(path.join(ewd, 'Report.docx'), 'utf8') === 'officer file');
+    }
     const C2 = tmpDir('clean');
     PU.ensureWorkDir(FS, C2);
     write(path.join(C2, PU.WORK_DIR_NAME, 'stage', 'x'), 'x');

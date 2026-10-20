@@ -250,6 +250,61 @@ function opts(setup, target, extra) {
         ok('drive copy ' + v + ' → "current", untouched, no work folder', r.status === 'current' && r.safe && sameTree(hashTree(target), before) && !FS.existsSync(path.join(target, PU.WORK_DIR_NAME)), r);
     }
 
+    section('an earlier update that did not finish cleanly is set aside, not a dead end (5.4.7)');
+    {
+        const stuckCases = [
+            ['a foreign .viper-update folder', (t) => write(path.join(t, PU.WORK_DIR_NAME, 'mine.txt'), 'not ours'), 'mine.txt'],
+            ['an interrupted earlier swap', (t) => {
+                const wd = PU.ensureWorkDir(FS, t);
+                write(path.join(wd, 'previous-abc', 'locales', 'x.pak'), 'old pak');
+                PU.writeJsonDurable(FS, path.join(wd, PU.JOURNAL_FILE), { kind: PU.MARKER_KIND, txId: 'abc', state: 'swapping', steps: [] });
+            }, 'previous-abc/locales/x.pak'],
+            ['an unsafe earlier failure', (t) => {
+                const wd = PU.ensureWorkDir(FS, t);
+                PU.writeJsonDurable(FS, path.join(wd, PU.RESULT_FILE), { kind: PU.MARKER_KIND, txId: 'abc', to: '5.4.2', ok: false, rolledBack: false });
+            }, PU.RESULT_FILE],
+            // Winnemucca USB (2026-10-20): an old successful self-update record
+            // for an OLDER version than the one on the drive.
+            ['a stale "applied" record from an older version', (t) => {
+                const wd = PU.ensureWorkDir(FS, t);
+                write(path.join(wd, 'previous-old1', EXE), 'older exe');
+                PU.writeJsonDurable(FS, path.join(wd, PU.RESULT_FILE), { kind: PU.MARKER_KIND, txId: 'old1', to: '5.3.0', ok: true });
+            }, 'previous-old1/' + EXE],
+        ];
+        for (const [label, prep, keepRel] of stuckCases) {
+            const setup = await makeSetup('5.4.3');
+            const target = await makeOfficerFolder('5.3.6');
+            prep(target);
+            const before = hashTree(target);
+            const logs = [];
+            const r = await DS.runDriveSetup(opts(setup, target, { log: (s) => logs.push(s) }));
+            ok(label + ': the drive copy is updated', r.status === 'applied' && r.safe === true && PU.readAsarVersion(FS, path.join(target, 'resources', 'app.asar')) === '5.4.3', r);
+            const ret = FS.readdirSync(target).filter(n => /^\.viper-update-old-[a-z0-9]+$/.test(n));
+            ok(label + ': the old folder was renamed aside with its contents intact', ret.length === 1
+                && FS.existsSync(path.join(target, ret[0], ...keepRel.split('/'))), ret);
+            ok(label + ': and logged', logs.some(s => /earlier update set aside/.test(s)));
+            ok(label + ': userdata, cases, .portable, the officer\u2019s own files are byte-identical', sameTree(pick(hashTree(target), KEEP), pick(before, KEEP)));
+            ok(label + ': the new version sees its own update as applied', PU.inspectWorkDir(FS, target, '5.4.3').status === 'applied');
+        }
+        // A refusal for another reason (no space) must not have moved anything.
+        const setup = await makeSetup('5.4.3');
+        const target = await makeOfficerFolder('5.3.6');
+        stuckCases[1][1](target);
+        const before = hashTree(target);
+        const r = await DS.runDriveSetup(opts(setup, target, { freeBytes: () => 10 * 1024 * 1024 }));
+        ok('a refusal before copying leaves the stuck folder exactly where it was', r.status === 'refused' && sameTree(hashTree(target), before)
+            && !FS.readdirSync(target).some(n => /^\.viper-update-old-/.test(n)), r);
+        // The work folder cannot be renamed → clear refusal, nothing changed.
+        const t2 = await makeOfficerFolder('5.3.6');
+        stuckCases[2][1](t2);
+        const b2 = hashTree(t2);
+        const lockFs = Object.create(FS);
+        lockFs.renameSync = (a, b) => { if (/\.viper-update$/.test(a)) { const e = new Error('EPERM'); e.code = 'EPERM'; throw e; } return FS.renameSync(a, b); };
+        const r2 = await DS.runDriveSetup(opts(await makeSetup('5.4.3'), t2, { fs: lockFs, retireOpts: { tries: 2, delayMs: 5 } }));
+        ok('a work folder that cannot be moved → refused with a plain reason, nothing changed', r2.status === 'refused' && /could not be moved out of the way \(EPERM\)/.test(r2.message)
+            && sameTree(hashTree(t2), b2), r2);
+    }
+
     section('refusals change nothing');
     async function refusal(label, mkTarget, extra, re, setupOpts) {
         const setup = await makeSetup('5.4.3', setupOpts);
@@ -268,19 +323,6 @@ function opts(setup, target, extra) {
     await refusal('the exe stays locked', () => makeOfficerFolder('5.3.6'), { isFileFree: () => false }, /still open/);
     await refusal('not enough space', () => makeOfficerFolder('5.3.6'), { freeBytes: () => 10 * 1024 * 1024 }, /not enough free space/);
     await refusal('unreadable drive program', () => makeOfficerFolder('5.3.6'), { prep: (t) => FS.writeFileSync(path.join(t, 'resources', 'app.asar'), 'garbage') }, /could not be read/);
-    await refusal('a foreign .viper-update folder', () => makeOfficerFolder('5.3.6'), { prep: (t) => write(path.join(t, PU.WORK_DIR_NAME, 'mine.txt'), 'not ours') }, /contact Intellect LE support/);
-    await refusal('an interrupted earlier swap', () => makeOfficerFolder('5.3.6'), {
-        prep: (t) => {
-            const wd = PU.ensureWorkDir(FS, t);
-            PU.writeJsonDurable(FS, path.join(wd, PU.JOURNAL_FILE), { kind: PU.MARKER_KIND, txId: 'abc', state: 'swapping', steps: [] });
-        },
-    }, /did not finish cleanly/);
-    await refusal('an unsafe earlier failure', () => makeOfficerFolder('5.3.6'), {
-        prep: (t) => {
-            const wd = PU.ensureWorkDir(FS, t);
-            PU.writeJsonDurable(FS, path.join(wd, PU.RESULT_FILE), { kind: PU.MARKER_KIND, txId: 'abc', to: '5.4.2', ok: false, rolledBack: false });
-        },
-    }, /did not finish cleanly/);
     await refusal('the installer copy has no program archive', () => makeOfficerFolder('5.3.6'), { prep: (t, s) => FS.unlinkSync(path.join(s.appDir, 'resources', 'app.asar')) }, /not usable/);
     await refusal('the installer copy is the wrong version', () => makeOfficerFolder('5.3.6'), { selfVersion: '5.4.4' }, /not usable/);
     await refusal('the installer copy carries a protected folder', () => makeOfficerFolder('5.3.6'), { prep: (t, s) => write(path.join(s.appDir, 'userdata', 'x'), 'x') }, /not usable/);

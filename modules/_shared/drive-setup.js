@@ -259,17 +259,13 @@ async function runDriveSetup(o) {
         return { status: 'current', safe: true, message: 'The copy on the drive is already version ' + fromVersion + '.', from: fromVersion, to: o.selfVersion };
     }
 
-    // 3. Anything an earlier update left behind.
+    // 3. Anything an earlier update left behind. Even one that did not finish
+    //    cleanly is no dead end: it is renamed aside (.viper-update-old-<id>,
+    //    nothing deleted) and this install lays down a COMPLETE new program.
     const prior = PU.inspectWorkDir(fs, target, fromVersion);
     log('work folder: ' + prior.status + (prior.reason ? ' ' + prior.reason : ''));
-    if (prior.status === 'unknown' || prior.status === 'interrupted' || (prior.status === 'failed' && !prior.safe)) {
-        return refuse('An earlier update of this drive copy did not finish cleanly, so it was not updated again. '
-            + 'Please contact Intellect LE support. Nothing was changed.', { workDir: prior.workDir });
-    }
-    if (prior.status !== 'none') {
-        const c = PU.cleanupWorkDir(fs, target);
-        if (!c.removed) return refuse('Files from an earlier update on the drive could not be cleared (' + c.reason + '). Nothing was changed.');
-    }
+    const priorStuck = prior.status === 'unknown' || prior.status === 'interrupted' || (prior.status === 'failed' && !prior.safe);
+    if (prior.status !== 'none' && !priorStuck) { try { PU.cleanupWorkDir(fs, target); } catch (_) {} }
 
     // 4. The new program, and room for it.
     let listing;
@@ -288,6 +284,11 @@ async function runDriveSetup(o) {
     }
 
     // 5. Copy and verify.
+    {
+        const clr = PU.clearWorkDirForUpdate(fs, target, PU.inspectWorkDir(fs, target, fromVersion), o.retireOpts);
+        if (clr.retired) log('earlier update set aside: ' + clr.retired);
+        if (!clr.ok) return refuse('Files from an earlier update on the drive could not be moved out of the way (' + clr.reason + '). Nothing was changed.');
+    }
     let wd;
     try { wd = PU.ensureWorkDir(fs, target); }
     catch (e) {

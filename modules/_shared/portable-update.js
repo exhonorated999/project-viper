@@ -71,6 +71,10 @@ const LIMITS = {
     spareBytes: 200 * 1024 * 1024,
 };
 const WORK_CHILDREN = /^(download|stage|incoming|previous-[a-z0-9]+|viper-update\.json|prepared\.json|journal\.json|result\.json)$/i;
+// A work folder an earlier attempt left in a state that cannot be resumed is
+// RENAMED to <exeDir>\.viper-update-old-<id> (5.4.7) so a new update can run.
+const RETIRED_PREFIX = WORK_DIR_NAME + '-old-';
+const RETIRED_RE = /^\.viper-update-old-[a-z0-9]+$/i;
 
 function isProtectedName(name) {
     const n = String(name || '').toLowerCase();
@@ -290,8 +294,11 @@ function removeWorkChild(fs, wd, name) {
  * → {removed:boolean, reason}
  */
 function cleanupWorkDir(fs, exeDir, opts) {
+    return cleanupDirAt(fs, workDirFor(exeDir), opts);
+}
+
+function cleanupDirAt(fs, wd, opts) {
     const keepPrevious = !!(opts && opts.keepPrevious);
-    const wd = workDirFor(exeDir);
     let st;
     try { st = lstatNoLink(fs, wd); } catch (e) { return { removed: false, reason: e.message }; }
     if (!st) return { removed: false, reason: 'absent' };
@@ -317,6 +324,60 @@ function cleanupWorkDir(fs, exeDir, opts) {
         return { removed: false, reason: 'busy:' + ((e && e.code) || e.message) };
     }
     return { removed: true, reason: 'ok' };
+}
+
+/**
+ * Set a stuck work folder aside by RENAME ONLY (nothing inside is deleted):
+ * <exeDir>\.viper-update → <exeDir>\.viper-update-old-<id>. A link/junction is
+ * renamed as the link itself, never followed.
+ * → {retired:boolean, to?, reason}
+ */
+function retireWorkDir(fs, exeDir, opts) {
+    const wd = workDirFor(exeDir);
+    try { fs.lstatSync(wd); }
+    catch (e) { return { retired: false, reason: (e && e.code === 'ENOENT') ? 'absent' : ((e && e.code) || e.message) }; }
+    const to = path.join(path.dirname(wd), RETIRED_PREFIX + newTxId());
+    try { renameRetry(fs, wd, to, (opts && opts.tries) || 6, (opts && opts.delayMs) || 500); }
+    catch (e) { return { retired: false, reason: (e && e.code) || (e && e.message) || String(e) }; }
+    return { retired: true, to, reason: 'ok' };
+}
+
+/**
+ * Make room for a new update, whatever an earlier attempt left behind.
+ * A tidy leftover is removed; one that is interrupted, failed part-way, not
+ * understood, or cannot be removed is retired (renamed aside). Used by the
+ * in-app updater and by the drive installer — both then lay down a COMPLETE
+ * new program, so nothing in the old folder is needed to finish.
+ * → {ok:true, retired?:path} | {ok:false, reason}
+ */
+function clearWorkDirForUpdate(fs, exeDir, prior, opts) {
+    if (!prior || prior.status === 'none') return { ok: true };
+    const stuck = prior.status === 'unknown' || prior.status === 'interrupted' || (prior.status === 'failed' && !prior.safe);
+    if (!stuck) {
+        let c = null;
+        try { c = cleanupWorkDir(fs, exeDir); } catch (_) {}
+        if (c && c.removed) return { ok: true };
+    }
+    const r = retireWorkDir(fs, exeDir, opts);
+    return r.retired ? { ok: true, retired: r.to } : { ok: false, reason: r.reason };
+}
+
+/**
+ * Remove retired work folders, with the same checks as cleanupWorkDir (real
+ * folder, our marker, only names we create). Called only once a NEW version
+ * has been applied and has run, so the old program copies are obsolete.
+ * Anything not provably ours is left alone.
+ * → [{name, removed, reason}]
+ */
+function cleanupRetiredWorkDirs(fs, exeDir) {
+    const dir = path.resolve(exeDir);
+    let names;
+    try { names = fs.readdirSync(dir); } catch (_) { return []; }
+    return names.filter(n => RETIRED_RE.test(n)).map(n => {
+        let r;
+        try { r = cleanupDirAt(fs, path.join(dir, n)); } catch (e) { r = { removed: false, reason: e.message }; }
+        return { name: n, removed: r.removed, reason: r.reason };
+    });
 }
 
 // ── Download ─────────────────────────────────────────────────────────────
@@ -647,9 +708,6 @@ function inspectWorkDir(fs, exeDir, currentVersion) {
 async function prepareUpdate(o) {
     const fs = o.fs;
     const prior = inspectWorkDir(fs, o.exeDir, o.currentVersion);
-    if (prior.status === 'unknown' || prior.status === 'interrupted' || (prior.status === 'failed' && !prior.safe)) {
-        throw new Error('An earlier update in this folder did not finish cleanly, so a new one will not be started. Please contact support.');
-    }
     const wdPath = workDirFor(o.exeDir);
     const stageDir = path.join(wdPath, 'stage');
     const incomingDir = path.join(wdPath, 'incoming');
@@ -662,10 +720,10 @@ async function prepareUpdate(o) {
         try { verifyBoth(); return { version: String(o.version), reused: true, stageExe: path.join(stageDir, o.exeName) }; }
         catch (_) { /* fall through: start fresh */ }
     }
-    if (prior.status !== 'none') {
-        const c = cleanupWorkDir(fs, o.exeDir);
-        if (!c.removed) throw new Error('Could not clear the files from an earlier update (' + c.reason + '). Restart VIPER and try again.');
-    }
+    // Anything an earlier attempt left (even one that did not finish cleanly)
+    // is removed or set aside — never a dead end for the officer.
+    const clr = clearWorkDirForUpdate(fs, o.exeDir, prior, o.retireOpts);
+    if (!clr.ok) throw new Error('Files from an earlier update could not be moved out of the way (' + clr.reason + '). Restart the computer and try again.');
     let wd;
     try { wd = ensureWorkDir(fs, o.exeDir); }
     catch (e) {
@@ -816,6 +874,7 @@ module.exports = {
     manifestUrl, assetUrl, parseManifest, requiredFreeBytes,
     validateEntries, safeJoin,
     workDirFor, lstatNoLink, readJson, writeJsonDurable, ensureWorkDir, removeWorkChild, cleanupWorkDir,
+    RETIRED_PREFIX, retireWorkDir, clearWorkDirForUpdate, cleanupRetiredWorkDirs,
     readBody, fetchManifest, downloadToFile,
     extractTwice, readAsarVersion, verifyStagedTree,
     renameRetry, applySwap,

@@ -195,6 +195,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   googleWarrantPickFile: () => ipcRenderer.invoke('google-warrant-pick-file'),
   googleWarrantReadMedia: (data) => ipcRenderer.invoke('google-warrant-read-media', data),
   googleWarrantGetMediaUrl: (data) => ipcRenderer.invoke('google-warrant-get-media-url', data),
+  googleWarrantOpenMedia: (data) => ipcRenderer.invoke('google-warrant-open-media', data),
+  googleWarrantEmailsPage: (data) => ipcRenderer.invoke('google-warrant-emails-page', data),
+  googleWarrantEmail: (data) => ipcRenderer.invoke('google-warrant-email', data),
+  googleWarrantLocations: (data) => ipcRenderer.invoke('google-warrant-locations', data),
+  googleWarrantStoreStats: (data) => ipcRenderer.invoke('google-warrant-store-stats', data),
+  googleWarrantStoreDelete: (data) => ipcRenderer.invoke('google-warrant-store-delete', data),
+  crashLogInfo: () => ipcRenderer.invoke('crash-log-info'),
+  crashLogOpenFolder: () => ipcRenderer.invoke('crash-log-open-folder'),
+  crashLogExport: () => ipcRenderer.invoke('crash-log-export'),
+  crashLogClear: () => ipcRenderer.invoke('crash-log-clear'),
 
   // META Warrant Parser
   metaWarrantScan: (data) => ipcRenderer.invoke('meta-warrant-scan', data),
@@ -231,6 +241,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   xWarrantImport: (data) => ipcRenderer.invoke('x-warrant-import', data),
   xWarrantPickFile: () => ipcRenderer.invoke('x-warrant-pick-file'),
   xWarrantReadMedia: (data) => ipcRenderer.invoke('x-warrant-read-media', data),
+  // Streamable viper-media:// URL for an extracted Snapchat / KIK / X file
+  // (video thumbnails + playback without base64-ing the whole file).
+  warrantMediaUrl: (data) => ipcRenderer.invoke('warrant-media-url', data),
 
   // Discord Warrant Parser
   discordWarrantScan: (data) => ipcRenderer.invoke('discord-warrant-scan', data),

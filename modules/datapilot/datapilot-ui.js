@@ -86,6 +86,10 @@ class DatapilotUI {
             this._wireEmpty(rootEl);
             return;
         }
+        // Capture the focused search box BEFORE the swap (contacts / comms /
+        // artifacts searches re-render the whole root on a debounce).
+        const kf = (typeof window !== 'undefined') ? window.VpKeepFocus : null;
+        const snap = kf ? kf.capture(rootEl) : null;
         rootEl.innerHTML = `
             <div class="dp-shell">
                 ${this._renderHeader(imp)}
@@ -98,6 +102,7 @@ class DatapilotUI {
         this._wireHeader(rootEl);
         this._wireViewSwitcher(rootEl);
         this._wireView(rootEl, imp);
+        if (kf) kf.restore(rootEl, snap);
     }
 
     // ────────────────────────── empty ──────────────────────────
@@ -402,8 +407,7 @@ class DatapilotUI {
         const csearch = root.querySelector('#dp-subject-contact-search');
         if (csearch) {
             let t;
-            // Preserve focus + caret across re-renders so typing is fluid.
-            const wasFocused = (root.ownerDocument && root.ownerDocument.activeElement && root.ownerDocument.activeElement.id === 'dp-subject-contact-search');
+            // Focus + caret are preserved by VpKeepFocus in render().
             if (this.subjectState.contactSearch) {
                 csearch.value = this.subjectState.contactSearch;
             }
@@ -412,11 +416,6 @@ class DatapilotUI {
                 this.subjectState.contactSearch = e.target.value;
                 t = setTimeout(() => this.module.render(), 200);
             };
-            if (wasFocused) {
-                csearch.focus();
-                const v = csearch.value;
-                csearch.setSelectionRange(v.length, v.length);
-            }
         }
         root.querySelectorAll('[data-dp-place]').forEach(tr => {
             tr.onclick = () => {

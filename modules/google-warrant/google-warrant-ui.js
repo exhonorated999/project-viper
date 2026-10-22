@@ -42,6 +42,7 @@ class GoogleWarrantUI {
             </div>
             <div id="gwp-evidence-bar"></div>
         `;
+        this._afterSectionRender();
     }
 
     renderEvidenceBar(files) {
@@ -123,6 +124,15 @@ class GoogleWarrantUI {
         document.querySelectorAll('.gwp-nav-item').forEach(el => {
             el.classList.toggle('active', el.dataset.section === section);
         });
+        this._afterSectionRender();
+    }
+
+    /** Things that need the section's DOM in place (the location map). */
+    _afterSectionRender() {
+        if (this.activeSection === 'location') {
+            const imp = this.currentImport;
+            setTimeout(() => { if (this.activeSection === 'location' && this.currentImport === imp) this.initLocationMap(imp); }, 0);
+        }
     }
 
     switchImport(idx) {
@@ -233,8 +243,8 @@ class GoogleWarrantUI {
 
         const sections = [
             { id: 'overview', label: 'Account Overview', icon: '👤', show: true },
-            { id: 'email', label: 'Email', icon: '📧', count: imp.emails?.length, show: imp.emails?.length > 0 },
-            { id: 'location', label: 'Location', icon: '📍', count: imp.locationRecords?.length + (imp.semanticLocations?.length || 0), show: imp.locationRecords?.length > 0 || imp.semanticLocations?.length > 0 },
+            { id: 'email', label: 'Email', icon: '📧', count: this.module.emailTotal(imp), show: this.module.emailTotal(imp) > 0 },
+            { id: 'location', label: 'Location', icon: '📍', count: this.module.locationTotal(imp) + (imp.semanticLocations?.length || 0), show: this.module.locationTotal(imp) > 0 || imp.semanticLocations?.length > 0 },
             { id: 'communications', label: 'Communications', icon: '💬', show: imp.chatMessages?.length > 0 || imp.hangoutsInfo },
             { id: 'activity', label: 'Activity', icon: '⚡', count: myActivityCount + aggCount, show: (myActivityCount + aggCount) > 0 },
             { id: 'devices', label: 'Devices & Apps', icon: '📱', count: imp.devices?.length, show: imp.devices?.length > 0 || imp.installs?.length > 0 },
@@ -258,7 +268,7 @@ class GoogleWarrantUI {
                             onclick="window.googleWarrantUI.switchSection('${s.id}')">
                         <span class="gwp-nav-icon">${s.icon}</span>
                         <span class="gwp-nav-label">${s.label}</span>
-                        ${s.count ? `<span class="gwp-nav-badge">${s.count}</span>` : ''}
+                        ${s.count ? `<span class="gwp-nav-badge">${typeof s.count === 'number' ? s.count.toLocaleString() : s.count}</span>` : ''}
                     </button>
                 `).join('')}
             </nav>
@@ -362,10 +372,19 @@ class GoogleWarrantUI {
 
     _onFlagClick(section, key) {
         this.module.toggleFlag(section, key);
+        const imp = this.currentImport;
+        if (section === 'emails' && imp && this.module.hasStore(imp)) {
+            if (this.module.isFlagged('emails', key)) {
+                const row = (this._em && this._em.rows || []).find(r => String(r.id) === String(key));
+                if (row) this.module.cacheFlaggedEmail(imp, row);
+            } else if (imp.flaggedEmailCache && imp.flaggedEmailCache[String(key)]) {
+                delete imp.flaggedEmailCache[String(key)];
+                this.module.saveData();
+            }
+        }
         this._refreshFlagToolbar();
         // Re-render the current section to update flag-button state on the visible row
-        const content = document.getElementById('gwp-content-area');
-        if (content) content.innerHTML = this._renderSection();
+        this._refreshContent();
     }
 
     /**
@@ -461,6 +480,47 @@ class GoogleWarrantUI {
             </div>`;
     }
 
+    /** Large returns: say what was not kept in full and where it was saved. */
+    _renderLargeReturnNotice(imp) {
+        const trunc = Object.entries(imp.truncated || {}).filter(([, n]) => n > 0);
+        const over = Array.isArray(imp.oversizeFiles) ? imp.oversizeFiles : [];
+        if (!trunc.length && !over.length) return '';
+        const label = (k) => String(k).replace(/^googlePay\./, 'Google Pay ').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase());
+        const mb = (n) => ((n || 0) / 1048576).toFixed(0) + ' MB';
+        return `
+            <div class="gwp-card" style="border-left:3px solid #f59e0b;">
+                <h4 class="gwp-card-title">⚠ Large return — some data is not shown in full</h4>
+                ${trunc.length ? `
+                <div class="gwp-more" style="text-align:left;">To keep VIPER responsive, these sections show only part of their data here. The rest is saved in this case's folder under Evidence\\google-warrant\\_store.</div>
+                <ul style="margin:6px 0 10px 18px;">
+                    ${trunc.map(([k, n]) => `<li>${this._escape(label(k))}: ${Number(n).toLocaleString()} not shown</li>`).join('')}
+                </ul>` : ''}
+                ${over.length ? `
+                <div class="gwp-more" style="text-align:left;">These files were too large to read inside VIPER. They were copied to the case folder so you can open them in another program.</div>
+                <div class="gwp-file-list">
+                    ${over.map((f, i) => `
+                        <div class="gwp-file-item">
+                            <div class="gwp-file-info">
+                                <span class="gwp-file-icon">📄</span>
+                                <span class="gwp-file-name">${this._escape(f.name || '')}</span>
+                                <span class="gwp-tag">${this._escape(f.category || '')}</span>
+                                <span class="gwp-mono gwp-file-size">${mb(f.size)}</span>
+                            </div>
+                            <div class="gwp-file-actions">${f.relPath
+                                ? `<button class="gwp-btn-sm gwp-btn-outline" onclick="window.googleWarrantUI.openOversizeFile(${i})">Show in folder</button>`
+                                : '<span class="gwp-tag">not saved (no case folder)</span>'}</div>
+                        </div>`).join('')}
+                </div>` : ''}
+            </div>`;
+    }
+
+    async openOversizeFile(i) {
+        const f = ((this.currentImport && this.currentImport.oversizeFiles) || [])[i];
+        if (!f || !f.relPath) return;
+        const res = await this.module.openMedia(f.relPath, true);
+        if (!res || !res.success) this._toast('Could not open folder: ' + ((res && res.error) || 'unknown error'), 'error');
+    }
+
     _renderOverview(imp) {
         const sub = imp.subscriber || {};
         const cats = imp.categories || [];
@@ -468,6 +528,7 @@ class GoogleWarrantUI {
 
         return `
             <div class="gwp-section-scroll">
+                ${this._renderLargeReturnNotice(imp)}
                 <!-- Subscriber Card -->
                 <div class="gwp-card gwp-card-highlight">
                     <div class="gwp-card-header">
@@ -607,13 +668,16 @@ class GoogleWarrantUI {
     // ─── Email Section ──────────────────────────────────────────────────
 
     _renderEmail(imp) {
+        if (this.module.hasStore && this.module.hasStore(imp)) return this._renderStoreEmail(imp);
         const emails = imp.emails || [];
         if (emails.length === 0) return '<div class="gwp-empty-section">No email data in this warrant return</div>';
+        return `<div class="gwp-section-scroll">${this._renderEmailInline(emails, `📧 Email Messages (${emails.length})`)}</div>`;
+    }
 
+    _renderEmailInline(emails, title) {
         return `
-            <div class="gwp-section-scroll">
                 <div class="gwp-section-header">
-                    <h3>📧 Email Messages (${emails.length})</h3>
+                    <h3>${title}</h3>
                 </div>
                 <div class="gwp-email-list">
                     ${emails.map((em, idx) => {
@@ -627,12 +691,12 @@ class GoogleWarrantUI {
                             </div>
                             <div class="gwp-email-subject">${this._escHtml(em.subject)}</div>
                             <div class="gwp-email-to">To: ${this._escHtml(em.to || '—')}</div>
-                            ${em.labels ? `<div class="gwp-email-labels">${em.labels.split(',').map(l => `<span class="gwp-tag-sm">${l.trim()}</span>`).join('')}</div>` : ''}
+                            ${em.labels ? `<div class="gwp-email-labels">${em.labels.split(',').map(l => `<span class="gwp-tag-sm">${this._escHtml(l.trim())}</span>`).join('')}</div>` : ''}
                             <div class="gwp-email-detail" id="gwp-email-detail-${idx}" style="display:none;">
                                 <div class="gwp-email-headers">
                                     ${em.cc ? `<div class="gwp-field-sm"><label>CC:</label><span>${this._escHtml(em.cc)}</span></div>` : ''}
-                                    ${em.threadId ? `<div class="gwp-field-sm"><label>Thread ID:</label><span class="gwp-mono">${em.threadId}</span></div>` : ''}
-                                    ${em.attachments?.length ? `<div class="gwp-field-sm"><label>Attachments:</label><span>${em.attachments.map(a => a.filename).join(', ')}</span></div>` : ''}
+                                    ${em.threadId ? `<div class="gwp-field-sm"><label>Thread ID:</label><span class="gwp-mono">${this._escHtml(em.threadId)}</span></div>` : ''}
+                                    ${em.attachments?.length ? `<div class="gwp-field-sm"><label>Attachments:</label><span>${this._escHtml(em.attachments.map(a => a.filename).join(', '))}</span></div>` : ''}
                                 </div>
                                 <div class="gwp-email-body">
                                     ${em.htmlBody
@@ -643,9 +707,7 @@ class GoogleWarrantUI {
                             </div>
                         </div>
                     `;}).join('')}
-                </div>
-            </div>
-        `;
+                </div>`;
     }
 
     toggleEmailDetail(idx) {
@@ -653,13 +715,154 @@ class GoogleWarrantUI {
         if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
     }
 
+    // ── Large returns: e-mails paged from the SQLite store ──
+
+    _emailState(imp) {
+        if (!this._em || this._em.impId !== imp.id || this._em.keysSig !== imp.store.keys.join('|')) {
+            this._em = { impId: imp.id, keysSig: imp.store.keys.join('|'), q: '', offset: 0, limit: 50, total: null, rows: [], loading: false, error: null, stale: true };
+        }
+        return this._em;
+    }
+
+    async _loadEmails() {
+        const imp = this.currentImport;
+        if (!imp || !this.module.hasStore(imp)) return;
+        const st = this._emailState(imp);
+        if (st.loading) return;
+        st.loading = true; st.stale = false; st.error = null;
+        const want = { q: st.q, offset: st.offset };
+        try {
+            const res = await this.module.emailsPage(imp, { offset: st.offset, limit: st.limit, q: st.q });
+            if (this._em !== st) return;
+            if (res && res.success) { st.rows = res.rows || []; st.total = res.total || 0; }
+            else { st.rows = []; st.total = 0; st.error = (res && res.error) || 'Could not read e-mails'; }
+        } catch (e) {
+            if (this._em === st) { st.rows = []; st.total = 0; st.error = e.message || String(e); }
+        } finally {
+            st.loading = false;
+        }
+        // The user may have paged/searched while this was in flight.
+        if (st.q !== want.q || st.offset !== want.offset) { st.stale = true; return this._loadEmails(); }
+        if (this.activeSection === 'email' && this.currentImport === imp) this._refreshContent();
+    }
+
+    _refreshContent() {
+        const content = document.getElementById('gwp-content-area');
+        if (content) {
+            // Keep the email search box focused after Enter / async reload.
+            const kf = (typeof window !== 'undefined') ? window.VpKeepFocus : null;
+            const snap = kf ? kf.capture(content) : null;
+            content.innerHTML = this._renderSection();
+            if (kf) kf.restore(content, snap);
+        }
+        this._afterSectionRender();
+    }
+
+    emailSearch() {
+        const st = this._em; if (!st) return;
+        const el = document.getElementById('gwp-email-q');
+        st.q = el ? el.value.trim() : '';
+        st.offset = 0; st.stale = true;
+        this._refreshContent();
+    }
+
+    emailPage(delta) {
+        const st = this._em; if (!st || st.total == null) return;
+        const next = st.offset + delta * st.limit;
+        if (next < 0 || next >= st.total) return;
+        st.offset = next; st.stale = true;
+        this._refreshContent();
+    }
+
+    _renderStoreEmail(imp) {
+        const st = this._emailState(imp);
+        if (st.stale && !st.loading) setTimeout(() => this._loadEmails(), 0);
+        const all = this.module.emailTotal(imp);
+        const legacy = imp.legacyEmails || [];
+        const shownFrom = st.total ? st.offset + 1 : 0;
+        const shownTo = st.offset + st.rows.length;
+        const fmt = (n) => Number(n || 0).toLocaleString();
+        const nav = `
+                <button class="gwp-btn-sm gwp-btn-outline" ${st.offset <= 0 ? 'disabled' : ''} onclick="window.googleWarrantUI.emailPage(-1)">◀ Prev</button>
+                <span style="font-size:12px;color:#94a3b8;white-space:nowrap;">${st.loading || st.total == null ? 'Loading…' : `${fmt(shownFrom)}–${fmt(shownTo)} of ${fmt(st.total)}${st.q ? ' matching' : ''}`}</span>
+                <button class="gwp-btn-sm gwp-btn-outline" ${st.total == null || shownTo >= st.total ? 'disabled' : ''} onclick="window.googleWarrantUI.emailPage(1)">Next ▶</button>`;
+        const pager = `
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0;">
+                <input id="gwp-email-q" class="gwp-input" type="search" placeholder="Search subject, sender, recipient, body…" value="${this._escAttr(st.q)}"
+                       style="flex:1;min-width:220px;padding:6px 10px;border-radius:6px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;"
+                       onkeydown="if(event.key==='Enter'){window.googleWarrantUI.emailSearch();}">
+                <button class="gwp-btn-sm" onclick="window.googleWarrantUI.emailSearch()">Search</button>
+                ${nav}
+            </div>`;
+        const rows = st.rows.map((em, i) => {
+            const flagged = this.module.isFlagged('emails', em.id);
+            return `
+                <div class="gwp-email-item ${flagged ? 'gwp-flagged' : ''}" onclick="window.googleWarrantUI.toggleStoreEmail(${i})">
+                    <div class="gwp-email-row">
+                        <div class="gwp-email-from">${this._escHtml(em.from || 'Unknown')}</div>
+                        <div class="gwp-email-date">${em.date ? new Date(em.date).toLocaleString() : '—'}</div>
+                        <span style="margin-left:auto;white-space:nowrap">${em.attachments && em.attachments.length ? `<span title="${this._escAttr(em.attachments.map(a => a.filename).join(', '))}">📎${em.attachments.length}</span> ` : ''}${this._srcBtn('emails', em, 'Email', ['Message-ID', 'From', 'Subject'])}${this._flagBtn('emails', em.id)}</span>
+                    </div>
+                    <div class="gwp-email-subject">${this._escHtml(em.subject || '(no subject)')}</div>
+                    <div class="gwp-email-to">To: ${this._escHtml(em.to || '—')}</div>
+                    ${em.labels ? `<div class="gwp-email-labels">${String(em.labels).split(',').map(l => `<span class="gwp-tag-sm">${this._escHtml(l.trim())}</span>`).join('')}</div>` : ''}
+                    <div class="gwp-email-snippet" style="font-size:12px;color:#94a3b8;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this._escHtml((em.snippet || '').replace(/\s+/g, ' ').slice(0, 200))}</div>
+                    <div class="gwp-email-detail" id="gwp-email-sdetail-${i}" style="display:none;" onclick="event.stopPropagation()"></div>
+                </div>`;
+        }).join('');
+        return `
+            <div class="gwp-section-scroll">
+                <div class="gwp-section-header">
+                    <h3>📧 Email Messages (${fmt(all)})</h3>
+                    ${imp.store.emailDuplicates ? `<span class="gwp-section-count">${fmt(imp.store.emailDuplicates)} duplicate copies skipped</span>` : ''}
+                </div>
+                ${pager}
+                ${st.error ? `<div class="gwp-empty-section" style="color:#fca5a5">Could not read e-mails: ${this._escHtml(st.error)}</div>` : ''}
+                ${!st.loading && st.total === 0 && !st.error ? `<div class="gwp-empty-section">${st.q ? 'No e-mails match this search.' : 'No e-mails in the store.'}</div>` : ''}
+                <div class="gwp-email-list">${rows}</div>
+                ${st.rows.length > 10 ? `<div style="display:flex;gap:8px;align-items:center;justify-content:flex-end;margin:8px 0;">${nav}</div>` : ''}
+                ${legacy.length ? `<div class="gwp-card" style="margin-top:16px">${this._renderEmailInline(legacy, `📧 From an earlier import (${fmt(legacy.length)})`)}</div>` : ''}
+            </div>`;
+    }
+
+    async toggleStoreEmail(i) {
+        const el = document.getElementById(`gwp-email-sdetail-${i}`);
+        const st = this._em;
+        const row = st && st.rows[i];
+        if (!el || !row) return;
+        if (el.style.display !== 'none') { el.style.display = 'none'; return; }
+        el.style.display = 'block';
+        if (el.dataset.loaded === '1') return;
+        el.innerHTML = '<div style="color:#94a3b8;font-size:12px;padding:8px">Loading message…</div>';
+        const em = await this.module.getEmail(row.key, row.seq);
+        if (!em) { el.innerHTML = '<div style="color:#fca5a5;font-size:12px;padding:8px">Could not load this message.</div>'; return; }
+        el.dataset.loaded = '1';
+        const size = em.rawSize ? ` · ${(em.rawSize / 1048576).toFixed(1)} MB` : '';
+        el.innerHTML = `
+            <div class="gwp-email-headers">
+                ${em.cc ? `<div class="gwp-field-sm"><label>CC:</label><span>${this._escHtml(em.cc)}</span></div>` : ''}
+                ${em.id ? `<div class="gwp-field-sm"><label>Message-ID:</label><span class="gwp-mono">${this._escHtml(em.id)}</span></div>` : ''}
+                ${em.threadId ? `<div class="gwp-field-sm"><label>Thread ID:</label><span class="gwp-mono">${this._escHtml(em.threadId)}</span></div>` : ''}
+                ${em.attachments?.length ? `<div class="gwp-field-sm"><label>Attachments:</label><span>${this._escHtml(em.attachments.map(a => `${a.filename || '(unnamed)'}${a.size ? ' (' + Math.round(a.size / 1024) + ' KB)' : ''}`).join(', '))}</span></div>` : ''}
+                ${em.truncated ? `<div class="gwp-field-sm" style="color:#fbbf24"><label>Note:</label><span>This message is very large${size}; only the first 64 MB was read. The full message is in the original return.</span></div>` : ''}
+            </div>
+            <div class="gwp-email-body">
+                ${em.htmlBody
+                    ? `<iframe class="gwp-email-iframe" srcdoc="${this._escAttr(em.htmlBody)}" sandbox=""></iframe>`
+                    : `<pre class="gwp-email-text">${this._escHtml(em.textBody || '(empty)')}</pre>`}
+            </div>`;
+    }
+
     // ─── Location Section ───────────────────────────────────────────────
 
     _renderLocation(imp) {
-        const records = imp.locationRecords || [];
+        const storeMode = this.module.hasStore(imp);
+        const records = storeMode ? [] : (imp.locationRecords || []);
+        const legacy = storeMode ? (imp.legacyLocationRecords || []) : [];
+        const rawTotal = this.module.locationTotal(imp);
         const semantic = imp.semanticLocations || [];
 
-        if (records.length === 0 && semantic.length === 0) {
+        if (rawTotal === 0 && semantic.length === 0) {
             return '<div class="gwp-empty-section">No location data in this warrant return</div>';
         }
 
@@ -670,12 +873,13 @@ class GoogleWarrantUI {
             <div class="gwp-section-scroll">
                 <div class="gwp-section-header">
                     <h3>📍 Location History</h3>
-                    <span class="gwp-section-count">${records.length} raw points, ${visits.length} places, ${segments.length} trips</span>
+                    <span class="gwp-section-count">${rawTotal.toLocaleString()} raw points, ${visits.length} places, ${segments.length} trips</span>
                 </div>
 
                 <!-- Map -->
                 <div class="gwp-card">
                     <div id="gwp-location-map" class="gwp-map"></div>
+                    <div id="gwp-map-note" class="gwp-more" style="text-align:left;"></div>
                 </div>
 
                 <!-- Place Visits -->
@@ -691,8 +895,8 @@ class GoogleWarrantUI {
                                     const flagged = this.module.isFlagged('locationVisits', fk);
                                     return `
                                     <tr class="${flagged ? 'gwp-row-flagged' : ''}">
-                                        <td>${v.name || '—'}</td>
-                                        <td>${v.address || '—'}</td>
+                                        <td>${this._escape(v.name || '—')}</td>
+                                        <td>${this._escape(v.address || '—')}</td>
                                         <td class="gwp-mono gwp-nowrap">${v.startTime || '—'}</td>
                                         <td class="gwp-mono gwp-nowrap">${v.endTime || '—'}</td>
                                         <td>${v.confidence ? v.confidence + '%' : '—'}</td>
@@ -709,44 +913,156 @@ class GoogleWarrantUI {
                 ${records.length > 0 ? `
                 <div class="gwp-card">
                     <h4 class="gwp-card-title">Raw Location Records (${records.length})</h4>
-                    <div class="gwp-table-wrap" style="max-height: 400px; overflow-y: auto;">
-                        <table class="gwp-table">
-                            <thead><tr><th>Timestamp</th><th>Latitude</th><th>Longitude</th><th>Accuracy</th><th>Source</th></tr></thead>
-                            <tbody>
-                                ${records.slice(0, 500).map(r => `
-                                    <tr>
-                                        <td class="gwp-mono gwp-nowrap">${r.timestamp || '—'}</td>
-                                        <td class="gwp-mono">${r.lat?.toFixed(6) || '—'}</td>
-                                        <td class="gwp-mono">${r.lng?.toFixed(6) || '—'}</td>
-                                        <td>${r.accuracy || '—'}</td>
-                                        <td>${r.source || '—'}</td>
-                                    </tr>
-                                `).join('')}
-                                ${records.length > 500 ? `<tr><td colspan="5" class="gwp-more">... ${records.length - 500} more records</td></tr>` : ''}
-                            </tbody>
-                        </table>
-                    </div>
+                    ${this._locTableHtml(records.slice(0, 500))}
+                    ${records.length > 500 ? `<div class="gwp-more">... ${records.length - 500} more records</div>` : ''}
                 </div>
                 ` : ''}
+
+                ${storeMode && (imp.store.locationCount || 0) > 0 ? `
+                <div class="gwp-card">
+                    <h4 class="gwp-card-title">Raw Location Records (${(imp.store.locationCount || 0).toLocaleString()})</h4>
+                    <div id="gwp-loc-table">${this._renderStoreLocTable(imp)}</div>
+                </div>` : ''}
+
+                ${legacy.length > 0 ? `
+                <div class="gwp-card">
+                    <h4 class="gwp-card-title">Raw Location Records — from an earlier import (${legacy.length.toLocaleString()})</h4>
+                    ${this._locTableHtml(legacy.slice(0, 500))}
+                    ${legacy.length > 500 ? `<div class="gwp-more">... ${(legacy.length - 500).toLocaleString()} more records</div>` : ''}
+                </div>` : ''}
             </div>
         `;
     }
 
+    // ── Large returns: location points paged / sampled from the SQLite store ──
+
+    _locTableHtml(rows) {
+        const num = (v) => (typeof v === 'number' && isFinite(v)) ? v.toFixed(6) : '—';
+        return `
+            <div class="gwp-table-wrap" style="max-height: 400px; overflow-y: auto;">
+                <table class="gwp-table">
+                    <thead><tr><th>Timestamp</th><th>Latitude</th><th>Longitude</th><th>Accuracy</th><th>Source</th></tr></thead>
+                    <tbody>
+                        ${rows.map(r => `
+                            <tr>
+                                <td class="gwp-mono gwp-nowrap">${this._escape(r.timestamp || '—')}</td>
+                                <td class="gwp-mono">${num(r.lat)}</td>
+                                <td class="gwp-mono">${num(r.lng)}</td>
+                                <td>${this._escape(r.accuracy != null && r.accuracy !== '' ? r.accuracy : '—')}</td>
+                                <td>${this._escape(r.source || '—')}</td>
+                            </tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>`;
+    }
+
+    _locState(imp) {
+        const sig = imp.store.keys.join('|');
+        if (!this._loc || this._loc.impId !== imp.id || this._loc.keysSig !== sig) {
+            this._loc = { impId: imp.id, keysSig: sig, offset: 0, limit: 500, total: null, rows: [], loading: false, error: null, stale: true };
+        }
+        return this._loc;
+    }
+
+    _renderStoreLocTable(imp) {
+        const st = this._locState(imp);
+        if (st.stale && !st.loading) setTimeout(() => this._loadLocations(), 0);
+        if (st.error) return `<div class="gwp-empty-section">Could not read location records: ${this._escape(st.error)}</div>`;
+        if (st.total == null) return '<div class="gwp-more">Loading location records…</div>';
+        const a = st.total ? st.offset + 1 : 0;
+        const b = Math.min(st.offset + st.rows.length, st.total);
+        const nav = `
+            <div style="display:flex;align-items:center;gap:8px;margin:6px 0;">
+                <button class="gwp-btn gwp-btn-sm" onclick="window.googleWarrantUI.locPage(-1)" ${st.offset <= 0 || st.loading ? 'disabled' : ''}>◀ Prev</button>
+                <span class="gwp-section-count">${a.toLocaleString()}–${b.toLocaleString()} of ${st.total.toLocaleString()}${st.loading ? ' (loading…)' : ''}</span>
+                <button class="gwp-btn gwp-btn-sm" onclick="window.googleWarrantUI.locPage(1)" ${st.offset + st.limit >= st.total || st.loading ? 'disabled' : ''}>Next ▶</button>
+            </div>`;
+        return nav + this._locTableHtml(st.rows);
+    }
+
+    async _loadLocations() {
+        const imp = this.currentImport;
+        if (!imp || !this.module.hasStore(imp)) return;
+        const st = this._locState(imp);
+        if (st.loading) return;
+        st.loading = true; st.stale = false; st.error = null;
+        const want = st.offset;
+        try {
+            const res = await this.module.locationsPage(imp, { offset: st.offset, limit: st.limit });
+            if (this._loc !== st) return;
+            if (res && res.success) { st.rows = res.rows || []; st.total = res.total || 0; }
+            else { st.rows = []; st.total = 0; st.error = (res && res.error) || 'Could not read location records'; }
+        } catch (e) {
+            if (this._loc === st) { st.rows = []; st.total = 0; st.error = e.message || String(e); }
+        } finally {
+            st.loading = false;
+        }
+        if (st.offset !== want) { st.stale = true; return this._loadLocations(); }
+        this._refreshLocTable(imp);
+    }
+
+    _refreshLocTable(imp) {
+        if (this.activeSection !== 'location' || this.currentImport !== imp) return;
+        const el = document.getElementById('gwp-loc-table');
+        if (el) el.innerHTML = this._renderStoreLocTable(imp);
+    }
+
+    locPage(delta) {
+        const st = this._loc; if (!st || st.total == null) return;
+        const next = st.offset + delta * st.limit;
+        if (next < 0 || next >= st.total) return;
+        st.offset = next; st.stale = true;
+        this._refreshLocTable(this.currentImport);
+    }
+
+    /** Map points for a store-backed import: an evenly spaced sample (≤ 20,000). */
+    _mapSample(imp) {
+        const sig = imp.store.keys.join('|');
+        const s = this._locSample;
+        if (s && s.impId === imp.id && s.keysSig === sig) return s;
+        const fresh = { impId: imp.id, keysSig: sig, rows: null, total: 0, sampled: false, error: null };
+        this._locSample = fresh;
+        this.module.locationsPage(imp, { sample: 20000 }).then((res) => {
+            if (this._locSample !== fresh) return;
+            if (res && res.success) { fresh.rows = res.rows || []; fresh.total = res.total || 0; fresh.sampled = (res.step || 1) > 1; }
+            else { fresh.rows = []; fresh.error = (res && res.error) || 'Could not read location points'; }
+        }).catch((e) => {
+            if (this._locSample === fresh) { fresh.rows = []; fresh.error = e.message || String(e); }
+        }).then(() => {
+            if (this._locSample === fresh && this.activeSection === 'location' && this.currentImport === imp) this.initLocationMap(imp);
+        });
+        return fresh;
+    }
+
     initLocationMap(imp) {
-        const records = imp?.locationRecords || [];
         const semantic = imp?.semanticLocations || [];
         const mapEl = document.getElementById('gwp-location-map');
         if (!mapEl || typeof L === 'undefined') return;
+        const noteEl = document.getElementById('gwp-map-note');
+        const note = (t) => { if (noteEl) noteEl.textContent = t; };
+
+        let records = imp?.locationRecords || [];
+        if (this.module.hasStore(imp)) {
+            const s = this._mapSample(imp);
+            if (s.rows === null) { note('Loading map points…'); return; }
+            records = s.rows.concat(imp.legacyLocationRecords || []);
+            if (s.error) note('Map points could not be read: ' + s.error);
+            else if (s.sampled) note(`Map shows ${s.rows.length.toLocaleString()} evenly spaced points out of ${s.total.toLocaleString()}. Every point is listed in the table below.`);
+            else note('');
+        }
 
         const points = records.filter(r => r.lat && r.lng).map(r => [r.lat, r.lng]);
         const visits = semantic.filter(s => s.type === 'placeVisit' && s.lat && s.lng);
 
+        if (this._leafletMap) { try { this._leafletMap.remove(); } catch (_) {} this._leafletMap = null; }
         if (points.length === 0 && visits.length === 0) {
             mapEl.innerHTML = '<div class="gwp-empty-section">No coordinates to display</div>';
             return;
         }
+        if (mapEl._leaflet_id) return; // already drawn into this element
 
         const map = L.map('gwp-location-map', { preferCanvas: true }).setView([0, 0], 2);
+        this._leafletMap = map;
         // CARTO watermarks keyless tiles with "API KEY REQUIRED"; the key lives
         // in modules/_shared/basemap.js. Keyless fallback = degraded, not broken.
         const tileUrl = (window.VIPER_BASEMAP && window.VIPER_BASEMAP.dark) ||
@@ -770,7 +1086,7 @@ class GoogleWarrantUI {
 
         // Place visits as labeled markers
         visits.forEach(v => {
-            L.marker([v.lat, v.lng]).addTo(map).bindPopup(`<b>${v.name || 'Unknown'}</b><br>${v.address || ''}<br>${v.startTime || ''}`);
+            L.marker([v.lat, v.lng]).addTo(map).bindPopup(`<b>${this._escape(v.name || 'Unknown')}</b><br>${this._escape(v.address || '')}<br>${this._escape(v.startTime || '')}`);
             allCoords.push([v.lat, v.lng]);
         });
 
@@ -1074,20 +1390,39 @@ class GoogleWarrantUI {
                 ${metadataItems.length ? `<span class="gwp-tag">📋 ${metadataItems.length} metadata</span>` : ''}
             </div>`;
 
+        // Drive files are written to the case folder (relPath) and loaded on
+        // demand. Records from older VIPER versions still carry base64 `data`.
+        const esc = (s) => this._escape(s == null ? '' : s);
+        const missing = (f) => !f.relPath && !f.data;
+        const missingNote = '<span class="gwp-tag" title="This file could not be saved to the case folder during import">not saved</span>';
+        const fileBtns = (f, cat, i) => f.relPath ? `
+                                ${GoogleWarrantUI.OPENABLE_RE.test(f.name || f.relPath) ? `<button class="gwp-btn-sm" onclick="window.googleWarrantUI.openDriveFile('${cat}', ${i}, false)">Open</button>` : ''}
+                                <button class="gwp-btn-sm gwp-btn-outline" onclick="window.googleWarrantUI.openDriveFile('${cat}', ${i}, true)">Show in folder</button>`
+            : f.data ? (cat === 'pdf'
+                ? `<button class="gwp-btn-sm" onclick="gwpViewPdf(${i})">View</button>
+                   <button class="gwp-btn-sm gwp-btn-outline" onclick="gwpDownloadFile('', '', ${i}, 'pdf')">Download</button>`
+                : `<button class="gwp-btn-sm gwp-btn-outline" onclick="gwpDownloadFile('', '', ${i}, 'other')">Download</button>`)
+            : missingNote;
+
         // ── Photo Gallery ──
         if (images.length > 0) {
             html += `
             <div class="gwp-card">
                 <h4 class="gwp-card-title">🖼️ Photos (${images.length})</h4>
-                <div class="gwp-gallery">
+                <div class="gwp-gallery" id="gwp-drive-gallery">
                     ${images.map((f, i) => `
-                        <div class="gwp-gallery-item" onclick="gwpShowLightbox('${f.mimeType}', '${f.data.substring(0, 50)}...', ${i}, 'img')">
-                            <img src="data:${f.mimeType};base64,${f.data}" alt="${this._escAttr(f.name)}" loading="lazy">
-                            <div class="gwp-gallery-label">${this._escHtml(f.name)}<br><span>${formatSize(f.size)}</span></div>
+                        <div class="gwp-gallery-item" onclick="window.googleWarrantUI.openDriveImage(${i})">
+                            ${f.relPath
+                                ? `<div class="gwp-photo-thumb" data-rel="${(f.size || 0) <= 25 * 1048576 ? esc(f.relPath) : ''}" data-video="0"><div class="gwp-photo-loading">${(f.size || 0) <= 25 * 1048576 ? '…' : '🖼️'}</div></div>`
+                                : f.data
+                                    ? `<img src="data:${esc(f.mimeType)};base64,${f.data}" alt="${this._escAttr(f.name)}" loading="lazy">`
+                                    : `<div class="gwp-photo-thumb"><div class="gwp-photo-loading">⚠</div></div>`}
+                            <div class="gwp-gallery-label">${this._escHtml(f.name)}<br><span>${formatSize(f.size)}</span>${missing(f) ? ' ' + missingNote : ''}</div>
                         </div>
                     `).join('')}
                 </div>
             </div>`;
+            setTimeout(() => this._hydratePhotoThumbs(null, '#gwp-drive-gallery .gwp-photo-thumb'), 50);
         }
 
         // ── Videos ──
@@ -1096,11 +1431,14 @@ class GoogleWarrantUI {
             <div class="gwp-card">
                 <h4 class="gwp-card-title">🎬 Videos (${videos.length})</h4>
                 <div class="gwp-media-list">
-                    ${videos.map(f => `
+                    ${videos.map((f, i) => `
                         <div class="gwp-media-item">
-                            <video controls preload="metadata" class="gwp-video-player">
-                                <source src="data:${f.mimeType};base64,${f.data}" type="${f.mimeType}">
-                            </video>
+                            ${f.relPath
+                                ? `<button class="gwp-btn-sm" onclick="window.googleWarrantUI.openDriveVideo(${i})">▶ Play</button>
+                                   <button class="gwp-btn-sm gwp-btn-outline" onclick="window.googleWarrantUI.openDriveFile('video', ${i}, true)">Show in folder</button>`
+                                : f.data
+                                    ? `<video controls preload="metadata" class="gwp-video-player"><source src="data:${esc(f.mimeType)};base64,${f.data}" type="${esc(f.mimeType)}"></video>`
+                                    : missingNote}
                             <div class="gwp-media-label">${this._escHtml(f.name)} <span class="gwp-mono">(${formatSize(f.size)})</span></div>
                         </div>
                     `).join('')}
@@ -1121,10 +1459,7 @@ class GoogleWarrantUI {
                                 <span class="gwp-file-name">${this._escHtml(f.name)}</span>
                                 <span class="gwp-mono gwp-file-size">${formatSize(f.size)}</span>
                             </div>
-                            <div class="gwp-file-actions">
-                                <button class="gwp-btn-sm" onclick="gwpViewPdf(${i})">View</button>
-                                <button class="gwp-btn-sm gwp-btn-outline" onclick="gwpDownloadFile('${this._escAttr(f.name)}', '${f.mimeType}', ${i}, 'pdf')">Download</button>
-                            </div>
+                            <div class="gwp-file-actions">${fileBtns(f, 'pdf', i)}</div>
                         </div>
                     `).join('')}
                 </div>
@@ -1138,12 +1473,15 @@ class GoogleWarrantUI {
             <div class="gwp-card">
                 <h4 class="gwp-card-title">🎵 Audio (${audio.length})</h4>
                 <div class="gwp-media-list">
-                    ${audio.map(f => `
+                    ${audio.map((f, i) => `
                         <div class="gwp-media-item gwp-audio-item">
                             <span class="gwp-file-name">${this._escHtml(f.name)} <span class="gwp-mono">(${formatSize(f.size)})</span></span>
-                            <audio controls preload="metadata">
-                                <source src="data:${f.mimeType};base64,${f.data}" type="${f.mimeType}">
-                            </audio>
+                            ${f.relPath
+                                ? `<span id="gwp-drive-audio-${i}"><button class="gwp-btn-sm" onclick="window.googleWarrantUI.playDriveAudio(${i})">▶ Play</button></span>
+                                   <button class="gwp-btn-sm gwp-btn-outline" onclick="window.googleWarrantUI.openDriveFile('audio', ${i}, true)">Show in folder</button>`
+                                : f.data
+                                    ? `<audio controls preload="metadata"><source src="data:${esc(f.mimeType)};base64,${f.data}" type="${esc(f.mimeType)}"></audio>`
+                                    : missingNote}
                         </div>
                     `).join('')}
                 </div>
@@ -1161,12 +1499,10 @@ class GoogleWarrantUI {
                             <div class="gwp-file-info">
                                 <span class="gwp-file-icon">📄</span>
                                 <span class="gwp-file-name">${this._escHtml(f.name)}</span>
-                                <span class="gwp-tag">${f.mimeType?.split('/').pop() || '?'}</span>
+                                <span class="gwp-tag">${esc(f.mimeType?.split('/').pop() || '?')}</span>
                                 <span class="gwp-mono gwp-file-size">${formatSize(f.size)}</span>
                             </div>
-                            <div class="gwp-file-actions">
-                                <button class="gwp-btn-sm gwp-btn-outline" onclick="gwpDownloadFile('${this._escAttr(f.name)}', '${f.mimeType}', ${i}, 'other')">Download</button>
-                            </div>
+                            <div class="gwp-file-actions">${fileBtns(f, 'other', i)}</div>
                         </div>
                     `).join('')}
                 </div>
@@ -1335,7 +1671,7 @@ class GoogleWarrantUI {
             html += `<div class="gwp-photo-tile" data-category="${this._escape(p.category || '')}" data-idx="${i}" data-rel="${this._escape(p.relPath || '')}" onclick="window.googleWarrantUI.openPhotoLightbox(${i})">
                 <div class="gwp-photo-thumb" data-rel="${this._escape(p.relPath || '')}" data-video="${isVideo ? '1' : '0'}">
                     ${isVideo ? '<div class="gwp-photo-video-badge">▶</div>' : ''}
-                    <div class="gwp-photo-loading">…</div>
+                    <div class="gwp-photo-loading">${isVideo ? '🎬' : '…'}</div>
                 </div>
                 <div class="gwp-photo-caption">
                     <div class="gwp-photo-name" title="${this._escape(p.filename)}">${this._escape(p.filename)}</div>
@@ -1360,10 +1696,30 @@ class GoogleWarrantUI {
      * Lazy-load thumbnails — fetches base64 from main, swaps into <img>.
      * Uses IntersectionObserver so off-screen tiles don't get hammered.
      */
-    _hydratePhotoThumbs(media) {
-        const tiles = document.querySelectorAll('#gwp-photos-grid .gwp-photo-thumb');
+    _hydratePhotoThumbs(media, selector) {
+        const tiles = document.querySelectorAll(selector || '#gwp-photos-grid .gwp-photo-thumb');
         if (!tiles.length || !this.module) return;
         const mod = this.module;
+
+        // Video tiles: the bytes can't go in an <img>. Decode a frame instead
+        // (shared VpVideoThumbs, streamed viper-media:// URL).
+        const vt = window.VpVideoThumbs;
+        const vidRoots = new Set();
+        tiles.forEach(t => {
+            if (t.getAttribute('data-video') !== '1') return;
+            t.dataset.loaded = '1';
+            const rel = t.getAttribute('data-rel');
+            if (rel && vt) { t.setAttribute('data-vpt-src', rel); if (t.parentNode) vidRoots.add(t.parentNode.parentNode || t.parentNode); }
+        });
+        if (vt) {
+            const apply = (tile, dataUrl) => {
+                tile.querySelector('.gwp-photo-loading')?.remove();
+                let img = tile.querySelector('img');
+                if (!img) { img = document.createElement('img'); img.alt = ''; tile.appendChild(img); }
+                img.src = dataUrl;
+            };
+            vidRoots.forEach(r => vt.hydrate(r, { getUrl: (rel) => mod.getMediaUrl(rel), apply }));
+        }
 
         const load = async (tile) => {
             const rel = tile.getAttribute('data-rel');
@@ -1463,6 +1819,58 @@ class GoogleWarrantUI {
         } catch (err) {
             stage.innerHTML = `<div class="gwp-lightbox-error">Failed to load: ${this._escape(err.message || String(err))}</div>`;
         }
+    }
+
+    // ─── Drive files (Files section) — opened from the case folder ─────
+
+    _driveLists(imp) {
+        const files = ((imp && imp.driveFiles) || []).filter(f => f && f._isFile);
+        const isPdf = (f) => f.mimeType === 'application/pdf';
+        const kind = (f, p) => !!(f.mimeType && f.mimeType.startsWith(p));
+        return {
+            image: files.filter(f => kind(f, 'image/')),
+            video: files.filter(f => kind(f, 'video/')),
+            audio: files.filter(f => kind(f, 'audio/')),
+            pdf: files.filter(isPdf),
+            other: files.filter(f => !kind(f, 'image/') && !kind(f, 'video/') && !kind(f, 'audio/') && !isPdf(f)),
+        };
+    }
+
+    _driveAsPhotos(list) {
+        return list.map(f => ({ filename: f.name || '', relPath: f.relPath || '', mimeType: f.mimeType || '', size: f.size || 0 }));
+    }
+
+    openDriveImage(i) {
+        const list = this._driveLists(this.currentImport).image;
+        const f = list[i];
+        if (!f) return;
+        if (!f.relPath) { if (f.data && typeof window.gwpShowLightbox === 'function') window.gwpShowLightbox('', '', i, 'img'); return; }
+        this._currentPhotos = this._driveAsPhotos(list);
+        this.openPhotoLightbox(i);
+    }
+
+    openDriveVideo(i) {
+        const list = this._driveLists(this.currentImport).video;
+        if (!list[i] || !list[i].relPath) return;
+        this._currentPhotos = this._driveAsPhotos(list);
+        this.openPhotoLightbox(i);
+    }
+
+    async playDriveAudio(i) {
+        const f = this._driveLists(this.currentImport).audio[i];
+        const slot = document.getElementById(`gwp-drive-audio-${i}`);
+        if (!f || !f.relPath || !slot) return;
+        slot.textContent = 'Loading…';
+        const url = await this.module.getMediaUrl(f.relPath);
+        if (!url) { slot.textContent = 'Could not open this file'; return; }
+        slot.innerHTML = `<audio controls autoplay src="${this._escape(url)}"></audio>`;
+    }
+
+    async openDriveFile(cat, i, reveal) {
+        const f = (this._driveLists(this.currentImport)[cat] || [])[i];
+        if (!f || !f.relPath) return;
+        const res = await this.module.openMedia(f.relPath, !!reveal);
+        if (!res || !res.success) this._toast('Could not open file: ' + ((res && res.error) || 'unknown error'), 'error');
     }
 
     // ─── Other Data (catch-all for unknown categories) ─────────────────
@@ -1576,8 +1984,10 @@ class GoogleWarrantUI {
             if (ch.timestamp) events.push({ time: ch.timestamp, type: 'change', icon: '⚙️', title: ch.changeType, detail: `${ch.oldValue || ''} → ${ch.newValue || ''}` });
         });
 
-        // Emails
-        (imp.emails || []).forEach(em => {
+        // Emails (large returns: the inline preview plus any earlier inline import)
+        const tlEmails = (imp.emails || []).concat(this.module.hasStore(imp) ? (imp.legacyEmails || []) : []);
+        this._tlEmailCount = tlEmails.length;
+        tlEmails.forEach(em => {
             if (em.date) events.push({ time: em.date, type: 'email', icon: '📧', title: em.subject, detail: `From: ${em.from} → To: ${em.to}` });
         });
 
@@ -1629,6 +2039,7 @@ class GoogleWarrantUI {
                         </select>
                     </div>
                 </div>
+                ${this.module.hasStore(imp) ? `<div class="gwp-more" style="text-align:left;">This is a large return: the timeline includes only ${(this._tlEmailCount || 0).toLocaleString()} of ${this.module.emailTotal(imp).toLocaleString()} e-mails. Use the Email section to search all of them.</div>` : ''}
                 <div class="gwp-timeline" id="gwp-timeline">
                     ${events.slice(0, 500).map(ev => `
                         <div class="gwp-timeline-item" data-type="${ev.type}">
@@ -1684,6 +2095,9 @@ class GoogleWarrantUI {
 }
 
 // Expose on window so initializeGoogleWarrant() can find it
+// Types the Files section offers to "Open" — mirrors OPENABLE_EXT in
+// google-warrant-store.js (main refuses anything else).
+GoogleWarrantUI.OPENABLE_RE = /\.(jpg|jpeg|png|gif|bmp|webp|heic|tif|tiff|mp4|mov|avi|mkv|webm|3gp|m4v|wmv|mp3|wav|m4a|aac|ogg|flac|wma|pdf|txt|csv|rtf|doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp|json|xml|log)$/i;
 window.GoogleWarrantUI = GoogleWarrantUI;
 
 // Global ARIN lookup for Google Warrant IP addresses
@@ -1724,13 +2138,22 @@ window.gwpArinLookup = gwpArinLookup;
 // Store reference to current import's driveFiles for global helpers
 window._gwpDriveFiles = null;
 
+// Records from older VIPER versions carry base64 `data`; newer ones are opened
+// from the case folder by GoogleWarrantUI.openDrive*.
+function _gwpCurrentImport() {
+    return window.googleWarrantUI?.currentImport || window.googleWarrantModule?.imports?.[0] || null;
+}
+function _gwpEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 function gwpShowLightbox(mimeType, dataPreview, idx, category) {
-    const imp = window.googleWarrantModule?.imports?.[0];
+    const imp = _gwpCurrentImport();
     if (!imp) return;
     const files = (imp.driveFiles || []).filter(f => f._isFile);
     const images = files.filter(f => f.mimeType?.startsWith('image/'));
     const file = images[idx];
-    if (!file) return;
+    if (!file || !file.data) return;
 
     // Remove existing lightbox
     document.getElementById('gwp-lightbox')?.remove();
@@ -1742,8 +2165,8 @@ function gwpShowLightbox(mimeType, dataPreview, idx, category) {
     lb.innerHTML = `
         <div class="gwp-lightbox-content">
             <button class="gwp-lightbox-close" onclick="document.getElementById('gwp-lightbox').remove()">✕</button>
-            <img src="data:${file.mimeType};base64,${file.data}" alt="${file.name}">
-            <div class="gwp-lightbox-caption">${file.name}</div>
+            <img src="data:${_gwpEsc(file.mimeType)};base64,${file.data}" alt="${_gwpEsc(file.name)}">
+            <div class="gwp-lightbox-caption">${_gwpEsc(file.name)}</div>
             <div class="gwp-lightbox-nav">
                 ${idx > 0 ? `<button onclick="event.stopPropagation(); document.getElementById('gwp-lightbox').remove(); gwpShowLightbox('','',${idx - 1},'img')">◀ Prev</button>` : '<span></span>'}
                 <span>${idx + 1} / ${images.length}</span>
@@ -1756,18 +2179,18 @@ function gwpShowLightbox(mimeType, dataPreview, idx, category) {
 window.gwpShowLightbox = gwpShowLightbox;
 
 function gwpViewPdf(idx) {
-    const imp = window.googleWarrantModule?.imports?.[0];
+    const imp = _gwpCurrentImport();
     if (!imp) return;
     const pdfs = (imp.driveFiles || []).filter(f => f._isFile && f.mimeType === 'application/pdf');
     const file = pdfs[idx];
-    if (!file) return;
+    if (!file || !file.data) return;
 
     const viewer = document.getElementById('gwp-pdf-viewer');
     if (!viewer) return;
     viewer.classList.remove('hidden');
     viewer.innerHTML = `
         <div class="gwp-pdf-header">
-            <span>${file.name}</span>
+            <span>${_gwpEsc(file.name)}</span>
             <button class="gwp-close-btn" onclick="document.getElementById('gwp-pdf-viewer').classList.add('hidden')">✕</button>
         </div>
         <iframe src="data:application/pdf;base64,${file.data}" class="gwp-pdf-iframe"></iframe>
@@ -1776,13 +2199,13 @@ function gwpViewPdf(idx) {
 window.gwpViewPdf = gwpViewPdf;
 
 function gwpDownloadFile(name, mimeType, idx, category) {
-    const imp = window.googleWarrantModule?.imports?.[0];
+    const imp = _gwpCurrentImport();
     if (!imp) return;
     let pool;
     if (category === 'pdf') pool = (imp.driveFiles || []).filter(f => f._isFile && f.mimeType === 'application/pdf');
     else pool = (imp.driveFiles || []).filter(f => f._isFile && !f.mimeType?.startsWith('image/') && !f.mimeType?.startsWith('video/') && !f.mimeType?.startsWith('audio/') && f.mimeType !== 'application/pdf');
     const file = pool[idx];
-    if (!file) return;
+    if (!file || !file.data) return;
 
     const a = document.createElement('a');
     a.href = `data:${file.mimeType};base64,${file.data}`;

@@ -868,9 +868,28 @@ function _setCasesHidden(hidden) {
 // receives a 'second-instance' event and focuses its window.
 // ─────────────────────────────────────────────────────────────────────
 const _gotSingleInstanceLock = app.requestSingleInstanceLock();
+// Crash log (Settings → Crash Log). Started only by the instance that owns
+// the lock, so a double-launch never mistakes the running copy for a crash.
+const _crashLogLib = require('./modules/_shared/crash-log.js');
+let crashLog = null;
+function _crashMark(label, detail) {
+  try { if (crashLog) crashLog.mark(label, detail); } catch (_) {}
+}
 if (!_gotSingleInstanceLock) {
   app.quit();
 } else {
+  try {
+    crashLog = _crashLogLib.createCrashLog({
+      fs,
+      logDir: path.join(app.getPath('userData'), 'logs'),
+      version: app.getVersion(),
+      homeDir: require('os').homedir(),
+      isPortable,
+    }).start();
+    _crashLogLib.install(crashLog, { app, crashReporter: electron.crashReporter, proc: process });
+  } catch (e) {
+    console.error('[crash-log] init failed:', e.message);
+  }
   app.on('second-instance', () => {
     try {
       if (mainWindow) {
@@ -13508,6 +13527,7 @@ ipcMain.handle('genlogs-request', async (_event, { method, url, headers, body })
 
 const GoogleWarrantParser = require('./modules/google-warrant/google-warrant-parser');
 const gwParser = new GoogleWarrantParser();
+const gwStore = require('./modules/google-warrant/google-warrant-store');
 
 ipcMain.handle('google-warrant-scan', async (event, { caseNumber }) => {
   try {
@@ -13587,37 +13607,151 @@ ipcMain.handle('google-warrant-import', async (event, { filePath, caseNumber }) 
     }
 
     if (stat.isDirectory()) {
-      // Folder of extracted inner ZIPs — reassemble into a virtual outer ZIP
-      const AdmZip = require('adm-zip');
-      const outerZip = new AdmZip();
-      const entries = fs.readdirSync(filePath);
-      for (const name of entries) {
-        const full = path.join(filePath, name);
-        if (fs.statSync(full).isFile()) {
-          let buf = fs.readFileSync(full);
-          if (security && security.isUnlocked() && security.isEncryptedBuffer(buf)) {
-            buf = security.decryptBuffer(buf);
-          }
-          outerZip.addFile(name, buf);
-        }
-      }
-      const data = await gwParser.parseOuterZip(outerZip.toBuffer(), {
-        mediaRoot,
-        inputName: path.basename(filePath)
-      });
-      if (data) data.sourceIntegrity = await fingerprintP;
-      return { success: true, data };
+      // Folder of extracted inner ZIPs. The parser walks the folder and opens
+      // each ZIP straight from disk. (It used to read every file into memory
+      // and re-zip the folder in one Buffer — that is what crashed VIPER on
+      // large returns.)
+      console.log('[google-warrant] folder import:', path.basename(filePath));
     }
+    const input = filePath;
 
-    // Single ZIP file — pass the path; the parser streams it via node-stream-zip,
-    // so we no longer load multi-GB warrant returns into a Buffer.
-    const data = await gwParser.parseOuterZip(filePath, { security, mediaRoot });
+    // Large returns: e-mails + location points go to a per-import SQLite
+    // store under the case, not into the import record (IPC + localStorage).
+    let writer = null;
+    let storeDir = null;
+    let storeKey = null;
+    if (mediaRoot) {
+      storeDir = path.join(mediaRoot, '_store');
+      storeKey = gwStore.storeKeyFor(filePath);
+      try { writer = gwStore.openWriter(storeDir, storeKey); }
+      catch (e) { console.error('[google-warrant] store unavailable, keeping data inline:', e.message); writer = null; }
+    }
+    let sizeMB = 0;
+    try { sizeMB = stat.isDirectory() ? 0 : Math.round(stat.size / 1048576); } catch (_) {}
+    _crashMark('google-warrant:import-start', { kind: stat.isDirectory() ? 'folder' : 'zip', sizeMB });
+    let data;
+    try {
+      data = await gwParser.parseOuterZip(input, {
+        security,
+        mediaRoot,
+        inputName: path.basename(filePath).replace(/\.zip$/i, ''),
+        sink: writer ? writer.sink : null,
+        storeDir: writer ? storeDir : null,
+        storeKey: writer ? writer.overflowKey : null,   // overflow is staged, swapped in by finish()
+        onMark: _crashMark,
+      });
+      if (writer) {
+        writer.finish();
+        gwStore.attachToResult(data, writer);
+      }
+    } catch (e) {
+      if (writer) writer.abort();
+      throw e;
+    }
+    _crashMark('google-warrant:import-done', {
+      emails: data && data.store ? data.store.emailCount : (data && data.emails ? data.emails.length : 0),
+      locations: data && data.store ? data.store.locationCount : (data && data.locationRecords ? data.locationRecords.length : 0),
+    });
     if (data) data.sourceIntegrity = await fingerprintP;
     return { success: true, data };
   } catch (error) {
     console.error('Google warrant import error:', error);
-    return { success: false, error: error.message };
+    try { if (crashLog) crashLog.error('google-warrant import failed', error); } catch (_) {}
+    return { success: false, error: _gwReadableError(error) };
   }
+});
+
+function _gwReadableError(error) {
+  const msg = String((error && error.message) || error || 'Unknown error');
+  const code = error && error.code;
+  if (code === 'ENOSPC' || /ENOSPC/.test(msg)) return 'The disk is full. Free up space on the case drive (and the C: drive, which holds temporary files) and try again.';
+  if (code === 'ERR_FS_FILE_TOO_LARGE' || /File size .* is greater than/i.test(msg)) return 'A file in this return is too large to read in one piece. Please send the crash log (Settings → Crash Log) to VIPER support.';
+  if (/heap|allocation failed|Invalid string length|Array buffer allocation/i.test(msg)) return 'VIPER ran out of memory reading this return. Please send the crash log (Settings → Crash Log) to VIPER support.';
+  if (code === 'EBUSY' || code === 'EPERM' || code === 'EACCES') return 'A file in this return is locked or not readable (' + code + '). Close other programs using it and try again.';
+  return msg;
+}
+
+// ─── Google Warrant SQLite store reads (large returns) ──────────────────
+function _gwStoreDir(caseNumber) {
+  if (!caseNumber || /[\\/]|\.\./.test(String(caseNumber))) throw new Error('Invalid case number');
+  return path.join(casesDir, String(caseNumber), 'Evidence', 'google-warrant', '_store');
+}
+
+ipcMain.handle('google-warrant-emails-page', async (event, { caseNumber, keys, offset, limit, q } = {}) => {
+  try {
+    return { success: true, ...gwStore.readEmailPage(_gwStoreDir(caseNumber), { keys, offset, limit, q }) };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('google-warrant-email', async (event, { caseNumber, key, seq, id } = {}) => {
+  try {
+    const email = gwStore.getEmail(_gwStoreDir(caseNumber), { key, seq, id });
+    return email ? { success: true, email } : { success: false, error: 'E-mail not found' };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('google-warrant-locations', async (event, { caseNumber, keys, offset, limit, sample } = {}) => {
+  try {
+    return { success: true, ...gwStore.readLocations(_gwStoreDir(caseNumber), { keys, offset, limit, sample }) };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('google-warrant-store-stats', async (event, { caseNumber, keys } = {}) => {
+  try {
+    return { success: true, ...gwStore.storeStats(_gwStoreDir(caseNumber), keys) };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('google-warrant-store-delete', async (event, { caseNumber, keys } = {}) => {
+  try {
+    return { success: true, deleted: gwStore.deleteStores(_gwStoreDir(caseNumber), keys) };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+// ─── Crash log (Settings → Crash Log) ───────────────────────────────────
+ipcMain.handle('crash-log-info', async () => {
+  try {
+    if (!crashLog) return { success: false, error: 'Crash log is not running' };
+    let dumps = 0;
+    try { dumps = _crashLogLib.countDumps(fs, app.getPath('crashDumps')); } catch (_) {}
+    return { success: true, ...crashLog.info(), dumps };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('crash-log-open-folder', async () => {
+  try {
+    if (!crashLog) return { success: false, error: 'Crash log is not running' };
+    const err = await shell.openPath(crashLog.logDir);
+    return err ? { success: false, error: err } : { success: true };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('crash-log-export', async (event) => {
+  try {
+    if (!crashLog) return { success: false, error: 'Crash log is not running' };
+    const stamp = new Date().toISOString().slice(0, 10);
+    const win = require('electron').BrowserWindow.fromWebContents(event.sender);
+    const res = await dialog.showSaveDialog(win, {
+      title: 'Save VIPER crash log',
+      defaultPath: path.join(app.getPath('desktop'), `VIPER-crash-log-${app.getVersion()}-${stamp}.txt`),
+      filters: [{ name: 'Text', extensions: ['txt'] }],
+    });
+    if (res.canceled || !res.filePath) return { success: false, canceled: true };
+    let dumps = 0;
+    try { dumps = _crashLogLib.countDumps(fs, app.getPath('crashDumps')); } catch (_) {}
+    const header = `VIPER ${app.getVersion()} crash log — exported ${new Date().toISOString()}\n` +
+      `Windows ${require('os').release()} · ${Math.round(require('os').totalmem() / 1073741824)} GB RAM · portable=${!!isPortable} · native crash dumps on this PC: ${dumps}\n\n`;
+    fs.writeFileSync(res.filePath, header + crashLog.exportText());
+    return { success: true, filePath: res.filePath };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('crash-log-clear', async () => {
+  try {
+    if (!crashLog) return { success: false, error: 'Crash log is not running' };
+    crashLog.clear();
+    return { success: true };
+  } catch (e) { return { success: false, error: e.message }; }
 });
 
 // ─── Google Warrant media read (base64) — for image thumbnails ──────────
@@ -13698,6 +13832,39 @@ ipcMain.handle('google-warrant-get-media-url', async (event, { caseNumber, relPa
     return { success: true, fileUrl: `viper-media://m/${token}`, sizeBytes: stat.size, isTemp, fileName: path.basename(fullPath) };
   } catch (error) {
     console.error('Google warrant get-media-url error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// ─── Google Warrant: open an extracted file in its Windows program / show it ─
+// (Drive files are no longer inlined as base64 — they live on disk under the case.)
+ipcMain.handle('google-warrant-open-media', async (event, { caseNumber, relPath, reveal } = {}) => {
+  try {
+    if (!caseNumber || !relPath || /[\\/]|\.\./.test(String(caseNumber))) return { success: false, error: 'Missing caseNumber or relPath' };
+    const root = path.resolve(path.join(casesDir, String(caseNumber), 'Evidence', 'google-warrant'));
+    const normRel = path.normalize(String(relPath)).replace(/^[\\/]+/, '');
+    const fullPath = path.resolve(root, normRel);
+    if (normRel.startsWith('..') || !fullPath.startsWith(root + path.sep)) return { success: false, error: 'Path traversal blocked' };
+    if (!fs.existsSync(fullPath)) return { success: false, error: 'File not found' };
+    if (reveal) { shell.showItemInFolder(fullPath); return { success: true }; }
+    // Suspect-supplied files: never launch executables / scripts / web pages.
+    if (!gwStore.canOpenDirectly(fullPath)) return { success: false, error: 'VIPER does not open this kind of file directly. Use Show in folder.' };
+    let openPath = fullPath;
+    if (security && security.isUnlocked()) {
+      const fd = fs.openSync(fullPath, 'r');
+      const head = Buffer.alloc(64);
+      try { fs.readSync(fd, head, 0, 64, 0); } finally { fs.closeSync(fd); }
+      if (security.isEncryptedBuffer(head)) {
+        const tempDir = path.join(app.getPath('temp'), 'viper-view-google-warrant');
+        fs.mkdirSync(tempDir, { recursive: true });
+        openPath = path.join(tempDir, `${Date.now()}_${path.basename(fullPath)}`);
+        fs.writeFileSync(openPath, security.decryptBuffer(fs.readFileSync(fullPath)));
+      }
+    }
+    const err = await shell.openPath(openPath);
+    return err ? { success: false, error: err } : { success: true };
+  } catch (error) {
+    console.error('Google warrant open-media error:', error);
     return { success: false, error: error.message };
   }
 });
@@ -14338,6 +14505,65 @@ ipcMain.handle('x-warrant-read-media', async (event, { filePath }) => {
     return { success: false, error: error.message };
   }
 });
+
+// ── warrant-media-url (start) ──
+// Streamable viper-media:// URL for a file the Snapchat / KIK / X importers
+// extracted under cases/<n>/Evidence/<Dir>/. Used for video thumbnails and
+// playback so a whole video is never base64'd across IPC. Only those three
+// evidence folders are allowed; the renderer never learns a new path.
+const WARRANT_MEDIA_DIRS = ['snapchatwarrant', 'kikwarrant', 'xwarrant'];
+const WARRANT_MEDIA_DECRYPT_MAX = 1024 * 1024 * 1024; // 1 GB
+const _warrantMediaTemp = new Map(); // source path → { tmp, mtimeMs, size }
+function _warrantMediaCheckPath(filePath, root) {
+  if (!filePath || typeof filePath !== 'string' || !root) return null;
+  const base = path.resolve(root);
+  const full = path.resolve(filePath);
+  if (!full.toLowerCase().startsWith(base.toLowerCase() + path.sep)) return null;
+  const parts = full.slice(base.length + 1).split(/[\\/]+/);
+  // <case>/Evidence/<Dir>/.../<file>
+  if (parts.length < 4 || parts.some(p => !p || p === '..' || p === '.')) return null;
+  if (parts[1].toLowerCase() !== 'evidence') return null;
+  if (!WARRANT_MEDIA_DIRS.includes(parts[2].toLowerCase())) return null;
+  return full;
+}
+ipcMain.handle('warrant-media-url', async (event, { filePath } = {}) => {
+  try {
+    const full = _warrantMediaCheckPath(filePath, casesDir);
+    if (!full) return { success: false, error: 'Path not allowed' };
+    let st;
+    try { st = fs.statSync(full); } catch (_) { return { success: false, error: 'File not found' }; }
+    if (!st.isFile()) return { success: false, error: 'Not a file' };
+    let servePath = full;
+    if (security && security.isUnlocked()) {
+      const fd = fs.openSync(full, 'r');
+      const head = Buffer.alloc(64);
+      try { fs.readSync(fd, head, 0, 64, 0); } finally { fs.closeSync(fd); }
+      if (security.isEncryptedBuffer(head)) {
+        const prev = _warrantMediaTemp.get(full);
+        if (prev && prev.mtimeMs === st.mtimeMs && prev.size === st.size && fs.existsSync(prev.tmp)) {
+          servePath = prev.tmp;
+        } else {
+          if (st.size > WARRANT_MEDIA_DECRYPT_MAX) return { success: false, error: 'File too large to preview' };
+          const tempDir = path.join(app.getPath('temp'), 'viper-view-warrant-media');
+          fs.mkdirSync(tempDir, { recursive: true });
+          const tmp = path.join(tempDir, crypto.randomBytes(8).toString('hex') + path.extname(full).toLowerCase());
+          fs.writeFileSync(tmp, security.decryptBuffer(fs.readFileSync(full)));
+          _warrantMediaTemp.set(full, { tmp, mtimeMs: st.mtimeMs, size: st.size });
+          servePath = tmp;
+        }
+      }
+    }
+    const token = _datapilotIssueMediaToken(servePath);
+    return { success: true, fileUrl: `viper-media://m/${token}` };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+app.on('will-quit', () => {
+  for (const { tmp } of _warrantMediaTemp.values()) { try { fs.unlinkSync(tmp); } catch (_) {} }
+  _warrantMediaTemp.clear();
+});
+// ── warrant-media-url (end) ──
 
 // ─── Discord Warrant Parser IPC ─────────────────────────────────────
 

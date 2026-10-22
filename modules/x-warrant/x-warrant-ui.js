@@ -353,7 +353,11 @@ class XWarrantUI {
     rerenderSection() {
         const content = document.getElementById('xwp-content-area');
         if (!content) return;
+        // Keep the search box focused while typing (it lives inside content).
+        const kf = (typeof window !== 'undefined') ? window.VpKeepFocus : null;
+        const snap = kf ? kf.capture(content) : null;
         content.innerHTML = this._renderSection();
+        if (kf) kf.restore(content, snap);
         this._loadLazyImages(content);
     }
 
@@ -474,7 +478,7 @@ class XWarrantUI {
         return `
             <div class="xwp-section">
                 <h2 class="xwp-section-title">💬 Threads (${threads.length})</h2>
-                <input type="text" class="xwp-input" placeholder="Search conversations / participants"
+                <input type="text" class="xwp-input" id="xwp-conv-filter" placeholder="Search conversations / participants"
                     value="${this._esc(this._convFilter)}"
                     oninput="window.xWarrantUI._convFilter = this.value; window.xWarrantUI.rerenderSection()">
                 <div class="xwp-conv-list">
@@ -534,7 +538,7 @@ class XWarrantUI {
         return `
             <div class="xwp-section">
                 <h2 class="xwp-section-title">🐦 Tweets (${tweets.length})</h2>
-                <input type="text" class="xwp-input" placeholder="Search tweet text"
+                <input type="text" class="xwp-input" id="xwp-tweet-filter" placeholder="Search tweet text"
                     value="${this._esc(this._tweetFilter)}"
                     oninput="window.xWarrantUI._tweetFilter = this.value; window.xWarrantUI.rerenderSection()">
                 <div class="xwp-tweet-list">
@@ -610,8 +614,11 @@ class XWarrantUI {
                     ${names.slice(0, 300).map(fn => {
                         const info = imp.mediaFiles[fn] || {};
                         const isImg = /^image\//.test(info.mimeType || '');
+                        const isVid = /^video\//.test(info.mimeType || '') && info.diskPath;
                         return `<div class="xwp-media-cell">
-                            ${isImg && info.diskPath ? `<img data-xwp-media="${this._escJs(info.diskPath)}" alt="${this._esc(fn)}" class="xwp-media-img">` : `<div class="xwp-media-placeholder">${/^video\//.test(info.mimeType) ? '🎬' : '📄'}</div>`}
+                            ${isImg && info.diskPath ? `<img data-xwp-media="${this._escJs(info.diskPath)}" alt="${this._esc(fn)}" class="xwp-media-img">`
+                                : isVid ? `<div class="xwp-media-video-thumb" data-vpt-src="${this._esc(info.diskPath)}" title="Play video" onclick="window.xWarrantUI.playVideo(this)"><span class="xwp-video-play-icon">▶</span><div class="xwp-media-placeholder vpt-hide">🎬</div></div>`
+                                : `<div class="xwp-media-placeholder">${/^video\//.test(info.mimeType) ? '🎬' : '📄'}</div>`}
                             <div class="xwp-media-name" title="${this._esc(fn)}">${this._esc(fn)}</div>
                         </div>`;
                     }).join('')}
@@ -659,6 +666,8 @@ class XWarrantUI {
     async _loadLazyImages(root) {
         const scope = root || this.container;
         if (!scope) return;
+        const vt = (typeof window !== 'undefined') ? window.VpVideoThumbs : null;
+        if (vt) vt.hydrate(scope, { getUrl: (diskPath) => this.module.mediaUrl(diskPath) });
         const imgs = scope.querySelectorAll('img[data-xwp-media]');
         for (const img of imgs) {
             const diskPath = img.getAttribute('data-xwp-media');
@@ -673,6 +682,28 @@ class XWarrantUI {
                 }
             } catch (e) { /* ignore */ }
         }
+    }
+
+    /** Media tab: swap a video tile for an inline player (streamed; blob fallback). */
+    async playVideo(tile) {
+        if (!tile || !tile.parentNode) return;
+        const diskPath = tile.getAttribute('data-vpt-src');
+        if (!diskPath) return;
+        let src = await this.module.mediaUrl(diskPath);
+        if (!src) {
+            const res = await this.module.readMedia(diskPath);
+            if (!res || !res.data) return;
+            const bin = atob(res.data);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            src = URL.createObjectURL(new Blob([bytes], { type: res.mimeType || 'video/mp4' }));
+        }
+        if (!tile.parentNode) return;
+        const v = document.createElement('video');
+        v.className = 'xwp-media-img';
+        v.controls = true; v.autoplay = true; v.preload = 'metadata';
+        v.src = src;
+        tile.parentNode.replaceChild(v, tile);
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────

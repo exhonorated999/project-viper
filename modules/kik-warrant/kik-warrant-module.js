@@ -164,6 +164,16 @@ class KikWarrantModule {
         return null;
     }
 
+    /** Streamable viper-media:// URL for an extracted file (null if unavailable). */
+    async mediaUrl(diskPath) {
+        if (!diskPath || !window.electronAPI?.warrantMediaUrl) return null;
+        try {
+            const r = await window.electronAPI.warrantMediaUrl({ filePath: diskPath });
+            if (r && r.success && r.fileUrl) return r.fileUrl;
+        } catch (e) { /* ignore — e.g. main not restarted yet */ }
+        return null;
+    }
+
     /**
      * Get disk path for a media UUID
      */

@@ -777,6 +777,14 @@ function harvestIdentifiers(caseId) {
     }
   }
 
+  // ── BitTorrent tab — suspect IP of each Torrential Downpour download ──
+  const bt = _readJson(`bittorrent_${caseId}`);
+  if (bt && Array.isArray(bt.imports)) {
+    for (const imp of bt.imports) {
+      if (imp && imp.ip) _add('ips', imp.ip, 'BitTorrent (Torrential Downpour)', { ref: imp.id });
+    }
+  }
+
   // ── Cellebrite (mobile forensics) — accounts/contacts ──
   const cb = _readJson(`cellebriteImport_${caseId}`);
   if (cb && Array.isArray(cb.imports)) {

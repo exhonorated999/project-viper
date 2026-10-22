@@ -87,6 +87,13 @@ const spotChecks = [
   { file: 'preload.js',                       test: (s) => /contextBridge/.test(s),        want: 'contextBridge' },
   { file: 'index.html',                       test: (s) => /^\s*<!DOCTYPE html/i.test(s),  want: '<!DOCTYPE html>' },
   { file: 'case-detail-with-analytics.html',  test: (s) => /^\s*<!DOCTYPE html/i.test(s),  want: '<!DOCTYPE html>' },
+  // electron-main.js requires bt-main at startup — a missing file means the app never opens.
+  { file: path.join('modules', 'bittorrent', 'bt-main.js'),           test: (s) => /register/.test(s),          want: 'register()' },
+  { file: path.join('modules', 'bittorrent', 'td-log-parser.js'),     test: (s) => /discoverLogs/.test(s),      want: 'discoverLogs' },
+  { file: path.join('modules', 'bittorrent', 'td-model.js'),          test: (s) => /clientProfile/.test(s),     want: 'clientProfile' },
+  { file: path.join('modules', 'bittorrent', 'bittorrent-module.js'), test: (s) => /BitTorrentModule/.test(s),  want: 'BitTorrentModule' },
+  { file: path.join('modules', 'bittorrent', 'bittorrent-ui.js'),     test: (s) => /BitTorrentUI/.test(s),      want: 'BitTorrentUI' },
+  { file: path.join('modules', 'bittorrent', 'bittorrent-styles.css'), test: (s) => /\.btt-/.test(s),           want: '.btt- styles' },
 ];
 
 for (const { file, test, want } of spotChecks) {

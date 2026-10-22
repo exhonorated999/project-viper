@@ -14506,6 +14506,17 @@ ipcMain.handle('x-warrant-read-media', async (event, { filePath }) => {
   }
 });
 
+// ─── BitTorrent (Torrential Downpour) tab IPC ───────────────────────
+require('./modules/bittorrent/bt-main').register({
+  ipcMain, dialog,
+  getMainWindow: () => mainWindow,
+  getCasesDir: () => casesDir,
+  getSecurity: () => security,
+  restoreFocus,
+  sourceFingerprint: (spec) => _sourceFingerprint(spec),
+  encryptMaxBytes: EVIDENCE_ENCRYPT_MAX_BYTES
+});
+
 // ── warrant-media-url (start) ──
 // Streamable viper-media:// URL for a file the Snapchat / KIK / X importers
 // extracted under cases/<n>/Evidence/<Dir>/. Used for video thumbnails and

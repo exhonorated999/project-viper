@@ -241,6 +241,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   xWarrantImport: (data) => ipcRenderer.invoke('x-warrant-import', data),
   xWarrantPickFile: () => ipcRenderer.invoke('x-warrant-pick-file'),
   xWarrantReadMedia: (data) => ipcRenderer.invoke('x-warrant-read-media', data),
+  // BitTorrent (Torrential Downpour) tab
+  btPickSource: () => ipcRenderer.invoke('bt-pick-source'),
+  btScan: (data) => ipcRenderer.invoke('bt-scan', data),
+  btImport: (data) => ipcRenderer.invoke('bt-import', data),
+  btCancel: (data) => ipcRenderer.invoke('bt-cancel', data),
+  btRead: (data) => ipcRenderer.invoke('bt-read', data),
+  btDelete: (data) => ipcRenderer.invoke('bt-delete', data),
+  onBtProgress: (callback) => {
+    const handler = (_e, data) => callback(data);
+    ipcRenderer.on('bt-progress', handler);
+    return () => ipcRenderer.removeListener('bt-progress', handler);
+  },
   // Streamable viper-media:// URL for an extracted Snapchat / KIK / X file
   // (video thumbnails + playback without base64-ing the whole file).
   warrantMediaUrl: (data) => ipcRenderer.invoke('warrant-media-url', data),

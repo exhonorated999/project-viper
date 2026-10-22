@@ -220,6 +220,14 @@
           identity: warrantImport, merge: 'list', reid: true, orphanOnTransfer: true },
         { key: 'flock', pattern: 2, label: 'Flock ALPR', shape: 'wrapped', list: 'imports',
           identity: warrantImport, merge: 'list', reid: true },
+        /* BitTorrent tab: parsed Torrential Downpour downloads live at
+         * cases/<n>/BitTorrent/<id>.json and the copied download (which can
+         * hold contraband) under Evidence/BitTorrent — neither travels.
+         * `id` is content-derived (IP + start time + info hash) and names the
+         * JSON file, so it is the identity and is never re-minted. */
+        { key: 'bittorrent', pattern: 2, label: 'BitTorrent Downloads', shape: 'wrapped', list: 'imports',
+          identity: function (r) { return r && r.id ? _id('bt', _s(r.id)) : ''; },
+          merge: 'list', orphanOnTransfer: true },
 
         /* ── RMS / external reports ──────────────────────────────────── */
         { key: 'rmsImports', pattern: 2, label: 'RMS Imports', shape: 'array',

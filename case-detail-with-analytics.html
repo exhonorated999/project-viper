@@ -842,6 +842,10 @@
     <script src="modules/snapchat-warrant/snapchat-warrant-ui.js"></script>
     <script src="modules/x-warrant/x-warrant-module.js"></script>
     <script src="modules/x-warrant/x-warrant-ui.js"></script>
+    <link rel="stylesheet" href="modules/bittorrent/bittorrent-styles.css">
+    <script src="modules/bittorrent/td-model.js"></script>
+    <script src="modules/bittorrent/bittorrent-module.js"></script>
+    <script src="modules/bittorrent/bittorrent-ui.js"></script>
     <script src="modules/discord-warrant/discord-warrant-module.js"></script>
     <script src="modules/discord-warrant/discord-warrant-ui.js"></script>
     <script src="modules/datapilot/datapilot-time.js"></script>
@@ -1677,6 +1681,7 @@
                     discordWarrant:  hasArr(_ls(`discordWarrant_${caseId}`)),
                     snapchatWarrant: hasArr(_ls(`snapchatWarrant_${caseId}`)),
                     xWarrant:        hasArr(_ls(`xWarrant_${caseId}`)),
+                    bittorrent:      hasArr(_ls(`bittorrent_${caseId}`)),
                     metaWarrant:     hasArr(_ls(`metaWarrant_${caseId}`))
                 };
 
@@ -2409,6 +2414,7 @@
                 kikWarrant: { label: 'KIK Warrant', icon: 'M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z' },
                 snapchatWarrant: { label: 'Snapchat Warrant', icon: 'M12 2C8.5 2 6 4.5 6 8c0 1.5.3 3 .8 4.2-.5.3-1.3.5-2 .5-.4 0-.8.3-.8.7 0 .5.5.9 1.2 1.2.7.3 1.6.5 2.3.6-.1.5-.5 1-1.2 1.5-.7.4-1.6.7-2.3.9-.5.1-.8.4-.8.8 0 .8 1.7 1.4 3.5 1.7.1.4.3.8.6 1 .3.2.7.2 1.1.1.5-.1 1-.1 1.6 0 .6.1 1.2.4 1.9.9.7.5 1.4.7 2.1.7s1.4-.2 2.1-.7c.7-.5 1.3-.8 1.9-.9.6-.1 1.1-.1 1.6 0 .4.1.8.1 1.1-.1.3-.2.5-.6.6-1 1.8-.3 3.5-.9 3.5-1.7 0-.4-.3-.7-.8-.8-.7-.2-1.6-.5-2.3-.9-.7-.5-1.1-1-1.2-1.5.7-.1 1.6-.3 2.3-.6.7-.3 1.2-.7 1.2-1.2 0-.4-.4-.7-.8-.7-.7 0-1.5-.2-2-.5.5-1.2.8-2.7.8-4.2 0-3.5-2.5-6-6-6z' },
                 xWarrant: { label: 'X / Twitter Warrant', icon: 'M4 4l16 16M20 4L4 20' },
+                bittorrent: { label: 'BitTorrent', icon: 'M6 3v8a6 6 0 0012 0V3h-4v8a2 2 0 01-4 0V3H6zM6 7h4M14 7h4' },
                 discordWarrant: { label: 'Discord Warrant', icon: 'M19.27 5.33C17.94 4.71 16.5 4.26 15 4a.09.09 0 00-.07.03c-.18.33-.39.76-.53 1.09a16.09 16.09 0 00-4.8 0c-.14-.34-.35-.76-.54-1.09-.01-.02-.04-.03-.07-.03-1.5.26-2.93.71-4.27 1.33-.01 0-.02.01-.03.02-2.72 4.07-3.47 8.03-3.1 11.95 0 .02.01.04.03.05 1.8 1.32 3.53 2.12 5.24 2.65.03.01.06 0 .07-.02.4-.55.76-1.13 1.07-1.74.02-.04 0-.08-.04-.09-.57-.22-1.11-.48-1.64-.78-.04-.02-.04-.08-.01-.11.11-.08.22-.17.33-.25.02-.02.05-.02.07-.01 3.44 1.57 7.15 1.57 10.55 0 .02-.01.05-.01.07.01.11.09.22.17.33.26.04.03.04.09-.01.11-.52.31-1.07.56-1.64.78-.04.01-.05.06-.04.09.32.61.68 1.19 1.07 1.74.03.01.06.02.09.01 1.72-.53 3.45-1.33 5.25-2.65.02-.01.03-.03.03-.05.44-4.53-.73-8.46-3.1-11.95-.01-.01-.02-.02-.04-.02zM8.52 14.91c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.84 2.12-1.89 2.12zm6.97 0c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.83 2.12-1.89 2.12z' },
                 datapilot: { label: 'Datapilot', icon: 'M9 17a4 4 0 01-2-7.5l1-3a4 4 0 017 0l1 3A4 4 0 0115 17H9zM12 12v9' },
                 cellebrite: { label: 'Cellebrite (Mobile Forensics)', icon: 'M11 2H9a2 2 0 00-2 2v16a2 2 0 002 2h6a2 2 0 002-2V4a2 2 0 00-2-2h-2M11 18h2' },
@@ -2559,6 +2565,7 @@
             allModules.kikWarrant = { label: 'KIK Warrant', icon: '💬' };
             allModules.snapchatWarrant = { label: 'Snapchat Warrant', icon: '👻' };
             allModules.xWarrant = { label: 'X / Twitter Warrant', icon: '𝕏' };
+            allModules.bittorrent = { label: 'BitTorrent', icon: '🧲' };
             allModules.discordWarrant = { label: 'Discord Warrant', icon: '💜' };
             allModules.datapilot = { label: 'Datapilot', icon: '📱' };
             allModules.cellebrite = { label: 'Cellebrite (Mobile Forensics)', icon: '📱' };
@@ -2658,6 +2665,7 @@
                 googleWarrant:'Google Warrant', metaWarrant:'META Warrant', kikWarrant:'KIK Warrant',
                 snapchatWarrant:'Snapchat Warrant',
                 xWarrant:'X / Twitter Warrant',
+                bittorrent:'BitTorrent',
                 discordWarrant:'Discord Warrant',
                 datapilot:'Datapilot',
                 cellebrite:'Cellebrite (Mobile Forensics)',
@@ -2724,6 +2732,7 @@
                 kikWarrant: { label: 'KIK Warrant', icon: '💬', type: 'data' },
                 snapchatWarrant: { label: 'Snapchat Warrant', icon: '👻', type: 'data' },
                 xWarrant: { label: 'X / Twitter Warrant', icon: '𝕏', type: 'data' },
+                bittorrent: { label: 'BitTorrent', icon: '🧲', type: 'data' },
                 discordWarrant: { label: 'Discord Warrant', icon: '💜', type: 'data' },
                 datapilot: { label: 'Datapilot', icon: '📱', type: 'data' },
                 cellebrite: { label: 'Cellebrite (Mobile Forensics)', icon: '📱', type: 'data' },
@@ -3217,6 +3226,10 @@
                 case 'xWarrant': {
                     const xwData = _lsParse(`xWarrant_${currentCase.id}`, {"imports": []});
                     return (xwData.imports || []).length;
+                }
+                case 'bittorrent': {
+                    const btData = _lsParse(`bittorrent_${currentCase.id}`, {"imports": []});
+                    return (btData.imports || []).length;
                 }
                 case 'discordWarrant': {
                     const dwData = _lsParse(`discordWarrant_${currentCase.id}`, {"imports": []});
@@ -6071,6 +6084,9 @@
             } else if (tabId === 'xWarrant') {
                 contentDiv.innerHTML = renderXWarrantTab();
                 initializeXWarrant();
+            } else if (tabId === 'bittorrent') {
+                contentDiv.innerHTML = renderBitTorrentTab();
+                initializeBitTorrent();
             } else if (tabId === 'discordWarrant') {
                 contentDiv.innerHTML = renderDiscordWarrantTab();
                 initializeDiscordWarrant();
@@ -9803,6 +9819,7 @@
                                             <option value="cellebriteExtraction">Cellebrite Extraction (.ufdx)</option>
                                             <option value="datapilot">Datapilot Extraction</option>
                                             <option value="ncmecCybertip">NCMEC CyberTip</option>
+                                            <option value="bittorrent">BitTorrent Download (Torrential Downpour)</option>
                                             <option value="other">Other</option>
                                         </select>
                                     </div>
@@ -9911,6 +9928,15 @@
                                                     </div>
                                                 </div>
                                             </div>
+                                        </div>
+                                    </div>
+                                    <!-- BitTorrent (Torrential Downpour): handed to the BitTorrent tab -->
+                                    <div id="bittorrentUploadUI" class="hidden">
+                                        <div class="p-3 bg-teal-500/10 border border-teal-500/40 rounded-lg text-xs text-teal-100">
+                                            <strong class="text-teal-300">🧲 BitTorrent download.</strong>
+                                            Press <strong>Save</strong> and pick the Torrential Downpour folder (an IP folder, a download folder, or its Logs folder).
+                                            VIPER opens the BitTorrent tab, reads the logs, copies the folder into <em>Evidence → BitTorrent</em> and files it here under this category.
+                                            Only the log files are listed on the Evidence item; downloaded media stays in the case folder and is never part of an Evidence export.
                                         </div>
                                     </div>
                                     <!-- NCMEC CyberTip picker (shown when NCMEC CyberTip selected) -->
@@ -10127,6 +10153,7 @@
             cellebriteExtraction: 'Cellebrite Extraction',
             computer: 'Computer / Drive Extraction',
             warrantReturn: 'Warrant Return',
+            bittorrent: 'BitTorrent Download',
         };
 
         function renderEvidenceItems() {
@@ -10147,6 +10174,7 @@
                 cellebriteExtraction: '📱',
                 datapilot: '📲',
                 ncmecCybertip: '⚠️',
+                bittorrent: '🧲',
                 other: '📎'
             };
 
@@ -10237,6 +10265,14 @@
             const hint = document.getElementById('standardUploadHint');
             const hideStd = () => { stdUI.classList.add('hidden'); if (hint) hint.classList.add('hidden'); };
             const showStd = () => { stdUI.classList.remove('hidden'); if (hint) hint.classList.remove('hidden'); };
+            const btUI = document.getElementById('bittorrentUploadUI');
+            if (btUI) btUI.classList.toggle('hidden', val !== 'bittorrent');
+            if (val === 'bittorrent') {
+                hideStd();
+                [celUI, celxUI, dpUI, ncUI].forEach(x => { if (x) x.classList.add('hidden'); });
+                _syncEvidenceStorageBlockForType(val);
+                return;
+            }
 
             if (val === 'cellebrite') {
                 hideStd();
@@ -11263,6 +11299,24 @@
         // tab and runs its own import with the officer's choice already
         // selected, then files the Evidence record ONLY if the import
         // completed. Flagged items are pushed to Evidence from that tab.
+        // Evidence → "BitTorrent Download": open the BitTorrent tab and run its
+        // folder picker there (parse, copy into Evidence/BitTorrent, file the item).
+        async function _fileBitTorrentDownload() {
+            cancelEvidenceForm();
+            ensureCaseModule('bittorrent');
+            if (typeof renderTabs === 'function') renderTabs();
+            window.bitTorrentModule = null;
+            renderTabContent('bittorrent');
+            try {
+                await _evWaitFor(() => window.bitTorrentModule && window.bitTorrentModule.ui
+                    && typeof window.bitTorrentModule.ui.importFromPicker === 'function', 10000);
+            } catch (_) {
+                viperToast('The BitTorrent tab did not open in time. Use Import TD folder on the BitTorrent tab instead.', 'error');
+                return;
+            }
+            window.bitTorrentModule.ui.importFromPicker();
+        }
+
         async function _fileCellebriteExtraction(opts) {
             const { pick, mode, tag, description, location, discoverable } = opts;
             const sourceMode = mode === 'copy' ? 'imported' : 'referenced';
@@ -11788,6 +11842,12 @@
                         if (progressModal) progressModal.classList.remove('show');
                         viperToast('Failed to save Datapilot evidence: ' + error.message, 'error');
                     }
+                    return;
+                }
+
+                // ===== BitTorrent (Torrential Downpour): hand off to the BitTorrent tab =====
+                if (type === 'bittorrent') {
+                    await _fileBitTorrentDownload();
                     return;
                 }
 
@@ -36866,6 +36926,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 { id: 'kikWarrant', label: 'KIK Warrant Parser', icon: 'M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z', desc: 'Parse KIK Messenger warrant returns — messages, contacts, sessions, groups' },
                 { id: 'snapchatWarrant', label: 'Snapchat Warrant Parser', icon: 'M12 2C8.5 2 6 4.5 6 8c0 1.5.3 3 .8 4.2-.5.3-1.3.5-2 .5-.4 0-.8.3-.8.7 0 .5.5.9 1.2 1.2.7.3 1.6.5 2.3.6-.1.5-.5 1-1.2 1.5-.7.4-1.6.7-2.3.9-.5.1-.8.4-.8.8 0 .8 1.7 1.4 3.5 1.7.1.4.3.8.6 1 .3.2.7.2 1.1.1.5-.1 1-.1 1.6 0 .6.1 1.2.4 1.9.9.7.5 1.4.7 2.1.7s1.4-.2 2.1-.7c.7-.5 1.3-.8 1.9-.9.6-.1 1.1-.1 1.6 0 .4.1.8.1 1.1-.1.3-.2.5-.6.6-1 1.8-.3 3.5-.9 3.5-1.7 0-.4-.3-.7-.8-.8-.7-.2-1.6-.5-2.3-.9-.7-.5-1.1-1-1.2-1.5.7-.1 1.6-.3 2.3-.6.7-.3 1.2-.7 1.2-1.2 0-.4-.4-.7-.8-.7-.7 0-1.5-.2-2-.5.5-1.2.8-2.7.8-4.2 0-3.5-2.5-6-6-6z', desc: 'Parse Snapchat warrant returns — conversations, geo, memories, devices, media' },
                 { id: 'xWarrant', label: 'X / Twitter Warrant Parser', icon: 'M4 4l16 16M20 4L4 20', desc: 'Parse X/Twitter productions — threads, tweets, records, media, users' },
+                { id: 'bittorrent', label: 'BitTorrent (Torrential Downpour)', icon: 'M6 3v8a6 6 0 0012 0V3h-4v8a2 2 0 01-4 0V3H6zM6 7h4M14 7h4', desc: 'Read Torrential Downpour download logs — sessions, pieces, files, hashes, netstat' },
                 { id: 'discordWarrant', label: 'Discord Warrant Parser', icon: 'M19.27 5.33C17.94 4.71 16.5 4.26 15 4a.09.09 0 00-.07.03c-.18.33-.39.76-.53 1.09a16.09 16.09 0 00-4.8 0c-.14-.34-.35-.76-.54-1.09-.01-.02-.04-.03-.07-.03-1.5.26-2.93.71-4.27 1.33-.01 0-.02.01-.03.02-2.72 4.07-3.47 8.03-3.1 11.95 0 .02.01.04.03.05 1.8 1.32 3.53 2.12 5.24 2.65.03.01.06 0 .07-.02.4-.55.76-1.13 1.07-1.74.02-.04 0-.08-.04-.09-.57-.22-1.11-.48-1.64-.78-.04-.02-.04-.08-.01-.11.11-.08.22-.17.33-.25.02-.02.05-.02.07-.01 3.44 1.57 7.15 1.57 10.55 0 .02-.01.05-.01.07.01.11.09.22.17.33.26.04.03.04.09-.01.11-.52.31-1.07.56-1.64.78-.04.01-.05.06-.04.09.32.61.68 1.19 1.07 1.74.03.01.06.02.09.01 1.72-.53 3.45-1.33 5.25-2.65.02-.01.03-.03.03-.05.44-4.53-.73-8.46-3.1-11.95-.01-.01-.02-.02-.04-.02zM8.52 14.91c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.84 2.12-1.89 2.12zm6.97 0c-1.03 0-1.89-.95-1.89-2.12 0-1.17.84-2.12 1.89-2.12 1.06 0 1.9.96 1.89 2.12 0 1.17-.83 2.12-1.89 2.12z', desc: 'Parse Discord Data Package warrant returns — messages, sessions, IPs, devices, billing' },
                 { id: 'datapilot', label: 'Datapilot (Mobile Forensics)', icon: 'M9 17a4 4 0 01-2-7.5l1-3a4 4 0 017 0l1 3A4 4 0 0115 17H9zM12 12v9', desc: 'Parse mobile forensic CSV exports — calls, messages, contacts, GPS, apps, files + AI insights' },
                 { id: 'cellebrite', label: 'Cellebrite (Mobile Forensics)', icon: 'M11 2H9a2 2 0 00-2 2v16a2 2 0 002 2h6a2 2 0 002-2V4a2 2 0 00-2-2h-2M11 18h2', desc: 'Parse raw UFED filesystem extractions (.ufdx) — device, apps, contacts, calls, SMS/MMS, accounts, Wi-Fi' },
@@ -46900,6 +46961,14 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             ctOpenSendToModal();
         }
 
+        // Shared entry for other tabs (BitTorrent, …): same modal, own source label.
+        function viperSendToPeople(items, source) {
+            if (!Array.isArray(items) || !items.length) { showToast('Nothing to send', 'error'); return; }
+            __ctSendToPayload = { items: items.map(it => ({ ...it })), targetType: null, targetIdx: null, source: source || '' };
+            ctOpenSendToModal();
+        }
+        window.viperSendToPeople = viperSendToPeople;
+
         function ctOpenSendToModal() {
             if (!__ctSendToPayload) return;
             const items = __ctSendToPayload.items;
@@ -47044,7 +47113,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 const ident = { type, value: v, provider: extra.provider || '' };
                 if (extra.platform) ident.platform = extra.platform;
                 if (extra.note) ident.note = extra.note;
-                ident.source = 'CyberTip';
+                ident.source = p.source || 'CyberTip';
                 target.identifiers.push(ident);
                 added++;
             };
@@ -47080,6 +47149,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 else if (k === 'ip') addIdent('ip', it.value, { platform, note: it.meta || '', provider: it.provider || '' });
                 else if (k === 'profile' || k === 'profileurl') addIdent('username', it.value, { platform: platform ? `${platform} (URL)` : 'URL' });
                 else if (k === 'deviceid' || k === 'device') appendNote(`Device ID (from CyberTip${platform ? ', ' + platform : ''}): ${it.value}`);
+                else if (k === 'note') appendNote(it.value);
                 else addIdent('username', it.value, { platform: it.label || '' });
             });
 
@@ -47095,7 +47165,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             // Audit-log
             try {
                 if (typeof auditLog === 'function') {
-                    auditLog('case_op', `CyberTip → ${p.targetType}: pushed ${added} field(s) to "${target.name || `#${p.targetIdx + 1}`}"`, currentCase?.caseNumber);
+                    auditLog('case_op', `${p.source || 'CyberTip'} → ${p.targetType}: pushed ${added} field(s) to "${target.name || `#${p.targetIdx + 1}`}"`, currentCase?.caseNumber);
                 }
             } catch (_) {}
 
@@ -48821,6 +48891,36 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     <div class="glass-card p-6 rounded-xl">
                         <div class="text-center text-red-400">
                             <p class="text-lg font-semibold mb-2">X / Twitter Warrant Parser Not Loaded</p>
+                            <p class="text-sm text-gray-400">Please check that all module files are properly installed.</p>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function renderBitTorrentTab() {
+            return `
+                <div id="bittorrent-tab-container" style="min-height: calc(100vh - 220px);"></div>
+            `;
+        }
+
+        function initializeBitTorrent() {
+            if (window.BitTorrentModule && window.BitTorrentUI) {
+                try { if (window.bitTorrentUI && window.bitTorrentUI.destroy) window.bitTorrentUI.destroy(); } catch (_) { /* stale tab */ }
+                window.bitTorrentModule = new BitTorrentModule(
+                    String(currentCase.id),
+                    String(currentCase.caseNumber || currentCase.id),
+                    currentCase.title || currentCase.name || currentCase.caseNumber
+                );
+                window.bitTorrentModule.init('bittorrent-tab-container').catch(err => {
+                    console.error('BitTorrent init error:', err);
+                });
+            } else {
+                console.error('BitTorrent module not loaded');
+                document.getElementById('bittorrent-tab-container').innerHTML = `
+                    <div class="glass-card p-6 rounded-xl">
+                        <div class="text-center text-red-400">
+                            <p class="text-lg font-semibold mb-2">BitTorrent Tab Not Loaded</p>
                             <p class="text-sm text-gray-400">Please check that all module files are properly installed.</p>
                         </div>
                     </div>

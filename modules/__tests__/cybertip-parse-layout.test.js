@@ -233,6 +233,11 @@ console.log('3. CyberTips detail view');
     const src = [
         liftFunction(DETAIL, 'function escHtmlSafe(s) {'),
         liftFunction(DETAIL, 'function ctRegisterSend(items) {'),
+        liftFunction(DETAIL, 'function _ctTsKey(s) {'),
+        liftFunction(DETAIL, 'function _ctGroupIps(t) {'),
+        liftFunction(DETAIL, 'function _ctArinHtml(r) {'),
+        'const _CT_ARIN_IDLE = "IDLE", _CT_ARIN_DONE = "DONE"; let __ctSelected, __ctIpGroups;',
+        'function _ctUpgradeTips() { return false; }',
         liftFunction(DETAIL, 'function renderCyberTipDetail(idx) {'),
         'return renderCyberTipDetail;'
     ].join('\n');
@@ -245,10 +250,10 @@ console.log('3. CyberTips detail view');
     ok(html.includes('IMEI: 356938035643809') && html.includes('SERIAL: SYNTHSERIAL0001'), 'device ID cards');
     ok(html.includes('NCMEC Files (4)'), 'files section counts 4');
     ok(html.includes('Upload IP: <span class="text-gray-300 font-mono">203.0.113.9</span>'), 'upload IP on the file card');
-    ok(/Uploaded Files - Upload · 1 file/.test(html), 'upload IP identifier card');
+    ok(/Uploaded Files · Upload 1 file</.test(html), 'upload IP identifier card');
     ok(html.includes('ESP category: <span class="text-gray-300">B1</span>'), 'ESP category on the file card');
-    const loginCards = (html.match(/Suspect - Login/g) || []).length;
-    eq(loginCards, 24, 'one card per login IP');
+    const loginCards = (html.match(/Suspect · Login ×1</g) || []).length;
+    eq(loginCards, 24, 'one card per distinct login IP');
 }
 
 // ── 4. Send To: a device ID becomes a note, not a fake username ───────────

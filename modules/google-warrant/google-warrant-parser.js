@@ -13,7 +13,175 @@ const { parse: parseHTML } = require('node-html-parser');
 const { simpleParser } = require('mailparser');
 const path = require('path');
 const fs   = require('fs');
+const { Readable } = require('stream');
+const { StringDecoder } = require('string_decoder');
 const { openZip } = require('../_shared/zip-reader');
+
+// ─── Memory guards (large returns — dozens of GB) ───────────────────────
+// Inner zips above this are extracted to a temp file and read from disk
+// instead of being held in a Buffer.
+const INNER_BUFFER_MAX = 32 * 1024 * 1024;
+// A single non-streamed file (HTML / CSV / JSON) above this is not parsed;
+// it is copied out to the case folder so nothing is lost.
+const MAX_INLINE_ENTRY = 64 * 1024 * 1024;
+// One e-mail above this keeps its first 64 MB (attachments are the bulk).
+const MBOX_MESSAGE_MAX = 64 * 1024 * 1024;
+// Arrays kept in the import record (which lives in localStorage).
+const INLINE_ROW_CAP = 10000;
+const INLINE_EMAIL_CAP = 5000;       // only when no SQLite store is attached
+const INLINE_LOCATION_CAP = 20000;   // only when no SQLite store is attached
+const INLINE_TEXT_CAP = 2 * 1024 * 1024;
+const RESULT_CHAR_BUDGET = 16 * 1000 * 1000;
+
+const FOLDER_SCAN_DEPTH = 4;
+const FOLDER_EXTS = /\.(zip|pdf|mbox)$/i;
+
+/**
+ * A folder of Google's per-product ZIPs, presented with the ZipReader
+ * surface the parser uses.  Each entry carries `_path`, so the parser opens
+ * the inner ZIP straight from disk — the files are never read into memory
+ * (the old code read every file and re-zipped the folder in a Buffer, which
+ * crashed VIPER on large returns).
+ */
+class FolderReader {
+    constructor(root, options = {}) {
+        this.root = root;
+        this.security = options.security || null;
+        this._skip = new Set((options.skipDirs || []).filter(Boolean).map(d => path.resolve(d).toLowerCase()));
+        this._entries = null;
+    }
+
+    getEntries() {
+        if (this._entries) return this._entries;
+        const out = [];
+        const walk = (dir, rel, depth) => {
+            let names;
+            try { names = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+            for (const d of names) {
+                const full = path.join(dir, d.name);
+                const relName = rel ? `${rel}/${d.name}` : d.name;
+                if (d.isDirectory()) {
+                    if (depth >= FOLDER_SCAN_DEPTH) continue;
+                    if (d.name === '_store' || this._skip.has(path.resolve(full).toLowerCase())) continue;
+                    walk(full, relName, depth + 1);
+                } else if (d.isFile() && FOLDER_EXTS.test(d.name)) {
+                    let size = 0;
+                    try { size = fs.statSync(full).size; } catch (_) {}
+                    out.push({
+                        entryName: relName,
+                        isDirectory: false,
+                        size,
+                        _path: full,
+                        getData() { return fs.readFileSync(full); },
+                    });
+                }
+            }
+        };
+        walk(this.root, '', 0);
+        this._entries = out;
+        return out;
+    }
+
+    _isEncrypted(p) {
+        const s = this.security;
+        if (!s || !s.isUnlocked || !s.isUnlocked() || !s.isEncryptedBuffer) return false;
+        try {
+            const fd = fs.openSync(p, 'r');
+            try {
+                const b = Buffer.alloc(8);
+                fs.readSync(fd, b, 0, 8, 0);
+                return s.isEncryptedBuffer(b);
+            } finally { fs.closeSync(fd); }
+        } catch (_) { return false; }
+    }
+
+    openStream(entry) {
+        if (this._isEncrypted(entry._path)) {
+            return Promise.resolve(Readable.from([this.security.decryptBuffer(fs.readFileSync(entry._path))]));
+        }
+        return Promise.resolve(fs.createReadStream(entry._path, { highWaterMark: 1024 * 1024 }));
+    }
+
+    extractEntryToFile(entry, dest) {
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.copyFileSync(entry._path, dest);
+        return Promise.resolve();
+    }
+
+    close() {}
+}
+
+/**
+ * Stream the items of one JSON array out of a (possibly multi-GB) JSON
+ * document without parsing the whole document.
+ *   arrayKey = 'locations' → the array under the root object's "locations"
+ *   arrayKey = null        → the root value is itself the array
+ * Each object item is JSON.parse'd on its own and handed to onItem (awaited).
+ */
+async function streamJsonArray(readable, arrayKey, onItem, opts = {}) {
+    const maxItem = opts.maxItemChars || 16 * 1024 * 1024;
+    const dec = new StringDecoder('utf8');
+    let depth = 0, inStr = false, esc = false;
+    let keyBuf = null, lastStr = null;
+    let inTarget = false, done = false, targetDepth = -1;
+    let parts = null, partLen = 0, tooBig = false;
+    const stats = { found: false, items: 0, bad: 0, oversized: 0 };
+
+    const run = async (s) => {
+        let start = parts ? 0 : -1;
+        for (let i = 0; i < s.length; i++) {
+            const c = s.charCodeAt(i);
+            if (inStr) {
+                if (esc) esc = false;
+                else if (c === 92) esc = true;
+                else if (c === 34) { inStr = false; if (keyBuf !== null) { lastStr = keyBuf; keyBuf = null; } continue; }
+                if (keyBuf !== null && keyBuf.length < 200) keyBuf += s[i];
+                continue;
+            }
+            if (c === 34) {
+                inStr = true;
+                if (!inTarget && depth === 1) keyBuf = '';
+            } else if (c === 123 || c === 91) {
+                if (inTarget && depth === targetDepth && c === 123 && !parts) {
+                    parts = []; partLen = 0; tooBig = false; start = i;
+                }
+                if (c === 91 && !inTarget && !done &&
+                    ((arrayKey == null && depth === 0) || (arrayKey != null && depth === 1 && lastStr === arrayKey))) {
+                    inTarget = true; targetDepth = depth + 1; stats.found = true;
+                }
+                depth++;
+            } else if (c === 125 || c === 93) {
+                depth--;
+                if (parts && depth === targetDepth) {
+                    let text = null;
+                    if (!tooBig) { parts.push(s.slice(start, i + 1)); text = parts.join(''); }
+                    parts = null; start = -1;
+                    if (text === null) { stats.oversized++; continue; }
+                    let obj;
+                    try { obj = JSON.parse(text); } catch (_) { stats.bad++; continue; }
+                    stats.items++;
+                    await onItem(obj);
+                } else if (inTarget && c === 93 && depth === targetDepth - 1) {
+                    inTarget = false; done = true;
+                }
+            } else if (c === 44 && depth === 1 && !inTarget) {
+                lastStr = null;
+            }
+        }
+        if (parts && start >= 0 && !tooBig) {
+            const piece = s.slice(start);
+            partLen += piece.length;
+            if (partLen > maxItem) { tooBig = true; parts = []; }
+            else parts.push(piece);
+        }
+    };
+
+    for await (const chunk of readable) {
+        await run(typeof chunk === 'string' ? chunk : dec.write(chunk));
+    }
+    await run(dec.end());
+    return stats;
+}
 
 class GoogleWarrantParser {
 
@@ -29,9 +197,9 @@ class GoogleWarrantParser {
         //   mediaRoot:  cases/{caseNumber}/Evidence/google-warrant   (optional)
         //   inputName:  '30136296-20260514-1'  (top-level zip basename without .zip)
         //   accountId:  populated as soon as we see it on an inner zip
-        const inputName = (typeof input === 'string')
+        const inputName = options.inputName || ((typeof input === 'string')
             ? path.basename(input).replace(/\.zip$/i, '')
-            : (options.inputName || 'warrant-' + Date.now());
+            : 'warrant-' + Date.now());
         const ctx = {
             mediaRoot: options.mediaRoot || null,
             inputName,
@@ -41,9 +209,29 @@ class GoogleWarrantParser {
             // counts in the import banner even if photos got streamed.
             mediaWritten: 0,
             mediaBytes: 0,
-            mediaErrors: 0
+            mediaErrors: 0,
+            security: options.security || null,
+            // { email(em), location(loc) } — SQLite writer for large returns.
+            sink: options.sink || null,
+            storeDir: options.storeDir || null,
+            storeKey: options.storeKey || null,
+            // Breadcrumbs for the crash log (category being parsed, size).
+            onMark: typeof options.onMark === 'function' ? options.onMark : null,
+            emailSeq: 0,
+            truncated: {},
+            oversizeFiles: [],
+            mboxErrors: 0
         };
-        const zip = await openZip(input, { security: options.security });
+        let zip;
+        let isDir = false;
+        if (typeof input === 'string') {
+            try { isDir = fs.statSync(input).isDirectory(); } catch (_) {}
+        }
+        if (isDir) {
+            zip = new FolderReader(input, { security: options.security, skipDirs: [options.mediaRoot] });
+        } else {
+            zip = await openZip(input, { security: options.security });
+        }
         try {
             return await this._parseFromZip(zip, options, ctx);
         } finally {
@@ -53,7 +241,9 @@ class GoogleWarrantParser {
 
     async _parseFromZip(zip, options, ctx) {
         ctx = ctx || { mediaRoot: null, inputName: 'warrant', accountId: null, accountEmail: null, mediaWritten: 0, mediaBytes: 0, mediaErrors: 0 };
-        const entries = zip.getEntries();        const _diag = { outerEntries: entries.length, innerZipsFound: 0, processed: 0, noRecords: 0, skippedMaster: 0, skippedPattern: 0, errors: [], byCategory: [] };
+        this._ensureCtx(ctx);
+        const entries = zip.getEntries();
+        const _diag = { outerEntries: entries.length, innerZipsFound: 0, processed: 0, noRecords: 0, skippedMaster: 0, skippedPattern: 0, errors: [], byCategory: [] };
         console.log(`[google-warrant] _parseFromZip: outer has ${entries.length} entries`);
 
         const result = {
@@ -167,7 +357,11 @@ class GoogleWarrantParser {
             let bundleReader = null;
             let bundleTempPath = null;
             try {
-                if (typeof zip.extractEntryToTemp === 'function' && bundleEntry.size && bundleEntry.size > (256 * 1024 * 1024)) {
+                this._mark(ctx, 'google-warrant:bundle', { bundle: bundleFileName, sizeMB: Number(bundleSizeMB) });
+                if (bundleEntry._path) {
+                    // Folder import: open the bundle in place — no copy, no Buffer.
+                    bundleReader = await openZip(bundleEntry._path, { security: ctx.security });
+                } else if (typeof zip.extractEntryToTemp === 'function' && bundleEntry.size && bundleEntry.size > INNER_BUFFER_MAX) {
                     bundleTempPath = await zip.extractEntryToTemp(bundleEntry, '.zip');
                     bundleReader = await openZip(bundleTempPath);
                 } else {
@@ -250,10 +444,16 @@ class GoogleWarrantParser {
             let innerZip = null;
             let tempInnerPath = null;
             try {
+                this._mark(ctx, 'google-warrant:category', { category, sizeMB: Number(sizeMB), source: sourceLabel });
                 // Inner ZIP can be multi-GB on its own (e.g. Mail.MessageContent).
-                // Extract it to a temp file then open it via the streaming reader
-                // instead of buffering through Buffer/AdmZip.
-                if (typeof ownerZip.extractEntryToTemp === 'function' && zipEntry.size && zipEntry.size > (256 * 1024 * 1024)) {
+                // Folder imports open it in place; inside a zip, anything over
+                // INNER_BUFFER_MAX is extracted to a temp file and read from
+                // disk instead of being buffered through Buffer/AdmZip.
+                if (zipEntry._path) {
+                    console.log(`[google-warrant]   ${category} (${sizeMB} MB, src=${sourceLabel}) → open from folder`);
+                    innerZip = await openZip(zipEntry._path, { security: ctx.security });
+                    innerEntries = innerZip.getEntries();
+                } else if (typeof ownerZip.extractEntryToTemp === 'function' && zipEntry.size && zipEntry.size > INNER_BUFFER_MAX) {
                     console.log(`[google-warrant]   ${category} (${sizeMB} MB, src=${sourceLabel}) → temp-extract path`);
                     tempInnerPath = await ownerZip.extractEntryToTemp(zipEntry, '.zip');
                     innerZip = await openZip(tempInnerPath);
@@ -292,7 +492,12 @@ class GoogleWarrantParser {
                 }
 
                 // Route to appropriate parser based on service.resource
-                await this._parseCategory(service, resource, innerEntries, result, ctx, work.sourceLabel);
+                ctx.currentZip = innerZip;
+                try {
+                    await this._parseCategory(service, resource, innerEntries, result, ctx, work.sourceLabel);
+                } finally {
+                    ctx.currentZip = null;
+                }
                 _diag.processed++;
                 _diag.byCategory.push({ category, sizeMB: Number(sizeMB), source: sourceLabel, result: 'ok' });
 
@@ -335,19 +540,22 @@ class GoogleWarrantParser {
             for (const e of _diag.errors) console.log(`  - ${e.category} (${e.sizeMB} MB, src=${e.source || 'outer'}): ${e.error}`);
         }
 
-        // Handle loose MBOX files (not inside an inner ZIP)
+        // Handle loose MBOX files (not inside an inner ZIP) — streamed.
         for (const entry of otherFiles) {
             if (entry.entryName.toLowerCase().endsWith('.mbox')) {
                 try {
-                    const mboxBuf = entry.getData();
-                    const emails = await this.parseMbox(mboxBuf);
-                    result.emails.push(...emails);
+                    this._mark(ctx, 'google-warrant:loose-mbox', { name: path.basename(entry.entryName), sizeMB: Math.round((entry.size || 0) / 1048576) });
+                    const stm = await zip.openStream(entry);
+                    await this.parseMboxStream(stm, (em) => this._emitEmail(em, result, ctx), ctx);
                 } catch (err) {
                     console.error('Error parsing loose mbox:', err.message);
+                    _diag.errors.push({ category: 'loose-mbox:' + path.basename(entry.entryName), sizeMB: Math.round((entry.size || 0) / 1048576), error: err.message });
                 }
             }
         }
 
+        this._capResult(result, ctx);
+        _diag.mboxErrors = ctx.mboxErrors;
         return result;
     }
 
@@ -362,7 +570,20 @@ class GoogleWarrantParser {
      */
     async _parseCategory(service, resource, innerEntries, result, ctx, sourceLabel) {
         ctx = ctx || { mediaRoot: null, inputName: 'warrant', accountId: null, mediaWritten: 0, mediaBytes: 0, mediaErrors: 0 };
+        this._ensureCtx(ctx);
         const key = `${service}.${resource}`;
+
+        // Any file this handler would read whole that is too big to parse
+        // safely is copied out to the case folder (nothing lost) and skipped.
+        const keep = [];
+        for (const e of innerEntries) {
+            if (e && !e.isDirectory && (e.size || 0) > MAX_INLINE_ENTRY && !this._isStreamedEntry(key, e)) {
+                await this._saveOversizeEntry(e, key, result, ctx);
+            } else {
+                keep.push(e);
+            }
+        }
+        innerEntries = keep;
 
         switch (key) {
             case 'GoogleAccount.SubscriberInfo':
@@ -388,8 +609,8 @@ class GoogleWarrantParser {
             case 'Gmail.Messages':           // alt naming
                 for (const e of innerEntries) {
                     if (e.entryName.toLowerCase().endsWith('.mbox')) {
-                        const emails = await this.parseMbox(e.getData());
-                        result.emails.push(...emails);
+                        const stm = await this._entryStream(e, ctx);
+                        await this.parseMboxStream(stm, (em) => this._emitEmail(em, result, ctx), ctx);
                     }
                 }
                 break;
@@ -412,8 +633,8 @@ class GoogleWarrantParser {
             case 'LocationHistory.Records':
                 for (const e of innerEntries) {
                     if (e.entryName.endsWith('.json') && !e.entryName.includes('ExportSummary')) {
-                        const locs = this.parseLocationRecords(e.getData().toString('utf-8'));
-                        result.locationRecords.push(...locs);
+                        const stm = await this._entryStream(e, ctx);
+                        await streamJsonArray(stm, 'locations', (loc) => this._emitLocation(this._mapLocation(loc), result, ctx));
                     }
                 }
                 break;
@@ -421,8 +642,11 @@ class GoogleWarrantParser {
             case 'LocationHistory.SemanticLocationHistory':
                 for (const e of innerEntries) {
                     if (e.entryName.endsWith('.json') && !e.entryName.includes('ExportSummary')) {
-                        const sem = this.parseSemanticLocation(e.getData().toString('utf-8'));
-                        result.semanticLocations.push(...sem);
+                        const stm = await this._entryStream(e, ctx);
+                        await streamJsonArray(stm, 'timelineObjects', (obj) => {
+                            const m = this._mapSemantic(obj);
+                            if (m) this._pushCapped(result.semanticLocations, 'semanticLocations', m, ctx);
+                        });
                     }
                 }
                 break;
@@ -474,7 +698,7 @@ class GoogleWarrantParser {
                             result.chatMessages.push(JSON.parse(e.getData().toString('utf-8')));
                         } catch (err) { /* skip */ }
                     } else if (e.entryName.endsWith('.html')) {
-                        result.chatMessages.push({ type: 'html', content: e.getData().toString('utf-8') });
+                        result.chatMessages.push({ type: 'html', content: this._capText(e.getData().toString('utf-8'), 'chatHtml', ctx) });
                     }
                 }
                 break;
@@ -482,7 +706,7 @@ class GoogleWarrantParser {
             case 'GoogleChat.UserInfo':
                 for (const e of innerEntries) {
                     if (!e.entryName.includes('ExportSummary') && !e.entryName.includes('NoRecords')) {
-                        result.chatUserInfo = e.getData().toString('utf-8');
+                        result.chatUserInfo = this._capText(e.getData().toString('utf-8'), 'chatUserInfo', ctx);
                     }
                 }
                 break;
@@ -636,14 +860,18 @@ class GoogleWarrantParser {
                             '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4',
                         };
                         const mimeType = mimeMap[ext] || 'application/octet-stream';
-                        const buf = e.getData();
+                        // Written to the case folder like photos — never
+                        // base64-inlined (a large Drive used to be held in
+                        // memory, cloned over IPC and put in localStorage).
+                        const rec = await this._writeEntryToMedia(e, ctx, key, true);
                         result.driveFiles.push({
                             _isFile: true,
                             name: name,
                             path: e.entryName,
                             mimeType: mimeType,
-                            size: buf.length,
-                            data: buf.toString('base64')
+                            size: rec ? rec.size : (e.size || 0),
+                            relPath: rec ? rec.relPath : null,
+                            stub: !rec
                         });
                     }
                 }
@@ -669,7 +897,7 @@ class GoogleWarrantParser {
             case 'Calendar.Calendars':
                 for (const e of innerEntries) {
                     if (e.entryName.toLowerCase().endsWith('.ics')) {
-                        result.calendars.push({ _ics: true, name: e.entryName.split('/').pop(), content: e.getData().toString('utf-8') });
+                        result.calendars.push({ _ics: true, name: e.entryName.split('/').pop(), content: this._capText(e.getData().toString('utf-8'), 'calendarIcs', ctx) });
                     } else if (e.entryName.endsWith('.html') && !e.entryName.includes('ExportSummary')) {
                         result.calendars.push(...this.parseGenericHtmlTables(e.getData().toString('utf-8')));
                     } else if (e.entryName.toLowerCase().endsWith('.csv')) {
@@ -778,16 +1006,25 @@ class GoogleWarrantParser {
                 const tables = this.parseGenericHtmlTables(html);
                 // Trim text to keep the payload reasonable
                 const text = (root.text || '').replace(/\s+/g, ' ').trim().slice(0, 50000);
-                bucket.html.push({ name, text, tables });
+                const item = { name, text, tables };
+                if (tables.length > INLINE_ROW_CAP) { item.totalRows = tables.length; item.tables = tables.slice(0, INLINE_ROW_CAP); }
+                bucket.html.push(item);
             } else if (lower.endsWith('.csv')) {
                 const rows = this.csvToObjects(entry.getData().toString('utf-8'));
-                bucket.csv.push({ name, rows });
+                const item = { name, rows };
+                if (rows.length > INLINE_ROW_CAP) { item.totalRows = rows.length; item.rows = rows.slice(0, INLINE_ROW_CAP); }
+                bucket.csv.push(item);
             } else if (lower.endsWith('.json')) {
-                try {
-                    const data = JSON.parse(entry.getData().toString('utf-8'));
-                    bucket.json.push({ name, data });
-                } catch (_) {
-                    bucket.other.push({ name, ext: 'json', text: entry.getData().toString('utf-8').slice(0, 50000) });
+                const text = entry.getData().toString('utf-8');
+                if (text.length > INLINE_TEXT_CAP) {
+                    bucket.other.push({ name, ext: 'json', text: text.slice(0, 50000), truncated: true, size: text.length });
+                } else {
+                    try {
+                        const data = JSON.parse(text);
+                        bucket.json.push({ name, data });
+                    } catch (_) {
+                        bucket.other.push({ name, ext: 'json', text: text.slice(0, 50000) });
+                    }
                 }
             } else if (lower.endsWith('.txt') || lower.endsWith('.vcf') || lower.endsWith('.ics')) {
                 bucket.other.push({ name, ext: lower.slice(lower.lastIndexOf('.') + 1), text: entry.getData().toString('utf-8').slice(0, 100000) });
@@ -865,29 +1102,17 @@ class GoogleWarrantParser {
             return;
         }
 
-        const acctSub = (ctx.accountId || 'unknown').toString().replace(/[^\w.-]/g, '_');
-        const bundleSub = (ctx.inputName || 'warrant').replace(/[^\w.-]/g, '_');
-        const catSub = (category || 'media').replace(/[^\w.-]/g, '_');
-        const targetDir = path.join(ctx.mediaRoot, acctSub, bundleSub, catSub);
-
+        const rec = await this._writeEntryToMedia(entry, ctx, category, false);
+        if (!rec) return;
         try {
-            fs.mkdirSync(targetDir, { recursive: true });
-            const targetPath = path.join(targetDir, name);
-            // .getData() returns a Buffer — for inner zip reads this means
-            // the *single file* is buffered, not the whole zip. Individual
-            // photos/videos are reasonable sizes (typically <50 MB each).
-            const buf = entry.getData();
-            fs.writeFileSync(targetPath, buf);
-            ctx.mediaWritten++;
-            ctx.mediaBytes += buf.length;
-
-            const relPath = path.relative(ctx.mediaRoot, targetPath).split(path.sep).join('/');
+            const targetPath = rec.path;
+            const relPath = rec.relPath;
             const meta = {
                 filename: name,
                 path: targetPath,
                 relPath,
                 mimeType,
-                size: buf.length,
+                size: rec.size,
                 bundle: ctx.inputName,
                 category,
                 isMedia,
@@ -896,9 +1121,9 @@ class GoogleWarrantParser {
 
             // Try to parse companion JSON metadata inline so the gallery can
             // show takenAt / geolocation / device.
-            if (lower.endsWith('.json')) {
+            if (lower.endsWith('.json') && rec.size <= 5 * 1024 * 1024) {
                 try {
-                    const parsed = JSON.parse(buf.toString('utf-8'));
+                    const parsed = JSON.parse(fs.readFileSync(targetPath, 'utf-8'));
                     meta.metadata = parsed;
                     if (parsed.photoTakenTime && parsed.photoTakenTime.timestamp) {
                         meta.takenAt = new Date(Number(parsed.photoTakenTime.timestamp) * 1000).toISOString();
@@ -916,6 +1141,327 @@ class GoogleWarrantParser {
             ctx.mediaErrors++;
             console.error(`[google-warrant] media extract failed: ${category}/${name}: ${err.message}`);
         }
+    }
+
+    // ─── Large-return helpers ────────────────────────────────────────────
+
+    _ensureCtx(ctx) {
+        if (ctx.emailSeq == null) ctx.emailSeq = 0;
+        if (!ctx.truncated) ctx.truncated = {};
+        if (!ctx.oversizeFiles) ctx.oversizeFiles = [];
+        if (ctx.mboxErrors == null) ctx.mboxErrors = 0;
+        return ctx;
+    }
+
+    _mark(ctx, label, detail) {
+        if (!ctx || !ctx.onMark) return;
+        try { ctx.onMark(label, detail); } catch (_) { /* never break a parse */ }
+    }
+
+    /** Readable for an inner-zip entry (streamed from disk when possible). */
+    async _entryStream(entry, ctx) {
+        if (ctx && ctx.currentZip && typeof ctx.currentZip.openStream === 'function') {
+            const s = await ctx.currentZip.openStream(entry);
+            if (s) return s;
+        }
+        return Readable.from([entry.getData()]);
+    }
+
+    /** Entries the handler streams instead of reading whole. */
+    _isStreamedEntry(key, e) {
+        const lower = (e.entryName || '').toLowerCase();
+        if (/^(Mail\.MessageContent|Mail\.Messages|Gmail\.Messages)$/.test(key) && lower.endsWith('.mbox')) return true;
+        if (/^LocationHistory\.(Records|SemanticLocationHistory)$/.test(key) && lower.endsWith('.json')) return true;
+        if (/^(GooglePhotos\.|GoogleFiWireless\.Voicemails|GoogleMeet\.(MediaInformation|UserSessions)$|YoutubeAndYoutubeMusic\.MediaUploads$|Keep\.Media$)/.test(key)) return true;
+        if (/^Drive\./.test(key) && !/\.(json|csv|html?)$/.test(lower)) return true;
+        return false;
+    }
+
+    /**
+     * Copy an entry to <mediaRoot>/<acct>/<bundle>/<category>/[subdirs/]<name>
+     * without buffering it.  Returns { path, relPath, size } or null.
+     */
+    async _writeEntryToMedia(entry, ctx, category, keepSubdirs) {
+        if (!ctx.mediaRoot) return null;
+        const raw = entry.entryName || '';
+        const segs = raw.split('/').filter(Boolean);
+        const name = segs.pop();
+        if (!name) return null;
+        const clean = (s) => String(s).replace(/[<>:"|?*\\\x00-\x1f]/g, '_').replace(/^\.+$/, '_');
+        const acctSub = (ctx.accountId || 'unknown').toString().replace(/[^\w.-]/g, '_');
+        const bundleSub = (ctx.inputName || 'warrant').replace(/[^\w.-]/g, '_');
+        const catSub = String(category || 'media').split('/').map(s => s.replace(/[^\w.-]/g, '_'));
+        const sub = keepSubdirs ? segs.map(clean) : [];
+        const targetDir = path.join(ctx.mediaRoot, acctSub, bundleSub, ...catSub, ...sub);
+        try {
+            if (!path.resolve(targetDir).startsWith(path.resolve(ctx.mediaRoot))) throw new Error('unsafe entry path');
+            fs.mkdirSync(targetDir, { recursive: true });
+            const targetPath = path.join(targetDir, clean(name));
+            if (ctx.currentZip && typeof ctx.currentZip.extractEntryToFile === 'function') {
+                await ctx.currentZip.extractEntryToFile(entry, targetPath);
+            } else {
+                fs.writeFileSync(targetPath, entry.getData());
+            }
+            let size = entry.size || 0;
+            try { size = fs.statSync(targetPath).size; } catch (_) {}
+            ctx.mediaWritten++;
+            ctx.mediaBytes += size;
+            const relPath = path.relative(ctx.mediaRoot, targetPath).split(path.sep).join('/');
+            return { path: targetPath, relPath, size };
+        } catch (err) {
+            ctx.mediaErrors++;
+            console.error(`[google-warrant] media extract failed: ${category}/${name}: ${err.message}`);
+            return null;
+        }
+    }
+
+    /** A file too large to parse: copy it out so the investigator still has it. */
+    async _saveOversizeEntry(entry, category, result, ctx) {
+        const name = (entry.entryName || '').split('/').pop();
+        const rec = await this._writeEntryToMedia(entry, ctx, '_oversize/' + category, false);
+        const item = { category, name, size: entry.size || 0, relPath: rec ? rec.relPath : null };
+        ctx.oversizeFiles.push(item);
+        console.warn(`[google-warrant] ${category}/${name} is ${(item.size / 1048576).toFixed(0)} MB — too large to display; saved to ${item.relPath || '(not saved: no case folder)'}`);
+    }
+
+    _capText(text, label, ctx) {
+        if (typeof text !== 'string' || text.length <= INLINE_TEXT_CAP) return text;
+        if (ctx) ctx.truncated[label] = (ctx.truncated[label] || 0) + 1;
+        return text.slice(0, INLINE_TEXT_CAP) + '\n\n[… truncated by VIPER — file too large to display in full]';
+    }
+
+    _pushCapped(arr, label, item, ctx, cap) {
+        if (arr.length < (cap || INLINE_ROW_CAP)) { arr.push(item); return; }
+        ctx.truncated[label] = (ctx.truncated[label] || 0) + 1;
+    }
+
+    async _emitEmail(em, result, ctx) {
+        if (ctx.sink) { await ctx.sink.email(em); return; }
+        this._pushCapped(result.emails, 'emails', em, ctx, INLINE_EMAIL_CAP);
+    }
+
+    async _emitLocation(loc, result, ctx) {
+        if (!loc) return;
+        if (ctx.sink) { await ctx.sink.location(loc); return; }
+        this._pushCapped(result.locationRecords, 'locationRecords', loc, ctx, INLINE_LOCATION_CAP);
+    }
+
+    /**
+     * Keep the import record small enough for IPC + localStorage.  Arrays
+     * beyond the cap are written to <storeDir>/<storeKey>.overflow/<field>.ndjson
+     * (when a case folder is available) so no parsed row is thrown away.
+     */
+    _capResult(result, ctx) {
+        const skip = new Set(['categories', 'noRecordCategories', 'bundleSources', 'emails', 'locationRecords']);
+        const fields = [];
+        for (const k of Object.keys(result)) {
+            if (!skip.has(k) && Array.isArray(result[k])) fields.push({ label: k, holder: result, key: k });
+        }
+        if (result.googlePay) {
+            for (const k of ['instruments', 'transactions', 'addresses']) {
+                if (Array.isArray(result.googlePay[k])) fields.push({ label: 'googlePay.' + k, holder: result.googlePay, key: k });
+            }
+        }
+        const estimate = (arr) => {
+            if (!arr.length) return 0;
+            const n = Math.min(arr.length, 50);
+            let s = 0;
+            try { s = JSON.stringify(arr.slice(0, n)).length; } catch (_) { s = n * 1000; }
+            return Math.ceil((s / n) * arr.length);
+        };
+        const cut = (f, cap) => {
+            const arr = f.holder[f.key];
+            if (arr.length <= cap) return;
+            this._writeOverflow(ctx, f.label, arr, cap);
+            ctx.truncated[f.label] = (ctx.truncated[f.label] || 0) + (arr.length - cap);
+            arr.length = cap;
+        };
+        for (const f of fields) cut(f, INLINE_ROW_CAP);
+        // Then shrink the biggest arrays until the whole record fits the budget.
+        for (let guard = 0; guard < 40; guard++) {
+            const sizes = fields.map(f => ({ f, size: estimate(f.holder[f.key]) }));
+            const total = sizes.reduce((a, b) => a + b.size, 0);
+            if (total <= RESULT_CHAR_BUDGET) break;
+            sizes.sort((a, b) => b.size - a.size);
+            const big = sizes[0];
+            const len = big.f.holder[big.f.key].length;
+            if (len <= 200) break;
+            cut(big.f, Math.max(200, Math.floor(len / 2)));
+        }
+        if (Object.keys(ctx.truncated).length) result.truncated = Object.assign({}, ctx.truncated);
+        if (ctx.oversizeFiles.length) result.oversizeFiles = ctx.oversizeFiles.slice();
+        return result;
+    }
+
+    _writeOverflow(ctx, label, arr, from) {
+        if (!ctx.storeDir || !ctx.storeKey) return;
+        try {
+            const dir = path.join(ctx.storeDir, `${ctx.storeKey}.overflow`);
+            fs.mkdirSync(dir, { recursive: true });
+            const file = path.join(dir, label.replace(/[^\w.-]/g, '_') + '.ndjson');
+            const fd = fs.openSync(file, 'a');
+            try {
+                for (let i = from; i < arr.length; i += 1000) {
+                    const lines = [];
+                    for (let j = i; j < Math.min(arr.length, i + 1000); j++) {
+                        try { lines.push(JSON.stringify(arr[j])); } catch (_) {}
+                    }
+                    fs.writeSync(fd, lines.join('\n') + '\n');
+                }
+            } finally { fs.closeSync(fd); }
+        } catch (err) {
+            console.error(`[google-warrant] overflow write failed for ${label}: ${err.message}`);
+        }
+    }
+
+    /**
+     * Stream an MBOX (any size).  Each message is parsed on its own and
+     * handed to onEmail (awaited), so memory is bounded by one message.
+     */
+    async parseMboxStream(readable, onEmail, ctx) {
+        ctx = this._ensureCtx(ctx || {});
+        const SEP = Buffer.from('\nFrom ');
+        let parts = [], size = 0, rawSize = 0, truncated = false;
+        let carry = null, atStart = true, skipLine = false, count = 0;
+
+        const flush = async () => {
+            if (!rawSize) return;
+            const buf = parts.length === 1 ? parts[0] : Buffer.concat(parts, size);
+            const wasTrunc = truncated, raw = rawSize;
+            parts = []; size = 0; rawSize = 0; truncated = false;
+            if (buf.length < 20 || !buf.toString('latin1', 0, Math.min(buf.length, 4096)).trim()) return;
+            const em = await this._parseMessage(buf, ctx, raw, wasTrunc);
+            if (em) { count++; await onEmail(em); }
+        };
+        const append = (b) => {
+            if (!b.length) return;
+            rawSize += b.length;
+            if (size >= MBOX_MESSAGE_MAX) { truncated = true; return; }
+            const room = MBOX_MESSAGE_MAX - size;
+            const piece = b.length > room ? b.subarray(0, room) : b;
+            if (piece.length < b.length) truncated = true;
+            parts.push(piece);
+            size += piece.length;
+        };
+
+        for await (let chunk of readable) {
+            if (typeof chunk === 'string') chunk = Buffer.from(chunk, 'utf-8');
+            const buf = carry ? Buffer.concat([carry, chunk]) : chunk;
+            carry = null;
+            let pos = 0;
+            if (atStart) {
+                if (buf.length < 5) { carry = Buffer.from(buf); continue; }
+                atStart = false;
+                if (buf.toString('latin1', 0, 5) === 'From ') { skipLine = true; pos = 5; }
+            }
+            while (pos < buf.length) {
+                if (skipLine) {
+                    const nl = buf.indexOf(10, pos);
+                    if (nl === -1) { pos = buf.length; break; }
+                    pos = nl + 1;
+                    skipLine = false;
+                    continue;
+                }
+                const idx = buf.indexOf(SEP, pos);
+                if (idx === -1) {
+                    const keep = Math.min(SEP.length - 1, buf.length - pos);
+                    append(buf.subarray(pos, buf.length - keep));
+                    carry = Buffer.from(buf.subarray(buf.length - keep));
+                    pos = buf.length;
+                    break;
+                }
+                append(buf.subarray(pos, idx + 1));
+                await flush();
+                pos = idx + SEP.length;
+                skipLine = true;
+            }
+        }
+        if (carry && !skipLine) append(carry);
+        await flush();
+        return count;
+    }
+
+    async _parseMessage(buf, ctx, rawSize, truncated) {
+        let parsed;
+        try {
+            parsed = await simpleParser(buf, { skipTextToHtml: true, skipImageLinks: true, skipTextLinks: true });
+        } catch (err) {
+            ctx.mboxErrors++;
+            console.warn('Failed to parse email part:', err.message);
+            return null;
+        }
+        const n = ++ctx.emailSeq;
+        const em = {
+            id: parsed.messageId || `msg-${n}`,
+            from: parsed.from?.text || '',
+            to: parsed.to?.text || '',
+            cc: parsed.cc?.text || '',
+            subject: parsed.subject || '(no subject)',
+            date: parsed.date ? (isNaN(parsed.date.getTime()) ? '' : parsed.date.toISOString()) : '',
+            labels: parsed.headers?.get('x-gmail-labels') || '',
+            threadId: parsed.headers?.get('x-gm-thrid') || '',
+            textBody: parsed.text || '',
+            htmlBody: parsed.html || '',
+            attachments: (parsed.attachments || []).map(a => ({
+                filename: a.filename,
+                contentType: a.contentType,
+                size: a.size
+            }))
+        };
+        if (typeof em.labels !== 'string') em.labels = String(em.labels);
+        if (typeof em.threadId !== 'string') em.threadId = String(em.threadId);
+        if (truncated) { em.truncated = true; em.rawSize = rawSize; }
+        return em;
+    }
+
+    _mapLocation(loc) {
+        if (!loc || typeof loc !== 'object') return null;
+        return {
+            timestamp: loc.timestamp || (loc.timestampMs ? new Date(parseInt(loc.timestampMs)).toISOString() : null),
+            lat: loc.latitudeE7 ? loc.latitudeE7 / 1e7 : null,
+            lng: loc.longitudeE7 ? loc.longitudeE7 / 1e7 : null,
+            accuracy: loc.accuracy || null,
+            altitude: loc.altitude || null,
+            velocity: loc.velocity || null,
+            heading: loc.heading || null,
+            source: loc.source || null,
+            deviceTag: loc.deviceTag || null,
+            activity: loc.activity || null
+        };
+    }
+
+    _mapSemantic(obj) {
+        if (!obj) return null;
+        if (obj.placeVisit) {
+            const pv = obj.placeVisit;
+            return {
+                type: 'placeVisit',
+                name: pv.location?.name || null,
+                address: pv.location?.address || null,
+                placeId: pv.location?.placeId || null,
+                lat: pv.location?.latitudeE7 ? pv.location.latitudeE7 / 1e7 : null,
+                lng: pv.location?.longitudeE7 ? pv.location.longitudeE7 / 1e7 : null,
+                startTime: pv.duration?.startTimestamp || null,
+                endTime: pv.duration?.endTimestamp || null,
+                confidence: pv.location?.locationConfidence || null
+            };
+        }
+        if (obj.activitySegment) {
+            const as = obj.activitySegment;
+            return {
+                type: 'activitySegment',
+                activityType: as.activityType || null,
+                confidence: as.confidence || null,
+                distance: as.distance || null,
+                startLat: as.startLocation?.latitudeE7 ? as.startLocation.latitudeE7 / 1e7 : null,
+                startLng: as.startLocation?.longitudeE7 ? as.startLocation.longitudeE7 / 1e7 : null,
+                endLat: as.endLocation?.latitudeE7 ? as.endLocation.latitudeE7 / 1e7 : null,
+                endLng: as.endLocation?.longitudeE7 ? as.endLocation.longitudeE7 / 1e7 : null,
+                startTime: as.duration?.startTimestamp || null,
+                endTime: as.duration?.endTimestamp || null
+            };
+        }
+        return null;
     }
 
     /**
@@ -1077,40 +1623,10 @@ class GoogleWarrantParser {
     // ─── MBOX Parser ────────────────────────────────────────────────────
 
     async parseMbox(buffer) {
-        const text = buffer.toString('utf-8');
+        // Kept for callers holding a small Buffer; large returns use
+        // parseMboxStream directly (see _parseCategory).
         const emails = [];
-
-        // Split on "From " at start of line (MBOX format)
-        const parts = text.split(/^From \S+/m);
-
-        for (let i = 0; i < parts.length; i++) {
-            const part = parts[i].trim();
-            if (!part || part.length < 20) continue;
-
-            try {
-                const parsed = await simpleParser(Buffer.from(part, 'utf-8'));
-                emails.push({
-                    id: parsed.messageId || `msg-${i}`,
-                    from: parsed.from?.text || '',
-                    to: parsed.to?.text || '',
-                    cc: parsed.cc?.text || '',
-                    subject: parsed.subject || '(no subject)',
-                    date: parsed.date?.toISOString() || '',
-                    labels: parsed.headers?.get('x-gmail-labels') || '',
-                    threadId: parsed.headers?.get('x-gm-thrid') || '',
-                    textBody: parsed.text || '',
-                    htmlBody: parsed.html || '',
-                    attachments: (parsed.attachments || []).map(a => ({
-                        filename: a.filename,
-                        contentType: a.contentType,
-                        size: a.size
-                    }))
-                });
-            } catch (err) {
-                console.warn('Failed to parse email part:', err.message);
-            }
-        }
-
+        await this.parseMboxStream(Readable.from([Buffer.isBuffer(buffer) ? buffer : Buffer.from(String(buffer), 'utf-8')]), (em) => { emails.push(em); });
         return emails;
     }
 
@@ -1495,4 +2011,7 @@ class GoogleWarrantParser {
     }
 }
 
+GoogleWarrantParser.streamJsonArray = streamJsonArray;
+GoogleWarrantParser.FolderReader = FolderReader;
+GoogleWarrantParser.LIMITS = { INNER_BUFFER_MAX, MAX_INLINE_ENTRY, MBOX_MESSAGE_MAX, INLINE_ROW_CAP, INLINE_EMAIL_CAP, INLINE_LOCATION_CAP, INLINE_TEXT_CAP, RESULT_CHAR_BUDGET };
 module.exports = GoogleWarrantParser;

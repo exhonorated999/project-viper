@@ -3397,6 +3397,39 @@
 
                 <!-- GenLogs and TRACE are now in the Investigative Tools section below -->
 
+                <!-- Crash Log — modules/_shared/crash-log.js (main process) -->
+                <div class="glass-card rounded-xl p-6">
+                    <div class="flex items-center justify-between cursor-pointer" onclick="toggleCrashLogCard()">
+                        <h3 class="text-xl font-bold flex items-center gap-2">
+                            <svg class="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                            Crash Log
+                            <span id="crashLogBadge" class="hidden text-xs font-medium px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300">last session did not close normally</span>
+                        </h3>
+                        <svg id="crashLogCardChevron" class="w-5 h-5 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </div>
+                    <div id="crashLogCardBody" class="hidden mt-4">
+                    <p class="text-gray-400 text-sm mb-4">
+                        VIPER keeps a short log of what it was doing (imports, errors, and crashes) on this computer. It is never sent anywhere. If VIPER closes unexpectedly, save a copy and send it to VIPER support so the problem can be found. Your home folder and e-mail addresses are replaced with placeholders in the log.
+                    </p>
+                    <div id="crashLogUnclean" class="hidden mb-4 rounded-lg p-4 border border-amber-400/40 bg-amber-400/10 text-amber-200 text-sm"></div>
+                    <div class="flex flex-wrap items-center justify-between bg-viper-dark rounded-lg p-4 border border-viper-cyan/20 gap-4">
+                        <p id="crashLogStatus" class="text-gray-300 text-sm">Loading…</p>
+                        <div class="flex flex-wrap gap-2">
+                            <button onclick="crashLogSaveCopy()" class="px-4 py-2 rounded-lg bg-viper-cyan/20 text-viper-cyan hover:bg-viper-cyan/30 text-sm font-medium transition-colors">Save a copy…</button>
+                            <button onclick="crashLogOpenFolder()" class="px-4 py-2 rounded-lg border border-viper-cyan/30 text-gray-200 hover:bg-viper-cyan/10 text-sm font-medium transition-colors">Open folder</button>
+                            <button onclick="crashLogClearLog()" class="px-4 py-2 rounded-lg border border-red-400/40 text-red-300 hover:bg-red-400/10 text-sm font-medium transition-colors">Clear log</button>
+                        </div>
+                    </div>
+                    <p id="crashLogMsg" class="text-xs mt-2 hidden"></p>
+                    <details class="mt-4">
+                        <summary class="cursor-pointer text-sm text-gray-400 hover:text-gray-200">Show the most recent entries</summary>
+                        <pre id="crashLogTail" class="mt-2 p-3 rounded-lg bg-black/40 text-xs text-gray-300 overflow-auto" style="max-height:320px;white-space:pre-wrap;word-break:break-word;"></pre>
+                    </details>
+                    </div>
+                </div>
+
                 <!-- Supervisor Link Toggle -->
                 <div class="glass-card rounded-xl p-6">
                     <div class="flex items-center justify-between cursor-pointer" onclick="toggleSupervisorLinkCard()">
@@ -8063,6 +8096,82 @@
     function toggleSupervisorLinkCard()   { toggleSettingsCard('supervisorLinkCardBody', 'supervisorLinkCardChevron'); }
     function toggleTelemetryCard()        { toggleSettingsCard('telemetryBody', 'telemetryCardChevron'); }
     function toggleWebLinksCard()         { toggleSettingsCard('webLinksCardBody', 'webLinksCardChevron'); }
+    function toggleCrashLogCard()         { toggleSettingsCard('crashLogCardBody', 'crashLogCardChevron'); refreshCrashLog(); }
+
+    // Crash Log — status + export of the main-process log (modules/_shared/crash-log.js).
+    function _crashLogSay(msg, ok) {
+        const el = document.getElementById('crashLogMsg');
+        if (!el) return;
+        el.textContent = msg;
+        el.className = 'text-xs mt-2 ' + (ok ? 'text-green-400' : 'text-red-400');
+    }
+    async function refreshCrashLog() {
+        const status = document.getElementById('crashLogStatus');
+        if (!status) return;
+        const api = window.electronAPI;
+        if (!api || typeof api.crashLogInfo !== 'function') {
+            status.textContent = 'Not available in this window — restart VIPER and try again.';
+            return;
+        }
+        let r = null;
+        try { r = await api.crashLogInfo(); } catch (e) { r = { success: false, error: e && e.message }; }
+        if (!r || !r.success) {
+            status.textContent = 'The crash log is not running' + (r && r.error ? ' (' + r.error + ')' : '') + '.';
+            return;
+        }
+        const kb = Math.max(0, Math.round((r.size || 0) / 1024));
+        status.textContent = 'Log size: ' + kb.toLocaleString() + ' KB' +
+            (r.dumps ? ' · ' + r.dumps + ' crash report file' + (r.dumps === 1 ? '' : 's') + ' on this computer' : '');
+        const badge = document.getElementById('crashLogBadge');
+        const box = document.getElementById('crashLogUnclean');
+        if (badge) badge.classList.toggle('hidden', !r.previousUnclean);
+        if (box) {
+            box.classList.toggle('hidden', !r.previousUnclean);
+            if (r.previousUnclean) {
+                const p = r.previous || {};
+                const m = p.lastMark;
+                const when = (s) => { const d = new Date(s); return isNaN(d) ? (s || '?') : d.toLocaleString(); };
+                box.textContent = 'The last time VIPER ran' + (p.version ? ' (version ' + p.version + ')' : '') +
+                    ', it did not close normally.' +
+                    (m ? ' Last thing it was doing: ' + m.label + (m.detail ? ' ' + m.detail : '') + ' at ' + when(m.at) + '.' : '') +
+                    ' If this was unexpected, click "Save a copy…" and send the file to VIPER support.';
+            }
+        }
+        const tail = document.getElementById('crashLogTail');
+        if (tail) tail.textContent = r.tail || '(empty)';
+    }
+    async function crashLogSaveCopy() {
+        const api = window.electronAPI;
+        if (!api || typeof api.crashLogExport !== 'function') return _crashLogSay('Not available — restart VIPER and try again.', false);
+        try {
+            const r = await api.crashLogExport();
+            if (r && r.success) _crashLogSay('Saved to ' + r.filePath, true);
+            else if (!(r && r.canceled)) _crashLogSay('Could not save' + (r && r.error ? ': ' + r.error : '.'), false);
+        } catch (e) { _crashLogSay('Could not save: ' + (e && e.message ? e.message : e), false); }
+    }
+    async function crashLogOpenFolder() {
+        const api = window.electronAPI;
+        if (!api || typeof api.crashLogOpenFolder !== 'function') return _crashLogSay('Not available — restart VIPER and try again.', false);
+        try {
+            const r = await api.crashLogOpenFolder();
+            if (!r || !r.success) _crashLogSay('Could not open the folder' + (r && r.error ? ': ' + r.error : '.'), false);
+        } catch (e) { _crashLogSay('Could not open the folder: ' + (e && e.message ? e.message : e), false); }
+    }
+    async function crashLogClearLog() {
+        const api = window.electronAPI;
+        if (!api || typeof api.crashLogClear !== 'function') return _crashLogSay('Not available — restart VIPER and try again.', false);
+        const msg = 'Clear the crash log? Only do this after you have sent a copy to support (or if you do not need it).';
+        const ok = (typeof viperConfirm === 'function') ? await viperConfirm(msg, { okText: 'Clear', danger: true }) : confirm(msg);
+        if (!ok) return;
+        try {
+            const r = await api.crashLogClear();
+            if (r && r.success) { _crashLogSay('Crash log cleared.', true); refreshCrashLog(); }
+            else _crashLogSay('Could not clear' + (r && r.error ? ': ' + r.error : '.'), false);
+        } catch (e) { _crashLogSay('Could not clear: ' + (e && e.message ? e.message : e), false); }
+    }
+    // Show the "did not close normally" badge without opening the card.
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => refreshCrashLog());
+    else refreshCrashLog();
 
     // Links in Case Notes — wipe the VIPER browser window's saved sign-ins
     // (modules/_shared/link-browser.js → signOut). Not destructive to any

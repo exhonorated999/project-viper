@@ -312,7 +312,11 @@ class SnapchatWarrantUI {
     rerenderSection() {
         const content = document.getElementById('swp-content-area');
         if (!content) return;
+        // Keep the search box focused while typing (it lives inside content).
+        const kf = (typeof window !== 'undefined') ? window.VpKeepFocus : null;
+        const snap = kf ? kf.capture(content) : null;
         content.innerHTML = this._renderSection();
+        if (kf) kf.restore(content, snap);
         this._loadLazyImages(content);
         if (this.activeSection === 'geo') this._initGeoMap();
     }
@@ -545,7 +549,7 @@ class SnapchatWarrantUI {
             <div class="swp-section">
                 <h2 class="swp-section-title">💬 Conversations (${total.toLocaleString()})</h2>
                 <div class="swp-toolbar">
-                    <input type="text" placeholder="Filter by participant or title..." value="${this._esc(this._convFilter)}"
+                    <input type="text" id="swp-conv-filter" placeholder="Filter by participant or title..." value="${this._esc(this._convFilter)}"
                         class="swp-input" oninput="window.snapchatWarrantUI._convFilter = this.value; window.snapchatWarrantUI._convPage = 0; window.snapchatWarrantUI.rerenderSection()">
                 </div>
                 <div class="swp-conv-list">
@@ -711,7 +715,7 @@ class SnapchatWarrantUI {
                             <div class="swp-media-card ${on ? 'swp-media-flagged' : ''}" onclick="window.snapchatWarrantUI.showMediaDetail('${this._escJs(m.name)}')">
                                 <div class="swp-media-thumb-wrap">
                                     ${isVideo
-                                        ? `<div class="swp-media-video-thumb"><span class="swp-video-play-icon">▶</span><div class="swp-media-placeholder">🎬</div></div>`
+                                        ? `<div class="swp-media-video-thumb"${m.diskPath ? ` data-vpt-src="${this._esc(m.diskPath)}"` : ''}><span class="swp-video-play-icon">▶</span><div class="swp-media-placeholder vpt-hide">🎬</div></div>`
                                         : `<img class="swp-media-thumb swp-lazy-img" data-disk-path="${this._esc(m.diskPath)}" loading="lazy">`}
                                     <div class="swp-media-flag-overlay">${this._flagBtn('media', k)}</div>
                                 </div>
@@ -1238,8 +1242,28 @@ class SnapchatWarrantUI {
      * seeking breaks on large files). Blob URLs hit the same memory path the
      * Media element expects.
      */
+    /** Frame thumbnails for `[data-vpt-src]` video tiles (shared VpVideoThumbs). */
+    _hydrateVideoThumbs(root) {
+        const vt = (typeof window !== 'undefined') ? window.VpVideoThumbs : null;
+        if (!vt || !root) return;
+        vt.hydrate(root, { getUrl: (diskPath) => this.module.mediaUrl(diskPath) });
+    }
+
+    _swapImgForVideoTile(img, diskPath, root) {
+        if (!this._mislabeledVideos) this._mislabeledVideos = new Set();
+        this._mislabeledVideos.add(diskPath);
+        if (!img || !img.parentNode || typeof document === 'undefined') return;
+        const tile = document.createElement('div');
+        tile.className = 'swp-media-video-thumb';
+        tile.setAttribute('data-vpt-src', diskPath);
+        tile.innerHTML = '<span class="swp-video-play-icon">▶</span><div class="swp-media-placeholder vpt-hide">🎬</div>';
+        img.parentNode.replaceChild(tile, img);
+        this._hydrateVideoThumbs(root);
+    }
+
     async _loadLazyImages(container) {
         const root = container || document;
+        this._hydrateVideoThumbs(root);
         const imgs = root.querySelectorAll('.swp-lazy-img[data-disk-path]');
         for (const img of imgs) {
             const diskPath = img.dataset.diskPath;
@@ -1249,8 +1273,18 @@ class SnapchatWarrantUI {
                 img.classList.remove('swp-lazy-img');
                 continue;
             }
+            if (this._mislabeledVideos && this._mislabeledVideos.has(diskPath)) {
+                this._swapImgForVideoTile(img, diskPath, root);
+                continue;
+            }
             try {
                 const result = await this.module.readMedia(diskPath);
+                if (result && /^video\//.test(result.mimeType || '')) {
+                    // Mislabeled (no / wrong extension) video in an image slot:
+                    // swap in a video tile so it gets a frame thumbnail.
+                    this._swapImgForVideoTile(img, diskPath, root);
+                    continue;
+                }
                 if (result) {
                     const dataUrl = `data:${result.mimeType};base64,${result.data}`;
                     this._mediaCache[diskPath] = dataUrl;
@@ -1270,6 +1304,14 @@ class SnapchatWarrantUI {
                 continue;
             }
             try {
+                // Prefer a streamed viper-media:// URL (seekable, no base64 copy
+                // of the whole file); fall back to the blob path below.
+                const streamUrl = await this.module.mediaUrl(diskPath);
+                if (streamUrl) {
+                    vid.src = streamUrl;
+                    vid.classList.remove('swp-lazy-video');
+                    continue;
+                }
                 const result = await this.module.readMedia(diskPath);
                 if (!result) continue;
                 // Decode base64 → Uint8Array → Blob → blob: URL

@@ -236,7 +236,15 @@ class KikWarrantUI {
     _renderSection() {
         const content = document.getElementById('kkp-content');
         if (!content) return;
+        // Keep the search box focused while typing (Media search lives inside content).
+        const kf = (typeof window !== 'undefined') ? window.VpKeepFocus : null;
+        const snap = kf ? kf.capture(content) : null;
+        this._renderSectionHtml(content);
+        if (kf) kf.restore(content, snap);
+        this._hydrateVideoThumbs(content);
+    }
 
+    _renderSectionHtml(content) {
         switch (this.activeSection) {
             case 'overview': content.innerHTML = this._renderOverview(); break;
             case 'sessions': content.innerHTML = this._renderSessions(); break;
@@ -641,7 +649,7 @@ class KikWarrantUI {
                         const mediaId = e.uuid ? e.uuid.replace(/[^a-zA-Z0-9-]/g, '') : '';
                         body = `<span class="media-tag">[${e.mediaType || 'Media'}]</span> `;
                         if (hasMedia) {
-                            body += `<span class="kkp-media-thumb" id="kkp-thumb-${mediaId}" data-uuid="${e.uuid}" style="cursor:pointer" onclick="window.kikWarrantUI.loadMediaThumb('${e.uuid}', 'kkp-thumb-${mediaId}')">📷 Click to load</span>`;
+                            body += this._mediaLoadSpan(e.uuid, `kkp-thumb-${mediaId}`, '📷 Click to load', true);
                         } else {
                             body += e.uuid ? `<span style="color:#6b7280; font-size:0.8em">${e.uuid.substring(0, 8)}…</span>` : '';
                         }
@@ -667,6 +675,7 @@ class KikWarrantUI {
         const conversations = this._buildDMConversations(this.data);
         const contacts = Object.entries(conversations).sort((a, b) => b[1].total - a[1].total);
         list.innerHTML = this._renderContactList(contacts);
+        this._hydrateVideoThumbs(list);
     }
 
     toggleContact(username) {
@@ -795,7 +804,7 @@ class KikWarrantUI {
                         const mediaId = e.uuid ? e.uuid.replace(/[^a-zA-Z0-9-]/g, '') : '';
                         body = `<strong style="color:${isTarget ? '#4ade80' : '#c084fc'}">${e.sender}</strong> → ${e.recipient}: <span class="media-tag">[${e.mediaType || 'Media'}]</span> `;
                         if (hasMedia) {
-                            body += `<span class="kkp-media-thumb" id="kkp-gthumb-${mediaId}" data-uuid="${e.uuid}" style="cursor:pointer" onclick="window.kikWarrantUI.loadMediaThumb('${e.uuid}', 'kkp-gthumb-${mediaId}')">📷 Click to load</span>`;
+                            body += this._mediaLoadSpan(e.uuid, `kkp-gthumb-${mediaId}`, '📷 Click to load', true);
                         }
                     }
                     return `
@@ -857,7 +866,7 @@ class KikWarrantUI {
 
                 <div class="kkp-search-bar">
                     <input type="text" class="kkp-search-input" placeholder="Filter by contact or UUID..."
-                        id="kkp-media-search" value="${this._mediaFilter}"
+                        id="kkp-media-search" value="${this._esc(this._mediaFilter)}"
                         oninput="window.kikWarrantUI.filterMedia(this.value)">
                 </div>
 
@@ -887,7 +896,7 @@ class KikWarrantUI {
                                         <td style="${m.sender === d.accountUsername ? 'color:#4ade80;font-weight:500' : ''}">${m.sender}</td>
                                         <td>${m.recipient}</td>
                                         <td>${m.mediaType}</td>
-                                        <td>${hasFile ? `<span id="${thumbId}" style="cursor:pointer" onclick="window.kikWarrantUI.loadMediaThumb('${m.uuid}', '${thumbId}')">📷 Load</span>` : `<span class="kkp-mono" title="${m.uuid}">${m.uuid ? m.uuid.substring(0, 12) + '…' : '—'}</span>`}</td>
+                                        <td>${hasFile ? this._mediaLoadSpan(m.uuid, thumbId, '📷 Load', false) : `<span class="kkp-mono" title="${m.uuid}">${m.uuid ? m.uuid.substring(0, 12) + '…' : '—'}</span>`}</td>
                                         <td>${m.context}</td>
                                         <td style="white-space:nowrap">${this._srcBtn('media', this._evtItem(m), 'Media ID')}${this._flagBtn('media', k)}</td>
                                     </tr>
@@ -1136,6 +1145,33 @@ class KikWarrantUI {
         return null;
     }
 
+    /** True when an extracted content file is a video (sniffed mime or extension). */
+    _isVideoFile(file) {
+        if (!file) return false;
+        if (/^video\//.test(file.mimeType || '')) return true;
+        return /\.(mp4|m4v|mov|webm|3gp)$/i.test(file.diskPath || '');
+    }
+
+    /**
+     * Click-to-load media placeholder. Videos get a tile that fills with a
+     * first-frame thumbnail automatically (VpVideoThumbs); click still plays.
+     */
+    _mediaLoadSpan(uuid, elementId, label, inMessage) {
+        const file = this._getContentFile(uuid);
+        const cls = inMessage ? 'kkp-media-thumb' : '';
+        const click = `onclick="window.kikWarrantUI.loadMediaThumb(this.dataset.uuid, this.id)"`;
+        if (file && file.diskPath && this._isVideoFile(file)) {
+            return `<span class="${cls} kkp-vthumb" id="${this._esc(elementId)}" data-uuid="${this._esc(uuid)}" data-vpt-src="${this._esc(file.diskPath)}" title="Play video" style="cursor:pointer" ${click}><span class="kkp-vthumb-play">▶</span><span class="kkp-vthumb-ph vpt-hide">🎬</span></span>`;
+        }
+        return `<span class="${cls}" id="${this._esc(elementId)}" data-uuid="${this._esc(uuid)}" style="cursor:pointer" ${click}>${label}</span>`;
+    }
+
+    _hydrateVideoThumbs(root) {
+        const vt = (typeof window !== 'undefined') ? window.VpVideoThumbs : null;
+        if (!vt || !root) return;
+        vt.hydrate(root, { getUrl: (diskPath) => this.module.mediaUrl(diskPath) });
+    }
+
     /** Lazy-load a media thumbnail */
     async loadMediaThumb(uuid, elementId) {
         const el = document.getElementById(elementId);
@@ -1151,6 +1187,20 @@ class KikWarrantUI {
         if (this._mediaCache[uuid]) {
             el.outerHTML = this._mediaCache[uuid];
             return;
+        }
+
+        // Videos: stream via viper-media:// (seekable, no base64 copy of the
+        // whole file) with the decoded frame as poster.
+        if (this._isVideoFile(file)) {
+            const streamUrl = await this.module.mediaUrl(file.diskPath);
+            if (streamUrl) {
+                const vt = window.VpVideoThumbs;
+                const cached = vt && vt.sharedCache.get(file.diskPath);
+                const html = `<video src="${this._esc(streamUrl)}" controls preload="metadata"${cached ? ` poster="${cached}"` : ''} style="max-width:300px; max-height:200px; border-radius:6px; margin-top:4px;"></video>`;
+                // Not cached: the token URL expires; re-mint on the next render.
+                if (el.isConnected) el.outerHTML = html;
+                return;
+            }
         }
 
         el.textContent = '⏳ Loading...';

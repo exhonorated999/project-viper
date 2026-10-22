@@ -775,9 +775,29 @@ class MetaWarrantUI {
         const url = this._attr(r.fileUrl);
         const cap = `<div class="mwp-media-name mwp-small mwp-muted">${this._esc(r.name || '')}${r.sniffed ? ' · relabelled (contents did not match the extension)' : ''}</div>`;
         if (kind === 'image') slot.innerHTML = `<img class="mwp-media-img" src="${url}" alt="" data-mw="zoom" data-ref="${this._attr(ref)}" loading="lazy">`;
-        else if (kind === 'video') slot.innerHTML = `<video class="mwp-media-video" src="${url}" controls preload="metadata"></video>${cap}`;
+        else if (kind === 'video') {
+            slot.innerHTML = `<video class="mwp-media-video" src="${url}" controls preload="metadata"></video>${cap}`;
+            this._videoPoster(slot, (imp && imp.storeKey ? imp.storeKey : '') + '|' + ref);
+        }
         else if (kind === 'audio') slot.innerHTML = `<audio class="mwp-media-audio" src="${url}" controls preload="metadata"></audio>${cap}`;
         else slot.innerHTML = `<span class="mwp-media-ph">📎 ${this._esc(r.name || ref)} · ${this._fmtSize(r.size)}</span>`;
+    }
+
+    /**
+     * Give a stored video a real poster frame. preload="metadata" alone paints
+     * nothing for many files, so tiles looked empty. Decoded once per
+     * storeKey|ref by the shared VpVideoThumbs (2 at a time, cached).
+     */
+    _videoPoster(slot, key) {
+        const vt = (typeof window !== 'undefined') ? window.VpVideoThumbs : null;
+        const v = slot && slot.querySelector && slot.querySelector('video.mwp-media-video');
+        if (!vt || !v || !key) return;
+        v.setAttribute('data-vpt-src', key);
+        vt.hydrate(slot, {
+            selector: 'video[data-vpt-src]',
+            getUrl: (k, el) => el.getAttribute('src'),
+            apply: (el, dataUrl) => { if (!el.getAttribute('poster')) el.setAttribute('poster', dataUrl); }
+        });
     }
 
     // ─── Badges, source buttons, flags ───────────────────────────────

@@ -291,6 +291,13 @@
     z-index: 2;
 }
 .xwp-media-placeholder { font-size: 40px; opacity: 0.4; }
+/* Media tab cells (images, video thumbnails, inline player) */
+.xwp-media-cell { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; overflow: hidden; }
+.xwp-media-cell > .xwp-media-img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: rgba(0,0,0,0.4); }
+.xwp-media-cell > video.xwp-media-img { object-fit: contain; background: #000; }
+.xwp-media-cell > .xwp-media-video-thumb { cursor: pointer; }
+.xwp-media-cell > .xwp-media-placeholder { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; }
+.xwp-media-name { padding: 6px 8px; font-size: 0.72em; color: #9ca3af; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .xwp-media-info { padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
 .xwp-media-time { color: #d1d5db; font-size: 0.76em; }
 .xwp-media-people { color: #9ca3af; font-size: 0.73em; word-break: break-word; }

@@ -50,9 +50,78 @@ class GoogleWarrantModule {
      * Save data to localStorage
      */
     saveData() {
-        localStorage.setItem(`googleWarrant_${this.caseId}`, JSON.stringify({
-            imports: this.imports
-        }));
+        try {
+            localStorage.setItem(`googleWarrant_${this.caseId}`, JSON.stringify({
+                imports: this.imports
+            }));
+            this.lastSaveError = null;
+            return true;
+        } catch (e) {
+            // A failed save used to throw out of the import and lose the work silently.
+            const quota = (e && (e.name === 'QuotaExceededError' || e.code === 22)) || /quota/i.test(String(e && e.message));
+            const msg = quota
+                ? 'Google Warrant data could not be saved: VIPER\'s storage for case data is full. The import is shown now but will not be there after VIPER restarts. Remove older imports you no longer need, then import again.'
+                : 'Google Warrant data could not be saved: ' + ((e && e.message) || e);
+            console.error('[google-warrant] saveData failed:', e);
+            this.lastSaveError = msg;
+            try { if (this.ui && this.ui._toast) this.ui._toast(msg, 'error'); } catch (_) {}
+            return false;
+        }
+    }
+
+    /** True when e-mails / location points live in the per-import SQLite store. */
+    hasStore(imp) {
+        return !!(imp && imp.store && Array.isArray(imp.store.keys) && imp.store.keys.length);
+    }
+
+    emailTotal(imp) {
+        if (!imp) return 0;
+        return this.hasStore(imp) ? (imp.store.emailCount || 0) + (imp.legacyEmails || []).length : (imp.emails || []).length;
+    }
+
+    locationTotal(imp) {
+        if (!imp) return 0;
+        return this.hasStore(imp) ? (imp.store.locationCount || 0) + (imp.legacyLocationRecords || []).length : (imp.locationRecords || []).length;
+    }
+
+    async emailsPage(imp, { offset = 0, limit = 50, q = '' } = {}) {
+        if (!this.hasStore(imp) || !window.electronAPI?.googleWarrantEmailsPage) return { success: false, error: 'E-mail store not available' };
+        return window.electronAPI.googleWarrantEmailsPage({ caseNumber: this.caseNumber, keys: imp.store.keys, offset, limit, q });
+    }
+
+    async getEmail(key, seq) {
+        if (!window.electronAPI?.googleWarrantEmail) return null;
+        const res = await window.electronAPI.googleWarrantEmail({ caseNumber: this.caseNumber, key, seq });
+        return res && res.success ? res.email : null;
+    }
+
+    async locationsPage(imp, { offset = 0, limit = 500, sample = 0 } = {}) {
+        if (!this.hasStore(imp) || !window.electronAPI?.googleWarrantLocations) return { success: false, error: 'Location store not available' };
+        return window.electronAPI.googleWarrantLocations({ caseNumber: this.caseNumber, keys: imp.store.keys, offset, limit, sample });
+    }
+
+    /**
+     * Store-backed e-mails are not in the import record, so a flagged one is
+     * copied here (first 2,000 characters of the body) for Push to Evidence.
+     */
+    async cacheFlaggedEmail(imp, row) {
+        if (!imp || !row || row.id == null) return;
+        imp.flaggedEmailCache = imp.flaggedEmailCache || {};
+        let full = null;
+        try { if (row.key && row.seq != null) full = await this.getEmail(row.key, row.seq); } catch (_) {}
+        const src = full || row;
+        imp.flaggedEmailCache[String(row.id)] = {
+            id: src.id, from: src.from || '', to: src.to || '', cc: src.cc || '', subject: src.subject || '',
+            date: src.date || '', labels: src.labels || '', threadId: src.threadId || '',
+            textBody: String(src.textBody || src.snippet || '').substring(0, 2000),
+            attachments: src.attachments || [],
+        };
+        this.saveData();
+    }
+
+    async openMedia(relPath, reveal) {
+        if (!window.electronAPI?.googleWarrantOpenMedia || !relPath) return { success: false, error: 'Not available' };
+        return window.electronAPI.googleWarrantOpenMedia({ caseNumber: this.caseNumber, relPath, reveal: !!reveal });
     }
 
     /**
@@ -151,6 +220,17 @@ class GoogleWarrantModule {
             // Source Validation: SHA-256 of the original taken at import.
             sourceIntegrity: result.data.sourceIntegrity || null,
             sourceIntegrityByPath: result.data.sourceIntegrity ? { [filePath]: result.data.sourceIntegrity } : {},
+            // Large returns: e-mails + location points are in a SQLite store under
+            // the case (emails/locationRecords above are just the first few).
+            store: result.data.store ? Object.assign({}, result.data.store, {
+                perKey: { [result.data.store.keys[0]]: {
+                    emailCount: result.data.store.emailCount || 0,
+                    emailDuplicates: result.data.store.emailDuplicates || 0,
+                    locationCount: result.data.store.locationCount || 0,
+                } }
+            }) : null,
+            truncated: result.data.truncated || null,
+            oversizeFiles: result.data.oversizeFiles || [],
             _diagnostics: result.data._diagnostics
         };
 
@@ -255,13 +335,38 @@ class GoogleWarrantModule {
             if (incoming.dateRange.end && (!merged.dateRange.end || incoming.dateRange.end > merged.dateRange.end)) merged.dateRange.end = incoming.dateRange.end;
         }
 
-        // Mail
-        merged.emails = concatById(base.emails, incoming.emails, e => (e && (e.messageId || e.id)) || null);
+        // Mail + Location
+        const hasStore = (r) => this.hasStore(r);
+        if (hasStore(base) || hasStore(incoming)) {
+            // Counts are kept per store so re-importing a part replaces its numbers.
+            const perKey = Object.assign({}, (base.store && base.store.perKey) || {}, (incoming.store && incoming.store.perKey) || {});
+            const keys = Array.from(new Set([...((base.store && base.store.keys) || []), ...((incoming.store && incoming.store.keys) || [])]));
+            const sum = (f) => keys.reduce((s, k) => s + ((perKey[k] && perKey[k][f]) || 0), 0);
+            merged.store = { keys, perKey, emailCount: sum('emailCount'), emailDuplicates: sum('emailDuplicates'), locationCount: sum('locationCount') };
+            // A part imported by an older VIPER has its e-mails inline: keep them apart from the previews.
+            const legacy = (r) => hasStore(r)
+                ? { emails: r.legacyEmails || [], locs: r.legacyLocationRecords || [] }
+                : { emails: r.emails || [], locs: r.locationRecords || [] };
+            const preview = (r) => hasStore(r) ? { emails: r.emails || [], locs: r.locationRecords || [] } : { emails: [], locs: [] };
+            const lb = legacy(base), li = legacy(incoming);
+            merged.legacyEmails = concatById(lb.emails, li.emails, e => (e && (e.messageId || e.id)) || null);
+            merged.legacyLocationRecords = concat(lb.locs, li.locs);
+            merged.emails = concatById(preview(base).emails, preview(incoming).emails, e => (e && (e.messageId || e.id)) || null);
+            merged.locationRecords = concat(preview(base).locs, preview(incoming).locs);
+            merged.flaggedEmailCache = Object.assign({}, base.flaggedEmailCache || {}, incoming.flaggedEmailCache || {});
+        } else {
+            merged.emails = concatById(base.emails, incoming.emails, e => (e && (e.messageId || e.id)) || null);
+            merged.locationRecords = concat(base.locationRecords, incoming.locationRecords);
+        }
         merged.emailMetadata = concat(base.emailMetadata, incoming.emailMetadata);
-
-        // Location
-        merged.locationRecords = concat(base.locationRecords, incoming.locationRecords);
         merged.semanticLocations = concat(base.semanticLocations, incoming.semanticLocations);
+
+        // What did not fit in the record
+        if (base.truncated || incoming.truncated) {
+            merged.truncated = Object.assign({}, base.truncated || {});
+            for (const [k, n] of Object.entries(incoming.truncated || {})) merged.truncated[k] = (merged.truncated[k] || 0) + n;
+        }
+        merged.oversizeFiles = concat(base.oversizeFiles, incoming.oversizeFiles);
 
         // Devices / installs / library (dedupe by JSON when possible)
         merged.devices = concat(base.devices, incoming.devices);
@@ -374,8 +479,19 @@ class GoogleWarrantModule {
      * Delete an import by ID
      */
     deleteImport(importId) {
+        const gone = this.imports.find(i => i && i.id === importId);
         this.imports = this.imports.filter(i => i.id !== importId);
         this.saveData();
+        // Remove its e-mail / location store unless another import still uses it.
+        if (this.hasStore(gone) && window.electronAPI?.googleWarrantStoreDelete) {
+            const inUse = new Set();
+            for (const i of this.imports) if (this.hasStore(i)) i.store.keys.forEach(k => inUse.add(k));
+            const keys = gone.store.keys.filter(k => !inUse.has(k));
+            if (keys.length) {
+                window.electronAPI.googleWarrantStoreDelete({ caseNumber: this.caseNumber, keys })
+                    .catch(e => console.warn('[google-warrant] store delete failed:', e));
+            }
+        }
     }
 
     /**
@@ -467,7 +583,17 @@ class GoogleWarrantModule {
 
         // Emails — flag key = email.id
         const flaggedEmailIds = new Set((f.emails || []).map(String));
-        for (const em of (d.emails || [])) {
+        const emailPool = [];
+        const seenEmail = new Set();
+        const cache = (imp && imp.flaggedEmailCache) || {};
+        // Store-backed e-mails: the flagged copy (with body) wins over the short preview.
+        for (const id of Object.keys(cache)) { emailPool.push(cache[id]); seenEmail.add(String(id)); }
+        for (const em of [...(d.emails || []), ...(d.legacyEmails || [])]) {
+            if (!em || seenEmail.has(String(em.id))) continue;
+            seenEmail.add(String(em.id));
+            emailPool.push(em);
+        }
+        for (const em of emailPool) {
             if (!flaggedEmailIds.has(String(em.id))) continue;
             out.emails.push({
                 id: em.id || '',

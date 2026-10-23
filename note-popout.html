@@ -81,6 +81,22 @@
             font-size: 12px;
         }
         .editor-wrap { flex: 1; overflow: auto; padding: 20px 24px; }
+        .title-wrap { padding: 14px 24px 0; flex-shrink: 0; }
+        #noteTitle {
+            width: 100%;
+            box-sizing: border-box;
+            background: #0f1117;
+            border: 1px solid #334155;
+            color: #f1f5f9;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 16px;
+            font-weight: 600;
+            font-family: Arial, sans-serif;
+            outline: none;
+        }
+        #noteTitle:focus { border-color: #00e0ff; }
+        #noteTitle::placeholder { color: #64748b; font-weight: 400; }
         #editor {
             min-height: 100%;
             outline: none;
@@ -130,6 +146,10 @@
         </select>
     </div>
 
+    <div class="title-wrap">
+        <input id="noteTitle" type="text" maxlength="200" spellcheck="true" autocomplete="off" placeholder="Title (optional)">
+    </div>
+
     <div class="editor-wrap">
         <div id="editor" contenteditable="true" spellcheck="true"></div>
     </div>
@@ -163,13 +183,23 @@
         document.title = 'Note \u2014 ' + (caseNumber || 'VIPER');
 
         const editor = document.getElementById('editor');
+        const titleInput = document.getElementById('noteTitle');
         const saveBtn = document.getElementById('saveBtn');
         const statusLeft = document.getElementById('statusLeft');
         const api = window.electronAPI;
 
         const AUTOSAVE_MS = 5 * 60 * 1000;
         let lastCommitted = null;
+        let lastCommittedTitle = '';
         let loaded = false;
+
+        /** Same rules as the main window: plain text, one line, 200 chars. */
+        function cleanTitle(s) {
+            return String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+        }
+        function showTitleInWindow(t) {
+            document.title = (t ? t + ' \u2014 ' : 'Note \u2014 ') + (caseNumber || 'VIPER');
+        }
 
         function fmt(cmd) { document.execCommand(cmd, false, null); editor.focus(); }
         function setSize(px) { editor.style.fontSize = px + 'px'; editor.focus(); }
@@ -185,7 +215,8 @@
         }
 
         function isDirty() {
-            return loaded && editor.innerHTML.trim() !== (lastCommitted || '');
+            return loaded && (editor.innerHTML.trim() !== (lastCommitted || '')
+                || cleanTitle(titleInput.value) !== lastCommittedTitle);
         }
 
         async function loadNote() {
@@ -202,6 +233,9 @@
                 }
                 editor.innerHTML = data.contentHtml || '';
                 lastCommitted = editor.innerHTML.trim();
+                titleInput.value = cleanTitle(data.title);
+                lastCommittedTitle = cleanTitle(titleInput.value);
+                showTitleInWindow(lastCommittedTitle);
                 loaded = true;
                 statusLeft.textContent = data.createdAt
                     ? ('Created ' + new Date(data.createdAt).toLocaleString())
@@ -220,9 +254,10 @@
                 return false;
             }
             const html = editor.innerHTML.trim();
+            const title = cleanTitle(titleInput.value);
             let ok = false;
             try {
-                ok = await api.noteSave(caseNumber, noteId, html);
+                ok = await api.noteSave(caseNumber, noteId, html, title);
             } catch (e) {
                 statusLeft.textContent = 'Save failed: ' + (e && e.message ? e.message : e);
                 return false;
@@ -232,6 +267,8 @@
                 return false;
             }
             lastCommitted = html;
+            lastCommittedTitle = title;
+            showTitleInWindow(title);
             const stamp = new Date().toLocaleTimeString();
             if (silent) {
                 markClean('Auto-saved ' + stamp);
@@ -245,6 +282,10 @@
         }
 
         editor.addEventListener('input', () => { if (isDirty()) markDirty(); });
+        titleInput.addEventListener('input', () => { if (isDirty()) markDirty(); });
+        titleInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); editor.focus(); }
+        });
 
         // Paste images straight in, same as the main note editor.
         editor.addEventListener('paste', (e) => {

@@ -190,6 +190,35 @@ section('_noteWriteToMain is the single writer');
     check('  rather than throwing', true);
   }
 
+  // ───────────── optional title ─────────────
+  section('the optional note title');
+  {
+    const t = makeHarness({ notes: NOTES() });
+    const n0 = () => t.readNotes()['25-123456'][0];
+    await t.sandbox._noteWriteToMain('25-123456', '991', '<p>original</p>', '  Knock\nand   talk  ');
+    check('a title-only change is written', n0().title === 'Knock and talk' && t.writes === 1);
+    check('  and stamps one edit', n0().editHistory.length === 1);
+    await t.sandbox._noteWriteToMain('25-123456', '991', '<p>original</p>', 'Knock and talk');
+    check('the same title again is a no-op', t.writes === 1 && n0().editHistory.length === 1);
+    await t.sandbox._noteWriteToMain('25-123456', '991', '<p>edited</p>');
+    check('a body-only caller (no title arg) leaves the title alone',
+      n0().title === 'Knock and talk' && n0().contentHtml === '<p>edited</p>');
+    await t.sandbox._noteWriteToMain('25-123456', '991', '<p>edited</p>', '');
+    check('an empty title removes the field', !('title' in n0()));
+    await t.sandbox._noteWriteToMain('25-123456', '991', '<p>edited</p>', 'x'.repeat(500));
+    check('a long title is capped at 200', n0().title.length === 200);
+  }
+  {
+    const t = makeHarness({ notes: NOTES() });
+    const win = makeNoteWin({ editorHtml: { html: '<p>from popout</p>', title: 'Popout title' } });
+    t.sandbox._attachNoteCloseFlush(win, '25-123456', '991');
+    win.close();
+    await new Promise(r => setTimeout(r, 20));
+    const n = t.readNotes()['25-123456'][0];
+    check('the close flush carries the pop-out title',
+      n.contentHtml === '<p>from popout</p>' && n.title === 'Popout title' && win.destroyed === true);
+  }
+
   // ───────────── the close flush ─────────────
   section('closing the pop-out saves the note');
 

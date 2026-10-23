@@ -919,7 +919,9 @@ class SnapchatWarrantParser {
             '.gif': 'image/gif', '.webp': 'image/webp',
             '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime'
         };
-        return map[(ext || '').toLowerCase()] || 'application/octet-stream';
+        const e = (ext || '').toLowerCase();
+        // Old formats (FLV, AVI, 3GP …) play through a VIPER playback copy.
+        return map[e] || require('../_shared/video-playback').VIDEO_MIME_BY_EXT[e.slice(1)] || 'application/octet-stream';
     }
 }
 

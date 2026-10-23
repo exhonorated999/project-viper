@@ -1003,6 +1003,16 @@
             
             <!-- Dashboard Content -->
             <div class="p-8 space-y-6">
+                <!-- Stat scope: what the cards' second number counts -->
+                <div id="dashScopeBar" class="flex items-center justify-end gap-2 -mb-3 text-xs">
+                    <span id="dashScopeHint" class="text-gray-500"></span>
+                    <span class="text-gray-500">Totals:</span>
+                    <div class="inline-flex rounded-lg border border-gray-700 overflow-hidden" role="group" aria-label="Totals period">
+                        <button type="button" data-scope="year" onclick="setDashStatScope('year')" class="px-3 py-1 text-gray-400 hover:text-white transition-colors" title="Calendar year (Jan 1 – Dec 31)">Year</button>
+                        <button type="button" data-scope="quarter" onclick="setDashStatScope('quarter')" class="px-3 py-1 text-gray-400 hover:text-white border-l border-gray-700 transition-colors" title="Calendar quarter (Jan–Mar, Apr–Jun, Jul–Sep, Oct–Dec)">Quarter</button>
+                        <button type="button" data-scope="all" onclick="setDashStatScope('all')" class="px-3 py-1 text-gray-400 hover:text-white border-l border-gray-700 transition-colors" title="Every case, all time">All time</button>
+                    </div>
+                </div>
                 <!-- Stat Cards -->
                 <div class="grid grid-cols-4 gap-6 relative" style="overflow: visible; z-index: 50;">
                     <!-- Card 1 -->
@@ -2357,6 +2367,7 @@
 
             // Initialize Quick Stats
             updateQuickStats();
+            _paintDashScopeBar();
         }
         
         function toggleDropdown(cardNum) {
@@ -2378,6 +2389,91 @@
             initializeDropdowns(); // Refresh dropdowns to update selected state
         }
         
+        // ── Second-column scope on the stat cards + Quick Stats ──────────
+        // Officers asked to swap "All time" for the calendar year or quarter.
+        // The numbers come from the same period sweep the Supervisor Link uses
+        // (_setMetricPeriod + viperComputeAllMetrics), so a quarter here always
+        // matches a quarter there. 'all' = the old lifetime figure.
+        var _dashScope = (function () {
+            try {
+                const s = localStorage.getItem('viperDashStatScope');
+                return (s === 'year' || s === 'quarter') ? s : 'all';
+            } catch (_) { return 'all'; }
+        })();
+        var _dashScopeVals = null;   // { metricKey: raw monthly-field value for the window }
+        var _dashScopeWin = null;    // { start, end, label }
+        var _dashScopeBusy = false;
+
+        function _refreshDashScope() {
+            if (_dashScope === 'all') { _dashScopeVals = null; _dashScopeWin = null; return; }
+            if (_dashScopeBusy) return;
+            _dashScopeBusy = true;
+            try {
+                const w = viperPeriodWindow(_dashScope);
+                _setMetricPeriod(w);
+                viperComputeAllMetrics({ metricsOnly: true });
+                const vals = {};
+                for (const k in dashboardMetrics) vals[k] = dashboardMetrics[k].monthly;
+                _dashScopeVals = vals;
+                _dashScopeWin = w;
+            } catch (e) {
+                console.warn('Dashboard stat scope failed — showing all time:', e);
+                _dashScopeVals = null; _dashScopeWin = null;
+            } finally {
+                // Hand the dashboard back its normal month window.
+                _setMetricPeriod(null);
+                try { viperComputeAllMetrics({ metricsOnly: true }); } catch (_) {}
+                _dashScopeBusy = false;
+            }
+        }
+
+        function _dashScopeActive() { return _dashScope !== 'all' && !!_dashScopeVals; }
+
+        function _dashScopeValue(key) {
+            const m = dashboardMetrics[key];
+            if (_dashScopeActive() && Object.prototype.hasOwnProperty.call(_dashScopeVals, key)
+                && _dashScopeVals[key] !== null && _dashScopeVals[key] !== undefined) {
+                return _dashScopeVals[key];
+            }
+            return m ? m.value : 0;
+        }
+
+        function _dashScopeLabel(short) {
+            if (!_dashScopeActive()) return 'All time';
+            if (_dashScope === 'year') return short ? 'Year' : 'This year';
+            return short ? 'Qtr' : 'This quarter';
+        }
+
+        function _dashScopeTitle() {
+            if (!_dashScopeActive() || !_dashScopeWin) return 'Every case, all time';
+            const last = new Date(_dashScopeWin.end.getTime() - 86400000);
+            const f = (d) => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+            return _dashScopeWin.label + ' (' + f(_dashScopeWin.start) + ' – ' + f(last) + ')';
+        }
+
+        function _paintDashScopeBar() {
+            const bar = document.getElementById('dashScopeBar');
+            if (!bar) return;
+            bar.querySelectorAll('[data-scope]').forEach(b => {
+                const on = b.getAttribute('data-scope') === _dashScope;
+                b.classList.toggle('bg-viper-cyan/20', on);
+                b.classList.toggle('text-viper-cyan', on);
+                b.classList.toggle('text-gray-400', !on);
+                b.setAttribute('aria-pressed', on ? 'true' : 'false');
+            });
+            const hint = document.getElementById('dashScopeHint');
+            if (hint) hint.textContent = _dashScopeActive() ? _dashScopeTitle() : '';
+        }
+
+        function setDashStatScope(scope) {
+            _dashScope = (scope === 'year' || scope === 'quarter') ? scope : 'all';
+            try { localStorage.setItem('viperDashStatScope', _dashScope); } catch (_) {}
+            _refreshDashScope();
+            for (let i = 1; i <= 4; i++) { try { updateCard(i, cardPreferences[i]); } catch (_) {} }
+            try { updateQuickStats(); } catch (_) {}
+            _paintDashScopeBar();
+        }
+
         function updateCard(cardNum, metricKey) {
             const card = document.querySelector(`[data-card="${cardNum}"]`);
             const metric = dashboardMetrics[metricKey];
@@ -2401,7 +2497,7 @@
                     card.querySelector('.card-value').innerHTML = `
                         <div class="grid grid-cols-2 gap-3 items-end">
                             <div>${renderUnits(metric.monthly, metric.color)}<p class="text-[10px] text-gray-500 uppercase tracking-wide mt-1">This month</p></div>
-                            <div class="border-l border-gray-700/60 pl-3">${renderUnits(metric.value, metric.color)}<p class="text-[10px] text-gray-500 uppercase tracking-wide mt-1">All time</p></div>
+                            <div class="border-l border-gray-700/60 pl-3" title="${_dashScopeTitle()}">${renderUnits(_dashScopeValue(metricKey), metric.color)}<p class="text-[10px] text-gray-500 uppercase tracking-wide mt-1">${_dashScopeLabel()}</p></div>
                         </div>`;
                     card.querySelector('.card-subtitle').textContent = '';
                 } else {
@@ -2422,9 +2518,9 @@
                             <div class="text-4xl font-bold text-${metric.color} leading-none">${metric.monthly}</div>
                             <p class="text-[10px] text-gray-500 uppercase tracking-wide mt-1">This month</p>
                         </div>
-                        <div class="border-l border-gray-700/60 pl-3">
-                            <div class="text-4xl font-bold text-${metric.color} leading-none">${metric.value}</div>
-                            <p class="text-[10px] text-gray-500 uppercase tracking-wide mt-1">All time</p>
+                        <div class="border-l border-gray-700/60 pl-3" title="${_dashScopeTitle()}">
+                            <div class="text-4xl font-bold text-${metric.color} leading-none">${_dashScopeValue(metricKey)}</div>
+                            <p class="text-[10px] text-gray-500 uppercase tracking-wide mt-1">${_dashScopeLabel()}</p>
                         </div>
                     </div>`;
                 card.querySelector('.card-subtitle').textContent = '';
@@ -2466,9 +2562,9 @@
                                     ${renderNarcoticsCompact(data.monthly, color)}
                                     <p class="text-[9px] text-gray-500 uppercase tracking-wide mt-0.5">Month</p>
                                 </div>
-                                <div class="border-l border-gray-700/60 pl-2">
-                                    ${renderNarcoticsCompact(data.value, color)}
-                                    <p class="text-[9px] text-gray-500 uppercase tracking-wide mt-0.5">All time</p>
+                                <div class="border-l border-gray-700/60 pl-2" title="${_dashScopeTitle()}">
+                                    ${renderNarcoticsCompact(_dashScopeValue(metric), color)}
+                                    <p class="text-[9px] text-gray-500 uppercase tracking-wide mt-0.5">${_dashScopeLabel(true)}</p>
                                 </div>
                             </div>`;
                     } else {
@@ -2481,9 +2577,9 @@
                                 <div class="text-lg font-bold text-${color} leading-none">${data.monthly}</div>
                                 <p class="text-[9px] text-gray-500 uppercase tracking-wide mt-0.5">Month</p>
                             </div>
-                            <div class="border-l border-gray-700/60 pl-2">
-                                <div class="text-lg font-bold text-${color} leading-none">${data.value}</div>
-                                <p class="text-[9px] text-gray-500 uppercase tracking-wide mt-0.5">All time</p>
+                            <div class="border-l border-gray-700/60 pl-2" title="${_dashScopeTitle()}">
+                                <div class="text-lg font-bold text-${color} leading-none">${_dashScopeValue(metric)}</div>
+                                <p class="text-[9px] text-gray-500 uppercase tracking-wide mt-0.5">${_dashScopeLabel(true)}</p>
                             </div>
                         </div>`;
                 } else {
@@ -6076,6 +6172,9 @@
         
         // Check for overdue warrants
         function checkOverdueWarrants() {
+            // Bell badge count — same list the bell shows, so a notice the
+            // officer removed stops counting.
+            try { return getOverdueWarrantsList().length; } catch (_) {}
             const allWarrants = JSON.parse(localStorage.getItem('viperCaseWarrants')) || {};
             let overdueCount = 0;
             
@@ -7685,6 +7784,9 @@
 
             // Update case data on dashboard (open/closed/transferred/inactive…)
             updateDashboardCaseData(metricsOnly);
+
+            // Year / quarter figures for the cards' second column (if chosen).
+            if (!metricsOnly) _refreshDashScope();
         }
 
         // Fresh, numeric { key -> number } snapshot of all built-in metrics for
@@ -7921,13 +8023,53 @@
         // single dropdown anchored to the top bell.  Replaces the old floating
         // bottom-right supervisor buttons (they overlapped the Resource Hub
         // magnifier).
+        // Removing an overdue-warrant notice from the bell hides only the
+        // NOTICE — the warrant, and its row on the Warrant Alerts card, stay.
+        // Keyed on the due date, so a warrant whose due date is changed (and
+        // goes overdue again) notifies again.
+        function _bellWarrantKey(caseNumber, w) {
+            return 'warrant|' + caseNumber + '|' + ((w && w.id) || '') + '|' + ((w && w.dueDate) || '');
+        }
+        function _bellRemovedSet() {
+            try {
+                const v = JSON.parse(localStorage.getItem('viperBellRemoved'));
+                return new Set(Array.isArray(v) ? v : []);
+            } catch (_) { return new Set(); }
+        }
+        function removeOverdueWarrantNotice(caseNumber, warrant) {
+            const set = _bellRemovedSet();
+            set.add(_bellWarrantKey(caseNumber, warrant));
+            try {
+                localStorage.setItem('viperBellRemoved', JSON.stringify(Array.from(set).slice(-1000)));
+            } catch (e) {
+                if (typeof viperToast === 'function') viperToast('Could not remove the notification: ' + (e && e.message ? e.message : e), 'error');
+                return;
+            }
+            try { updateNotificationBadge(); } catch (_) {}
+            if (document.getElementById('bellDropdown')) { try { renderBellDropdown(); } catch (_) {} }
+        }
+        function _bellRemoveBtn(title, onClick) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.title = title;
+            b.setAttribute('data-notif-remove', '');
+            b.style.cssText = 'margin-left:6px;display:inline-flex;align-items:center;background:transparent;'
+                + 'border:1px solid transparent;color:#6b7280;cursor:pointer;border-radius:6px;padding:3px 5px;line-height:1;';
+            b.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>';
+            b.addEventListener('mouseenter', () => { b.style.color = '#ef5350'; });
+            b.addEventListener('mouseleave', () => { b.style.color = '#6b7280'; });
+            b.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
+            return b;
+        }
+
         function getOverdueWarrantsList() {
             const allWarrants = JSON.parse(localStorage.getItem('viperCaseWarrants')) || {};
             const allCases = JSON.parse(localStorage.getItem('viperCases')) || [];
+            const removed = _bellRemovedSet();
             const overdue = [];
             Object.entries(allWarrants).forEach(([caseNumber, warrants]) => {
                 (Array.isArray(warrants) ? warrants : []).forEach(warrant => {
-                    if (warrant && WarrantStatus.isOverdue(warrant)) {
+                    if (warrant && WarrantStatus.isOverdue(warrant) && !removed.has(_bellWarrantKey(caseNumber, warrant))) {
                         const caseInfo = allCases.find(c => c && c.caseNumber === caseNumber);
                         overdue.push({ caseNumber, warrant, caseId: caseInfo ? caseInfo.id : null });
                     }
@@ -8080,7 +8222,9 @@
                     const when = document.createElement('span');
                     when.style.cssText = 'margin-left:auto;color:#f87171;font-size:12px;';
                     when.textContent = item.days === 0 ? 'expires today' : item.days + 'd expired';
-                    top.append(icon, cn, when);
+                    top.append(icon, cn, when, _bellRemoveBtn(
+                        'Remove from list (acknowledges the expiration)',
+                        () => acknowledgePrttExpiration(item.caseNumber, item.warrant.id)));
                     const sub = document.createElement('div');
                     sub.style.cssText = 'display:flex;align-items:center;gap:8px;color:#9aa4b2;font-size:12px;margin-top:5px;';
                     const what = document.createElement('span');
@@ -8122,6 +8266,9 @@
                         + '<div style="color:#9aa4b2;font-size:12px;margin-top:5px;">'
                         + String(item.warrant.type || 'Warrant').toUpperCase()
                         + (item.warrant.issuedTo ? ' to ' + item.warrant.issuedTo : '') + '</div>';
+                    row.firstElementChild.appendChild(_bellRemoveBtn(
+                        'Remove from list (the warrant and its Warrant Alerts entry stay)',
+                        () => removeOverdueWarrantNotice(item.caseNumber, item.warrant)));
                     row.addEventListener('click', () => {
                         if (item.caseId) {
                             localStorage.setItem('currentCaseId', item.caseId);

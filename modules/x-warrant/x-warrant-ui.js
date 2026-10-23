@@ -702,6 +702,7 @@ class XWarrantUI {
         const v = document.createElement('video');
         v.className = 'xwp-media-img';
         v.controls = true; v.autoplay = true; v.preload = 'metadata';
+        v.setAttribute('data-disk-path', diskPath);   // VpLegacyVideo: playback copy if it can't decode
         v.src = src;
         tile.parentNode.replaceChild(v, tile);
     }

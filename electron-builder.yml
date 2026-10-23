@@ -34,6 +34,14 @@ files:
   - "!build/whisper-stream/**"
 asarUnpack:
   - "build/**"
+# ─── ffmpeg (LGPL) → resources/ffmpeg ───────────────────────────────────────
+# Plays old evidence video (FLV/AVI/WMV/MPG/3GP…) through a converted copy and
+# makes video thumbnails (modules/_shared/video-playback.js). build/ is not in
+# git — run `node scripts/fetch-ffmpeg.js` once on the build machine.
+# scripts/verify-package.js fails the package if it is missing or GPL.
+extraResources:
+  - from: build/ffmpeg
+    to: ffmpeg
 # ─── On-demand Whisper engines (NOT bundled in the installer) ───────────────
 # The Faster-Whisper-XXL batch engine and the whisper.cpp live-dictation engine
 # are large (multi-GB) and are NO LONGER shipped inside the installer — bundling

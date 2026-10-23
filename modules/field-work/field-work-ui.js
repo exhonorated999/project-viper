@@ -199,6 +199,48 @@
         return !!(a && a.fieldWorkFormCreate);
     }
 
+    /* ── Keyboard focus (Electron/Windows) ───────────────────────────────
+     * Electron on Windows can leave the page unable to type into a freshly
+     * opened modal — keyboard focus is stuck in a hidden BrowserView or was
+     * lost to a native dialog — until the officer clicks off VIPER and back.
+     * document.hasFocus() is false in exactly that state, so when it is,
+     * ask main to give the page focus back, then focus the box they wanted. */
+    function ensureKeyboardFocus(target) {
+        if (typeof document === 'undefined') return Promise.resolve(false);
+        var focusTarget = function () {
+            try { if (target && target.isConnected !== false && typeof target.focus === 'function') target.focus(); } catch (_) { /* gone */ }
+        };
+        var a = api();
+        if ((typeof document.hasFocus === 'function' && document.hasFocus()) || !a || typeof a.focusMainWindow !== 'function') {
+            focusTarget();
+            return Promise.resolve(false);
+        }
+        return Promise.resolve(a.focusMainWindow()).catch(function () { return null; }).then(function () {
+            focusTarget();
+            return true;
+        });
+    }
+
+    function guardModalFocus(modalId, firstFieldId) {
+        if (typeof document === 'undefined') return;
+        var modal = document.getElementById(modalId);
+        if (!modal || modal._fwFocusGuard) return;
+        modal._fwFocusGuard = true;
+        var FIELDS = 'input, textarea, select, [contenteditable="true"]';
+        // Capture phase: runs before the click lands, survives repaints of the body.
+        modal.addEventListener('mousedown', function (ev) {
+            if (typeof document.hasFocus === 'function' && document.hasFocus()) return;
+            var t = ev && ev.target && ev.target.closest ? ev.target.closest(FIELDS) : null;
+            ensureKeyboardFocus(t);
+        }, true);
+        // The file chooser is a native dialog; it can take focus with it.
+        modal.addEventListener('change', function (ev) {
+            if (ev && ev.target && ev.target.type === 'file') ensureKeyboardFocus(null);
+        }, true);
+        var first = firstFieldId ? document.getElementById(firstFieldId) : null;
+        ensureKeyboardFocus(first);
+    }
+
     function call(fn) {
         if (typeof host.apiCall === 'function') return host.apiCall(fn);
         return Promise.reject(new Error('Not registered — activate your VIPER license in Settings.'));
@@ -996,6 +1038,7 @@
                 '<div class="glass-card rounded-xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto" id="fwCreateBody"></div>' +
             '</div>');
         paintCreateModal();
+        guardModalFocus('fwCreateModal', 'fwTitle');
     }
 
     function paintCreateModal() {
@@ -1058,8 +1101,8 @@
 
             '<div class="bg-viper-cyan/10 border border-viper-cyan/30 rounded-lg p-3 text-xs text-gray-300 leading-relaxed">' +
                 '<p>📱 A page is created on the Intellect server and you open it from your phone — no WiFi or VPN needed. ' +
-                'Photos, clips, recordings and documents are <strong>encrypted on the phone before they are uploaded</strong>, ' +
-                'with a key that only exists in this case and in the link itself. The server stores files it cannot read.</p>' +
+                'Everything you type and capture — notes, names, addresses, photos, clips, recordings and documents — is <strong>encrypted on the phone before it is uploaded</strong>, ' +
+                'with a key that only exists in this case and in the link itself. The server stores data it cannot read, and never receives the case number or form title.</p>' +
                 '<p class="mt-2">The form expires after 48 hours. Importing it deletes everything from the server.</p>' +
             '</div>' +
 
@@ -1486,7 +1529,7 @@
                 host.toast('Recovered ' + retried.recovered + ' attachment(s) from a previous import', 'success');
             }
             return call(function (key) {
-                return api().fieldWorkFormDownload({ apiKey: key, formId: formId });
+                return api().fieldWorkFormDownload({ apiKey: key, formId: formId, mediaKey: form.mediaKey || '' });
             }).then(function (result) {
                 var rows = (result && result.entries) || [];
                 if (!rows.length) {
@@ -1519,8 +1562,15 @@
             });
             // Carried, not yet fetched — resolved once the import is confirmed.
             entry._relayMedia = Array.isArray(row.media) ? row.media : [];
+            // A sealed entry that would not open keeps its ciphertext.
+            if (row.e2eError) { entry.e2eError = true; entry.e2eCipher = row.e2eCipher || ''; }
             return entry;
         });
+        var sealedFailed = fresh.filter(function (e) { return e.e2eError; }).length;
+        if (sealedFailed) {
+            host.toast(sealedFailed + ' entr' + (sealedFailed === 1 ? 'y' : 'ies') +
+                ' could not be decrypted with this form\'s key and will be kept encrypted.', 'error');
+        }
 
         // De-duplicate on the relay's own row id. Address+time collides for
         // real on a surveillance form where every entry is the same address
@@ -1697,6 +1747,7 @@
                 '</div>' +
             '</div>' +
         '</div>');
+        guardModalFocus('fwEntryModal', 'fweStreet');
     }
 
     function closeEntryModal() {
@@ -2065,6 +2116,8 @@
         boardPins: boardPins,
         nonDiscoverableFileNames: nonDiscoverableFileNames,
         fileNameFor: fileNameFor,
+        ensureKeyboardFocus: ensureKeyboardFocus,
+        guardModalFocus: guardModalFocus,
 
         // Exposed for tests — not part of the host contract.
         _state: function () { return { entries: entries, forms: forms, filter: filter, draft: draft, viewIndex: viewIndex }; },

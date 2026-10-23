@@ -72,7 +72,12 @@ function handlerSource(channel) {
   });
 
   ok('the key rides in the URL fragment', () => {
-    assert.ok(create.indexOf("'#k=' + mediaKey") !== -1,
+    // Built by _relayFormUrl, shared with Area Canvas.
+    assert.ok(create.indexOf('_relayFormUrl(result.form_url, mediaKey') !== -1,
+      'fieldwork-form-create must build its URL with _relayFormUrl');
+    const a = SRC.indexOf('function _relayFormUrl(');
+    const helper = SRC.slice(a, SRC.indexOf('\n}\n', a));
+    assert.ok(helper.indexOf("'#k=' + mediaKey") !== -1,
       'the key must be a fragment — a browser never puts a fragment in a request');
   });
 

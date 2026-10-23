@@ -129,7 +129,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // because a case has many notes but only one report.
   openNoteWindow: (caseNumber, noteId) => ipcRenderer.invoke('open-note-window', caseNumber, noteId),
   noteGet: (caseNumber, noteId) => ipcRenderer.invoke('note-get', caseNumber, noteId),
-  noteSave: (caseNumber, noteId, contentHtml) => ipcRenderer.invoke('note-save', caseNumber, noteId, contentHtml),
+  noteSave: (caseNumber, noteId, contentHtml, title) => ipcRenderer.invoke('note-save', caseNumber, noteId, contentHtml, title),
   selectRmsFiles: () => ipcRenderer.invoke('select-rms-files'),
   selectCybertipFiles: () => ipcRenderer.invoke('select-cybertip-files'),
   selectDmvFile: () => ipcRenderer.invoke('select-dmv-file'),
@@ -248,6 +248,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   btCancel: (data) => ipcRenderer.invoke('bt-cancel', data),
   btRead: (data) => ipcRenderer.invoke('bt-read', data),
   btDelete: (data) => ipcRenderer.invoke('bt-delete', data),
+  btMediaList: (data) => ipcRenderer.invoke('bt-media-list', data),
+  btMediaUrl: (data) => ipcRenderer.invoke('bt-media-url', data),
+  btVideo: (data) => ipcRenderer.invoke('bt-video', data),
+  btVerify: (data) => ipcRenderer.invoke('bt-verify', data),
   onBtProgress: (callback) => {
     const handler = (_e, data) => callback(data);
     ipcRenderer.on('bt-progress', handler);
@@ -256,6 +260,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Streamable viper-media:// URL for an extracted Snapchat / KIK / X file
   // (video thumbnails + playback without base64-ing the whole file).
   warrantMediaUrl: (data) => ipcRenderer.invoke('warrant-media-url', data),
+  // Old-format video in the warrant tabs: { op:'play'|'thumb', filePath | caseNumber+storeKey+ref }.
+  warrantVideo: (args) => ipcRenderer.invoke('warrant-video', args),
 
   // Discord Warrant Parser
   discordWarrantScan: (data) => ipcRenderer.invoke('discord-warrant-scan', data),
@@ -364,6 +370,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   copyAppDataFile: (data) => ipcRenderer.invoke('copy-appdata-file', data),
   deleteAppDataFile: (filePath) => ipcRenderer.invoke('delete-appdata-file', filePath),
   readEvidenceFile: (filePath) => ipcRenderer.invoke('read-evidence-file', filePath),
+  // Evidence tab, one file at a time (modules/_shared/evidence-view.js)
+  evidenceMediaUrl: (args) => ipcRenderer.invoke('evidence-media-url', args),
+  evidenceThumb: (args) => ipcRenderer.invoke('evidence-thumb', args),
+  // Old video formats: a converted playback copy (modules/_shared/video-playback.js)
+  videoPlaybackUrl: (args) => ipcRenderer.invoke('video-playback-url', args),
+  onVideoPlaybackProgress: (callback) => {
+    const handler = (_e, data) => callback(data);
+    ipcRenderer.on('video-playback-progress', handler);
+    return () => ipcRenderer.removeListener('video-playback-progress', handler);
+  },
   // Files inside a ZIP filed as evidence (CyberTips from the ICAC Data System)
   evidenceZipList: (zipPath) => ipcRenderer.invoke('evidence-zip-list', zipPath),
   evidenceZipRead: (zipPath, entryName, inZip) => ipcRenderer.invoke('evidence-zip-read', zipPath, entryName, inZip || ''),
@@ -492,6 +508,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   reportDocsList: (caseNumber) => ipcRenderer.invoke('report-docs-list', { caseNumber }),
   reportDocImport: (caseNumber, replace) => ipcRenderer.invoke('report-doc-import', { caseNumber, replace: replace || null }),
   reportDocNewBlank: (caseNumber, newName, seedText) => ipcRenderer.invoke('report-doc-new-blank', { caseNumber, newName, seedText: seedText || '' }),
+  reportDocFromBlocks: (caseNumber, newName, blocks, opts) => ipcRenderer.invoke('report-doc-from-blocks', { caseNumber, newName, blocks, footerText: (opts && opts.footerText) || '', title: (opts && opts.title) || '' }),
   reportDocOpen: (caseNumber, fileName) => ipcRenderer.invoke('report-doc-open', { caseNumber, fileName }),
   reportDocRemove: (caseNumber, fileName) => ipcRenderer.invoke('report-doc-remove', { caseNumber, fileName }),
   reportDocRename: (caseNumber, fileName, newName) => ipcRenderer.invoke('report-doc-rename', { caseNumber, fileName, newName }),
@@ -576,6 +593,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Unlike canvass, the desktop sends the complete field descriptors and the
   // relay renders them generically, so a new field needs no server deploy.
   fieldWorkFormCreate: (params) => ipcRenderer.invoke('fieldwork-form-create', params),
+  focusMainWindow: () => ipcRenderer.invoke('focus-main-window'),
   fieldWorkFormGetInfo: (params) => ipcRenderer.invoke('fieldwork-form-get-info', params),
   fieldWorkFormDownload: (params) => ipcRenderer.invoke('fieldwork-form-download', params),
   fieldWorkFormDelete: (params) => ipcRenderer.invoke('fieldwork-form-delete', params),

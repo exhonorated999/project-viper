@@ -19,6 +19,7 @@ const crypto = require('crypto');
 const { parsePage, looksLikeMetaPage } = require('./meta-html-tree');
 const { MetaMerger, sortPageNames } = require('./meta-merge');
 const Store = require('./meta-warrant-store');
+const VP = require('../_shared/video-playback');
 
 const EXT_MIME = {
     '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif',
@@ -29,16 +30,22 @@ const EXT_MIME = {
     '.pdf': 'application/pdf', '.txt': 'text/plain', '.html': 'text/html', '.json': 'application/json',
     '.zip': 'application/zip'
 };
+// Old video formats (FLV, AVI, WMV, MPG, 3GP …) — played through a VIPER playback copy.
+for (const k of Object.keys(VP.VIDEO_MIME_BY_EXT)) if (!EXT_MIME['.' + k]) EXT_MIME['.' + k] = VP.VIDEO_MIME_BY_EXT[k];
 const MIME_EXT = {
     'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp', 'image/heic': '.heic',
     'video/mp4': '.mp4', 'video/quicktime': '.mov', 'video/webm': '.webm', 'video/ogg': '.ogv',
     'audio/mpeg': '.mp3', 'audio/mp4': '.m4a', 'audio/aac': '.aac', 'audio/wav': '.wav', 'audio/ogg': '.ogg',
-    'application/pdf': '.pdf', 'application/zip': '.zip'
+    'application/pdf': '.pdf', 'application/zip': '.zip',
+    'video/x-flv': '.flv', 'video/x-msvideo': '.avi', 'video/mpeg': '.mpg',
+    'video/x-pn-realvideo': '.rm'
 };
 // Extensions that already name each sniffed type correctly (no rename needed).
 const OK_EXTS = {
     'image/jpeg': ['.jpg', '.jpeg'], 'video/mp4': ['.mp4', '.m4v'], 'audio/mp4': ['.m4a', '.mp4'],
-    'audio/ogg': ['.ogg', '.opus', '.oga'], 'video/quicktime': ['.mov', '.qt']
+    'audio/ogg': ['.ogg', '.opus', '.oga'], 'video/quicktime': ['.mov', '.qt'],
+    'video/x-flv': ['.flv', '.f4v'], 'video/x-msvideo': ['.avi', '.divx'],
+    'video/mpeg': ['.mpg', '.mpeg', '.mpe', '.vob', '.m1v', '.m2v'], 'video/x-pn-realvideo': ['.rm', '.rmvb']
 };
 
 /** Real type from the first bytes.  null when it is not a known binary format. */
@@ -72,6 +79,9 @@ function sniff(buf) {
     if (ascii(0, 3) === 'ID3') return r('audio/mpeg');
     if (b[0] === 0xFF && (b[1] === 0xF1 || b[1] === 0xF9)) return r('audio/aac');
     if (b[0] === 0xFF && (b[1] & 0xE0) === 0xE0) return r('audio/mpeg');
+    // Old video containers. ASF is left to the extension (.wma is ASF too).
+    const old = VP.sniffVideo(b);
+    if (old && old.ext !== 'wmv') return r(old.mime);
     return null;
 }
 

@@ -59,6 +59,27 @@ const STAMP = (() => {
     throw new Error('unbalanced braces lifting _provStampEdits');
 })();
 
+// The optional note title helpers (_noteTitleOf, _noteCleanTitle, …) are
+// called from the people block but live beside the autosave code. Lift them
+// as one contiguous run: from _noteTitleMax through the end of _noteApplyTitle.
+const TITLE_START = SRC.indexOf('function _noteTitleMax(');
+const TITLE_END_FN = SRC.indexOf('function _noteApplyTitle(');
+if (TITLE_START < 0 || TITLE_END_FN < TITLE_START) {
+    console.error('Could not locate the note title helpers in the page. Anchors moved?');
+    process.exit(1);
+}
+const TITLE = (() => {
+    const tail = SRC.slice(TITLE_END_FN).split('\n');
+    let depth = 0, opened = false;
+    for (let i = 0; i < tail.length; i++) {
+        depth += (tail[i].match(/\{/g) || []).length;
+        depth -= (tail[i].match(/\}/g) || []).length;
+        if (tail[i].indexOf('{') >= 0) opened = true;
+        if (opened && depth <= 0) return SRC.slice(TITLE_START, TITLE_END_FN) + tail.slice(0, i + 1).join('\n');
+    }
+    throw new Error('unbalanced braces lifting the note title helpers');
+})();
+
 // `const NOTE_PERSON_ROLES` is lexical, so it never lands on the sandbox
 // global the way a function declaration does. Append a test-only hook that
 // republishes the block's API rather than restructuring shipping code.
@@ -189,7 +210,7 @@ function buildSandbox(state) {
     sandbox.saveWitnesses();
     sandbox.saveInvolvedPersons();
     sandbox.saveMissingPersons();
-    vm.runInContext(STAMP + '\n' + BLOCK + HOOK, sandbox);
+    vm.runInContext(STAMP + '\n' + TITLE + '\n' + BLOCK + HOOK, sandbox);
     return sandbox;
 }
 

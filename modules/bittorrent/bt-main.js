@@ -7,8 +7,12 @@
  *                   cases/<n>/BitTorrent/<downloadId>.json
  *   bt-read         parsed model for one download
  *   bt-delete       remove the parsed JSON (never touches Evidence files)
- *   bt-cancel       cancel a running import
- * Progress: 'bt-progress' { jobId, phase:'logs'|'copy'|'save', ... }
+ *   bt-cancel       cancel a running import / hash check
+ *   bt-media-list   which torrent files are on disk in the Download folder
+ *   bt-media-url    viper-media:// URL for one file (by index, never a path)
+ *   bt-video        ffmpeg thumbnail / playback copy for one video
+ *   bt-verify       re-hash files on disk against the log's SHA-1 values
+ * Progress: 'bt-progress' { jobId, phase:'logs'|'copy'|'save'|'verify', ... }
  *
  * Field Security: copies are encrypted per file when the vault is on, the
  * parsed JSON likewise, and encrypted copies are decrypted in memory to parse.
@@ -237,9 +241,109 @@ function metaOf(model) {
       firstContact: s.firstContact, lastContact: s.lastContact, clients: (s.clients || []).slice(0, 5)
     },
     warnings: (model.warnings || []).length,
-    storage: { mode: st.mode || null, caseDir: st.caseDir || null, sourceCaseDir: st.sourceCaseDir || null },
-    importedAt: (model.import && model.import.importedAt) || null
+    storage: { mode: st.mode || null, caseDir: st.caseDir || null, sourceCaseDir: st.sourceCaseDir || null, hasDownload: !!st.downloadDir },
+    importedAt: (model.import && model.import.importedAt) || null,
+    verify: verifySummary(model.verify)
   };
+}
+
+// ── Downloaded files: find on disk, serve, verify (BT Phase 4) ──────────
+const VP = require('../_shared/video-playback');
+const IMAGE_EXT = new Set(['jpg', 'jpeg', 'jpe', 'jfif', 'png', 'gif', 'bmp', 'webp', 'avif', 'ico']);
+const VIDEO_EXT = new Set(VP.ALL_VIDEO_EXT || []);
+function mediaKind(name) {
+  const m = /\.([^.\\/]+)$/.exec(String(name || ''));
+  const e = m ? m[1].toLowerCase() : '';
+  return IMAGE_EXT.has(e) ? 'image' : VIDEO_EXT.has(e) ? 'video' : 'other';
+}
+function _normRel(p) { return String(p || '').replace(/[\\/]+/g, '/').replace(/^\/+|\/+$/g, '').toLowerCase(); }
+
+/**
+ * Match the torrent's file list to files under the download's Download
+ * folder. TD may write <Download>\<path> or <Download>\<torrent name>\<path>,
+ * so up to 3 leading folders on disk are tried. Only regular files inside the
+ * Download folder are returned (no symlinks, no '..').
+ * → { downloadDir, exists, byIndex: Map<index, {path,size}>, extra }
+ */
+function resolveDownloadFiles(model) {
+  const st = (model && model.storage) || {};
+  const dl = st.downloadDir || null;
+  const res = { downloadDir: dl, exists: false, byIndex: new Map(), extra: 0 };
+  if (!dl) return res;
+  try { if (!fs.statSync(dl).isDirectory()) return res; } catch (_) { return res; }
+  res.exists = true;
+  const want = new Map();
+  for (const f of (model.files || [])) if (f && f.path) { const k = _normRel(f.path); if (!want.has(k)) want.set(k, f.index); }
+  for (const it of _listTree(dl)) {
+    const segs = _normRel(it.rel).split('/');
+    let idx = null;
+    for (let k = 0; k < Math.min(4, segs.length); k++) {
+      const key = segs.slice(k).join('/');
+      if (want.has(key)) { idx = want.get(key); break; }
+    }
+    if (idx == null || res.byIndex.has(idx) || !_within(it.full, dl)) { res.extra++; continue; }
+    res.byIndex.set(idx, { path: it.full, size: it.size });
+  }
+  return res;
+}
+
+function sha1File(p, security, isCancelled) {
+  if (isEncryptedFile(p, security)) {
+    return Promise.resolve(require('crypto').createHash('sha1').update(_decryptFile(p, security)).digest('hex'));
+  }
+  return new Promise((resolve, reject) => {
+    const h = require('crypto').createHash('sha1');
+    const s = fs.createReadStream(p, { highWaterMark: 1 << 20 });
+    s.on('data', (b) => { if (isCancelled && isCancelled()) { s.destroy(); const e = new Error('cancelled'); e.cancelled = true; reject(e); return; } h.update(b); });
+    s.on('error', reject);
+    s.on('end', () => resolve(h.digest('hex')));
+  });
+}
+
+const VERIFY_LIST_MAX = 5000;
+/**
+ * Re-hash every file the log has a SHA-1 for and compare.
+ * → { at, downloadFolder, withHash, checked, matched, mismatched[], missing[], unreadable[], partialOnDisk, noHashInLog }
+ */
+async function verifyDownload(model, resolved, opts) {
+  opts = opts || {};
+  const security = opts.security || null;
+  const onProgress = opts.onProgress || (() => {});
+  const isCancelled = opts.isCancelled || (() => false);
+  const files = (model.files || []).filter(Boolean);
+  const hashed = files.filter(f => /^[0-9a-f]{40}$/i.test(String(f.sha1 || '')));
+  const out = {
+    at: new Date().toISOString(), downloadFolder: !!resolved.exists, withHash: hashed.length,
+    checked: 0, matched: 0, mismatched: [], missing: [], unreadable: [],
+    partialOnDisk: 0, noHashInLog: files.length - hashed.length
+  };
+  for (const f of files) if (!f.sha1 && resolved.byIndex.has(f.index)) out.partialOnDisk++;
+  const bytesTotal = hashed.reduce((a, f) => { const loc = resolved.byIndex.get(f.index); return a + (loc ? loc.size : 0); }, 0);
+  let bytesDone = 0, lastTick = 0;
+  const push = (arr, v) => { if (arr.length < VERIFY_LIST_MAX) arr.push(v); };
+  for (const f of hashed) {
+    if (isCancelled()) { const e = new Error('cancelled'); e.cancelled = true; throw e; }
+    const loc = resolved.byIndex.get(f.index);
+    if (!loc) { push(out.missing, f.index); continue; }
+    let h = null;
+    try { h = await sha1File(loc.path, security, isCancelled); } catch (e) {
+      if (e && (e.cancelled || e.code === 'VAULT_LOCKED')) throw e;
+      push(out.unreadable, f.index);
+    }
+    if (h) {
+      out.checked++;
+      if (h === String(f.sha1).toLowerCase()) out.matched++; else push(out.mismatched, f.index);
+    }
+    bytesDone += loc.size;
+    const now = Date.now();
+    if (now - lastTick > 200) { lastTick = now; onProgress({ phase: 'verify', bytesDone, bytesTotal, filesDone: out.checked + out.missing.length + out.unreadable.length, filesTotal: hashed.length }); }
+  }
+  onProgress({ phase: 'verify', bytesDone: bytesTotal, bytesTotal, filesDone: hashed.length, filesTotal: hashed.length });
+  return out;
+}
+function verifySummary(v) {
+  if (!v) return null;
+  return { at: v.at, withHash: v.withHash, checked: v.checked, matched: v.matched, mismatched: v.mismatched.length, missing: v.missing.length, unreadable: v.unreadable.length, downloadFolder: v.downloadFolder };
 }
 
 // ── IPC registration ─────────────────────────────────────────────────────
@@ -367,10 +471,100 @@ function register(deps) {
     }
   });
 
+  // ── Downloaded files (BT Phase 4) ──
+  // Media is only ever looked up by { caseNumber, downloadId, index }: the
+  // renderer never sends a path. Files must sit inside the Download folder
+  // recorded for this case's import.
+  const resolvedCache = new Map(); // model file → { mtimeMs, at, model, res }
+  const RESOLVE_TTL = 60 * 1000;
+  function loadResolved(caseNumber, downloadId, fresh) {
+    const file = modelPath(casesDir(), caseNumber, downloadId);
+    let st;
+    try { st = fs.statSync(file); } catch (_) { const e = new Error('The parsed results for this download are missing. Re-import it.'); e.code = 'MISSING'; throw e; }
+    const hit = resolvedCache.get(file);
+    if (!fresh && hit && hit.mtimeMs === st.mtimeMs && Date.now() - hit.at < RESOLVE_TTL) return hit;
+    const model = readModel(file, sec());
+    const v = { file, mtimeMs: st.mtimeMs, at: Date.now(), model, res: resolveDownloadFiles(model) };
+    resolvedCache.set(file, v);
+    if (resolvedCache.size > 20) resolvedCache.delete(resolvedCache.keys().next().value);
+    return v;
+  }
+  function fileFor(a) {
+    const v = loadResolved(a.caseNumber, a.downloadId);
+    const idx = typeof a.index === 'number' ? a.index : (/^\d{1,9}$/.test(String(a.index == null ? '' : a.index)) ? Number(a.index) : NaN);
+    if (!Number.isInteger(idx) || idx < 0) return null;
+    const loc = v.res.byIndex.get(idx);
+    if (!loc || !v.res.downloadDir || !_within(loc.path, v.res.downloadDir)) return null;
+    return loc.path;
+  }
+
+  ipcMain.handle('bt-media-list', async (_e, { caseNumber, downloadId } = {}) => {
+    try {
+      const v = loadResolved(caseNumber, downloadId, true);
+      const onDisk = {};
+      for (const [idx, loc] of v.res.byIndex) onDisk[idx] = loc.size;
+      return {
+        success: true, hasDownloadFolder: !!v.res.downloadDir, folderFound: v.res.exists,
+        onDisk, matched: v.res.byIndex.size, extra: v.res.extra, verify: v.model.verify || null
+      };
+    } catch (error) {
+      return { success: false, error: error.message, code: (error && error.code) || null };
+    }
+  });
+
+  ipcMain.handle('bt-media-url', async (_e, a = {}) => {
+    try {
+      const p = fileFor(a);
+      if (!p) return { success: false, reason: 'not-on-disk', error: 'This file is not in the download folder.' };
+      if (typeof deps.mediaUrl !== 'function') return { success: false, error: 'Viewer not available.' };
+      return await deps.mediaUrl(p);
+    } catch (error) {
+      return { success: false, error: error.message, code: (error && error.code) || null };
+    }
+  });
+
+  ipcMain.handle('bt-video', async (event, a = {}) => {
+    let p = null;
+    try { p = fileFor(a); } catch (_) { p = null; }
+    if (!p) return { success: false, reason: 'not-allowed', error: 'This file is not in the download folder.' };
+    const vp = deps.videoPlayback;
+    if (!vp) return { success: false, noEngine: true, error: 'Video playback is not available.' };
+    if (a.op === 'thumb') return vp.thumb({ filePath: p, size: a.size, anyExt: true });
+    const sender = event.sender;
+    const jobId = String(a.jobId || '').slice(0, 64);
+    return vp.prepare({
+      filePath: p, anyExt: true,
+      onProgress: (x) => { try { if (!sender.isDestroyed()) sender.send('video-playback-progress', Object.assign({ jobId }, x)); } catch (_) { /* */ } }
+    });
+  });
+
+  ipcMain.handle('bt-verify', async (event, { jobId, caseNumber, downloadId } = {}) => {
+    const job = { cancelled: false };
+    const id = String(jobId || Date.now());
+    jobs.set(id, job);
+    const send = (p) => { try { if (!event.sender.isDestroyed()) event.sender.send('bt-progress', Object.assign({ jobId: id }, p)); } catch (_) { /* */ } };
+    try {
+      const security = sec();
+      const v = loadResolved(caseNumber, downloadId, true);
+      const result = await verifyDownload(v.model, v.res, { security, onProgress: send, isCancelled: () => job.cancelled });
+      const model = readModel(v.file, security);   // re-read: never write back a stale copy
+      model.verify = result;
+      writeModel(v.file, model, security);
+      resolvedCache.delete(v.file);
+      return { success: true, verify: result, summary: verifySummary(result), meta: metaOf(model) };
+    } catch (error) {
+      if (error && error.cancelled) return { success: false, cancelled: true, error: 'Check cancelled.' };
+      return { success: false, error: error.message, code: (error && error.code) || null };
+    } finally {
+      jobs.delete(id);
+    }
+  });
+
   return { jobs };
 }
 
 module.exports = {
   register, copyDownload, vaultIo, isEncryptedFile, writeModel, readModel, metaOf, describe,
-  modelPath, safeId, safeSegment, ENCRYPT_MAX_DEFAULT
+  modelPath, safeId, safeSegment, ENCRYPT_MAX_DEFAULT,
+  resolveDownloadFiles, verifyDownload, verifySummary, sha1File, mediaKind
 };

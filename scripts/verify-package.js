@@ -88,12 +88,19 @@ const spotChecks = [
   { file: 'index.html',                       test: (s) => /^\s*<!DOCTYPE html/i.test(s),  want: '<!DOCTYPE html>' },
   { file: 'case-detail-with-analytics.html',  test: (s) => /^\s*<!DOCTYPE html/i.test(s),  want: '<!DOCTYPE html>' },
   // electron-main.js requires bt-main at startup — a missing file means the app never opens.
-  { file: path.join('modules', 'bittorrent', 'bt-main.js'),           test: (s) => /register/.test(s),          want: 'register()' },
+  { file: path.join('modules', 'bittorrent', 'bt-main.js'),           test: (s) => /register/.test(s) && /bt-verify/.test(s) && /bt-media-url/.test(s), want: 'register() + bt-media-url / bt-verify' },
   { file: path.join('modules', 'bittorrent', 'td-log-parser.js'),     test: (s) => /discoverLogs/.test(s),      want: 'discoverLogs' },
   { file: path.join('modules', 'bittorrent', 'td-model.js'),          test: (s) => /clientProfile/.test(s),     want: 'clientProfile' },
-  { file: path.join('modules', 'bittorrent', 'bittorrent-module.js'), test: (s) => /BitTorrentModule/.test(s),  want: 'BitTorrentModule' },
-  { file: path.join('modules', 'bittorrent', 'bittorrent-ui.js'),     test: (s) => /BitTorrentUI/.test(s),      want: 'BitTorrentUI' },
-  { file: path.join('modules', 'bittorrent', 'bittorrent-styles.css'), test: (s) => /\.btt-/.test(s),           want: '.btt- styles' },
+  { file: path.join('modules', 'bittorrent', 'bittorrent-module.js'), test: (s) => /BitTorrentModule/.test(s) && /verifyFiles/.test(s) && /exportSummaryPdf/.test(s) && /sendToWarrantAuthor/.test(s), want: 'BitTorrentModule + verifyFiles + report outputs' },
+  { file: path.join('modules', 'bittorrent', 'bt-report.js'),         test: (s) => /BtReport/.test(s) && /reportHtml/.test(s) && /reportBlocks/.test(s) && /pcParagraph/.test(s) && /hashCsv/.test(s), want: 'BtReport reportBlocks / reportHtml / pcParagraph / hashCsv' },
+  { file: path.join('modules', 'reports', 'blocks-docx.js'),          test: (s) => /buildDocx/.test(s) && /cleanText/.test(s), want: 'blocks-docx buildDocx (Word report from blocks)' },
+  { file: path.join('modules', 'bittorrent', 'bittorrent-ui.js'),     test: (s) => /BitTorrentUI/.test(s) && /openViewer/.test(s), want: 'BitTorrentUI + viewer' },
+  { file: path.join('modules', 'bittorrent', 'bittorrent-styles.css'), test: (s) => /\.btt-/.test(s) && /\.btt-tile\.blur/.test(s), want: '.btt- styles + blur' },
+  { file: path.join('modules', '_shared', 'evidence-view.js'),        test: (s) => /createEvidenceView/.test(s), want: 'createEvidenceView' },
+  { file: path.join('modules', '_shared', 'cdr-formats.js'),          test: (s) => /CdrFormats/.test(s) && /tmobileMapping/.test(s), want: 'CdrFormats.tmobileMapping' },
+  { file: path.join('modules', 'parser-submission', 'sample-builder.js'), test: (s) => /function inspectExcel/.test(s), want: 'inspectExcel (Scout Excel headers)' },
+  { file: path.join('modules', '_shared', 'video-playback.js'),       test: (s) => /createVideoPlayback/.test(s) && /locateFfmpeg/.test(s), want: 'createVideoPlayback' },
+  { file: path.join('modules', '_shared', 'legacy-video.js'),         test: (s) => /VpLegacyVideo/.test(s) && /warrantVideo/.test(s), want: 'VpLegacyVideo' },
 ];
 
 for (const { file, test, want } of spotChecks) {
@@ -120,6 +127,32 @@ if (fs.existsSync(unpackedDir)) {
   if (nodeFiles.length) pass('native modules present (' + nodeFiles.length + ' .node)');
   else fail('app.asar.unpacked exists but contains no .node binaries');
 }
+
+// 6. ffmpeg (old-format video playback + video thumbnails) ships via
+//    extraResources → resources\ffmpeg (an .exe cannot run from inside the
+//    asar) with its DLLs and LGPL notice, and must actually run.
+//    Missing → run scripts\fetch-ffmpeg.js.
+(function checkFfmpeg() {
+  const dir = path.join(unpackedIn, 'resources', 'ffmpeg');
+  const exe = path.join(dir, 'ffmpeg.exe');
+  if (!fs.existsSync(exe)) { fail('ffmpeg missing at ' + exe + ' — run: node scripts\\fetch-ffmpeg.js, then package again'); return; }
+  const dlls = fs.readdirSync(dir).filter(n => /\.dll$/i.test(n));
+  const need = ['avcodec', 'avformat', 'avutil', 'avfilter', 'swscale', 'swresample', 'avdevice'];
+  const missing = need.filter(p => !dlls.some(n => n.toLowerCase().startsWith(p + '-')));
+  if (missing.length) fail('ffmpeg DLLs missing: ' + missing.join(', '));
+  if (!fs.existsSync(path.join(dir, 'LICENSE')) || !fs.existsSync(path.join(dir, 'NOTICE'))) fail('ffmpeg LICENSE / NOTICE missing (LGPL notice must ship)');
+  try {
+    const cp = require('child_process');
+    const ver = cp.execFileSync(exe, ['-hide_banner', '-version'], { encoding: 'utf8', timeout: 20000 }).split(/\r?\n/)[0];
+    const enc = cp.execFileSync(exe, ['-hide_banner', '-encoders'], { encoding: 'utf8', timeout: 20000 });
+    const cfg = cp.execFileSync(exe, ['-hide_banner', '-buildconf'], { encoding: 'utf8', timeout: 20000 });
+    if (/--enable-gpl|--enable-nonfree/.test(cfg)) fail('ffmpeg is a GPL/nonfree build — VIPER ships LGPL only');
+    else if (!/\slibopenh264\s/.test(enc) || !/\saac\s/.test(enc)) fail('ffmpeg lacks the libopenh264 / aac encoders');
+    else pass('ffmpeg runs, LGPL (' + ver.replace(/ Copyright.*/, '') + ', ' + dlls.length + ' DLLs)');
+  } catch (e) {
+    fail('ffmpeg did not run: ' + e.message);
+  }
+})();
 
 console.log('');
 if (failures) {

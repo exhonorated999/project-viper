@@ -190,6 +190,17 @@ function createService(host) {
             return Store.listStores(caseDirOf(caseNumber));
         },
 
+        /**
+         * Path of one stored media file as it sits on disk (may be vault-
+         * encrypted), for the video playback-copy maker. null if not found.
+         */
+        mediaSource(caseNumber, storeKey, ref) {
+            const hit = Store.mediaPath(storeDirOf(caseNumber, storeKey), String(ref || ''));
+            if (!hit || !fs.existsSync(hit.path)) return null;
+            if (hit.entry.kind !== 'video' && hit.entry.kind !== 'audio') return null;
+            return hit.path;
+        },
+
         remove(caseNumber, storeKey) {
             if (inFlight.has(String(caseNumber))) throw new Error('Wait for the running import to finish.');
             const ok = Store.deleteStore(caseDirOf(caseNumber), storeKey);

@@ -223,7 +223,25 @@
                 '<div class="inline-flex rounded-lg border border-gray-600 overflow-hidden">' +
                     seg('viper', 'VIPER editor') + '<span class="w-px bg-gray-600"></span>' + seg('word', 'Microsoft Word') +
                 '</div>' +
+                (f === 'viper' ? '<span id="wrWordHint" class="text-xs text-viper-orange">' + wordHint() + '</span>' : '') +
             '</div>';
+    }
+
+    /**
+     * In the VIPER-editor view, Word reports other tabs saved into the case
+     * (e.g. the BitTorrent Download Summary) would otherwise be invisible.
+     */
+    function wordHint() {
+        var cn = caseNumber();
+        if (cn && state.loadedFor !== cn && !state.loading && api() && api().reportDocsList) { subscribe(); setTimeout(refresh, 0); }
+        var n = state.loadedFor === cn ? state.docs.length : 0;
+        return n ? '\uD83D\uDCDD ' + n + ' Word report' + (n === 1 ? '' : 's') + ' saved in this case \u2014 choose Microsoft Word to see ' + (n === 1 ? 'it' : 'them') + '.' : '';
+    }
+
+    /** Another tab added a Word report: re-read the list next time it is shown. */
+    function invalidate() {
+        state.loadedFor = null;
+        if (doc$('wrPanel') || doc$('wrWordHint')) refresh();
     }
 
     function disclaimerBox() {
@@ -338,6 +356,8 @@
     function repaint() {
         var p = doc$('wrPanel');
         if (p) p.innerHTML = panelInner();
+        var h = doc$('wrWordHint');
+        if (h && state.loadedFor === caseNumber()) h.innerHTML = wordHint();
     }
 
     // ── the small name dialog ────────────────────────────────────────────
@@ -595,6 +615,7 @@
         renderPanel: renderPanel,
         renderModeSwitch: renderModeSwitch,
         refresh: refresh,
+        invalidate: invalidate,
         act: act,
         htmlToText: htmlToText,
         // exposed for tests

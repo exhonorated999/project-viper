@@ -12,6 +12,7 @@
     <script src="modules/_shared/case-blobs.js"></script>
     <script src="modules/_shared/keep-focus.js"></script>
     <script src="modules/_shared/video-thumbs.js"></script>
+    <script src="modules/_shared/legacy-video.js"></script>
     <script src="modules/viper-ui.js"></script>
     <script src="modules/viper-prefs.js"></script>
     <script src="modules/datetime-format.js"></script>
@@ -65,6 +66,7 @@
     <script src="modules/connection-board/connection-board.js" defer></script>
     <link rel="stylesheet" href="modules/flock/flock-styles.css" />
     <script src="modules/flock/flock-xlsx.js" defer></script>
+    <script src="modules/_shared/cdr-formats.js" defer></script>
     <script src="modules/flock/flock-parser.js" defer></script>
     <!-- RMS: Arkansas state NIBRS Incident Report format (additive; the other
          RMS formats stay in the inline parseRmsReport dispatcher) -->
@@ -844,6 +846,7 @@
     <script src="modules/x-warrant/x-warrant-ui.js"></script>
     <link rel="stylesheet" href="modules/bittorrent/bittorrent-styles.css">
     <script src="modules/bittorrent/td-model.js"></script>
+    <script src="modules/bittorrent/bt-report.js"></script>
     <script src="modules/bittorrent/bittorrent-module.js"></script>
     <script src="modules/bittorrent/bittorrent-ui.js"></script>
     <script src="modules/discord-warrant/discord-warrant-module.js"></script>
@@ -1681,7 +1684,7 @@
                     discordWarrant:  hasArr(_ls(`discordWarrant_${caseId}`)),
                     snapchatWarrant: hasArr(_ls(`snapchatWarrant_${caseId}`)),
                     xWarrant:        hasArr(_ls(`xWarrant_${caseId}`)),
-                    bittorrent:      hasArr(_ls(`bittorrent_${caseId}`)),
+                    bittorrent:      hasArr((_ls(`bittorrent_${caseId}`) || {}).imports),
                     metaWarrant:     hasArr(_ls(`metaWarrant_${caseId}`))
                 };
 
@@ -7445,6 +7448,15 @@
                         </div>
                         <form id="noteFormEl" onsubmit="return saveNote(event);">
                             <div class="space-y-4">
+                                <!-- Title (optional) -->
+                                <div>
+                                    <label for="noteTitleInput" class="block text-sm font-medium text-gray-300 mb-2">Title (Optional)</label>
+                                    <input id="noteTitleInput" type="text" maxlength="${_noteTitleMax()}" spellcheck="true" autocomplete="off"
+                                        placeholder="e.g. Knock and talk at suspect residence"
+                                        onkeydown="if (event.key === 'Enter') { event.preventDefault(); const ed = document.getElementById('noteEditor'); if (ed) ed.focus(); }"
+                                        class="w-full px-4 py-2 bg-viper-card/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none transition-colors">
+                                </div>
+
                                 <!-- Rich Editor -->
                                 <div>
                                     <label class="block text-sm font-medium text-gray-300 mb-2">Note Content *</label>
@@ -7688,6 +7700,12 @@
 
             return favHtml + controls + groups.map(g => {
                 const open = !!_noteDaysExpanded[g.key];
+                // Titles of the notes in this day, so a collapsed day still
+                // says what is inside it. Untitled notes are skipped.
+                const dayTitles = g.items.filter(n => _provShow(n)).map(_noteTitleOf).filter(Boolean);
+                const titlesHtml = dayTitles.length
+                    ? `<span class="ml-3 text-sm text-gray-400 truncate" title="${_escapeAttr(dayTitles.join(' · '))}">${dayTitles.map(_escapeHtml).join('<span class="mx-1.5 text-gray-600">·</span>')}</span>`
+                    : '';
                 return `
                 <div class="rounded-xl border border-gray-700/60 bg-viper-card/25 overflow-hidden">
                     <button type="button" onclick="toggleNoteDay('${g.key}')"
@@ -7696,7 +7714,8 @@
                             <svg id="noteDayChevron-${g.key}" class="w-4 h-4 mr-2 text-viper-cyan flex-shrink-0 transition-transform" style="transform: rotate(${open ? 90 : 0}deg);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                             </svg>
-                            <span class="text-sm font-semibold text-gray-200 truncate">${g.label}</span>
+                            <span class="text-sm font-semibold text-gray-200 flex-shrink-0">${g.label}</span>
+                            ${titlesHtml}
                         </span>
                         <span class="ml-3 flex-shrink-0 px-2 py-0.5 rounded-full border border-viper-cyan/40 bg-viper-cyan/10 text-viper-cyan text-xs font-medium">
                             ${g.items.length} note${g.items.length === 1 ? '' : 's'}
@@ -7712,10 +7731,12 @@
         function _renderNoteCard(note, personIndex) {
             const html = _noteRenderHtml(note);
             const atts = _noteAttachmentList(note);
+            const title = _noteTitleOf(note);
             return `
             <div class="glass-card rounded-xl p-6 hover:border-viper-cyan/30 transition-colors" style="${_provAccent(note)}">
-                <div class="flex items-start justify-between mb-4">
-                    <div class="flex-1">
+                <div class="flex items-start justify-between ${title ? 'pb-4 mb-4 border-b border-gray-700/60' : 'mb-4'}">
+                    <div class="flex-1 min-w-0">
+                        ${title ? `<h3 class="text-xl font-bold text-white mb-3 break-words">${_escapeHtml(title)}</h3>` : ''}
                         <div class="flex items-center space-x-2 mb-2">
                             <svg class="w-4 h-4 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
@@ -7768,12 +7789,13 @@
             // init AFTER unhiding. Wait one frame so layout settles for focus().
             requestAnimationFrame(() => {
                 initializeNoteEditor('');
+                _noteSetTitleInput('');
                 renderNoteAttachmentsList();
                 _syncNoteAssignBoxes(null);
                 _noteMarkClean();
                 _noteStartAutosave();
-                const ed = document.getElementById('noteEditor');
-                if (ed) ed.focus();
+                const t = document.getElementById('noteTitleInput');
+                if (t) t.focus();
             });
         }
 
@@ -7804,6 +7826,7 @@
             const initialHtml = _noteResolveHtml(note);
             requestAnimationFrame(() => {
                 initializeNoteEditor(initialHtml);
+                _noteSetTitleInput(_noteTitleOf(note));
                 renderNoteAttachmentsList();
                 _syncNoteAssignBoxes(note);
                 _noteMarkClean();
@@ -7829,6 +7852,7 @@
             document.getElementById('noteForm').classList.add('hidden');
             const ed = document.getElementById('noteEditor');
             if (ed) ed.innerHTML = '';
+            _noteSetTitleInput('');
             const list = document.getElementById('noteAttachmentsList');
             if (list) list.innerHTML = '';
             const fileInput = document.getElementById('noteFile');
@@ -8265,6 +8289,33 @@
         const NOTE_AUTOSAVE_MS = 5 * 60 * 1000;
         let _noteAutosaveTimer = null;
         let _noteLastCommittedHtml = null;
+        let _noteLastCommittedTitle = '';
+
+        // ─── Optional note title ─────────────────────────────────────────
+        // Plain text on `note.title`, never markup. Absent (not '') when the
+        // officer leaves it blank, so old notes and untitled notes look the
+        // same to every reader. The DA export already headed each note with
+        // `n.title || 'Note N'`; this is what finally fills it in.
+        // Function declarations, not consts: renderCaseNotesTab can run
+        // before this part of the script has been evaluated.
+        function _noteTitleMax() { return 200; }
+        function _noteCleanTitle(s) {
+            return String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, _noteTitleMax());
+        }
+        function _noteTitleOf(note) { return note && typeof note.title === 'string' ? _noteCleanTitle(note.title) : ''; }
+        function _noteSetTitleInput(v) {
+            const t = document.getElementById('noteTitleInput');
+            if (t) t.value = v || '';
+        }
+        function _noteReadTitleInput() {
+            const t = document.getElementById('noteTitleInput');
+            return t ? _noteCleanTitle(t.value) : '';
+        }
+        /** Writes the title onto a note record; blank removes the field. */
+        function _noteApplyTitle(note, title) {
+            if (!note) return;
+            if (title) note.title = title; else delete note.title;
+        }
 
         function _noteFormIsOpen() {
             const form = document.getElementById('noteForm');
@@ -8282,6 +8333,7 @@
             const ed = document.getElementById('noteEditor');
             if (!ed) return false;
             if (pendingNoteAttachments.length > 0) return true;
+            if (_noteReadTitleInput() !== (_noteLastCommittedTitle || '')) return true;
             return ed.innerHTML.trim() !== (_noteLastCommittedHtml || '');
         }
 
@@ -8290,6 +8342,7 @@
         function _noteMarkClean() {
             const ed = document.getElementById('noteEditor');
             _noteLastCommittedHtml = ed ? ed.innerHTML.trim() : '';
+            _noteLastCommittedTitle = _noteReadTitleInput();
         }
 
         function _noteStartAutosave() {
@@ -8377,13 +8430,14 @@
             const contentHtml = editor.innerHTML.trim();
             const plainText = (editor.innerText || editor.textContent || '').trim();
             const assignments = _collectNoteAssignments();
+            const title = _noteReadTitleInput();
 
             const hasContent = plainText.length > 0
                 || /<img\b/i.test(contentHtml)
                 || pendingNoteAttachments.length > 0
                 || savedNoteAttachments.filter(a => !a.legacy).length > 0;
             if (!hasContent) {
-                notify('Note is empty — type something, paste a screenshot, or attach a file.', 'info');
+                notify(title ? 'Add some note content — a title on its own is not saved.' : 'Note is empty — type something, paste a screenshot, or attach a file.', 'info');
                 return { saved: false, reason: 'empty' };
             }
 
@@ -8462,6 +8516,7 @@
                 if (note) {
                     note.contentHtml = storedHtml;
                     delete note.content;
+                    _noteApplyTitle(note, title);
                     note.attachments = finalAttachments;
                     delete note.hasAttachment;
                     delete note.attachmentName;
@@ -8473,14 +8528,16 @@
             } else {
                 const createdAt = new Date().toISOString();
                 noteId = Date.now();
-                caseNotes.push({
+                const fresh = {
                     id: noteId,
                     contentHtml: storedHtml,
                     createdAt,
                     editHistory: [],
                     attachments: finalAttachments,
                     assignedTo: assignments || []
-                });
+                };
+                _noteApplyTitle(fresh, title);
+                caseNotes.push(fresh);
                 savedNoteCreatedAt = createdAt;
                 // See THE DUPLICATE TRAP above. The record exists from here
                 // on, so every later pass must update it, never insert.
@@ -8508,6 +8565,7 @@
             // The editor now matches what is on disk, so the next autosave
             // tick has nothing to do until the officer types again.
             _noteLastCommittedHtml = contentHtml;
+            _noteLastCommittedTitle = title;
 
             return { saved: true, noteId, createdAt: savedNoteCreatedAt };
         }
@@ -8658,6 +8716,22 @@
             allNotes[currentCase.caseNumber] = caseNotes;
             return _lsSetSafe('viperCaseNotes', JSON.stringify(allNotes), 'this note');
         }
+
+        // Other tabs file a ready-made note into Case Notes (BitTorrent → Send to Notes).
+        // caseNotes is a top-level `let`, so module scripts reach it only through this.
+        window.viperAddCaseNote = function (contentHtml, opts) {
+            if (!currentCase || !contentHtml) return { saved: false };
+            const before = caseNotes.slice();
+            const createdAt = new Date().toISOString();
+            const noteId = Date.now();
+            caseNotes.push({ id: noteId, contentHtml: String(contentHtml), createdAt, editHistory: [], attachments: [], assignedTo: [],
+                source: (opts && opts.source) ? String(opts.source) : undefined });
+            if (_persistCaseNotes() === false) { caseNotes = before; return { saved: false, reason: 'quota' }; }
+            try { _touchCaseActivity(); } catch (_) { /* non-fatal */ }
+            try { if (ensureCaseModule('notes') && typeof renderTabs === 'function') renderTabs(); } catch (_) { /* non-fatal */ }
+            try { _revealNoteDay(createdAt); } catch (_) { /* non-fatal */ }
+            return { saved: true, noteId };
+        };
 
         /** A person only gets a uid when something is actually filed against
          *  them, so merely opening a profile never rewrites the party list. */
@@ -8847,6 +8921,7 @@
                                             </button>
                                         </div>
                                     </div>
+                                    ${_noteTitleOf(n) ? `<div class="text-sm font-semibold text-white mb-1 break-words">${_escapeHtml(_noteTitleOf(n))}</div>` : ''}
                                     <div class="note-rendered text-gray-200 text-sm" style="line-height:1.6;">${_noteRenderHtml(n)}</div>
                                     ${_noteAttachmentList(n)}
                                 </div>
@@ -8884,6 +8959,10 @@
                     <div class="glass-card rounded-xl p-6 max-w-2xl w-full">
                         <h3 class="text-xl font-bold text-white mb-1">${_escapeHtml(title)}</h3>
                         <p class="text-xs text-gray-400 mb-4">Filed against <span class="text-viper-cyan">${_escapeHtml(who)}</span> &middot; saved to Case Notes</p>
+                        <input id="personNoteTitle" type="text" maxlength="${_noteTitleMax()}" spellcheck="true" autocomplete="off"
+                            value="${_escapeAttr(note ? _noteTitleOf(note) : '')}" placeholder="Title (optional)"
+                            onkeydown="if (event.key === 'Enter') { event.preventDefault(); document.getElementById('personNoteEditor').focus(); }"
+                            class="w-full mb-3 px-4 py-2 bg-viper-card/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:border-viper-cyan focus:ring-1 focus:ring-viper-cyan outline-none transition-colors">
                         <div class="glass-card rounded-lg overflow-hidden border border-gray-600 focus-within:border-viper-cyan transition-colors">
                             <div class="bg-viper-card/70 border-b border-gray-700 p-2 flex items-center gap-1">
                                 <button type="button" onclick="document.execCommand('bold', false, null); document.getElementById('personNoteEditor').focus();" title="Bold" class="p-2 rounded hover:bg-viper-cyan/20 text-gray-300 hover:text-viper-cyan w-9 h-9 flex items-center justify-center"><span class="font-bold text-sm">B</span></button>
@@ -8931,8 +9010,10 @@
 
             const contentHtml = ed.innerHTML.trim();
             const plain = (ed.innerText || ed.textContent || '').trim();
+            const titleEl = document.getElementById('personNoteTitle');
+            const title = _noteCleanTitle(titleEl ? titleEl.value : '');
             if (!plain && !/<img\b/i.test(contentHtml)) {
-                viperToast('Note is empty — type something first.', 'info');
+                viperToast(title ? 'Add some note content — a title on its own is not saved.' : 'Note is empty — type something first.', 'info');
                 return;
             }
 
@@ -8959,6 +9040,7 @@
                 if (note) {
                     note.contentHtml = storedHtml;
                     delete note.content;
+                    _noteApplyTitle(note, title);
                     note.editHistory = note.editHistory || [];
                     note.editHistory.push(new Date().toISOString());
                     const links = _noteAssignments(note);
@@ -8966,14 +9048,16 @@
                     note.assignedTo = links;
                 }
             } else {
-                caseNotes.push({
+                const fresh = {
                     id: Date.now(),
                     contentHtml: storedHtml,
                     createdAt: new Date().toISOString(),
                     editHistory: [],
                     attachments: [],
                     assignedTo: [link]
-                });
+                };
+                _noteApplyTitle(fresh, title);
+                caseNotes.push(fresh);
             }
 
             if (_persistCaseNotes() === false) { caseNotes = before; return; }
@@ -9187,7 +9271,15 @@
                 doc.setFontSize(11);
                 doc.setFont(undefined, 'bold');
                 doc.setTextColor(10, 14, 20);
-                doc.text(`Note ${sortedNotes.length - index}`, M + 2, yPos);
+                {
+                    // Title rides in the header bar; cut to one line so it
+                    // never spills out of the bar.
+                    const t = _noteTitleOf(note);
+                    let label = `Note ${sortedNotes.length - index}${t ? ': ' + t : ''}`;
+                    const fit = doc.splitTextToSize(label, 174);
+                    if (fit.length > 1) label = String(fit[0]).replace(/\s+\S*$/, '') + '...';
+                    doc.text(label, M + 2, yPos);
+                }
                 yPos += 10;
 
                 // Timestamps
@@ -11305,7 +11397,6 @@
             cancelEvidenceForm();
             ensureCaseModule('bittorrent');
             if (typeof renderTabs === 'function') renderTabs();
-            window.bitTorrentModule = null;
             renderTabContent('bittorrent');
             try {
                 await _evWaitFor(() => window.bitTorrentModule && window.bitTorrentModule.ui
@@ -12205,6 +12296,7 @@
         }
         
         async function viewEvidenceInline(evidenceId) {
+            _evFvTeardown();
             const evidence = caseEvidence.find(e => e.id === evidenceId);
             if (!evidence) { _persistOpenEvidence(null); return; }
 
@@ -12309,33 +12401,12 @@
                 return map[ext] || '';
             };
 
-            // Convert file paths to blob URLs for inline preview
-            for (const file of evidence.files) {
-                if (file.path && !file.path.startsWith('http') && !file.path.startsWith('data:') && !file.path.startsWith('blob:')) {
-                    const mime = file.type || mimeFromExt(file.name);
-                    const isViewable = mime && (
-                        mime.startsWith('audio/') || mime.startsWith('video/') ||
-                        mime.startsWith('image/') || mime === 'application/pdf' ||
-                        mime === 'text/html'
-                    );
-                    if (isViewable && window.electronAPI && window.electronAPI.readEvidenceFile) {
-                        try {
-                            const fileData = await window.electronAPI.readEvidenceFile(file.path);
-                            const blob = new Blob([new Uint8Array(fileData)], { type: mime });
-                            file.displayUrl = URL.createObjectURL(blob);
-                        } catch (error) {
-                            console.error('Error creating blob URL for', file.name, error);
-                            // Convert Windows path to file:// URL as fallback
-                            file.displayUrl = 'file:///' + file.path.replace(/\\/g, '/');
-                            file.loadError = error.message || 'Failed to read file';
-                        }
-                    } else {
-                        file.displayUrl = 'file:///' + file.path.replace(/\\/g, '/');
-                    }
-                }
-            }
-            
+            // Files are NOT read here any more. Reading every file up front
+            // (a 6,000-photo folder) filled the window's memory and crashed
+            // it; each card now loads its own file when it scrolls into view.
+            _evFvStart(evidence);
             viewerContent.innerHTML = renderEvidenceFiles(evidence);
+            _evFvAfterRender();
             // ZIPs list their contents after the panel is on screen; the
             // listing can take a moment on a large or encrypted ZIP.
             _hydrateEvidenceZipPanels(evidence);
@@ -14246,7 +14317,543 @@
                 : `<div class="my-2"><audio controls preload="metadata" class="w-full" ${_S}="${url}"></audio></div>`;
         }
 
+        // ── evidence-fv (start) ──
+        // Evidence tab file list for big folders. An officer filed a 5,993-
+        // file folder; VIPER read every file into the window before showing
+        // anything, then drew every photo full size — it crashed while he
+        // scrolled. Now files are paged and each card's media loads only
+        // while it is on screen:
+        //   Full size   50 cards a page; images / video / audio stream from
+        //               disk (viper-media://) and are let go off screen.
+        //   Thumbnails  240 tiles a page; small JPEGs made in the main
+        //               process (evidence-thumb). Default at 100+ images.
+        // Main side: modules/_shared/evidence-view.js.
+        const EV_FV_LIST_PAGE = 50;
+        const EV_FV_GRID_PAGE = 240;
+        const EV_FV_GRID_MIN_IMAGES = 100;
+        const EV_FV_THUMB_JOBS = 3;
+        const EV_FV_THUMB_CACHE = 2000;
+        const EV_FV_EXT = {
+            pdf: ['pdf'], zip: ['zip'],
+            image: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'heic', 'heif', 'tiff', 'tif', 'svg'],
+            video: ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv', 'flv', 'm4v', 'wmv', 'ogv', 'f4v', 'asf', 'mpg', 'mpeg', 'mpe', 'm1v', 'm2v', 'vob',
+                '3gp', '3g2', 'ts', 'mts', 'm2ts', 'divx', 'rm', 'rmvb', 'ogm', 'dv', 'mxf'],
+            audio: ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'wma'],
+            html: ['html', 'htm']
+        };
+        // The window cannot decode these at all: they play through a copy that
+        // main converts with ffmpeg (modules/_shared/video-playback.js).
+        const EV_FV_LEGACY_VIDEO = ['avi', 'flv', 'f4v', 'wmv', 'asf', 'mpg', 'mpeg', 'mpe', 'm1v', 'm2v', 'vob',
+            '3gp', '3g2', 'ts', 'mts', 'm2ts', 'divx', 'rm', 'rmvb', 'ogm', 'dv', 'mxf'];
+        const EV_FV_MIME = {
+            jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp',
+            svg: 'image/svg+xml', tif: 'image/tiff', tiff: 'image/tiff', heic: 'image/heic', heif: 'image/heif',
+            mp4: 'video/mp4', webm: 'video/webm', ogg: 'video/ogg', mov: 'video/quicktime', m4v: 'video/x-m4v',
+            mkv: 'video/x-matroska', avi: 'video/x-msvideo', wmv: 'video/x-ms-wmv', flv: 'video/x-flv',
+            mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', aac: 'audio/aac', flac: 'audio/flac', wma: 'audio/x-ms-wma',
+            pdf: 'application/pdf', html: 'text/html', htm: 'text/html'
+        };
+        const EV_FV_ICON = { pdf: '📄', zip: '📦', image: '🖼️', video: '🎞️', audio: '🔊', html: '🗂', other: '📎' };
+        const EV_FV_SLOT_H = { pdf: 800, image: 400, video: 320, audio: 54, html: 800 };
+        // What the bytes really were (evidence-view.js sniff) → plain English.
+        const EV_FV_SNIFF = {
+            zeros: ['Blank file', 'This file is blank inside (all zero bytes) — usually a download that never finished.'],
+            empty: ['Empty file', 'This file is empty (0 bytes).'],
+            'jpeg-truncated': ['Cut-off JPEG', 'This JPEG stops part-way — usually a partial or interrupted download. Open Externally may show the part that exists.'],
+            heic: ['HEIC photo', 'This is really an Apple HEIC photo. VIPER cannot show HEIC inside the app — use Open Externally.'],
+            avif: ['AVIF image', 'This is really an AVIF image, which VIPER cannot show inside the app — use Open Externally.'],
+            tiff: ['TIFF image', 'This is a TIFF image, which VIPER cannot show inside the app — use Open Externally.'],
+            mp4: ['Really a video', 'This file is really a video, not a photo — use Open Externally.'],
+            pdf: ['Really a PDF', 'This file is really a PDF, not a photo — use Open Externally.'],
+            zip: ['Really a ZIP', 'This file is really a ZIP or Office document, not a photo — use Open Externally.'],
+            unknown: ['Not an image', 'This does not look like an image file — it may be damaged, or encrypted by another program.'],
+            'blank-tail': ['Partial download', 'The end of this file is blank — an unfinished download. Only part of the picture exists; the rest shows as grey or black.']
+        };
+        function _evFvNoteHtml(note) {
+            const m = note && EV_FV_SNIFF[note];
+            return m ? `<p class="ev-fv-note text-xs text-viper-orange mt-2">⚠ ${_evEsc(m[1])}</p>` : '';
+        }
+        var _evFv = null;      // var: viewEvidenceInline (above) calls _evFvTeardown
+        var _evFvGen = 0;
+
+        function _evFvExt(file) {
+            const m = /\.([^.\\/]+)$/.exec(String((file && (file.name || file.path)) || ''));
+            return m ? m[1].toLowerCase() : '';
+        }
+        function _evFvKind(file) {
+            const x = _evFvExt(file);
+            for (const k of ['pdf', 'zip', 'image', 'video', 'audio', 'html']) if (EV_FV_EXT[k].includes(x)) return k;
+            return 'other';
+        }
+        // Web / data URLs show as-is. Saved blob: URLs are stale after a restart,
+        // and file:/// is blocked — local files always go through main.
+        function _evFvDirectUrl(file) {
+            for (const u of [file && file.url, file && file.path]) {
+                if (typeof u === 'string' && /^(https?:|data:)/i.test(u)) return u;
+            }
+            return '';
+        }
+        function _evFvPlan(files) {
+            const list = Array.isArray(files) ? files : [];
+            let images = 0, videos = 0;
+            for (const f of list) {
+                const k = _evFvKind(f);
+                if (k === 'image') images++;
+                else if (k === 'video') videos++;
+            }
+            // Videos get frame thumbnails too, so a folder of 159 videos is a grid.
+            return { images, videos, mode: images + videos >= EV_FV_GRID_MIN_IMAGES ? 'grid' : 'list' };
+        }
+        function _evFvStart(evidence) {
+            _evFvTeardown();
+            const plan = _evFvPlan(evidence && evidence.files);
+            _evFv = {
+                gen: ++_evFvGen, evidence, page: 0, mode: plan.mode, images: plan.images, videos: plan.videos,
+                blur: typeof _evZipIsCsam === 'function' && _evZipIsCsam(evidence),
+                observer: null, blobs: new Set(), thumbs: new Map(), queue: [], jobs: 0, lightbox: -1,
+                converted: new Set()   // file paths main already has a playback copy of
+            };
+        }
+        function _evFvTeardown() {
+            if (document.getElementById('evFvLightbox')) _evFvClose();
+            if (!_evFv) return;
+            if (_evFv.observer) _evFv.observer.disconnect();
+            _evFv.blobs.forEach(u => { try { URL.revokeObjectURL(u); } catch (_) {} });
+            _evFv.blobs.clear();
+            _evFv.thumbs.clear();
+            _evFv.queue = [];
+            _evFv = null;
+        }
+        function _evFvFiles() { return (_evFv && Array.isArray(_evFv.evidence.files)) ? _evFv.evidence.files : []; }
+        function _evFvPageSize() { return _evFv && _evFv.mode === 'grid' ? EV_FV_GRID_PAGE : EV_FV_LIST_PAGE; }
+        function _evFvPageCount() { return Math.max(1, Math.ceil(_evFvFiles().length / _evFvPageSize())); }
+
+        function _evFvToolbarHtml() {
+            if (!_evFv) return '';
+            const n = _evFvFiles().length;
+            if (n <= 6 && _evFv.mode === 'list') return '';   // small items look as they always did
+            const btn = (mode, label) => `<button type="button" onclick="_evFvSetMode('${mode}')" class="px-3 py-1 rounded text-xs border ${_evFv.mode === mode ? 'bg-viper-cyan/20 text-viper-cyan border-viper-cyan/40' : 'bg-viper-dark text-gray-400 border-white/10 hover:text-white'}">${label}</button>`;
+            return `<div id="evFvToolbar" class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2">${btn('grid', '▦ Thumbnails')}${btn('list', '☰ Full size')}</div>
+                <div class="text-xs text-gray-500">${n.toLocaleString()} file${n !== 1 ? 's' : ''}${_evFv.images ? ' · ' + _evFv.images.toLocaleString() + ' image' + (_evFv.images !== 1 ? 's' : '') : ''}${_evFv.videos ? ' · ' + _evFv.videos.toLocaleString() + ' video' + (_evFv.videos !== 1 ? 's' : '') : ''}${_evFv.blur ? ' · thumbnails blurred' : ''}</div>
+            </div>`;
+        }
+        function _evFvPagerHtml() {
+            const pages = _evFvPageCount();
+            if (pages <= 1) return '';
+            const size = _evFvPageSize(), p = _evFv.page, n = _evFvFiles().length;
+            const from = p * size + 1, to = Math.min(n, (p + 1) * size);
+            let opts = '';
+            for (let i = 0; i < pages; i++) opts += `<option value="${i}"${i === p ? ' selected' : ''}>Page ${i + 1}</option>`;
+            const nav = (d, label, off) => `<button type="button" ${off ? 'disabled' : ''} onclick="_evFvGoto(${p + d})" class="px-3 py-1 rounded text-xs border border-white/10 ${off ? 'text-gray-600 cursor-not-allowed' : 'text-gray-300 hover:text-white hover:bg-white/5'}">${label}</button>`;
+            return `<div class="flex flex-wrap items-center justify-center gap-2 py-2 text-xs text-gray-400">
+                ${nav(-1, '‹ Prev', p === 0)}
+                <select onchange="_evFvGoto(+this.value)" style="background:#111318;color:#d1d5db;color-scheme:dark" class="bg-viper-dark border border-white/10 rounded px-2 py-1 text-xs text-gray-300">${opts}</select>
+                <span>of ${pages} · files ${from.toLocaleString()}–${to.toLocaleString()} of ${n.toLocaleString()}</span>
+                ${nav(1, 'Next ›', p >= pages - 1)}
+            </div>`;
+        }
+        function _evFvBodyHtml() {
+            if (!_evFv) return '';
+            const ev = _evFv.evidence, files = _evFvFiles();
+            const size = _evFvPageSize(), start = _evFv.page * size, end = Math.min(files.length, start + size);
+            let body = '';
+            if (_evFv.mode === 'grid') {
+                for (let i = start; i < end; i++) body += _evFvTileHtml(files[i], i);
+                body = `<div class="ev-fv-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;">${body}</div>`;
+            } else {
+                for (let i = start; i < end; i++) body += _evFileCard(ev, files[i], i);
+                body = `<div class="space-y-4">${body}</div>`;
+            }
+            const pager = _evFvPagerHtml();
+            return pager + body + pager;
+        }
+        function _evFvTileHtml(file, i) {
+            const kind = _evFvKind(file);
+            const name = _evEsc(file.name || '');
+            const thumb = (kind === 'image' && !!(file.path || _evFvDirectUrl(file))) || (kind === 'video' && !!file.path);
+            return `<button type="button" onclick="_evFvOpen(${i})" title="${name}" class="ev-fv-tile glass-card rounded overflow-hidden text-left hover:ring-2 hover:ring-viper-cyan/50 focus:outline-none focus:ring-2 focus:ring-viper-cyan">
+                <div class="ev-fv-thumb" data-ev-i="${i}" data-ev-kind="${thumb ? 'thumb' : 'icon'}" style="position:relative;height:140px;display:flex;align-items:center;justify-content:center;background:#000;overflow:hidden;">
+                    <span class="text-3xl opacity-60">${EV_FV_ICON[kind]}</span>
+                </div>
+                <div class="px-2 pt-1 text-[11px] text-gray-300 truncate">${name}</div>
+                <div class="px-2 pb-1 text-[10px] text-gray-500">${formatFileSize(file.size)}</div>
+            </button>`;
+        }
+
+        function _evFvSlotHtml(kind, directUrl, file, index) {
+            if (directUrl) return _evFvMediaHtml(kind, directUrl, file);
+            if (!file.path) return `<div class="text-center text-sm text-gray-500 py-6">No file on disk for this entry.</div>`;
+            return `<div class="ev-fv-media" data-ev-i="${index}" data-ev-kind="${kind}" style="min-height:${EV_FV_SLOT_H[kind]}px;">${_evFvWaitHtml(kind)}</div>`;
+        }
+        function _evFvWaitHtml(kind) {
+            return `<div class="flex items-center justify-center text-xs text-gray-600 rounded ${kind === 'audio' ? '' : 'bg-black/40'}" style="min-height:${EV_FV_SLOT_H[kind]}px;">Loading…</div>`;
+        }
+        // No type= on <source>: a guessed type Chromium dislikes (video/quicktime)
+        // makes it skip the source; without one it sniffs the stream itself.
+        function _evFvMediaHtml(kind, url, file) {
+            const u = _evEsc(url), x = _evFvExt(file), name = _evEsc(file.name || '');
+            if (kind === 'pdf') return `<div class="bg-white rounded overflow-hidden"><iframe ${_S}="${u}" class="w-full" style="height: 800px;" frameborder="0"></iframe></div>`;
+            if (kind === 'image') return `<div class="bg-black rounded flex items-center justify-center p-4 min-h-[400px]"><img ${_S}="${u}" alt="${name}" decoding="async" class="max-w-full max-h-[600px] object-contain" onerror="_evFvImgError(this)"></div>`;
+            if (kind === 'video') return `<div class="bg-black rounded overflow-hidden"><video controls class="w-full" preload="metadata" style="max-height: 600px;" onloadedmetadata="_evFvVideoMeta(this)"><source ${_S}="${u}" onerror="_evFvVideoFail(this)"><p class="text-center text-gray-400 p-8">Video format: ${x.toUpperCase()}<br>Click "Open Externally" to view in your media player</p></video></div>`;
+            if (kind === 'audio') return `<audio controls class="w-full" preload="metadata"><source ${_S}="${u}">Your browser does not support this audio format.</audio>`;
+            if (kind === 'html') return `<div class="bg-white rounded overflow-auto border border-white/10" style="max-height: 800px;"><iframe ${_S}="${u}" sandbox="allow-same-origin" frameborder="0" scrolling="auto" onload="try{this.contentWindow.scrollTo(0,0);}catch(e){} try{_wireHtmlPreviewLinks(this);}catch(e){}" style="width: 100%; min-width: 1400px; height: 800px; background: white; display: block; border: 0;"></iframe></div>`;
+            return '';
+        }
+        // ── Old video formats: play a converted copy ──
+        // FLV / AVI / WMV / MPG / 3GP … never play in the window; an MP4 / MOV
+        // can hold codecs it cannot decode either. Main makes a playback copy
+        // with ffmpeg (video-playback-url); the original is only read.
+        var _evFvConvSeq = 0;
+        const _evFvConvJobs = new Map();   // jobId → message element
+        let _evFvConvOff = null;
+        function _evFvIsLegacyVideo(file) { return EV_FV_LEGACY_VIDEO.includes(_evFvExt(file)); }
+        function _evFvCanConvert() { return !!(window.electronAPI && window.electronAPI.videoPlaybackUrl); }
+        function _evFvConvertHtml(file, why) {
+            const x = _evEsc(_evFvExt(file).toUpperCase());
+            const msg = why || `${x} video — VIPER makes a playback copy first. The original file is not changed.`;
+            return `<div class="ev-fv-conv bg-black rounded flex flex-col items-center justify-center text-center p-4" style="min-height:${EV_FV_SLOT_H.video}px;">
+                <img class="ev-fv-poster rounded" alt="" style="display:none;max-height:220px;max-width:100%;object-fit:contain;${_evFv && _evFv.blur ? 'filter:blur(14px);' : ''}">
+                <button type="button" onclick="_evFvConvert(this, true)" class="ev-fv-conv-btn mt-3 px-4 py-2 rounded text-sm bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/40 hover:bg-viper-cyan/30">▶ Play in VIPER</button>
+                <p class="ev-fv-conv-msg text-xs text-gray-500 mt-2">${msg}</p>
+            </div>`;
+        }
+        function _evFvPlayerHtml(url, res, autoplay) {
+            const how = res.mode === 'remux' || (res.mode === 'cached' && res.format === 'webm') ? 'repackaged' : 'converted';
+            return `<div class="bg-black rounded overflow-hidden"><video controls ${autoplay ? 'autoplay' : ''} class="w-full" preload="metadata" style="max-height: 600px;"><source ${_S}="${_evEsc(url)}"></video></div>
+                <p class="text-xs text-gray-500 mt-1">Playing a VIPER playback copy (${_evEsc(String(res.from || '').toUpperCase())} ${how} to ${_evEsc(String(res.format || 'mp4').toUpperCase())}). The original evidence file is unchanged — Open Externally plays the original.</p>`;
+        }
+        async function _evFvPoster(slot, file) {
+            const api = window.electronAPI || {};
+            if (!api.evidenceThumb || !file.path) return;
+            let res = _evFv && _evFv.thumbs.get(file.path);
+            if (!res) {
+                try { res = await api.evidenceThumb({ filePath: file.path, size: 512 }); } catch (_) { return; }
+            }
+            const img = slot.isConnected && slot.querySelector('.ev-fv-poster');
+            if (img && res && res.success) { img.src = res.dataUrl; img.style.display = ''; }
+        }
+        async function _evFvConvert(btn, autoplay) {
+            const slot = btn && btn.closest('.ev-fv-media');
+            if (!slot || !_evFv) return;
+            const file = _evFvFiles()[+slot.dataset.evI];
+            if (!file || !file.path) return;
+            const api = window.electronAPI || {};
+            if (!api.videoPlaybackUrl) { slot.innerHTML = _evFvProblemHtml({ error: 'Restart VIPER to finish this update.' }, file); return; }
+            const fv = _evFv;
+            const jobId = 'ev' + (++_evFvConvSeq);
+            const msg = slot.querySelector('.ev-fv-conv-msg');
+            const b = slot.querySelector('.ev-fv-conv-btn');
+            if (b) { b.disabled = true; b.textContent = 'Preparing…'; }
+            if (msg) { msg.textContent = 'Getting this video ready…'; _evFvConvJobs.set(jobId, msg); }
+            if (!_evFvConvOff && api.onVideoPlaybackProgress) {
+                _evFvConvOff = api.onVideoPlaybackProgress((p) => {
+                    const el = p && _evFvConvJobs.get(p.jobId);
+                    if (el && el.isConnected) el.textContent = (p.stage === 'remux' ? 'Repackaging' : 'Converting') + ' for playback… ' + (p.pct | 0) + '%';
+                });
+            }
+            slot._evConvJob = jobId;
+            let res;
+            try { res = await api.videoPlaybackUrl({ filePath: file.path, jobId }); }
+            catch (e) { res = { success: false, error: (e && e.message) || String(e) }; }
+            _evFvConvJobs.delete(jobId);
+            if (res && res.success && fv) fv.converted.add(file.path);
+            if (slot._evConvJob !== jobId) return;
+            slot._evConvJob = null;
+            if (!slot.isConnected || _evFv !== fv) return;
+            slot.dataset.evState = res && res.success ? 'on' : 'error';
+            slot.innerHTML = res && res.success ? _evFvPlayerHtml(res.url, res, autoplay) : _evFvProblemHtml(res, file);
+        }
+        // A video the window cannot open at all (codec inside an MP4 / MOV / MKV).
+        function _evFvVideoFail(src) {
+            const slot = src && src.closest('.ev-fv-media');
+            if (!slot || !_evFvCanConvert()) return;
+            const file = _evFvFiles()[+slot.dataset.evI];
+            if (!file || !file.path) return;
+            slot.innerHTML = _evFvConvertHtml(file, `VIPER's player cannot decode the video inside this ${_evEsc(_evFvExt(file).toUpperCase())} file — VIPER can make a playback copy. The original file is not changed.`);
+            _evFvPoster(slot, file);
+        }
+        // Opens, but no picture (e.g. HEVC or MPEG-4 Part 2 inside an MP4).
+        function _evFvVideoMeta(v) {
+            if (!v || v.videoWidth > 0 || !_evFvCanConvert()) return;
+            const box = v.parentElement;
+            if (!box || !box.parentElement || box.parentElement.querySelector('.ev-fv-conv-hint')) return;
+            box.insertAdjacentHTML('afterend', `<p class="ev-fv-conv-hint text-xs text-gray-400 mt-1">No picture? <button type="button" onclick="_evFvVideoFail(this)" class="text-viper-cyan hover:underline">▶ Play a converted copy</button></p>`);
+        }
+        function _evFvExplain(res, ext) {
+            if (!res) return 'VIPER could not display this file.';
+            if (res.locked || res.reason === 'locked') return 'This file is protected by Field Security. Unlock Field Security to view it.';
+            if (res.reason === 'too-large') return 'This image is too large to make a thumbnail — open it to view.';
+            if (res.sniff && EV_FV_SNIFF[res.sniff]) return EV_FV_SNIFF[res.sniff][1];
+            if (res.error) return res.error;
+            if (['heic', 'heif', 'tif', 'tiff'].includes(ext)) return 'VIPER cannot show ' + ext.toUpperCase() + ' images inside the app — use Open Externally.';
+            return 'VIPER could not display this image.';
+        }
+        function _evFvShort(res) {
+            if (!res) return 'No preview';
+            if (res.locked || res.reason === 'locked') return 'Locked';
+            if (res.reason === 'too-large') return 'Too large';
+            if (res.sniff && EV_FV_SNIFF[res.sniff]) return EV_FV_SNIFF[res.sniff][0];
+            return 'No preview';
+        }
+        function _evFvProblemHtml(res, file) {
+            return `<div class="text-center p-6 rounded bg-viper-orange/5 border border-viper-orange/20">
+                <p class="text-viper-orange text-sm">⚠ ${_evEsc(_evFvExplain(res, _evFvExt(file)))}</p>
+                <p class="text-xs text-gray-500 mt-2">Use "Open Externally" to try another program.</p>
+            </div>`;
+        }
+        // A full-size image that will not draw: ask main what the bytes really
+        // are (a ".jpg" that is a cut-off download, a HEIC, all zeros…).
+        async function _evFvImgError(img) {
+            const box = img && img.parentElement;
+            if (!box) return;
+            const slot = img.closest('.ev-fv-media');
+            const file = slot && _evFvFiles()[+slot.dataset.evI];
+            box.innerHTML = '<div class="text-center text-sm text-gray-500">Checking this file…</div>';
+            let res = null;
+            if (file && file.path && window.electronAPI && window.electronAPI.evidenceThumb) {
+                try { res = await window.electronAPI.evidenceThumb({ filePath: file.path, size: 512 }); } catch (_) {}
+            }
+            if (!box.isConnected) return;
+            if (res && res.success) {
+                box.innerHTML = `<div class="text-center"><img ${_S}="${_evEsc(res.dataUrl)}" alt="" class="max-w-full object-contain mx-auto"><p class="text-xs text-gray-500 mt-2">Shown as a small preview — the full-size image could not be drawn.</p></div>`;
+            } else {
+                box.innerHTML = _evFvProblemHtml(res, file || {});
+            }
+        }
+
+        function _evFvScrollRoot(el) {
+            for (let p = el && el.parentElement; p && p !== document.body; p = p.parentElement) {
+                const oy = getComputedStyle(p).overflowY;
+                if (oy === 'auto' || oy === 'scroll') return p;
+            }
+            return null;
+        }
+        function _evFvAfterRender() {
+            if (!_evFv) return;
+            const body = document.getElementById('evFvBody');
+            if (!body) return;
+            if (_evFv.observer) _evFv.observer.disconnect();
+            _evFv.queue = [];
+            const gen = _evFv.gen;
+            _evFv.observer = new IntersectionObserver((entries) => {
+                if (!_evFv || _evFv.gen !== gen) return;
+                for (const en of entries) {
+                    const el = en.target;
+                    el._evVisible = en.isIntersecting;
+                    if (el.classList.contains('ev-fv-thumb')) { if (en.isIntersecting) _evFvQueueThumb(el); }
+                    else if (en.isIntersecting) _evFvHydrate(el);
+                    else _evFvDehydrate(el);
+                }
+            }, { root: _evFvScrollRoot(body), rootMargin: '600px 0px' });
+            body.querySelectorAll('.ev-fv-media, .ev-fv-thumb[data-ev-kind="thumb"]').forEach(el => _evFv.observer.observe(el));
+        }
+        function _evFvRelease(root) {
+            if (root) root.querySelectorAll('.ev-fv-media').forEach(el => _evFvDehydrate(el, true));
+        }
+        function _evFvGoto(page) {
+            if (!_evFv) return;
+            const body = document.getElementById('evFvBody');
+            if (!body) return;
+            _evFvRelease(body);
+            _evFv.page = Math.max(0, Math.min(_evFvPageCount() - 1, page | 0));
+            body.innerHTML = _evFvBodyHtml();
+            _evFvAfterRender();
+            _hydrateEvidenceZipPanels(_evFv.evidence);
+            try { body.scrollIntoView({ block: 'start' }); } catch (_) {}
+        }
+        function _evFvSetMode(mode) {
+            if (!_evFv || _evFv.mode === mode) return;
+            const first = _evFv.page * _evFvPageSize();   // keep the same files in view
+            _evFv.mode = mode;
+            const tb = document.getElementById('evFvToolbar');
+            if (tb) tb.outerHTML = _evFvToolbarHtml();
+            _evFvGoto(Math.floor(first / _evFvPageSize()));
+        }
+
+        async function _evFvHydrate(slot) {
+            const st = slot.dataset.evState;
+            if (!_evFv || st === 'on' || st === 'loading' || st === 'error') return;
+            const file = _evFvFiles()[+slot.dataset.evI];
+            const kind = slot.dataset.evKind;
+            if (!file || !file.path) return;
+            // Old formats skip the original: show the poster + Play button (or,
+            // if main already made the copy this session, the player).
+            if (kind === 'video' && _evFvIsLegacyVideo(file) && _evFvCanConvert()) {
+                slot.dataset.evState = 'on';
+                slot.innerHTML = _evFvConvertHtml(file);
+                if (_evFv.converted.has(file.path)) _evFvConvert(slot.querySelector('.ev-fv-conv-btn'), false);
+                else _evFvPoster(slot, file);
+                return;
+            }
+            const req = slot._evReq = (slot._evReq || 0) + 1;
+            slot.dataset.evState = 'loading';
+            let res;
+            try {
+                res = (window.electronAPI && window.electronAPI.evidenceMediaUrl)
+                    ? await window.electronAPI.evidenceMediaUrl({ filePath: file.path })
+                    : { success: false, error: 'Restart VIPER to finish this update.' };
+            } catch (e) {
+                res = { success: false, error: (e && e.message) || String(e) };
+            }
+            if (slot._evReq !== req || !slot.isConnected || slot.dataset.evState !== 'loading' || !_evFv) return;
+            if (!res || !res.success) {
+                slot.dataset.evState = 'error';
+                slot.innerHTML = _evFvProblemHtml(res, file);
+                return;
+            }
+            let url = res.url;
+            if (res.bytes) {
+                url = URL.createObjectURL(new Blob([res.bytes], { type: EV_FV_MIME[_evFvExt(file)] || file.type || 'application/octet-stream' }));
+                slot._evBlob = url;
+                _evFv.blobs.add(url);
+            }
+            slot.dataset.evState = 'on';
+            slot.innerHTML = _evFvMediaHtml(kind, url, file) + _evFvNoteHtml(res.note);
+        }
+        function _evFvDehydrate(slot, force) {
+            const st = slot.dataset.evState;
+            if (st === 'loading') { slot.dataset.evState = ''; slot._evReq = (slot._evReq || 0) + 1; return; }
+            if (st !== 'on') return;
+            if (!force) {
+                if (slot._evConvJob) return;                      // converting — keep its progress
+                const m = slot.querySelector('video, audio');
+                if (m && !m.paused) return;                       // keep playing media
+                if (slot.dataset.evKind === 'audio') return;      // tiny; keep its place
+                slot.style.minHeight = slot.offsetHeight + 'px';  // no scroll jump
+            }
+            if (slot._evBlob) {
+                try { URL.revokeObjectURL(slot._evBlob); } catch (_) {}
+                if (_evFv) _evFv.blobs.delete(slot._evBlob);
+                slot._evBlob = null;
+            }
+            slot.dataset.evState = '';
+            slot._evConvJob = null;
+            slot.innerHTML = _evFvWaitHtml(slot.dataset.evKind);
+        }
+
+        function _evFvQueueThumb(el) {
+            if (!_evFv || el._evThumbQueued || el.dataset.evDone) return;
+            const file = _evFvFiles()[+el.dataset.evI];
+            if (!file) return;
+            const hit = _evFv.thumbs.get(file.path || _evFvDirectUrl(file));
+            if (hit) { _evFvPaintThumb(el, hit, file); return; }
+            el._evThumbQueued = true;
+            _evFv.queue.push(el);
+            _evFvPump();
+        }
+        function _evFvPump() {
+            const fv = _evFv;
+            while (fv && fv.jobs < EV_FV_THUMB_JOBS && fv.queue.length) {
+                const el = fv.queue.pop();                 // newest first: what is on screen now
+                el._evThumbQueued = false;
+                if (!el.isConnected || !el._evVisible || el.dataset.evDone) continue;
+                fv.jobs++;
+                _evFvMakeThumb(el, fv).finally(() => { fv.jobs--; if (_evFv === fv) _evFvPump(); });
+            }
+        }
+        async function _evFvMakeThumb(el, fv) {
+            const file = fv.evidence.files[+el.dataset.evI];
+            const direct = _evFvKind(file) === 'image' ? _evFvDirectUrl(file) : '';
+            const api = window.electronAPI || {};
+            let res;
+            if (direct) {
+                res = { success: true, dataUrl: direct };
+            } else {
+                try {
+                    res = api.evidenceThumb ? await api.evidenceThumb({ filePath: file.path, size: 320 })
+                        : { success: false, reason: 'error', error: 'Restart VIPER to finish this update.' };
+                } catch (e) {
+                    res = { success: false, reason: 'error', error: (e && e.message) || String(e) };
+                }
+                // GIF / WebP / SVG / BMP that nativeImage cannot decode but the
+                // window can: show the (small) file itself.
+                if (res && !res.success && res.reason === 'undecodable' && ['gif', 'webp', 'svg', 'bmp'].includes(_evFvExt(file))
+                    && !['zeros', 'empty', 'unknown'].includes(res.sniff) && (file.size || 0) <= 8 * 1024 * 1024 && api.evidenceMediaUrl) {
+                    try {
+                        const m = await api.evidenceMediaUrl({ filePath: file.path });
+                        if (m && m.success && m.url) res = { success: true, dataUrl: m.url };
+                    } catch (_) {}
+                }
+            }
+            if (_evFv !== fv) return;
+            if (res && res.reason !== 'error') {
+                if (fv.thumbs.size >= EV_FV_THUMB_CACHE) fv.thumbs.delete(fv.thumbs.keys().next().value);
+                fv.thumbs.set(file.path || direct, res);
+            }
+            if (el.isConnected) _evFvPaintThumb(el, res, file);
+        }
+        function _evFvPaintThumb(el, res, file) {
+            el.dataset.evDone = '1';
+            const vid = _evFvKind(file) === 'video';
+            if (res && res.success) {
+                el.innerHTML = `<img ${_S}="${_evEsc(res.dataUrl)}" alt="" decoding="async" draggable="false" style="width:100%;height:100%;object-fit:cover;${_evFv && _evFv.blur ? 'filter:blur(14px);' : ''}">`
+                    + (vid ? `<div class="ev-fv-play" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:34px;height:34px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;pointer-events:none">▶</div>`
+                        + `<div style="position:absolute;right:4px;bottom:4px;font-size:10px;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,.75);color:#d1d5db">${_evEsc(_evFvExt(file).toUpperCase())}</div>` : '')
+                    + (res.note && EV_FV_SNIFF[res.note] ? `<div class="ev-fv-badge" style="position:absolute;left:4px;bottom:4px;font-size:10px;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,.75);color:#fb923c">⚠ ${_evEsc(EV_FV_SNIFF[res.note][0])}</div>` : '');
+                el.title = res.note && EV_FV_SNIFF[res.note] ? EV_FV_SNIFF[res.note][1] : '';
+            } else if (vid) {
+                el.innerHTML = `<div class="text-center px-2"><div class="text-3xl opacity-60">${EV_FV_ICON.video}</div><div class="text-[10px] text-gray-500 leading-tight mt-1">${_evEsc(_evFvExt(file).toUpperCase())} · ${_evEsc(_evFvShort(res))}</div></div>`;
+                el.title = (res && res.error) || 'VIPER could not make a thumbnail for this video.';
+            } else {
+                el.innerHTML = `<div class="text-center px-2"><div class="text-2xl opacity-70">⚠</div><div class="text-[10px] text-viper-orange leading-tight mt-1">${_evEsc(_evFvShort(res))}</div></div>`;
+                el.title = _evFvExplain(res, _evFvExt(file));
+            }
+        }
+
+        // Grid → one file full size, with Prev / Next (← →) and Esc.
+        function _evFvOpen(i) {
+            if (!_evFv) return;
+            const files = _evFvFiles();
+            if (i < 0 || i >= files.length) return;
+            let box = document.getElementById('evFvLightbox');
+            if (!box) {
+                box = document.createElement('div');
+                box.id = 'evFvLightbox';
+                box.className = 'fixed inset-0 bg-black/90 flex flex-col';
+                box.style.zIndex = '9998';
+                document.body.appendChild(box);
+                document.addEventListener('keydown', _evFvKey, true);
+            } else {
+                _evFvRelease(box);
+            }
+            _evFv.lightbox = i;
+            const f = files[i];
+            const b = (on, label, off) => `<button type="button" ${off ? 'disabled' : ''} onclick="${on}" class="px-3 py-1 rounded text-xs border border-white/15 ${off ? 'text-gray-600 cursor-not-allowed' : 'text-gray-200 hover:bg-white/10'}">${label}</button>`;
+            box.innerHTML = `
+                <div class="flex items-center justify-between gap-3 px-4 py-2 border-b border-white/10 text-sm">
+                    <div class="text-gray-300 truncate">${_evEsc(f.name || '')} <span class="text-gray-500 text-xs ml-2">${(i + 1).toLocaleString()} of ${files.length.toLocaleString()}</span></div>
+                    <div class="flex gap-2 shrink-0">
+                        ${b(`_evFvOpen(${i - 1})`, '‹ Prev', i === 0)}
+                        ${b(`_evFvOpen(${i + 1})`, 'Next ›', i >= files.length - 1)}
+                        ${b('_evFvClose()', '✕ Close', false)}
+                    </div>
+                </div>
+                <div class="flex-1 overflow-auto p-4"><div class="max-w-5xl mx-auto">${_evFileCard(_evFv.evidence, f, i)}</div></div>`;
+            box.querySelectorAll('.ev-fv-media').forEach(_evFvHydrate);
+            if (_evFvKind(f) === 'zip') _hydrateEvidenceZipPanels(_evFv.evidence);
+        }
+        function _evFvClose() {
+            const box = document.getElementById('evFvLightbox');
+            if (box) { _evFvRelease(box); box.remove(); }
+            document.removeEventListener('keydown', _evFvKey, true);
+            if (_evFv) _evFv.lightbox = -1;
+            Object.keys(_evZipState).forEach(pid => {
+                if (!document.getElementById(pid)) { _evZipRevoke(pid); delete _evZipState[pid]; }
+            });
+        }
+        function _evFvKey(e) {
+            if (!_evFv || _evFv.lightbox < 0) return;
+            const t = e.target;
+            if (t && /^(INPUT|TEXTAREA|SELECT|VIDEO|AUDIO)$/.test(t.tagName)) return;
+            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); _evFvClose(); }
+            else if (e.key === 'ArrowRight') { e.preventDefault(); _evFvOpen(_evFv.lightbox + 1); }
+            else if (e.key === 'ArrowLeft') { e.preventDefault(); _evFvOpen(_evFv.lightbox - 1); }
+        }
+        // ── evidence-fv (end) ──
+
         function renderEvidenceFiles(evidence) {
+            if (!_evFv || _evFv.evidence !== evidence) _evFvStart(evidence);
             if (!evidence.files || evidence.files.length === 0) {
                 return `
                     <div class="flex items-center justify-center h-full">
@@ -14295,64 +14902,50 @@
                             </div>
                         ` : ''}
                     </div>
-                    ${evidence.files.map((file, index) => {
-                        const fileExt = file.name.split('.').pop().toLowerCase();
+                    ${_evFvToolbarHtml()}
+                    <div id="evFvBody">${_evFvBodyHtml()}</div>
+                </div>
+            `;
+        }
+
+        // One file's card (list view, and the grid's full-size viewer).
+        // Media are empty slots filled by _evFvHydrate when on screen.
+        function _evFileCard(evidence, file, index) {
+                        const fileExt = String(file.name || '').split('.').pop().toLowerCase();
                         const isPDF = fileExt === 'pdf';
                         const isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'heic', 'heif', 'tiff', 'tif', 'svg'].includes(fileExt);
-                        const isVideo = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv', 'flv', 'm4v', 'wmv'].includes(fileExt);
+                        const isVideo = EV_FV_EXT.video.includes(fileExt);
                         const isAudio = ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'wma'].includes(fileExt);
                         const isHtml = ['html', 'htm'].includes(fileExt);
                         const isDocument = ['doc', 'docx', 'txt', 'rtf', 'xls', 'xlsx', 'csv'].includes(fileExt);
                         const isZip = fileExt === 'zip';
-                        const fileUrl = file.displayUrl || file.url || file.path;
+                        const directUrl = _evFvDirectUrl(file);
+                        const slot = (kind) => _evFvSlotHtml(kind, directUrl, file, index);
+                        const nameHtml = _evEsc(file.name || '');
                         
                         return `
                             <div class="glass-card rounded-lg p-4">
                                 <div class="flex items-center justify-between mb-3">
-                                    <div class="flex items-center space-x-2">
+                                    <div class="flex items-center space-x-2 min-w-0">
                                         <span class="text-viper-cyan">📄</span>
-                                        <span class="font-medium">${file.name}</span>
-                                        <span class="text-xs text-gray-400">(${formatFileSize(file.size)})</span>
+                                        <span class="font-medium break-all">${nameHtml}</span>
+                                        <span class="text-xs text-gray-400 whitespace-nowrap">(${formatFileSize(file.size)})</span>
                                     </div>
                                     <div class="flex gap-2">
                                         ${file.path ? `
-                                            <button onclick="window.electronAPI.openFile('${file.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')" class="px-3 py-1 rounded text-xs bg-viper-purple/20 text-viper-purple border border-viper-purple/30 hover:bg-viper-purple/30 transition-colors">
+                                            <button onclick="window.electronAPI.openFile('${file.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')" class="px-3 py-1 rounded text-xs bg-viper-purple/20 text-viper-purple border border-viper-purple/30 hover:bg-viper-purple/30 transition-colors whitespace-nowrap">
                                                 Open Externally
                                             </button>
                                         ` : ''}
                                     </div>
                                 </div>
-                                ${file.loadError ? `
-                                    <div class="bg-viper-orange/10 border border-viper-orange/30 rounded-lg p-3 mb-3 text-xs text-viper-orange">
-                                        ⚠ Preview error: ${file.loadError}. Use "Open Externally" to view this file.
-                                    </div>
-                                ` : ''}
                                 
-                                ${isPDF ? `
-                                    <div class="space-y-3">
-                                        <div class="bg-white rounded overflow-hidden">
-                                            <iframe ${_S}="${fileUrl}" class="w-full" style="height: 800px;" frameborder="0"></iframe>
-                                        </div>
-                                    </div>
-                                ` : isZip && file.path ? `
+                                ${isPDF ? slot('pdf') : isZip && file.path ? `
                                     <div class="ev-zip-panel" id="${_evZipPanelId(evidence, index)}">
                                         <div class="text-sm text-gray-400 py-4 text-center">📦 Reading what is inside this ZIP…</div>
                                     </div>
-                                ` : isImage ? `
-                                    <div class="bg-black rounded flex items-center justify-center p-4 min-h-[400px]">
-                                        <img ${_S}="${fileUrl}" alt="${file.name}" class="max-w-full max-h-[600px] object-contain" 
-                                            onerror="this.parentElement.innerHTML='<div class=text-center><p class=text-viper-orange>Cannot display this image format</p><p class=text-sm text-gray-400 mt-2>Click Open Externally to view</p></div>'">
-                                    </div>
-                                ` : isVideo ? `
-                                    <div class="bg-black rounded overflow-hidden">
-                                        <video controls class="w-full" preload="metadata" style="max-height: 600px;">
-                                            <source ${_S}="${fileUrl}" type="${file.type || 'video/' + fileExt}">
-                                            <p class="text-center text-gray-400 p-8">
-                                                Video format: ${fileExt.toUpperCase()}<br>
-                                                Click "Open Externally" to view in your media player
-                                            </p>
-                                        </video>
-                                    </div>
+                                ` : isImage ? slot('image') : isVideo ? `
+                                    ${slot('video')}
                                     ${_whisperBlock(evidence, index, file)}
                                 ` : isAudio ? `
                                     <div class="bg-viper-card/50 rounded p-6">
@@ -14361,10 +14954,7 @@
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/>
                                             </svg>
                                         </div>
-                                        <audio controls class="w-full" preload="metadata">
-                                            <source ${_S}="${fileUrl}" type="${file.type || 'audio/' + fileExt}">
-                                            Your browser does not support this audio format.
-                                        </audio>
+                                        ${slot('audio')}
                                         <p class="text-center text-sm text-gray-400 mt-3">Audio: ${fileExt.toUpperCase()}</p>
                                         ${_whisperBlock(evidence, index, file)}
                                     </div>
@@ -14374,11 +14964,7 @@
                                             <span>🗂 Archived web page (SingleFile)</span>
                                             <span>Sandboxed preview — scripts disabled · scroll to navigate</span>
                                         </div>
-                                        <div class="bg-white rounded overflow-auto border border-white/10" style="max-height: 800px;">
-                                            <iframe ${_S}="${fileUrl}" sandbox="allow-same-origin" frameborder="0" scrolling="auto"
-                                                onload="try{this.contentWindow.scrollTo(0,0);}catch(e){} try{_wireHtmlPreviewLinks(this);}catch(e){}"
-                                                style="width: 100%; min-width: 1400px; height: 800px; background: white; display: block; border: 0;"></iframe>
-                                        </div>
+                                        ${slot('html')}
                                     </div>
                                 ` : isDocument ? `
                                     <div class="text-center py-12">
@@ -14405,9 +14991,6 @@
                                 `}
                             </div>
                         `;
-                    }).join('')}
-                </div>
-            `;
         }
         
         // ─── Warrant Author (Multi-Business ESP Warrants) ───────────────
@@ -30798,6 +31381,7 @@
 
                             <div class="bg-viper-orange/10 border border-viper-orange/30 rounded-lg p-3 text-sm text-gray-300">
                                 <p>📱 <strong>How it works:</strong> A form will be created on the Intellect server. Officers anywhere can scan the QR code or open the link on their phones — no WiFi or VPN needed. Form auto-expires after 48 hours. When you download results, submissions are removed from the server.</p>
+                                <p class="mt-2">🔒 Everything officers type and capture is <strong>encrypted on their phone</strong> with a key that exists only in this case and in the link. The server stores data it cannot read, and never receives the case number or form title.</p>
                             </div>
                         </div>
 
@@ -31062,7 +31646,8 @@
                 }
 
                 // Download results (server deletes them after retrieval)
-                const result = await _canvasCallWithKey((key) => window.electronAPI.canvasFormDownload({ apiKey: key, formId }));
+                const _dlForm = activeCanvasForms.find(f => f.formId === formId);
+                const result = await _canvasCallWithKey((key) => window.electronAPI.canvasFormDownload({ apiKey: key, formId, mediaKey: (_dlForm && _dlForm.mediaKey) || '' }));
                 if (!result.submissions || result.submissions.length === 0) {
                     if (retried.recovered) renderTabContent('areacanvas');
                     else viperToast('No submissions to download yet.', 'info');
@@ -31095,6 +31680,9 @@
                         notes: s.notes || '',
                         needsFollowUp: false,
                         timestamp: s.submittedAt || s.timestamp || new Date().toISOString(),
+                        // Sealed entry that would not open: keep the ciphertext.
+                        e2eError: s.e2eError || undefined,
+                        e2eCipher: s.e2eCipher || undefined,
                         // Carried, not yet fetched. Resolved below once the
                         // detective confirms the import.
                         _relayMedia: Array.isArray(s.media) ? s.media : []
@@ -31102,6 +31690,8 @@
                 });
 
                 // Check for duplicates by address+timestamp
+                const _sealedFailed = newEntries.filter(e => e.e2eError).length;
+                if (_sealedFailed) viperToast(`${_sealedFailed} entr${_sealedFailed === 1 ? 'y' : 'ies'} could not be decrypted with this form's key and will be kept encrypted.`, 'error');
                 const existingKeys = new Set(canvasData.map(e => e.address.toLowerCase() + '|' + e.timestamp));
                 const unique = newEntries.filter(e => !existingKeys.has(e.address.toLowerCase() + '|' + e.timestamp));
 
@@ -40862,7 +41452,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             // Create file input
             const input = document.createElement('input');
             input.type = 'file';
-            input.accept = '.csv,.txt';
+            input.accept = '.csv,.txt,.xlsx,.xlsm,.xls';
             input.onchange = (e) => {
                 const file = e.target.files[0];
                 if (file) {
@@ -40942,77 +41532,92 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
         }
 
-        function parseCDRFile(file) {
-            // Read the file as text first to detect format
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const text = e.target.result;
-                const lines = text.split('\n');
-                
-                // Extract reference lat/lon from header lines (AT&T format: "LAT: xx, LON: yy")
-                let parsedRefLat = null, parsedRefLon = null;
-                for (let i = 0; i < Math.min(5, lines.length); i++) {
-                    const latMatch = lines[i].match(/LAT:\s*([-\d.]+)/i);
-                    const lonMatch = lines[i].match(/LON:\s*([-\d.]+)/i);
-                    if (latMatch) parsedRefLat = parseFloat(latMatch[1]);
-                    if (lonMatch) parsedRefLon = parseFloat(lonMatch[1]);
-                }
-                // Store for later use
-                window._cdrRefLat = parsedRefLat;
-                window._cdrRefLon = parsedRefLon;
+        function _cdrEsc(v) {
+            return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
 
-                // Carrier hint from the first few lines (best-effort; used only
-                // to label the mapping modal — mapping itself is generic).
-                const head = lines.slice(0, 8).join('\n').toLowerCase();
-                let carrierHint = '';
-                if (/at&t|att\b|cingular/.test(head)) carrierHint = 'AT&T';
-                else if (/verizon|vzw/.test(head)) carrierHint = 'Verizon';
-                else if (/t-mobile|tmobile|t mobile|metropcs/.test(head)) carrierHint = 'T-Mobile';
-                else if (/us ?cellular|uscc/.test(head)) carrierHint = 'US Cellular';
-                else if (/sprint/.test(head)) carrierHint = 'Sprint';
-                window._cdrCarrierHint = carrierHint;
-
-                // Detect if this is AT&T format (has info lines before header)
-                let headerLineIndex = 0;
-                let skipLines = 0;
-                
-                // Check first few lines for header indicators
-                for (let i = 0; i < Math.min(5, lines.length); i++) {
-                    const line = lines[i].trim();
-                    // AT&T format has "Source,Conn Date,Conn Time" header
-                    if (line.includes('Source,') && line.includes('Conn Date')) {
-                        headerLineIndex = i;
-                        skipLines = i;
-                        break;
+        // Reads a carrier return (CSV/TXT or Excel .xlsx) into rows, finds the
+        // column-header row under any title/banner rows, picks the call-record
+        // sheet in a workbook, names the carrier, and opens the mapping modal.
+        // The parsed records are kept in window._cdrPending for the submit.
+        async function parseCDRFile(file) {
+            const CF = window.CdrFormats;
+            const fileName = (file && file.name) || 'CDR';
+            window._cdrPending = null;
+            if (/\.xls$/i.test(fileName)) {
+                showToast('This is an old Excel (.xls) file. Open it in Excel, choose File → Save As → Excel Workbook (.xlsx) or CSV, then upload that copy.', 'error');
+                return;
+            }
+            const isXlsx = /\.(xlsx|xlsm)$/i.test(fileName);
+            let rows = [], headerRow = -1, sheetName = '';
+            try {
+                if (isXlsx) {
+                    if (!window.FlockXlsx || !CF) throw new Error('Excel reader not loaded');
+                    showLoadingIndicator('Reading Excel file...');
+                    let wb;
+                    try { wb = await window.FlockXlsx.readWorkbook(await file.arrayBuffer()); }
+                    finally { hideLoadingIndicator(); }
+                    const pick = CF.pickSheet(wb.sheets || []);
+                    if (!pick) {
+                        showToast('No call-record table was found in this workbook (no sheet has a row of column headers).', 'error');
+                        return;
                     }
-                    // Standard CDR header
-                    if (line.includes('MSIDN') || line.includes('Phone') || line.includes('Number')) {
-                        headerLineIndex = i;
-                        skipLines = i;
-                        break;
+                    rows = pick.rows; headerRow = pick.headerRow; sheetName = pick.name || '';
+                } else {
+                    const text = await file.text();
+                    rows = Papa.parse(text, { skipEmptyLines: true }).data || [];
+                    // AT&T: "Source,Conn Date,Conn Time…" under LAT/LON title lines.
+                    for (let i = 0; i < Math.min(5, rows.length); i++) {
+                        const line = (rows[i] || []).join(',');
+                        if (line.includes('Source,') && line.includes('Conn Date')) { headerRow = i; break; }
                     }
-                }
-                
-                // Parse with Papa
-                Papa.parse(file, {
-                    complete: function(results) {
-                        // If AT&T format detected, adjust results
-                        if (skipLines > 0 && results.data.length > skipLines) {
-                            const adjustedResults = {
-                                data: results.data.slice(skipLines),
-                                errors: results.errors,
-                                meta: results.meta
-                            };
-                            showColumnMappingModal(file.name, adjustedResults, 'ATT');
-                        } else {
-                            showColumnMappingModal(file.name, results, 'STANDARD');
+                    if (headerRow < 0 && CF) headerRow = CF.findHeaderRow(rows);
+                    if (headerRow < 0) {
+                        for (let i = 0; i < Math.min(5, rows.length); i++) {
+                            const line = (rows[i] || []).join(',');
+                            if (line.includes('MSIDN') || line.includes('Phone') || line.includes('Number')) { headerRow = i; break; }
                         }
-                    },
-                    preview: 15, // Preview more rows to handle skipped lines
-                    skipEmptyLines: true
-                });
+                    }
+                    if (headerRow < 0) headerRow = 0;
+                }
+            } catch (err) {
+                console.error('parseCDRFile error:', err);
+                showToast('Could not read ' + _cdrEsc(fileName) + ': ' + _cdrEsc(err && err.message || err), 'error');
+                return;
+            }
+            if (!rows.length || !rows[headerRow]) {
+                showToast('This file is empty.', 'error');
+                return;
+            }
+
+            // Reference lat/lon from title lines (AT&T: "LAT: xx, LON: yy").
+            let parsedRefLat = null, parsedRefLon = null;
+            for (let i = 0; i < Math.min(Math.max(5, headerRow), rows.length); i++) {
+                const line = (rows[i] || []).join(',');
+                const latMatch = line.match(/LAT:\s*([-\d.]+)/i);
+                const lonMatch = line.match(/LON:\s*([-\d.]+)/i);
+                if (latMatch) parsedRefLat = parseFloat(latMatch[1]);
+                if (lonMatch) parsedRefLon = parseFloat(lonMatch[1]);
+            }
+            window._cdrRefLat = parsedRefLat;
+            window._cdrRefLon = parsedRefLon;
+
+            const carrier = CF ? CF.detectCarrier(rows, headerRow, fileName) : '';
+            window._cdrCarrierHint = carrier;
+
+            const conv = CF ? CF.rowsToRecords(rows, headerRow) : { headers: rows[headerRow].map(String), records: [] };
+            const lowHeads = conv.headers.map(h => String(h).trim().toLowerCase());
+            const formatType = (lowHeads.includes('source') && lowHeads.some(h => h.includes('conn date'))) ? 'ATT'
+                : carrier === 'T-Mobile' ? 'TMOBILE' : 'STANDARD';
+
+            window._cdrPending = {
+                fileName, sheetName, carrier, formatType,
+                sourceFormat: isXlsx ? 'xlsx' : 'csv',
+                headers: conv.headers,
+                records: conv.records
             };
-            reader.readAsText(file);
+            const preview = [conv.headers].concat(rows.slice(headerRow + 1, headerRow + 4));
+            showColumnMappingModal(fileName, { data: preview }, formatType);
         }
 
         // Generic multi-carrier column auto-detection. Maps common header
@@ -41063,9 +41668,23 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
         function showColumnMappingModal(fileName, parseResults, formatType) {
             const headers = parseResults.data[0];
             const sampleRows = parseResults.data.slice(1, 4);
+            const CF = window.CdrFormats;
+            const pend = window._cdrPending || {};
 
             // Generic auto-detect for every format, then layer AT&T specifics.
             const autoMappings = autoDetectCdrColumns(headers);
+            if (CF && formatType === 'TMOBILE') {
+                // T-Mobile / legacy Sprint: the carrier's own column names win;
+                // drop any generic guess that grabbed one of those columns.
+                const tm = CF.tmobileMapping(headers);
+                const taken = new Set(Object.values(tm));
+                Object.keys(autoMappings).forEach(k => { if (!tm[k] && taken.has(autoMappings[k])) delete autoMappings[k]; });
+                if (tm.datetime) { delete autoMappings.date; delete autoMappings.time; }
+                Object.assign(autoMappings, tm);
+            } else if (CF) {
+                const tm = CF.tmobileMapping(headers);
+                if (tm.direction && !Object.values(autoMappings).includes(tm.direction)) autoMappings.direction = tm.direction;
+            }
             if (formatType === 'ATT') {
                 headers.forEach((header) => {
                     const h = String(header).toLowerCase();
@@ -41083,15 +41702,17 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
             const carrierLabel = (window._cdrCarrierHint || '').trim();
             const detectedCount = Object.keys(autoMappings).length;
+            const timesUtc = CF ? CF.carrierTimesUtc(carrierLabel, headers) : false;
+            const recCount = Array.isArray(pend.records) ? pend.records.length : 0;
             
             const modalHTML = `
                 <div id="columnMappingModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onclick="if(event.target.id === 'columnMappingModal') closeColumnMappingModal()">
                     <div class="glass-card rounded-xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-                        <h3 class="text-2xl font-bold text-white mb-2">Map CSV Columns</h3>
-                        <p class="text-gray-400 mb-6">Match your CSV columns to standard CDR fields. Required fields are marked with *</p>
+                        <h3 class="text-2xl font-bold text-white mb-2">Map CDR Columns</h3>
+                        <p class="text-gray-400 mb-6">Match the columns in this return to standard CDR fields. Required fields are marked with *</p>
                         
                         <div class="mb-6 glass-card p-4 rounded">
-                            <h4 class="text-sm font-semibold text-viper-cyan mb-2">File: ${fileName}</h4>
+                            <h4 class="text-sm font-semibold text-viper-cyan mb-2">File: ${_cdrEsc(fileName)}${pend.sheetName ? ` <span class="text-gray-400 font-normal">— sheet “${_cdrEsc(pend.sheetName)}”</span>` : ''}${recCount ? ` <span class="text-gray-400 font-normal">— ${recCount.toLocaleString()} rows</span>` : ''}</h4>
                             <div class="text-xs text-gray-400">
                                 Preview of first few rows:
                             </div>
@@ -41099,13 +41720,13 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                 <table class="text-xs text-gray-300">
                                     <thead>
                                         <tr class="border-b border-gray-600">
-                                            ${headers.map(h => `<th class="px-2 py-1 text-left">${h}</th>`).join('')}
+                                            ${headers.map(h => `<th class="px-2 py-1 text-left">${_cdrEsc(h)}</th>`).join('')}
                                         </tr>
                                     </thead>
                                     <tbody>
                                         ${sampleRows.map(row => `
                                             <tr class="border-b border-gray-700">
-                                                ${row.map(cell => `<td class="px-2 py-1">${cell}</td>`).join('')}
+                                                ${(row || []).map(cell => `<td class="px-2 py-1">${_cdrEsc(cell)}</td>`).join('')}
                                             </tr>
                                         `).join('')}
                                     </tbody>
@@ -41118,14 +41739,19 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                 <div class="text-viper-cyan text-sm font-semibold mb-1">✓ AT&T Format Detected</div>
                                 <div class="text-gray-300 text-xs">Columns auto-mapped for AT&T tower dump format</div>
                             </div>
+                        ` : formatType === 'TMOBILE' ? `
+                            <div class="bg-viper-cyan/10 border border-viper-cyan rounded p-3 mb-4">
+                                <div class="text-viper-cyan text-sm font-semibold mb-1">✓ T-Mobile Format Detected — ${detectedCount} column${detectedCount === 1 ? '' : 's'} pre-mapped</div>
+                                <div class="text-gray-300 text-xs">T-Mobile call codes (mSOriginating, mSTerminating, SMSinMSC, iMS, vONR, RCS…) are read automatically. 1st Tower Lat/Long/Azimuth plot on the map. The "Switch" column is the carrier's switch, not a location. Legacy Sprint returns (Mobile Role, First/Last Cell) are supported too.</div>
+                            </div>
                         ` : `
                             <div class="bg-viper-cyan/10 border border-viper-cyan rounded p-3 mb-4">
-                                <div class="text-viper-cyan text-sm font-semibold mb-1">✓ ${carrierLabel ? carrierLabel + ' format' : 'Auto-detected'} — ${detectedCount} column${detectedCount === 1 ? '' : 's'} pre-mapped</div>
+                                <div class="text-viper-cyan text-sm font-semibold mb-1">✓ ${carrierLabel ? _cdrEsc(carrierLabel) + ' format' : 'Auto-detected'} — ${detectedCount} column${detectedCount === 1 ? '' : 's'} pre-mapped</div>
                                 <div class="text-gray-300 text-xs">Review the mapping below. Latitude/Longitude/Azimuth are optional — fill them to plot this return on the map.</div>
                             </div>
                         `}
                         
-                        <form onsubmit="submitColumnMapping(event, '${fileName}', '${formatType}')">
+                        <form onsubmit="submitColumnMapping(event, null, '${formatType}')">
                             <div class="grid grid-cols-2 gap-4 mb-6">
                                 ${renderColumnMappingField('Phone A (Caller)', 'phoneA', headers, true, autoMappings.phoneA)}
                                 ${renderColumnMappingField('Phone B (Callee)', 'phoneB', headers, true, autoMappings.phoneB)}
@@ -41133,12 +41759,18 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                 ${renderColumnMappingField('Date', 'date', headers, !autoMappings.datetime, autoMappings.date)}
                                 ${renderColumnMappingField('Time', 'time', headers, false, autoMappings.time)}
                                 ${renderColumnMappingField('Call Type', 'callType', headers, false, autoMappings.callType)}
+                                ${renderColumnMappingField('Direction / Mobile Role (optional)', 'direction', headers, false, autoMappings.direction)}
                                 ${renderColumnMappingField('Duration', 'duration', headers, false, autoMappings.duration)}
                                 ${renderColumnMappingField('IMEI', 'imei', headers, false, autoMappings.imei)}
                                 ${renderColumnMappingField('IMSI', 'imsi', headers, false, autoMappings.imsi)}
                                 ${renderColumnMappingField('Tower/Cell ID', 'towerA', headers, false, autoMappings.towerA)}
                                 ${renderColumnMappingField('Tower B (optional)', 'towerB', headers, false, autoMappings.towerB)}
                             </div>
+
+                            <label class="flex items-start gap-2 mb-6 text-sm text-gray-300 cursor-pointer">
+                                <input type="checkbox" name="tzUtc" value="1" class="mt-1" ${timesUtc ? 'checked' : ''}>
+                                <span>Times in this file are <b>UTC</b> — convert them to local time${timesUtc ? ` <span class="text-viper-green text-xs ml-1">✓ ${formatType === 'TMOBILE' ? 'T-Mobile spreadsheets are UTC' : 'UTC column found'}</span>` : ''}<br><span class="text-xs text-gray-500">Leave unchecked if the return's times are already local. Dates are read month-first (MM/DD/YYYY).</span></span>
+                            </label>
 
                             <div class="text-xs font-semibold text-viper-cyan mb-2 mt-2">📍 Geolocation (optional — enables map plotting)</div>
                             <div class="grid grid-cols-2 gap-4 mb-6">
@@ -41173,7 +41805,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     </label>
                     <select name="${fieldName}" class="w-full px-3 py-2 bg-viper-card border border-gray-600 rounded text-white text-sm focus:border-viper-cyan focus:outline-none" ${required ? 'required' : ''}>
                         <option value="">-- Select Column --</option>
-                        ${headers.map(h => `<option value="${h}" ${defaultValue === h ? 'selected' : ''}>${h}</option>`).join('')}
+                        ${headers.map(h => `<option value="${_cdrEsc(h)}" ${defaultValue === h ? 'selected' : ''}>${_cdrEsc(h)}</option>`).join('')}
                     </select>
                 </div>
             `;
@@ -41188,6 +41820,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             event.preventDefault();
             const formData = new FormData(event.target);
             const mapping = Object.fromEntries(formData.entries());
+            const timesUtc = mapping.tzUtc === '1';
+            delete mapping.tzUtc;
             
             // For ATT format, auto-inject the Source column if present
             if (formatType === 'ATT' && !mapping.source) {
@@ -41195,79 +41829,81 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
             
             closeColumnMappingModal();
-            
-            // Show loading indicator
-            showLoadingIndicator('Parsing CDR file...');
-            
-            // Use the stored file reference
-            const file = pendingCDRFile;
-            
-            if (!file) {
-                hideLoadingIndicator();
+
+            // Records were parsed once when the file was opened (CSV or Excel).
+            const pend = window._cdrPending;
+            if (!pend || !Array.isArray(pend.records)) {
                 showToast('File not found. Please try uploading again.', 'error');
                 return;
             }
             
-            // Read file as text to handle AT&T format
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const text = e.target.result;
-                const lines = text.split('\n');
-                
-                // Find header line
-                let headerLineIndex = 0;
-                for (let i = 0; i < Math.min(5, lines.length); i++) {
-                    const line = lines[i].trim();
-                    if (line.includes('Source,') && line.includes('Conn Date')) {
-                        headerLineIndex = i;
-                        break;
-                    }
-                    if (line.includes('MSIDN') || line.includes('Phone')) {
-                        headerLineIndex = i;
-                        break;
-                    }
-                }
-                
-                // Create cleaned CSV starting from header
-                const cleanedText = lines.slice(headerLineIndex).join('\n');
-                
-                Papa.parse(cleanedText, {
-                    header: true,
-                    complete: function(results) {
-                        processCDRData(fileName, mapping, results.data, formatType);
-                        hideLoadingIndicator();
-                    },
-                    skipEmptyLines: true
+            showLoadingIndicator('Parsing CDR file...');
+            // Let the loading indicator paint before the heavy loop.
+            await new Promise(r => setTimeout(r, 30));
+            try {
+                await processCDRData(fileName || pend.fileName, mapping, pend.records, formatType, {
+                    utc: timesUtc,
+                    sourceFormat: pend.sourceFormat,
+                    sheetName: pend.sheetName,
+                    carrier: pend.carrier
                 });
-            };
-            reader.readAsText(file);
+            } catch (err) {
+                console.error('processCDRData error:', err);
+                showToast('Could not parse the CDR: ' + _cdrEsc(err && err.message || err), 'error');
+            } finally {
+                hideLoadingIndicator();
+                window._cdrPending = null;
+            }
         }
 
-        async function processCDRData(fileName, mapping, rawData, formatType) {
+        async function processCDRData(fileName, mapping, rawData, formatType, opts) {
+            opts = opts || {};
+            const CF = window.CdrFormats;
+            const utc = !!opts.utc;
+            let unreadableDates = 0;
             // A duration column literally named in minutes is treated as minutes.
             const durIsMinutes = formatType === 'ATT'
                 || /min/i.test(String(mapping.duration || ''));
             const num = (v) => { const n = parseFloat(String(v).replace(/[^0-9.\-]/g, '')); return isFinite(n) ? n : null; };
+            const phone = (v) => (CF && v != null) ? CF.cleanNumber(v) : v;
 
             // Normalize and index the data
             const normalized = rawData.map((row, index) => {
                 // Parse duration - some carriers report minutes (decimal), others seconds.
                 let durationSeconds = 0;
                 if (row[mapping.duration]) {
-                    const durationValue = parseFloat(row[mapping.duration]);
-                    if (isFinite(durationValue)) {
-                        durationSeconds = Math.round(durIsMinutes ? durationValue * 60 : durationValue);
+                    if (CF) {
+                        durationSeconds = CF.durationSeconds(row[mapping.duration], durIsMinutes);
+                    } else {
+                        const durationValue = parseFloat(row[mapping.duration]);
+                        if (isFinite(durationValue)) {
+                            durationSeconds = Math.round(durIsMinutes ? durationValue * 60 : durationValue);
+                        }
                     }
                 }
 
                 // For AT&T: combine Source (Voice/SMS/Data) + Call Type (MO/MT)
                 const rawCallType = row[mapping.callType] || '';
                 const rawSource = mapping.source ? (row[mapping.source] || '') : '';
-                const callType = normalizeCallType(rawCallType, formatType, rawSource);
+                const rawDirection = mapping.direction ? (row[mapping.direction] || '') : '';
+                const callType = normalizeCallType(String(rawCallType), formatType, rawSource, rawDirection);
 
                 // Timestamp: prefer a combined date/time column when mapped.
+                // Month-first (US carriers); UTC when the officer says so.
+                // Unreadable → '' (kept, flagged) — never "now".
                 let timestamp;
-                if (mapping.datetime && row[mapping.datetime]) {
+                if (CF) {
+                    let iso = null;
+                    const dtVal = mapping.datetime ? row[mapping.datetime] : '';
+                    if (dtVal) iso = CF.parseDateTime(dtVal, '', { utc });
+                    if (!iso && mapping.date && row[mapping.date]) iso = CF.parseDateTime(row[mapping.date], mapping.time ? row[mapping.time] : '', { utc });
+                    if (!iso && dtVal && !utc) {
+                        const d = new Date(dtVal);
+                        if (!isNaN(d) && d.getFullYear() >= 1980 && d.getFullYear() <= 2100) iso = d.toISOString();
+                    }
+                    if (!iso) unreadableDates++;
+                    timestamp = iso || '';
+                } else if (mapping.datetime && row[mapping.datetime]) {
                     const parsed = new Date(row[mapping.datetime]);
                     timestamp = isNaN(parsed) ? parseTimestamp(row[mapping.date], row[mapping.time]) : parsed.toISOString();
                 } else {
@@ -41282,11 +41918,12 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
                 return {
                     id: `cdr_${Date.now()}_${index}`,
-                    phoneA: row[mapping.phoneA],
-                    phoneB: row[mapping.phoneB],
+                    phoneA: phone(row[mapping.phoneA]),
+                    phoneB: phone(row[mapping.phoneB]),
                     date: mapping.date ? row[mapping.date] : '',
                     time: mapping.time ? row[mapping.time] : '',
                     timestamp: timestamp,
+                    timeUnknown: timestamp ? undefined : true,
                     callType: callType,
                     duration: durationSeconds,
                     imei: row[mapping.imei] || null,
@@ -41350,9 +41987,12 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 id: `dump_${Date.now()}`,
                 name: fileName,
                 uploadDate: new Date().toISOString(),
-                format: 'csv',
+                format: opts.sourceFormat || 'csv',
                 columnMapping: mapping,
-                carrier: window._cdrCarrierHint || '',
+                carrier: opts.carrier != null ? opts.carrier : (window._cdrCarrierHint || ''),
+                sheetName: opts.sheetName || '',
+                timesUtc: utc,
+                unreadableDates: unreadableDates,
                 records: normalized,
                 stats: stats,
                 hasTowerData: normalized.some(r => r.towerA || r.towerB),
@@ -41374,7 +42014,11 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             // If save failed, the modal will be shown, otherwise render normally
             if (saved !== false) {
                 renderTabContent('analytics');
-                showToast('CDR file parsed successfully', 'success');
+                if (unreadableDates) {
+                    showToast('Parsed ' + normalized.length.toLocaleString() + ' records — ' + unreadableDates.toLocaleString() + ' had a date VIPER could not read. They are kept, but left out of the timeline and date filters; check the Date/Time mapping.', 'error');
+                } else {
+                    showToast('CDR file parsed successfully — ' + normalized.length.toLocaleString() + ' records', 'success');
+                }
             }
         }
 
@@ -41400,8 +42044,12 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
         }
 
-        function normalizeCallType(rawType, formatType, rawSource) {
-            if (!rawType) return 'unknown';
+        function normalizeCallType(rawType, formatType, rawSource, rawDirection) {
+            const CF = window.CdrFormats;
+            if (!rawType) {
+                const byDir = (CF && rawDirection) ? CF.callType('', rawDirection) : '';
+                return byDir || 'unknown';
+            }
             const type = rawType.toUpperCase().trim();
             const source = (rawSource || '').toUpperCase().trim();
             
@@ -41412,6 +42060,13 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 if (source.includes('SMS') || source.includes('MMS') || source.includes('TEXT')) return `sms-${direction}`;
                 if (source.includes('DATA') || source.includes('GPRS')) return `data-${direction}`;
                 return `voice-${direction}`; // default to voice
+            }
+
+            // T-Mobile / legacy Sprint codes (mSOriginating, …SMSinMSC, iMS_,
+            // vONR_, RCS…), plus a Direction / Mobile Role column when mapped.
+            if (CF) {
+                const t = CF.callType(rawType, rawDirection);
+                if (t) return t;
             }
             
             const typeMap = {
@@ -41446,14 +42101,18 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             
             records.forEach(r => {
                 callTypes[r.callType] = (callTypes[r.callType] || 0) + 1;
-                totalDuration += r.duration;
+                totalDuration += Number(r.duration) || 0;
             });
             
-            // Date range
-            const timestamps = records.map(r => new Date(r.timestamp)).sort((a, b) => a - b);
-            const start = timestamps[0];
-            const end = timestamps[timestamps.length - 1];
-            const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+            // Date range over readable timestamps only (an unreadable date is
+            // '' — it must not crash the dashboard or drag the range to 1970).
+            let tMin = Infinity, tMax = -Infinity;
+            records.forEach(r => {
+                const t = (r && r.timestamp != null && r.timestamp !== '') ? new Date(r.timestamp).getTime() : NaN;
+                if (isFinite(t)) { if (t < tMin) tMin = t; if (t > tMax) tMax = t; }
+            });
+            const hasRange = isFinite(tMin);
+            const days = hasRange ? Math.ceil((tMax - tMin) / (1000 * 60 * 60 * 24)) : 0;
             
             return {
                 totalRecords: records.length,
@@ -41463,8 +42122,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 callTypes: callTypes,
                 totalDuration: totalDuration,
                 dateRange: {
-                    start: start.toISOString(),
-                    end: end.toISOString(),
+                    start: hasRange ? new Date(tMin).toISOString() : '',
+                    end: hasRange ? new Date(tMax).toISOString() : '',
                     days: days
                 }
             };
@@ -41853,6 +42512,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const groups = new Map();
             records.forEach(r => {
                 const date = new Date(r.timestamp);
+                if (!r.timestamp || isNaN(date.getTime())) return;   // unreadable date
                 const hour = `${date.toISOString().split('T')[0]} ${date.getHours()}:00`;
                 groups.set(hour, (groups.get(hour) || 0) + 1);
             });
@@ -46707,38 +47367,6 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             </div>`;
         }
 
-        async function ctArinLookup(ipAddress, uid) {
-            const btn = document.querySelector(`#${uid}_card button`);
-            const resultDiv = document.getElementById(`${uid}_result`);
-            if (!btn || !resultDiv) return;
-            btn.disabled = true;
-            btn.innerHTML = '<svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Looking up...';
-            try {
-                const result = await window.electronAPI.arinLookup(ipAddress);
-                if (result.success && result.provider) {
-                    let html = `<div class="mt-2 space-y-1 text-xs">`;
-                    html += `<div class="flex items-center gap-2"><span class="text-gray-400">ISP:</span><span class="text-green-400 font-semibold">${result.provider}</span></div>`;
-                    if (result.network) html += `<div class="flex items-center gap-2"><span class="text-gray-400">Network:</span><span class="text-gray-300">${result.network}</span></div>`;
-                    if (result.netRange) html += `<div class="flex items-center gap-2"><span class="text-gray-400">Range:</span><span class="text-gray-300 font-mono">${result.netRange}</span></div>`;
-                    if (result.org) html += `<div class="flex items-center gap-2"><span class="text-gray-400">Org:</span><span class="text-gray-300">${result.org}</span></div>`;
-                    if (result.country) html += `<div class="flex items-center gap-2"><span class="text-gray-400">Country:</span><span class="text-gray-300">${result.country}</span></div>`;
-                    html += `</div>`;
-                    resultDiv.innerHTML = html;
-                    btn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Resolved';
-                    btn.classList.remove('text-cyan-400', 'bg-cyan-500/20', 'border-cyan-500/40');
-                    btn.classList.add('text-green-400', 'bg-green-500/20', 'border-green-500/40');
-                } else {
-                    resultDiv.innerHTML = `<div class="mt-2 text-xs text-red-400">${result.error || 'No results found'}</div>`;
-                    btn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg> ARIN Lookup';
-                    btn.disabled = false;
-                }
-            } catch (e) {
-                resultDiv.innerHTML = `<div class="mt-2 text-xs text-red-400">Lookup failed: ${e.message}</div>`;
-                btn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg> ARIN Lookup';
-                btn.disabled = false;
-            }
-        }
-
         // ── CyberTip identifiers: re-parse, IP grouping, saved ARIN, batch select ──
         let __ctSelected = new Set();     // registry indexes ticked for "Send selected"
         let __ctIpGroups = [];            // groups behind the IP cards on screen
@@ -48906,6 +49534,19 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
         function initializeBitTorrent() {
             if (window.BitTorrentModule && window.BitTorrentUI) {
+                // Coming back to the tab: keep the same module/UI so the officer picks up where they left off
+                // (selected download, open sections, file filters, scroll, a running import or hash check).
+                const prev = window.bitTorrentModule;
+                if (prev && prev.ui && prev.caseId === String(currentCase.id)) {
+                    try {
+                        if (!prev.job && !prev.verifyJob) prev.loadData();
+                        window.bitTorrentUI = prev.ui;
+                        prev.ui.resume();
+                        prev.ui.render();
+                        prev.scanEvidence().catch(() => {});
+                        return;
+                    } catch (err) { console.error('BitTorrent resume error:', err); }
+                }
                 try { if (window.bitTorrentUI && window.bitTorrentUI.destroy) window.bitTorrentUI.destroy(); } catch (_) { /* stale tab */ }
                 window.bitTorrentModule = new BitTorrentModule(
                     String(currentCase.id),

@@ -776,7 +776,9 @@ class MetaWarrantUI {
         const cap = `<div class="mwp-media-name mwp-small mwp-muted">${this._esc(r.name || '')}${r.sniffed ? ' · relabelled (contents did not match the extension)' : ''}</div>`;
         if (kind === 'image') slot.innerHTML = `<img class="mwp-media-img" src="${url}" alt="" data-mw="zoom" data-ref="${this._attr(ref)}" loading="lazy">`;
         else if (kind === 'video') {
-            slot.innerHTML = `<video class="mwp-media-video" src="${url}" controls preload="metadata"></video>${cap}`;
+            // data-vplv: lets VpLegacyVideo offer a playback copy if the window can't decode it.
+            const vplv = JSON.stringify({ caseNumber: this.module.caseNumber, storeKey: imp && imp.storeKey, ref, name: r.name || '' });
+            slot.innerHTML = `<video class="mwp-media-video" src="${url}" controls preload="metadata" data-vplv="${this._attr(vplv)}"></video>${cap}`;
             this._videoPoster(slot, (imp && imp.storeKey ? imp.storeKey : '') + '|' + ref);
         }
         else if (kind === 'audio') slot.innerHTML = `<audio class="mwp-media-audio" src="${url}" controls preload="metadata"></audio>${cap}`;

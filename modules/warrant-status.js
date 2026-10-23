@@ -80,7 +80,10 @@
         if (!due) return null;
         const ref = now ? new Date(now) : new Date();
         ref.setHours(0, 0, 0, 0);
-        return Math.ceil((due - ref) / 86400000);
+        // Both sides are local midnight, so the gap is whole days ± 1 h when
+        // a DST change falls in between — round, don't ceil (ceil gave
+        // "11 days remaining" for a 10-day warrant across the November change).
+        return Math.round((due - ref) / 86400000);
     }
 
     function parseDueDate(v) {

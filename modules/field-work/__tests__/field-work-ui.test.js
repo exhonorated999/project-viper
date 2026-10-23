@@ -509,6 +509,88 @@ function relayStub(answers) {
     try { UI.renderTab(); } catch (e) { threw2 = e.message; }
     ok('a corrupt store renders an empty tab rather than throwing', threw2 === null, threw2);
 
+    /* ── keyboard focus: the "click off VIPER and back" bug ─────────── */
+    console.log('\n[keyboard focus in the field-work modals]');
+    const savedApi = globalThis.window.electronAPI;
+    const savedHasFocus = globalThis.document.hasFocus;
+    let focusCalls = 0, pageFocused = false;
+    globalThis.window.electronAPI = Object.assign({}, savedApi || {}, {
+        fieldWorkFormCreate: async () => ({ success: true }),
+        focusMainWindow: async () => { focusCalls++; pageFocused = true; return { focused: true }; }
+    });
+    globalThis.document.hasFocus = () => pageFocused;
+    function modalEl(id) {
+        const el = fakeEl(id); el.listeners = {}; el.remove = () => { delete DOM.byId[id]; };
+        el.addEventListener = (type, fn, cap) => { (el.listeners[type] = el.listeners[type] || []).push({ fn, cap }); };
+        return el;
+    }
+    function inputEl(id, type) {
+        const el = fakeEl(id); el.type = type || 'text'; el.isConnected = true; el.focused = 0;
+        el.focus = () => { el.focused++; }; el.closest = () => el;
+        return el;
+    }
+
+    // Opening "New Field Form" while the page has lost keyboard focus.
+    DOM.byId.fwCreateModal = modalEl('fwCreateModal');
+    DOM.byId.fwCreateBody = fakeEl('fwCreateBody');
+    DOM.byId.fwTitle = inputEl('fwTitle');
+    seed([], []);
+    UI.showCreateFormModal();
+    await flush();
+    ok('New Field Form opened unfocused → asks main for keyboard focus', focusCalls === 1, focusCalls);
+    ok('  — then puts the cursor in Form Title', DOM.byId.fwTitle.focused === 1, DOM.byId.fwTitle.focused);
+    const md = DOM.byId.fwCreateModal.listeners.mousedown || [];
+    ok('  — and guards clicks inside the modal (capture phase)', md.length === 1 && md[0].cap === true);
+    UI.closeCreate();
+
+    // Clicking a box after focus was lost again (e.g. a hidden view grabbed it).
+    pageFocused = false;
+    const notes = inputEl('fweNotes', 'textarea');
+    md[0].fn({ target: notes });
+    await flush();
+    ok('a click into a box while unfocused → focus restored and that box focused', focusCalls === 2 && notes.focused === 1);
+    // Already focused: no IPC round-trip on ordinary clicks.
+    md[0].fn({ target: notes });
+    await flush();
+    ok('ordinary clicks with focus intact do not call main', focusCalls === 2);
+
+    // Log Field Work modal: first box + file chooser.
+    pageFocused = false;
+    DOM.byId.fwEntryModal = modalEl('fwEntryModal');
+    DOM.byId.fweStreet = inputEl('fweStreet');
+    UI.showEntryModal();
+    await flush();
+    ok('Log Field Work opened unfocused → focus restored, cursor in Street', focusCalls === 3 && DOM.byId.fweStreet.focused === 1);
+    pageFocused = false;
+    (DOM.byId.fwEntryModal.listeners.change || [])[0].fn({ target: { type: 'file' } });
+    await flush();
+    ok('after the native file chooser closes unfocused → focus restored', focusCalls === 4);
+    const again = DOM.byId.fwEntryModal.listeners.mousedown.length;
+    UI.guardModalFocus('fwEntryModal', 'fweStreet');
+    ok('guard is installed once per modal', DOM.byId.fwEntryModal.listeners.mousedown.length === again);
+    UI.closeEntryModal();
+
+    // Old preload (no focusMainWindow) or a failing main: still focuses, never throws.
+    pageFocused = false;
+    delete globalThis.window.electronAPI.focusMainWindow;
+    const t1 = inputEl('x');
+    ok('old preload → returns false, still focuses the box', (await UI.ensureKeyboardFocus(t1)) === false && t1.focused === 1);
+    globalThis.window.electronAPI.focusMainWindow = async () => { throw new Error('main gone (synthetic)'); };
+    const t2 = inputEl('y');
+    let threwF = null; try { await UI.ensureKeyboardFocus(t2); } catch (e) { threwF = e; }
+    ok('main failing → no throw, box still focused', threwF === null && t2.focused === 1);
+    ok('null target is fine', (await UI.ensureKeyboardFocus(null)) === true);
+
+    ok('main handler: focus-main-window registered and focuses the sender, blur/focus fallback',
+        /ipcMain\.handle\('focus-main-window'[\s\S]{0,600}wc\.focus\(\)[\s\S]{0,200}win\.blur\(\);[\s\S]{0,40}win\.focus\(\)/.test(
+            require('fs').readFileSync(path.join(__dirname, '..', '..', '..', 'electron-main.js'), 'utf8')));
+    ok('preload exposes focusMainWindow',
+        /focusMainWindow:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('focus-main-window'\)/.test(
+            require('fs').readFileSync(path.join(__dirname, '..', '..', '..', 'preload.js'), 'utf8')));
+    globalThis.window.electronAPI = savedApi;
+    globalThis.document.hasFocus = savedHasFocus;
+    ['fwCreateModal', 'fwCreateBody', 'fwTitle', 'fweStreet'].forEach(k => { delete DOM.byId[k]; });
+
     console.log('\n' + (fail ? 'FAILED' : 'OK') + ' — ' + pass + ' passed, ' + fail + ' failed');
     process.exit(fail ? 1 : 0);
 })();

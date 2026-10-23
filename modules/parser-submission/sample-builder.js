@@ -1799,6 +1799,50 @@ async function inspectPdfTextAsync(buf, syncShape, onOcrPage) {
     };
 }
 
+// VIPER crash log (Settings → Crash Log → Copy/Export) — first line is
+// "VIPER 5.4.8 crash log · …". Kept whole, up to these caps.
+const CRASH_LOG_HEAD_RE = /^VIPER \d+\.\d+\.\d+\S* crash log\b/i;
+const CRASH_LOG_MAX_LINES = 300;
+const CRASH_LOG_MAX_CHARS = 24000;
+
+function _crashPathToken(m) {
+    const ext = /\.([A-Za-z0-9]{1,6})$/.exec(String(m).replace(/[)\],.;:]+$/, ''));
+    return ext ? '<PATH .' + ext[1].toLowerCase() + '>' : '<PATH>';
+}
+
+/**
+ * Redact one crash-log line. Keeps the shape a developer needs (timestamp,
+ * level, message, file extension, MB figures) and drops what could identify
+ * a case or person: file paths (all but the extension), IPs, emails, MACs
+ * and runs of 6+ digits (case / report / phone numbers).
+ */
+function _redactCrashLog(s) {
+    return String(s)
+        .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '<EMAIL>')
+        // Paths: drive (C:\...), UNC (\\server\...), %USERPROFILE%\..., file:///...
+        // Quoted first (Node errors quote them, spaces and all); unquoted ones
+        // run on through spaces while a later \ or a ".ext" shows the path
+        // continues — over-redacting a following word is the safe side.
+        .replace(/(['"])((?:file:\/\/\/?)?(?:[A-Za-z]:[\\/]|\\\\|%[A-Z]+%[\\/])[^'"\r\n]*)\1/g, (m, q, p) => q + _crashPathToken(p) + q)
+        .replace(/(?:file:\/\/\/?)?(?:[A-Za-z]:[\\/]|\\\\[^\\\s]+\\|%[A-Z]+%[\\/])[^\s"'<>|*?]*(?:[ ](?=[^\\/\r\n"'<>|*?:]*(?:[\\/]|\.[A-Za-z0-9]{1,6}(?:$|[\s,;)\]])))[^\s"'<>|*?]*)*/g, _crashPathToken)
+        .replace(/(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d])/g, '<IPV4>')
+        .replace(/(?<![\w:])[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{0,4}){3,7}(?![\w:])/g, (m) =>
+            (/[A-Fa-f]/.test(m) || m.indexOf('::') >= 0) ? '<IPV6>' : m)
+        .replace(/(?<!\d)\d{6,}(?!\d)/g, (m) => '<NUM ' + m.length + '>');
+}
+
+function _crashLogExcerpt(lines) {
+    let keep = lines.filter(l => l.trim().length > 0);
+    if (keep.length > CRASH_LOG_MAX_LINES) {
+        // Header + the most recent lines — the crash is at the end.
+        const tail = CRASH_LOG_MAX_LINES - 5;
+        keep = keep.slice(0, 4).concat(['… ' + (keep.length - 4 - tail) + ' earlier lines left out …'], keep.slice(-tail));
+    }
+    let ex = keep.map(_redactCrashLog).join('\n');
+    if (ex.length > CRASH_LOG_MAX_CHARS) ex = ex.slice(0, 400) + '\n…\n' + ex.slice(-(CRASH_LOG_MAX_CHARS - 410));
+    return ex;
+}
+
 /**
  * Plain text: line count + char count + first-line-shape hint, plus
  * delimiter / per-column format inference and a PII-redacted excerpt.
@@ -1838,6 +1882,18 @@ function inspectText(text) {
                 break;
             }
         }
+    }
+
+    // ── VIPER's own crash log (Settings → Crash Log) ──
+    // The 3-line excerpt below kept only the header and lost every line
+    // that explains the crash (Oct 2026: a 5,993-file Evidence folder).
+    // The log is already redacted when written (crash-log.js: home folder,
+    // emails); _redactCrashLog also strips paths, IPs and long numbers
+    // while keeping timestamps and memory figures readable.
+    if (CRASH_LOG_HEAD_RE.test(firstLine.trim())) {
+        out.viper_crash_log = true;
+        out.excerpt_redacted = _crashLogExcerpt(lines);
+        return out;
     }
 
     // ── PII-redacted excerpt (first few non-empty lines) ──
@@ -1881,6 +1937,242 @@ function _majorityFormat(counts) {
     return bestFmt;
 }
 
+// ─── Excel (.xlsx / .xlsm) — column headers only ───────────────────────────
+// Records each sheet's shape and its column-header TEXT so a parser author
+// can map a new format (e.g. a carrier CDR return) without the data.  Cell
+// VALUES are never copied: data rows contribute only a value-format label
+// ("date_str", "int_str", "phone", "excel_date"…), and the title/banner rows
+// above the header contribute only the label before a colon ("Tracking ID").
+// Huge sheets are partially inflated — the header is at the top.
+
+const EXCEL_MAX_SHEETS = 12;
+const EXCEL_MAX_COLS = 200;
+const EXCEL_SCAN_ROWS = 60;
+const EXCEL_FORMAT_ROWS = 30;
+const EXCEL_FULL_INFLATE_BYTES = 1024 * 1024;        // compressed size inflated whole
+const EXCEL_PARTIAL_INFLATE_BYTES = 512 * 1024;      // else: this much compressed, sync-flushed
+
+function _xmlUnescape(s) {
+    return String(s)
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+        .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(+n))
+        .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+        .replace(/&amp;/g, '&');
+}
+
+/** Inflate a zip entry; big entries only partly (returns { text, partial }). */
+function _excelEntryText(ze) {
+    if (!ze) return { text: '', partial: false };
+    const zlib = require('zlib');
+    const method = ze.header && ze.header.method;
+    const csize = ze.header && ze.header.compressedSize || 0;
+    if (method === 8 && csize > EXCEL_FULL_INFLATE_BYTES) {
+        const comp = ze.getCompressedData().subarray(0, EXCEL_PARTIAL_INFLATE_BYTES);
+        let out;
+        try { out = zlib.inflateRawSync(comp, { finishFlush: zlib.constants.Z_SYNC_FLUSH }); }
+        catch { out = Buffer.alloc(0); }
+        return { text: out.toString('utf8'), partial: true };
+    }
+    let data;
+    try { data = ze.getData(); } catch { data = Buffer.alloc(0); }
+    return { text: data.toString('utf8'), partial: false };
+}
+
+function _excelColIndex(ref) {
+    const m = /^([A-Z]+)/i.exec(ref || '');
+    if (!m) return -1;
+    let n = 0;
+    for (const ch of m[1].toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
+    return n - 1;
+}
+
+/** cellXfs index → true when that style shows a date/time. */
+function _excelDateStyles(stylesXml) {
+    const custom = {};
+    (stylesXml.match(/<numFmt\b[^>]*>/g) || []).forEach(tag => {
+        const id = /numFmtId="(\d+)"/.exec(tag), code = /formatCode="([^"]*)"/.exec(tag);
+        if (id && code) custom[id[1]] = _xmlUnescape(code[1]);
+    });
+    const isDateFmt = id => {
+        const n = +id;
+        if ((n >= 14 && n <= 22) || (n >= 45 && n <= 47) || (n >= 27 && n <= 36) || (n >= 50 && n <= 58)) return true;
+        const code = custom[id];
+        if (!code) return false;
+        const bare = code.replace(/"[^"]*"|\[[^\]]*\]|\\./g, '');
+        return /[dmyhs]/i.test(bare) && !/^[#0.,%\s]*$/.test(bare);
+    };
+    const xfs = /<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/.exec(stylesXml);
+    if (!xfs) return [];
+    return (xfs[1].match(/<xf\b[^>]*>/g) || []).map(tag => {
+        const id = /numFmtId="(\d+)"/.exec(tag);
+        return !!(id && isDateFmt(id[1]));
+    });
+}
+
+function _excelSharedStrings(xml) {
+    const out = [];
+    const re = /<si\b[^>]*>([\s\S]*?)<\/si>/g;
+    let m;
+    while ((m = re.exec(xml))) {
+        let s = '';
+        const tre = /<t\b[^>]*>([\s\S]*?)<\/t>|<t\b[^>]*\/>/g;
+        let t;
+        while ((t = tre.exec(m[1]))) s += t[1] ? _xmlUnescape(t[1]) : '';
+        out.push(s);
+    }
+    return out;
+}
+
+/** Sheet XML → { rows: [[{v, kind}]], rowsSeen, complete }  (first maxRows rows). */
+function _excelSheetRows(xml, shared, dateStyles, maxRows) {
+    const rows = [];
+    let rowsSeen = 0;
+    const rowRe = /<row\b[^>]*?(?:\/>|>([\s\S]*?)<\/row>)/g;
+    let rm;
+    while ((rm = rowRe.exec(xml))) {
+        rowsSeen++;
+        if (rows.length >= maxRows) continue;
+        const cells = [];
+        const body = rm[1] || '';
+        const cellRe = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
+        let cm, seq = 0;
+        while ((cm = cellRe.exec(body))) {
+            const attrs = cm[1] || '', inner = cm[2] || '';
+            const r = /\br="([A-Z]+\d+)"/i.exec(attrs);
+            let col = r ? _excelColIndex(r[1]) : seq;
+            seq = col + 1;
+            if (col < 0 || col >= EXCEL_MAX_COLS) continue;
+            const t = (/\bt="(\w+)"/.exec(attrs) || [])[1] || 'n';
+            const s = (/\bs="(\d+)"/.exec(attrs) || [])[1];
+            const vm = /<v>([\s\S]*?)<\/v>/.exec(inner);
+            let v = '', kind = 'string';
+            if (t === 's') v = vm ? (shared[+vm[1]] != null ? shared[+vm[1]] : '') : '';
+            else if (t === 'inlineStr') { const im = /<t\b[^>]*>([\s\S]*?)<\/t>/.exec(inner); v = im ? _xmlUnescape(im[1]) : ''; }
+            else if (t === 'str' || t === 'e') v = vm ? _xmlUnescape(vm[1]) : '';
+            else if (t === 'b') { v = vm ? vm[1] : ''; kind = 'bool'; }
+            else if (vm) { v = vm[1]; kind = (s != null && dateStyles[+s]) ? 'excel_date' : 'number'; }
+            cells[col] = { v, kind };
+        }
+        rows.push(cells);
+    }
+    const complete = /<\/sheetData>/.test(xml);
+    return { rows, rowsSeen, complete };
+}
+
+function _excelCellText(c) { return c ? String(c.v == null ? '' : c.v).trim() : ''; }
+
+/** First row with ≥ 80% of the widest text row's labels (header sits above the data). */
+function _excelHeaderRow(rows) {
+    const textCount = rows.map(r => (r || []).filter(c => {
+        const s = _excelCellText(c);
+        return s && c.kind === 'string' && s.length <= 64 && !/^[-+\d.,:\/\s()]+$/.test(s);
+    }).length);
+    const max = Math.max(0, ...textCount);
+    if (max < 2) return -1;
+    for (let i = 0; i < textCount.length; i++) if (textCount[i] >= Math.max(2, Math.ceil(max * 0.8))) return i;
+    return -1;
+}
+
+function _excelValueFormat(c) {
+    const s = _excelCellText(c);
+    if (!s) return 'string_empty';
+    if (c.kind === 'excel_date') return 'excel_date';
+    if (c.kind === 'bool') return 'bool';
+    if (c.kind === 'number') {
+        if (/[eE]/.test(s)) return 'number_sci';
+        return inferValueFormat(Number(s));
+    }
+    if (/^\d{1,4}[\/.-]\d{1,2}[\/.-]\d{2,4}([ T]\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?)?$/i.test(s)) return /:\d{2}/.test(s) ? 'datetime_str' : 'date_str';
+    if (/^\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?$/i.test(s)) return 'time_str';
+    return inferValueFormat(s);
+}
+
+function inspectExcel(buffer) {
+    if (!buffer || buffer.length < 4) return { type: 'excel', metadata_only: true };
+    if (buffer[0] === 0xD0 && buffer[1] === 0xCF && buffer[2] === 0x11 && buffer[3] === 0xE0) {
+        return { type: 'excel', legacy_xls: true, metadata_only: true };    // BIFF .xls — no reader here
+    }
+    if (!(buffer[0] === 0x50 && buffer[1] === 0x4B)) return { type: 'excel', metadata_only: true, inspect_note: 'not_a_zip' };
+    const AdmZip = require('adm-zip');
+    const zip = new AdmZip(buffer);
+    const get = name => zip.getEntry(name);
+    if (!get('xl/workbook.xml')) return { type: 'excel', metadata_only: true, inspect_note: 'no_workbook' };
+
+    const wbXml = _excelEntryText(get('xl/workbook.xml')).text;
+    const relsXml = _excelEntryText(get('xl/_rels/workbook.xml.rels')).text;
+    const rels = {};
+    (relsXml.match(/<Relationship\b[^>]*>/g) || []).forEach(tag => {
+        const id = /\bId="([^"]+)"/.exec(tag), tg = /\bTarget="([^"]+)"/.exec(tag);
+        if (id && tg) rels[id[1]] = tg[1];
+    });
+    const sharedRes = _excelEntryText(get('xl/sharedStrings.xml'));
+    const shared = _excelSharedStrings(sharedRes.text);
+    const dateStyles = _excelDateStyles(_excelEntryText(get('xl/styles.xml')).text);
+    const date1904 = /date1904="(1|true)"/.test(wbXml);
+
+    const sheetTags = wbXml.match(/<sheet\b[^>]*>/g) || [];
+    const sheets = [];
+    sheetTags.slice(0, EXCEL_MAX_SHEETS).forEach((tag, i) => {
+        const name = _xmlUnescape((/\bname="([^"]*)"/.exec(tag) || [])[1] || ('Sheet' + (i + 1)));
+        const rid = (/\br:id="([^"]+)"/.exec(tag) || /\bid="([^"]+)"/.exec(tag) || [])[1];
+        let target = rid && rels[rid] ? rels[rid].replace(/^\/?xl\//, '').replace(/^\//, '') : ('worksheets/sheet' + (i + 1) + '.xml');
+        const ze = get('xl/' + target) || get('xl/worksheets/sheet' + (i + 1) + '.xml');
+        const out = { name: _redactCellPii(name), state: /state="(hidden|veryHidden)"/.exec(tag) ? 'hidden' : 'visible' };
+        if (!ze) { out.missing = true; sheets.push(out); return; }
+        const res = _excelEntryText(ze);
+        const dim = /<dimension\b[^>]*\bref="([^"]+)"/.exec(res.text);
+        const parsed = _excelSheetRows(res.text, shared, dateStyles, EXCEL_SCAN_ROWS + EXCEL_FORMAT_ROWS);
+        if (dim) out.dimension = dim[1];
+        const dimRows = dim && /:[A-Z]+(\d+)$/i.exec(dim[1]);
+        out.row_count = (res.partial || !parsed.complete) && dimRows ? +dimRows[1] : parsed.rowsSeen;
+        out.row_count_from = (res.partial || !parsed.complete) ? (dimRows ? 'dimension' : 'partial_scan') : 'rows';
+        if (res.partial) out.partially_read = true;
+
+        const hr = _excelHeaderRow(parsed.rows.slice(0, EXCEL_SCAN_ROWS));
+        if (hr < 0) { out.headers = []; sheets.push(out); return; }
+        const headRow = parsed.rows[hr] || [];
+        const width = Math.min(EXCEL_MAX_COLS, headRow.length);
+        out.header_row = hr;
+        out.banner_rows_skipped = hr;
+        const labels = [];
+        for (let r = 0; r < hr && labels.length < 10; r++) {
+            (parsed.rows[r] || []).forEach(c => {
+                const s = _excelCellText(c);
+                const m = /^([^:]{1,40}):/.exec(s);
+                if (m && labels.length < 10) labels.push(_redactCellPii(m[1].trim()));
+            });
+        }
+        if (labels.length) out.banner_labels = labels;
+        out.headers = [];
+        for (let c = 0; c < width; c++) out.headers.push(_redactCellPii(_excelCellText(headRow[c])));
+        out.column_count = width;
+        const counts = out.headers.map(() => ({}));
+        let sampled = 0;
+        for (let r = hr + 1; r < parsed.rows.length && sampled < EXCEL_FORMAT_ROWS; r++) {
+            const row = parsed.rows[r] || [];
+            if (!row.some(c => _excelCellText(c))) continue;
+            sampled++;
+            for (let c = 0; c < width; c++) {
+                const f = _excelValueFormat(row[c]);
+                counts[c][f] = (counts[c][f] || 0) + 1;
+            }
+        }
+        out.rows_sampled_for_formats = sampled;
+        if (sampled) {
+            out.column_formats = counts.map(cn => {
+                const nonEmpty = Object.assign({}, cn); delete nonEmpty.string_empty;
+                return Object.keys(nonEmpty).length ? _majorityFormat(nonEmpty) : 'string_empty';
+            });
+        }
+        sheets.push(out);
+    });
+    const result = { type: 'excel', sheet_count: sheetTags.length, sheets };
+    if (sheetTags.length > EXCEL_MAX_SHEETS) result.sheets_truncated = true;
+    if (date1904) result.date1904 = true;
+    if (sharedRes.partial) result.shared_strings_partial = true;
+    return result;
+}
+
 // ─── Top-level inspector dispatch ──────────────────────────────────────────
 
 function inspectFormat(format, buffer) {
@@ -1893,6 +2185,7 @@ function inspectFormat(format, buffer) {
             case 'mbox': return inspectMbox(buffer.toString('utf8'));
             case 'eml':  return inspectEml(buffer.toString('utf8'));
             case 'pdf':  return inspectPdf(buffer);
+            case 'excel': return inspectExcel(buffer);
             case 'xml':  return inspectHtml(buffer.toString('utf8'));   // tag-freq reuse
             case 'text': return inspectText(buffer.toString('utf8'));
             default:     return { type: format, metadata_only: true };
@@ -1946,7 +2239,9 @@ function inspectFileFromDisk(rel, abs, size, envelopeBytes, sanitizer) {
     } else {
         // Cap read size at min(per-file budget, 8 MB) — generous enough for
         // every realistic per-file inspection while protecting memory.
-        const readCap = Math.min(size, 8 * 1024 * 1024);
+        // Excel is a ZIP whose directory sits at the END — read it whole
+        // (already ≤ PER_FILE_BUDGET_BYTES) or the workbook can't be opened.
+        const readCap = fmt === 'excel' ? size : Math.min(size, 8 * 1024 * 1024);
         const buf = readCap === peek.length ? peek : readUpTo(abs, readCap);
         structure = inspectFormat(fmt, buf);
     }
@@ -2335,12 +2630,17 @@ module.exports = {
         inspectMbox,
         inspectEml,
         inspectPdf,
+        inspectExcel,
+        inspectFormat,
         inspectText,
         inspectPdfTextAsync,
         _pdfGarbleScore,
         _collapseNarratives,
         _redactStructural,
         _redactExcerpt,
+        _redactCrashLog,
+        _crashLogExcerpt,
+        CRASH_LOG_MAX_LINES,
         _protectableLabels,
         _safeCapsWords,
         _scrubKnownNameWords,

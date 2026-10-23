@@ -920,11 +920,16 @@ class KikWarrantParser {
         if (ext === '.png') return 'image/png';
         if (ext === '.gif') return 'image/gif';
         if (ext === '.mp4') return 'video/mp4';
+        // Old video formats (FLV, AVI, 3GP …) play through a VIPER playback copy.
+        const VP = require('../_shared/video-playback');
+        if (VP.VIDEO_MIME_BY_EXT[ext.slice(1)]) return VP.VIDEO_MIME_BY_EXT[ext.slice(1)];
         // No extension — peek magic bytes
         try {
-            const header = entry.getData().slice(0, 8);
+            const header = entry.getData().slice(0, 16);
             if (header[0] === 0xFF && header[1] === 0xD8) return 'image/jpeg';
             if (header[0] === 0x89 && header[1] === 0x50) return 'image/png';
+            const old = VP.sniffVideo(header);
+            if (old) return old.mime;
             if (header.length > 7 && header[4] === 0x66 && header[5] === 0x74 &&
                 header[6] === 0x79 && header[7] === 0x70) return 'video/mp4';
         } catch (e) { /* keep default */ }

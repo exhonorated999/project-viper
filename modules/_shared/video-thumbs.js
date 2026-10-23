@@ -186,10 +186,25 @@
             let p = inflight.get(key);
             if (!p) {
                 p = (async () => {
-                    let url = null;
-                    try { url = await o.getUrl(key, el); } catch (_) { url = null; }
-                    if (!url) return null;           // not cached: may succeed later
-                    const data = await withDecodeSlot(() => capture(url));
+                    // api.fallback (set by legacy-video.js): ffmpeg frame from
+                    // main for formats the window can't decode. first(el) →
+                    // skip the in-window attempt (FLV/AVI/WMV … never decode).
+                    const fb = api.fallback;
+                    let data = null;
+                    let skip = false, tried = false;
+                    try { skip = !!(fb && fb.first && fb.first(el)); } catch (_) { skip = false; }
+                    if (!skip) {
+                        let url = null;
+                        try { url = await o.getUrl(key, el); } catch (_) { url = null; }
+                        if (url) { tried = true; data = await withDecodeSlot(() => capture(url)); }
+                    }
+                    if (!data && fb && fb.thumb) {
+                        let got = null;
+                        try { got = await fb.thumb(el); } catch (_) { got = null; }
+                        if (got) data = got;
+                        else if (got === false) tried = true;   // fallback ran and failed for good
+                    }
+                    if (!data && !tried) return null;    // not cached: may succeed later
                     cacheSet(cache, key, data || FAILED);
                     return data || null;
                 })();
@@ -236,5 +251,6 @@
         sharedCache.clear(); inflight.clear(); styleDone = false; gActive = 0; gWait.length = 0;
     }
 
-    return { hydrate, captureFrame, defaultApply, sharedCache, _resetForTests };
+    const api = { hydrate, captureFrame, defaultApply, sharedCache, _resetForTests, fallback: null };
+    return api;
 });

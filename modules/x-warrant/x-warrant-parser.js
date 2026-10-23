@@ -708,7 +708,7 @@ class XWarrantParser {
             '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime', '.m4v': 'video/x-m4v',
             '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.opus': 'audio/opus',
         };
-        return map[e] || 'application/octet-stream';
+        return map[e] || require('../_shared/video-playback').VIDEO_MIME_BY_EXT[e.slice(1)] || 'application/octet-stream';
     }
 
     // ─── Stats ──────────────────────────────────────────────────────────

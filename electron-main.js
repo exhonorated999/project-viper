@@ -130,15 +130,29 @@ protocol.registerSchemesAsPrivileged([
 // token → { absPath, expiresAt }. Tokens are short-lived (1 hour) and only
 // resolved by the protocol handler. The renderer never sees the absolute path.
 const datapilotMediaTokens = new Map();
+const _mediaTokenByPath = new Map(); // absPath → token (Evidence tab asks thousands of times)
+let _mediaTokenSweepAt = 0;
 function _datapilotIssueMediaToken(absPath) {
   // Reuse token if same path already issued and unexpired
   const now = Date.now();
-  for (const [tok, entry] of datapilotMediaTokens) {
-    if (entry.expiresAt < now) datapilotMediaTokens.delete(tok);
-    else if (entry.absPath === absPath) return tok;
+  const have = _mediaTokenByPath.get(absPath);
+  if (have) {
+    const e = datapilotMediaTokens.get(have);
+    if (e && e.absPath === absPath && e.expiresAt >= now) return have;
+    _mediaTokenByPath.delete(absPath);
+  }
+  if (now - _mediaTokenSweepAt > 60 * 1000) {
+    _mediaTokenSweepAt = now;
+    for (const [tok, entry] of datapilotMediaTokens) {
+      if (entry.expiresAt < now) {
+        datapilotMediaTokens.delete(tok);
+        if (_mediaTokenByPath.get(entry.absPath) === tok) _mediaTokenByPath.delete(entry.absPath);
+      }
+    }
   }
   const tok = crypto.randomBytes(16).toString('hex');
   datapilotMediaTokens.set(tok, { absPath, expiresAt: now + 60 * 60 * 1000 });
+  _mediaTokenByPath.set(absPath, tok);
   return tok;
 }
 
@@ -813,6 +827,28 @@ function restoreFocus() {
     }, 100);
   }
 }
+
+// Renderer asks for keyboard focus back. Electron on Windows sometimes leaves
+// the page unable to type (focus stuck in a hidden BrowserView or lost after a
+// native dialog) until the officer clicks off VIPER and back on. Do the same
+// thing that click does: focus the page, and if that is not enough, blur and
+// re-focus the window (its 'focus' handler focuses the webContents).
+ipcMain.handle('focus-main-window', async (event) => {
+  try {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed() || win.isMinimized()) return { focused: false };
+    const wc = event.sender;
+    wc.focus();
+    if (!wc.isFocused()) {
+      win.blur();
+      win.focus();
+      wc.focus();
+    }
+    return { focused: wc.isFocused() };
+  } catch (e) {
+    return { focused: false, error: e.message };
+  }
+});
 
 // Encrypt localStorage snapshot to vault + clear sensitive data at rest.
 // Split out from saveVaultAndQuit so the update/quit path can flush the
@@ -4180,6 +4216,7 @@ ipcMain.handle('note-get', async (event, caseNumber, noteId) => {
     } catch (_) {}
     return {
       contentHtml: html,
+      title: typeof note.title === 'string' ? note.title : '',
       createdAt: note.createdAt || null
     };
   })()`;
@@ -4190,12 +4227,18 @@ ipcMain.handle('note-get', async (event, caseNumber, noteId) => {
 // button, its five-minute autosave, the flush when its window closes, and
 // the flush on app quit. Four callers, one writer; two write paths would
 // drift the moment one of them grew a guard the other did not.
-async function _noteWriteToMain(caseNumber, noteId, contentHtml) {
+async function _noteWriteToMain(caseNumber, noteId, contentHtml, title) {
   if (!mainWindow || mainWindow.isDestroyed()) return false;
+  // `title` is optional: undefined means "leave the note's title alone"
+  // (older pop-outs, and any caller that only knows the body). A string —
+  // even '' — is the officer's title; '' removes it.
+  const hasTitle = typeof title === 'string';
   const safePayload = JSON.stringify(JSON.stringify({
     caseNumber: String(caseNumber),
     noteId: String(noteId),
     contentHtml: String(contentHtml == null ? '' : contentHtml),
+    hasTitle,
+    title: hasTitle ? title.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200) : '',
     editedAt: new Date().toISOString()
   }));
   const js = `(() => {
@@ -4219,10 +4262,12 @@ async function _noteWriteToMain(caseNumber, noteId, contentHtml) {
     // own beforeunload and the main-side close flush can both fire for the
     // same close, and without this the note would collect two identical
     // edit timestamps for one keystroke.
-    if (note.contentHtml === d.contentHtml) return true;
+    if (note.contentHtml === d.contentHtml
+        && (!d.hasTitle || (note.title || '') === d.title)) return true;
 
     note.contentHtml = d.contentHtml;
     delete note.content;
+    if (d.hasTitle) { if (d.title) note.title = d.title; else delete note.title; }
     note.editHistory = Array.isArray(note.editHistory) ? note.editHistory : [];
     note.editHistory.push(d.editedAt);
     localStorage.setItem('viperCaseNotes', JSON.stringify(all));
@@ -4268,6 +4313,7 @@ async function _noteWriteToMain(caseNumber, noteId, contentHtml) {
           if (live) {
             live.contentHtml = d.contentHtml;
             delete live.content;
+            if (d.hasTitle) { if (d.title) live.title = d.title; else delete live.title; }
             live.editHistory = note.editHistory.slice();
             // The in-memory copy is what the list behind the pop-out paints
             // from, and it needs the pictures in it. Read them back and
@@ -4306,8 +4352,8 @@ async function _noteWriteToMain(caseNumber, noteId, contentHtml) {
   return await mainWindow.webContents.executeJavaScript(js);
 }
 
-ipcMain.handle('note-save', async (event, caseNumber, noteId, contentHtml) =>
-  await _noteWriteToMain(caseNumber, noteId, contentHtml));
+ipcMain.handle('note-save', async (event, caseNumber, noteId, contentHtml, title) =>
+  await _noteWriteToMain(caseNumber, noteId, contentHtml, title));
 
 // Closing the pop-out window saves the note.
 //
@@ -4326,7 +4372,7 @@ async function _flushNoteWindow(noteWin) {
   if (!id) return;
   try {
     if (noteWin.isDestroyed() || noteWin.webContents.isDestroyed()) return;
-    const html = await noteWin.webContents.executeJavaScript(`(() => {
+    const read = await noteWin.webContents.executeJavaScript(`(() => {
       try {
         // isDirty() stays false until loadNote() has run, and the pop-out
         // never marks a missing note loaded — so an unloaded window, or one
@@ -4334,11 +4380,16 @@ async function _flushNoteWindow(noteWin) {
         // empty string over a real record.
         if (typeof isDirty !== 'function' || !isDirty()) return null;
         const ed = document.getElementById('editor');
-        return ed ? ed.innerHTML.trim() : null;
+        if (!ed) return null;
+        const t = document.getElementById('noteTitle');
+        return { html: ed.innerHTML.trim(), title: t ? String(t.value) : undefined };
       } catch (_) { return null; }
     })()`);
+    // A plain string is an older pop-out (body only, title left alone).
+    const html = typeof read === 'string' ? read : (read && typeof read.html === 'string' ? read.html : null);
+    const title = read && typeof read === 'object' && typeof read.title === 'string' ? read.title : undefined;
     if (typeof html === 'string') {
-      await _noteWriteToMain(id.caseNumber, id.noteId, html);
+      await _noteWriteToMain(id.caseNumber, id.noteId, html, title);
     }
   } catch (_) { /* never block a close or a quit on a save failure */ }
 }
@@ -7529,16 +7580,55 @@ ipcMain.handle('read-evidence-file', async (event, filePath) => {
     }
     const raw = fs.readFileSync(filePath);
     // Decrypt if security is active and file is encrypted
+    // Buffers cross IPC as a Uint8Array. (A number[] costs ~8x the file
+    // size and throws RangeError past ~250 MB.) Callers wrap the result in
+    // new Uint8Array(), which takes either.
     if (security && security.isUnlocked() && security.isEncryptedBuffer(raw)) {
-      const decrypted = security.decryptBuffer(raw);
-      return Array.from(new Uint8Array(decrypted));
+      return security.decryptBuffer(raw);
     }
-    return Array.from(new Uint8Array(raw));
+    return raw;
   } catch (error) {
     console.error('Failed to read evidence file:', error);
     throw error;
   }
 });
+
+// --- Evidence tab: one file at a time, only when its card is on screen ---
+// See modules/_shared/evidence-view.js. Plain files stream through
+// viper-media://; encrypted ones come back decrypted, one per call.
+// ── video-playback (start) ──
+// Old video formats (FLV, AVI, WMV, MPG, 3GP …) play through a converted
+// copy made by the shipped LGPL ffmpeg; video thumbnails come from it too.
+// See modules/_shared/video-playback.js.
+const _videoPlaybackLib = require('./modules/_shared/video-playback');
+const _videoPlayback = _videoPlaybackLib.createVideoPlayback({
+  fs,
+  spawn: require('child_process').spawn,
+  getSecurity: () => security,
+  issueToken: (p) => _datapilotIssueMediaToken(p),
+  ffmpegPath: () => _videoPlaybackLib.locateFfmpeg({ fs, resourcesPath: app.isPackaged ? process.resourcesPath : '', appDir: __dirname }),
+  cacheRoot: path.join(app.getPath('temp'), 'viper-video-playback'),
+  isPidAlive: (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return !!(e && e.code === 'EPERM'); } },
+});
+try { _videoPlayback.sweep(); } catch (_) {}
+app.on('will-quit', () => { try { _videoPlayback.dispose(); } catch (_) {} });
+// { filePath, jobId } → { success, url, mode, format, from } — progress on 'video-playback-progress'.
+ipcMain.handle('video-playback-url', async (event, args) => {
+  const a = args || {};
+  const sender = event.sender;
+  const jobId = String(a.jobId || '').slice(0, 64);
+  return _videoPlayback.prepare({
+    filePath: a.filePath,
+    onProgress: (p) => { try { if (!sender.isDestroyed()) sender.send('video-playback-progress', Object.assign({ jobId }, p)); } catch (_) {} },
+  });
+});
+// ── video-playback (end) ──
+const _evidenceView = require('./modules/_shared/evidence-view').createEvidenceView({
+  fs, getSecurity: () => security, nativeImage: electron.nativeImage, issueToken: (p) => _datapilotIssueMediaToken(p),
+  videoThumb: (a) => _videoPlayback.thumb(a),
+});
+ipcMain.handle('evidence-media-url', (event, args) => _evidenceView.mediaUrl(args));
+ipcMain.handle('evidence-thumb', (event, args) => _evidenceView.thumb(args));
 
 // ── Evidence ZIPs (CyberTips from the ICAC Data System) ─────────────────
 // List and read the files inside a ZIP filed as evidence, without unpacking
@@ -9526,6 +9616,19 @@ ipcMain.handle('report-doc-new-blank', async (event, { caseNumber, newName, seed
   } catch (e) { return _wdFail(e); }
 });
 
+// A tab's report as an editable Word report (first user: the BitTorrent tab's
+// Download Summary). The renderer sends plain "blocks" — the same ones its PDF
+// is made from — and modules/reports/blocks-docx.js lays them out. Saved
+// beside the case's other Word reports; addBuffer never overwrites (a second
+// one gets "(2)").
+ipcMain.handle('report-doc-from-blocks', async (event, { caseNumber, newName, blocks, footerText, title } = {}) => {
+  try {
+    const name = WorkingDocsLib.withExt(WorkingDocsLib.cleanName(newName), '.docx') || 'Report.docx';
+    const buf = await require('./modules/reports/blocks-docx').buildDocx(blocks, { footerText, title });
+    return { success: true, ..._reportDocs().addBuffer(caseNumber, name, buf) };
+  } catch (e) { return _wdFail(e); }
+});
+
 ipcMain.handle('report-doc-open', async (event, { caseNumber, fileName } = {}) => {
   try { return { success: true, ...(await _reportDocs().open(caseNumber, fileName)) }; }
   catch (e) {
@@ -9965,11 +10068,20 @@ async function _doSaveHtmlAsPdf({ html, defaultFileName, options, attachments, r
 
     // Print with timeout — if Chromium hangs on a malformed asset we don't
     // want the hidden window to live forever holding GPU + RAM.
+    // options.footerText: plain text printed in the bottom margin of every
+    // page with "Page n of N" (Chromium 120 has no CSS @page margin boxes).
+    const footerText = options && typeof options.footerText === 'string' ? options.footerText.slice(0, 300) : '';
+    const escFoot = (s) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const printPromise = pdfWin.webContents.printToPDF({
       printBackground: true,
       pageSize: (options && options.pageSize) || 'Letter',
       margins: { marginType: 'default' },
-      landscape: !!(options && options.landscape)
+      landscape: !!(options && options.landscape),
+      ...(footerText ? {
+        displayHeaderFooter: true,
+        headerTemplate: '<span></span>',
+        footerTemplate: `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:7.5pt;color:#555;width:100%;padding:0 0.45in;display:flex;justify-content:space-between"><span>${escFoot(footerText)}</span><span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span></div>`
+      } : {})
     });
     const timeoutPromise = new Promise((_, rej) => {
       printTimer = setTimeout(() => rej(new Error(`PDF render timed out after ${PDF_PRINT_TIMEOUT_MS / 1000}s`)), PDF_PRINT_TIMEOUT_MS);
@@ -10498,12 +10610,73 @@ async function _canvasApiFetchBinary(apiKey, endpoint) {
 }
 
 // Canvas Form IPC handlers — all calls go to Railway server
+
+// ── Sealed relay entries (Area Canvas + Field Work) ──────────────────────
+// Forms created by this build put `t=1` in the URL fragment, and the phone
+// then encrypts the whole WRITTEN entry with the form's key before posting
+// it: the relay stores {e2e:1, ct:<base64 of 12-byte IV ‖ ciphertext ‖ tag>}
+// and never sees notes, names, phones or addresses. Same key, same layout as
+// the attachments.
+//
+// The relay deletes entries the moment they are downloaded, so an entry that
+// will not open is NOT dropped: it is kept with its ciphertext and a visible
+// note, so nothing an officer filed silently disappears.
+//
+// The display title and case reference also ride only in the fragment; the
+// relay is given a generic title and no case number.
+function _relayFormUrl(serverUrl, mediaKey, title, caseRef) {
+  let url = String(serverUrl || '') + '#k=' + mediaKey + '&t=1';
+  const n = String(title || '').trim().slice(0, 120);
+  const c = String(caseRef || '').trim().slice(0, 60);
+  if (n) url += '&n=' + encodeURIComponent(n);
+  if (c) url += '&c=' + encodeURIComponent(c);
+  return url;
+}
+
+function _openSealedRelayEntries(list, mediaKey) {
+  if (!Array.isArray(list)) return list;
+  const nodeCrypto = require('crypto');
+  let key = null;
+  try {
+    const k = Buffer.from(String(mediaKey || ''), 'base64url');
+    if (k.length === 32) key = k;
+  } catch (_) {}
+  return list.map((e) => {
+    if (!e || e.e2e !== 1 || typeof e.ct !== 'string') return e;
+    const envelope = { id: e.id, submittedAt: e.submittedAt, media: Array.isArray(e.media) ? e.media : [] };
+    try {
+      if (!key) throw new Error('no key');
+      const buf = Buffer.from(e.ct, 'base64');
+      if (buf.length < 12 + 16) throw new Error('short');
+      const decipher = nodeCrypto.createDecipheriv('aes-256-gcm', key, buf.subarray(0, 12));
+      decipher.setAuthTag(buf.subarray(buf.length - 16));
+      const plain = Buffer.concat([decipher.update(buf.subarray(12, buf.length - 16)), decipher.final()]);
+      const data = JSON.parse(plain.toString('utf8'));
+      if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('shape');
+      const names = (data._mediaNames && typeof data._mediaNames === 'object') ? data._mediaNames : {};
+      delete data._mediaNames;
+      delete data.e2e; delete data.ct;
+      envelope.media = envelope.media.map((m) => (m && !m.fileName && typeof names[m.label] === 'string')
+        ? Object.assign({}, m, { fileName: names[m.label] }) : m);
+      return Object.assign(data, envelope);
+    } catch (err) {
+      return Object.assign({
+        notes: '[VIPER could not decrypt this entry. It has been kept in encrypted form; the form key on this computer may not match the link that was used.]',
+        e2eError: true,
+        e2eCipher: e.ct
+      }, envelope);
+    }
+  });
+}
+
 ipcMain.handle('canvas-form-create', async (event, { apiKey, title, caseRef, fields }) => {
   const result = await _canvasApiFetch(apiKey, '/api/canvas/forms', {
     method: 'POST',
     body: {
-      title: title || 'Area Canvas',
-      case_ref: caseRef || '',
+      // Generic on purpose — the real title and case number go in the
+      // fragment (see _relayFormUrl) and never reach the relay.
+      title: 'Area Canvas',
+      case_ref: '',
       fields: fields || ['address']
     }
   });
@@ -10518,7 +10691,7 @@ ipcMain.handle('canvas-form-create', async (event, { apiKey, title, caseRef, fie
   // to an agency about this feature, and it is why the key must not be
   // appended as a query string.
   const mediaKey = require('crypto').randomBytes(32).toString('base64url');
-  const formUrl = String(result.form_url || '') + '#k=' + mediaKey;
+  const formUrl = _relayFormUrl(result.form_url, mediaKey, title, caseRef);
 
   // Generate QR code for the form URL
   const QRCode = require('qrcode');
@@ -10606,9 +10779,13 @@ ipcMain.handle('canvas-form-get-info', async (event, { apiKey, formId }) => {
   return await _canvasApiFetch(apiKey, `/api/canvas/${formId}/info`);
 });
 
-ipcMain.handle('canvas-form-download', async (event, { apiKey, formId }) => {
-  // Download results AND delete them from server
-  return await _canvasApiFetch(apiKey, `/api/canvas/${formId}/results`);
+ipcMain.handle('canvas-form-download', async (event, { apiKey, formId, mediaKey }) => {
+  // Download results AND delete them from server; open sealed entries here.
+  const result = await _canvasApiFetch(apiKey, `/api/canvas/${formId}/results`);
+  if (result && Array.isArray(result.submissions)) {
+    result.submissions = _openSealedRelayEntries(result.submissions, mediaKey);
+  }
+  return result;
 });
 
 ipcMain.handle('canvas-form-delete', async (event, { apiKey, formId }) => {
@@ -10639,8 +10816,10 @@ ipcMain.handle('fieldwork-form-create', async (_e, params) => {
   const result = await _relayApiFetch(p.apiKey, '/api/fieldwork/forms', {
     method: 'POST',
     body: {
-      title: p.title || 'Field Work',
-      case_ref: p.caseRef || '',
+      // Generic on purpose: the preset name only. The officer's title and
+      // the case number go in the fragment and never reach the relay.
+      title: p.presetLabel || 'Field Work',
+      case_ref: '',
       preset: p.preset || 'custom',
       preset_label: p.presetLabel || '',
       fields: Array.isArray(p.fields) ? p.fields : [],
@@ -10659,7 +10838,7 @@ ipcMain.handle('fieldwork-form-create', async (_e, params) => {
   // to an agency about this feature, and it is why the key must not be
   // appended as a query string.
   const mediaKey = require('crypto').randomBytes(32).toString('base64url');
-  const formUrl = String(result.form_url || '') + '#k=' + mediaKey;
+  const formUrl = _relayFormUrl(result.form_url, mediaKey, p.title, p.caseRef);
 
   const QRCode = require('qrcode');
   const qrDataUrl = await QRCode.toDataURL(formUrl, {
@@ -10705,12 +10884,16 @@ ipcMain.handle('fieldwork-form-get-info', async (_e, { apiKey, formId }) => {
   }
 });
 
-ipcMain.handle('fieldwork-form-download', async (_e, { apiKey, formId }) => {
+ipcMain.handle('fieldwork-form-download', async (_e, { apiKey, formId, mediaKey }) => {
   // Fetching the results DELETES the entry rows on the server in the same
   // request. The attachments deliberately survive that delete — see
   // fieldwork-fetch-media below — so they can still be pulled down after
-  // the entries that referenced them are gone.
-  return await _relayApiFetch(apiKey, `/api/fieldwork/${formId}/results`);
+  // the entries that referenced them are gone. Sealed entries open here.
+  const result = await _relayApiFetch(apiKey, `/api/fieldwork/${formId}/results`);
+  if (result && Array.isArray(result.entries)) {
+    result.entries = _openSealedRelayEntries(result.entries, mediaKey);
+  }
+  return result;
 });
 
 ipcMain.handle('fieldwork-form-delete', async (_e, { apiKey, formId }) => {
@@ -14514,7 +14697,10 @@ require('./modules/bittorrent/bt-main').register({
   getSecurity: () => security,
   restoreFocus,
   sourceFingerprint: (spec) => _sourceFingerprint(spec),
-  encryptMaxBytes: EVIDENCE_ENCRYPT_MAX_BYTES
+  encryptMaxBytes: EVIDENCE_ENCRYPT_MAX_BYTES,
+  // Phase 4 viewer: bt-main guards the path (Download folder of this case's import).
+  mediaUrl: (p) => _mediaUrlForCheckedPath(p),
+  videoPlayback: _videoPlayback
 });
 
 // ── warrant-media-url (start) ──
@@ -14541,6 +14727,14 @@ ipcMain.handle('warrant-media-url', async (event, { filePath } = {}) => {
   try {
     const full = _warrantMediaCheckPath(filePath, casesDir);
     if (!full) return { success: false, error: 'Path not allowed' };
+    return _mediaUrlForCheckedPath(full);
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+// Token URL for a path the caller has ALREADY guarded (warrant tabs, BitTorrent tab).
+function _mediaUrlForCheckedPath(full) {
+  try {
     let st;
     try { st = fs.statSync(full); } catch (_) { return { success: false, error: 'File not found' }; }
     if (!st.isFile()) return { success: false, error: 'Not a file' };
@@ -14569,12 +14763,37 @@ ipcMain.handle('warrant-media-url', async (event, { filePath } = {}) => {
   } catch (error) {
     return { success: false, error: error.message };
   }
-});
+}
 app.on('will-quit', () => {
   for (const { tmp } of _warrantMediaTemp.values()) { try { fs.unlinkSync(tmp); } catch (_) {} }
   _warrantMediaTemp.clear();
 });
 // ── warrant-media-url (end) ──
+
+// ── warrant-video (start) ──
+// Playback copies + ffmpeg thumbnails for videos in the Snapchat / KIK / X
+// tabs (path-guarded like warrant-media-url) and the Meta tab (by store ref).
+// { op:'play'|'thumb', filePath? | caseNumber+storeKey+ref, jobId?, size? }
+function _warrantVideoSource(a) {
+  if (a.filePath) return _warrantMediaCheckPath(a.filePath, casesDir);
+  if (a.storeKey && a.ref != null && a.caseNumber != null) {
+    try { return _metaService.mediaSource(String(a.caseNumber), String(a.storeKey), String(a.ref)); } catch (_) { return null; }
+  }
+  return null;
+}
+ipcMain.handle('warrant-video', async (event, args) => {
+  const a = args || {};
+  const filePath = _warrantVideoSource(a);
+  if (!filePath) return { success: false, reason: 'not-allowed', error: 'This file cannot be played here.' };
+  if (a.op === 'thumb') return _videoPlayback.thumb({ filePath, size: a.size, anyExt: true });
+  const sender = event.sender;
+  const jobId = String(a.jobId || '').slice(0, 64);
+  return _videoPlayback.prepare({
+    filePath, anyExt: true,
+    onProgress: (p) => { try { if (!sender.isDestroyed()) sender.send('video-playback-progress', Object.assign({ jobId }, p)); } catch (_) {} },
+  });
+});
+// ── warrant-video (end) ──
 
 // ─── Discord Warrant Parser IPC ─────────────────────────────────────
 

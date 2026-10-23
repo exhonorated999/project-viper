@@ -139,7 +139,11 @@
 
     const out = list.map((n) => {
       // contentHtml is current; content/text are legacy shapes still on disk.
-      const text = htmlToPlainText(n.contentHtml || n.content || n.text || '');
+      // An optional title rides at the top of the text, so the payload shape
+      // (and every untitled note) is unchanged.
+      const body = htmlToPlainText(n.contentHtml || n.content || n.text || '');
+      const title = typeof n.title === 'string' ? n.title.replace(/\s+/g, ' ').trim() : '';
+      const text = title && body ? title + '\n' + body : body;
       const date = String(n.createdAt || '');
       const edits = Array.isArray(n.editHistory) ? n.editHistory.length : 0;
       return {
@@ -993,6 +997,7 @@
   }
 
   function upsertAssignment(a) {
+    if (a && isRemoved('icac', a.id)) return;
     const list = inboxGet();
     const i = list.findIndex((x) => x.id === a.id);
     if (i >= 0) list[i] = { ...list[i], ...a };
@@ -1058,6 +1063,11 @@
         ${a.note ? `<div style="color:${C.text};font-size:12.5px;margin-top:6px;">${escapeHtml(a.note)}</div>` : ''}
         ${a.caseNumber ? `<div style="color:${C.cyan};font-size:12px;margin-top:6px;">Case ${escapeHtml(a.caseNumber)}</div>` : ''}
       `;
+      row.firstElementChild.appendChild(removeButton('icac', a.id, {
+        confirm: !ackd,
+        title: 'Remove from list',
+        confirmTitle: 'Not acknowledged yet — your supervisor will not be told you received it. Click again to remove.',
+      }));
       if (!ackd) {
         const actions = el('div', 'display:flex;gap:8px;margin-top:10px;');
         const launch = el('button', `flex:1;padding:7px;border-radius:8px;border:1px solid ${C.cyan};
@@ -1176,6 +1186,7 @@
   function casePendingCount() { return caseInboxGet().filter((a) => a.status !== 'acknowledged').length; }
 
   function upsertCaseAssignment(a) {
+    if (a && isRemoved('case', a.id)) return;
     const list = caseInboxGet();
     const i = list.findIndex((x) => x.id === a.id);
     if (i >= 0) list[i] = { ...list[i], ...a };
@@ -1214,6 +1225,11 @@
         ${a.note ? `<div style="color:${C.dim};font-size:12px;margin-top:4px;">${escapeHtml(a.note)}</div>` : ''}
         ${a.openedCaseNumber ? `<div style="color:${C.cyan};font-size:12px;margin-top:6px;">Opened ${escapeHtml(a.openedCaseNumber)}</div>` : ''}
       `;
+      row.firstElementChild.appendChild(removeButton('case', a.id, {
+        confirm: !ackd,
+        title: 'Remove from list',
+        confirmTitle: 'Not acknowledged yet — your supervisor will not be told you received it. Click again to remove.',
+      }));
       if (!ackd) {
         const actions = el('div', 'display:flex;gap:8px;margin-top:10px;');
         const launch = el('button', `flex:1;padding:7px;border-radius:8px;border:1px solid ${C.cyan};
@@ -1388,6 +1404,9 @@
 
   function upsertReview(r, opts) {
     opts = opts || {};
+    // Removed from the bell list, but the decision is still part of the
+    // case record — keep writing it there.
+    if (r && isRemoved('review', r.deliveryId)) { writeReviewToCase(r); return false; }
     const list = reviewGet();
     const i = list.findIndex((x) => x && x.deliveryId === r.deliveryId);
     const isNew = i < 0;
@@ -1416,6 +1435,81 @@
     emitInboxUpdate();
   }
 
+  // ── Removing notifications from the bell list ────────────────────────────
+  // The reconcile-on-paint calls re-send every assignment / decision the node
+  // still holds, so a removed row would come straight back. Removed ids are
+  // remembered here; a NEW assignment has a new id and still arrives.
+  // Removing never touches the case: review decisions stay on the case's
+  // Overview, and an opened case stays opened.
+  const REMOVED_KEY = 'viperRemovedNotifications';
+  const REMOVED_CAP = 1000;
+  function removedGet() {
+    const v = lsJSON(REMOVED_KEY, {});
+    return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+  }
+  function isRemoved(kind, id) {
+    if (id == null || id === '') return false;
+    const l = removedGet()[kind];
+    return Array.isArray(l) && l.includes(String(id));
+  }
+  const REMOVE_STORES = {
+    icac: { get: () => inboxGet(), save: (l) => inboxSave(l), key: 'id' },
+    case: { get: () => caseInboxGet(), save: (l) => caseInboxSave(l), key: 'id' },
+    review: { get: () => reviewGet(), save: (l) => reviewSave(l), key: 'deliveryId' },
+  };
+  function removeNotification(kind, id) {
+    const s = REMOVE_STORES[kind];
+    if (!s || id == null || id === '') return false;
+    const all = removedGet();
+    const l = Array.isArray(all[kind]) ? all[kind] : [];
+    if (!l.includes(String(id))) l.push(String(id));
+    all[kind] = l.slice(-REMOVED_CAP);
+    try { localStorage.setItem(REMOVED_KEY, JSON.stringify(all)); } catch (_) { return false; }
+    const list = s.get();
+    const next = list.filter((x) => !(x && String(x[s.key]) === String(id)));
+    if (next.length !== list.length) s.save(next);
+    if (inboxPanelEl) renderInboxList();
+    if (caseInboxPanelEl) renderCaseInboxList();
+    emitInboxUpdate();
+    return true;
+  }
+
+  // Trash button for a notification row. Items the officer has not dealt
+  // with yet (pending assignment, unread decision) take a second click so a
+  // stray click can't silently drop work — no native confirm(), which steals
+  // focus from inputs in Electron.
+  function removeButton(kind, id, opts) {
+    opts = opts || {};
+    const b = el('button', `${opts.pushRight ? 'margin-left:auto;' : 'margin-left:6px;'}display:inline-flex;align-items:center;gap:4px;
+      background:transparent;border:1px solid transparent;color:${C.faint};cursor:pointer;border-radius:6px;
+      padding:3px 5px;font-size:11.5px;line-height:1;`, { type: 'button', title: opts.title || 'Remove from list' });
+    b.setAttribute('data-notif-remove', kind);
+    const icon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>';
+    b.innerHTML = icon;
+    let armed = false, timer = null;
+    b.addEventListener('mouseenter', () => { if (!armed) b.style.color = C.red; });
+    b.addEventListener('mouseleave', () => { if (!armed) b.style.color = C.faint; });
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (opts.confirm && !armed) {
+        armed = true;
+        b.innerHTML = icon + '<span>Remove?</span>';
+        b.style.color = C.red;
+        b.style.borderColor = C.red;
+        b.title = opts.confirmTitle || 'Click again to remove';
+        timer = setTimeout(() => {
+          armed = false;
+          b.innerHTML = icon; b.style.color = C.faint; b.style.borderColor = 'transparent';
+          b.title = opts.title || 'Remove from list';
+        }, 4000);
+        return;
+      }
+      if (timer) clearTimeout(timer);
+      removeNotification(kind, id);
+    });
+    return b;
+  }
+
   function renderReviewInboxInto(container) {
     if (!container) return;
     const list = reviewGet();
@@ -1439,6 +1533,12 @@
         ${r.comments ? `<div style="color:${C.text};font-size:12.5px;margin-top:6px;white-space:pre-wrap;">${escapeHtml(r.comments)}</div>`
           : `<div style="color:${C.faint};font-size:12px;margin-top:6px;">No comments.</div>`}
       `;
+      row.firstElementChild.appendChild(removeButton('review', r.deliveryId, {
+        pushRight: !!r.seen,
+        confirm: !r.seen,
+        title: 'Remove from list (the decision stays on the case Overview)',
+        confirmTitle: 'Not read yet. Click again to remove — the decision stays on the case Overview.',
+      }));
       const actions = el('div', 'display:flex;gap:8px;margin-top:10px;');
       if (r.caseNumber) {
         const open = el('button', `flex:1;padding:7px;border-radius:8px;border:1px solid ${C.cyan};
@@ -1623,6 +1723,7 @@
     getIdentity, openPushDialog, buildStatsSnapshot, buildCaseDigest,
     openInbox, openCaseInbox,
     getInboxCounts, renderInboxInto, renderCaseInboxInto,
+    removeNotification, isNotificationRemoved: isRemoved,
     renderReviewInboxInto, getCaseReviews: reviewGet, markReviewSeen,
   };
 })();

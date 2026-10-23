@@ -75,7 +75,13 @@ async function encryptLikeThePhone(keyB64Url, plaintext) {
   });
 
   ok('the key rides in the URL fragment, never a query string', () => {
-    assert.ok(/form_url[^\n]*\+ '#k=' \+ mediaKey/.test(SRC),
+    // Built by _relayFormUrl (shared with Field Work; sealed entries add &t=1).
+    const cc = SRC.slice(SRC.indexOf("const mediaKey = require('crypto')"));
+    assert.ok(/_relayFormUrl\(result\.form_url, mediaKey/.test(cc),
+      'canvas-form-create must build its URL with _relayFormUrl');
+    const a = SRC.indexOf('function _relayFormUrl(');
+    const helper = SRC.slice(a, SRC.indexOf('\n}\n', a));
+    assert.ok(helper.indexOf("'#k=' + mediaKey") !== -1,
       "the key must be appended as '#k=' — a query string would be sent to the server");
     // And the QR must encode the URL that carries it.
     const qr = SRC.slice(SRC.indexOf("const mediaKey = require('crypto')"));

@@ -1149,7 +1149,7 @@ class KikWarrantUI {
     _isVideoFile(file) {
         if (!file) return false;
         if (/^video\//.test(file.mimeType || '')) return true;
-        return /\.(mp4|m4v|mov|webm|3gp)$/i.test(file.diskPath || '');
+        return /\.(mp4|m4v|mov|webm|3gp|3g2|avi|flv|f4v|wmv|asf|mpg|mpeg|vob|mkv|ts|divx)$/i.test(file.diskPath || '');
     }
 
     /**
@@ -1196,7 +1196,7 @@ class KikWarrantUI {
             if (streamUrl) {
                 const vt = window.VpVideoThumbs;
                 const cached = vt && vt.sharedCache.get(file.diskPath);
-                const html = `<video src="${this._esc(streamUrl)}" controls preload="metadata"${cached ? ` poster="${cached}"` : ''} style="max-width:300px; max-height:200px; border-radius:6px; margin-top:4px;"></video>`;
+                const html = `<video src="${this._esc(streamUrl)}" data-disk-path="${this._esc(file.diskPath)}" controls preload="metadata"${cached ? ` poster="${cached}"` : ''} style="max-width:300px; max-height:200px; border-radius:6px; margin-top:4px;"></video>`;
                 // Not cached: the token URL expires; re-mint on the next render.
                 if (el.isConnected) el.outerHTML = html;
                 return;

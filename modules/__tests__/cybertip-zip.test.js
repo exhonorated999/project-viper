@@ -461,7 +461,7 @@ const tempBefore = new Set(fs.readdirSync(os.tmpdir()).filter(n => /^viper-zip-/
 
     // Renderer wiring.
     ok(/const isZip = fileExt === 'zip';/.test(DETAIL), 'renderEvidenceFiles recognises a ZIP');
-    ok(/viewerContent\.innerHTML = renderEvidenceFiles\(evidence\);\n[^\n]*\n[^\n]*\n\s*_hydrateEvidenceZipPanels\(evidence\);/.test(DETAIL),
+    ok(/viewerContent\.innerHTML = renderEvidenceFiles\(evidence\);\n(?:[^\n]*\n){0,5}\s*_hydrateEvidenceZipPanels\(evidence\);/.test(DETAIL),
        'the viewer fills ZIP panels after rendering');
 
     const tempEnd = fs.readdirSync(os.tmpdir()).filter(n => /^viper-zip-/.test(n) && !tempBefore.has(n));

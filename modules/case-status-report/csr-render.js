@@ -12,7 +12,7 @@
  *
  *   model   — CaseStatusReportBuild.build(...)
  *   updates — { cases: { [caseNumber]: {update, nextSteps, blockers[], targetDate} }, statement }
- *   opts    — { theme: 'dark'|'light', includeNotes: true, logoUrl, badgeUrl }
+ *   opts    — { theme: 'dark'|'light', includeNotes: true, logoUrl }  (VIPER logo only)
  *
  * Fonts are Windows system fonts (Bahnschrift / Segoe UI / Consolas) — the
  * report renders offline. Charts are inline SVG / CSS; no filters (they
@@ -476,9 +476,9 @@
             var scopeLine = OP.scope === 'all'
                 ? 'All open cases &nbsp;·&nbsp; ' + th + '-day threshold'
                 : 'Cases open longer than ' + th + ' days from assignment';
+            // VIPER mark only — no agency/department badge on this report.
             var logos = '<div class="cv-logos">' +
-                (opts.logoUrl ? '<div class="cv-logo"><img src="' + esc(opts.logoUrl) + '" alt=""></div>' : '<div class="cv-text-logo">V.I.P.E.R.</div>') +
-                (opts.badgeUrl ? '<div class="cv-x">×</div><div class="cv-badge"><img src="' + esc(opts.badgeUrl) + '" alt=""></div>' : '') + '</div>';
+                (opts.logoUrl ? '<div class="cv-logo"><img src="' + esc(opts.logoUrl) + '" alt=""></div>' : '<div class="cv-text-logo">V.I.P.E.R.</div>') + '</div>';
             var stats = [
                 ['cyan', num(T.openCases), 'Open cases'],
                 ['orange', num(T.overThreshold), 'Over ' + th + ' days'],

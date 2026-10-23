@@ -228,7 +228,10 @@ console.log('[render]');
     ok('statement escaped', safe.indexOf('&quot;quoted&quot; &amp; &lt;tag&gt;') !== -1);
 
     const logo = R.render(m, {}, { logoUrl: 'file:///C:/x/csr-logo.png', badgeUrl: 'data:image/png;base64,AAAA' });
-    ok('logo and badge used', logo.indexOf('file:///C:/x/csr-logo.png') !== -1 && logo.indexOf('data:image/png;base64,AAAA') !== -1);
+    ok('VIPER logo used', logo.indexOf('file:///C:/x/csr-logo.png') !== -1);
+    ok('no agency badge on the cover, even if passed', logo.indexOf('data:image/png;base64,AAAA') === -1 && logo.indexOf('cv-badge"') === -1);
+    const dashSrc = fs.readFileSync(path.join(__dirname, '..', 'csr-dashboard.js'), 'utf8');
+    ok('dashboard does not read the department badge', dashSrc.indexOf('readDeptBadge') === -1);
 
     const empty = B.build({ getItem: () => null, now: NOW, opts: {} });
     const eh = R.render(empty, {}, {});

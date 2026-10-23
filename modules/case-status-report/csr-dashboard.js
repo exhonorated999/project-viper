@@ -573,14 +573,6 @@
             '</div></div>';
     }
 
-    function readBadge() {
-        var api = root && root.electronAPI;
-        if (!api || typeof api.readDeptBadge !== 'function') return Promise.resolve('');
-        return Promise.resolve(api.readDeptBadge()).then(function (r) {
-            return r && r.success && r.found && r.dataUrl ? r.dataUrl : '';
-        }, function () { return ''; });
-    }
-
     function logoUrl() {
         try { return new URL(LOGO_PATH, root.location.href).href; } catch (_) { return LOGO_PATH; }
     }
@@ -610,8 +602,8 @@
         S.busy = true;
         S.step = 3;
         openShell('Rendering ' + model.cases.length + ' case pages.', busyHtml(model.cases.length), false);
-        Promise.all([readBadge(), logoData()]).then(function (imgs) {
-            var html = R().render(model, updates, { theme: S.theme, includeNotes: S.includeNotes, logoUrl: imgs[1], badgeUrl: imgs[0] });
+        logoData().then(function (logo) {
+            var html = R().render(model, updates, { theme: S.theme, includeNotes: S.includeNotes, logoUrl: logo });
             return api.saveHtmlAsPdf({ html: html, defaultFileName: fileName(model), options: { marginType: 'none', settleMs: 600 } });
         }).then(function (res) {
             if (!S) return;

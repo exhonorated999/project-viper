@@ -10075,7 +10075,10 @@ async function _doSaveHtmlAsPdf({ html, defaultFileName, options, attachments, r
     const printPromise = pdfWin.webContents.printToPDF({
       printBackground: true,
       pageSize: (options && options.pageSize) || 'Letter',
-      margins: { marginType: 'default' },
+      // options.marginType 'none' → full-bleed pages (Case Status Report
+      // draws its own dark background edge to edge). Anything else keeps
+      // Chromium's default margins, which every other report relies on.
+      margins: { marginType: (options && options.marginType === 'none') ? 'none' : 'default' },
       landscape: !!(options && options.landscape),
       ...(footerText ? {
         displayHeaderFooter: true,

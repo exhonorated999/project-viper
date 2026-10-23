@@ -2795,6 +2795,39 @@
                     </div>
                 </div>
 
+                <!-- ═══ Case Status Report ═══ -->
+                <div class="glass-card rounded-xl p-6">
+                    <div class="flex items-center justify-between gap-4">
+                        <div>
+                            <h3 class="text-xl font-bold flex items-center gap-2">
+                                <svg class="w-6 h-6 text-viper-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+                                </svg>
+                                Case Status Report
+                            </h3>
+                            <p class="text-gray-400 text-sm mt-2">Adds a <span class="text-gray-300">Case Status Report</span> button to the dashboard. Builds a report of your open cases — or only those open longer than the threshold — with case stats, activity since your last report, and your status updates. If this is off, none of it appears.</p>
+                        </div>
+                        <button id="csrToggleBtn" onclick="toggleCsrEnabled()"
+                            class="relative inline-flex items-center h-6 rounded-full w-11 flex-shrink-0 transition-colors focus:outline-none bg-gray-700"
+                            aria-label="Toggle case status report">
+                            <span id="csrToggleIndicator" class="inline-block w-4 h-4 transform transition-transform bg-white rounded-full translate-x-1"></span>
+                        </button>
+                    </div>
+                    <div id="csrSettingsBody" class="hidden mt-4 pt-4 border-t border-gray-700 flex items-center justify-between gap-4">
+                        <div>
+                            <p class="text-sm font-medium text-gray-200">Outstanding threshold</p>
+                            <p class="text-xs text-gray-400 mt-1">A case counts as outstanding once it has been open this many days since its assignment date (creation date if none is set).</p>
+                        </div>
+                        <select id="csrThresholdSelect" onchange="setCsrThreshold(this.value)"
+                            class="px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-sm text-white focus:border-viper-purple outline-none">
+                            <option value="30">30 days</option>
+                            <option value="45">45 days</option>
+                            <option value="60">60 days</option>
+                            <option value="90">90 days</option>
+                        </select>
+                    </div>
+                </div>
+
                 <!-- ═══ Warrant Authoring Section ═══ -->
                 <div class="glass-card rounded-xl p-6">
                     <div class="flex justify-between items-center cursor-pointer" onclick="toggleDocumentAuthoringSection()">
@@ -10081,6 +10114,36 @@
         ind.classList.toggle('translate-x-6', on);
         ind.classList.toggle('translate-x-1', !on);
     }
+    // ═══ Case Status Report ═══
+    // Off by default. On draws the dashboard button (CaseStatusReport.refresh).
+    function isCsrEnabled() {
+        return localStorage.getItem('viperCaseStatusReportEnabled') === 'true';
+    }
+    function toggleCsrEnabled() {
+        localStorage.setItem('viperCaseStatusReportEnabled', isCsrEnabled() ? 'false' : 'true');
+        refreshCsrUI();
+    }
+    function setCsrThreshold(v) {
+        const n = parseInt(v, 10);
+        localStorage.setItem('viperCsrThresholdDays', String([30, 45, 60, 90].includes(n) ? n : 30));
+    }
+    function refreshCsrUI() {
+        const on = isCsrEnabled();
+        const btn = document.getElementById('csrToggleBtn');
+        const ind = document.getElementById('csrToggleIndicator');
+        const body = document.getElementById('csrSettingsBody');
+        const sel = document.getElementById('csrThresholdSelect');
+        if (!btn || !ind) return;
+        btn.classList.toggle('bg-viper-purple', on);
+        btn.classList.toggle('bg-gray-700', !on);
+        ind.classList.toggle('translate-x-6', on);
+        ind.classList.toggle('translate-x-1', !on);
+        if (body) body.classList.toggle('hidden', !on);
+        if (sel) {
+            const n = parseInt(localStorage.getItem('viperCsrThresholdDays') || '', 10);
+            sel.value = String([30, 45, 60, 90].includes(n) ? n : 30);
+        }
+    }
     const metricColorMap = {
         cyan: { bg: 'bg-viper-cyan/10', text: 'text-viper-cyan', border: 'border-viper-cyan/30', dot: 'bg-viper-cyan' },
         purple: { bg: 'bg-viper-purple/10', text: 'text-viper-purple', border: 'border-viper-purple/30', dot: 'bg-viper-purple' },
@@ -10274,6 +10337,7 @@
         refreshReportRecipientUI();
         refreshCustomMetricsUI();
         try { refreshIdsUI(); } catch (e) { console.warn('IDS switch render failed:', e); }
+        try { refreshCsrUI(); } catch (e) { console.warn('Case Status Report switch render failed:', e); }
         try { renderAgencyProfileFields(); } catch (e) { console.warn('Agency Profile render failed:', e); }
         try { _renderProviderTypeFilters(); renderProviderDirectory(); } catch (e) { console.warn('Provider Directory render failed:', e); }
         refreshWarrantAuthorUI();

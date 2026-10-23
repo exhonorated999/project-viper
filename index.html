@@ -70,6 +70,9 @@
     <!-- IDS (ICAC Data System) monthly measures + activity log. Inert unless the Settings switch is on. -->
     <script src="modules/ids-measures/ids-measures.js"></script>
     <script src="modules/ids-measures/ids-dashboard.js"></script>
+    <script src="modules/case-status-report/csr-build.js"></script>
+    <script src="modules/case-status-report/csr-render.js"></script>
+    <script src="modules/case-status-report/csr-dashboard.js"></script>
     <style>
         /* Font size accessibility — set via Settings > Display */
         :root { --viper-font-size: 15px; }
@@ -1213,6 +1216,18 @@
                                     <div class="text-left">
                                         <p class="text-sm font-medium">IDS Monthly Measures</p>
                                         <p class="text-xs text-gray-400">The month's numbers for IDS</p>
+                                    </div>
+                                </button>
+                            </div>
+                            <!-- Case Status Report: shown only when Settings > Case Status Report is on (CaseStatusReport.refresh). -->
+                            <div id="csrDashboardPanel" class="hidden pt-4">
+                                <button onclick="CaseStatusReport.open()" class="w-full flex items-center justify-center space-x-3 p-3 bg-viper-card/50 rounded-lg border border-viper-cyan/30 hover:bg-viper-cyan/10 hover:border-viper-cyan/50 transition-all group">
+                                    <svg class="w-5 h-5 text-viper-cyan group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+                                    </svg>
+                                    <div class="text-left">
+                                        <p class="text-sm font-medium">Case Status Report</p>
+                                        <p class="text-xs text-gray-400">Open-case stats &amp; updates</p>
                                     </div>
                                 </button>
                             </div>

@@ -299,7 +299,7 @@
         try { ev = caseEvidence; } catch (_) { ev = null; } // host top-level `let`
         if (!Array.isArray(ev)) throw new Error('Evidence list is not loaded. Open the Evidence tab once and retry.');
         var rec = {
-            id: Date.now(), type: 'document', tag: tag, discoverable: true,
+            id: Date.now(), type: opts.type || 'document', tag: tag, discoverable: true,
             description: opts.description || opts.fileName, location: '',
             fileCount: 1, totalSize: opts.bytes.length,
             files: [{ name: opts.fileName, path: savedPath, size: opts.bytes.length, type: opts.mime || 'application/octet-stream', lastModified: Date.now() }],
@@ -319,6 +319,15 @@
         return rec;
     }
 
+    /** The open case's Evidence records (host top-level `let caseEvidence`). */
+    function evidenceList() {
+        try { if (typeof caseEvidence !== 'undefined' && Array.isArray(caseEvidence)) return caseEvidence; } catch (_) {}
+        var c = theCase();
+        if (!c) return [];
+        var allEv = lsParse('viperCaseEvidence', {}) || {};
+        return Array.isArray(allEv[c.caseNumber]) ? allEv[c.caseNumber] : [];
+    }
+
     /** Shared context handed to the bulletin and footage sub-modules. */
     function ctx() {
         return {
@@ -327,7 +336,8 @@
             filter: SA.filter, save: save, rerender: rerender, renderBody: renderBody,
             esc: esc, toast: toast, fmtDate: fmtDate, fmtDateLong: fmtDateLong, timeText: timeText,
             today: today, byId: byId, groupColor: groupColor, openModal: openModal, closeModal: closeModal,
-            editIncident: openIncidentModal, saveToEvidence: saveToEvidence, confirm: confirmBox, lsParse: lsParse
+            editIncident: openIncidentModal, saveToEvidence: saveToEvidence, confirm: confirmBox, lsParse: lsParse,
+            evidence: evidenceList, modalHead: modalHead
         };
     }
 

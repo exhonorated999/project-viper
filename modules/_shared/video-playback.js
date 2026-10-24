@@ -159,6 +159,12 @@ function thumbArgs(src, seekSec, size) {
         '-f', 'image2pipe', '-c:v', 'mjpeg', '-q:v', '5', 'pipe:1'];
 }
 
+function frameArgs(src, seekSec, size) {
+    return ['-hide_banner', '-nostdin', '-loglevel', 'error', '-ss', String(seekSec), '-i', src,
+        '-frames:v', '1', '-vf', 'scale=' + size + ':' + size + ':force_original_aspect_ratio=decrease',
+        '-f', 'image2pipe', '-c:v', 'mjpeg', '-q:v', '3', 'pipe:1'];
+}
+
 /** A small "at most n at once" gate. */
 function gate(n) {
     let active = 0;
@@ -431,6 +437,43 @@ function createVideoPlayback(o) {
         }
     }
 
+    /**
+     * One still from an exact point in the ORIGINAL file (no canvas, so no
+     * tainted-canvas problem with viper-media:// playback).
+     * { filePath, atSec, size } → { success, dataUrl, atSec } | { success:false, reason, error? }
+     */
+    async function frame(args) {
+        const a = args || {};
+        try {
+            const chk = checkVideo(a.filePath, !!a.anyExt);
+            if (!chk) return { success: false, reason: 'not-video', error: 'This file cannot be read here.' };
+            if (!ff()) return Object.assign(noEngine(), { reason: 'no-engine' });
+            const size = Math.max(64, Math.min(1920, parseInt(a.size, 10) || 960));
+            const at = Math.max(0, Number(a.atSec) || 0);
+            const key = keyOf(chk);
+            return await thumbGate(async () => {
+                const src = await readablePath(chk, key, DECRYPT_MAX);
+                if (src.error) return Object.assign(src.error, { reason: src.error.locked ? 'locked' : 'too-large' });
+                try {
+                    // Input seeking re-decodes to the exact frame; step back a hair
+                    // if the very end of the file yields nothing.
+                    for (const seek of [at, Math.max(0, at - 0.5)]) {
+                        const r = await runFf(frameArgs(src.path, seek, size), { timeoutMs: THUMB_TIMEOUT_MS * 2, stdoutMax: 12 * 1024 * 1024 });
+                        const b = r.stdout;
+                        if (b.length > 3 && b[0] === 0xFF && b[1] === 0xD8) {
+                            return { success: true, dataUrl: 'data:image/jpeg;base64,' + b.toString('base64'), atSec: seek };
+                        }
+                    }
+                    return { success: false, reason: 'undecodable', error: 'VIPER could not read a picture at that point in the video.' };
+                } finally {
+                    src.done();
+                }
+            });
+        } catch (e) {
+            return { success: false, reason: 'error', error: (e && e.message) || String(e) };
+        }
+    }
+
     /** Remove this run's copies and any left by a VIPER that crashed. */
     function sweep() {
         let names = [];
@@ -448,7 +491,7 @@ function createVideoPlayback(o) {
         try { fs.rmSync(cacheDir, { recursive: true, force: true }); } catch (_) {}
     }
 
-    return { prepare, thumb, probe, sweep, dispose, available: () => !!ff(), _cacheDir: cacheDir };
+    return { prepare, thumb, frame, probe, sweep, dispose, available: () => !!ff(), _cacheDir: cacheDir };
 }
 
 function lastErrorLine(stderr) {
@@ -458,6 +501,6 @@ function lastErrorLine(stderr) {
 
 module.exports = {
     createVideoPlayback, locateFfmpeg, parseProbe, planFor, videoBitrate,
-    remuxArgs, transcodeArgs, thumbArgs, isLegacyVideo, isVideo, extOf,
+    remuxArgs, transcodeArgs, thumbArgs, frameArgs, isLegacyVideo, isVideo, extOf,
     NATIVE_VIDEO_EXT, LEGACY_VIDEO_EXT, ALL_VIDEO_EXT, VIDEO_MIME_BY_EXT, sniffVideo,
 };

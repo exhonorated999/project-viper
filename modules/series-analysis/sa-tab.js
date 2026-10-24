@@ -280,6 +280,45 @@
         if (host && host.parentNode) { host.parentNode.innerHTML = renderSeriesAnalysisTab(); initializeSeriesAnalysis(); }
     }
 
+    /**
+     * Write bytes to the case's evidence folder and add an Evidence record
+     * (same shape and save path as the Evidence tab's own upload).
+     * opts: { fileName, bytes:Uint8Array, mime, description, tag, source }
+     * Resolves to the record, or throws with a readable message.
+     */
+    async function saveToEvidence(opts) {
+        var c = theCase();
+        if (!c) throw new Error('No case is open.');
+        if (!window.electronAPI || typeof window.electronAPI.saveEvidenceFile !== 'function') throw new Error('Saving to Evidence needs the VIPER desktop app.');
+        var tag = opts.tag || ('SA-' + Date.now().toString(36).toUpperCase());
+        var savedPath = await window.electronAPI.saveEvidenceFile({
+            caseNumber: c.caseNumber, evidenceTag: tag, fileName: opts.fileName, fileData: Array.from(opts.bytes)
+        });
+        if (!savedPath) throw new Error('The file could not be written to the evidence folder.');
+        var ev;
+        try { ev = caseEvidence; } catch (_) { ev = null; } // host top-level `let`
+        if (!Array.isArray(ev)) throw new Error('Evidence list is not loaded. Open the Evidence tab once and retry.');
+        var rec = {
+            id: Date.now(), type: 'document', tag: tag, discoverable: true,
+            description: opts.description || opts.fileName, location: '',
+            fileCount: 1, totalSize: opts.bytes.length,
+            files: [{ name: opts.fileName, path: savedPath, size: opts.bytes.length, type: opts.mime || 'application/octet-stream', lastModified: Date.now() }],
+            source: opts.source || 'series_analysis', createdAt: new Date().toISOString()
+        };
+        ev.push(rec);
+        try {
+            var allEv = lsParse('viperCaseEvidence', {}) || {};
+            try { if (typeof _provStampEdits === 'function') _provStampEdits('viperCaseEvidence', ev); } catch (_) {}
+            allEv[c.caseNumber] = ev;
+            localStorage.setItem('viperCaseEvidence', JSON.stringify(allEv));
+        } catch (e) {
+            ev.pop();
+            throw new Error('Saved the file, but the Evidence list could not be updated (storage full?).');
+        }
+        try { if (typeof window.audit === 'function') window.audit('evidence_added', { case_number: c.caseNumber, case_id: c.id, evidence_id: rec.id, type: rec.type, tag: tag, file_count: 1, source: rec.source }); } catch (_) {}
+        return rec;
+    }
+
     /** Shared context handed to the bulletin and footage sub-modules. */
     function ctx() {
         return {
@@ -288,7 +327,7 @@
             filter: SA.filter, save: save, rerender: rerender, renderBody: renderBody,
             esc: esc, toast: toast, fmtDate: fmtDate, fmtDateLong: fmtDateLong, timeText: timeText,
             today: today, byId: byId, groupColor: groupColor, openModal: openModal, closeModal: closeModal,
-            editIncident: openIncidentModal
+            editIncident: openIncidentModal, saveToEvidence: saveToEvidence, confirm: confirmBox, lsParse: lsParse
         };
     }
 

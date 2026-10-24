@@ -1046,7 +1046,17 @@
     if (connectMode) toggleConnect();
   }
 
-  function onEsc(e) { if (e.key === 'Escape') closeBoard(); }
+  function onEsc(e) {
+    if (e.key !== 'Escape') return;
+    // The resource tray floats above the board; Esc closes the tray first
+    // so analysts don't lose the board while working a third-party tool.
+    var rh = document.getElementById('resourceHubDrawer');
+    if (rh && rh.classList.contains('rh-open') && typeof window.closeResourceHub === 'function') {
+      window.closeResourceHub();
+      return;
+    }
+    closeBoard();
+  }
 
   // ============================================================
   //  VIEW SWITCHING

@@ -167,8 +167,11 @@
     // FAB
     const fab = document.createElement('button');
     fab.id = 'resourceHubFab';
-    fab.className = 'fixed z-[9998] w-12 h-12 rounded-xl flex items-center justify-center text-pink-300';
-    fab.style.cssText = 'bottom:24px;right:24px;display:none;background:rgba(236,72,153,.12);border:1px solid rgba(236,72,153,.30);backdrop-filter:blur(8px);';
+    // z-index: above every app overlay (Connection Board 9999, P2P / BitTorrent
+    // viewers and lightboxes 10000-10050) so the tray is reachable from any
+    // screen, but below viper-ui's confirm (99998) and toasts (99999).
+    fab.className = 'fixed w-12 h-12 rounded-xl flex items-center justify-center text-pink-300';
+    fab.style.cssText = 'z-index:99990;bottom:24px;right:24px;display:none;background:rgba(236,72,153,.12);border:1px solid rgba(236,72,153,.30);backdrop-filter:blur(8px);';
     fab.title = 'Investigative Resources';
     fab.onclick = toggle;
     fab.innerHTML = `
@@ -181,8 +184,8 @@
     // Drawer
     const drawer = document.createElement('div');
     drawer.id = 'resourceHubDrawer';
-    drawer.className = 'fixed top-0 right-0 h-full z-[9999]';
-    drawer.style.cssText = 'width:560px;transform:translateX(100%);';
+    drawer.className = 'fixed top-0 right-0 h-full';
+    drawer.style.cssText = 'z-index:99991;width:560px;transform:translateX(100%);';
     drawer.innerHTML = `
       <div class="h-full flex flex-col border-l border-cyan-500/20" style="background:rgba(10,14,22,.97);backdrop-filter:blur(24px);">
         <div class="flex items-center justify-between px-5 py-3 border-b border-white/5 flex-shrink-0">
@@ -863,8 +866,8 @@
     if (document.getElementById('rhDlRouter')) return;
     const wrap = document.createElement('div');
     wrap.id = 'rhDlRouter';
-    wrap.className = 'fixed inset-0 z-[10001] hidden items-center justify-center';
-    wrap.style.cssText = 'background:rgba(2,6,18,.78);backdrop-filter:blur(6px);';
+    wrap.className = 'fixed inset-0 hidden items-center justify-center';
+    wrap.style.cssText = 'z-index:99995;background:rgba(2,6,18,.78);backdrop-filter:blur(6px);';
     wrap.innerHTML = `
       <div class="w-full max-w-lg rounded-2xl p-6 border border-pink-400/30" style="background:linear-gradient(160deg,#0f172a 0%,#0b1220 100%);box-shadow:0 24px 64px rgba(236,72,153,.18);">
         <div class="flex items-start justify-between mb-4">

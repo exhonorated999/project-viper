@@ -179,6 +179,15 @@
          * victims identified/rescued, evidence-needed and CVIP dates. */
         { key: 'icac', pattern: 2, label: 'ICAC Reporting', shape: 'object',
           identity: null, merge: 'replace' },
+        /* Series Analysis (crime analyst): the incidents of a series worked
+         * under one case. Siblings (columns, cameras, footage observations,
+         * bulletin options) ride along in the envelope. Observations point at
+         * incident ids, so ids are NOT re-minted — identity is the report
+         * number + date + start time + address two analysts would both type. */
+        { key: 'seriesAnalysis', pattern: 2, label: 'Series Analysis', shape: 'wrapped', list: 'incidents',
+          identity: function (r) {
+              return r ? _id(_n(r.reportNo), _date(r.date), _s(r.timeFrom), _n(r.address)) : '';
+          }, merge: 'list' },
 
         /* ── warrant author ──────────────────────────────────────────────
          * NOT in any previous list. A .vcase handoff silently dropped every

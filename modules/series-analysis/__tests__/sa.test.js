@@ -287,6 +287,36 @@ ok('log states the correction direction', /\+2:34 \(recorder behind real time\)/
 ok('log has the observation in real time', /2026-10-14 02:34:04 real \| Cam 2 \| DVR 2026-10-14 02:31:30 \| video 01:30 \| incident #3 \| vehicle/.test(log));
 ok('log has the text', /Silver sedan enters lot/.test(log));
 
+// ── connection board specs (boardSpecs) ─────────────────────────────
+const bsInc = INC.map(i => i.id);
+const bs = M.boardSpecs({ incidents: incidents13(), geoHint: 'Denver, CO',
+    cameras: [{ id: 'c1', name: 'Cam 2', fileName: 'ch2.mp4', filePath: 'C:\\e\\ch2.mp4', evidenceId: 1, startDvr: cam.startDvr, offsetSec: 154, incidentId: bsInc[2] },
+              { id: 'c2', name: 'Loose cam', fileName: 'x.mp4' }],
+    observations: [{ id: 'o1', cameraId: 'c1', cameraName: 'Cam 2', incidentId: bsInc[2], text: 'Silver sedan enters lot', tag: 'vehicle', realIso: '2026-10-14T02:34:04', frame: 'data:image/jpeg;base64,AAA' },
+                   { id: 'o2', cameraId: 'c1', incidentId: bsInc[4], text: '' },
+                   { id: 'o3', cameraId: 'gone', text: 'orphan' }] }, { now: '2026-10-23' });
+const bsBy = id => bs.specs.find(s => s.sourceId === id);
+eq(bs.specs.filter(s => s.data.seriesKind === 'incident').length, INC.length, 'boardSpecs one pin per incident');
+ok('boardSpecs all series sourceType', bs.specs.every(s => s.sourceType === 'series'));
+ok('boardSpecs incident is a scene with seq label', bsBy(String(bsInc[0])).type === 'scene' && /^#\d+ /.test(bsBy(String(bsInc[0])).label));
+ok('boardSpecs keys cover every spec', bs.specs.every(s => bs.keys[s.sourceId]));
+const bsLikely = bsBy('likely-next');
+ok('boardSpecs likely-next present with coords', !!bsLikely && typeof bsLikely.lat === 'number');
+ok('boardSpecs likely-next is descriptive', /Descriptive projection/.test(bsLikely.data.notes) && !/\bwill (occur|happen|strike)\b|\bpredicts?\b/i.test(bsLikely.data.notes.replace(/not a prediction/gi, '')));
+ok('boardSpecs camera pin carries the video', bsBy('cam:c1').type === 'video' && bsBy('cam:c1').data.video.path === 'C:\\e\\ch2.mp4');
+ok('boardSpecs camera without file has no video', bsBy('cam:c2').data.video === null);
+ok('boardSpecs camera→incident link', bs.links.some(l => l.from === 'cam:c1' && l.to === String(bsInc[2]) && l.label === 'covers'));
+ok('boardSpecs unlinked camera has no link', !bs.links.some(l => l.from === 'cam:c2'));
+eq(bsBy('obs:o1').photoRef, { kind: 'seriesFrame', obsId: 'o1' }, 'boardSpecs observation photoRef');
+ok('boardSpecs observation without frame has no photoRef', bsBy('obs:o2').photoRef === null && bsBy('obs:o2').label === 'Footage observation');
+ok('boardSpecs observation recorded-on link', bs.links.some(l => l.from === 'obs:o1' && l.to === 'cam:c1' && l.label === 'recorded on'));
+ok('boardSpecs same-incident observation has no seen-at', !bs.links.some(l => l.from === 'obs:o1' && l.label === 'seen at'));
+ok('boardSpecs cross-incident observation gets seen-at', bs.links.some(l => l.from === 'obs:o2' && l.to === String(bsInc[4]) && l.label === 'seen at'));
+ok('boardSpecs orphan observation has no links', !bs.links.some(l => l.from === 'obs:o3'));
+ok('boardSpecs observation real time', /2026-10-14 02:34:04 \(real time\)/.test(bsBy('obs:o1').data.datetime));
+ok('boardSpecs no frame data copied', JSON.stringify(bs).indexOf('base64') < 0);
+eq(M.boardSpecs({}).specs.length, 0, 'boardSpecs empty store');
+
 // ── bulletin builder (sa-bulletin.js) ───────────────────────────────
 const B = require('../sa-bulletin.js');
 eq(B.blockOf('1420 Oak Hollow Dr'), '1400 block of Oak Hollow Dr', 'blockOf');

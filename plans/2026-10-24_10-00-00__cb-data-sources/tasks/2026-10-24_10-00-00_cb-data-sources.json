@@ -1,0 +1,32 @@
+[
+  {
+    "id": "A-1",
+    "content": "[A-1] Resource tray usable over the Connection Board",
+    "status": "completed"
+  },
+  {
+    "id": "A-2",
+    "content": "[A-2] Series Analysis as a live CB source (incidents, likely-next, cameras, observation stills, links)",
+    "status": "completed"
+  },
+  {
+    "id": "B-1",
+    "content": "[B-1] cb-import-parse.js + tests (CSV/XLSX rows, KML, GeoJSON)",
+    "status": "completed"
+  },
+  {
+    "id": "B-2",
+    "content": "[B-2] cb-import.js UI: Import menu, column mapper, map files, batches, geocoding",
+    "status": "completed"
+  },
+  {
+    "id": "B-3",
+    "content": "[B-3] Paste cards + tray Send to board (rh-capture-png, evidence, link to pin)",
+    "status": "completed"
+  },
+  {
+    "id": "C-1",
+    "content": "[C-1] Harness screenshots, tests, commit",
+    "status": "completed"
+  }
+]

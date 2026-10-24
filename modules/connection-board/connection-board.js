@@ -1027,6 +1027,7 @@
         '<div class="cb-seg" id="cbAddMenuWrap" style="position:relative;">' +
           '<button id="cbAddDataBtn">\u2795 Add from case data</button>' +
         '</div>' +
+        '<button class="cb-btn" id="cbImportBtn" title="Bring in third-party data: spreadsheets (CSV/XLSX), map files (KML/KMZ/GeoJSON), or paste text and screenshots">\u2B06 Import</button>' +
         '<button class="cb-btn" id="cbSyncBtn" title="Re-sync the board with the current case data (adds new suspects/assets, removes deleted ones)">\uD83D\uDD04 Sync</button>' +
         '<button class="cb-btn" id="cbExportBtn" title="Export this board as a single self-contained HTML file you can email or take to a briefing on a USB stick">\u2B07 Export</button>' +
         '<div class="cb-spacer"></div>' +
@@ -1064,6 +1065,11 @@
     drawer.querySelector('#cbAddPinBtn').addEventListener('click', startDropPin);
     drawer.querySelector('#cbAddAssetBtn').addEventListener('click', openAssetForm);
     drawer.querySelector('#cbAddDataBtn').addEventListener('click', openAddMenu);
+    drawer.querySelector('#cbImportBtn').addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (window.CBImport) window.CBImport.openMenu(e.currentTarget);
+      else toast('Import module not loaded', 'warning');
+    });
     drawer.querySelector('#cbSyncBtn').addEventListener('click', function () { syncFromCase(false); });
     drawer.querySelector('#cbExportBtn').addEventListener('click', exportBoard);
     drawer.querySelector('#cbZoomIn').addEventListener('click', function () { setWebZoom(webZoom * 1.2); });
@@ -1957,6 +1963,9 @@
         (pin.data && pin.data.plate ? '<div class="cb-card-row"><span class="cb-k">Plate:</span> ' + esc(pin.data.plate) + '</div>' : '') +
         (pin.data && pin.data.datetime ? '<div class="cb-card-row"><span class="cb-k">Date/Time:</span> ' + esc(pin.data.datetime) + '</div>' : '') +
         (pin.data && pin.data.time ? '<div class="cb-card-row"><span class="cb-k">Time:</span> ' + esc(pin.data.time) + '</div>' : '') +
+        (pin.data && pin.data.importSource ? '<div class="cb-card-row"><span class="cb-k">Imported from:</span> ' + esc(pin.data.importSource) + (pin.data.importRow ? ' <span style="color:#6b7685">row ' + esc(pin.data.importRow) + '</span>' : '') + (pin.data.importedAt ? ' <span style="color:#6b7685">\u00B7 ' + esc(String(pin.data.importedAt).slice(0, 10)) + '</span>' : '') + '</div>' : '') +
+        (pin.data && pin.data.capture && pin.data.capture.source ? '<div class="cb-card-row"><span class="cb-k">Source:</span> ' + esc(pin.data.capture.source) + (pin.data.capture.capturedAt ? ' <span style="color:#6b7685">\u00B7 captured ' + esc(pin.data.capture.capturedAt) + '</span>' : '') + '</div>' : '') +
+        (pin.data && pin.data.capture && pin.data.capture.url ? '<div class="cb-card-row" style="word-break:break-all"><span class="cb-k">URL:</span> ' + esc(pin.data.capture.url) + '</div>' : '') +
         (pin.data && pin.data.notes ? '<div class="cb-card-row cb-card-notes"><span class="cb-k">Notes:</span> ' + esc(pin.data.notes) + '</div>' : '') +
         (video ? '<div class="cb-card-row"><span class="cb-k">Video:</span> ' + esc(video.name || 'surveillance') + ' <span style="color:#6b7685">(in Evidence)</span></div>' : '') +
         (mediaList.length ? '<div class="cb-card-media" data-media-host="1"></div>' : '') +
@@ -2359,7 +2368,8 @@
   }
 
   // Save a file into the case Evidence module (disk + viperCaseEvidence store).
-  function saveFileToEvidence(file, makeEvidenceItem) {
+  function saveFileToEvidence(file, makeEvidenceItem, meta) {
+    meta = meta || {};
     if (!currentCase || !window.electronAPI || !window.electronAPI.saveEvidenceFile) return Promise.resolve(null);
     var caseNumber = currentCase.caseNumber;
     var tag = 'ConnectionBoard_' + Date.now();
@@ -2377,7 +2387,7 @@
             id: evidenceId,
             type: /^video\//i.test(file.type) ? 'video' : 'digital',
             tag: tag,
-            description: 'Added from Connection Board',
+            description: meta.description || 'Added from Connection Board',
             fileCount: 1, totalSize: file.size,
             files: [{ name: file.name, path: savedPath, size: file.size, type: file.type, lastModified: file.lastModified }],
             createdAt: new Date().toISOString(),
@@ -2404,6 +2414,15 @@
   var EXPORT_MEDIA_CAP = 8 * 1024 * 1024; // bytes; clips under this embed in full
 
   function _fmtMB(n) { return (n / 1024 / 1024).toFixed(1) + ' MB'; }
+
+  // Where a card came from (third-party import / paste / tray capture), for the export.
+  function _provenance(p) {
+    var d = p.data || {}, out = [];
+    if (d.importSource) out.push('Imported from: ' + d.importSource + (d.importRow ? ' (row ' + d.importRow + ')' : '') + (d.importedAt ? ' \u00B7 ' + String(d.importedAt).slice(0, 10) : ''));
+    if (d.capture && d.capture.source) out.push('Source: ' + d.capture.source + (d.capture.capturedAt ? ' \u00B7 captured ' + d.capture.capturedAt : ''));
+    if (d.capture && d.capture.url) out.push('URL: ' + d.capture.url);
+    return out.join('\n');
+  }
 
   function _blobToDataUrl(blob) {
     return new Promise(function (res, rej) {
@@ -2467,7 +2486,7 @@
         data: {
           dob: (p.data && p.data.dob) || '', plate: (p.data && p.data.plate) || '',
           datetime: (p.data && p.data.datetime) || '', time: (p.data && p.data.time) || '',
-          notes: (p.data && p.data.notes) || ''
+          notes: [(p.data && p.data.notes) || '', _provenance(p)].filter(Boolean).join('\n')
         },
         media: []
       };
@@ -2764,10 +2783,153 @@
     return 1;
   }
 
+  // ---- hooks for cb-import.js (third-party imports, paste, Send to board) ----
+  function _syncBoardRef() {
+    if (!isBoardOpen() || caseId !== currentCase.id || !board) { caseId = currentCase.id; loadBoard(); }
+  }
+
+  /**
+   * Geocode every pin of a sourceType that has an address but no coordinates
+   * (imported rows). Runs through the throttled Nominatim queue, so ~1/sec.
+   * onProgress(done, total, found) may return false to stop early.
+   */
+  function geocodePending(sourceType, onProgress) {
+    if (typeof currentCase === 'undefined' || !currentCase) return Promise.resolve({ total: 0, done: 0, found: 0 });
+    _syncBoardRef();
+    var cid = currentCase.id;
+    var ids = board.pins.filter(function (p) { return p.sourceType === sourceType && p.lat == null && hasAddrText(p.address); })
+      .map(function (p) { return p.id; });
+    var total = ids.length, done = 0, found = 0, stop = false;
+    var chain = Promise.resolve();
+    ids.forEach(function (id) {
+      chain = chain.then(function () {
+        if (stop || caseId !== cid) { stop = true; return; }
+        var pin = findPin(id);
+        if (!pin || pin.lat != null) { done++; return; }
+        return geocode(pin.address).then(function (g) {
+          done++;
+          var p2 = caseId === cid ? findPin(id) : null;
+          if (g && p2 && p2.lat == null) { p2.lat = g.lat; p2.lng = g.lng; p2.approx = !!g.approx; found++; saveBoard(); scheduleRefresh(); }
+          if (onProgress && onProgress(done, total, found) === false) stop = true;
+        });
+      });
+    });
+    return chain.then(function () {
+      if (caseId === cid) { saveBoard(); if (isBoardOpen()) { renderCurrentView(); renderLocPanel(); } }
+      return { total: total, done: done, found: found, stopped: stop };
+    });
+  }
+
+  /**
+   * Add a user card (pasted text, screenshot, captured page). It is a normal
+   * user asset (no sourceType), so syncs never remove it.
+   * opts: {linkTo: pinId, linkLabel}
+   */
+  function addCard(spec, opts) {
+    opts = opts || {};
+    if (typeof currentCase === 'undefined' || !currentCase) { toast('Open a case first', 'warning'); return null; }
+    _syncBoardRef();
+    var type = TYPE_META[spec.type] ? spec.type : 'note';
+    var pin = {
+      id: uid('pin'), type: type, label: String(spec.label || (TYPE_META[type] || TYPE_META.custom).label).slice(0, 120),
+      lat: spec.lat != null ? spec.lat : null, lng: spec.lng != null ? spec.lng : null, x: null, y: null,
+      color: spec.color || typeColor(type), photo: spec.photo || '', manual: true,
+      sourceType: null, sourceId: null, address: spec.address || '', data: spec.data || {}
+    };
+    var open = isBoardOpen();
+    var target = opts.linkTo ? findPin(opts.linkTo) : null;
+    function busyAt(x, y) { return board.pins.some(function (p) { return p !== pin && p.x != null && p.y != null && Math.abs(p.x - x) < 230 && Math.abs(p.y - y) < 260; }); }
+    function freeSlot() {
+      // Open on the web view: start at the visible top-left; otherwise start at
+      // the board origin. Either way take the first free slot (row by row).
+      var stage = document.getElementById('cbWebStage');
+      var onWeb = open && view === 'web' && stage;
+      var x0 = onWeb ? (stage.scrollLeft + 60) / (webZoom || 1) : 60;
+      var y0 = onWeb ? (stage.scrollTop + 60) / (webZoom || 1) : 60;
+      for (var row = 0; row < 40; row++) {
+        for (var col = 0; col < 5; col++) {
+          var px = x0 + col * 250, py = y0 + row * 280;
+          if (!busyAt(px, py) && !busyAt(px + 330, py)) return { x: px, y: py };
+        }
+      }
+      return { x: x0 + (board.pins.length % 5) * 26, y: y0 + (board.pins.length % 5) * 26 };
+    }
+    if (target && (target.x == null || target.y == null)) {
+      // The linked pin is not on the web yet (e.g. an imported row): bring it
+      // onto the web too, or the new string would have nothing to attach to.
+      var ts = freeSlot();
+      target.x = ts.x; target.y = ts.y; target.hidden = false;
+    }
+    if (target) {
+      // Beside the card it is linked to, first free slot to the right.
+      var x = target.x + 330, y = target.y, n = 0;
+      while (busyAt(x, y) && n++ < 16) x += 250;
+      pin.x = x; pin.y = y;
+    } else {
+      var fs = freeSlot();
+      pin.x = fs.x; pin.y = fs.y;
+    }
+    board.pins.push(pin);
+    if (target) {
+      addManualString(target.id, pin.id, opts.linkLabel || '', currentColor, 'solid', 'web');
+      if (pin.lat != null && target.lat != null) addManualString(target.id, pin.id, opts.linkLabel || '', currentColor, 'solid', 'map');
+    }
+    saveBoard();
+    if (open) { renderCurrentView(); renderLocPanel(); }
+    if (pin.lat == null && hasAddrText(pin.address)) {
+      var cid = currentCase.id, tid = target ? target.id : null;
+      geocode(pin.address).then(function (g) {
+        var p2 = (g && caseId === cid) ? findPin(pin.id) : null;
+        if (!p2) return;
+        p2.lat = g.lat; p2.lng = g.lng; p2.approx = !!g.approx;
+        var t2 = tid ? findPin(tid) : null;
+        if (t2 && t2.lat != null) addManualString(t2.id, p2.id, opts.linkLabel || '', currentColor, 'solid', 'map');
+        saveBoard(); scheduleRefresh();
+      });
+    }
+    return pin.id;
+  }
+
+  /** Visible pins for pickers ("link this card to…"). */
+  function fitToSource(sourceType) {
+    if (!isBoardOpen() || !board) return false;
+    var pts = board.pins.filter(function (p) { return p.sourceType === sourceType && p.lat != null && !p.hidden; })
+      .map(function (p) { return [p.lat, p.lng]; });
+    if (!pts.length) return false;
+    function fit() {
+      if (!map) return;
+      try {
+        map.invalidateSize();
+        if (pts.length === 1) map.setView(pts[0], 14); else map.fitBounds(pts, { padding: [60, 60], maxZoom: 15 });
+      } catch (e) { console.warn('[CB] fitToSource', e); }
+    }
+    if (view !== 'map') { setView('map'); setTimeout(fit, 350); } else fit();
+    return true;
+  }
+
+  /** Visible pins for pickers ("link this card to…"). */
+  function listPins() {
+    if (typeof currentCase === 'undefined' || !currentCase) return [];
+    _syncBoardRef();
+    return board.pins.filter(function (p) { return !p.hidden; }).map(function (p) {
+      return { id: p.id, label: p.label, type: p.type, typeLabel: (TYPE_META[p.type] || TYPE_META.custom).label, sourceType: p.sourceType || '' };
+    });
+  }
+
+  /** Live pin count per sourceType (for the imported-batch list). */
+  function countBySourceType(sourceType) {
+    if (typeof currentCase === 'undefined' || !currentCase) return 0;
+    _syncBoardRef();
+    return board.pins.filter(function (p) { return p.sourceType === sourceType && !p.hidden; }).length;
+  }
+
   // ---- exports ----
   window.ConnectionBoard = {
     open: openBoard, close: closeBoard, addFromCaseData: addFromCaseData, applyFlag: applyFlag,
-    addPins: addPins, removePinsBySourceType: removePinsBySourceType, removePinsBySource: removePinsBySource
+    addPins: addPins, removePinsBySourceType: removePinsBySourceType, removePinsBySource: removePinsBySource,
+    geocodePending: geocodePending, addCard: addCard, listPins: listPins, countBySourceType: countBySourceType, fitToSource: fitToSource, isOpen: isBoardOpen,
+    saveToEvidence: function (file, makeItem, meta) { return saveFileToEvidence(file, makeItem, meta); },
+    typeMeta: function () { return TYPE_META; }
   };
   window.openConnectionBoard = openBoard;
   window.closeConnectionBoard = closeBoard;

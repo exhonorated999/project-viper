@@ -81,7 +81,10 @@
 .sa-grid { display: grid; grid-template-columns: 30px repeat(24, minmax(0, 1fr)); gap: 2px; align-items: center; }
 .sa-grid-h { font-size: 9px; color: #6b7280; text-align: center; }
 .sa-grid-d { font-size: 10.5px; color: #9ca3af; font-weight: 600; }
-.sa-cell { aspect-ratio: 1.35; border-radius: 2px; }
+.sa-cell { aspect-ratio: 1.35; border-radius: 2px; background: rgba(255, 255, 255, .04); }
+.sa-cell.hot { background: rgba(0, 217, 255, var(--a, .5)); }
+.sa-ramp { background: linear-gradient(90deg, rgba(0, 217, 255, .1), rgba(0, 217, 255, .95)); }
+.sa-kpi-accent { color: #00d9ff; }
 .sa-cell.peak { outline: 1.5px solid #ffa726; outline-offset: -1px; }
 
 .sa-summary li { font-size: 12.5px; color: #d1d5db; line-height: 1.45; margin-bottom: 6px; padding-left: 14px; position: relative; }
@@ -160,3 +163,92 @@ td[data-sa-cell] { cursor: text; }
 .sa-scrub-win { position: absolute; top: 0; bottom: 0; background: rgba(239, 68, 68, .16); border-left: 1px dashed rgba(239, 68, 68, .6); border-right: 1px dashed rgba(239, 68, 68, .6); pointer-events: none; }
 .sa-kbd { display: inline-block; font: 600 10.5px/1 ui-monospace, Consolas, monospace; padding: 2px 5px; border-radius: 4px; border: 1px solid #4b5563; color: #d1d5db; background: rgba(255, 255, 255, .04); }
 .sa-cam-err { color: #fca5a5; font-size: 11px; }
+
+/* ============================================================
+   Ranger Green skin: cards match the dashboard stat cards
+   (olive canvas, dashed stitching, corner rivets) using the
+   skin's own --sk-* variables from modules/viper-skins-tactical.css.
+   Cyan accents become coyote tan. The bulletin page stays white (it's a print).
+   ============================================================ */
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-card,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-kpi,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-modal {
+    background: var(--sk-card); border-color: var(--sk-card-border); box-shadow: var(--sk-card-shadow); border-radius: 10px;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-card { padding: 16px 18px; }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-kpi { padding: 13px 18px; }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-modal { padding: 22px 24px; }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-kpi-next { border-color: rgba(240, 160, 75, .55); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-kpi-next .sa-kpi-l,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-kpi-next .sa-kpi-v { color: #f0a04b; }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-card-h,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-kpi-v,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-modal h3,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-title { color: var(--sk-text); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-kpi-l,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-card-h small,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-kpi-v small,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-label,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-grid-h,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-grid-d,
+html[data-skin="ranger-green"] body:not(.light-mode) table.sa-table th { color: var(--sk-text-3); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-kpi-accent { color: var(--sk-accent); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-title:focus { border-bottom-color: var(--sk-accent); }
+
+/* Day × hour heat ramp */
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-cell { background: rgba(0, 0, 0, .28); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-cell.hot { background: rgba(210, 176, 122, var(--a, .5)); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-ramp { background: linear-gradient(90deg, rgba(210, 176, 122, .1), rgba(210, 176, 122, .95)); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-summary li { color: var(--sk-text-2); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-summary li::before { color: var(--sk-accent); }
+
+/* Pills, buttons, toggles */
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-pill { color: var(--sk-text-3); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-pill:hover { color: var(--sk-text); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-btn { border-color: var(--sk-inset-border); color: var(--sk-text-2); background: var(--sk-inset); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-btn:hover { border-color: var(--sk-accent); color: var(--sk-text); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-pill.on,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-btn-cyan,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-toggle.on[data-layer="points"] {
+    color: var(--sk-accent); background: var(--sk-accent-soft); border-color: var(--sk-accent-border);
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-btn-purple { color: #c9d6a0; border-color: rgba(159, 179, 109, .55); background: rgba(159, 179, 109, .14); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-btn-orange { color: #f0a04b; border-color: rgba(240, 160, 75, .55); background: rgba(240, 160, 75, .12); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-toggle { border-color: var(--sk-inset-border); color: var(--sk-text-3); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-speed button { color: var(--sk-text-3); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-speed button.on { background: var(--sk-accent-soft); color: var(--sk-accent); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-kbd { border-color: var(--sk-inset-border); color: var(--sk-text-2); background: var(--sk-inset); }
+
+/* Inner panels sit recessed inside the card, like the dashboard's bars */
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-cam,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-obs { background: var(--sk-inset); border-color: var(--sk-inset-border); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-cam.on { border-color: var(--sk-accent-border); box-shadow: inset 0 0 0 1px var(--sk-accent-soft); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-map,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-video-wrap,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-scrub { border-color: var(--sk-inset-border); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-scrub-fill { background: rgba(210, 176, 122, .2); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-scrub-head { background: var(--sk-accent); box-shadow: 0 0 6px var(--sk-accent); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-empty-card { border-color: var(--sk-accent-border); background: var(--sk-accent-soft); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-empty-card:hover { border-color: var(--sk-accent); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-bul-stage { background: rgba(0, 0, 0, .3); }
+
+/* Table */
+html[data-skin="ranger-green"] body:not(.light-mode) table.sa-table td { color: var(--sk-text-2); }
+html[data-skin="ranger-green"] body:not(.light-mode) table.sa-table tbody tr { border-top-color: rgba(205, 175, 125, .12); }
+html[data-skin="ranger-green"] body:not(.light-mode) table.sa-table tbody tr:hover { background: rgba(196, 164, 112, .07); }
+html[data-skin="ranger-green"] body:not(.light-mode) table.sa-table tbody tr.sa-row-focus { background: var(--sk-accent-soft); }
+
+/* Menus, popups, dropdown lists */
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-menu { background: linear-gradient(180deg, #363a29, #282a1d); border-color: var(--sk-card-border); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-menu button { color: var(--sk-text); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-menu button:hover { background: var(--sk-accent-soft); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-menu button small { color: var(--sk-text-3); }
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-root .leaflet-popup-content-wrapper,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-root .leaflet-popup-tip,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-root .leaflet-tooltip { background: #282a1d; color: var(--sk-text); border-color: var(--sk-accent-border); }
+html[data-skin="ranger-green"] body:not(.light-mode) #saRoot select option,
+html[data-skin="ranger-green"] body:not(.light-mode) #saModal select option,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-select option { background: #23271c; color: var(--sk-text); }
+html[data-skin="ranger-green"] body:not(.light-mode) #saRoot select option:checked,
+html[data-skin="ranger-green"] body:not(.light-mode) #saModal select option:checked,
+html[data-skin="ranger-green"] body:not(.light-mode) .sa-select option:checked { background: #3a4129; color: #fff; }

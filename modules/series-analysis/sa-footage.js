@@ -413,8 +413,8 @@
                 '<button class="font-mono ' + (o.realIso ? 'text-viper-cyan' : 'text-gray-400') + '" data-sa="saf-seek-obs" data-id="' + E(o.id) + '" title="DVR ' + E(o.dvr || '-') + ' · video ' + E(o.video || '') + '">' + E(o.real || o.video) + '</button>' +
                 '<span class="text-gray-500 truncate" style="max-width:55%" title="' + E(o.cameraName) + '">' + E(o.cameraName || '') + '</span></div>' +
             '<input class="sa-input" style="padding:4px 7px;font-size:12px" data-saf-obs="text" data-id="' + E(o.id) + '" value="' + E(o.text || '') + '" placeholder="What do you see? e.g. silver sedan enters lot">' +
-            '<div class="flex gap-1 mt-1"><select class="sa-select" style="padding:2px 4px;font-size:11px;flex:0 0 auto" data-saf-obs="tag" data-id="' + E(o.id) + '">' + tagOpts + '</select>' +
-                '<select class="sa-select" style="padding:2px 4px;font-size:11px;flex:1;min-width:0" data-saf-obs="incidentId" data-id="' + E(o.id) + '">' + incOptions(o.incidentId, 'No incident') + '</select></div>' +
+            '<div class="flex gap-1 mt-1"><select class="sa-select" style="padding:2px 4px;font-size:11px;width:84px;flex:0 0 84px" data-saf-obs="tag" data-id="' + E(o.id) + '">' + tagOpts + '</select>' +
+                '<select class="sa-select" style="padding:2px 4px;font-size:11px;width:auto;flex:1 1 0;min-width:0" data-saf-obs="incidentId" data-id="' + E(o.id) + '">' + incOptions(o.incidentId, 'No incident') + '</select></div>' +
             '<div class="flex gap-1 mt-1 flex-wrap">' +
                 (o.evidenceTag
                     ? '<span class="text-[10.5px] text-green-300 px-1" title="Full-size still filed on Evidence">✓ ' + E(o.evidenceTag) + '</span>'

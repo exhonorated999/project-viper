@@ -380,7 +380,7 @@
             '<div class="sa-kpi"><div class="sa-kpi-l">Incidents</div><div class="sa-kpi-v">' + (k.count || 0) +
                 (k.spanDays != null ? ' <small>in ' + (k.spanDays + 1) + ' day' + (k.spanDays ? 's' : '') + '</small>' : '') + '</div></div>' +
             '<div class="sa-kpi"><div class="sa-kpi-l">Avg gap</div><div class="sa-kpi-v">' + (gap != null ? gap + ' <small>days' + (k.trend ? ' · ' + esc(k.trend) : '') + '</small>' : '<small>—</small>') + '</div></div>' +
-            '<div class="sa-kpi"><div class="sa-kpi-l">Peak window</div><div class="sa-kpi-v" style="color:#00d9ff">' + (k.peak ? esc(k.peak.label) + ' <small>' + esc(k.peak.daysLabel || '') + '</small>' : '<small>—</small>') + '</div></div>' +
+            '<div class="sa-kpi"><div class="sa-kpi-l">Peak window</div><div class="sa-kpi-v sa-kpi-accent">' + (k.peak ? esc(k.peak.label) + ' <small>' + esc(k.peak.daysLabel || '') + '</small>' : '<small>—</small>') + '</div></div>' +
             '<div class="sa-kpi"><div class="sa-kpi-l">' + esc(k.top ? ((colByKey(k.top.column) || {}).label || 'Top value') : 'Top shared value') + '</div><div class="sa-kpi-v" title="' + esc(k.top ? k.top.display : '') + '">' +
                 (k.top ? esc(k.top.display) + ' <small>' + k.top.count + ' of ' + (k.count || 0) + '</small>' : '<small>none shared yet</small>') + '</div></div>' +
             '<div class="sa-kpi sa-kpi-next"><div class="sa-kpi-l">Next likely window <span class="normal-case tracking-normal text-gray-500">(observed)</span></div>' + nextHtml + '</div>' +
@@ -404,16 +404,18 @@
             s += '<div class="sa-grid-d">' + DOW[d] + '</div>';
             for (var hh = 0; hh < 24; hh++) {
                 var v = max ? g[d][hh] / max : 0;
-                var bg = v === 0 ? 'rgba(255,255,255,.04)' : 'rgba(0,217,255,' + (0.10 + v * 0.85).toFixed(3) + ')';
+                // Intensity goes out as --a so skins can recolour the ramp (see sa.css .sa-cell.hot).
+                var cellCls = v === 0 ? '' : ' hot';
+                var cellStyle = v === 0 ? '' : ' style="--a:' + (0.10 + v * 0.85).toFixed(3) + '"';
                 var peak = pk && pk.days && pk.days.indexOf(d) >= 0 && inBand(hh, pk.startHour, pk.endHour);
                 var w = Math.round(g[d][hh] * 100) / 100;
-                s += '<div class="sa-cell' + (peak ? ' peak' : '') + '" style="background:' + bg + '" title="' + DOW[d] + ' ' + ('0' + hh).slice(-2) + ':00 · ' + w + ' hit' + (w === 1 ? '' : 's') + '"></div>';
+                s += '<div class="sa-cell' + cellCls + (peak ? ' peak' : '') + '"' + cellStyle + ' title="' + DOW[d] + ' ' + ('0' + hh).slice(-2) + ':00 · ' + w + ' hit' + (w === 1 ? '' : 's') + '"></div>';
             }
         });
         s += '</div>';
         if (!(opts && opts.bare)) {
             s += '<div class="flex items-center gap-2 mt-2 text-[10.5px] text-gray-500"><span>less</span>' +
-                '<span class="inline-block w-16 h-2 rounded" style="background:linear-gradient(90deg,rgba(0,217,255,.1),rgba(0,217,255,.95))"></span><span>more</span>' +
+                '<span class="inline-block w-16 h-2 rounded sa-ramp"></span><span>more</span>' +
                 (pk ? '<span class="ml-3 inline-block w-3 h-3" style="outline:1.5px solid #ffa726"></span><span>peak window · ' + Math.round((pk.share || 0) * 100) + '% of weight</span>' : '') +
                 '</div>';
         }

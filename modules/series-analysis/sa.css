@@ -111,6 +111,10 @@ td[data-sa-cell] { cursor: text; }
     padding: 6px 9px; font-size: 13px; outline: none;
 }
 .sa-input:focus, .sa-select:focus, .sa-textarea:focus { border-color: rgba(0, 217, 255, .7); }
+/* Native dropdown popups (and date/time pickers) render light unless told otherwise. */
+#saRoot, #saModal, .sa-select, .sa-input { color-scheme: dark; }
+#saRoot select option, #saModal select option, .sa-select option { background: #111827; color: #e5e7eb; }
+#saRoot select option:checked, #saModal select option:checked, .sa-select option:checked { background: #1f2937; color: #fff; }
 .sa-label { display: block; font-size: 11px; color: #9ca3af; margin-bottom: 3px; }
 
 .sa-modal-backdrop {

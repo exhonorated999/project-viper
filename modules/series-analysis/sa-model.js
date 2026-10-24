@@ -155,8 +155,13 @@
         var parts = t.split(/\s*(?:[-–—~]|\bto\b|\band\b|\bthru\b|\bthrough\b|&)\s*/i).filter(function (p) { return p !== ''; });
         if (parts.length >= 2) {
             var a = parseTime(parts[0]), b = parseTime(parts[1]);
-            // "1:30-5:45am": carry the trailing am/pm onto the first part.
-            if (!a && b) a = parseTime(parts[0] + (/[ap]\.?m?\.?$/i.exec(parts[1]) || [''])[0]);
+            // "1:30-5:45pm": carry the trailing am/pm onto a bare first part,
+            // unless that would put the start after the end ("11:30-1:45pm").
+            var suf = /[ap]\.?m?\.?$/i.exec(parts[1]);
+            if (b && suf && !/[ap]\.?m?\.?$/i.test(parts[0])) {
+                var carried = parseTime(parts[0] + suf[0]);
+                if (carried && (!a || minutes(carried) <= minutes(b))) a = carried;
+            }
             if (a && b) return { from: a, to: b === a ? '' : b };
             if (a) return { from: a, to: '' };
         }

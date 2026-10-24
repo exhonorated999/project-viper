@@ -103,6 +103,12 @@
     <script src="modules/dmv/co-vehicle-parser.js"></script>
     <script src="modules/flock/flock-module.js" defer></script>
     <script src="modules/flock/flock-ui.js" defer></script>
+    <!-- Series Analysis (crime analyst): many incidents worked under one case. -->
+    <link rel="stylesheet" href="modules/series-analysis/sa.css" />
+    <script src="modules/series-analysis/sa-model.js" defer></script>
+    <script src="modules/series-analysis/sa-bulletin.js" defer></script>
+    <script src="modules/series-analysis/sa-footage.js" defer></script>
+    <script src="modules/series-analysis/sa-tab.js" defer></script>
     <!-- Area Canvas media: photos attached from disk, video/audio recorded
          in-app. Loaded WITHOUT defer — the canvass tab's render functions
          call CanvasMedia.galleryHtml()/attachBarHtml() synchronously while
@@ -1685,6 +1691,7 @@
                     snapchatWarrant: hasArr(_ls(`snapchatWarrant_${caseId}`)),
                     xWarrant:        hasArr(_ls(`xWarrant_${caseId}`)),
                     bittorrent:      hasArr((_ls(`bittorrent_${caseId}`) || {}).imports),
+                    seriesAnalysis:  hasArr((_ls(`seriesAnalysis_${caseId}`) || {}).incidents),
                     metaWarrant:     hasArr(_ls(`metaWarrant_${caseId}`))
                 };
 
@@ -2422,6 +2429,7 @@
                 datapilot: { label: 'Datapilot', icon: 'M9 17a4 4 0 01-2-7.5l1-3a4 4 0 017 0l1 3A4 4 0 0115 17H9zM12 12v9' },
                 cellebrite: { label: 'Cellebrite (Mobile Forensics)', icon: 'M11 2H9a2 2 0 00-2 2v16a2 2 0 002 2h6a2 2 0 002-2V4a2 2 0 00-2-2h-2M11 18h2' },
                 flock: { label: 'FLOCK (LPR)', icon: 'M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z M15 13a3 3 0 11-6 0 3 3 0 016 0z' },
+                seriesAnalysis: { label: 'Series Analysis', icon: 'M6 19a2 2 0 100-4 2 2 0 000 4zM12 11a2 2 0 100-4 2 2 0 000 4zM18 15a2 2 0 100-4 2 2 0 000 4zM7.5 15.5l3-5M13.6 10.2l2.8 1.8' },
                 forensics: { label: 'Device Exams', icon: 'M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25' }
             };
             
@@ -2573,6 +2581,7 @@
             allModules.datapilot = { label: 'Datapilot', icon: '📱' };
             allModules.cellebrite = { label: 'Cellebrite (Mobile Forensics)', icon: '📱' };
             allModules.flock = { label: 'FLOCK (LPR)', icon: '📷' };
+            allModules.seriesAnalysis = { label: 'Series Analysis', icon: '📈' };
             allModules.forensics = { label: 'Device Exams', icon: '🔬' };
 
             // Warrant Author — only surface in Manage Tabs when feature toggle is enabled.
@@ -2673,6 +2682,7 @@
                 datapilot:'Datapilot',
                 cellebrite:'Cellebrite (Mobile Forensics)',
                 flock:'FLOCK (LPR)',
+                seriesAnalysis:'Series Analysis',
                 forensics:'Device Exams',
                 warrantAuthor:'Warrant Author'
             };
@@ -2740,6 +2750,7 @@
                 datapilot: { label: 'Datapilot', icon: '📱', type: 'data' },
                 cellebrite: { label: 'Cellebrite (Mobile Forensics)', icon: '📱', type: 'data' },
                 flock: { label: 'FLOCK (LPR)', icon: '📷', type: 'data' },
+                seriesAnalysis: { label: 'Series Analysis', icon: '📈', type: 'data' },
                 forensics: { label: 'Device Exams', icon: '🔬', type: 'mixed' },
                 consentSearch: { label: 'Consent Search', icon: '✅', type: 'data' },
                 warrantAuthor: { label: 'Warrant Author', icon: '✍️', type: 'mixed' }
@@ -3250,6 +3261,10 @@
                     // Count plate READS, not imports — the reads are the evidence.
                     const flkData = _lsParse(`flock_${currentCase.id}`, {"imports": []});
                     return (flkData.imports || []).reduce((n, i) => n + ((i.hits || []).length), 0);
+                }
+                case 'seriesAnalysis': {
+                    const saData = _lsParse(`seriesAnalysis_${currentCase.id}`, { incidents: [] });
+                    return Array.isArray(saData && saData.incidents) ? saData.incidents.length : 0;
                 }
                 case 'warrantAuthor': {
                     // Index lives in localStorage; full draft bodies live on disk under cases/{caseNumber}/Warrants/Drafts/.
@@ -5936,6 +5951,11 @@
             if (typeof teardownFlock === 'function' && tabId !== 'flock') {
                 try { teardownFlock(); } catch (_) {}
             }
+            // Series Analysis owns a Leaflet map and a <video>. Release them on
+            // every render, including its own re-render (init rebuilds both).
+            if (typeof teardownSeriesAnalysis === 'function') {
+                try { teardownSeriesAnalysis(); } catch (_) {}
+            }
 
             // Telemetry: track module open (demo-only, gated internally)
             try { ViperTelemetry.moduleOpen(tabId); } catch (e) {}
@@ -6102,6 +6122,13 @@
             } else if (tabId === 'flock') {
                 contentDiv.innerHTML = renderFlockTab();
                 initializeFlock();
+            } else if (tabId === 'seriesAnalysis') {
+                if (typeof renderSeriesAnalysisTab === 'function') {
+                    contentDiv.innerHTML = renderSeriesAnalysisTab();
+                    initializeSeriesAnalysis();
+                } else {
+                    contentDiv.innerHTML = '<div class="p-8 text-center text-gray-400">Series Analysis failed to load. Restart VIPER.</div>';
+                }
             } else {
                 contentDiv.innerHTML = renderPlaceholderTab(tabId);
             }
@@ -37521,6 +37548,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 { id: 'datapilot', label: 'Datapilot (Mobile Forensics)', icon: 'M9 17a4 4 0 01-2-7.5l1-3a4 4 0 017 0l1 3A4 4 0 0115 17H9zM12 12v9', desc: 'Parse mobile forensic CSV exports — calls, messages, contacts, GPS, apps, files + AI insights' },
                 { id: 'cellebrite', label: 'Cellebrite (Mobile Forensics)', icon: 'M11 2H9a2 2 0 00-2 2v16a2 2 0 002 2h6a2 2 0 002-2V4a2 2 0 00-2-2h-2M11 18h2', desc: 'Parse raw UFED filesystem extractions (.ufdx) — device, apps, contacts, calls, SMS/MMS, accounts, Wi-Fi' },
                 { id: 'flock', label: 'FLOCK (License Plate Reader)', icon: 'M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z M15 13a3 3 0 11-6 0 3 3 0 016 0z', desc: 'Map Flock ALPR search results, replay vehicle movement & push hits to the Connection Board' },
+                { id: 'seriesAnalysis', label: 'Series Analysis (Crime Analyst)', icon: 'M6 19a2 2 0 100-4 2 2 0 000 4zM12 11a2 2 0 100-4 2 2 0 000 4zM18 15a2 2 0 100-4 2 2 0 000 4zM7.5 15.5l3-5M13.6 10.2l2.8 1.8', desc: 'Work many incidents under one case: map, day × hour pattern, shared MO/vehicles, footage review, crime bulletin' },
             ];
 
             const allModules = [...caseManagement, ...investigativeTools];

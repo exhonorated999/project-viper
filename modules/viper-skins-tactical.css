@@ -1,0 +1,170 @@
+/* Project VIPER - Tactical skins: Ranger Green
+   Selected like every other skin: ViperSkins writes data-skin on <html> (see modules/viper-skins.js).
+   Inactive when body has .light-mode.
+   Colors / borders / shadows / backgrounds / blur only. Media (iframe, embed, img, video, object, PDF viewer) never styled. */
+
+/* ================= RANGER GREEN ================= */
+html[data-skin="ranger-green"] body:not(.light-mode) {
+  --sk-page: radial-gradient(ellipse at 50% 30%, rgba(40,46,32,0) 40%, rgba(0,0,0,0.55) 100%) fixed, #16180f;
+  --sk-page-pattern: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8'%3E%3Crect width='8' height='8' fill='%23181a12'/%3E%3Cpath d='M0 2h4M4 6h4' stroke='%2322261a' stroke-width='2'/%3E%3Cpath d='M2 0v4M6 4v4' stroke='%23171a13' stroke-width='2'/%3E%3C/svg%3E") 0 0 / 8px 8px;
+  --sk-sidebar: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6'%3E%3Cpath d='M0 1.5h3M3 4.5h3' stroke='%23ffffff' stroke-opacity='.035' stroke-width='1.5'/%3E%3Cpath d='M1.5 0v3M4.5 3v3' stroke='%23000' stroke-opacity='.12' stroke-width='1.5'/%3E%3C/svg%3E") 0 0 / 6px 6px, linear-gradient(180deg, #23271c, #1b1e16);
+  --sk-sidebar-border: #3c4231;
+  --sk-card: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cdefs%3E%3CradialGradient id='g' cx='.35' cy='.3'%3E%3Cstop offset='0' stop-color='%239a9580'/%3E%3Cstop offset='1' stop-color='%233b3a30'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='6' cy='6' r='5.5' fill='%2315170f'/%3E%3Cpath d='M6 1.5L9.9 3.75V8.25L6 10.5L2.1 8.25V3.75Z' fill='url(%23g)' stroke='%2311120d' stroke-width='.6'/%3E%3Ccircle cx='6' cy='6' r='1.4' fill='%2325261d'/%3E%3C/svg%3E") no-repeat left 2px top 2px / 11px 11px, url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cdefs%3E%3CradialGradient id='g' cx='.35' cy='.3'%3E%3Cstop offset='0' stop-color='%239a9580'/%3E%3Cstop offset='1' stop-color='%233b3a30'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='6' cy='6' r='5.5' fill='%2315170f'/%3E%3Cpath d='M6 1.5L9.9 3.75V8.25L6 10.5L2.1 8.25V3.75Z' fill='url(%23g)' stroke='%2311120d' stroke-width='.6'/%3E%3Ccircle cx='6' cy='6' r='1.4' fill='%2325261d'/%3E%3C/svg%3E") no-repeat right 2px top 2px / 11px 11px, url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cdefs%3E%3CradialGradient id='g' cx='.35' cy='.3'%3E%3Cstop offset='0' stop-color='%239a9580'/%3E%3Cstop offset='1' stop-color='%233b3a30'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='6' cy='6' r='5.5' fill='%2315170f'/%3E%3Cpath d='M6 1.5L9.9 3.75V8.25L6 10.5L2.1 8.25V3.75Z' fill='url(%23g)' stroke='%2311120d' stroke-width='.6'/%3E%3Ccircle cx='6' cy='6' r='1.4' fill='%2325261d'/%3E%3C/svg%3E") no-repeat left 2px bottom 2px / 11px 11px, url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cdefs%3E%3CradialGradient id='g' cx='.35' cy='.3'%3E%3Cstop offset='0' stop-color='%239a9580'/%3E%3Cstop offset='1' stop-color='%233b3a30'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='6' cy='6' r='5.5' fill='%2315170f'/%3E%3Cpath d='M6 1.5L9.9 3.75V8.25L6 10.5L2.1 8.25V3.75Z' fill='url(%23g)' stroke='%2311120d' stroke-width='.6'/%3E%3Ccircle cx='6' cy='6' r='1.4' fill='%2325261d'/%3E%3C/svg%3E") no-repeat right 2px bottom 2px / 11px 11px, repeating-linear-gradient(90deg, rgba(205,175,125,0.7) 0 6px, transparent 6px 11px) no-repeat left 5px top 5px / calc(100% - 10px) 1px, repeating-linear-gradient(90deg, rgba(205,175,125,0.7) 0 6px, transparent 6px 11px) no-repeat left 5px bottom 5px / calc(100% - 10px) 1px, repeating-linear-gradient(180deg, rgba(205,175,125,0.7) 0 6px, transparent 6px 11px) no-repeat left 5px top 5px / 1px calc(100% - 10px), repeating-linear-gradient(180deg, rgba(205,175,125,0.7) 0 6px, transparent 6px 11px) no-repeat right 5px top 5px / 1px calc(100% - 10px), url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6'%3E%3Cpath d='M0 1.5h3M3 4.5h3' stroke='%23ffffff' stroke-opacity='.035' stroke-width='1.5'/%3E%3Cpath d='M1.5 0v3M4.5 3v3' stroke='%23000' stroke-opacity='.12' stroke-width='1.5'/%3E%3C/svg%3E") 0 0 / 6px 6px, radial-gradient(ellipse at 30% 0%, rgba(255,240,200,0.06), transparent 60%), linear-gradient(180deg, #363a29, #282a1d);
+  --sk-card-border: #4d5440;
+  --sk-card-shadow: inset 0 1px 0 rgba(255,255,230,0.07), inset 0 0 0 2px #22261b, inset 0 0 18px rgba(0,0,0,0.45), 0 6px 16px rgba(0,0,0,0.6);
+  --sk-card-blur: none;
+  --sk-inset: linear-gradient(180deg, #23271c, #1e2218);
+  --sk-inset-border: #454b38;
+  --sk-text: #ece6d4; --sk-text-2: #cfc8b2; --sk-text-3: #a8a28c;
+  --sk-accent: #d2b07a; --sk-accent-soft: rgba(196,164,112,0.16); --sk-accent-border: rgba(196,164,112,0.55);
+  --sk-accent-2: #9fb36d;
+  --sk-btn: linear-gradient(180deg, #c9aa76, #a8885a); --sk-btn-text: #1d1a12; --sk-btn-border: #d8bd8c;
+  --sk-thead: linear-gradient(180deg, #4a5236, #3a4129); --sk-thead-text: #f1ead6;
+  --sk-fx-molle: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='26'%3E%3Crect width='48' height='26' fill='%232b3122'/%3E%3Crect y='0' width='48' height='2' fill='%23151810'/%3E%3Crect y='24' width='48' height='2' fill='%23151810'/%3E%3Crect x='2' y='7' width='40' height='12' rx='1' fill='%233a4130' stroke='%231a1d14'/%3E%3Cpath d='M4 9h36M4 17h36' stroke='%23c4a470' stroke-opacity='.35' stroke-dasharray='3 3'/%3E%3C/svg%3E") 0 0 / 48px 26px repeat-x;
+  --sk-fx-vignette: radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(0,0,0,0.9) 100%);
+}
+html[data-skin="ranger-green"] body:not(.light-mode) {
+  background: var(--sk-page-pattern), var(--sk-page) !important; color: var(--sk-text) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .hex-pattern {
+  background: var(--sk-page-pattern), var(--sk-page) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .glass-card,
+html[data-skin="ranger-green"] body:not(.light-mode) .stat-card {
+  background: var(--sk-card) !important; border-color: var(--sk-card-border) !important; box-shadow: var(--sk-card-shadow) !important; backdrop-filter: var(--sk-card-blur); -webkit-backdrop-filter: var(--sk-card-blur);
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .w-64.glass-card {
+  background: var(--sk-sidebar) !important; border-color: var(--sk-sidebar-border) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .sidebar-item {
+  color: var(--sk-text-2) !important; background: transparent !important; border-color: transparent !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .sidebar-item svg {
+  color: var(--sk-accent) !important; stroke: currentColor;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .sidebar-item:hover {
+  background: var(--sk-accent-soft) !important; color: var(--sk-text) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .sidebar-item.active {
+  background: var(--sk-accent-soft) !important; color: var(--sk-accent) !important; border-color: var(--sk-accent-border) !important; box-shadow: inset 3px 0 0 var(--sk-accent) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .border-b.border-gray-700.bg-viper-card\/50 {
+  background: var(--sk-card) !important; border-color: var(--sk-card-border) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .tab-button {
+  color: var(--sk-text-3) !important; background: transparent !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .tab-button:hover {
+  color: var(--sk-text) !important; background: var(--sk-accent-soft) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .tab-button.active {
+  color: var(--sk-accent) !important; border-bottom-color: var(--sk-accent) !important; box-shadow: 0 2px 10px -4px var(--sk-accent) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .inv-thead-solid th {
+  background: var(--sk-thead) !important; color: var(--sk-thead-text) !important; border-color: var(--sk-card-border) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) [class*="bg-viper-card"]:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]),
+html[data-skin="ranger-green"] body:not(.light-mode) [class*="bg-viper-dark"]:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]),
+html[data-skin="ranger-green"] body:not(.light-mode) .bg-gray-700:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]),
+html[data-skin="ranger-green"] body:not(.light-mode) .bg-gray-800:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]),
+html[data-skin="ranger-green"] body:not(.light-mode) [class*="bg-gray-7"]:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]),
+html[data-skin="ranger-green"] body:not(.light-mode) [class*="bg-gray-8"]:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]) {
+  background: var(--sk-inset) !important; border-color: var(--sk-inset-border) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) input,
+html[data-skin="ranger-green"] body:not(.light-mode) textarea,
+html[data-skin="ranger-green"] body:not(.light-mode) select {
+  background: var(--sk-inset) !important; color: var(--sk-text) !important; border-color: var(--sk-inset-border) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) ::placeholder,
+html[data-skin="ranger-green"] body:not(.light-mode) input::placeholder,
+html[data-skin="ranger-green"] body:not(.light-mode) textarea::placeholder {
+  color: var(--sk-text-3) !important; opacity: 1;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) input:focus,
+html[data-skin="ranger-green"] body:not(.light-mode) textarea:focus,
+html[data-skin="ranger-green"] body:not(.light-mode) select:focus,
+html[data-skin="ranger-green"] body:not(.light-mode) :focus-visible:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]) {
+  border-color: var(--sk-accent) !important; box-shadow: 0 0 0 2px var(--sk-accent-soft), 0 0 12px -2px var(--sk-accent) !important; outline-color: var(--sk-accent);
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .text-white {
+  color: var(--sk-text) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .text-gray-300 {
+  color: var(--sk-text-2) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .text-gray-400,
+html[data-skin="ranger-green"] body:not(.light-mode) .text-gray-500 {
+  color: var(--sk-text-3) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .text-viper-cyan {
+  color: var(--sk-accent) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .text-viper-purple {
+  color: var(--sk-accent-2) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .bg-viper-cyan\/20,
+html[data-skin="ranger-green"] body:not(.light-mode) .bg-viper-cyan\/10 {
+  background: var(--sk-btn) !important; color: var(--sk-btn-text) !important; border-color: var(--sk-btn-border) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .bg-viper-cyan\/20:hover,
+html[data-skin="ranger-green"] body:not(.light-mode) .bg-viper-cyan\/10:hover {
+  background: var(--sk-accent-soft) !important; box-shadow: 0 0 14px -2px var(--sk-accent) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .border-gray-600,
+html[data-skin="ranger-green"] body:not(.light-mode) .border-gray-700 {
+  border-color: var(--sk-inset-border) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode) .border-viper-cyan\/20,
+html[data-skin="ranger-green"] body:not(.light-mode) .border-viper-cyan\/30 {
+  border-color: var(--sk-accent-border) !important;
+}
+
+/* status colors stay recognizable */
+html[data-skin="ranger-green"] body:not(.light-mode) .text-viper-green { color: #8fd06a !important; }
+html[data-skin="ranger-green"] body:not(.light-mode) .text-viper-orange { color: #f0a04b !important; }
+html[data-skin="ranger-green"] body:not(.light-mode) .bg-viper-green\/20 { background: rgba(120,190,90,0.18) !important; color: #d4f0c2 !important; border-color: rgba(143,208,106,0.5) !important; }
+html[data-skin="ranger-green"] body:not(.light-mode) .bg-viper-orange\/20 { background: linear-gradient(180deg, rgba(150,80,30,0.45), rgba(110,55,20,0.45)) !important; color: #ffdcb0 !important; border-color: rgba(240,160,75,0.55) !important; }
+html[data-skin="ranger-green"] body:not(.light-mode) .bg-viper-purple\/20 { background: rgba(200,80,60,0.20) !important; color: #ffd2c8 !important; border-color: rgba(220,100,80,0.5) !important; }
+html[data-skin="ranger-green"] body:not(.light-mode) .bg-viper-cyan\/10 { background: linear-gradient(180deg, #2f3526, #262b1e) !important; color: var(--sk-text) !important; border-color: #5a6148 !important; }
+html[data-skin="ranger-green"] body:not(.light-mode) .sidebar-item.active { background: linear-gradient(180deg, #3d3a2a, #2f2d21) !important; box-shadow: inset 0 0 0 1px rgba(196,164,112,0.45), 0 2px 6px rgba(0,0,0,0.5) !important; }
+html[data-skin="ranger-green"] body:not(.light-mode) .border-b.border-gray-700.bg-viper-card\/50 { background: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6'%3E%3Cpath d='M0 1.5h3M3 4.5h3' stroke='%23ffffff' stroke-opacity='.035' stroke-width='1.5'/%3E%3Cpath d='M1.5 0v3M4.5 3v3' stroke='%23000' stroke-opacity='.12' stroke-width='1.5'/%3E%3C/svg%3E") 0 0 / 6px 6px, linear-gradient(180deg, #2c3222, #252a1d) !important; box-shadow: inset 0 -1px 0 #4d5440 !important; }
+html[data-skin="ranger-green"] body:not(.light-mode) .w-64.glass-card { box-shadow: inset -1px 0 0 #3c4231, 4px 0 14px rgba(0,0,0,0.5) !important; }
+
+/* --- decorations (fixed, non-interactive, z-index 0) --- */
+html[data-skin="ranger-green"] body:not(.light-mode)::before {
+  content: ""; position: fixed; top: 0; left: 0; right: 0; height: 26px;
+  pointer-events: none; z-index: 0; opacity: 0.6; background: var(--sk-fx-molle) !important;
+}
+html[data-skin="ranger-green"] body:not(.light-mode)::after {
+  content: ""; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none; z-index: 0; opacity: 0.35; background: var(--sk-fx-vignette) !important;
+}
+@media (prefers-reduced-motion: no-preference) {
+  html[data-skin="ranger-green"] body:not(.light-mode) .stat-card { transition: box-shadow .25s ease; }
+  html[data-skin="ranger-green"] body:not(.light-mode) .stat-card:hover { box-shadow: inset 0 1px 0 rgba(255,255,230,0.07), inset 0 0 0 3px #22261b, 0 0 0 1px rgba(196,164,112,0.45), 0 8px 20px rgba(0,0,0,0.7) !important; }
+}
+
+/* ================= VIPER INTEGRATION =================
+   1. Palette: the rest of VIPER colours through the --vp-* RGB triples
+      (see modules/viper-skins.css), so restate them here. Purple doubles as a
+      solid button colour with white text, hence a deep olive
+      (text-viper-purple is still remapped above).
+   2. Decorations sit BEHIND the app. At z-index 0 a fixed body::before/::after
+      paints over every non-positioned element: the MOLLE strip would cover
+      the page titles and the vignette would darken the whole UI. At -1 they
+      paint just above the page background. .hex-pattern (the dashboard
+      wrapper) is made transparent so it doesn't hide them; body already
+      carries the page background. */
+html[data-skin="ranger-green"] body:not(.light-mode) {
+  --vp-dark: 22 24 15;  --vp-card: 40 42 29;  --vp-cyan: 210 176 122;
+  --vp-purple: 95 110 52; --vp-green: 143 208 106; --vp-orange: 240 160 75;
+}
+html[data-skin="ranger-green"] body:not(.light-mode)::before,
+html[data-skin="ranger-green"] body:not(.light-mode)::after { z-index: -1 !important; }
+html[data-skin="ranger-green"] body:not(.light-mode) .hex-pattern { background: transparent !important; }
+/* Tab text was --sk-text-3, too dim on the dark canvas strip. */
+html[data-skin="ranger-green"] body:not(.light-mode) .tab-button { color: var(--sk-text-2) !important; }
+/* Scrollbars: the pages hard-code a cyan thumb; use coyote tan instead. */
+html[data-skin="ranger-green"] body:not(.light-mode) ::-webkit-scrollbar-thumb { background: rgba(196, 164, 112, 0.35) !important; }
+html[data-skin="ranger-green"] body:not(.light-mode) ::-webkit-scrollbar-thumb:hover { background: rgba(210, 176, 122, 0.6) !important; }

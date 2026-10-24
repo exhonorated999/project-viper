@@ -7344,6 +7344,29 @@ ipcMain.handle('rh-capture-pdf', async (_e, payload) => {
   }
 });
 
+// Screenshot of the visible part of a resource view, returned to the
+// renderer as a PNG data URL. Used by "Send to board": the renderer saves
+// it to Evidence and pins it on the Connection Board with its source URL.
+ipcMain.handle('rh-capture-png', async (_e, payload) => {
+  const resourceId = payload && payload.resourceId;
+  const meta = _rhResourceMap()[resourceId];
+  if (!meta || !meta.bv || meta.bv.webContents.isDestroyed()) {
+    return { success: false, error: 'Resource view not available' };
+  }
+  try {
+    const wc = meta.bv.webContents;
+    const url = wc.getURL() || '';
+    let title = '';
+    try { title = await wc.executeJavaScript('document.title || ""'); } catch (_) {}
+    const img = await wc.capturePage();
+    if (!img || img.isEmpty()) return { success: false, error: 'The page is not visible yet' };
+    return { success: true, dataUrl: 'data:image/png;base64,' + img.toPNG().toString('base64'), url, title, label: meta.label };
+  } catch (err) {
+    console.error('[rh-capture-png]', err);
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
 // --- Capture current Resource-Hub BrowserView as SingleFile HTML ---
 // Loads the SingleFile bundle (single-file-cli) into the BrowserView via
 // executeJavaScript, then calls singlefile.getPageData() to produce a

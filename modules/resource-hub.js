@@ -210,6 +210,9 @@
             <button id="rhCaptureHtmlBtn" class="p-2 rounded-lg hover:bg-white/5 text-gray-500 hover:text-white transition disabled:opacity-30 disabled:cursor-not-allowed" title="Save current view as SingleFile HTML (inlined assets) → Evidence" onclick="window._rhCaptureHtml()">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
             </button>
+            <button id="rhSendBoardBtn" class="p-2 rounded-lg hover:bg-white/5 text-gray-500 hover:text-white transition disabled:opacity-30 disabled:cursor-not-allowed" title="Send to Connection Board: snapshot this page as a card (saved to Evidence, linked to a pin)" onclick="window._rhSendToBoard()" style="display:none;">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2" stroke-width="2"/><circle cx="8" cy="9" r="1.5" fill="currentColor"/><circle cx="16" cy="13" r="1.5" fill="currentColor"/><path stroke-linecap="round" stroke-width="1.6" d="M8 9l8 4"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18v3m-3 0h6"/></svg>
+            </button>
             <button id="rhExpandBtn" class="p-2 rounded-lg hover:bg-white/5 text-gray-500 hover:text-white transition" title="Expand" onclick="window._rhToggleExpand()">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
             </button>
@@ -597,6 +600,8 @@
     const isBV = !!(res && res.isBV);
     // Zoom + Capture controls only meaningful for BV-backed tabs
     [lbl, out, inn, cap, caph].forEach(el => { if (el) el.style.display = isBV ? '' : 'none'; });
+    const sb = document.getElementById('rhSendBoardBtn');
+    if (sb) sb.style.display = (isBV && window.CBImport && window.ConnectionBoard && window.electronAPI && window.electronAPI.resourceHubCapturePng) ? '' : 'none';
     if (isBV) {
       const f = getZoomFactor(rhActiveTab);
       lbl.textContent = Math.round(f * 100) + '%';
@@ -667,6 +672,43 @@
     } catch (e) {
       console.error('[ResourceHub] captureHtml', e);
       viperToast('HTML archive error: ' + (e.message || e), 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  /* ── Trace Network Search ─────────────────────────────────── */
+  /* ── Send current BrowserView to the Connection Board ───────
+   * Snapshots the visible page as a PNG, hides the native view (it sits
+   * above all DOM) while the card modal is up, then restores it. */
+  async function sendToBoard() {
+    const res = RESOURCES.find(r => r.id === rhActiveTab);
+    if (!res || !res.isBV) { viperToast('Switch to a web resource tab first.', 'warning'); return; }
+    if (!window.CBImport || !window.electronAPI || !window.electronAPI.resourceHubCapturePng) {
+      viperToast('Connection Board is not available on this page.', 'warning'); return;
+    }
+    if (typeof currentCase === 'undefined' || !currentCase) { viperToast('Open a case first.', 'warning'); return; }
+    const btn = document.getElementById('rhSendBoardBtn');
+    if (btn) btn.disabled = true;
+    const resId = res.id;
+    try {
+      const r = await window.electronAPI.resourceHubCapturePng({ resourceId: resId });
+      if (!r || !r.success || !r.dataUrl) { viperToast('Snapshot failed: ' + ((r && r.error) || 'unknown'), 'error'); return; }
+      hideBV(resId);
+      window.CBImport.openCardModal({
+        image: r.dataUrl,
+        source: res.label || r.label || resId,
+        sourceUrl: r.url || '',
+        title: r.title || '',
+        kind: 'tray',
+        onClose: function () {
+          if (rhOpen && rhActiveTab === resId) requestAnimationFrame(() => positionBV(resId));
+        }
+      });
+    } catch (e) {
+      console.error('[ResourceHub] sendToBoard', e);
+      viperToast('Send to board failed: ' + (e.message || e), 'error');
+      if (rhOpen && rhActiveTab === resId) positionBV(resId);
     } finally {
       if (btn) btn.disabled = false;
     }
@@ -853,6 +895,7 @@
   window._rhZoomReset        = zoomReset;
   window._rhCapturePdf       = capturePdf;
   window._rhCaptureHtml      = captureHtml;
+  window._rhSendToBoard      = sendToBoard;
 
   /* ── Download routing modal ─────────────────────────────────
    * When the main process intercepts a Resource Hub BrowserView

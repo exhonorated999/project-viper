@@ -477,6 +477,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   resourceHubRouteDownload: (payload) => ipcRenderer.invoke('rh-download-route', payload),
   resourceHubCapturePdf: (payload) => ipcRenderer.invoke('rh-capture-pdf', payload),
   resourceHubCaptureHtml: (payload) => ipcRenderer.invoke('rh-capture-html', payload),
+  resourceHubCapturePng: (payload) => ipcRenderer.invoke('rh-capture-png', payload),
 
   // P2P Activity Check (TorrentAnalytics). The results view is a
   // BrowserView because the site forbids framing (X-Frame-Options: DENY

@@ -438,8 +438,25 @@
     function isXlsxName(name) { return /\.xls[xm]$/i.test(String(name || '')); }
     function isLegacyXlsName(name) { return /\.xls$/i.test(String(name || '')); }
 
+    /**
+     * Read the text of entries in any ZIP (the Connection Board uses this for
+     * .kmz, which is a ZIP around doc.kml).
+     * @param {ArrayBuffer} arrayBuffer
+     * @param {function(string):boolean} [match] which entry names to read
+     * @returns Promise<[{ name, text }]>
+     */
+    function readZipText(arrayBuffer, match) {
+        var entries;
+        try { entries = parseCentralDirectory(arrayBuffer); } catch (e) { return Promise.reject(e); }
+        var pick = entries.filter(function (e) { return !/\/$/.test(e.name) && (!match || match(e.name)); });
+        return Promise.all(pick.map(function (e) {
+            return readEntryText(arrayBuffer, e).then(function (t) { return { name: e.name, text: t }; });
+        }));
+    }
+
     return {
         readWorkbook: readWorkbook,
+        readZipText: readZipText,
         isXlsxName: isXlsxName,
         isLegacyXlsName: isLegacyXlsName,
         // exported for tests

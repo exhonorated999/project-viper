@@ -224,6 +224,87 @@ eq(M.tileMosaic([[39.75, -105]], 400, 300).zoom, 15, 'single point zoom 15');
 eq(M.tileMosaic([], 400, 300), null, 'empty mosaic null');
 near(M.metersPerPixel(0, 0), 156543.03, 0.1, 'metersPerPixel');
 
+// ── footage clock maths (sa-footage.js) ─────────────────────────────
+const F = require('../sa-footage.js');
+eq(F.fmtStamp(F.parseStamp('2026-10-14 02:30:00')), '2026-10-14 02:30:00', 'parseStamp ISO');
+eq(F.fmtStamp(F.parseStamp('2026-10-14T02:30')), '2026-10-14 02:30:00', 'parseStamp T, no seconds');
+eq(F.fmtStamp(F.parseStamp('10/14/2026 2:30:05 PM')), '2026-10-14 14:30:05', 'parseStamp US pm');
+eq(F.fmtStamp(F.parseStamp('10/14/26 12:05 am')), '2026-10-14 00:05:00', 'parseStamp 12 am');
+eq(F.parseStamp('2026-02-30 01:00'), null, 'parseStamp rejects Feb 30');
+eq(F.parseStamp('nonsense'), null, 'parseStamp junk');
+eq(F.stampFromFileName('CH02_20261014_023000.mp4'), '2026-10-14 02:30:00', 'file name stamp compact');
+eq(F.stampFromFileName('Front Lot 2026-10-14 02-31-15.avi'), '2026-10-14 02:31:15', 'file name stamp dashed');
+eq(F.stampFromFileName('NVR_ch3_main_20261014023000_20261014030000.dav'), '2026-10-14 02:30:00', 'file name stamp first of a range');
+eq(F.stampFromFileName('IMG_1234.mov'), '', 'no stamp in file name');
+eq(F.parseOffset('+3:00'), 180, 'offset +m:ss');
+eq(F.parseOffset('-1:02:03'), -3723, 'offset -h:mm:ss');
+eq(F.parseOffset('\u22122:34'), -154, 'offset unicode minus');
+eq(F.parseOffset('90'), 90, 'offset bare seconds');
+eq(F.parseOffset('2m 34s'), 154, 'offset 2m 34s');
+eq(F.parseOffset(''), 0, 'offset empty is 0');
+eq(F.parseOffset('soon'), null, 'offset junk');
+eq(F.fmtOffset(154), '+2:34', 'fmtOffset +');
+eq(F.fmtOffset(-3723), '-1:02:03', 'fmtOffset h');
+eq(F.fmtOffset(0), '0:00', 'fmtOffset 0');
+eq(F.fmtDur(3725.9), '1:02:05', 'fmtDur h');
+eq(F.fmtDur(65), '01:05', 'fmtDur m');
+const cam = { startDvr: '2026-10-14 02:30:00', offsetSec: 154 };
+const ck = F.clockAt(cam, 90);
+eq(F.fmtStamp(ck.dvr), '2026-10-14 02:31:30', 'clockAt DVR');
+eq(F.fmtStamp(ck.real), '2026-10-14 02:34:04', 'clockAt real = DVR + correction');
+eq(F.clockAt({ startDvr: '' }, 10), null, 'clockAt without a clock');
+near(F.videoSecAt(cam, F.parseStamp('2026-10-14 02:34:04')), 90, 0.001, 'videoSecAt inverts clockAt');
+const w1 = F.windowFor(cam, { date: '2026-10-14', timeFrom: '02:40', timeTo: '03:10' });
+near(w1.from, 600 - 154, 0.001, 'window from (secs into video)');
+near(w1.to, 2400 - 154, 0.001, 'window to');
+ok('window not exact', w1.exact === false);
+const w2 = F.windowFor({ startDvr: '2026-10-13 23:00:00', offsetSec: 0 }, { date: '2026-10-13', timeFrom: '23:30', timeTo: '01:00' });
+near(w2.to - w2.from, 5400, 0.001, 'window across midnight is 90 min');
+const w3 = F.windowFor(cam, { date: '2026-10-14', timeFrom: '02:40' });
+ok('exact time padded ±10 min', w3.exact && Math.abs((w3.to - w3.from) - 1200) < 0.001);
+eq(F.windowFor(cam, { date: '2026-10-14' }), null, 'no time, no window');
+eq(F.offsetFromSync({ startDvr: '2026-10-14 02:30:00', offsetSec: 0 }, 60, '02:34:00'), 180, 'sync: 3 min slow → +3:00');
+eq(F.offsetFromSync({ startDvr: '2026-10-14 23:59:00', offsetSec: 0 }, 0, '00:01:00'), 120, 'sync across midnight');
+eq(F.offsetFromSync({ startDvr: '2026-10-14 02:30:00' }, 0, '2:25 am'), -300, 'sync fast recorder, am');
+eq(F.offsetFromSync({ startDvr: '' }, 0, '02:00:00'), null, 'sync needs a DVR start');
+const evs = F.evidenceVideos([
+    { id: 1, tag: 'E1', description: 'Rear lot DVR', files: [{ name: 'ch2.mp4', path: 'C:\\e\\ch2.mp4' }, { name: 'notes.pdf', path: 'C:\\e\\n.pdf' }] },
+    { id: 2, files: [{ name: 'export', path: 'C:\\e\\x', type: 'video/x-msvideo' }, { name: 'nopath.avi' }] },
+    null
+]);
+eq(evs.map(v => v.fileName), ['ch2.mp4', 'export'], 'evidenceVideos picks videos with a path');
+eq(evs[0].evidenceId, 1, 'evidenceVideos keeps the record id');
+const ob = F.stampObservation({ atSec: 90 }, cam);
+eq([ob.real, ob.dvr, ob.realIso, ob.video], ['10/14 02:34:04', '2026-10-14 02:31:30', '2026-10-14T02:34:04', '01:30'], 'stampObservation');
+eq(F.stampObservation({ atSec: 5 }, { startDvr: '' }).real, 'video 00:05', 'stampObservation without a clock');
+const sorted = F.sortObservations([{ id: 'b', realIso: '2026-10-14T03:00:00' }, { id: 'c', realIso: '' }, { id: 'a', realIso: '2026-10-14T02:00:00' }]);
+eq(sorted.map(o => o.id), ['a', 'b', 'c'], 'observations sort by real time, unknown last');
+const log = F.makeLog({ title: 'Oak Hollow', cameras: [{ id: 'c1', name: 'Cam 2', fileName: 'ch2.mp4', startDvr: cam.startDvr, offsetSec: 154, incidentId: 'inc_3' }],
+    observations: [Object.assign({ id: 'o1', cameraId: 'c1', cameraName: 'Cam 2', incidentId: 'inc_3', text: 'Silver sedan enters lot', tag: 'vehicle' }, ob)] },
+    { caseNumber: '26-001' }, 'now', { inc_3: 3 });
+ok('log names the case', /Case: 26-001/.test(log));
+ok('log states the correction direction', /\+2:34 \(recorder behind real time\)/.test(log));
+ok('log has the observation in real time', /2026-10-14 02:34:04 real \| Cam 2 \| DVR 2026-10-14 02:31:30 \| video 01:30 \| incident #3 \| vehicle/.test(log));
+ok('log has the text', /Silver sedan enters lot/.test(log));
+
+// ── bulletin builder (sa-bulletin.js) ───────────────────────────────
+const B = require('../sa-bulletin.js');
+eq(B.blockOf('1420 Oak Hollow Dr'), '1400 block of Oak Hollow Dr', 'blockOf');
+eq(B.blockOf('Oak Hollow Dr'), 'Oak Hollow Dr', 'blockOf no number');
+const bopts = Object.assign(B.defaults(), { title: 'Cat converter thefts', agency: 'Test PD', contact: 'Det. Smith' });
+const les = B.buildHtml({ model: M, incidents: INC, columns: COLS, options: bopts, caseObj: { caseNumber: '26-001' }, now: '2026-10-23', seriesTitle: 'Oak Hollow', tileUrl: null });
+ok('bulletin is a full page', /<html/i.test(les) && /<\/html>/i.test(les));
+ok('bulletin LES banner', /LAW ENFORCEMENT SENSITIVE/.test(les));
+ok('bulletin title + agency', les.indexOf('Cat converter thefts') >= 0 && les.indexOf('Test PD') >= 0);
+ok('bulletin likely-next says not a prediction', /not a prediction/i.test(les));
+ok('bulletin block-level addresses by default', !/\b1420 Oak/.test(les));
+ok('bulletin no script', !/<script/i.test(les));
+const pub = B.buildHtml({ model: M, incidents: INC, columns: COLS, options: Object.assign(B.defaults(), { audience: 'public', include: Object.assign(B.defaults().include, { next: false }) }), caseObj: {}, now: '2026-10-23', seriesTitle: 'x', tileUrl: null });
+ok('community banner', /COMMUNITY CRIME ALERT/.test(pub) && !/LAW ENFORCEMENT SENSITIVE/.test(pub));
+ok('community has no likely-next box', !/not a prediction/i.test(pub));
+const evil = B.buildHtml({ model: M, incidents: [Object.assign({}, INC[0], { address: '<img src=x onerror=alert(1)>' })], columns: COLS, options: Object.assign(B.defaults(), { title: '<script>x</script>' }), caseObj: {}, now: '2026-10-23', seriesTitle: '', tileUrl: null });
+ok('bulletin escapes user text', !/<script>x/.test(evil) && !/<img src=x/.test(evil));
+
 // ── wiring ──────────────────────────────────────────────────────────
 const root = path.join(__dirname, '..', '..', '..');
 const host = fs.readFileSync(path.join(root, 'case-detail-with-analytics.html'), 'utf8');
@@ -236,6 +317,13 @@ ok('host tears down', /teardownSeriesAnalysis/.test(host));
 const cs = require('../../_shared/case-stores.js');
 const stores = cs.STORES || (cs.CaseStores && cs.CaseStores.STORES) || [];
 ok('case-stores entry', stores.some(s => s.key === 'seriesAnalysis' && s.list === 'incidents'));
+const MAIN = fs.readFileSync(path.join(root, 'electron-main.js'), 'utf8');
+const PRELOAD = fs.readFileSync(path.join(root, 'preload.js'), 'utf8');
+ok('main handles video-frame', /ipcMain\.handle\('video-frame'/.test(MAIN));
+ok('preload exposes videoFrame', /videoFrame: \(args\) => ipcRenderer\.invoke\('video-frame', args\)/.test(PRELOAD));
+const VP = require('../../_shared/video-playback.js');
+const fa = VP.frameArgs('C:\\v.mp4', 12.5, 960);
+ok('frameArgs seeks before input, one jpeg frame', fa.indexOf('-ss') < fa.indexOf('-i') && fa[fa.indexOf('-ss') + 1] === '12.5' && fa.indexOf('mjpeg') > 0 && fa.indexOf('1') > 0);
 
 console.log('\nSeries Analysis tests: ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

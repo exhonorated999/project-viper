@@ -7622,6 +7622,11 @@ ipcMain.handle('video-playback-url', async (event, args) => {
     onProgress: (p) => { try { if (!sender.isDestroyed()) sender.send('video-playback-progress', Object.assign({ jobId }, p)); } catch (_) {} },
   });
 });
+// { filePath, atSec, size } → { success, dataUrl, atSec } — Series Analysis frame grabs.
+ipcMain.handle('video-frame', async (event, args) => {
+  const a = args || {};
+  return _videoPlayback.frame({ filePath: a.filePath, atSec: a.atSec, size: a.size });
+});
 // ── video-playback (end) ──
 const _evidenceView = require('./modules/_shared/evidence-view').createEvidenceView({
   fs, getSecurity: () => security, nativeImage: electron.nativeImage, issueToken: (p) => _datapilotIssueMediaToken(p),

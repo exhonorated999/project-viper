@@ -375,6 +375,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   evidenceThumb: (args) => ipcRenderer.invoke('evidence-thumb', args),
   // Old video formats: a converted playback copy (modules/_shared/video-playback.js)
   videoPlaybackUrl: (args) => ipcRenderer.invoke('video-playback-url', args),
+  // One still from an exact point of a video file ({ filePath, atSec, size } → { success, dataUrl })
+  videoFrame: (args) => ipcRenderer.invoke('video-frame', args),
   onVideoPlaybackProgress: (callback) => {
     const handler = (_e, data) => callback(data);
     ipcRenderer.on('video-playback-progress', handler);

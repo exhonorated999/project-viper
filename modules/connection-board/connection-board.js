@@ -20,6 +20,12 @@
   var selectedPinId = null;
   var geocodeCache = {};
   var webZoom = 1;           // web-board zoom factor (0.25–2), persisted per board
+  // True from openBoard() until closeBoard(). The drawer only gets its
+  // .cb-open class two frames later (slide-in animation), so code that runs
+  // during openBoard's own sync must not treat the board as closed and reload
+  // a stale copy from localStorage (that undid reconcileDeletions on reopen).
+  var boardOpen = false;
+  function isBoardOpen() { return boardOpen || !!document.querySelector('#cbDrawer.cb-open'); }
 
   var COLORS = ['#ef4444', '#f59e0b', '#eab308', '#22c55e', '#06b6d4',
                 '#3b82f6', '#a855f7', '#ec4899', '#ffffff', '#9ca3af'];
@@ -274,7 +280,12 @@
     // Strings are ONLY user-drawn (Connect mode sets manual:true). Purge any
     // legacy auto-generated strings ("resides at", "last seen", "owner of")
     // that older builds seeded, so the board never draws lines on its own.
-    board.strings = board.strings.filter(function (s) { return s && s.manual === true; });
+    // Exception: links a live source states as fact (Series Analysis says
+    // camera X covers incident #3). Those carry `auto` and are re-derived on
+    // every sync; deleting one suppresses it (board.suppressedLinks).
+    board.strings = board.strings.filter(function (s) { return s && (s.manual === true || s.auto === 'series'); });
+    board.suppressedLinks = board.suppressedLinks || {};
+    _seriesFrameCache = null;
     // Strings are per-view (each belongs to the map OR the web canvas, not both).
     // Legacy strings predate the `view` tag; they were drawn on the web canvas, so
     // default them to 'web' — keeps them off the map, matching where they were made.
@@ -292,6 +303,33 @@
   function pinBySource(st, sid) {
     for (var i = 0; i < board.pins.length; i++) if (board.pins[i].sourceType === st && String(board.pins[i].sourceId) === String(sid)) return board.pins[i];
     return null;
+  }
+
+  // ---- pin photo resolution ----
+  // Most pins carry their photo inline. Series Analysis footage stills stay in
+  // the series store (they are already ~13 KB each there; copying them would
+  // double the case's localStorage use), so those pins carry a photoRef and
+  // the image is looked up at render time.
+  var _seriesFrameCache = null; // { caseId, frames: {obsId: dataUrl} }
+  function _seriesFrames() {
+    var cid = caseId || (currentCase && currentCase.id);
+    if (_seriesFrameCache && _seriesFrameCache.caseId === cid) return _seriesFrameCache.frames;
+    var frames = {};
+    var st = lsParse('seriesAnalysis_' + cid, null);
+    ((st && st.observations) || []).forEach(function (o) { if (o && o.id != null && o.frame) frames[String(o.id)] = o.frame; });
+    _seriesFrameCache = { caseId: cid, frames: frames };
+    return frames;
+  }
+  function pinPhoto(pin) {
+    if (!pin) return '';
+    if (pin.photo) return pin.photo;
+    var ref = pin.photoRef;
+    if (ref && ref.kind === 'seriesFrame' && ref.obsId != null) return _seriesFrames()[String(ref.obsId)] || '';
+    return '';
+  }
+  function _todayIso() {
+    var d = new Date();
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
   }
 
   // ---- geocoding (Nominatim; CSP-whitelisted) ----
@@ -594,6 +632,12 @@
       var evAll = (lsParse('viperCaseEvidence', {}) || {})[currentCase.caseNumber] || [];
       evAll.forEach(function (ev, idx) { if (ev && ev.location && String(ev.location).trim()) keys['evidence'][String(ev.id != null ? ev.id : idx)] = true; });
     } catch (_) {}
+    // Series Analysis: incidents, likely-next, cameras, observations. Only
+    // tracked when the model is loaded, otherwise series pins are left alone.
+    var SAM = window.SeriesAnalysisModel;
+    if (SAM && typeof SAM.boardSpecs === 'function') {
+      try { keys['series'] = SAM.boardSpecs(lsParse('seriesAnalysis_' + cid, null), { now: _todayIso() }).keys; } catch (_) {}
+    }
     return keys;
   }
 
@@ -626,7 +670,7 @@
   // Which "Add from case data" imports already have pins on the board, so a sync
   // refreshes exactly the sources the user opted into (not every possible type).
   function _presentDataTypes() {
-    var map = { victim: 'victims', witness: 'witnesses', involved: 'involved', missing: 'missing', lastseen: 'missing', vehicle: 'vehicles', canvas: 'canvas', 'auto:fieldwork': 'fieldwork', evidence: 'evidence', crosscase: 'crosscase' };
+    var map = { victim: 'victims', witness: 'witnesses', involved: 'involved', missing: 'missing', lastseen: 'missing', vehicle: 'vehicles', canvas: 'canvas', 'auto:fieldwork': 'fieldwork', evidence: 'evidence', crosscase: 'crosscase', series: 'series' };
     var types = {};
     board.pins.forEach(function (p) { if (p.sourceType && map[p.sourceType]) types[map[p.sourceType]] = true; });
     return Object.keys(types);
@@ -658,6 +702,80 @@
     toast(parts.length ? ('Board synced \u2014 ' + parts.join(', ')) : 'Board already up to date', parts.length ? 'success' : 'info');
   }
 
+  // ---- Series Analysis: derived links + first-time web layout ----
+  // Links are keyed on SOURCE ids (stable across re-imports), not pin ids.
+  var SERIES_LINK_COLOR = '#94a3b8';
+  function _seriesLinkKey(l) { return 'series|' + l.from + '|' + l.to + '|' + l.label; }
+  function _syncSeriesLinks(links) {
+    board.suppressedLinks = board.suppressedLinks || {};
+    var want = {};
+    (links || []).forEach(function (l) {
+      var a = pinBySource('series', l.from), b = pinBySource('series', l.to);
+      if (!a || !b) return;
+      var key = _seriesLinkKey(l);
+      if (board.suppressedLinks[key]) return;
+      ['web', 'map'].forEach(function (vn) {
+        if (vn === 'map' && (a.lat == null || b.lat == null)) return;
+        want[key + '|' + vn] = true;
+        var s = null;
+        for (var i = 0; i < board.strings.length; i++) {
+          var x = board.strings[i];
+          if (x.auto === 'series' && x.key === key && (x.view || 'web') === vn) { s = x; break; }
+        }
+        if (!s) {
+          board.strings.push({ id: uid('str'), from: a.id, to: b.id, label: l.label, color: SERIES_LINK_COLOR, style: 'dashed', manual: false, auto: 'series', key: key, view: vn });
+        } else {
+          s.from = a.id; s.to = b.id;
+          if (!s._labelOverride) s.label = l.label;
+        }
+      });
+    });
+    board.strings = board.strings.filter(function (s) { return s.auto !== 'series' || want[s.key + '|' + (s.view || 'web')]; });
+  }
+
+  // Place series cards on the Web board the first time they appear, so the
+  // camera/observation links are visible without hand-dragging 40 cards:
+  // incidents across a row in series order, each camera under the incident it
+  // covers, each observation under its camera. A pin is laid out once
+  // (_autoPlaced); if the analyst moves or unplaces it, that choice sticks.
+  function _autoLayoutSeries(bs) {
+    var CW = 250, RH = 300;
+    var specs = (bs && bs.specs) || [];
+    var placed = board.pins.filter(function (p) { return p.x != null && p.y != null; });
+    var seriesPlaced = placed.filter(function (p) { return p.sourceType === 'series'; });
+    var baseY;
+    if (seriesPlaced.length) baseY = Math.min.apply(null, seriesPlaced.map(function (p) { return p.y; }));
+    else {
+      var others = placed.filter(function (p) { return p.sourceType !== 'series'; });
+      baseY = others.length ? Math.max.apply(null, others.map(function (p) { return p.y; })) + 320 : 40;
+    }
+    var parent = {};
+    ((bs && bs.links) || []).forEach(function (l) { if (!parent[l.from]) parent[l.from] = l.to; });
+    var incCount = specs.filter(function (s) { return s.data && s.data.seriesKind === 'incident'; }).length;
+    function busy(x, y) {
+      return board.pins.some(function (p) { return p.x != null && p.y != null && Math.abs(p.x - x) < 230 && Math.abs(p.y - y) < RH - 20; });
+    }
+    function free(x, y) { var n = 0; while (busy(x, y) && n++ < 80) y += RH; return { x: x, y: y }; }
+    specs.forEach(function (spec) {
+      var pin = pinBySource('series', spec.sourceId);
+      if (!pin || pin._autoPlaced || pin.hidden) return;
+      if (pin.x != null && pin.y != null) { pin._autoPlaced = true; return; }
+      var kind = spec.data && spec.data.seriesKind, pos;
+      var par = parent[spec.sourceId] ? pinBySource('series', parent[spec.sourceId]) : null;
+      if (kind === 'incident') pos = free(40 + ((spec.data.seq || 1) - 1) * CW, baseY);
+      else if (kind === 'likely') pos = free(40 + incCount * CW, baseY);
+      else if (par && par.x != null && par.y != null) {
+        // Children fan out to the right under their parent, so each link
+        // runs straight down instead of behind the card above it.
+        var cx = par.x, cy = par.y + RH, n = 0;
+        while (busy(cx, cy) && n++ < 12) cx += CW;
+        pos = busy(cx, cy) ? free(par.x, cy) : { x: cx, y: cy };
+      }
+      else pos = free(40 + (incCount + 1) * CW, baseY);
+      pin.x = pos.x; pin.y = pos.y; pin._autoPlaced = true;
+    });
+  }
+
   // ---- Add-from-case-data sources ----
   function addFromCaseData(type, quiet) {
     if (!currentCase) return;
@@ -666,13 +784,14 @@
     // and `board` are unset or still point at the previously opened case.
     // saveBoard() keys off `caseId`, so without this the pins land in the
     // wrong case's store. Same guard addPins() has carried since 5.1.5.
-    var drawerOpen = !!document.querySelector('#cbDrawer.cb-open');
+    var drawerOpen = isBoardOpen();
     if (!drawerOpen || caseId !== currentCase.id || !board) {
       caseId = currentCase.id;
       loadBoard();
     }
     var added = 0;
     var jobs = [];
+    var seriesLinks = null;
     var cid = currentCase.id, cnum = currentCase.caseNumber;
 
     function addPerson(arr, ptype, tab) {
@@ -836,8 +955,41 @@
         } else { toast('Case-link engine not loaded', 'warning'); }
       } catch (e) { console.warn('[CB] crosscase', e); }
     }
+    else if (type === 'series') {
+      var SAM = window.SeriesAnalysisModel;
+      if (!SAM || typeof SAM.boardSpecs !== 'function') {
+        if (!quiet) toast('Series Analysis is not loaded', 'warning');
+      } else {
+        var sStore = lsParse('seriesAnalysis_' + cid, null);
+        var bs = SAM.boardSpecs(sStore, { now: _todayIso() });
+        _seriesFrameCache = null; // stills may have changed
+        if (!bs.specs.length && !quiet) toast('This case has no Series Analysis incidents yet', 'info');
+        var sHint = (sStore && sStore.geoHint) ? String(sStore.geoHint).trim() : '';
+        bs.specs.forEach(function (spec) {
+          var sp = upsertAutoPin(spec);
+          // upsert seeds these only on CREATE; the series store is the truth.
+          sp.data = spec.data || {};
+          sp.photoRef = spec.photoRef || null;
+          if (spec.color && !sp._colorOverride) sp.color = spec.color;
+          if (spec.lat != null && spec.lng != null && !sp._posManual) { sp.lat = spec.lat; sp.lng = spec.lng; sp.approx = false; }
+          // A deliberate "Add from case data" brings back pins the analyst
+          // took off the board; a background sync leaves them off.
+          if (!quiet && sp.hidden) sp.hidden = false;
+          added++;
+          if (sp.lat == null && hasAddrText(sp.address)) {
+            var q = (sHint && sp.address.toLowerCase().indexOf(sHint.toLowerCase()) < 0) ? sp.address + ', ' + sHint : sp.address;
+            jobs.push(geocode(q).then(function (g) { if (g) { sp.lat = g.lat; sp.lng = g.lng; sp.approx = !!g.approx; scheduleRefresh(); } }));
+          }
+        });
+        _syncSeriesLinks(bs.links);
+        _autoLayoutSeries(bs);
+        seriesLinks = bs.links;
+      }
+    }
 
     Promise.all(jobs).then(function () {
+      // Geocoded series pins may now have both ends on the map.
+      if (seriesLinks && jobs.length) _syncSeriesLinks(seriesLinks);
       saveBoard();
       if (drawerOpen) { renderCurrentView(); renderLocPanel(); }
       if (!quiet) toast(added ? ('Added ' + added + ' item(s) to the board') : 'Nothing new to add', added ? 'success' : 'info');
@@ -1008,6 +1160,7 @@
     buildDrawer();
     caseId = currentCase.id;
     loadBoard();
+    boardOpen = true;
 
     document.getElementById('cbCaseLabel').textContent = 'Case ' + (currentCase.caseNumber || '');
     var bd = document.getElementById('cbBackdrop');
@@ -1039,6 +1192,7 @@
 
   function closeBoard() {
     var d = document.getElementById('cbDrawer'); if (!d) return;
+    boardOpen = false;
     d.classList.remove('cb-open');
     document.getElementById('cbBackdrop').classList.remove('cb-open');
     document.removeEventListener('keydown', onEsc);
@@ -1136,8 +1290,9 @@
   }
 
   function markerIcon(pin) {
-    var inner = pin.photo
-      ? '<img src="' + esc(pin.photo) + '" alt="">'
+    var ph = pinPhoto(pin);
+    var inner = ph
+      ? '<img src="' + esc(ph) + '" alt="">'
       : '<span class="cb-marker-glyph">' + typeGlyph(pin.type) + '</span>';
     var size = 44;
     var approxCls = pin.approx ? ' cb-marker-approx' : '';
@@ -1414,7 +1569,8 @@
   function webCardHtml(pin) {
     var meta = TYPE_META[pin.type] || TYPE_META.custom;
     var color = pin.color || meta.color;
-    var img = pin.photo ? '<img class="cb-web-card-img" src="' + esc(pin.photo) + '">' : '';
+    var ph = pinPhoto(pin);
+    var img = ph ? '<img class="cb-web-card-img" src="' + esc(ph) + '">' : '';
     var rows = '';
     if (hasAddrText(pin.address)) rows += '<div class="cb-web-card-row"><span class="cb-k">\uD83D\uDCCD </span>' + esc(pin.address) + '</div>';
     if (pin.data && pin.data.plate) rows += '<div class="cb-web-card-row"><span class="cb-k">Plate: </span>' + esc(pin.data.plate) + '</div>';
@@ -1617,7 +1773,14 @@
       if (choice === null) return;
       if (choice && choice.del) {
         board.strings = board.strings.filter(function (x) { return x.id !== s.id; });
-      } else { s.label = choice; }
+        // A derived link would come straight back on the next sync; remember
+        // the analyst removed it (both views go, they are one statement).
+        if (s.auto === 'series' && s.key) {
+          board.suppressedLinks = board.suppressedLinks || {};
+          board.suppressedLinks[s.key] = true;
+          board.strings = board.strings.filter(function (x) { return !(x.auto === 'series' && x.key === s.key); });
+        }
+      } else { s.label = choice; if (s.auto) s._labelOverride = true; }
       saveBoard(); renderCurrentView();
     });
   }
@@ -1787,7 +1950,7 @@
         '<span class="cb-card-close" title="Close">\u2715</span>' +
       '</div>' +
       '<div class="cb-card-body">' +
-        (pin.photo ? '<img class="cb-card-photo" src="' + esc(pin.photo) + '">' : '') +
+        (pinPhoto(pin) ? '<img class="cb-card-photo" src="' + esc(pinPhoto(pin)) + '">' : '') +
         '<div class="cb-card-row"><span class="cb-k">Type:</span> ' + esc(meta.label) + '</div>' +
         (pin.data && pin.data.dob ? '<div class="cb-card-row"><span class="cb-k">DOB:</span> ' + esc(pin.data.dob) + '</div>' : '') +
         (hasAddrText(pin.address) ? '<div class="cb-card-row"><span class="cb-k">Address:</span> ' + esc(pin.address) + '</div>' : '') +
@@ -2001,6 +2164,7 @@
       ['victims', 'Victims'], ['witnesses', 'Witnesses'], ['involved', 'Other Involved Persons'], ['missing', 'Missing Persons (last seen)'],
       ['vehicles', 'Vehicles / Plates'], ['canvas', 'Area Canvas locations'], ['fieldwork', 'Field Work locations'], ['evidence', 'Evidence (with location)'], ['crosscase', 'Related cases (shared suspects)']
     ];
+    if (window.SeriesAnalysisModel) opts.push(['series', 'Series Analysis (incidents, likely-next area, cameras, footage)']);
     var wrap = document.getElementById('cbAddMenuWrap');
     var existing = document.getElementById('cbAddMenu');
     if (existing) { existing.remove(); return; }
@@ -2299,7 +2463,7 @@
       var base = {
         id: p.id, type: p.type, label: p.label || '', color: p.color || '', address: p.address || '',
         lat: (p.lat == null ? null : p.lat), lng: (p.lng == null ? null : p.lng), approx: !!p.approx,
-        x: (p.x == null ? null : p.x), y: (p.y == null ? null : p.y), photo: p.photo || '',
+        x: (p.x == null ? null : p.x), y: (p.y == null ? null : p.y), photo: pinPhoto(p),
         data: {
           dob: (p.data && p.data.dob) || '', plate: (p.data && p.data.plate) || '',
           datetime: (p.data && p.data.datetime) || '', time: (p.data && p.data.time) || '',
@@ -2531,7 +2695,7 @@
     specs = (specs || []).filter(Boolean);
     if (!specs.length) return { added: 0, updated: 0 };
 
-    var drawerOpen = !!document.querySelector('#cbDrawer.cb-open');
+    var drawerOpen = isBoardOpen();
     // When the board is closed our in-memory copy may be stale or belong to a
     // different case, so re-read from the store before merging.
     if (!drawerOpen || caseId !== currentCase.id || !board) {
@@ -2566,7 +2730,7 @@
   /** Remove every pin that came from a given sourceType (e.g. 'flock'). */
   function removePinsBySourceType(sourceType) {
     if (typeof currentCase === 'undefined' || !currentCase) return 0;
-    var drawerOpen = !!document.querySelector('#cbDrawer.cb-open');
+    var drawerOpen = isBoardOpen();
     if (!drawerOpen || caseId !== currentCase.id || !board) {
       caseId = currentCase.id;
       loadBoard();
@@ -2582,10 +2746,28 @@
     return n;
   }
 
+  /** Remove the single pin that came from (sourceType, sourceId), with its strings. */
+  function removePinsBySource(sourceType, sourceId) {
+    if (typeof currentCase === 'undefined' || !currentCase) return 0;
+    var drawerOpen = isBoardOpen();
+    if (!drawerOpen || caseId !== currentCase.id || !board) {
+      caseId = currentCase.id;
+      loadBoard();
+    }
+    var pin = pinBySource(sourceType, sourceId);
+    if (!pin) return 0;
+    board.pins = board.pins.filter(function (p) { return p !== pin; });
+    board.strings = board.strings.filter(function (s) { return s.from !== pin.id && s.to !== pin.id; });
+    var wc = webCards[pin.id]; if (wc && wc.parentNode) wc.parentNode.removeChild(wc); delete webCards[pin.id];
+    saveBoard();
+    if (drawerOpen) { renderCurrentView(); renderLocPanel(); }
+    return 1;
+  }
+
   // ---- exports ----
   window.ConnectionBoard = {
     open: openBoard, close: closeBoard, addFromCaseData: addFromCaseData, applyFlag: applyFlag,
-    addPins: addPins, removePinsBySourceType: removePinsBySourceType
+    addPins: addPins, removePinsBySourceType: removePinsBySourceType, removePinsBySource: removePinsBySource
   };
   window.openConnectionBoard = openBoard;
   window.closeConnectionBoard = closeBoard;

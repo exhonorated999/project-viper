@@ -1139,38 +1139,13 @@
     // ── Connection Board ─────────────────────────────────────────────
     function sendToBoard() {
         var CB = window.ConnectionBoard;
-        if (!CB || typeof CB.addPins !== 'function') { toast('The Connection Board is not available.', 'error'); return; }
-        var list = visible();
-        if (!list.length) { toast('No incidents to send.', 'info'); return; }
-        var sq = seq();
-        var specs = M().chrono(list).map(function (inc) {
-            var n = sq[inc.id];
-            var notes = [inc.offense].concat(cols().map(function (c) {
-                var v = (inc.attrs || {})[c.key];
-                return v ? c.label + ': ' + v : '';
-            })).concat([inc.notes]).filter(Boolean).join(' — ');
-            return {
-                type: 'scene',
-                label: '#' + n + ' ' + fmtDate(inc.date) + (inc.reportNo ? ' · ' + inc.reportNo : ''),
-                sourceType: 'series', sourceId: inc.id,
-                lat: hasGeo(inc) ? inc.lat : null, lng: hasGeo(inc) ? inc.lng : null,
-                color: seqColor(n), address: inc.address || '',
-                data: { datetime: [fmtDateLong(inc.date), timeText(inc)].filter(Boolean).join(' '), notes: notes, sourceTab: 'seriesAnalysis' }
-            };
-        });
-        var nx = M().likelyNext(list, { now: today() });
-        if (nx && nx.area && nx.area.center) {
-            specs.push({
-                type: 'location', label: 'Likely next area · ' + (nx.window ? nx.window.label : ''),
-                sourceType: 'series', sourceId: 'likely-next',
-                lat: nx.area.center.lat, lng: nx.area.center.lng, color: '#ffa726', address: '',
-                data: { datetime: nx.window ? nx.window.label + ' ' + (nx.window.hoursLabel || '') : '',
-                    notes: 'Descriptive projection from observed hits (' + nx.confidence + ' confidence), radius about ' + Math.round(nx.area.radius_m) + ' m. ' + (nx.reasons || []).join(' '),
-                    sourceTab: 'seriesAnalysis' }
-            });
-        }
-        var r = CB.addPins(specs) || { added: 0, updated: 0 };
-        toast('Connection Board: ' + r.added + ' pin' + (r.added === 1 ? '' : 's') + ' added, ' + r.updated + ' updated.', 'success');
+        if (!CB || typeof CB.addFromCaseData !== 'function') { toast('The Connection Board is not available.', 'error'); return; }
+        if (!all().length) { toast('No incidents to send.', 'info'); return; }
+        // The board reads the whole series straight from the store (incidents,
+        // likely-next area, cameras, footage observations + their links) and
+        // keeps it in sync from then on, so save first.
+        save({ quiet: true });
+        CB.addFromCaseData('series');
     }
 
     // ── events (delegated, installed once) ───────────────────────────

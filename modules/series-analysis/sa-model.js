@@ -792,6 +792,128 @@
         return h.map(csvCell).join(',');
     }
 
+    // ── Connection Board source ──────────────────────────────────────
+    // The board pulls a series as a live source: every call rebuilds the
+    // full spec list from the store, and the board upserts by
+    // (sourceType 'series', sourceId), so re-running it updates pins in
+    // place and anything missing from `keys` is removed on sync.
+    //
+    // Source ids: incident id | 'likely-next' | 'cam:<id>' | 'obs:<id>'.
+    // Observation stills are NOT copied onto the board (they already live
+    // in the series store); the pin carries photoRef {obsId} and the board
+    // resolves it at render time.
+    function seqRamp(n, N) {
+        var t = N > 1 ? Math.min(1, Math.max(0, (n - 1) / (N - 1))) : 0;
+        return 'rgb(' + Math.round(t * 255) + ',' + Math.round(217 - t * 50) + ',' + Math.round(255 - t * 217) + ')';
+    }
+    function boardDate(d) {
+        var n = dayNum(d);
+        if (n == null) return 'no date';
+        var p = String(d).split('-');
+        return DOW[dowOf(d)] + ' ' + (+p[1]) + '/' + (+p[2]);
+    }
+    function boardSpecs(store, opts) {
+        opts = opts || {};
+        var data = normalizeStore(store);
+        var list = data.incidents;
+        var cols = data.columns || [];
+        var sq = seqMap(list), N = Math.max(1, list.length);
+        var specs = [], links = [], keys = {};
+        var incKey = {};
+        function push(spec) { specs.push(spec); keys[String(spec.sourceId)] = true; }
+
+        chrono(list).forEach(function (inc) {
+            var n = sq[inc.id];
+            var t = inc.timeFrom ? (inc.timeTo ? inc.timeFrom + '–' + inc.timeTo : inc.timeFrom) : '';
+            var p = inc.date ? String(inc.date).split('-') : null;
+            var notes = [inc.offense].concat(cols.map(function (c) {
+                var v = (inc.attrs || {})[c.key];
+                return v ? c.label + ': ' + v : '';
+            })).concat([inc.notes]).filter(Boolean).join(' — ');
+            incKey[inc.id] = String(inc.id);
+            push({
+                type: 'scene',
+                label: '#' + n + ' ' + boardDate(inc.date) + (inc.reportNo ? ' · ' + inc.reportNo : ''),
+                sourceType: 'series', sourceId: String(inc.id),
+                lat: hasGeo(inc) ? inc.lat : null, lng: hasGeo(inc) ? inc.lng : null,
+                color: seqRamp(n, N), address: inc.address || '',
+                data: {
+                    datetime: [p ? (+p[1]) + '/' + (+p[2]) + '/' + p[0] : '', t].filter(Boolean).join(' '),
+                    notes: notes, seriesKind: 'incident', seq: n, sourceTab: 'seriesAnalysis'
+                }
+            });
+        });
+
+        var nx = likelyNext(list, { now: opts.now });
+        if (nx && nx.area && nx.area.center) {
+            push({
+                type: 'location', label: 'Likely next area · ' + (nx.window ? nx.window.label : ''),
+                sourceType: 'series', sourceId: 'likely-next',
+                lat: nx.area.center.lat, lng: nx.area.center.lng, color: '#ffa726', address: '',
+                data: {
+                    datetime: nx.window ? (nx.window.label + ' ' + (nx.window.hoursLabel || '')).trim() : '',
+                    notes: 'Descriptive projection from observed hits (' + nx.confidence + ' confidence), radius about ' +
+                        Math.round(nx.area.radius_m) + ' m. ' + (nx.reasons || []).join(' '),
+                    seriesKind: 'likely', radius_m: Math.round(nx.area.radius_m), sourceTab: 'seriesAnalysis'
+                }
+            });
+        }
+
+        var camKey = {};
+        (data.cameras || []).forEach(function (cam) {
+            if (!cam || !cam.id) return;
+            var key = 'cam:' + cam.id;
+            camKey[cam.id] = key;
+            var inc = cam.incidentId && incKey[cam.incidentId] ? cam.incidentId : '';
+            var camGeo = typeof cam.lat === 'number' && typeof cam.lng === 'number';
+            push({
+                type: 'video', label: cam.name || cam.fileName || 'Camera',
+                sourceType: 'series', sourceId: key,
+                lat: camGeo ? cam.lat : null, lng: camGeo ? cam.lng : null,
+                color: '#ef4444', address: cam.address || '',
+                data: {
+                    notes: [cam.fileName ? 'File: ' + cam.fileName : '', cam.startDvr ? 'DVR start ' + cam.startDvr : '',
+                        cam.offsetSec ? 'clock correction ' + (cam.offsetSec > 0 ? '+' : '') + cam.offsetSec + ' s' : '',
+                        inc ? 'covers incident #' + sq[inc] : 'not linked to an incident'].filter(Boolean).join(' · '),
+                    video: cam.filePath ? { name: cam.fileName || '', path: cam.filePath, evidenceId: cam.evidenceId } : null,
+                    seriesKind: 'camera', incidentId: inc, sourceTab: 'seriesAnalysis'
+                }
+            });
+            if (inc) links.push({ from: key, to: incKey[inc], label: 'covers' });
+        });
+
+        (data.observations || []).forEach(function (o) {
+            if (!o || !o.id) return;
+            var key = 'obs:' + o.id;
+            var when = o.realIso ? String(o.realIso).replace('T', ' ').slice(0, 19) : (o.dvr || '');
+            var inc = o.incidentId && incKey[o.incidentId] ? o.incidentId : '';
+            push({
+                type: 'image',
+                label: o.text ? String(o.text).slice(0, 60) : 'Footage observation',
+                sourceType: 'series', sourceId: key,
+                lat: null, lng: null, color: '#38bdf8', address: '',
+                photoRef: o.frame ? { kind: 'seriesFrame', obsId: String(o.id) } : null,
+                data: {
+                    datetime: when ? when + (o.realIso ? ' (real time)' : ' (DVR)') : '',
+                    notes: [o.cameraName ? 'Camera: ' + o.cameraName : '', o.video ? 'video ' + o.video : '',
+                        o.dvr ? 'DVR ' + o.dvr : '', o.tag ? 'tag: ' + o.tag : '', o.evidenceTag ? 'still filed as ' + o.evidenceTag : '',
+                        o.text || ''].filter(Boolean).join(' · '),
+                    seriesKind: 'observation', cameraId: o.cameraId || '', incidentId: inc, evidenceId: o.evidenceId || null,
+                    sourceTab: 'seriesAnalysis'
+                }
+            });
+            var ck = o.cameraId && camKey[o.cameraId];
+            if (ck) links.push({ from: key, to: ck, label: 'recorded on' });
+            // Observation tied to a different incident than its camera covers:
+            // say so directly instead of implying it through the camera.
+            var camInc = '';
+            (data.cameras || []).forEach(function (c) { if (c && c.id === o.cameraId) camInc = c.incidentId || ''; });
+            if (inc && (!ck || camInc !== inc)) links.push({ from: key, to: incKey[inc], label: 'seen at' });
+        });
+
+        return { specs: specs, links: links, keys: keys, count: { incidents: list.length, cameras: (data.cameras || []).length, observations: (data.observations || []).length } };
+    }
+
     // ── static map (Web Mercator, 256-px tiles) ──────────────────────
     function projectPx(lat, lng, z) {
         var scale = 256 * Math.pow(2, z);
@@ -845,7 +967,7 @@
         haversine: haversine, hasGeo: hasGeo, spatial: spatial, ellipsePolygon: ellipsePolygon, circlePolygon: circlePolygon,
         likelyNext: likelyNext,
         normValue: normValue, splitValues: splitValues, shared: shared, matrix: matrix, filterByValue: filterByValue,
-        kpis: kpis, summary: summary, fromCase: fromCase, csvTemplate: csvTemplate,
+        kpis: kpis, summary: summary, fromCase: fromCase, csvTemplate: csvTemplate, boardSpecs: boardSpecs,
         projectPx: projectPx, tileMosaic: tileMosaic, toViewport: toViewport, metersPerPixel: metersPerPixel,
         dayNum: dayNum, fromDayNum: fromDayNum, dowOf: dowOf, shortDate: shortDate
     };

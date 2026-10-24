@@ -39,6 +39,26 @@
             label: 'Ember Protocol',
             description: 'Molten gold-and-orange magma with cyber-violet over warm obsidian.',
             swatches: ['#060608', '#131211', '#ffb020', '#a855f7', '#ff5a1f']
+        },
+        // Holiday skins live in modules/viper-skins-holiday.css.
+        {
+            id: 'winter-frost',
+            label: 'Winter Frost',
+            description: 'Frosted-glass panels, an aurora banner and drifting snowflakes over midnight blue.',
+            swatches: ['#070f22', '#16325c', '#7cc4ff', '#d3dde8', '#5fe3a1']
+        },
+        {
+            id: 'holiday-lights',
+            label: 'Holiday Lights',
+            description: 'A string of twinkling bulbs and warm bokeh over candlelit gold.',
+            swatches: ['#15110d', '#1b1610', '#e0a94a', '#e86a5a', '#5fd884']
+        },
+        // Tactical skins live in modules/viper-skins-tactical.css.
+        {
+            id: 'ranger-green',
+            label: 'Ranger Green',
+            description: 'OD tactical: riveted, stitched canvas panels, a MOLLE webbing strip and coyote-tan accents.',
+            swatches: ['#16180f', '#282a1d', '#d2b07a', '#9fb36d', '#f0a04b']
         }
     ];
 

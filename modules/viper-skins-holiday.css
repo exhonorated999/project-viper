@@ -1,0 +1,357 @@
+/* Project VIPER - Holiday skins: Winter Frost + Holiday Lights
+   Selected like every other skin: ViperSkins writes data-skin on <html> (see modules/viper-skins.js).
+   Inactive when body has .light-mode.
+   Colors / borders / shadows / backgrounds / blur only. Media (iframe, embed, img, video, object, PDF viewer) never styled. */
+
+/* ================= WINTER FROST ================= */
+html[data-skin="winter-frost"] body:not(.light-mode) {
+  --sk-page: radial-gradient(ellipse at 50% -10%, #123a66 0%, #0b1a36 40%, #070f22 100%) fixed, #0a1428;
+  --sk-page-pattern: radial-gradient(ellipse at 50% 120%, rgba(200,230,255,0.16), transparent 45%), url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Cpath d='M0 32L32 0L64 32L32 64Z' fill='none' stroke='%237cc4ff' stroke-opacity='.07'/%3E%3C/svg%3E");
+  --sk-sidebar: rgba(12,26,51,0.78);
+  --sk-sidebar-border: rgba(160,210,255,0.30);
+  --sk-card: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='120' preserveAspectRatio='none'%3E%3Cdefs%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='.9' numOctaves='2' seed='4'/%3E%3CfeColorMatrix values='0 0 0 0 .85 0 0 0 0 .93 0 0 0 0 1 0 0 0 1.4 -.75'/%3E%3C/filter%3E%3C/defs%3E%3Crect width='200' height='120' filter='url(%23n)' opacity='.18'/%3E%3C/svg%3E") 0 0 / 100% 100%, linear-gradient(160deg, rgba(150,200,255,0.16), rgba(40,80,150,0.10) 60%, rgba(150,200,255,0.10));
+  --sk-card-border: rgba(200,232,255,0.70);
+  --sk-card-shadow: inset 0 0 0 1px rgba(255,255,255,0.10), inset 0 0 18px rgba(190,225,255,0.22), inset 0 1px 0 rgba(255,255,255,0.45), 0 0 22px rgba(140,205,255,0.50), 0 10px 30px rgba(0,0,0,0.45);
+  --sk-card-blur: blur(10px) saturate(130%);
+  --sk-inset: rgba(8,20,42,0.72);
+  --sk-inset-border: rgba(140,190,240,0.28);
+  --sk-text: #eef5ff; --sk-text-2: #c6d6ea; --sk-text-3: #9db3cf;
+  --sk-accent: #7cc4ff; --sk-accent-soft: rgba(124,196,255,0.16); --sk-accent-border: rgba(124,196,255,0.45);
+  --sk-accent-2: #d3dde8;
+  --sk-btn: rgba(124,196,255,0.16); --sk-btn-text: #dff0ff; --sk-btn-border: rgba(124,196,255,0.6);
+  --sk-thead: linear-gradient(90deg, #16325c, #1e4478); --sk-thead-text: #eaf4ff;
+  --sk-fx-banner: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1600' height='160' viewBox='0 0 1600 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3Cfilter id='b' x='-20%' y='-50%' width='140%' height='200%'%3E%3CfeGaussianBlur stdDeviation='14'/%3E%3C/filter%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%237affd9' stop-opacity='0'/%3E%3Cstop offset='.45' stop-color='%233dffc0' stop-opacity='.9'/%3E%3Cstop offset='1' stop-color='%232a7bff' stop-opacity='0'/%3E%3C/linearGradient%3E%3ClinearGradient id='h' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23a070ff' stop-opacity='0'/%3E%3Cstop offset='.5' stop-color='%235aa8ff' stop-opacity='.8'/%3E%3Cstop offset='1' stop-color='%231b3cff' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cg filter='url(%23b)'%3E%3Cpath d='M0 70 C200 10 380 120 600 50 S1000 0 1200 70 S1500 30 1600 60 L1600 110 C1400 90 1200 130 1000 90 S600 120 400 100 S100 130 0 120Z' fill='url(%23g)'/%3E%3Cpath d='M0 30 C250 80 500 0 800 40 S1300 90 1600 20 L1600 70 C1300 120 1000 60 800 90 S300 60 0 80Z' fill='url(%23h)' opacity='.8'/%3E%3C/g%3E%3Cg stroke='%23b9fff0' stroke-opacity='.16' stroke-width='3'%3E%3Cline x1='20' y1='50' x2='26' y2='120'/%3E%3Cline x1='42' y1='54' x2='48' y2='106'/%3E%3Cline x1='64' y1='58' x2='70' y2='132'/%3E%3Cline x1='86' y1='32' x2='92' y2='118'/%3E%3Cline x1='108' y1='36' x2='114' y2='104'/%3E%3Cline x1='130' y1='40' x2='136' y2='130'/%3E%3Cline x1='152' y1='44' x2='158' y2='116'/%3E%3Cline x1='174' y1='48' x2='180' y2='102'/%3E%3Cline x1='196' y1='52' x2='202' y2='128'/%3E%3Cline x1='218' y1='56' x2='224' y2='114'/%3E%3Cline x1='240' y1='30' x2='246' y2='100'/%3E%3Cline x1='262' y1='34' x2='268' y2='126'/%3E%3Cline x1='284' y1='38' x2='290' y2='112'/%3E%3Cline x1='306' y1='42' x2='312' y2='138'/%3E%3Cline x1='328' y1='46' x2='334' y2='124'/%3E%3Cline x1='350' y1='50' x2='356' y2='110'/%3E%3Cline x1='372' y1='54' x2='378' y2='136'/%3E%3Cline x1='394' y1='58' x2='400' y2='122'/%3E%3Cline x1='416' y1='32' x2='422' y2='108'/%3E%3Cline x1='438' y1='36' x2='444' y2='134'/%3E%3Cline x1='460' y1='40' x2='466' y2='120'/%3E%3Cline x1='482' y1='44' x2='488' y2='106'/%3E%3Cline x1='504' y1='48' x2='510' y2='132'/%3E%3Cline x1='526' y1='52' x2='532' y2='118'/%3E%3Cline x1='548' y1='56' x2='554' y2='104'/%3E%3Cline x1='570' y1='30' x2='576' y2='130'/%3E%3Cline x1='592' y1='34' x2='598' y2='116'/%3E%3Cline x1='614' y1='38' x2='620' y2='102'/%3E%3Cline x1='636' y1='42' x2='642' y2='128'/%3E%3Cline x1='658' y1='46' x2='664' y2='114'/%3E%3Cline x1='680' y1='50' x2='686' y2='100'/%3E%3Cline x1='702' y1='54' x2='708' y2='126'/%3E%3Cline x1='724' y1='58' x2='730' y2='112'/%3E%3Cline x1='746' y1='32' x2='752' y2='138'/%3E%3Cline x1='768' y1='36' x2='774' y2='124'/%3E%3Cline x1='790' y1='40' x2='796' y2='110'/%3E%3Cline x1='812' y1='44' x2='818' y2='136'/%3E%3Cline x1='834' y1='48' x2='840' y2='122'/%3E%3Cline x1='856' y1='52' x2='862' y2='108'/%3E%3Cline x1='878' y1='56' x2='884' y2='134'/%3E%3Cline x1='900' y1='30' x2='906' y2='120'/%3E%3Cline x1='922' y1='34' x2='928' y2='106'/%3E%3Cline x1='944' y1='38' x2='950' y2='132'/%3E%3Cline x1='966' y1='42' x2='972' y2='118'/%3E%3Cline x1='988' y1='46' x2='994' y2='104'/%3E%3Cline x1='1010' y1='50' x2='1016' y2='130'/%3E%3Cline x1='1032' y1='54' x2='1038' y2='116'/%3E%3Cline x1='1054' y1='58' x2='1060' y2='102'/%3E%3Cline x1='1076' y1='32' x2='1082' y2='128'/%3E%3Cline x1='1098' y1='36' x2='1104' y2='114'/%3E%3Cline x1='1120' y1='40' x2='1126' y2='100'/%3E%3Cline x1='1142' y1='44' x2='1148' y2='126'/%3E%3Cline x1='1164' y1='48' x2='1170' y2='112'/%3E%3Cline x1='1186' y1='52' x2='1192' y2='138'/%3E%3Cline x1='1208' y1='56' x2='1214' y2='124'/%3E%3Cline x1='1230' y1='30' x2='1236' y2='110'/%3E%3Cline x1='1252' y1='34' x2='1258' y2='136'/%3E%3Cline x1='1274' y1='38' x2='1280' y2='122'/%3E%3Cline x1='1296' y1='42' x2='1302' y2='108'/%3E%3Cline x1='1318' y1='46' x2='1324' y2='134'/%3E%3Cline x1='1340' y1='50' x2='1346' y2='120'/%3E%3Cline x1='1362' y1='54' x2='1368' y2='106'/%3E%3Cline x1='1384' y1='58' x2='1390' y2='132'/%3E%3Cline x1='1406' y1='32' x2='1412' y2='118'/%3E%3Cline x1='1428' y1='36' x2='1434' y2='104'/%3E%3Cline x1='1450' y1='40' x2='1456' y2='130'/%3E%3Cline x1='1472' y1='44' x2='1478' y2='116'/%3E%3Cline x1='1494' y1='48' x2='1500' y2='102'/%3E%3Cline x1='1516' y1='52' x2='1522' y2='128'/%3E%3Cline x1='1538' y1='56' x2='1544' y2='114'/%3E%3Cline x1='1560' y1='30' x2='1566' y2='100'/%3E%3Cline x1='1582' y1='34' x2='1588' y2='126'/%3E%3C/g%3E%3C/svg%3E") 0 0 / 1600px 100% repeat-x, radial-gradient(ellipse at 50% 0%, rgba(60,255,200,0.20), transparent 70%);
+  --sk-fx-corner: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='300'%3E%3Cdefs%3E%3CradialGradient id='r' cx='1' cy='1' r='1'%3E%3Cstop offset='0' stop-color='%23dff2ff' stop-opacity='.9'/%3E%3Cstop offset='1' stop-color='%23dff2ff' stop-opacity='0'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect width='420' height='300' fill='url(%23r)' opacity='.35'/%3E%3Cg transform='translate(360 240) scale(4)'%3E%3Cg stroke='%23e6f4ff' stroke-width='1.4' fill='none' stroke-linecap='round'%3E%3Cpath d='M0-12V12M-10.4-6L10.4 6M-10.4 6L10.4-6M0-12l-3 3M0-12l3 3M0 12l-3-3M0 12l3-3'/%3E%3C/g%3E%3C/g%3E%3Cg transform='translate(250 270) scale(2.2)'%3E%3Cg stroke='%23e6f4ff' stroke-width='1.4' fill='none' stroke-linecap='round'%3E%3Cpath d='M0-12V12M-10.4-6L10.4 6M-10.4 6L10.4-6M0-12l-3 3M0-12l3 3M0 12l-3-3M0 12l3-3'/%3E%3C/g%3E%3C/g%3E%3Cg transform='translate(390 120) scale(2)'%3E%3Cg stroke='%23e6f4ff' stroke-width='1.4' fill='none' stroke-linecap='round'%3E%3Cpath d='M0-12V12M-10.4-6L10.4 6M-10.4 6L10.4-6M0-12l-3 3M0-12l3 3M0 12l-3-3M0 12l3-3'/%3E%3C/g%3E%3C/g%3E%3Cg transform='translate(300 160) scale(1.4)'%3E%3Cg stroke='%23e6f4ff' stroke-width='1.4' fill='none' stroke-linecap='round'%3E%3Cpath d='M0-12V12M-10.4-6L10.4 6M-10.4 6L10.4-6M0-12l-3 3M0-12l3 3M0 12l-3-3M0 12l3-3'/%3E%3C/g%3E%3C/g%3E%3Cg transform='translate(170 285) scale(1.3)'%3E%3Cg stroke='%23e6f4ff' stroke-width='1.4' fill='none' stroke-linecap='round'%3E%3Cpath d='M0-12V12M-10.4-6L10.4 6M-10.4 6L10.4-6M0-12l-3 3M0-12l3 3M0 12l-3-3M0 12l3-3'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E") no-repeat right bottom / 420px 300px, url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Ccircle cx='121' cy='303' r='1' fill='%23fff' opacity='0.7'/%3E%3Ccircle cx='309' cy='242' r='0.8' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='6' cy='240' r='1.3' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='119' cy='98' r='1.8' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='281' cy='243' r='1.8' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='77' cy='118' r='1' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='199' cy='379' r='0.8' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='397' cy='32' r='1' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='21' cy='154' r='0.8' fill='%23fff' opacity='0.7'/%3E%3Ccircle cx='242' cy='304' r='1.8' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='218' cy='202' r='1.8' fill='%23fff' opacity='0.5'/%3E%3Ccircle cx='187' cy='49' r='0.8' fill='%23fff' opacity='0.5'/%3E%3Ccircle cx='253' cy='111' r='1.3' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='223' cy='398' r='1.3' fill='%23fff' opacity='0.7'/%3E%3Ccircle cx='259' cy='197' r='1.3' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='299' cy='208' r='1' fill='%23fff' opacity='0.7'/%3E%3Ccircle cx='349' cy='14' r='1.3' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='343' cy='356' r='1' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='167' cy='277' r='0.8' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='335' cy='108' r='1.3' fill='%23fff' opacity='0.7'/%3E%3Ccircle cx='63' cy='32' r='1.8' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='247' cy='45' r='1.3' fill='%23fff' opacity='0.5'/%3E%3Ccircle cx='210' cy='77' r='0.8' fill='%23fff' opacity='0.7'/%3E%3Ccircle cx='218' cy='393' r='1.8' fill='%23fff' opacity='0.5'/%3E%3Ccircle cx='22' cy='309' r='0.8' fill='%23fff' opacity='0.7'/%3E%3Ccircle cx='367' cy='300' r='1.3' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='142' cy='258' r='1' fill='%23fff' opacity='0.5'/%3E%3Ccircle cx='158' cy='3' r='0.8' fill='%23fff' opacity='0.5'/%3E%3Ccircle cx='307' cy='274' r='0.8' fill='%23fff' opacity='0.5'/%3E%3Ccircle cx='208' cy='149' r='1.3' fill='%23fff' opacity='0.5'/%3E%3Ccircle cx='353' cy='21' r='1.3' fill='%23fff' opacity='0.7'/%3E%3Ccircle cx='184' cy='70' r='1.8' fill='%23fff' opacity='0.7'/%3E%3Ccircle cx='235' cy='266' r='1.8' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='304' cy='348' r='0.8' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='259' cy='138' r='1.8' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='368' cy='366' r='1' fill='%23fff' opacity='0.7'/%3E%3Ccircle cx='223' cy='132' r='1.3' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='173' cy='5' r='1.8' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='161' cy='10' r='1.8' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='301' cy='323' r='1' fill='%23fff' opacity='0.5'/%3E%3Ccircle cx='324' cy='321' r='1.3' fill='%23fff' opacity='0.7'/%3E%3Ccircle cx='180' cy='347' r='1.3' fill='%23fff' opacity='0.9'/%3E%3Ccircle cx='361' cy='142' r='1.8' fill='%23fff' opacity='0.5'/%3E%3Ccircle cx='301' cy='31' r='0.8' fill='%23fff' opacity='0.7'/%3E%3Ccircle cx='128' cy='321' r='1.8' fill='%23fff' opacity='0.7'/%3E%3Cg transform='translate(60 80) scale(0.9)'%3E%3Cg stroke='%23e6f4ff' stroke-width='1.4' fill='none' stroke-linecap='round'%3E%3Cpath d='M0-12V12M-10.4-6L10.4 6M-10.4 6L10.4-6M0-12l-3 3M0-12l3 3M0 12l-3-3M0 12l3-3'/%3E%3C/g%3E%3C/g%3E%3Cg transform='translate(300 220) scale(1.3)'%3E%3Cg stroke='%23e6f4ff' stroke-width='1.4' fill='none' stroke-linecap='round'%3E%3Cpath d='M0-12V12M-10.4-6L10.4 6M-10.4 6L10.4-6M0-12l-3 3M0-12l3 3M0 12l-3-3M0 12l3-3'/%3E%3C/g%3E%3C/g%3E%3Cg transform='translate(180 340) scale(0.7)'%3E%3Cg stroke='%23e6f4ff' stroke-width='1.4' fill='none' stroke-linecap='round'%3E%3Cpath d='M0-12V12M-10.4-6L10.4 6M-10.4 6L10.4-6M0-12l-3 3M0-12l3 3M0 12l-3-3M0 12l3-3'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E") 0 0 / 400px 400px;
+  --sk-fx-corner-opacity: 0.30;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) {
+  background: var(--sk-page-pattern), var(--sk-page) !important; color: var(--sk-text) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .hex-pattern {
+  background: var(--sk-page-pattern), var(--sk-page) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .glass-card,
+html[data-skin="winter-frost"] body:not(.light-mode) .stat-card {
+  background: var(--sk-card) !important; border-color: var(--sk-card-border) !important; box-shadow: var(--sk-card-shadow) !important; backdrop-filter: var(--sk-card-blur); -webkit-backdrop-filter: var(--sk-card-blur);
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .w-64.glass-card {
+  background: var(--sk-sidebar) !important; border-color: var(--sk-sidebar-border) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .sidebar-item {
+  color: var(--sk-text-2) !important; background: transparent !important; border-color: transparent !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .sidebar-item svg {
+  color: var(--sk-accent) !important; stroke: currentColor;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .sidebar-item:hover {
+  background: var(--sk-accent-soft) !important; color: var(--sk-text) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .sidebar-item.active {
+  background: var(--sk-accent-soft) !important; color: var(--sk-accent) !important; border-color: var(--sk-accent-border) !important; box-shadow: inset 3px 0 0 var(--sk-accent) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .border-b.border-gray-700.bg-viper-card\/50 {
+  background: var(--sk-card) !important; border-color: var(--sk-card-border) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .tab-button {
+  color: var(--sk-text-3) !important; background: transparent !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .tab-button:hover {
+  color: var(--sk-text) !important; background: var(--sk-accent-soft) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .tab-button.active {
+  color: var(--sk-accent) !important; border-bottom-color: var(--sk-accent) !important; box-shadow: 0 2px 10px -4px var(--sk-accent) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .inv-thead-solid th {
+  background: var(--sk-thead) !important; color: var(--sk-thead-text) !important; border-color: var(--sk-card-border) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) [class*="bg-viper-card"]:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]),
+html[data-skin="winter-frost"] body:not(.light-mode) [class*="bg-viper-dark"]:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]),
+html[data-skin="winter-frost"] body:not(.light-mode) .bg-gray-700:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]),
+html[data-skin="winter-frost"] body:not(.light-mode) .bg-gray-800:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]),
+html[data-skin="winter-frost"] body:not(.light-mode) [class*="bg-gray-7"]:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]),
+html[data-skin="winter-frost"] body:not(.light-mode) [class*="bg-gray-8"]:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]) {
+  background: var(--sk-inset) !important; border-color: var(--sk-inset-border) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) input,
+html[data-skin="winter-frost"] body:not(.light-mode) textarea,
+html[data-skin="winter-frost"] body:not(.light-mode) select {
+  background: var(--sk-inset) !important; color: var(--sk-text) !important; border-color: var(--sk-inset-border) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) ::placeholder,
+html[data-skin="winter-frost"] body:not(.light-mode) input::placeholder,
+html[data-skin="winter-frost"] body:not(.light-mode) textarea::placeholder {
+  color: var(--sk-text-3) !important; opacity: 1;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) input:focus,
+html[data-skin="winter-frost"] body:not(.light-mode) textarea:focus,
+html[data-skin="winter-frost"] body:not(.light-mode) select:focus,
+html[data-skin="winter-frost"] body:not(.light-mode) :focus-visible:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]) {
+  border-color: var(--sk-accent) !important; box-shadow: 0 0 0 2px var(--sk-accent-soft), 0 0 12px -2px var(--sk-accent) !important; outline-color: var(--sk-accent);
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .text-white {
+  color: var(--sk-text) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .text-gray-300 {
+  color: var(--sk-text-2) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .text-gray-400,
+html[data-skin="winter-frost"] body:not(.light-mode) .text-gray-500 {
+  color: var(--sk-text-3) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .text-viper-cyan {
+  color: var(--sk-accent) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .text-viper-purple {
+  color: var(--sk-accent-2) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .bg-viper-cyan\/20,
+html[data-skin="winter-frost"] body:not(.light-mode) .bg-viper-cyan\/10 {
+  background: var(--sk-btn) !important; color: var(--sk-btn-text) !important; border-color: var(--sk-btn-border) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .bg-viper-cyan\/20:hover,
+html[data-skin="winter-frost"] body:not(.light-mode) .bg-viper-cyan\/10:hover {
+  background: var(--sk-accent-soft) !important; box-shadow: 0 0 14px -2px var(--sk-accent) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .border-gray-600,
+html[data-skin="winter-frost"] body:not(.light-mode) .border-gray-700 {
+  border-color: var(--sk-inset-border) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .border-viper-cyan\/20,
+html[data-skin="winter-frost"] body:not(.light-mode) .border-viper-cyan\/30 {
+  border-color: var(--sk-accent-border) !important;
+}
+
+/* keep status colors recognizable (slightly brightened for dark bg) */
+html[data-skin="winter-frost"] body:not(.light-mode) .text-viper-green { color: #5fe3a1 !important; }
+html[data-skin="winter-frost"] body:not(.light-mode) .text-viper-orange { color: #ffb454 !important; }
+html[data-skin="winter-frost"] body:not(.light-mode) .bg-viper-green\/20 { background: rgba(95,227,161,0.18) !important; color: #c9f7df !important; border-color: rgba(95,227,161,0.5) !important; }
+html[data-skin="winter-frost"] body:not(.light-mode) .bg-viper-orange\/20 { background: rgba(255,180,84,0.18) !important; color: #ffe2b8 !important; border-color: rgba(255,180,84,0.5) !important; }
+html[data-skin="winter-frost"] body:not(.light-mode) .bg-viper-purple\/20 { background: rgba(211,221,232,0.14) !important; color: #eef3f8 !important; border-color: rgba(211,221,232,0.45) !important; }
+
+/* --- winter-frost: decorations (fixed, non-interactive, z-index 0) --- */
+html[data-skin="winter-frost"] body:not(.light-mode)::before {
+  content: ""; position: fixed; top: 0; left: 0; right: 0; height: 90px;
+  pointer-events: none; z-index: 0; background: var(--sk-fx-banner) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode)::after {
+  content: ""; position: fixed; right: 0; bottom: 0; width: 340px; height: 340px;
+  pointer-events: none; z-index: 0; opacity: var(--sk-fx-corner-opacity); background: var(--sk-fx-corner) !important;
+}
+
+html[data-skin="winter-frost"] body:not(.light-mode)::after { top: 0; left: 0; width: auto; height: auto; }
+html[data-skin="winter-frost"] body:not(.light-mode)::before { height: 150px; }
+/* (stat-card snowflake icon removed: it sat on top of the cards' own corner icons/buttons) */
+html[data-skin="winter-frost"] body:not(.light-mode) .stat-card { background: var(--sk-card), rgba(9, 22, 46, 0.62) !important; }
+html[data-skin="winter-frost"] body:not(.light-mode) .bg-viper-cyan\/20 { background: linear-gradient(180deg, rgba(124,196,255,0.45), rgba(60,120,210,0.35)) !important; color: #ffffff !important; border-color: #a9dcff !important; box-shadow: 0 0 14px rgba(124,196,255,0.45) !important; }
+/* ================= HOLIDAY LIGHTS ================= */
+html[data-skin="holiday-lights"] body:not(.light-mode) {
+  --sk-page: radial-gradient(ellipse at 50% 0%, #2a1e10 0%, #15110d 55%, #0c0907 100%) fixed, #15110d;
+  --sk-page-pattern: radial-gradient(circle at 15% 70%, rgba(224,169,74,0.05), transparent 180px), radial-gradient(circle at 85% 35%, rgba(200,50,40,0.05), transparent 200px);
+  --sk-sidebar: #1a1510;
+  --sk-sidebar-border: rgba(224,169,74,0.30);
+  --sk-card: linear-gradient(170deg, rgba(255,200,120,0.06), rgba(255,200,120,0.02)), rgba(27,22,16,0.80);
+  --sk-card-border: rgba(224,169,74,0.55);
+  --sk-card-shadow: inset 0 0 24px rgba(255,170,60,0.08), inset 0 1px 0 rgba(255,220,150,0.18), 0 0 18px rgba(255,170,60,0.16), 0 10px 26px rgba(0,0,0,0.55);
+  --sk-card-blur: none;
+  --sk-inset: rgba(16,12,9,0.82);
+  --sk-inset-border: rgba(224,169,74,0.24);
+  --sk-text: #f8efdd; --sk-text-2: #e2d3b8; --sk-text-3: #b8a688;
+  --sk-accent: #e0a94a; --sk-accent-soft: rgba(224,169,74,0.15); --sk-accent-border: rgba(224,169,74,0.5);
+  --sk-accent-2: #e86a5a;
+  --sk-btn: linear-gradient(180deg, rgba(224,169,74,0.28), rgba(176,125,42,0.22)); --sk-btn-text: #fbe6bd; --sk-btn-border: rgba(224,169,74,0.65);
+  --sk-thead: linear-gradient(180deg, #8a6424, #5a3f14); --sk-thead-text: #fff4dc;
+  --sk-fx-banner: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='640' height='130'%3E%3Cdefs%3E%3CradialGradient id='bb0' cx='.4' cy='.35' r='.7'%3E%3Cstop offset='0' stop-color='%23fff'/%3E%3Cstop offset='.35' stop-color='%23ff3b3b'/%3E%3Cstop offset='1' stop-color='%23ff3b3b' stop-opacity='.8'/%3E%3C/radialGradient%3E%3CradialGradient id='halo0'%3E%3Cstop offset='0' stop-color='%23ff3b3b' stop-opacity='.55'/%3E%3Cstop offset='1' stop-color='%23ff3b3b' stop-opacity='0'/%3E%3C/radialGradient%3E%3CradialGradient id='bb1' cx='.4' cy='.35' r='.7'%3E%3Cstop offset='0' stop-color='%23fff'/%3E%3Cstop offset='.35' stop-color='%23ffcc33'/%3E%3Cstop offset='1' stop-color='%23ffcc33' stop-opacity='.8'/%3E%3C/radialGradient%3E%3CradialGradient id='halo1'%3E%3Cstop offset='0' stop-color='%23ffcc33' stop-opacity='.55'/%3E%3Cstop offset='1' stop-color='%23ffcc33' stop-opacity='0'/%3E%3C/radialGradient%3E%3CradialGradient id='bb2' cx='.4' cy='.35' r='.7'%3E%3Cstop offset='0' stop-color='%23fff'/%3E%3Cstop offset='.35' stop-color='%2333e070'/%3E%3Cstop offset='1' stop-color='%2333e070' stop-opacity='.8'/%3E%3C/radialGradient%3E%3CradialGradient id='halo2'%3E%3Cstop offset='0' stop-color='%2333e070' stop-opacity='.55'/%3E%3Cstop offset='1' stop-color='%2333e070' stop-opacity='0'/%3E%3C/radialGradient%3E%3CradialGradient id='bb3' cx='.4' cy='.35' r='.7'%3E%3Cstop offset='0' stop-color='%23fff'/%3E%3Cstop offset='.35' stop-color='%233d9bff'/%3E%3Cstop offset='1' stop-color='%233d9bff' stop-opacity='.8'/%3E%3C/radialGradient%3E%3CradialGradient id='halo3'%3E%3Cstop offset='0' stop-color='%233d9bff' stop-opacity='.55'/%3E%3Cstop offset='1' stop-color='%233d9bff' stop-opacity='0'/%3E%3C/radialGradient%3E%3CradialGradient id='bb4' cx='.4' cy='.35' r='.7'%3E%3Cstop offset='0' stop-color='%23fff'/%3E%3Cstop offset='.35' stop-color='%23ff8a1f'/%3E%3Cstop offset='1' stop-color='%23ff8a1f' stop-opacity='.8'/%3E%3C/radialGradient%3E%3CradialGradient id='halo4'%3E%3Cstop offset='0' stop-color='%23ff8a1f' stop-opacity='.55'/%3E%3Cstop offset='1' stop-color='%23ff8a1f' stop-opacity='0'/%3E%3C/radialGradient%3E%3CradialGradient id='bb5' cx='.4' cy='.35' r='.7'%3E%3Cstop offset='0' stop-color='%23fff'/%3E%3Cstop offset='.35' stop-color='%23ff4fb0'/%3E%3Cstop offset='1' stop-color='%23ff4fb0' stop-opacity='.8'/%3E%3C/radialGradient%3E%3CradialGradient id='halo5'%3E%3Cstop offset='0' stop-color='%23ff4fb0' stop-opacity='.55'/%3E%3Cstop offset='1' stop-color='%23ff4fb0' stop-opacity='0'/%3E%3C/radialGradient%3E%3CradialGradient id='bb6' cx='.4' cy='.35' r='.7'%3E%3Cstop offset='0' stop-color='%23fff'/%3E%3Cstop offset='.35' stop-color='%2333e070'/%3E%3Cstop offset='1' stop-color='%2333e070' stop-opacity='.8'/%3E%3C/radialGradient%3E%3CradialGradient id='halo6'%3E%3Cstop offset='0' stop-color='%2333e070' stop-opacity='.55'/%3E%3Cstop offset='1' stop-color='%2333e070' stop-opacity='0'/%3E%3C/radialGradient%3E%3CradialGradient id='bb7' cx='.4' cy='.35' r='.7'%3E%3Cstop offset='0' stop-color='%23fff'/%3E%3Cstop offset='.35' stop-color='%23ffcc33'/%3E%3Cstop offset='1' stop-color='%23ffcc33' stop-opacity='.8'/%3E%3C/radialGradient%3E%3CradialGradient id='halo7'%3E%3Cstop offset='0' stop-color='%23ffcc33' stop-opacity='.55'/%3E%3Cstop offset='1' stop-color='%23ffcc33' stop-opacity='0'/%3E%3C/radialGradient%3E%3C/defs%3E%3Cpath d='M0 18 Q160 122 320 18 Q480 122 640 18' stroke='%232a2118' stroke-width='2.5' fill='none'/%3E%3Cpath d='M0 18 Q160 122 320 18 Q480 122 640 18' stroke='%236b5434' stroke-width='.8' fill='none'/%3E%3Cg transform='translate(40 40.8) rotate(19)'%3E%3Ccircle cx='0' cy='18' r='24' fill='url(%23halo0)'/%3E%3Crect x='-4' y='-2' width='8' height='8' rx='1.5' fill='%233b3026'/%3E%3Cpath d='M0 4 C-9 8 -9 26 0 32 C9 26 9 8 0 4Z' fill='url(%23bb0)'/%3E%3Cellipse cx='-2.5' cy='13' rx='1.6' ry='4' fill='%23fff' opacity='.7'/%3E%3C/g%3E%3Cg transform='translate(120 66.8) rotate(6)'%3E%3Ccircle cx='0' cy='18' r='24' fill='url(%23halo1)'/%3E%3Crect x='-4' y='-2' width='8' height='8' rx='1.5' fill='%233b3026'/%3E%3Cpath d='M0 4 C-9 8 -9 26 0 32 C9 26 9 8 0 4Z' fill='url(%23bb1)'/%3E%3Cellipse cx='-2.5' cy='13' rx='1.6' ry='4' fill='%23fff' opacity='.7'/%3E%3C/g%3E%3Cg transform='translate(200 66.8) rotate(-6)'%3E%3Ccircle cx='0' cy='18' r='24' fill='url(%23halo2)'/%3E%3Crect x='-4' y='-2' width='8' height='8' rx='1.5' fill='%233b3026'/%3E%3Cpath d='M0 4 C-9 8 -9 26 0 32 C9 26 9 8 0 4Z' fill='url(%23bb2)'/%3E%3Cellipse cx='-2.5' cy='13' rx='1.6' ry='4' fill='%23fff' opacity='.7'/%3E%3C/g%3E%3Cg transform='translate(280 40.8) rotate(-19)'%3E%3Ccircle cx='0' cy='18' r='24' fill='url(%23halo3)'/%3E%3Crect x='-4' y='-2' width='8' height='8' rx='1.5' fill='%233b3026'/%3E%3Cpath d='M0 4 C-9 8 -9 26 0 32 C9 26 9 8 0 4Z' fill='url(%23bb3)'/%3E%3Cellipse cx='-2.5' cy='13' rx='1.6' ry='4' fill='%23fff' opacity='.7'/%3E%3C/g%3E%3Cg transform='translate(360 40.8) rotate(19)'%3E%3Ccircle cx='0' cy='18' r='24' fill='url(%23halo4)'/%3E%3Crect x='-4' y='-2' width='8' height='8' rx='1.5' fill='%233b3026'/%3E%3Cpath d='M0 4 C-9 8 -9 26 0 32 C9 26 9 8 0 4Z' fill='url(%23bb4)'/%3E%3Cellipse cx='-2.5' cy='13' rx='1.6' ry='4' fill='%23fff' opacity='.7'/%3E%3C/g%3E%3Cg transform='translate(440 66.8) rotate(6)'%3E%3Ccircle cx='0' cy='18' r='24' fill='url(%23halo5)'/%3E%3Crect x='-4' y='-2' width='8' height='8' rx='1.5' fill='%233b3026'/%3E%3Cpath d='M0 4 C-9 8 -9 26 0 32 C9 26 9 8 0 4Z' fill='url(%23bb5)'/%3E%3Cellipse cx='-2.5' cy='13' rx='1.6' ry='4' fill='%23fff' opacity='.7'/%3E%3C/g%3E%3Cg transform='translate(520 66.8) rotate(-6)'%3E%3Ccircle cx='0' cy='18' r='24' fill='url(%23halo6)'/%3E%3Crect x='-4' y='-2' width='8' height='8' rx='1.5' fill='%233b3026'/%3E%3Cpath d='M0 4 C-9 8 -9 26 0 32 C9 26 9 8 0 4Z' fill='url(%23bb6)'/%3E%3Cellipse cx='-2.5' cy='13' rx='1.6' ry='4' fill='%23fff' opacity='.7'/%3E%3C/g%3E%3Cg transform='translate(600 40.8) rotate(-19)'%3E%3Ccircle cx='0' cy='18' r='24' fill='url(%23halo7)'/%3E%3Crect x='-4' y='-2' width='8' height='8' rx='1.5' fill='%233b3026'/%3E%3Cpath d='M0 4 C-9 8 -9 26 0 32 C9 26 9 8 0 4Z' fill='url(%23bb7)'/%3E%3Cellipse cx='-2.5' cy='13' rx='1.6' ry='4' fill='%23fff' opacity='.7'/%3E%3C/g%3E%3C/svg%3E") 0 0 / 640px 130px repeat-x;
+  --sk-fx-corner: radial-gradient(circle at 70% 60%, rgba(255,90,70,0.9), transparent 34px), radial-gradient(circle at 40% 80%, rgba(224,169,74,0.9), transparent 46px), radial-gradient(circle at 85% 30%, rgba(70,210,110,0.8), transparent 28px), radial-gradient(circle at 25% 45%, rgba(255,210,90,0.7), transparent 22px), radial-gradient(circle at 60% 25%, rgba(90,160,255,0.6), transparent 18px), radial-gradient(circle at 90% 85%, rgba(255,180,80,0.8), transparent 40px);
+  --sk-fx-corner-opacity: 0.30;
+  --sk-fx-bokeh: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1280' height='800' preserveAspectRatio='xMidYMax slice'%3E%3Cdefs%3E%3Cfilter id='f'%3E%3CfeGaussianBlur stdDeviation='6'/%3E%3C/filter%3E%3C/defs%3E%3Cg filter='url(%23f)'%3E%3Ccircle cx='663' cy='294' r='39' fill='%23e0a94a' opacity='0.35'/%3E%3Ccircle cx='148' cy='688' r='20' fill='%234fe08a' opacity='0.7'/%3E%3Ccircle cx='118' cy='659' r='27' fill='%23ffb347' opacity='0.35'/%3E%3Ccircle cx='888' cy='568' r='18' fill='%23ff5a4a' opacity='0.35'/%3E%3Ccircle cx='1128' cy='574' r='17' fill='%235aa0ff' opacity='0.35'/%3E%3Ccircle cx='457' cy='785' r='17' fill='%235aa0ff' opacity='0.7'/%3E%3Ccircle cx='812' cy='190' r='28' fill='%23ffb347' opacity='0.7'/%3E%3Ccircle cx='272' cy='436' r='40' fill='%23ff5a4a' opacity='0.7'/%3E%3Ccircle cx='241' cy='724' r='33' fill='%235aa0ff' opacity='0.7'/%3E%3Ccircle cx='370' cy='245' r='26' fill='%234fe08a' opacity='0.35'/%3E%3Ccircle cx='1121' cy='204' r='17' fill='%235aa0ff' opacity='0.35'/%3E%3Ccircle cx='1016' cy='684' r='41' fill='%234fe08a' opacity='0.5'/%3E%3Ccircle cx='1199' cy='604' r='37' fill='%234fe08a' opacity='0.35'/%3E%3Ccircle cx='368' cy='389' r='19' fill='%235aa0ff' opacity='0.5'/%3E%3Ccircle cx='1075' cy='646' r='35' fill='%23e0a94a' opacity='0.5'/%3E%3Ccircle cx='589' cy='763' r='18' fill='%23ffb347' opacity='0.7'/%3E%3Ccircle cx='856' cy='308' r='35' fill='%23ff5a4a' opacity='0.5'/%3E%3Ccircle cx='863' cy='180' r='18' fill='%235aa0ff' opacity='0.7'/%3E%3Ccircle cx='642' cy='488' r='36' fill='%235aa0ff' opacity='0.5'/%3E%3Ccircle cx='1187' cy='607' r='18' fill='%23ffb347' opacity='0.5'/%3E%3Ccircle cx='970' cy='206' r='17' fill='%23e0a94a' opacity='0.7'/%3E%3Ccircle cx='634' cy='731' r='42' fill='%234fe08a' opacity='0.7'/%3E%3Ccircle cx='790' cy='495' r='15' fill='%23ffd76a' opacity='0.5'/%3E%3Ccircle cx='344' cy='765' r='21' fill='%23ffd76a' opacity='0.35'/%3E%3Ccircle cx='446' cy='434' r='22' fill='%23e0a94a' opacity='0.35'/%3E%3Ccircle cx='814' cy='540' r='45' fill='%23ffb347' opacity='0.35'/%3E%3Ccircle cx='919' cy='551' r='31' fill='%23ff5a4a' opacity='0.5'/%3E%3Ccircle cx='1126' cy='425' r='40' fill='%234fe08a' opacity='0.7'/%3E%3Ccircle cx='779' cy='376' r='23' fill='%23ffb347' opacity='0.35'/%3E%3Ccircle cx='309' cy='377' r='28' fill='%23ffb347' opacity='0.5'/%3E%3Ccircle cx='1206' cy='326' r='30' fill='%234fe08a' opacity='0.35'/%3E%3Ccircle cx='298' cy='569' r='37' fill='%235aa0ff' opacity='0.7'/%3E%3Ccircle cx='652' cy='268' r='46' fill='%235aa0ff' opacity='0.7'/%3E%3Ccircle cx='110' cy='607' r='39' fill='%23ffd76a' opacity='0.5'/%3E%3Ccircle cx='807' cy='246' r='44' fill='%23e0a94a' opacity='0.5'/%3E%3Ccircle cx='127' cy='335' r='18' fill='%23ff5a4a' opacity='0.5'/%3E%3Ccircle cx='332' cy='252' r='35' fill='%235aa0ff' opacity='0.35'/%3E%3Ccircle cx='209' cy='140' r='23' fill='%235aa0ff' opacity='0.35'/%3E%3Ccircle cx='744' cy='768' r='15' fill='%23ffb347' opacity='0.35'/%3E%3Ccircle cx='1257' cy='525' r='23' fill='%23e0a94a' opacity='0.5'/%3E%3Ccircle cx='711' cy='756' r='37' fill='%23ffd76a' opacity='0.35'/%3E%3Ccircle cx='236' cy='639' r='43' fill='%23ffd76a' opacity='0.5'/%3E%3Ccircle cx='638' cy='227' r='23' fill='%23ffb347' opacity='0.7'/%3E%3Ccircle cx='701' cy='411' r='44' fill='%23e0a94a' opacity='0.35'/%3E%3Ccircle cx='1057' cy='163' r='27' fill='%235aa0ff' opacity='0.5'/%3E%3Ccircle cx='300' cy='696' r='15' fill='%235aa0ff' opacity='0.5'/%3E%3Ccircle cx='186' cy='407' r='37' fill='%23ff5a4a' opacity='0.5'/%3E%3Ccircle cx='456' cy='685' r='46' fill='%234fe08a' opacity='0.7'/%3E%3Ccircle cx='456' cy='767' r='26' fill='%23ff5a4a' opacity='0.5'/%3E%3Ccircle cx='464' cy='344' r='45' fill='%234fe08a' opacity='0.7'/%3E%3Ccircle cx='59' cy='168' r='31' fill='%23ffd76a' opacity='0.5'/%3E%3Ccircle cx='396' cy='759' r='36' fill='%23ffd76a' opacity='0.7'/%3E%3Ccircle cx='715' cy='513' r='19' fill='%23ff5a4a' opacity='0.35'/%3E%3Ccircle cx='464' cy='621' r='26' fill='%234fe08a' opacity='0.35'/%3E%3Ccircle cx='988' cy='779' r='14' fill='%23ffd76a' opacity='0.7'/%3E%3Ccircle cx='704' cy='798' r='19' fill='%23e0a94a' opacity='0.35'/%3E%3Ccircle cx='795' cy='344' r='44' fill='%23ff5a4a' opacity='0.5'/%3E%3Ccircle cx='680' cy='228' r='39' fill='%23ffd76a' opacity='0.5'/%3E%3Ccircle cx='173' cy='302' r='24' fill='%23ff5a4a' opacity='0.35'/%3E%3Ccircle cx='309' cy='744' r='43' fill='%23e0a94a' opacity='0.35'/%3E%3Ccircle cx='1252' cy='750' r='44' fill='%23e0a94a' opacity='0.5'/%3E%3Ccircle cx='319' cy='701' r='22' fill='%23ffb347' opacity='0.35'/%3E%3Ccircle cx='210' cy='679' r='22' fill='%23ffd76a' opacity='0.35'/%3E%3Ccircle cx='432' cy='168' r='30' fill='%23ff5a4a' opacity='0.5'/%3E%3Ccircle cx='1026' cy='386' r='34' fill='%234fe08a' opacity='0.7'/%3E%3Ccircle cx='858' cy='274' r='17' fill='%23e0a94a' opacity='0.5'/%3E%3Ccircle cx='938' cy='737' r='40' fill='%235aa0ff' opacity='0.35'/%3E%3Ccircle cx='1089' cy='295' r='46' fill='%23ffb347' opacity='0.5'/%3E%3Ccircle cx='375' cy='763' r='14' fill='%23ff5a4a' opacity='0.35'/%3E%3Ccircle cx='289' cy='624' r='21' fill='%235aa0ff' opacity='0.35'/%3E%3Ccircle cx='667' cy='670' r='44' fill='%23ffb347' opacity='0.7'/%3E%3Ccircle cx='116' cy='394' r='26' fill='%234fe08a' opacity='0.35'/%3E%3Ccircle cx='200' cy='659' r='42' fill='%235aa0ff' opacity='0.35'/%3E%3Ccircle cx='129' cy='593' r='34' fill='%235aa0ff' opacity='0.7'/%3E%3Ccircle cx='1241' cy='664' r='26' fill='%23e0a94a' opacity='0.5'/%3E%3Ccircle cx='926' cy='660' r='44' fill='%235aa0ff' opacity='0.35'/%3E%3Ccircle cx='1071' cy='405' r='26' fill='%23ffd76a' opacity='0.35'/%3E%3Ccircle cx='853' cy='264' r='39' fill='%23ffd76a' opacity='0.5'/%3E%3Ccircle cx='148' cy='386' r='41' fill='%23ffb347' opacity='0.35'/%3E%3Ccircle cx='620' cy='265' r='23' fill='%23e0a94a' opacity='0.7'/%3E%3Ccircle cx='749' cy='286' r='30' fill='%23ff5a4a' opacity='0.5'/%3E%3Ccircle cx='449' cy='236' r='39' fill='%23ffd76a' opacity='0.35'/%3E%3Ccircle cx='458' cy='305' r='41' fill='%235aa0ff' opacity='0.5'/%3E%3Ccircle cx='694' cy='571' r='26' fill='%234fe08a' opacity='0.5'/%3E%3Ccircle cx='188' cy='514' r='15' fill='%234fe08a' opacity='0.7'/%3E%3Ccircle cx='939' cy='591' r='15' fill='%23ffd76a' opacity='0.5'/%3E%3Ccircle cx='1059' cy='778' r='32' fill='%235aa0ff' opacity='0.35'/%3E%3Ccircle cx='231' cy='374' r='20' fill='%23ffb347' opacity='0.5'/%3E%3Ccircle cx='556' cy='180' r='25' fill='%234fe08a' opacity='0.35'/%3E%3Ccircle cx='864' cy='404' r='39' fill='%23ff5a4a' opacity='0.7'/%3E%3C/g%3E%3C/svg%3E") center bottom / cover no-repeat;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) {
+  background: var(--sk-page-pattern), var(--sk-page) !important; color: var(--sk-text) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .hex-pattern {
+  background: var(--sk-page-pattern), var(--sk-page) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .glass-card,
+html[data-skin="holiday-lights"] body:not(.light-mode) .stat-card {
+  background: var(--sk-card) !important; border-color: var(--sk-card-border) !important; box-shadow: var(--sk-card-shadow) !important; backdrop-filter: var(--sk-card-blur); -webkit-backdrop-filter: var(--sk-card-blur);
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .w-64.glass-card {
+  background: var(--sk-sidebar) !important; border-color: var(--sk-sidebar-border) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .sidebar-item {
+  color: var(--sk-text-2) !important; background: transparent !important; border-color: transparent !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .sidebar-item svg {
+  color: var(--sk-accent) !important; stroke: currentColor;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .sidebar-item:hover {
+  background: var(--sk-accent-soft) !important; color: var(--sk-text) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .sidebar-item.active {
+  background: var(--sk-accent-soft) !important; color: var(--sk-accent) !important; border-color: var(--sk-accent-border) !important; box-shadow: inset 3px 0 0 var(--sk-accent) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .border-b.border-gray-700.bg-viper-card\/50 {
+  background: var(--sk-card) !important; border-color: var(--sk-card-border) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .tab-button {
+  color: var(--sk-text-3) !important; background: transparent !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .tab-button:hover {
+  color: var(--sk-text) !important; background: var(--sk-accent-soft) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .tab-button.active {
+  color: var(--sk-accent) !important; border-bottom-color: var(--sk-accent) !important; box-shadow: 0 2px 10px -4px var(--sk-accent) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .inv-thead-solid th {
+  background: var(--sk-thead) !important; color: var(--sk-thead-text) !important; border-color: var(--sk-card-border) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) [class*="bg-viper-card"]:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]),
+html[data-skin="holiday-lights"] body:not(.light-mode) [class*="bg-viper-dark"]:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]),
+html[data-skin="holiday-lights"] body:not(.light-mode) .bg-gray-700:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]),
+html[data-skin="holiday-lights"] body:not(.light-mode) .bg-gray-800:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]),
+html[data-skin="holiday-lights"] body:not(.light-mode) [class*="bg-gray-7"]:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]),
+html[data-skin="holiday-lights"] body:not(.light-mode) [class*="bg-gray-8"]:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]) {
+  background: var(--sk-inset) !important; border-color: var(--sk-inset-border) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) input,
+html[data-skin="holiday-lights"] body:not(.light-mode) textarea,
+html[data-skin="holiday-lights"] body:not(.light-mode) select {
+  background: var(--sk-inset) !important; color: var(--sk-text) !important; border-color: var(--sk-inset-border) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) ::placeholder,
+html[data-skin="holiday-lights"] body:not(.light-mode) input::placeholder,
+html[data-skin="holiday-lights"] body:not(.light-mode) textarea::placeholder {
+  color: var(--sk-text-3) !important; opacity: 1;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) input:focus,
+html[data-skin="holiday-lights"] body:not(.light-mode) textarea:focus,
+html[data-skin="holiday-lights"] body:not(.light-mode) select:focus,
+html[data-skin="holiday-lights"] body:not(.light-mode) :focus-visible:not(iframe):not(embed):not(img):not(video):not(object):not([class*="pdf"]) {
+  border-color: var(--sk-accent) !important; box-shadow: 0 0 0 2px var(--sk-accent-soft), 0 0 12px -2px var(--sk-accent) !important; outline-color: var(--sk-accent);
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .text-white {
+  color: var(--sk-text) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .text-gray-300 {
+  color: var(--sk-text-2) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .text-gray-400,
+html[data-skin="holiday-lights"] body:not(.light-mode) .text-gray-500 {
+  color: var(--sk-text-3) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .text-viper-cyan {
+  color: var(--sk-accent) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .text-viper-purple {
+  color: var(--sk-accent-2) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .bg-viper-cyan\/20,
+html[data-skin="holiday-lights"] body:not(.light-mode) .bg-viper-cyan\/10 {
+  background: var(--sk-btn) !important; color: var(--sk-btn-text) !important; border-color: var(--sk-btn-border) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .bg-viper-cyan\/20:hover,
+html[data-skin="holiday-lights"] body:not(.light-mode) .bg-viper-cyan\/10:hover {
+  background: var(--sk-accent-soft) !important; box-shadow: 0 0 14px -2px var(--sk-accent) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .border-gray-600,
+html[data-skin="holiday-lights"] body:not(.light-mode) .border-gray-700 {
+  border-color: var(--sk-inset-border) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) .border-viper-cyan\/20,
+html[data-skin="holiday-lights"] body:not(.light-mode) .border-viper-cyan\/30 {
+  border-color: var(--sk-accent-border) !important;
+}
+
+html[data-skin="holiday-lights"] body:not(.light-mode) .text-viper-green { color: #5fd884 !important; }
+html[data-skin="holiday-lights"] body:not(.light-mode) .text-viper-orange { color: #ffad42 !important; }
+html[data-skin="holiday-lights"] body:not(.light-mode) .bg-viper-green\/20 { background: rgba(60,170,90,0.22) !important; color: #c8f2d4 !important; border-color: rgba(95,216,132,0.5) !important; }
+html[data-skin="holiday-lights"] body:not(.light-mode) .bg-viper-orange\/20 { background: rgba(255,173,66,0.20) !important; color: #ffe3bd !important; border-color: rgba(255,173,66,0.5) !important; }
+html[data-skin="holiday-lights"] body:not(.light-mode) .bg-viper-purple\/20 { background: rgba(232,106,90,0.20) !important; color: #ffd9d2 !important; border-color: rgba(232,106,90,0.5) !important; }
+
+/* --- holiday-lights: decorations (fixed, non-interactive, z-index 0) --- */
+html[data-skin="holiday-lights"] body:not(.light-mode)::before {
+  content: ""; position: fixed; top: 0; left: 0; right: 0; height: 90px;
+  pointer-events: none; z-index: 0; background: var(--sk-fx-banner) !important;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode)::after {
+  content: ""; position: fixed; right: 0; bottom: 0; width: 340px; height: 340px;
+  pointer-events: none; z-index: 0; opacity: var(--sk-fx-corner-opacity); background: var(--sk-fx-corner) !important;
+}
+
+html[data-skin="holiday-lights"] body:not(.light-mode)::after { top: 0; left: 0; width: auto; height: auto; background: var(--sk-fx-bokeh) !important; }
+html[data-skin="holiday-lights"] body:not(.light-mode)::before { height: 140px; }
+html[data-skin="holiday-lights"] body:not(.light-mode) .bg-viper-cyan\/20 { background: linear-gradient(180deg, #e7b75a, #b07d2a) !important; color: #1c1306 !important; border-color: #f0c873 !important; box-shadow: 0 0 12px rgba(224,169,74,0.35) !important; }
+html[data-skin="holiday-lights"] body:not(.light-mode) .glass-card:not(.w-64), html[data-skin="holiday-lights"] body:not(.light-mode) .stat-card { border-color: rgba(224,169,74,0.55) !important; }
+html[data-skin="holiday-lights"] body:not(.light-mode) .stat-card:hover { border-color: #f0c873 !important; box-shadow: 0 0 22px rgba(240,200,115,0.35), inset 0 0 24px rgba(255,170,60,0.10) !important; }
+html[data-skin="holiday-lights"] body:not(.light-mode)::before { background: var(--sk-fx-banner) !important; }
+
+/* ================= MOTION (opt-in only) ================= */
+@media (prefers-reduced-motion: no-preference) {
+  html[data-skin="winter-frost"] body:not(.light-mode)::before { animation: sk-aurora 40s ease-in-out infinite alternate; }
+  html[data-skin="holiday-lights"] body:not(.light-mode)::before { animation: sk-twinkle 3.2s ease-in-out infinite; }
+  html[data-skin="holiday-lights"] body:not(.light-mode)::after { animation: sk-bokeh 9s ease-in-out infinite alternate; }
+  @keyframes sk-aurora { from { background-position: 0 0, 0 0; opacity: .85; } to { background-position: -800px 0, 0 0; opacity: 1; } }
+  @keyframes sk-twinkle { 0%,100% { filter: brightness(1) saturate(1); } 50% { filter: brightness(1.35) saturate(1.25); } }
+  html[data-skin="winter-frost"] body:not(.light-mode)::after { animation: sk-snow 30s linear infinite; }
+  @keyframes sk-snow { from { background-position: right bottom, 0 0; } to { background-position: right bottom, 0 400px; } }
+  @keyframes sk-bokeh { from { opacity: 0.22; } to { opacity: 0.32; } }
+}
+
+/* ================= VIPER INTEGRATION =================
+   1. Palette: the rest of VIPER colours through the --vp-* RGB triples
+      (see modules/viper-skins.css), so restate them per skin. Purple doubles
+      as a solid button colour with white text, hence the deeper tones here
+      (text-viper-purple is still remapped above).
+   2. Decorations sit BEHIND the app. At z-index 0 a fixed body::before/::after
+      paints over every non-positioned element, so the bulb string covered
+      page titles and the snow/bokeh layer covered cards and text. At -1 they
+      paint just above the page background and show through the glass panels.
+      .hex-pattern (the dashboard wrapper) is made transparent so it doesn't
+      hide them; body already carries the page background. */
+html[data-skin="winter-frost"] body:not(.light-mode) {
+  --vp-dark: 7 15 34;  --vp-card: 18 38 72;   --vp-cyan: 124 196 255;
+  --vp-purple: 99 102 241; --vp-green: 95 227 161; --vp-orange: 255 180 84;
+}
+html[data-skin="holiday-lights"] body:not(.light-mode) {
+  --vp-dark: 12 9 7;   --vp-card: 27 22 16;   --vp-cyan: 224 169 74;
+  --vp-purple: 192 57 43; --vp-green: 95 216 132; --vp-orange: 255 173 66;
+}
+html[data-skin="winter-frost"] body:not(.light-mode)::before,
+html[data-skin="winter-frost"] body:not(.light-mode)::after,
+html[data-skin="holiday-lights"] body:not(.light-mode)::before,
+html[data-skin="holiday-lights"] body:not(.light-mode)::after { z-index: -1 !important; }
+html[data-skin="winter-frost"] body:not(.light-mode) .hex-pattern,
+html[data-skin="holiday-lights"] body:not(.light-mode) .hex-pattern { background: transparent !important; }
+
+/* 3. Winter Frost readability. The frost glass is only ~10-16% opaque, so the
+      aurora, icicles and snow behind it competed with the text, worst on the
+      case-detail module tab bar once it scrolls under the aurora. Panels get
+      a dark backing under the frost, the tab bar is near-solid, and tab text
+      moves from --sk-text-3 to a brighter tone. */
+html[data-skin="winter-frost"] body:not(.light-mode) .glass-card:not(.w-64) {
+  background: var(--sk-card), rgba(9, 22, 46, 0.62) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .border-b.border-gray-700.bg-viper-card\/50 {
+  background: linear-gradient(180deg, rgba(16, 36, 68, 0.96), rgba(10, 24, 48, 0.96)) !important;
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border-color: rgba(160, 210, 255, 0.35) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .tab-button {
+  color: #d6e6f8 !important; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+}
+html[data-skin="winter-frost"] body:not(.light-mode) .tab-button svg { color: var(--sk-accent) !important; }
+html[data-skin="winter-frost"] body:not(.light-mode) .tab-button:hover { color: #ffffff !important; }
+html[data-skin="winter-frost"] body:not(.light-mode) .tab-button.active {
+  color: #ffffff !important; background: rgba(124, 196, 255, 0.16) !important;
+}
+html[data-skin="winter-frost"] body:not(.light-mode) #connectionBoardBtn {
+  color: #e2ccff !important; border-color: #b78cff !important; background: rgba(168, 85, 247, 0.22) !important;
+}
+/* Holiday Lights panels are already ~80% opaque; only the tab text was too dim. */
+html[data-skin="holiday-lights"] body:not(.light-mode) .tab-button { color: #eadbbf !important; }
+html[data-skin="holiday-lights"] body:not(.light-mode) .tab-button:hover { color: #fff6e6 !important; }
+/* Scrollbars: the pages hard-code a cyan thumb; match each skin instead. */
+html[data-skin="winter-frost"] body:not(.light-mode) ::-webkit-scrollbar-thumb { background: rgba(124, 196, 255, 0.32) !important; }
+html[data-skin="winter-frost"] body:not(.light-mode) ::-webkit-scrollbar-thumb:hover { background: rgba(124, 196, 255, 0.55) !important; }
+html[data-skin="holiday-lights"] body:not(.light-mode) ::-webkit-scrollbar-thumb { background: rgba(224, 169, 74, 0.35) !important; }
+html[data-skin="holiday-lights"] body:not(.light-mode) ::-webkit-scrollbar-thumb:hover { background: rgba(224, 169, 74, 0.6) !important; }

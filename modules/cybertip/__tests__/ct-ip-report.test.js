@@ -219,7 +219,7 @@ ok(DETAIL.includes("currentCyberTipView === 'ipAll'") && DETAIL.includes('CTIpRe
 ok(DETAIL.includes('CTIpReportUI.listButton()'), 'list-page button');
 const detail = lift('function renderCyberTipDetail(idx) {');
 ok(detail.includes('CTIpReportUI.tipPanel(t)'), 'per-tip panel in the detail view');
-ok(detail.indexOf('CTIpReportUI.tipPanel(t)') < detail.indexOf('<!-- Identifiers -->'), 'panel sits above Identifiers');
+ok(detail.indexOf('CTIpReportUI.tipPanel(t)') > detail.indexOf('<!-- Identifiers -->') && detail.indexOf('CTIpReportUI.tipPanel(t)') < detail.indexOf('<!-- Persons Detail -->'), 'panel sits after Identifiers, before Persons');
 const UI = fs.readFileSync(path.join(__dirname, '..', 'ct-ip-report-ui.js'), 'utf8');
 ok(UI.includes('returnBase64: true') && UI.includes('saveEvidenceFile'), 'UI saves the PDF to Evidence');
 ok(UI.includes("'viperCaseEvidence'"), 'UI registers the Evidence record');

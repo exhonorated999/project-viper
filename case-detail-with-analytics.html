@@ -48167,9 +48167,6 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     </div>
                 </div>` : ''}
 
-                <!-- Uploads by IP (dates, times, files per address; logins after) -->
-                ${(typeof window !== 'undefined' && window.CTIpReportUI) ? window.CTIpReportUI.tipPanel(t) : ''}
-
                 <!-- Identifiers -->
                 ${idCards.length ? `
                 <div class="glass-card rounded-xl p-6 border border-gray-700/50">
@@ -48178,6 +48175,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         ${idCards.join('')}
                     </div>
                 </div>` : ''}
+
+                <!-- Uploads by IP (dates, times, files per address; logins after) -->
+                ${(typeof window !== 'undefined' && window.CTIpReportUI) ? window.CTIpReportUI.tipPanel(t) : ''}
 
                 <!-- Persons Detail -->
                 ${t.persons.length ? `

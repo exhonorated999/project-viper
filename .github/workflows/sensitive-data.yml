@@ -1,0 +1,44 @@
+# Refuses pushes and pull requests that add case data, evidence, mail
+# stores, documents outside the asset folders, or secrets — in ANY commit,
+# not just the final tree (deleting a file in a later commit leaves it in
+# history). Rules: scripts/sensitive-guard.js.
+name: sensitive-data
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Every new commit
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            RANGE="$BASE..$HEAD"
+          elif [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            # New branch or tag: check what is not already on master.
+            if git rev-parse -q --verify origin/master >/dev/null; then RANGE="origin/master..$HEAD"; else RANGE="$HEAD"; fi
+          else
+            RANGE="$BEFORE..$HEAD"
+          fi
+          echo "Checking $RANGE"
+          node scripts/sensitive-guard.js --range "$RANGE"
+
+      - name: Whole tree
+        run: node scripts/sensitive-guard.js --tree HEAD

@@ -11,7 +11,9 @@
     "verify:package": "node scripts/verify-package.js",
     "package:portable-update": "node scripts/build-portable-update.js",
     "package:diagnostic": "electron-builder --win portable --config electron-builder-diagnostic.yml",
-    "postinstall": "electron-rebuild -f -w better-sqlite3 || electron-builder install-app-deps"
+    "postinstall": "electron-rebuild -f -w better-sqlite3 || electron-builder install-app-deps",
+    "prepare": "node scripts/install-hooks.js",
+    "check:sensitive": "node scripts/sensitive-guard.js --tree HEAD"
   },
   "keywords": [
     "viper",

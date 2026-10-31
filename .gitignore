@@ -19,6 +19,18 @@ test_pdf_output.txt
 # Local RMS extracts, warrant returns, and parser scratch. This directory
 # has held real case records. Never commit it.
 sample-data/
+# Case data, evidence and mail stores never belong in this (public) repo.
+# scripts/sensitive-guard.js enforces this on commit, push, CI and packaging.
+**/_sample_body/
+*.eml
+*.msg
+*.pst
+*.ost
+*.ufdr
+*.ufd
+*.oversight
+# Local list of real names/contacts/ids the guard refuses (never committed).
+.sensitive-terms.local
 plans/2026-05-03_cellebrite-module/
 
 # Scratch / local-only

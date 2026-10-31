@@ -1,0 +1,5 @@
+#!/bin/sh
+# Checks every commit about to be pushed (including ones made with
+# `git commit --no-verify`). See scripts/sensitive-guard.js.
+# git passes "<local ref> <local sha> <remote ref> <remote sha>" lines on stdin.
+exec node "$(git rev-parse --show-toplevel)/scripts/sensitive-guard.js" --pre-push "$1"

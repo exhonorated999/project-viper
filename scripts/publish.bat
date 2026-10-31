@@ -34,6 +34,12 @@ if "%GH_TOKEN%"=="" (
 node scripts\release-guard.mjs
 if errorlevel 1 exit /b 1
 
+rem No case data / evidence / secrets in the tree. electron-builder's afterPack
+rem hook (scripts\after-pack-guard.js) re-checks the packed app.asar, including
+rem untracked files on disk, before any installer is built or uploaded.
+node scripts\sensitive-guard.js --tree HEAD
+if errorlevel 1 exit /b 1
+
 call npx electron-builder --win --publish always
 if errorlevel 1 (
   echo.

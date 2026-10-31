@@ -1,0 +1,4 @@
+#!/bin/sh
+# Refuses commits that add case data, evidence, real names/contacts or
+# secrets. See scripts/sensitive-guard.js.
+exec node "$(git rev-parse --show-toplevel)/scripts/sensitive-guard.js" --staged

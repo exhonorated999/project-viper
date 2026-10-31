@@ -3,6 +3,9 @@ productName: V.I.P.E.R. Diagnostic
 copyright: Copyright © 2026 Intellect LE, LLC
 directories:
   output: dist-diagnostic
+# Scans the packed app.asar for case data / evidence / secrets before the
+# portable build is made; throws (build fails) on a hit.
+afterPack: scripts/after-pack-guard.js
 files:
   - "**/*"
   - "!dist/**"
@@ -26,6 +29,23 @@ files:
   - "!test-*.html"
   - "!check-*.html"
   - "!.gitignore"
+  # ── Never ship local data or dev scratch (see scripts/sensitive-guard.js) ──
+  # Patterns without "**/" only match at the root; test folders, scratch
+  # output and evidence files live inside modules/, so match them anywhere.
+  # scripts/after-pack-guard.js re-checks the packed asar and stops the build.
+  - "!**/sample-data/**"
+  - "!**/cases/**"
+  - "!**/_sample_body/**"
+  - "!**/__tests__/**"
+  - "!**/test_fixtures/**"
+  - "!**/fixtures/**"
+  - "!**/*.{eml,msg,mbox,pst,ost,ufdr,ufd,oversight,log,py,pyc}"
+  - "!_*.{js,py}"
+  - "!.workshop/**"
+  - "!.github/**"
+  - "!.githooks/**"
+  - "!.gitattributes"
+  - "!.sensitive-terms.local"
 asarUnpack:
   - "build/**"
 # ─── DIAGNOSTIC BUILD ────────────────────────────────────────────────

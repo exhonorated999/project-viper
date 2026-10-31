@@ -34,6 +34,10 @@ jobs:
           elif [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
             # New branch or tag: check what is not already on master.
             if git rev-parse -q --verify origin/master >/dev/null; then RANGE="origin/master..$HEAD"; else RANGE="$HEAD"; fi
+          elif ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            # Force push (history rewritten): the old tip no longer exists, so
+            # check every commit reachable from the new tip.
+            RANGE="$HEAD"
           else
             RANGE="$BEFORE..$HEAD"
           fi

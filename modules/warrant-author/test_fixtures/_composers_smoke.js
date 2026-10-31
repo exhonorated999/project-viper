@@ -49,11 +49,11 @@ const baseDraft = {
   courtName: 'Superior Court of California',
   template: 'ca-multi-business-esp',
   affiantSnapshot: {
-    affiantName: 'Justin Moyer',
+    affiantName: 'Alex Example',
     affiantRank: 'Detective',
     affiantBadge: '1234',
-    affiantEmail: 'jmoyer@fontana.org',
-    affiantPhone: '(909) 356-7168',
+    affiantEmail: 'a.example@example.gov',
+    affiantPhone: '(909) 555-0100',
   },
 };
 
@@ -124,7 +124,7 @@ async function suite_blockBuilder() {
     const txts = out.blocks.map(b => b.text || `${b.label || ''}: ${b.value || ''}`).join('\n');
     assert(/SUPERIOR COURT/.test(txts), 'court name uppercased in cover');
     assert(/25-001234/.test(txts), 'case ref appears');
-    assert(/Fontana/.test(txts) || /Justin Moyer/.test(txts), 'affiant identity rendered');
+    assert(/Fontana/.test(txts) || /Alex Example/.test(txts), 'affiant identity rendered');
   });
 
   await test('inserts page-break before each addendum', () => {
@@ -182,7 +182,7 @@ async function suite_blockBuilder() {
     });
     const sigs = out.blocks.filter(b => b.kind === 'signature');
     assert(sigs.length >= 2, `expected >=2 signature blocks (affiant + judge), got ${sigs.length}`);
-    assert(/Justin Moyer|Detective/.test(sigs[0].label), 'affiant sig label includes name or rank');
+    assert(/Alex Example|Detective/.test(sigs[0].label), 'affiant sig label includes name or rank');
   });
 
   await test('disclaimer when includeDisclaimer=true (non-CA)', () => {

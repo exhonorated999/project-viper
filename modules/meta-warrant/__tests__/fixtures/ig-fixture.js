@@ -2,7 +2,7 @@
  * Synthetic Instagram return generator (no real data).
  *
  * Models what Scout submission #20 told us about the 2026 Instagram export,
- * on top of the Facebook markup we have a real sample of:
+ * on top of the same div_table markup a Facebook return uses:
  *   - same template: sidebar <a property> TOC + print <input>/<label> list,
  *     div#property-<id>.content-pane, div_table / display:table rows
  *   - NO <br> anywhere (records are told apart by wrapper divs, or by the

@@ -12,6 +12,7 @@ files:
   - "!test/**"
   - "!test_fixtures/**"
   - "!cases/**"
+  # Local-only case extracts (gitignored). Keep them out of the installer.
   - "!sample-data/**"
   - "!viper-source/**"
   - "!tools/**"

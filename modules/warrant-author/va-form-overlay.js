@@ -667,7 +667,7 @@ function _composeAffiantTitle(agency) {
   const name = _safe(agency.affiantName);
   if (!name) return rank;
   if (!rank) return name;
-  // Avoid "Detective Detective J. Moyer" if affiantName already starts with the rank.
+  // Avoid "Detective Detective Alex Example" if affiantName already starts with the rank.
   const nameLower = name.toLowerCase();
   const rankLower = rank.toLowerCase();
   if (nameLower.startsWith(rankLower + ' ') || nameLower === rankLower) {

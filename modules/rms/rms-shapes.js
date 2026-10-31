@@ -615,8 +615,8 @@
      *   The bare label "Location" is ambiguous. On the Virginia form the
      *   OFFENSE block carries "Location" followed by "25" — a NIBRS
      *   location CODE, not a place. So a bare "Location" is only believed
-     *   when its value is actually shaped like an address. Measured
-     *   against sample-data/_field_incident.txt, which contains both.
+     *   when its value is actually shaped like an address. A Virginia-style
+     *   OFFENSE block can carry both the code and a separate place name.
      *
      * Rejects "Location Name", "Location Code", "Location Type" and
      * anything under an ARREST heading outright: a Westminster bundle can
@@ -652,8 +652,8 @@
 
     /* Whitespace only. The address itself is carried verbatim — this just
      * repairs what the PDF text layer does to a table cell, which is to
-     * leave "7421 BEACH CT  Westminster, CO  80031" with the column gaps
-     * still in it, and "17005 UPLAND AV , FONTANA" with a space before the
+     * leave "100 SYNTHETIC CT  Westminster, CO  80031" with the column gaps
+     * still in it, and "200 SYNTHETIC AV , FONTANA" with a space before the
      * comma. Both look like a bug in a form field the officer then reads. */
     function _normalizeLocation(s) {
         var t = String(s == null ? '' : s).replace(/[\s\u00a0]+/g, ' ').trim();
@@ -670,9 +670,9 @@
         if (!/[A-Za-z]/.test(t)) return false;          // "25" — a NIBRS code
         if (!/\d/.test(t) && !/[&\/]/.test(t)) return false;
         if (RE_ADDR_ZIP.test(t) || RE_ADDR_NOZIP.test(t)) return true;
-        if (/^\d+[A-Za-z]?\s+[A-Za-z]/.test(t)) return true;       // 1600 S CONRAD AVE
+        if (/^\d+[A-Za-z]?\s+[A-Za-z]/.test(t)) return true;       // 300 SYNTHETIC AVE
         if (/\s(?:&|\/|AND|AT)\s/i.test(t) && /[A-Za-z]{3}/.test(t)) return true; // intersection
-        if (/\bBLOCK\b/i.test(t)) return true;                     // 700 BLOCK OF ...
+        if (/\bBLOCK\b/i.test(t)) return true;                     // 100 BLOCK OF ...
         if (/,\s*[A-Z]{2}\.?\s*,?\s*\d{5}(?:-\d{4})?\b/.test(t)) return true;
         return false;
     }

@@ -314,8 +314,8 @@ console.log('\n[pages]');
  * in index.html and the RMS tab's parseRmsReport wrapper — so the same PDF
  * produces the same address either way.
  *
- * The addresses below are taken from the extracts in sample-data/, which
- * are the real reference documents' text layers.
+ * The addresses below are synthetic. They only have to exercise the
+ * whitespace and label shapes those forms print.
  */
 console.log('\n[location of occurrence]');
 
@@ -323,50 +323,50 @@ console.log('\n[location of occurrence]');
     // The address is carried VERBATIM. Only the damage the PDF text layer
     // does to a table cell is repaired.
     eq('column gaps inside a cell collapse',
-        S.normalizeLocation('7421 BEACH CT  Westminster, CO  80031'),
-        '7421 BEACH CT Westminster, CO 80031');
+        S.normalizeLocation('100 SYNTHETIC CT  Westminster, CO  80031'),
+        '100 SYNTHETIC CT Westminster, CO 80031');
     eq('a space before a comma is closed up',
-        S.normalizeLocation('17005 UPLAND AV , FONTANA, CA 92335'),
-        '17005 UPLAND AV, FONTANA, CA 92335');
+        S.normalizeLocation('200 SYNTHETIC AV , FONTANA, CA 92335'),
+        '200 SYNTHETIC AV, FONTANA, CA 92335');
     eq('a missing space after a comma is opened up',
         S.normalizeLocation('9 ELM ST,Aurora,CO 80010'),
         '9 ELM ST, Aurora, CO 80010');
     eq('a semicolon separator is spaced the same way',
-        S.normalizeLocation('1600 S CONRAD AVE;COVINGTON VA 24426'),
-        '1600 S CONRAD AVE; COVINGTON VA 24426');
+        S.normalizeLocation('300 SYNTHETIC AVE;COVINGTON VA 24426'),
+        '300 SYNTHETIC AVE; COVINGTON VA 24426');
     eq('non-breaking space is whitespace too',
         S.normalizeLocation('9 ELM\u00a0ST'), '9 ELM ST');
     eq('nothing in, nothing out', S.normalizeLocation(null), '');
     eq('the street name itself is never touched',
-        S.normalizeLocation('  SANTA ANA AV & ELM AV , FON, CA 92337  '),
-        'SANTA ANA AV & ELM AV, FON, CA 92337');
+        S.normalizeLocation('  OAK AV & PINE AV , FON, CA 90000  '),
+        'OAK AV & PINE AV, FON, CA 90000');
 })();
 
 (function shapes() {
     ok('a street address is address-shaped',
-        S.looksLikeAddressValue('1600 S CONRAD AVE; COVINGTON VA 24426'));
+        S.looksLikeAddressValue('300 SYNTHETIC AVE; COVINGTON VA 24426'));
     ok('so is an intersection',
-        S.looksLikeAddressValue('SANTA ANA AV & ELM AV , FON, CA 92337'));
+        S.looksLikeAddressValue('OAK AV & PINE AV , FON, CA 90000'));
     ok('so is a block reference',
-        S.looksLikeAddressValue('700 BLOCK OF W 92ND AVE'));
+        S.looksLikeAddressValue('100 BLOCK OF W EXAMPLE AVE'));
     ok('a bare NIBRS location code is NOT an address',
         !S.looksLikeAddressValue('25'), '25');
     ok('nor is a place name with no number, under the ambiguous label',
-        !S.looksLikeAddressValue('FORT YOUNG'), 'FORT YOUNG');
+        !S.looksLikeAddressValue('EXAMPLE PLACE'), 'EXAMPLE PLACE');
     ok('nor is an empty value', !S.looksLikeAddressValue(''));
 })();
 
 (function labelled() {
     const r = S.findLocation('Event Information\nOccurred From\n11/18/2023\n' +
-        'Incident Location\n7421 BEACH CT  Westminster, CO  80031\nBeat\n');
+        'Incident Location\n100 SYNTHETIC CT  Westminster, CO  80031\nBeat\n');
     eq('Westminster: the Incident Location cell is read',
-        r.value, '7421 BEACH CT Westminster, CO 80031');
+        r.value, '100 SYNTHETIC CT Westminster, CO 80031');
     eq('...under the label it was printed with', r.label, 'Incident Location');
     eq('...and a specific label is believed outright', r.confidence, 'labelled');
 
-    const va = S.findLocation('OFFENSE\nLocation Address\n1600 S CONRAD AVE; COVINGTON VA 24426\n');
+    const va = S.findLocation('OFFENSE\nLocation Address\n300 SYNTHETIC AVE; COVINGTON VA 24426\n');
     eq('Virginia: Location Address is read',
-        va.value, '1600 S CONRAD AVE; COVINGTON VA 24426');
+        va.value, '300 SYNTHETIC AVE; COVINGTON VA 24426');
     eq('...as a labelled read', va.confidence, 'labelled');
 
     const ar = S.findLocation('OFFENSE #1\nADDRESS OF OFFENSE\n9 ELM ST, Conway, AR 72032\n');
@@ -378,8 +378,8 @@ console.log('\n[location of occurrence]');
         '123 MAIN ST, DENVER, CO 80202');
 
     eq('a blank line between label and value is stepped over',
-        S.findLocation('Incident Location\n\n7421 BEACH CT  Westminster, CO  80031\n').value,
-        '7421 BEACH CT Westminster, CO 80031');
+        S.findLocation('Incident Location\n\n100 SYNTHETIC CT  Westminster, CO  80031\n').value,
+        '100 SYNTHETIC CT Westminster, CO 80031');
 
     // A location of occurrence is not always an address, and under a label
     // that says so outright we take the officer at their word.
@@ -394,31 +394,31 @@ console.log('\n[location of occurrence]');
 
 (function inferred() {
     // The Fontana-style INFORM report labels it with a bare "Location".
-    const f = S.findLocation('Event Information\nLocation\n17005 UPLAND AV , FONTANA, CA 92335\nBeat\n5\n');
+    const f = S.findLocation('Event Information\nLocation\n200 SYNTHETIC AV , FONTANA, CA 92335\nBeat\n5\n');
     eq('a bare Location that holds an address is read',
-        f.value, '17005 UPLAND AV, FONTANA, CA 92335');
+        f.value, '200 SYNTHETIC AV, FONTANA, CA 92335');
     eq('...but only ever as an inferred read', f.confidence, 'inferred');
 
     eq('an intersection under the bare label still reads',
-        S.findLocation('Location\nSANTA ANA AV & ELM AV , FON, CA 92337\n').value,
-        'SANTA ANA AV & ELM AV, FON, CA 92337');
+        S.findLocation('Location\nOAK AV & PINE AV , FON, CA 90000\n').value,
+        'OAK AV & PINE AV, FON, CA 90000');
 })();
 
 (function theFalsePositive() {
     /* The single reason the bare label needs a shape check at all.
-     * sample-data/_field_incident.txt carries, inside the OFFENSE block:
+     * A Virginia-style OFFENSE block can carry:
      *     Location
      *     25
      *     Location Name
-     *     FORT YOUNG
+     *     EXAMPLE PLACE
      * "25" is a NIBRS location CODE. Importing it as the place the offence
      * happened would put a number in the officer's Location field and look
      * like the import had mangled the report. */
-    const bad = 'OFFENSE\nLocation\n25\nLocation Name\nFORT YOUNG\nDescription\nASSAULT\n';
+    const bad = 'OFFENSE\nLocation\n25\nLocation Name\nEXAMPLE PLACE\nDescription\nASSAULT\n';
     eq('a NIBRS location code is not imported as a location',
         S.findLocation(bad).value, '');
     eq('"Location Name" is a different fact and is never read',
-        S.findLocation('Location Name\nFORT YOUNG\n').value, '');
+        S.findLocation('Location Name\nEXAMPLE PLACE\n').value, '');
     eq('nor is Location Code', S.findLocation('Location Code\n25\n').value, '');
     eq('nor is Location Type', S.findLocation('Location Type\nResidence\n').value, '');
 })();
@@ -433,7 +433,7 @@ console.log('\n[location of occurrence]');
     eq('nor a cell tower location',
         S.findLocation('Cell Tower Location\n9 ELM ST, Aurora, CO 80010\n').value, '');
 
-    const both = 'Location\n17005 UPLAND AV, FONTANA, CA 92335\n' +
+    const both = 'Location\n200 SYNTHETIC AV, FONTANA, CA 92335\n' +
         'Incident Location\n9 ELM ST, Aurora, CO 80010\n';
     eq('a specific label later in the document beats an earlier bare one',
         S.findLocation(both).value, '9 ELM ST, Aurora, CO 80010');

@@ -462,7 +462,7 @@ function relayStub(answers) {
     seed([S.makeEntry({
         id: 'e-open', preset: 'surveillance', timestamp: D,
         fields: {
-            location: { street: '17005 Upland Ave', city: 'Fontana', state: 'CA', zip: '92336' },
+            location: { street: '100 Synthetic Ln', city: 'Example City', state: 'CA', zip: '90000' },
             vehicle: 'Black Toyota 4Runner',
             notes: 'Watched the driveway for two hours.'
         }

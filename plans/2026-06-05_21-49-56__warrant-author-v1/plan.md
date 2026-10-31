@@ -204,7 +204,7 @@ warrantAuthor_${caseId} = {
 // localStorage
 viperAgencyProfile = {
   agencyName: 'Fontana Police Department',
-  agencyAddress: '100 Synthetic Ave, Fontana, California 92335',
+  agencyAddress: '100 Synthetic Ave, Example City, CA 90000',
   agencyShortName: 'FPD',
   unit: 'Internet Crimes Against Children Unit',
   unitShort: 'ICAC',
@@ -213,8 +213,8 @@ viperAgencyProfile = {
   affiantName: 'Alex Example',
   affiantRank: 'Detective',
   affiantBadge: 'string',
-  affiantEmail: 'affiant@example.gov',
-  affiantPhone: '(555) 010-0199',
+  affiantEmail: 'a.example@example.gov',
+  affiantPhone: '(909) 555-0100',
   trainingExperienceBoilerplate: 'long-form bio, optional shipped default',
   defaultCourtName: 'Superior Court of California, County of San Bernardino',
   defaultJudgeName: 'optional',

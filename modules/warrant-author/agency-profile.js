@@ -131,7 +131,7 @@ const FIELDS = Object.freeze([
   // Agency block
   { key: 'agencyName',         label: 'Agency Name',         group: 'agency',  type: 'text',      placeholder: 'Fontana Police Department',                helper: 'Full legal name of your agency.' },
   { key: 'agencyShortName',    label: 'Agency Short Name',   group: 'agency',  type: 'text',      placeholder: 'FPD',                                      helper: 'Abbreviation used in headers / footers.' },
-  { key: 'agencyAddress',      label: 'Agency Address',      group: 'agency',  type: 'text',      placeholder: '100 Synthetic Ave, Fontana, CA 92335',      helper: 'Mailing address printed on the affidavit cover.' },
+  { key: 'agencyAddress',      label: 'Agency Address',      group: 'agency',  type: 'text',      placeholder: '100 Synthetic Ave, Example City, CA 90000',      helper: 'Mailing address printed on the affidavit cover.' },
   { key: 'unit',               label: 'Unit / Bureau',       group: 'agency',  type: 'text',      placeholder: 'Internet Crimes Against Children Unit',    helper: 'Full unit name.' },
   { key: 'unitShort',          label: 'Unit Short Name',     group: 'agency',  type: 'text',      placeholder: 'ICAC',                                     helper: 'Abbreviation used in headers.' },
   { key: 'county',             label: 'County',              group: 'agency',  type: 'text',      placeholder: 'San Bernardino',                           helper: 'County the agency operates in.' },
@@ -141,8 +141,8 @@ const FIELDS = Object.freeze([
   { key: 'affiantName',        label: 'Affiant Name',        group: 'affiant', type: 'text',      placeholder: 'Alex Example',                             helper: 'Full legal name as it will appear on the affidavit.' },
   { key: 'affiantRank',        label: 'Rank / Title',        group: 'affiant', type: 'text',      placeholder: 'Detective',                                helper: 'e.g. Detective, Special Agent, Investigator.' },
   { key: 'affiantBadge',       label: 'Badge / ID #',        group: 'affiant', type: 'text',      placeholder: '1234',                                     helper: 'Some agencies use letters — free text.' },
-  { key: 'affiantEmail',       label: 'Email',               group: 'affiant', type: 'email',     placeholder: 'affiant@example.gov',                       helper: 'Contact email for the providers / court.' },
-  { key: 'affiantPhone',       label: 'Phone',               group: 'affiant', type: 'text',      placeholder: '(555) 010-0199',                           helper: 'Contact phone for the providers / court.' },
+  { key: 'affiantEmail',       label: 'Email',               group: 'affiant', type: 'email',     placeholder: 'a.example@example.gov',                       helper: 'Contact email for the providers / court.' },
+  { key: 'affiantPhone',       label: 'Phone',               group: 'affiant', type: 'text',      placeholder: '(909) 555-0100',                           helper: 'Contact phone for the providers / court.' },
 
   // Defaults block
   { key: 'defaultCourtName',   label: 'Default Court Name',  group: 'defaults', type: 'text',     placeholder: 'Superior Court of California, County of San Bernardino', helper: 'Pre-fills the affidavit caption; editable per draft.' },

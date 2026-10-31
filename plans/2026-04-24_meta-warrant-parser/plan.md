@@ -66,10 +66,10 @@ Return structure:
 {
   source: 'records' | 'preservation-1',
   service: 'Facebook' | 'Instagram',
-  targetId: '100000000000001',
-  accountId: '100000000000001',
+  targetId: '10000000000001',
+  accountId: '10000000000001',
   dateRange: { start, end },
-  generated: '2024-01-09 23:39:40 UTC',
+  generated: '2030-01-01 00:00:00 UTC',
   ncmecReports: [],
   registrationIp: null,
   ipAddresses: [{ ip, time }],

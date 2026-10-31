@@ -16,7 +16,9 @@ _test_*.js
 test_fixtures/
 *.traineddata
 test_pdf_output.txt
-sample-data/kik-sample/
+# Local RMS extracts, warrant returns, and parser scratch. This directory
+# has held real case records. Never commit it.
+sample-data/
 plans/2026-05-03_cellebrite-module/
 
 # Scratch / local-only

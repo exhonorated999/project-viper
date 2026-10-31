@@ -181,9 +181,9 @@
         /* ---------------- person fields ---------------- */
         { key: 'name',   cls: 'field', field: 'name',   type: 'name',
           re: /\bNAMES?\b|LAST\s*,?\s*FIRST|\bSURNAME\b/i,
-          /* Not every NAME cell holds a person. Alleghany County's DETAILS
-           * box prints "Location Name / FORT YOUNG" — a place — and it was
-           * filed as a person on the report. */
+          /* Not every NAME cell holds a person. A DETAILS box can print
+           * "Location Name / EXAMPLE PLACE" — a place — and that was filed
+           * as a person on the report. */
           not: /AGENCY\s*NAME|OFFENSE\s*NAME|BUSINESS\s*NAME|SCHOOL\s*NAME|FILE\s*NAME|LOCATION\s*NAME|PLACE\s*NAME|PREMISES?\s*NAME|STREET\s*NAME|CITY\s*NAME|DEVICE\s*NAME|USER\s*-?\s*NAME|USERNAME|NAME\s*OF\s*(BUSINESS|LOCATION|PLACE|SCHOOL|AGENCY)/i },
         { key: 'dob',    cls: 'field', field: 'dob',    type: 'date',
           re: /\bD\.?O\.?B\.?\b|DATE\s*OF\s*BIRTH|\bBIRTH\s*DATE\b|\bBIRTHDATE\b/i },

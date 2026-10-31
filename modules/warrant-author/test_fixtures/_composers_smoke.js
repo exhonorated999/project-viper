@@ -52,8 +52,8 @@ const baseDraft = {
     affiantName: 'Alex Example',
     affiantRank: 'Detective',
     affiantBadge: '1234',
-    affiantEmail: 'affiant@example.gov',
-    affiantPhone: '(555) 010-0199',
+    affiantEmail: 'a.example@example.gov',
+    affiantPhone: '(909) 555-0100',
   },
 };
 

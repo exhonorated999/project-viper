@@ -5,11 +5,9 @@
  *
  * Covers the record-splitting rules the markup never states, the layout
  * fallbacks that keep an unknown future export from importing as "empty",
- * and the real Facebook sample in sample-data/meta-sample.
+ * and a synthetic Facebook return (no real warrant).
  */
 'use strict';
-const fs = require('fs');
-const path = require('path');
 const T = require('../meta-html-tree');
 const MI = require('../meta-interpret');
 const IG = require('./fixtures/ig-fixture');
@@ -178,8 +176,8 @@ const recsOf = (cat) => (cat.v.r || []);
 
 // ── 5. Interpreter ────────────────────────────────────────────────────
 {
-    eq(MI.normTime('2024-01-09 22:38:28 UTC'), '2024-01-09 22:38:28', 'normTime full');
-    eq(MI.normTime('2024-01-09T22:38'), '2024-01-09 22:38:00', 'normTime no seconds');
+    eq(MI.normTime('2030-04-15 16:20:28 UTC'), '2030-04-15 16:20:28', 'normTime full');
+    eq(MI.normTime('2030-04-15T16:20'), '2030-04-15 16:20:00', 'normTime no seconds');
     eq(MI.normTime('January 9'), '', 'normTime no match');
     eq(MI.normTime(null), '', 'normTime null');
 }
@@ -232,9 +230,9 @@ const recsOf = (cat) => (cat.v.r || []);
     eq(MI.summary([{ k: 'Body', v: { t: ['x'.repeat(300)] } }], 50).length, 50, 'summary: truncated to max');
 }
 {
-    eq(MI.extractIps('from 203.0.113.27 at').join(), '203.0.113.27', 'ips: v4');
-    eq(MI.extractIps('2600:1700:ABCD:12::1').join(), '2600:1700:abcd:12::1', 'ips: v6 lowercased');
-    eq(MI.extractIps('2024-01-09 22:38:28 UTC').length, 0, 'ips: a time is not an IPv6');
+    eq(MI.extractIps('from 203.0.113.10 at').join(), '203.0.113.10', 'ips: v4');
+    eq(MI.extractIps('2001:db8:ABCD:12::1').join(), '2001:db8:abcd:12::1', 'ips: v6 lowercased');
+    eq(MI.extractIps('2030-04-15 16:20:28 UTC').length, 0, 'ips: a time is not an IPv6');
     eq(MI.extractIps('999.1.1.1').length, 0, 'ips: out-of-range octet rejected');
     eq(MI.extractIps('1.2.3.4 and 5.6.7.8').length, 2, 'ips: several');
     const f = [{ k: 'Logins', v: { r: [
@@ -267,20 +265,52 @@ const recsOf = (cat) => (cat.v.r || []);
     ok(!MI.isThreadCategory({ v: { r: [[{ k: 'Thread', v: { t: ['plain text'] } }]] } }), 'threads: a "Thread" row without records is not a thread');
 }
 
-// ── 6. The real Facebook sample (sample-data/meta-sample) ─────────────
+// ── 6. A synthetic Facebook return (not a real warrant) ──────────────
+// Same markup the parser expects: property panes, div_table rows, <br>
+// record breaks, a sidebar TOC. Every id, time, and address below is fake.
 {
-    const dir = path.join(__dirname, '..', '..', '..', 'sample-data', 'meta-sample');
-    const p = T.parsePage(fs.readFileSync(path.join(dir, 'records.html'), 'utf8'));
+    const br = '<br>';
+    const line = (s) => '<div>' + s + '</div>';
+    const defs = Array.from({ length: 11 }, (_, i) => line('Synthetic definition ' + (i + 1))).join('');
+    const photo = (n) =>
+        row('Id', line('synthetic-photo-' + n)) +
+        row('Uploaded', line('2030-02-0' + n + ' 12:00:00 UTC')) +
+        row('Image', '<img src="linked_media/synthetic-photo-' + n + '.jpg" />');
+    const ipRec = (ip, t) => row('IP Address', line(ip)) + row('Time', line(t));
+    const status = (n) => row('Status', line('Synthetic status ' + n)) + row('Posted', line('2030-03-0' + n + ' 08:00:00 UTC'));
+    const msg = (author, sent, body) => row('Author', line(author)) + row('Sent', line(sent)) + row('Body', line(body));
+    const thread =
+        line('( 90000000000001 )') +
+        row('Current Participants', line('synthetic.user.a (Facebook: 10000000000001)') + line('synthetic.user.b (Facebook: 10000000000002)')) +
+        br + msg('synthetic.user.a', '2030-04-01 10:00:00 UTC', 'Synthetic connection notice') +
+        br + msg('synthetic.user.b', '2030-04-01 10:01:00 UTC', 'Synthetic reply one') +
+        br + msg('synthetic.user.a', '2030-04-01 10:02:00 UTC', 'Synthetic reply two');
+    const fillerIds = ['about_me', 'shares', 'wallposts', 'bio', 'groups', 'events'];
+    const tocIds = ['request_parameters', 'ip_addresses', 'status_updates', 'photos', 'ncmec_reports', 'unified_messages'].concat(fillerIds);
+    const toc = tocIds.map(id => '<li><a property="' + id + '" href="#property-' + id + '">' + id + '</a></li>').join('');
+    const panes = [
+        pane('request_parameters', row('Target', line('10000000000001')) + row('Account Type', line('User')) + row('Service', line('Facebook'))),
+        pane('ip_addresses', [
+            ipRec('192.0.2.1', '2030-03-01 01:00:01 UTC'),
+            ipRec('192.0.2.2', '2030-03-01 01:00:02 UTC'),
+            ipRec('192.0.2.3', '2030-03-01 01:00:03 UTC')
+        ].join(br)),
+        pane('status_updates', [1, 2, 3, 4].map(status).join(br)),
+        pane('photos', row('Definitions', defs) + br + photo(1) + br + photo(2)),
+        pane('ncmec_reports', row('Reports', line('No responsive records located'))),
+        pane('unified_messages', row('Thread', thread))
+    ].concat(fillerIds.map(id => pane(id, row('Note', line('Synthetic empty category ' + id)))));
+    const p = T.parsePage(page('Facebook Legal Request', panes.join(''), toc));
     eq(p.service, 'Facebook', 'FB: service');
     eq(p.layout, 'property', 'FB: layout');
     eq(p.categories.length, 12, 'FB: 12 categories');
     eq(p.toc.length, 12, 'FB: 12 TOC entries');
     const byId = {}; for (const c of p.categories) byId[c.id] = c;
     const rp = MI.requestParams(byId.request_parameters);
-    eq(rp.target, '100000000000001', 'FB: target');
+    eq(rp.target, '10000000000001', 'FB: target');
     eq(rp.accountType, 'User', 'FB: account type');
     eq(MI.items(byId.ip_addresses).length, 3, 'FB: 3 IP records');
-    deq(MI.items(byId.ip_addresses).map(i => MI.ipsInFields(i.f)[0].t), ['2024-01-09 22:38:28', '2024-01-09 22:37:42', '2024-01-09 22:37:24'], 'FB: IP times');
+    deq(MI.items(byId.ip_addresses).map(i => MI.ipsInFields(i.f)[0].t), ['2030-03-01 01:00:01', '2030-03-01 01:00:02', '2030-03-01 01:00:03'], 'FB: IP times');
     eq(MI.items(byId.status_updates).length, 4, 'FB: 4 status updates');
     eq(MI.items(byId.photos).length, 2, 'FB: 2 photos');
     eq(MI.deepMedia(MI.items(byId.photos).map(i => i.f)).length, 2, 'FB: photo media');
@@ -288,10 +318,10 @@ const recsOf = (cat) => (cat.v.r || []);
     ok(MI.isNoRecords(MI.items(byId.ncmec_reports)[0].f), 'FB: ncmec is the placeholder');
     const th = MI.threads(byId.unified_messages);
     eq(th.length, 1, 'FB: one thread');
-    eq(th[0].threadId, '100000000000002', 'FB: thread id');
+    eq(th[0].threadId, '90000000000001', 'FB: thread id');
     eq(th[0].messages.length, 3, 'FB: 3 messages');
     eq(th[0].participants.length, 2, 'FB: 2 participants');
-    eq(th[0].messages[0].body, 'You are now connected on Messenger', 'FB: first message body');
+    eq(th[0].messages[0].body, 'Synthetic connection notice', 'FB: first message body');
 }
 
 // ── 7. Parsed values must not pin the page source in memory ───────────

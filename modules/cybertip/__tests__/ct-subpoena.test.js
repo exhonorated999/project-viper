@@ -139,6 +139,37 @@ ok(P.csv(evil).indexOf(`"'=HYPERLINK(""x"")"`) > 0, 'CSV formula injection neutr
 eq(P.fileName(one, { caseNumber: 'C-1', day: '2026-11-02' }), 'IP-Subpoena-List_198-51-100-4_C-1_2026-11-02.pdf', 'file name, one IP');
 eq(P.fileName(m, { caseNumber: 'C 1', day: '2026-11-02' }, 'csv'), 'IP-Subpoena-List_3-IPs_C_1_2026-11-02.csv', 'file name, several');
 
+// ── 4b. activity labels off ───────────────────────────────────────────────
+console.log('4b. activity labels off');
+const noAct = P.build([TIP_A], { addresses: ['198.51.100.4'], showActivity: false });
+const ga = noAct.ips[0];
+eq([noAct.showActivity, ga.showActivity], [false, false], 'flag carried on model and IP');
+ok(ga.rows.every(r => r.activity === '' && r.kind === ''), 'rows carry no activity');
+eq(ga.entries, 6, 'entry count unchanged');
+const naTxt = P.text(noAct, {}).split('\r\n');
+eq(naTxt[2], 'Used 6 times (5 distinct dates/times), 11/05/2025 22:20:23 UTC to 05/11/2026 19:41:41 UTC.', 'no upload/login breakdown');
+eq(naTxt[4], '1. 11/05/2025 22:20:23 UTC', 'row without activity word');
+ok(naTxt.indexOf('5. 05/11/2026 19:41:41 UTC  port 443') >= 0 && naTxt.indexOf('4. 02/16/2026 01:30:55 UTC  (2 entries)') >= 0, 'port and count kept');
+ok(!/Upload|Login|upload|login/.test(P.text(noAct, {})), 'text never says upload or login');
+const naCsv = P.csv(noAct).split('\r\n');
+eq(naCsv[0], 'IP address,Line,Date,Time,Time zone,Port,Entries,Provider', 'CSV without Activity column');
+eq(naCsv[4], '198.51.100.4,4,02/16/2026,01:30:55,UTC,,2,Example Cable Co', 'CSV row without activity');
+const naHtml = P.pdfHtml(noAct, { caseNumber: 'C-1', showCase: true });
+ok(!/<th>Activity<\/th>/.test(naHtml) && !/Upload|Login|upload|login/.test(naHtml), 'PDF: no activity column or words');
+ok(/"Entries" counts records at the same date and time\./.test(naHtml), 'PDF entries note without activity');
+ok(/<th>Activity<\/th>/.test(P.pdfHtml(one, {})), 'default still has the Activity column');
+// SYNTHETIC: a login and an upload in the same second merge into one line when labels are off.
+const TIP_C = {
+    reportNumber: '900000777', esp: { name: 'Example Cloud' },
+    uploadedFiles: [up('x.jpg', 'e'.repeat(32), [['198.51.100.9', '04-01-2026 10:00:00 UTC']])],
+    persons: [{ ipAddresses: [{ address: '198.51.100.9', type: 'Login', port: '', timestamp: '04-01-2026 10:00:00 UTC' }] }]
+};
+eq(P.build([TIP_C]).ips[0].rows.length, 2, 'labels on: upload and login at the same second stay separate');
+const mc = P.build([TIP_C], { showActivity: false }).ips[0];
+eq([mc.rows.length, mc.rows[0].count], [1, 2], 'labels off: same second merges into one line with a count');
+eq(P.build([TIP_C], { showActivity: false, merge: false }).ips[0].rows.length, 2, 'labels off + merge off: one line per entry');
+ok(/check\('showActivity'/.test(UI) && /showActivity: S\.showActivity/.test(UI) && /showActivity: o\.showActivity !== false/.test(UI), 'UI: option shown, saved, default on');
+
 // ── 5. PDF HTML ───────────────────────────────────────────────────────────
 console.log('5. PDF');
 const html = P.pdfHtml(m, { caseNumber: 'C-1', showCase: true, showTips: false, onePerPage: true, request: 'Please <provide>', logo: 'data:image/png;base64,AAAA' });

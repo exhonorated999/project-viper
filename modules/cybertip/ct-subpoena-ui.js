@@ -34,14 +34,14 @@
         return t ? [t] : [];
     }
     function loadOpts() {
-        var d = { merge: true, onePerPage: true, showCase: true, showTips: false, request: '' };
+        var d = { merge: true, onePerPage: true, showCase: true, showTips: false, showActivity: true, request: '' };
         try { var o = JSON.parse(localStorage.getItem(OPTS_KEY) || '{}'); if (o && typeof o === 'object') Object.assign(d, o); } catch (_) {}
         if (typeof d.request !== 'string' || !d.request.trim()) d.request = M() ? M().DEFAULT_REQUEST : '';
         return d;
     }
     function saveOpts() {
         if (!S) return;
-        try { localStorage.setItem(OPTS_KEY, JSON.stringify({ merge: S.merge, onePerPage: S.onePerPage, showCase: S.showCase, showTips: S.showTips, request: S.request })); } catch (_) {}
+        try { localStorage.setItem(OPTS_KEY, JSON.stringify({ merge: S.merge, onePerPage: S.onePerPage, showCase: S.showCase, showTips: S.showTips, showActivity: S.showActivity, request: S.request })); } catch (_) {}
     }
 
     var ICON = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6M9 8h2m-5 13h12a2 2 0 002-2V7l-5-5H6a2 2 0 00-2 2v15a2 2 0 002 2z"/></svg>';
@@ -89,7 +89,7 @@
         S = {
             scope: scope, tips: tips, cands: cands, sel: sel,
             kinds: { upload: true, login: true, other: true },
-            merge: !!o.merge, onePerPage: !!o.onePerPage, showCase: !!o.showCase, showTips: !!o.showTips, request: o.request,
+            merge: !!o.merge, onePerPage: !!o.onePerPage, showCase: !!o.showCase, showTips: !!o.showTips, showActivity: o.showActivity !== false, request: o.request,
             single: !!(want && want.length === 1)
         };
         mount();
@@ -99,7 +99,7 @@
     function model() {
         if (!S) return null;
         var addrs = S.cands.filter(function (c) { return S.sel.has(c.address.toLowerCase()); }).map(function (c) { return c.address; });
-        return M().build(S.tips, { addresses: addrs, kinds: S.kinds, merge: S.merge });
+        return M().build(S.tips, { addresses: addrs, kinds: S.kinds, merge: S.merge, showActivity: S.showActivity });
     }
 
     function overlay() { return document.getElementById('ctSubpModal'); }
@@ -188,7 +188,12 @@
                     '<div class="ct-subp-list rounded-lg border border-gray-700/50 bg-black/20 p-1 overflow-y-auto" style="max-height:200px">' + list + '</div>' +
                 '</div>' +
                 '<div class="grid gap-4" style="grid-template-columns:1fr 1fr">' +
-                    '<div class="space-y-1.5"><div class="text-xs font-semibold text-gray-300 uppercase tracking-wide">Include</div>' + kindBoxes + '</div>' +
+                    '<div class="space-y-1.5"><div class="text-xs font-semibold text-gray-300 uppercase tracking-wide">Include</div>' + kindBoxes +
+                        '<div class="pt-1.5 mt-1 border-t border-gray-700/50">' +
+                            check('showActivity', S.showActivity, 'Say whether each line was an upload or a login', 'Off: the provider sees only the dates, times and ports, with no activity column and no upload/login counts') +
+                            '<div class="text-[11px] text-gray-500 pl-6 mt-0.5">' + (S.showActivity ? 'Each line is labelled Upload, Login, etc.' : 'Dates, times and ports only. The provider is not told which lines were uploads.') + '</div>' +
+                        '</div>' +
+                    '</div>' +
                     '<div class="space-y-1.5"><div class="text-xs font-semibold text-gray-300 uppercase tracking-wide">Layout</div>' +
                         check('merge', S.merge, 'One line per date and time', 'Several files uploaded in the same second become one line with a count') +
                         check('onePerPage', S.onePerPage, 'Start each IP on a new page', 'Lets you attach each page to the subpoena for that IP\u2019s provider') +

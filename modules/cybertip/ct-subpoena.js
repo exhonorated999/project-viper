@@ -154,12 +154,16 @@
          kinds      {upload, login, other} booleans (default all true)
          merge      combine entries at the same second, activity and port
                     into one line with a count (default true)
+         showActivity  label each line Upload / Login / ... (default true).
+                    Off: dates, times and ports only; entries at the same
+                    second and port merge regardless of activity.
     */
     function build(tips, opts) {
         opts = opts || {};
         var list = (Array.isArray(tips) ? tips : [tips]).filter(Boolean);
         var kinds = Object.assign({ upload: true, login: true, other: true }, opts.kinds || {});
         var merge = opts.merge !== false;
+        var showAct = opts.showActivity !== false;
         var want = Array.isArray(opts.addresses) ? new Set(opts.addresses.map(addrKey)) : null;
         var prov = providers(list);
         var all = collect(list);
@@ -170,14 +174,14 @@
             if (!evs.length) return;
             var rows = [], byKey = new Map();
             evs.forEach(function (e) {
-                var sig = [e.key || ('?' + e.timestamp), e.activity.toLowerCase(), e.port].join('|');
+                var sig = [e.key || ('?' + e.timestamp), showAct ? e.activity.toLowerCase() : '', e.port].join('|');
                 var r = merge ? byKey.get(sig) : null;
                 if (r) {
                     r.count++;
                     e.tips.forEach(function (x) { if (r.tips.indexOf(x) < 0) r.tips.push(x); });
                     return;
                 }
-                r = { key: e.key, date: e.date, time: e.time, zone: e.zone, timestamp: e.timestamp, activity: e.activity, kind: e.kind, port: e.port, count: 1, tips: e.tips.slice() };
+                r = { key: e.key, date: e.date, time: e.time, zone: e.zone, timestamp: e.timestamp, activity: showAct ? e.activity : '', kind: showAct ? e.kind : '', port: e.port, count: 1, tips: e.tips.slice() };
                 byKey.set(sig, r);
                 rows.push(r);
             });
@@ -210,7 +214,8 @@
                 hasPort: rows.some(function (r) { return r.port; }),
                 merged: rows.some(function (r) { return r.count > 1; }),
                 zones: zones,
-                tips: tipsSet
+                tips: tipsSet,
+                showActivity: showAct
             });
         });
         ips.sort(function (a, b) { return (b.entries - a.entries) || (a.address < b.address ? -1 : 1); });
@@ -225,6 +230,7 @@
             zones: zonesAll,
             kinds: kinds,
             merge: merge,
+            showActivity: showAct,
             totals: {
                 ips: ips.length,
                 lines: ips.reduce(function (n, g) { return n + g.rows.length; }, 0),
@@ -258,7 +264,8 @@
         return g.provider + (g.providerSource ? ' (' + g.providerSource + ')' : '');
     }
     function usedLine(g) {
-        return 'Used ' + plural(g.entries, 'time') + (countsText(g) ? ': ' + countsText(g) : '') +
+        var ct = g.showActivity === false ? '' : countsText(g);
+        return 'Used ' + plural(g.entries, 'time') + (ct ? ': ' + ct : '') +
             (g.rows.length !== g.entries ? ' (' + plural(g.rows.length, 'distinct date/time', 'distinct dates/times') + ')' : '');
     }
 
@@ -274,7 +281,7 @@
             out.push('Dates and times used (' + zoneWord(g) + '):');
             g.rows.forEach(function (r) {
                 var when = r.date ? stamp(r) : 'Date not listed';
-                out.push(r.n + '. ' + when + '  ' + r.activity + (r.port ? '  port ' + r.port : '') + (r.count > 1 ? '  (' + r.count + ' entries)' : ''));
+                out.push(r.n + '. ' + when + (r.activity ? '  ' + r.activity : '') + (r.port ? '  port ' + r.port : '') + (r.count > 1 ? '  (' + r.count + ' entries)' : ''));
             });
         });
         return out.join('\r\n');
@@ -287,10 +294,13 @@
         return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
     }
     function csv(model) {
-        var lines = [['IP address', 'Line', 'Date', 'Time', 'Time zone', 'Activity', 'Port', 'Entries', 'Provider'].join(',')];
+        var act = model.showActivity !== false;
+        var head = ['IP address', 'Line', 'Date', 'Time', 'Time zone'].concat(act ? ['Activity'] : [], ['Port', 'Entries', 'Provider']);
+        var lines = [head.join(',')];
         model.ips.forEach(function (g) {
             g.rows.forEach(function (r) {
-                lines.push([g.address, r.n, r.date, r.time, r.zone, r.activity, r.port, r.count, g.provider].map(csvCell).join(','));
+                var row = [g.address, r.n, r.date, r.time, r.zone].concat(act ? [r.activity] : [], [r.port, r.count, g.provider]);
+                lines.push(row.map(csvCell).join(','));
             });
         });
         return lines.join('\r\n') + '\r\n';
@@ -343,7 +353,7 @@
             (meta.request ? '<div class="req">' + esc(meta.request) + '</div>' : '');
 
         var secs = model.ips.map(function (g, i) {
-            var portCol = g.hasPort, cntCol = g.merged;
+            var portCol = g.hasPort, cntCol = g.merged, actCol = g.showActivity !== false;
             var kv = function (k, v, cls) { return v ? '<div class="k">' + esc(k) + '</div><div class="v' + (cls ? ' ' + cls : '') + '">' + esc(v) + '</div>' : ''; };
             var zoneNote = !g.zones.length ? 'Not stated in the report' : (g.zones.length === 1 && !g.noZone ? g.zones[0] + ', as reported (not converted)' : 'As shown on each line (not converted)');
             return '<div class="sec' + (meta.onePerPage && i ? ' pb' : '') + '">' +
@@ -357,13 +367,15 @@
                     kv('Time zone', zoneNote, g.zones.length ? '' : 'warn') +
                     (meta.showTips && model.tips.length > 1 ? kv('CyberTip', g.tips.join(', ')) : '') +
                 '</div>' +
-                '<table><thead><tr><th>#</th><th>Date</th><th>Time</th><th>Activity</th>' + (portCol ? '<th>Port</th>' : '') + (cntCol ? '<th>Entries</th>' : '') + '</tr></thead><tbody>' +
+                '<table><thead><tr><th>#</th><th>Date</th><th>Time</th>' + (actCol ? '<th>Activity</th>' : '') + (portCol ? '<th>Port</th>' : '') + (cntCol ? '<th>Entries</th>' : '') + '</tr></thead><tbody>' +
                 g.rows.map(function (r) {
-                    return '<tr><td class="n">' + r.n + '</td><td>' + esc(r.date || 'Not listed') + '</td><td class="mono">' + esc(timeText(r)) + '</td><td>' + esc(r.activity) + '</td>' +
+                    return '<tr><td class="n">' + r.n + '</td><td>' + esc(r.date || 'Not listed') + '</td><td class="mono">' + esc(timeText(r)) + '</td>' + (actCol ? '<td>' + esc(r.activity) + '</td>' : '') +
                         (portCol ? '<td class="mono">' + esc(r.port) + '</td>' : '') + (cntCol ? '<td>' + (r.count > 1 ? r.count : '') + '</td>' : '') + '</tr>';
                 }).join('') +
                 '</tbody></table>' +
-                (cntCol ? '<div class="foot" style="border:0;margin-top:4px;padding:0">"Entries" counts records at the same date, time and activity (for example several files uploaded in the same second).</div>' : '') +
+                (cntCol ? '<div class="foot" style="border:0;margin-top:4px;padding:0">' + (actCol
+                    ? '"Entries" counts records at the same date, time and activity (for example several files uploaded in the same second).'
+                    : '"Entries" counts records at the same date and time.') + '</div>' : '') +
             '</div>';
         }).join('');
 
